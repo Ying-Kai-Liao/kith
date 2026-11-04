@@ -10,8 +10,10 @@
 //! bounded buffer (an [`Outbox`]). The supervisor (`holder_link.rs`) is the only reader of the holder link and feeds
 //! this relay through [`Relay::output`], [`Relay::exited`] and [`Relay::tailed`]; those only copy bytes into memory,
 //! so a viewer that stops reading can never slow the supervisor, the other viewers or the engine. The connection
-//! threads write to the holder (keystrokes, size, a tail request) through a [`Sender`] on the supervisor's connection,
-//! one whole frame at a time.
+//! threads reach the holder (keystrokes, size, a tail request) through one ordered queue and a writer thread of their
+//! own (a [`Link`]), so the relay's lock is never held across a write to the holder. The queue's order is the order
+//! the lock was taken in, which is what keeps each TAIL request in step with its waiter. Keystrokes waiting for the
+//! holder are bounded ([`MAX_INPUT_QUEUE`]): an owner past it is cut `slow`.
 //!
 //! The replay and the live output, with no gap and no duplicate. The holder sends everything on one ordered
 //! connection, and it answers a TAIL request under the same lock that appends output to the tail and queues the
@@ -23,18 +25,22 @@
 //! client (the queue of [`Waiter`]s). The replay does not count against the client's buffer; the live output after
 //! it does.
 //!
-//! A slow client. Each client's buffer holds [`attach::CLIENT_BUFFER`] bytes of live output. The output that would
-//! overflow it cuts the client instead: what was queued and not yet sent is dropped, DETACHED `slow` is queued, and
+//! A slow client. Each client's buffer holds [`attach::CLIENT_BUFFER`] bytes of live output, the owner's
+//! [`attach::OWNER_BUFFER`] (four times that: the owner is the one a burst, like a `cat` of a big file, must not cut
+//! while it reads as fast as it can). The output that would overflow it cuts the client instead: what was queued and not yet sent is dropped, DETACHED `slow` is queued, and
 //! the connection closes after it. A viewer that is merely behind (not reading for a while) gets what the socket
 //! had taken, then DETACHED `slow`; one that never reads again is closed by the write timeout (Unix; on Windows
 //! its writer thread waits until the client closes, and the memory it holds is the bounded buffer). The owner is
-//! cut like any other client.
+//! cut like any other client, and comes back with a new ticket from `terminal.attach` (which mints one for a running
+//! terminal, or an ended one still kept); `terminal.open` answers `busy` for a running session.
 //!
 //! Size. The owner's ATTACH `cols`/`rows` and its RESIZE frames go to the holder; the terminal has one size, the last
 //! active owner's, because there is one owner at a time. An observer's RESIZE is ignored, and so is its INPUT.
 //!
 //! One owner. A second owner ATTACH is ERROR `owner_present`; with `takeover: true` (and an owner ticket) it
-//! DETACHES the first owner `taken_over`. The check and the first owner's INPUT and RESIZE share one lock, so once the
+//! DETACHES the first owner `taken_over`, after its own resize and tail request went through. What can be refused
+//! without the ticket (no such terminal, an owner there, too many clients, the holder link down) is refused before the
+//! ticket is used up, so the same ticket can be tried again. The check and the first owner's INPUT and RESIZE share one lock, so once the
 //! takeover is done the old owner's frames are dropped, never forwarded after the new owner's.
 //!
 //! When the engine ends. The holder's EXITED reaches every live client as EXIT, and they are closed after it. The
@@ -42,8 +48,8 @@
 //! ended terminal is kept in the core's memory for [`ENDED_KEEP`] (ten minutes), at most [`MAX_ENDED`] of them, each with its exit and the
 //! last [`ENDED_TAIL`] bytes of output. A client that attaches to one (its ticket came first, or it was late) gets
 //! ATTACHED, the kept output as the replay, then EXIT, and is closed. After that the terminal is gone: ERROR
-//! `terminal_gone`. Nothing is written to disk. A clients that attached while the end was being taken is answered from
-//! the same kept tail.
+//! `terminal_gone`. Nothing is written to disk. A client that attached while the end was being taken is answered from the
+//! same kept tail.
 //!
 //! The holder link. When it drops, every client is DETACHED `holder_lost` (the terminals live on in the holder). When
 //! the supervisor connects again it learns what the holder holds from the welcome: terminals are listed again, and an
@@ -71,6 +77,8 @@ const FIRST_FRAME: Duration = Duration::from_secs(10);
 /// How long a write to a client may make no progress before the client is cut (Unix).
 const WRITE_STALL: Duration = Duration::from_secs(15);
 const MAX_CONNECTIONS: usize = 64;
+/// The most keystroke bytes waiting for the holder link at once; an owner past it is cut like a slow viewer.
+const MAX_INPUT_QUEUE: usize = 4 * 1024 * 1024;
 /// Clients attached to one terminal.
 const MAX_CLIENTS: usize = 32;
 /// How long an ended terminal's exit and tail are kept for a late attach.
@@ -102,10 +110,11 @@ struct Queue {
 }
 
 /// What is waiting to be written to one client. Pushing never blocks.
-#[derive(Default)]
 struct Outbox {
     q: Mutex<Queue>,
     cv: Condvar,
+    /// How much live output may wait before the client is cut.
+    cap: usize,
 }
 
 fn control(kind: u8, msg: &Value) -> Vec<u8> {
@@ -113,6 +122,14 @@ fn control(kind: u8, msg: &Value) -> Vec<u8> {
 }
 
 impl Outbox {
+    fn new(cap: usize) -> Self {
+        Self {
+            q: Mutex::default(),
+            cv: Condvar::new(),
+            cap,
+        }
+    }
+
     fn push(&self, bytes: Vec<u8>) {
         let mut q = lock(&self.q);
         if !q.closing && !q.dead {
@@ -121,14 +138,14 @@ impl Outbox {
         }
     }
 
-    /// Terminal bytes, cut into frames that fit. `live` bytes count against [`attach::CLIENT_BUFFER`].
+    /// Terminal bytes, cut into frames that fit. `live` bytes count against the client's cap.
     fn push_output(&self, data: &[u8], live: bool) {
         let mut q = lock(&self.q);
         for chunk in data.chunks(attach::MAX_PAYLOAD) {
             if q.closing || q.dead {
                 return;
             }
-            if live && q.live + chunk.len() > attach::CLIENT_BUFFER {
+            if live && q.live + chunk.len() > self.cap {
                 // Too far behind: what it has not been sent is dropped, and it is told why.
                 q.items.clear();
                 q.live = 0;
@@ -194,6 +211,80 @@ impl Outbox {
     }
 }
 
+// --- the holder link, from the relay's side ----------------------------------------------------------------------------
+
+enum Cmd {
+    Input(HeldId, Vec<u8>),
+    Resize(HeldId, u16, u16),
+    Tail(HeldId),
+}
+
+/// Why the link took no more input.
+enum LinkRefused {
+    Closed,
+    Overflow,
+}
+
+/// Commands for the holder, in order, written by a thread of their own: the relay's lock is never held across a write
+/// to the holder, so a holder that stops reading (or a big paste) can stall that thread and nothing else. The order
+/// is the order the relay's lock was taken in, which is what pairs each TAIL request with its waiter.
+#[derive(Clone)]
+struct Link {
+    cmds: mpsc::Sender<Cmd>,
+    queued: Arc<AtomicUsize>,
+}
+
+impl Link {
+    fn start(tx: Sender) -> Link {
+        let (cmds, queue) = mpsc::channel::<Cmd>();
+        let queued = Arc::new(AtomicUsize::new(0));
+        let counted = queued.clone();
+        let _ = std::thread::Builder::new()
+            .name("kith-attach-holder".into())
+            .spawn(move || {
+                // Ends with the link: when the relay drops its end, or a write fails (the supervisor finds out).
+                for cmd in queue {
+                    let done = match cmd {
+                        Cmd::Input(h, bytes) => {
+                            let r = tx.input(&h, &bytes);
+                            counted.fetch_sub(bytes.len(), Ordering::SeqCst);
+                            r
+                        }
+                        Cmd::Resize(h, cols, rows) => tx.resize(&h, cols, rows),
+                        Cmd::Tail(h) => tx.request_tail(&h),
+                    };
+                    if done.is_err() {
+                        return;
+                    }
+                }
+            });
+        Link { cmds, queued }
+    }
+
+    fn input(&self, held: &HeldId, bytes: &[u8]) -> std::result::Result<(), LinkRefused> {
+        if bytes.is_empty() {
+            return Ok(()); // an empty INPUT would close a pipes process's stdin
+        }
+        if self.queued.fetch_add(bytes.len(), Ordering::SeqCst) + bytes.len() > MAX_INPUT_QUEUE {
+            self.queued.fetch_sub(bytes.len(), Ordering::SeqCst);
+            return Err(LinkRefused::Overflow);
+        }
+        self.cmds
+            .send(Cmd::Input(held.clone(), bytes.to_vec()))
+            .map_err(|_| LinkRefused::Closed)
+    }
+
+    fn resize(&self, held: &HeldId, cols: u16, rows: u16) -> bool {
+        self.cmds
+            .send(Cmd::Resize(held.clone(), cols, rows))
+            .is_ok()
+    }
+
+    fn request_tail(&self, held: &HeldId) -> bool {
+        self.cmds.send(Cmd::Tail(held.clone())).is_ok()
+    }
+}
+
 // --- the registry ----------------------------------------------------------------------------------------------------
 
 /// One attached client.
@@ -239,6 +330,8 @@ struct Term {
 }
 
 struct Ended {
+    session: String,
+    agent: Option<String>,
     exit: proto::Exit,
     tail: Vec<u8>,
     cols: u16,
@@ -249,9 +342,8 @@ struct Ended {
 #[derive(Default)]
 struct Inner {
     /// The holder link; `None` while it is down.
-    tx: Option<Sender>,
-    instance: String,
-    /// By process id; all of the current holder instance.
+    tx: Option<Link>,
+    /// By process id; all of the current holder instance (a term is only ever used for a `HeldId` that equals its own).
     terms: HashMap<u32, Term>,
     ended: HashMap<HeldId, Ended>,
 }
@@ -301,12 +393,13 @@ impl Relay {
 
     /// The holder link is up: this is what it holds. Terminals the holder no longer has are dropped, new ones are
     /// listed (their agent is unknown), and an exit nobody acked is taken now.
-    pub(crate) fn link_up(&self, tx: Sender, instance: &str, procs: &[proto::Held]) {
+    pub(crate) fn link_up(&self, tx: Sender, procs: &[proto::Held]) {
         let mut inner = lock(&self.inner);
-        inner.tx = Some(tx);
-        instance.clone_into(&mut inner.instance);
-        let alive: Vec<u32> = procs.iter().map(|p| p.id).collect();
-        inner.terms.retain(|id, _| alive.contains(id));
+        inner.tx = Some(Link::start(tx));
+        // A term of another holder instance is not this holder's process, even with the same id.
+        inner
+            .terms
+            .retain(|id, t| procs.iter().any(|p| p.id == *id && p.held_id() == t.held));
         for p in procs {
             let held = p.held_id();
             let term = inner.terms.entry(p.id).or_insert_with(|| Term {
@@ -403,13 +496,14 @@ impl Relay {
     }
 
     /// The holder's EXITED: EXIT to the live clients, which are closed after it; then the end is taken.
-    pub(crate) fn exited(&self, id: u32, exit: &proto::Exit) {
+    /// False when the relay knows no such terminal (the caller acks it so the holder forgets it).
+    pub(crate) fn exited(&self, id: u32, exit: &proto::Exit) -> bool {
         let mut inner = lock(&self.inner);
         let Some(term) = inner.terms.get_mut(&id) else {
-            return;
+            return false;
         };
         if term.exit.is_some() {
-            return; // already being taken (the welcome listed it and the frame came too)
+            return true; // already being taken (the welcome listed it and the frame came too)
         }
         term.exit = Some(exit.clone());
         let frame = exit_frame(exit);
@@ -423,6 +517,7 @@ impl Relay {
             }
         });
         inner.begin_end(id);
+        true
     }
 
     /// The holder's answer to a TAIL request. Returns the process to ack when it was the end being taken.
@@ -447,6 +542,8 @@ impl Relay {
                 let term = inner.terms.remove(&id)?;
                 let held = term.held.clone();
                 let ended = Ended {
+                    session: term.session.clone(),
+                    agent: term.agent.clone(),
                     exit: term.exit.clone().unwrap_or(proto::Exit {
                         code: None,
                         signal: None,
@@ -478,6 +575,21 @@ impl Relay {
 
     // --- a connection's side -----------------------------------------------------------------------------------------
 
+    /// What an ATTACH would be refused for before it uses its ticket up: no link, no such terminal, an owner already
+    /// there. (The ticket is checked again, and these again, when it is redeemed.)
+    fn check(&self, held: &HeldId, role: Role, takeover: bool) -> std::result::Result<(), Refusal> {
+        let mut inner = lock(&self.inner);
+        inner.purge_ended();
+        if inner.ended.contains_key(held) {
+            return Ok(());
+        }
+        if inner.tx.is_none() {
+            return Err(Refusal::HolderLost);
+        }
+        let term = inner.live_term(held).ok_or(Refusal::Gone)?;
+        term.admits(role, takeover).map(|_| ())
+    }
+
     /// Attaches a client for a redeemed ticket. `size` is the owner's cols and rows from its ATTACH.
     fn attach(
         &self,
@@ -492,7 +604,10 @@ impl Relay {
             id: self.next.fetch_add(1, Ordering::SeqCst),
             role,
             held: held.clone(),
-            out: Outbox::default(),
+            out: Outbox::new(match role {
+                Role::Owner => attach::OWNER_BUFFER,
+                Role::Observer => attach::CLIENT_BUFFER,
+            }),
             live: AtomicBool::new(false),
             gone: AtomicBool::new(false),
         });
@@ -500,38 +615,30 @@ impl Relay {
             serve_ended(&h, ended);
             return Ok(h);
         }
-        let tx = inner.tx.clone().ok_or(Refusal::HolderLost)?;
-        let term = inner.terms.get_mut(&held.id).ok_or(Refusal::Gone)?;
-        if term.clients.len() >= MAX_CLIENTS {
-            return Err(Refusal::TooMany);
-        }
-        if role == Role::Owner {
-            let owner = term
-                .clients
-                .iter()
-                .position(|c| c.role == Role::Owner && !c.gone.load(Ordering::SeqCst));
-            if let Some(i) = owner {
-                if !takeover {
-                    return Err(Refusal::OwnerPresent);
-                }
-                term.clients.remove(i).detach("taken_over");
+        let link = inner.tx.clone().ok_or(Refusal::HolderLost)?;
+        let term = inner.live_term(held).ok_or(Refusal::Gone)?;
+        let old_owner = term.admits(role, takeover)?;
+        // Everything the holder is asked comes first; the owner being replaced is told only once it all went through.
+        if role == Role::Owner
+            && let Some((cols, rows)) = size.filter(|(c, r)| *c > 0 && *r > 0)
+        {
+            if !link.resize(held, cols, rows) {
+                return Err(Refusal::HolderLost);
             }
-            if let Some((cols, rows)) = size.filter(|(c, r)| *c > 0 && *r > 0) {
-                if tx.resize(held, cols, rows).is_err() {
-                    return Err(Refusal::HolderLost);
-                }
-                term.cols = cols;
-                term.rows = rows;
-            }
+            term.cols = cols;
+            term.rows = rows;
         }
         if term.exit.is_none() {
             // The tail is asked for after the resize, so the redraw it causes comes after the replay, as live output.
-            if tx.request_tail(held).is_err() {
+            if !link.request_tail(held) {
                 return Err(Refusal::HolderLost);
             }
         }
         term.waiters.push_back(Waiter::Client(h.clone()));
         term.clients.push(h.clone());
+        if let Some(i) = old_owner {
+            term.clients.remove(i).detach("taken_over");
+        }
         Ok(h)
     }
 
@@ -540,9 +647,11 @@ impl Relay {
         let inner = lock(&self.inner);
         if h.role == Role::Owner
             && !h.gone.load(Ordering::SeqCst)
-            && let Some(tx) = &inner.tx
+            && let Some(link) = &inner.tx
+            && let Err(LinkRefused::Overflow) = link.input(&h.held, bytes)
         {
-            let _ = tx.input(&h.held, bytes);
+            // More waiting for the holder than it will take: the owner is cut like a viewer that cannot keep up.
+            h.detach("slow");
         }
     }
 
@@ -555,13 +664,47 @@ impl Relay {
         if h.role != Role::Owner || h.gone.load(Ordering::SeqCst) {
             return;
         }
-        let Some(tx) = inner.tx.clone() else { return };
-        if tx.resize(&h.held, cols, rows).is_ok()
-            && let Some(term) = inner.terms.get_mut(&h.held.id)
+        let Some(link) = inner.tx.clone() else { return };
+        if link.resize(&h.held, cols, rows)
+            && let Some(term) = inner.live_term(&h.held)
         {
             term.cols = cols;
             term.rows = rows;
         }
+    }
+
+    /// A held terminal to mint a ticket for, by held id or session: a running one, else one kept after its end.
+    pub(crate) fn find(&self, held: Option<&HeldId>, session: Option<&str>) -> Option<Found> {
+        let mut inner = lock(&self.inner);
+        inner.purge_ended();
+        let running = inner.terms.values().find(|t| {
+            t.exit.is_none()
+                && held.is_none_or(|h| *h == t.held)
+                && session.is_none_or(|s| s == t.session)
+        });
+        if let Some(t) = running {
+            return Some(Found {
+                held: t.held.clone(),
+                session: t.session.clone(),
+                agent: t.agent.clone(),
+                cols: t.cols,
+                rows: t.rows,
+                ended: false,
+            });
+        }
+        inner
+            .ended
+            .iter()
+            .filter(|(k, e)| held.is_none_or(|h| h == *k) && session.is_none_or(|s| s == e.session))
+            .max_by_key(|(_, e)| e.at)
+            .map(|(k, e)| Found {
+                held: k.clone(),
+                session: e.session.clone(),
+                agent: e.agent.clone(),
+                cols: e.cols,
+                rows: e.rows,
+                ended: true,
+            })
     }
 
     /// The client leaves (DETACH, or its connection ended).
@@ -603,15 +746,53 @@ impl Relay {
     }
 }
 
+/// A held terminal `terminal.attach` found.
+pub(crate) struct Found {
+    pub held: HeldId,
+    pub session: String,
+    pub agent: Option<String>,
+    pub cols: u16,
+    pub rows: u16,
+    /// It has ended; the ticket gets its kept output and exit.
+    pub ended: bool,
+}
+
+impl Term {
+    /// Whether another client of `role` may join: not past the limit, and no owner in the way unless it takes over.
+    /// Returns the position of the owner to be replaced.
+    fn admits(&self, role: Role, takeover: bool) -> std::result::Result<Option<usize>, Refusal> {
+        if self.clients.len() >= MAX_CLIENTS {
+            return Err(Refusal::TooMany);
+        }
+        if role != Role::Owner {
+            return Ok(None);
+        }
+        let owner = self
+            .clients
+            .iter()
+            .position(|c| c.role == Role::Owner && !c.gone.load(Ordering::SeqCst));
+        match owner {
+            Some(_) if !takeover => Err(Refusal::OwnerPresent),
+            other => Ok(other),
+        }
+    }
+}
+
 impl Inner {
+    /// The term for this holder process. The id alone is not enough: a ticket from before a holder restart names an
+    /// older instance whose ids restart at 1.
+    fn live_term(&mut self, held: &HeldId) -> Option<&mut Term> {
+        self.terms.get_mut(&held.id).filter(|t| t.held == *held)
+    }
+
     /// The engine ended: ask for the last tail; its answer keeps the end and acks it.
     fn begin_end(&mut self, id: u32) {
         let Some(term) = self.terms.get_mut(&id) else {
             return;
         };
         term.waiters.push_back(Waiter::Ender);
-        if let Some(tx) = &self.tx {
-            let _ = tx.request_tail(&term.held);
+        if let Some(link) = &self.tx {
+            let _ = link.request_tail(&term.held);
         }
     }
 
@@ -705,6 +886,7 @@ pub(crate) struct Server {
 }
 
 struct Ctx {
+    logs: PathBuf,
     tickets: Arc<Tickets>,
     relay: Arc<Relay>,
     stop: Arc<AtomicBool>,
@@ -718,6 +900,7 @@ impl Server {
         layout: &Layout,
         tickets: Arc<Tickets>,
         relay: Arc<Relay>,
+        logs: PathBuf,
     ) -> Result<Server> {
         let ep = endpoint(layout);
         platform::remove_endpoint(&ep);
@@ -729,6 +912,7 @@ impl Server {
         })?;
         let stop = Arc::new(AtomicBool::new(false));
         let ctx = Arc::new(Ctx {
+            logs,
             tickets,
             relay,
             stop: stop.clone(),
@@ -769,7 +953,15 @@ fn accept_loop(listener: &platform::Listener, ctx: &Arc<Ctx>) {
                 std::thread::sleep(Duration::from_millis(20));
                 continue;
             }
-            Err(_) => break,
+            Err(e) => {
+                if !ctx.stop.load(Ordering::SeqCst) {
+                    crate::log::note(
+                        &ctx.logs,
+                        &format!("attach: the attach socket stopped accepting: {e}"),
+                    );
+                }
+                break;
+            }
         };
         if ctx.stop.load(Ordering::SeqCst) {
             break;
@@ -832,6 +1024,27 @@ fn read_attach(payload: &[u8]) -> std::result::Result<AttachReq, &'static str> {
     })
 }
 
+/// One client frame: (kind, payload). The length is checked against [`attach::MAX_PAYLOAD`] before anything is
+/// allocated for it; a longer one is `InvalidData`. `Ok(None)` at a clean end of the stream.
+fn read_client_frame(r: &mut impl std::io::Read) -> std::io::Result<Option<(u8, Vec<u8>)>> {
+    let mut header = [0u8; 9];
+    match r.read_exact(&mut header) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
+    }
+    let len = u32::from_le_bytes([header[5], header[6], header[7], header[8]]) as usize;
+    if len > attach::MAX_PAYLOAD {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "payload_too_large",
+        ));
+    }
+    let mut payload = vec![0; len];
+    r.read_exact(&mut payload)?;
+    Ok(Some((header[0], payload)))
+}
+
 fn serve_one(mut stream: Stream, ctx: &Ctx) {
     // The ATTACH has a time to arrive in: a peer that sends nothing is cut off.
     let (done, waiting) = mpsc::channel::<()>();
@@ -844,11 +1057,17 @@ fn serve_one(mut stream: Stream, ctx: &Ctx) {
                 }
             });
     }
-    let first = wire::read(&mut stream);
+    let first = read_client_frame(&mut stream);
     drop(done);
-    let Ok(Some((kind, _, payload))) = first else {
-        let _ = stream.shutdown(std::net::Shutdown::Both);
-        return;
+    let (kind, payload) = match first {
+        Ok(Some(frame)) => frame,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            return refuse(&mut stream, "payload_too_large");
+        }
+        _ => {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            return;
+        }
     };
     if kind != attach::ATTACH {
         let known = matches!(kind, attach::INPUT | attach::RESIZE | attach::DETACH);
@@ -865,13 +1084,25 @@ fn serve_one(mut stream: Stream, ctx: &Ctx) {
         Ok(r) => r,
         Err(code) => return refuse(&mut stream, code),
     };
+    // What can be refused without the ticket is refused before it is used up, so a client can try again with it.
+    let peeked = match ctx.tickets.peek(&req.ticket) {
+        Ok(t) => t,
+        Err(TicketRefused::Unknown) => return refuse(&mut stream, "ticket_unknown"),
+        Err(TicketRefused::Expired) => {
+            let _ = ctx.tickets.redeem(&req.ticket);
+            return refuse(&mut stream, "ticket_expired");
+        }
+    };
+    let Some(role) = peeked.grant(req.role, req.takeover) else {
+        return refuse(&mut stream, "role_not_allowed");
+    };
+    if let Err(why) = ctx.relay.check(&peeked.held, role, req.takeover) {
+        return refuse(&mut stream, why.code());
+    }
     let ticket = match ctx.tickets.redeem(&req.ticket) {
         Ok(t) => t,
         Err(TicketRefused::Unknown) => return refuse(&mut stream, "ticket_unknown"),
         Err(TicketRefused::Expired) => return refuse(&mut stream, "ticket_expired"),
-    };
-    let Some(role) = ticket.grant(req.role, req.takeover) else {
-        return refuse(&mut stream, "role_not_allowed");
     };
     let handle = match ctx.relay.attach(&ticket.held, role, req.takeover, req.size) {
         Ok(h) => h,
@@ -919,13 +1150,14 @@ fn write_loop(h: &Handle, mut stream: Stream) {
 /// The frames after ATTACH, until the client leaves or its connection ends. True when the connection ended.
 fn read_loop(stream: &mut Stream, ctx: &Ctx, h: &Arc<Handle>) -> bool {
     loop {
-        let Ok(Some((kind, _, payload))) = wire::read(stream) else {
-            return true;
+        let (kind, payload) = match read_client_frame(stream) {
+            Ok(Some(frame)) => frame,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                h.detach_with_error("payload_too_large", &ctx.relay);
+                return false;
+            }
+            _ => return true,
         };
-        if payload.len() > attach::MAX_PAYLOAD {
-            h.detach_with_error("payload_too_large", &ctx.relay);
-            return false;
-        }
         match kind {
             attach::INPUT => ctx.relay.input(h, &payload),
             attach::RESIZE => {

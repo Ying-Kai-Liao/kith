@@ -255,6 +255,25 @@ impl Tickets {
         self.redeem_at(Instant::now(), ticket)
     }
 
+    /// What the ticket is for, without using it up: the relay checks the cheap refusals (no such terminal, an owner
+    /// there already) before it burns a ticket on them. Unknown and expired look as they do to `redeem`.
+    pub(crate) fn peek(&self, ticket: &str) -> std::result::Result<Redeemed, TicketRefused> {
+        let map = self
+            .by_hash
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = map.get(&hash(ticket)).ok_or(TicketRefused::Unknown)?;
+        if entry.expires <= Instant::now() {
+            return Err(TicketRefused::Expired);
+        }
+        Ok(Redeemed {
+            role: entry.role,
+            held: entry.held.clone(),
+            session: entry.session.clone(),
+            agent: entry.agent.clone(),
+        })
+    }
+
     fn redeem_at(
         &self,
         now: Instant,
@@ -453,6 +472,63 @@ impl Terminals {
         Ok(json!({
             "link": if self.link_up.load(Ordering::SeqCst) { "up" } else { "down" },
             "terminals": self.relay.list(),
+        }))
+    }
+
+    /// The `terminal.attach` method: a new single-use ticket for a held terminal that is running (or has ended and is
+    /// still kept for a late attach). `open` answers `busy` for a running session, so this is how a client comes back
+    /// after a detach, a cut (`slow`) or a lost link.
+    pub(crate) fn attach_ticket(&self, params: &Value) -> Result<Value> {
+        let row = kith_api::method("terminal.attach")
+            .ok_or_else(|| Error::NoSuchMethod("kith-core: no method terminal.attach".into()))?;
+        kith_api::params::validate(row, params)
+            .map_err(|e| Error::BadParams(format!("kith-core: {e}")))?;
+        let bad = |m: &str| Error::BadParams(format!("kith-core: terminal.attach: {m}"));
+        let role = match params.get("role").and_then(Value::as_str) {
+            None | Some("owner") => Role::Owner,
+            Some("observer") => Role::Observer,
+            Some(_) => return Err(bad("role is owner or observer")),
+        };
+        let held = match params.get("heldId") {
+            None | Some(Value::Null) => None,
+            Some(h) => Some(HeldId {
+                instance: h
+                    .get("instance")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| bad("heldId needs an instance and an id"))?
+                    .to_owned(),
+                id: h
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u32::try_from(n).ok())
+                    .ok_or_else(|| bad("heldId needs an instance and an id"))?,
+            }),
+        };
+        let session = params.get("session").and_then(Value::as_str);
+        if held.is_none() && session.is_none() {
+            return Err(bad("needs heldId or session"));
+        }
+        let Some(found) = self.relay.find(held.as_ref(), session) else {
+            return Ok(
+                json!({"status": "gone", "note": "no such held terminal (it ended and was forgotten, or was never opened here)"}),
+            );
+        };
+        let ticket = self.tickets.issue(
+            role,
+            found.held.clone(),
+            &found.session,
+            found.agent.as_deref().unwrap_or(""),
+        )?;
+        Ok(json!({
+            "status": "open",
+            "ticket": ticket,
+            "expires_in": TICKET_TTL.as_secs(),
+            "held_id": {"instance": found.held.instance, "id": found.held.id},
+            "session": found.session,
+            "agent": found.agent,
+            "cols": found.cols,
+            "rows": found.rows,
+            "ended": found.ended,
         }))
     }
 

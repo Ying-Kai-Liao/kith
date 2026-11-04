@@ -352,7 +352,7 @@ fn connected(
     shared
         .terminals
         .relay
-        .link_up(client.sender(), &instance, &client.welcome.procs);
+        .link_up(client.sender(), &client.welcome.procs);
     shared.terminals.set_link(true);
     shared.set_holder(|h| {
         h.state = "connected";
@@ -383,11 +383,8 @@ fn connected(
             Some(Req::End(held)) => end_held(&mut client, relay, &held),
             None => {}
         }
-        pump(
-            &mut client,
-            relay,
-            if busy { PUMP_WAIT } else { Duration::ZERO },
-        )?;
+        let pause = if busy { PUMP_WAIT } else { Duration::ZERO };
+        pump(&mut client, relay, &instance, &shared.logs, pause)?;
         if shared.stopping() {
             break;
         }
@@ -424,6 +421,8 @@ const PUMP_BATCH: usize = 512;
 fn pump(
     client: &mut Client,
     relay: &Relay,
+    instance: &str,
+    logs: &Path,
     first_wait: Duration,
 ) -> std::result::Result<(), String> {
     let mut wait = first_wait;
@@ -440,8 +439,25 @@ fn pump(
         match kind {
             proto::OUTPUT => relay.output(id, &payload),
             proto::EXITED => {
-                if let Ok(exit) = serde_json::from_slice::<proto::Exit>(&payload) {
-                    relay.exited(id, &exit);
+                // An exit the relay does not know (or cannot read) is acked all the same, so the holder forgets it.
+                let known = match serde_json::from_slice::<proto::Exit>(&payload) {
+                    Ok(exit) => relay.exited(id, &exit),
+                    Err(e) => {
+                        log::note(
+                            logs,
+                            &format!("holder: unreadable exit of process {id} ({e}); acked"),
+                        );
+                        false
+                    }
+                };
+                if !known {
+                    let held = proto::HeldId {
+                        instance: instance.to_owned(),
+                        id,
+                    };
+                    client
+                        .ack(&held)
+                        .map_err(|e| format!("the holder stopped answering: {e}"))?;
                 }
             }
             proto::TAILED => {

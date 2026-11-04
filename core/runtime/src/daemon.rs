@@ -115,6 +115,11 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        if method == "terminal.attach" {
+            let answer = self.terminals.attach_ticket(params)?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         if method == "terminal.list" {
             let answer = self.terminals.list(params)?;
             self.served.fetch_add(1, Ordering::SeqCst);
@@ -409,6 +414,7 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         layout,
         shared.terminals.tickets.clone(),
         shared.terminals.relay.clone(),
+        shared.logs.clone(),
     ) {
         Ok(server) => {
             let mut slot = shared

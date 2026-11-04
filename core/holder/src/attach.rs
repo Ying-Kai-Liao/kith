@@ -19,5 +19,8 @@ pub const VERSION: u32 = 1;
 /// The largest payload the relay sends in one frame; OUTPUT and the replay are cut to fit, and a client accepts a
 /// payload that size.
 pub const MAX_PAYLOAD: usize = 64 * 1024;
-/// What the relay buffers for one attached client before it cuts the client with DETACHED `slow`.
+/// What the relay buffers for one attached observer before it cuts the client with DETACHED `slow`.
 pub const CLIENT_BUFFER: usize = 1024 * 1024;
+/// What the relay buffers for the owner before it cuts it with DETACHED `slow`: larger than an observer's, because the
+/// owner is the one a burst (a `cat` of a big file) must not cut when it is reading as fast as it can.
+pub const OWNER_BUFFER: usize = 4 * 1024 * 1024;

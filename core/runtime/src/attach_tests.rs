@@ -488,3 +488,109 @@ fn the_end_reaches_every_viewer_then_is_acked_and_a_late_attach_is_told_how_it_e
     assert_eq!(control.last().unwrap().0, attach::EXIT);
     assert_eq!(control.last().unwrap().1["code"], 3);
 }
+
+fn attach_call(rig: &Rig, params: &Value) -> Value {
+    match crate::reach(
+        &crate::tests::paths(&rig.m),
+        "terminal.attach",
+        params,
+        false,
+    ) {
+        crate::Reached::Answered(v) => v,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn terminal_attach_mints_a_ticket_to_come_back_with_after_a_detach_or_a_cut() {
+    let rig = Rig::new(RUNNING);
+    let a = start(&rig, "s-back", "echo first-words; cat");
+    let mut v = Viewer::connect(&rig.m);
+    v.attach(a["ticket"].as_str().unwrap(), "owner", &json!({}));
+    assert_eq!(v.answer().0, attach::ATTACHED);
+    v.read_until("first-words");
+    v.send(attach::DETACH, b"");
+    let _ = v.read_to_the_end();
+
+    // By session, and by held id; the ticket is single-use like the first.
+    let by_session = attach_call(&rig, &json!({"session": "s-back"}));
+    assert_eq!(by_session["status"], "open", "{by_session}");
+    assert_eq!(by_session["held_id"], a["held_id"]);
+    let by_held = attach_call(&rig, &json!({"heldId": a["held_id"], "role": "observer"}));
+    assert_eq!(by_held["status"], "open", "{by_held}");
+    let mut back = Viewer::connect(&rig.m);
+    back.attach(by_session["ticket"].as_str().unwrap(), "owner", &json!({}));
+    assert_eq!(back.answer().0, attach::ATTACHED);
+    back.read_until("first-words");
+    // The observer ticket cannot be an owner's.
+    let mut greedy = Viewer::connect(&rig.m);
+    greedy.attach(by_held["ticket"].as_str().unwrap(), "owner", &json!({}));
+    assert_eq!(greedy.answer().1["error"], "role_not_allowed");
+    // Nothing to attach to: gone, and nothing minted.
+    assert_eq!(
+        attach_call(&rig, &json!({"session": "nope"}))["status"],
+        "gone"
+    );
+    assert_eq!(
+        attach_call(&rig, &json!({"heldId": {"instance": "old", "id": 1}}))["status"],
+        "gone"
+    );
+}
+
+#[test]
+fn a_refusal_that_needs_no_ticket_leaves_the_ticket_to_try_again() {
+    let rig = Rig::new(RUNNING);
+    let a = start(&rig, "s-keep", "echo up; cat");
+    let mut one = Viewer::connect(&rig.m);
+    one.attach(a["ticket"].as_str().unwrap(), "owner", &json!({}));
+    assert_eq!(one.answer().0, attach::ATTACHED);
+
+    let spare = ticket(&rig, &a, Role::Owner);
+    let mut two = Viewer::connect(&rig.m);
+    two.attach(&spare, "owner", &json!({}));
+    assert_eq!(two.answer().1["error"], "owner_present");
+    // The owner leaves; the same ticket now works.
+    one.send(attach::DETACH, b"");
+    let _ = one.read_to_the_end();
+    let mut again = Viewer::connect(&rig.m);
+    again.attach(&spare, "owner", &json!({}));
+    assert_eq!(again.answer().0, attach::ATTACHED);
+}
+
+#[test]
+fn a_ticket_from_another_holder_instance_never_reaches_this_ones_process() {
+    let rig = Rig::new(RUNNING);
+    let a = start(&rig, "s-stale", "echo up; cat");
+    // Same process id, an older instance: what a ticket from before a holder restart looks like.
+    let stale = HeldId {
+        instance: "an-older-holder".into(),
+        id: held_of(&a).id,
+    };
+    let t = rig
+        .d
+        .shared()
+        .terminals
+        .tickets
+        .issue(Role::Owner, stale, "s-stale", "kai")
+        .unwrap();
+    let mut v = Viewer::connect(&rig.m);
+    v.attach(&t, "owner", &json!({}));
+    assert_eq!(v.answer().1["error"], "terminal_gone");
+}
+
+#[test]
+fn a_burst_does_not_cut_an_owner_that_keeps_reading() {
+    let rig = Rig::new(RUNNING);
+    // Three megabytes at once: more than an observer's buffer, less than the owner's.
+    let a = start(
+        &rig,
+        "s-burst",
+        r"echo up; read go; head -c 3000000 /dev/zero | tr '\0' x; echo; echo burst-done; cat",
+    );
+    let mut owner = Viewer::connect(&rig.m);
+    owner.attach(a["ticket"].as_str().unwrap(), "owner", &json!({}));
+    assert_eq!(owner.answer().0, attach::ATTACHED);
+    owner.read_until("up");
+    owner.send(attach::INPUT, b"go\n");
+    owner.read_until("burst-done");
+}
