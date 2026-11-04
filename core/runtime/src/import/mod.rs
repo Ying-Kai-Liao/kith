@@ -30,6 +30,9 @@
 //! unavailable"; the check's cost on very large files; `\r` handling differs from Python's text mode; the dry run opens
 //! a WAL database read-only and needs its `-shm` to exist or be creatable.
 
+// The ask tree's import (M3-8a): wired into `kith migrate` at the switch (M3-10).
+#[allow(dead_code, reason = "first caller is the switch of kith-ask (M3-10)")]
+pub(crate) mod asks;
 mod authority;
 mod check;
 pub(crate) mod items;

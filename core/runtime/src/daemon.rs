@@ -159,6 +159,16 @@ impl Shared {
                 return Ok(answer);
             }
         }
+        // The ask tree: open, settle and end are claim transactions (M3-8a).
+        #[cfg(unix)]
+        {
+            if crate::asks::serves(method) {
+                crate::call::check(kith_api::Principal::Owner, method, params)?;
+                let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
+                self.served.fetch_add(1, Ordering::SeqCst);
+                return Ok(answer);
+            }
+        }
         // Same for the sync lease: a change is a claim transaction.
         if method.starts_with("syncLease.") {
             crate::call::check(kith_api::Principal::Owner, method, params)?;
