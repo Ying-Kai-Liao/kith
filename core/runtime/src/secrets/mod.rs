@@ -85,6 +85,7 @@ pub(crate) fn call(
                 json!({"found": true, "value": value})
             }
         }),
+        "secrets.launchEnv" => envelope.launch_env(conn, text("agent")?),
         "secrets.put" => {
             envelope.put(conn, text("name")?, text("value")?.as_bytes())?;
             Ok(json!({}))
@@ -156,6 +157,65 @@ impl Envelope {
             params![name, key_id, nonce.as_slice(), sealed, now],
         )?;
         Ok(())
+    }
+
+    /// The keys `agent` is granted, for a launch (M2-18b): per granted service its profile and the value of each variable
+    /// of that profile, read from the records the profile's `keychain:` sources name (the names the import sealed them
+    /// under). Mirrors `kith-auth`'s `secrets()`: a profile that is missing, or a variable that does not resolve, refuses
+    /// the whole launch and says which, with no partial answer. An agent with no grants gets an empty list and needs no
+    /// key. Other agents' grants are never read.
+    pub(crate) fn launch_env(&mut self, conn: &Connection, agent: &str) -> Result<Value> {
+        if agent.is_empty()
+            || agent.len() > MAX_NAME
+            || agent.chars().any(|c| c.is_control() || c == '/')
+        {
+            return Err(Error::BadParams(
+                "kith-core: secrets.launchEnv needs an agent name".into(),
+            ));
+        }
+        let pairs = |sql: &str, key: &str| -> Result<Vec<(String, String)>> {
+            let mut stmt = conn.prepare(sql)?;
+            let rows = stmt
+                .query_map([key], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows)
+        };
+        let granted = pairs(
+            "SELECT service, profile FROM secret_grants WHERE agent = ?1 ORDER BY service, seq",
+            agent,
+        )?;
+        let mut keys = Vec::new();
+        for (service, profile) in granted {
+            let refs = pairs(
+                "SELECT var, source FROM secret_profiles WHERE profile = ?1 ORDER BY var",
+                &profile,
+            )?;
+            if refs.is_empty() {
+                return Err(Error::Refused(format!(
+                    "kith-core: {agent} is granted {service} as {profile}, and there is no profile {profile} (kith-auth set {profile} <VAR>)"
+                )));
+            }
+            for (var, source) in refs {
+                if !source.starts_with("keychain:") {
+                    return Err(Error::Refused(format!(
+                        "kith-core: {profile}: {var} comes from {source}, which is not in the secrets envelope"
+                    )));
+                }
+                let Some(value) = self.get(conn, &source)? else {
+                    return Err(Error::Refused(format!(
+                        "kith-core: {profile}: {var} does not resolve ({source} is not stored; kith-auth set {profile} {var})"
+                    )));
+                };
+                let value = std::str::from_utf8(&value)
+                    .map_err(|_| Error::Corrupt("kith-core: the secret is not text".into()))?;
+                keys.push(
+                    json!({"service": service, "profile": profile, "var": var, "value": value}),
+                );
+            }
+        }
+        Ok(json!({"agent": agent, "keys": keys}))
     }
 
     /// The secret under `name`, or `None` if there is no such record.

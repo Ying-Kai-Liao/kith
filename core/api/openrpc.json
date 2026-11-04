@@ -6623,6 +6623,43 @@
       }
     },
     {
+      "name": "secrets.launchEnv",
+      "summary": "The keys one agent is granted, for a launch: for each granted service, its profile and the values of that profile's variables. Only that agent's grants, never another agent's keys.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent being launched.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
       "name": "gate.list",
       "summary": "The gate's slots and the line, in the order the line is kept. Frees holders whose process is gone first.",
       "params": [],

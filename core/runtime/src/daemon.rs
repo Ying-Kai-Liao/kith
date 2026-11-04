@@ -162,7 +162,10 @@ impl Shared {
             return Ok(answer);
         }
         // The envelope's rows that need the master key read it first, outside the core lock (see `secrets::preload`).
-        if matches!(method, "secrets.open" | "secrets.get" | "secrets.put") {
+        if matches!(
+            method,
+            "secrets.open" | "secrets.get" | "secrets.put" | "secrets.launchEnv"
+        ) {
             crate::call::check(who, method, params)?;
             let key = self.master_key()?;
             let answer = self.with_core(|c| {

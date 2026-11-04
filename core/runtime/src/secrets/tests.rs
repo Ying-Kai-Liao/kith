@@ -438,3 +438,124 @@ fn every_secrets_row_is_the_owners_except_get_which_is_the_hosts_alone() {
         }
     }
 }
+
+/// Two agents, three profiles: the fixture `kith-auth`'s `secrets(auth, svc, profile)` reads (profile -> VAR -> source,
+/// grants agent -> service -> profile). Values sit in the envelope under the `keychain:` reference itself, as the import
+/// seals them.
+fn launch_fixture(c: &Connection, e: &mut Envelope) {
+    let profile = |p: &str, var: &str, source: &str| {
+        c.execute(
+            "INSERT INTO secret_profiles (profile, var, source) VALUES (?1, ?2, ?3)",
+            [p, var, source],
+        )
+        .expect("profile");
+    };
+    let grant = |a: &str, s: &str, p: &str, seq: i64| {
+        c.execute(
+            "INSERT INTO secret_grants (agent, service, profile, seq) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![a, s, p, seq],
+        )
+        .expect("grant");
+    };
+    profile("github/work", "GITHUB_TOKEN", "keychain:kith-github#work");
+    profile("mail/me", "MAIL_USER", "keychain:kith-mail#user");
+    profile("mail/me", "MAIL_PASS", "keychain:kith-mail#pass");
+    profile("github/other", "GITHUB_TOKEN", "keychain:kith-github#other");
+    grant("coder", "github", "github/work", 0);
+    grant("coder", "mail", "mail/me", 0);
+    grant("house", "github", "github/other", 0);
+    for (name, value) in [
+        ("keychain:kith-github#work", "ghp_work"),
+        ("keychain:kith-mail#user", "me@example.com"),
+        ("keychain:kith-mail#pass", "pw"),
+        ("keychain:kith-github#other", "ghp_other"),
+    ] {
+        e.put(c, name, value.as_bytes()).expect("put");
+    }
+}
+
+#[test]
+fn launch_env_returns_only_the_agents_granted_keys() {
+    use serde_json::json;
+    let c = db();
+    let store = MemoryKeyStore::default();
+    let s = slot(&store);
+    launch_fixture(&c, s.lock().unwrap().as_mut().unwrap());
+    let call = |a: &str| super::call(&c, &s, "secrets.launchEnv", &json!({"agent": a}));
+    // Same pairs `kith-auth` would put in the environment for each service, sorted by service then variable.
+    assert_eq!(
+        call("coder").expect("coder"),
+        json!({"agent": "coder", "keys": [
+            {"service": "github", "profile": "github/work", "var": "GITHUB_TOKEN", "value": "ghp_work"},
+            {"service": "mail", "profile": "mail/me", "var": "MAIL_PASS", "value": "pw"},
+            {"service": "mail", "profile": "mail/me", "var": "MAIL_USER", "value": "me@example.com"},
+        ]})
+    );
+    let house = call("house").expect("house").to_string();
+    assert!(house.contains("ghp_other"));
+    assert!(
+        !house.contains("ghp_work") && !house.contains("pw\""),
+        "another agent's key: {house}"
+    );
+    // No grants: empty, and no key needed (a fresh store is not minted into).
+    assert_eq!(
+        call("nobody").expect("nobody"),
+        json!({"agent": "nobody", "keys": []})
+    );
+    assert!(super::call(&c, &s, "secrets.launchEnv", &json!({"agent": ""})).is_err());
+}
+
+#[test]
+fn launch_env_sees_a_key_a_card_wrote_and_names_what_is_missing() {
+    use serde_json::json;
+    let c = db();
+    let store = MemoryKeyStore::default();
+    let s = slot(&store);
+    launch_fixture(&c, s.lock().unwrap().as_mut().unwrap());
+    let call = |a: &str| super::call(&c, &s, "secrets.launchEnv", &json!({"agent": a}));
+    // A card (or put) rewriting the record shows up on the next launch.
+    super::call(
+        &c,
+        &s,
+        "secrets.put",
+        &json!({"name": "keychain:kith-github#other", "value": "ghp_new"}),
+    )
+    .expect("put");
+    assert!(
+        call("house")
+            .expect("house")
+            .to_string()
+            .contains("ghp_new")
+    );
+    // A record gone: the whole launch refuses and says which, with no partial keys.
+    Envelope::delete(&c, "keychain:kith-mail#pass").expect("delete");
+    let e = call("coder").expect_err("missing").to_string();
+    assert!(e.contains("mail/me") && e.contains("MAIL_PASS"), "{e}");
+    assert!(!e.contains("ghp_work"));
+    // A grant to a profile nobody made.
+    c.execute(
+        "INSERT INTO secret_grants (agent, service, profile, seq) VALUES ('ghost', 'x', 'x/none', 0)",
+        [],
+    )
+    .expect("grant");
+    assert!(
+        call("ghost")
+            .expect_err("no profile")
+            .to_string()
+            .contains("x/none")
+    );
+}
+
+#[test]
+fn launch_env_refuses_without_the_master_key() {
+    use serde_json::json;
+    let c = db();
+    let store = MemoryKeyStore::default();
+    let s = slot(&store);
+    launch_fixture(&c, s.lock().unwrap().as_mut().unwrap());
+    let lost = slot(&MemoryKeyStore::default());
+    let e = super::call(&c, &lost, "secrets.launchEnv", &json!({"agent": "coder"}))
+        .expect_err("locked")
+        .to_string();
+    assert!(e.contains("master key"), "{e}");
+}

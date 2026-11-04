@@ -67,4 +67,17 @@ pub(super) const ROWS: &[Method] = &[
         Stability::Experimental,
     )
     .formats(J),
+    row(
+        "secrets.launchEnv",
+        "The keys one agent is granted, for a launch: for each granted service, its profile and the values of that profile's variables. Only that agent's grants, never another agent's keys.",
+        &[pos("agent", "string", true, "The agent being launched.")],
+        "json",
+        &["secrets", "launch-env"],
+        Served::Core,
+        Stability::Experimental,
+    )
+    .formats(J)
+    // Owner only, and it hands values back: the narrow door kith-auth uses at the switch (M2-18b, q223), so `get` can
+    // stay the host's alone. Not wired into kith-auth yet.
+    .no_cli(),
 ];
