@@ -44,8 +44,8 @@ with open(d + '/calls', 'a') as f:
     f.write(f'{method} {pid}\n')
 db = json.load(open(d + '/core.json')) if os.path.exists(d + '/core.json') else {}
 if pid not in db:
-    print(f"no person '{pid}' (kith-auth person {pid} name=..)", file=sys.stderr); sys.exit(4)
-elif method == 'people.removePerson':
+    print((f"no bot '{pid}'" if method == 'people.removeBot' else f"no person '{pid}' (kith-auth person {pid} name=..)"), file=sys.stderr); sys.exit(4)
+elif method in ('people.removePerson', 'people.removeBot'):
     db.pop(pid)
 elif method == 'people.suspend':
     db[pid]['revoked'] = True
@@ -137,6 +137,24 @@ A person bob --rm >"$T/out" 2>"$T/err"; rc=$?
 check "rm of a person the core doesn't know: removed, warned" "[ $rc -eq 0 ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
 A person nobody --rm >"$T/out" 2>"$T/err"; rc=$?
 check "rm of a person nobody knows: idempotent, and the core's refusal is the same warning" "[ $rc -eq 0 ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
+
+# 5. bot --rm
+for b in bot-up bot-down bot-new bot-gone bot-none; do A bot $b --of kai >/dev/null; done
+core_add bot-up bot-down bot-gone
+A bot bot-up --rm >"$T/out" 2>"$T/err"; rc=$?
+check "bot rm up: gone from auth.json and the core, no warning" "[ $rc -eq 0 ] && [ \"\$(auth_has bot-up)\" = False ] && grep -q 'people.removeBot bot-up' $FAKE_DIR/calls && [ \"\$(core_revoked bot-up)\" = absent ] && [ ! -s $T/err ]"
+down
+A bot bot-down --rm >"$T/out" 2>"$T/err"; rc=$?
+check "bot rm down: still removed in auth.json, warned" "[ $rc -eq 0 ] && [ \"\$(auth_has bot-down)\" = False ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
+up
+A bot bot-new --rm >"$T/out" 2>"$T/err"; rc=$?
+check "bot rm of a bot the core never imported: removed, no warning" "[ $rc -eq 0 ] && [ \"\$(auth_has bot-new)\" = False ] && [ ! -s $T/err ]"
+A bot bot-gone --rm >/dev/null 2>&1; A bot bot-gone --rm >"$T/out" 2>"$T/err"; rc=$?
+check "bot rm twice: the second is refused by auth.json, core not called again" "[ $rc -ne 0 ] && [ \"\$(grep -c 'people.removeBot bot-gone' $FAKE_DIR/calls)\" = 1 ]"
+export KITH_BIN=$T/nothing-here PATH=/usr/bin:/bin
+A bot bot-none --rm >"$T/out" 2>"$T/err"; rc=$?
+check "bot rm with no kith program: removed, warned like person rm" "[ $rc -eq 0 ] && [ \"\$(auth_has bot-none)\" = False ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
+export KITH_BIN=$T/fakekith PATH=$ORIG_PATH
 
 [ $fail -eq 0 ] && echo "all ok" || echo "FAILED"
 exit $fail

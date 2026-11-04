@@ -2457,12 +2457,13 @@ def sweep_kernel(persons):
 # `kith kernel core-call`) AFTER auth.json is written. No queue: a replayed revoke could land after a later re-grant or
 # undo and wrongly win. A call that fails only prints a warning and the command still succeeds; the host's same-answer
 # guard (M2-18) covers a miss.
-MIRROR_METHOD = {'suspend': 'people.suspend', 'undo': 'people.undo', 'remove': 'people.removePerson'}
+MIRROR_METHOD = {'suspend': 'people.suspend', 'undo': 'people.undo', 'remove': 'people.removePerson',
+                 'remove-bot': 'people.removeBot'}
 # The warnings name the core's file, which only core/runtime may spell out in source (kith-core-boundary-check): it is
 # joined here so the printed line is exact.
 CORE_FILE = 'core' + '.db'
 TELL_AGAIN = '(run it again once kith serve is running)'   # safe: the first `at` is kept and the core is called again
-MIRROR_DONE = {'suspend': 'revoked', 'undo': 'unrevoked', 'remove': 'removed'}
+MIRROR_DONE = {'suspend': 'revoked', 'undo': 'unrevoked', 'remove': 'removed', 'remove-bot': 'removed'}
 # The wait happens under auth.json.lock (and the host's AUTH_WRITES), so a dead core must cost seconds, not the ~25 s the
 # 10 s-per-candidate program probe plus a 15 s call used to: the probe gets MIRROR_PROBE_SECS in all, the call CORE_CALL_SECS.
 MIRROR_PROBE_SECS = 4
@@ -2477,8 +2478,9 @@ def mirror_warning(action, may_have_applied):
     return f'{MIRROR_DONE[action]} in auth.json; {CORE_FILE} {state} {TELL_AGAIN}'
 
 
-def mirror_to_core(pid, action):
-    """After auth.json is written: tell the core, once. On any failure say so on stderr and return (exit stays 0)."""
+def mirror_to_core(pid, action, already_ok=None):
+    """After auth.json is written: tell the core, once. On any failure say so on stderr and return (exit stays 0).
+    already_ok: a refusal text that means the core is already where auth.json is (a bot it never imported), so no line."""
     may_have_applied = False
     try:
         from kith_paths import kith_bin
@@ -2489,6 +2491,8 @@ def mirror_to_core(pid, action):
             r = subprocess.run([bin_, 'kernel', 'core-call', MIRROR_METHOD[action], '--params-stdin'],
                                input=json.dumps(params), capture_output=True, text=True, timeout=CORE_CALL_SECS)
             if r.returncode == 0:
+                return
+            if already_ok and r.returncode == 4 and already_ok in (r.stderr or r.stdout):
                 return
             may_have_applied = r.returncode == 5   # the call went out and the answer was lost
     except subprocess.TimeoutExpired:
@@ -2823,6 +2827,7 @@ def cmd_bot(args):
         auth['people'].pop(bid)
         forget(auth, [bid])
         save_auth(auth)
+        mirror_to_core(bid, 'remove-bot', already_ok=f"no bot '{bid}'")   # a bot the core never imported is already gone there
         print(f'{bid} removed, with its memberships')
         return
     if not opts.get('--of'):
