@@ -491,6 +491,8 @@ def core():
                + (' (tied to the daemon\'s job: it ends with it)' if h.get('tied_to_starter') else ''))
         elif state == 'absent':
             note('holder: no kith-holder program beside kith (nothing uses a holder before M1)')
+        elif state == 'blocked':
+            warn(f'holder: blocked: {h.get("error")} (the daemon retries slowly and signals nothing)')
         elif state in ('unreachable',):
             warn(f'holder: {h.get("error")} (the daemon retries; nothing uses a holder before M1)')
         else:

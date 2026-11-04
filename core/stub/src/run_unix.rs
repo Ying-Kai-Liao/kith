@@ -45,7 +45,13 @@ fn install(sig: c_int, handler: extern "C" fn(c_int)) {
     }
 }
 
-pub fn run(engine: &[OsString]) -> i32 {
+/// The engine, started and exec'd (std's `spawn` returns once the child has exec'd or failed to).
+pub struct Spawned(libc::pid_t);
+
+/// Starts the engine and returns its handle, or the stub's exit code when it cannot start. A resident stub calls this
+/// before it serves its control channel, so a take cannot land between the engine's fork and exec: until the exec the
+/// child still holds a copy of the lock file's open description, and a flock belongs to that description.
+pub fn spawn(engine: &[OsString]) -> Result<Spawned, i32> {
     install(libc::SIGINT, nothing);
     install(libc::SIGQUIT, nothing);
     install(libc::SIGTERM, forward);
@@ -75,11 +81,11 @@ pub fn run(engine: &[OsString]) -> i32 {
         Ok(c) => c,
         Err(e) => {
             eprintln!("kith-stub: cannot start {:?}: {e}", engine[0]);
-            return if e.kind() == ErrorKind::NotFound {
+            return Err(if e.kind() == ErrorKind::NotFound {
                 127
             } else {
                 126
-            };
+            });
         }
     };
     let pid = child.id() as libc::pid_t;
@@ -89,7 +95,19 @@ pub fn run(engine: &[OsString]) -> i32 {
         // SAFETY: kill has no preconditions beyond valid arguments.
         unsafe { libc::kill(pid, pending) };
     }
+    Ok(Spawned(pid))
+}
 
+pub fn run(engine: &[OsString]) -> i32 {
+    match spawn(engine) {
+        Ok(child) => wait(child),
+        Err(code) => code,
+    }
+}
+
+/// Holds until the engine is gone; the stub's exit code.
+pub fn wait(child: Spawned) -> i32 {
+    let pid = child.0;
     loop {
         let mut status: c_int = 0;
         // SAFETY: status is a valid out pointer; pid is our child.

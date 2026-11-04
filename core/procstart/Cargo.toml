@@ -1,0 +1,43 @@
+[package]
+name = "kith-procstart"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Process start stamps: the OS's own record of when a pid began, compared by plain equality"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like core/kernel.
+workspace = "../../serve/host"
+
+# Links nothing of ours and nothing but libc and windows-sys: the stub (which links no other kith crate) and the kernel
+# both use it, so a start time is written and read one way everywhere. kith-kernel re-exports it as `kith_kernel::procstart`.
+[lib]
+name = "kith_procstart"
+path = "src/lib.rs"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[lints.rust]
+# `deny`, not `forbid`: the process probes are unsafe FFI calls (no safe std spelling), allowed in lib.rs.
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
