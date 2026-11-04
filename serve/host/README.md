@@ -168,8 +168,8 @@ A thread is one Claude session and two writers corrupt it, so a check alone is n
 (`src/terminal/claim.rs`; the kernel's `bin/kith-sessions` writes the same file). `<state>/live/terminal/<session>.claim` is
 made whole in a temp file and linked into place (exclusive, 0600): `{"pid", "procStart", "at", "kind": terminal|app|bot,
 "takeover"}`. A claim whose pid is dead, or whose start stamp differs (`procStart` is `e<ms>` on macOS, `b<boot id>:<ticks>` on Linux, the
-OS's own record; a claim from before stamps holds `ps -o lstart=` text, an unknown start that keeps it held), is stale and is
-replaced under a `flock` on `<session>.claim.lock`. It works with the host down.
+OS's own record; a claim from before stamps holds `ps -o lstart=` text: a live pid whose start `ps` reads as positively different is free, released without a signal so Stop answers `Nobody`; one whose start `ps` can't read is held, and Stop answers `CantStop`), is stale and is
+replaced under a `flock` on `<session>.claim.lock`. Signals go only on a positive match. A one-shot claim with old text is believed alive while `ps` can't read its start. It works with the host down.
 
 - `kith <agent> --resume` claims the session for the launcher's shell, THEN asks `resolveThread`; `hostBusy` counts a
   running turn and a queued send, read under the thread's lock. A busy answer releases the claim and refuses. The run
