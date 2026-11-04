@@ -74,8 +74,11 @@ fn digest(token: &str) -> [u8; 32] {
 }
 
 impl RunTokens {
+    /// The run's process is bound with its procstart stamp (`kith_kernel::procstart`), and every request compares it by
+    /// strict equality, never `same_process`: for a token an unknown start (unreadable, or of another form) means
+    /// refuse, the opposite default from claims, or a stranger holding a reused pid would get the token.
     pub(crate) fn new() -> Self {
-        Self::with(descends, crate::lock::process_start)
+        Self::with(descends, kith_kernel::procstart::start_stamp)
     }
 
     /// With the process facts replaced, for tests that use made-up pids.
