@@ -1839,7 +1839,8 @@ fn service_keys_go_through_a_real_daemon_to_the_owner_alone() {
         "secrets.serviceKeys",
         &json!({"agent": "ghost", "service": "github", "vars": ["GITHUB_TOKEN"]}),
     ) {
-        Reached::Refused(Error::Refused(note)) => {
+        // The wire carries a refusal as its text, which the client reads back as Io.
+        Reached::Refused(Error::Io(note)) => {
             assert!(note.contains("kith-auth grant ghost github"), "{note}");
         }
         other => panic!("no grant: {other:?}"),
