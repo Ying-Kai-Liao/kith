@@ -1,11 +1,13 @@
 //! The doors' state and sweep (M2-14): the start against the sweep on one row, the revoke hook, the dead supervisor,
 //! and the same answers as `kernel/lib/kith_door.py`'s sweep rule for the same sequences.
 #![allow(
+    unknown_lints,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::many_single_char_names,
     clippy::fn_params_excessive_bools,
-    clippy::used_underscore_binding
+    clippy::used_underscore_binding,
+    clippy::assert_is_empty
 )]
 
 use std::path::PathBuf;
