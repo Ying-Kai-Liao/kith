@@ -258,6 +258,15 @@ pub(super) const ROWS: &[Method] = &[
         Stability::Experimental,
     ),
     row(
+        "kernel.cutover",
+        "The module-keyed cutover framework: `step MODULE [--dry-run]`, `rollback MODULE [--force]`, `status`, `check MODULE`, `modules`.",
+        &[KERNEL, rest("args", "The verb and its arguments.")],
+        "string",
+        &["kernel", "cutover"],
+        Served::Core,
+        Stability::Experimental,
+    ),
+    row(
         "terminal.open",
         "Starts an agent's engine in a held terminal (the holder runs it under the start stub, so it outlives the window) and returns a single-use attach ticket; `direct` when the holder is not reachable, `busy` when another writer has the session.",
         &[

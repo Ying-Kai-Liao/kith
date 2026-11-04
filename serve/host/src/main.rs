@@ -439,6 +439,13 @@ enum KernelCmd {
         #[arg(long, requires = "authority")]
         force: bool,
     },
+    /// The cutover framework (M3-10a): `step MODULE [--dry-run] [--force]`, `rollback MODULE [--force]`, `status`,
+    /// `check MODULE`, `modules`. `kith migrate step|status` and `kith rollback` run it. No module is registered yet.
+    #[command(hide = true)]
+    Cutover {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
     /// Runs the daemon front alone, in the foreground (what `kith serve` starts inside itself); ends when stdin closes.
     #[command(hide = true)]
     CoreDaemon,
@@ -785,6 +792,29 @@ fn core_migrate_authority(p: &kith_kernel::paths::Paths, dry_run: bool, force: b
 #[cfg(not(unix))]
 fn core_migrate_authority(_: &kith_kernel::paths::Paths, _: bool, _: bool) -> i32 {
     eprintln!("the authority import is not available on this operating system yet");
+    1
+}
+
+/// `kith kernel cutover ...`: the lines of the framework's answer (exit code).
+#[cfg(unix)]
+fn cutover_verb(p: &kith_kernel::paths::Paths, args: &[String]) -> i32 {
+    match kith_core::cutover(p, args) {
+        Ok(lines) => {
+            for line in &lines {
+                println!("{line}");
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn cutover_verb(_: &kith_kernel::paths::Paths, _: &[String]) -> i32 {
+    eprintln!("the cutover framework is not available on this operating system yet");
     1
 }
 
@@ -1285,6 +1315,9 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
+            if let KernelCmd::Cutover { args } = cmd {
+                std::process::exit(cutover_verb(&kernel::folders(&kith_kernel::paths::process_home()), &args));
+            }
             if matches!(cmd, KernelCmd::CoreDaemon) {
                 std::process::exit(core_front::run_foreground());
             }
@@ -1377,6 +1410,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
+                    | KernelCmd::Cutover { .. }
                     | KernelCmd::CoreDaemon
                     | KernelCmd::CoreStatus { .. } => {
                         unreachable!("handled above")

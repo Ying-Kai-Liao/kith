@@ -273,6 +273,7 @@ fn every_switched_verb_has_a_row() {
         "kernel threads resolve s1",
         "kernel run-once claude -- hi",
         "kernel core-migrate",
+        "kernel cutover status",
         "kernel core-status --json",
         "kernel core-daemon",
     ];
