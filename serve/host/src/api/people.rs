@@ -444,28 +444,33 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    local_revoke(hub, &bin, id, revoke).await?;
+    let core_updated = local_revoke(hub, &bin, id, revoke).await?;
     if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
         crate::remote::handle_revokes::changed(hub, &who, revoke);
     }
-    Ok(json!({"revoked": revoke, "everywhere": everywhere}))
+    // false: auth.json has it but the core's copy missed it (or may have); the owner runs it again once the core is up.
+    Ok(json!({"revoked": revoke, "everywhere": everywhere, "coreUpdated": core_updated}))
 }
 
 /// This computer's half of a revoke or its undo, for the owner's own call, a change from the cloud and one from a paired
 /// computer: kith-auth's revoked state, then what the host holds. A revoke cuts the person off at once (R5) and keeps
 /// their devices, memberships and open invites for undo (R1, R2); an undo gives them back. Either repeats harmlessly.
-pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<()> {
-    {
+/// True when the core's copy of the person took the change too; false when kith-auth warned that it didn't (logged here).
+pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<bool> {
+    let core_updated = {
         let _w = AUTH_WRITES.lock().await;
-        account::run(bin, &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"]).await?;
-    }
+        let (_, said) =
+            account::run_noted(bin, &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"]).await?;
+        account::note_stderr(id, &said);
+        !account::core_missed(&said)
+    };
     if revoke {
         cut_off(hub, id).await;
     } else {
         restored(hub, id);
     }
-    Ok(())
+    Ok(core_updated)
 }
 
 /// Undo: what the revoke kept is back as it was.

@@ -2461,27 +2461,40 @@ MIRROR_METHOD = {'suspend': 'people.suspend', 'undo': 'people.undo', 'remove': '
 # The warnings name the core's file, which only core/runtime may spell out in source (kith-core-boundary-check): it is
 # joined here so the printed line is exact.
 CORE_FILE = 'core' + '.db'
-MIRROR_WARNING = {'suspend': f'revoked in auth.json; {CORE_FILE} not updated',
-                  'undo': f'unrevoked in auth.json; {CORE_FILE} not updated',
-                  'remove': f'removed in auth.json; {CORE_FILE} not updated'}
-CORE_CALL_SECS = 15
+TELL_AGAIN = '(run it again once kith serve is running)'   # safe: the first `at` is kept and the core is called again
+MIRROR_DONE = {'suspend': 'revoked', 'undo': 'unrevoked', 'remove': 'removed'}
+# The wait happens under auth.json.lock (and the host's AUTH_WRITES), so a dead core must cost seconds, not the ~25 s the
+# 10 s-per-candidate program probe plus a 15 s call used to: the probe gets MIRROR_PROBE_SECS in all, the call CORE_CALL_SECS.
+MIRROR_PROBE_SECS = 4
+CORE_CALL_SECS = 4
 MIRROR_ENV = ('KITH_STATE', 'HQ_STATE', 'KITH_HOME', 'HQ_HOME', 'KITH_AGENTS', 'HQ_AGENTS')
+
+
+def mirror_warning(action, may_have_applied):
+    """The line the owner sees. After a lost answer (exit 5) or a timeout the core may have applied the change."""
+    state = 'may not be updated' if may_have_applied else 'not updated'
+    return f'{MIRROR_DONE[action]} in auth.json; {CORE_FILE} {state} {TELL_AGAIN}'
 
 
 def mirror_to_core(pid, action):
     """After auth.json is written: tell the core, once. On any failure say so on stderr and return (exit stays 0)."""
+    may_have_applied = False
     try:
         from kith_paths import kith_bin
-        bin_ = kith_bin()
-        params = {'id': pid, 'kernel': str(KITH), 'home': str(Path.home()),
-                  'env': {k: os.environ[k] for k in MIRROR_ENV if os.environ.get(k)}}
-        r = subprocess.run([bin_, 'kernel', 'core-call', MIRROR_METHOD[action], '--params-stdin'] if bin_ else [],
-                           input=json.dumps(params), capture_output=True, text=True, timeout=CORE_CALL_SECS)
-        if r.returncode == 0:
-            return
-    except Exception:   # no kith program, no daemon, a timeout: all the same warning
+        bin_ = kith_bin(budget=MIRROR_PROBE_SECS)   # picked once, for the one call below
+        if bin_:
+            params = {'id': pid, 'kernel': str(KITH), 'home': str(Path.home()),
+                      'env': {k: os.environ[k] for k in MIRROR_ENV if os.environ.get(k)}}
+            r = subprocess.run([bin_, 'kernel', 'core-call', MIRROR_METHOD[action], '--params-stdin'],
+                               input=json.dumps(params), capture_output=True, text=True, timeout=CORE_CALL_SECS)
+            if r.returncode == 0:
+                return
+            may_have_applied = r.returncode == 5   # the call went out and the answer was lost
+    except subprocess.TimeoutExpired:
+        may_have_applied = True
+    except Exception:   # no kith program, no daemon: all the same warning
         pass
-    print(MIRROR_WARNING[action], file=sys.stderr)
+    print(mirror_warning(action, may_have_applied), file=sys.stderr)
 
 
 def revoke_person(pid, revoke, local):
