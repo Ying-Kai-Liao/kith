@@ -4,6 +4,7 @@
 //! - `wire`: the frame layout, over any byte stream.
 //! - `attach`: the frame kinds a client and the core's attach relay speak (the relay itself is in kith-core).
 //! - `proto`: the messages a core and the holder exchange.
+//! - `clock`: the sleep-counting clock the lease reads.
 //! - `platform`: sockets and pipes, terminals, process trees, detaching, per OS.
 //! - `holder`: the process itself. `client`: a blocking client (the core's side, and the tests').
 //! - `supervise`: the holder as the supervised root, restarting the core (M1).
@@ -12,6 +13,7 @@
 pub mod attach;
 pub mod auth;
 pub mod client;
+pub mod clock;
 pub mod holder;
 pub mod launch;
 pub mod platform;

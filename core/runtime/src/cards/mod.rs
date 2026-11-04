@@ -26,7 +26,8 @@
 //! drops the claim; a failed probe never does.
 //!
 //! A claim with a pid is not a timer. While that process is alive the claim holds past its `claim_until`: a second
-//! claimer, a plain answer, the sweep and a withdrawal all leave the card alone (M2-11 review, precondition 1: a claim
+//! claimer, a plain answer, the sweep and a single-card withdrawal all leave the card alone (a revoke's [`withdraw_people`] is the exception and
+//! takes a claimed card too, the holder's `saved` then finds it closed; M2-11 review, precondition 1: a claim
 //! that ran out by time must not be taken over under a writer that is still going). Only the holder's own end, or its
 //! death (start time and ESRCH-only, as above), frees it. A claim with no pid is the caller's own timer: it ends at
 //! `claim_until`. The secret path ([`secret`]) claims with the daemon's own pid, so the writer is the claimer and no
@@ -49,7 +50,7 @@ use serde_json::{Value, json};
 
 use crate::db::Core;
 use crate::error::{Error, Result};
-use crate::gate::Liveness;
+use crate::gate::{Liveness, holder_alive};
 
 /// The tools whose card writes a secret or an access grant on yes. `cards.answer` never takes their yes: a key card is
 /// provided through [`secret`], and an escape card's yes waits for M2-3. Fail safe: it is held back, since its yes
@@ -311,7 +312,11 @@ fn get(tx: &Transaction<'_>, id: &str) -> Result<Option<Card>> {
         .optional()?)
 }
 
-fn list_where(tx: &Transaction<'_>, tail: &str, args: impl rusqlite::Params) -> Result<Vec<Card>> {
+fn list_where(
+    tx: &rusqlite::Connection,
+    tail: &str,
+    args: impl rusqlite::Params,
+) -> Result<Vec<Card>> {
     let mut st = tx.prepare(&format!("SELECT {COLS} FROM cards {tail}"))?;
     let rows = st.query_map(args, row)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -320,7 +325,7 @@ fn list_where(tx: &Transaction<'_>, tail: &str, args: impl rusqlite::Params) -> 
 /// Moves every card matching `where_` to `to`; returns them as they were before. A move that closes the card drops its
 /// claim; `keep_claim` is for a move that leaves the card open (parking), whose claim holder is still writing.
 fn move_where(
-    tx: &Transaction<'_>,
+    tx: &rusqlite::Connection,
     where_: &str,
     args: impl rusqlite::Params + Copy,
     to: State,
@@ -346,43 +351,47 @@ fn bad(what: &str) -> Error {
     Error::BadParams(format!("kith-core: cards: {what}"))
 }
 
-/// Drops the claims whose holder's process is gone or is another process now. One rule, as the gate's:
+/// The claims whose holder's process is gone or is another process now, judged with no lock held (a probe reads the
+/// system; the write lock is shared with the conversation claims). One rule, as the gate's ([`holder_alive`]):
 /// - the start time reads and equals the recorded one: alive;
 /// - it reads and differs: the pid was reused, dead;
-/// - it cannot be read (or none was recorded): dead only when the system says there is no such process. A failed `ps`
-///   must never drop a live holder's claim, which would let a second answerer in.
-fn void_dead_claims(tx: &Transaction<'_>, live: &dyn Liveness) -> Result<()> {
-    let mut dead: Vec<String> = Vec::new();
-    {
-        let mut st = tx.prepare(
-            "SELECT id, claim_pid, claim_started FROM cards WHERE claim_by IS NOT NULL AND claim_pid IS NOT NULL",
-        )?;
-        let rows = st.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        for r in rows {
-            let (id, pid, started) = r?;
-            let Ok(pid) = u32::try_from(pid) else {
-                continue;
-            };
-            let alive = match live.start(pid) {
-                Some(current) if !started.is_empty() => current == started,
-                Some(_) => true,
-                None => !live.gone(pid),
-            };
-            if !alive {
-                dead.push(id);
-            }
+/// - it cannot be read (or none was recorded, or old `lstart` text): dead only when the system says there is no such
+///   process. A failed probe must never drop a live holder's claim, which would let a second answerer in.
+///
+/// `(card id, pid, started)` as the row was read; [`void_dead_claims`] frees the ones that still read so.
+pub(super) fn dead_claims(core: &Core, live: &dyn Liveness) -> Result<Vec<(String, i64, String)>> {
+    let mut st = core.conn().prepare(
+        "SELECT id, claim_pid, claim_started FROM cards WHERE claim_by IS NOT NULL AND claim_pid IS NOT NULL",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut dead = Vec::new();
+    for r in rows {
+        let (id, pid, started) = r?;
+        let Ok(p) = u32::try_from(pid) else {
+            continue;
+        };
+        if !holder_alive(live, p, &started) {
+            dead.push((id, pid, started));
         }
     }
-    for id in dead {
+    Ok(dead)
+}
+
+/// Drops the claims [`dead_claims`] found, inside the transaction. A claim that was taken again in between (another pid
+/// or start time) is left alone.
+pub(super) fn void_dead_claims(tx: &Transaction<'_>, dead: &[(String, i64, String)]) -> Result<()> {
+    for (id, pid, started) in dead {
         tx.execute(
-            &format!("UPDATE cards SET {CLEAR_CLAIM} WHERE id = ?1"),
-            [id],
+            &format!(
+                "UPDATE cards SET {CLEAR_CLAIM} WHERE id = ?1 AND claim_pid = ?2 AND claim_started = ?3"
+            ),
+            params![id, pid, started],
         )?;
     }
     Ok(())
@@ -411,8 +420,9 @@ pub(crate) fn raise(core: &mut Core, n: &NewCard, now: i64, live: &dyn Liveness)
     if n.deadline <= now {
         return Err(bad("a card's deadline is in the future"));
     }
+    let dead = dead_claims(core, live)?;
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     // Whatever is past its deadline is closed first: an expired card never joins or grants.
     tx.execute(
         &format!(
@@ -562,8 +572,9 @@ pub(crate) fn answer(
     if r.by.is_empty() || r.answer.is_empty() {
         return Err(bad("an answer says who gave it and what it is"));
     }
+    let dead = dead_claims(core, live)?;
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     let Some(card) = get(&tx, r.id)? else {
         return Ok(Answered::Nothing(None));
     };
@@ -641,15 +652,16 @@ pub(crate) fn claim(
     if c.until <= now {
         return Err(bad("a claim lasts past now"));
     }
+    let dead = dead_claims(core, live)?;
+    let started = c.pid.and_then(|p| live.start(p)).unwrap_or_default();
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     let Some(card) = get(&tx, id)?.filter(|k| k.state.open() && k.deadline >= now) else {
         return Ok(None);
     };
     if card.holder(now).is_some_and(|h| h != c.holder) {
         return Ok(None);
     }
-    let started = c.pid.and_then(|p| live.start(p)).unwrap_or_default();
     tx.execute(
         "UPDATE cards SET claim_by = ?2, claim_until = ?3, claim_pid = ?4, claim_started = ?5 WHERE id = ?1",
         params![id, c.holder, c.until, c.pid.map(i64::from), started],
@@ -667,8 +679,9 @@ pub(crate) fn release(
     holder: &str,
     live: &dyn Liveness,
 ) -> Result<bool> {
+    let dead = dead_claims(core, live)?;
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     let n = tx.execute(
         &format!(
             "UPDATE cards SET {CLEAR_CLAIM} WHERE id = ?1 AND claim_by = ?2 AND state IN ({OPEN_STATES})"
@@ -698,8 +711,9 @@ pub(crate) fn saved(
     if by.is_empty() {
         return Err(bad("a save says who gave it"));
     }
+    let dead = dead_claims(core, live)?;
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     let done = saved_in(&tx, id, holder, by, now, keep_until)?;
     let card = if done { get(&tx, id)? } else { None };
     tx.commit()?;
@@ -730,10 +744,12 @@ fn saved_in(
 
 /// An open card is withdrawn (the asker cancelled, the person's access ended). A card whose claim is held is not: its
 /// holder is mid-write, and closing the card under it would let the write land on a closed card, so this answers false
-/// as the sweep leaves it alone, and the caller asks again once the claim has ended. Returns whether it was withdrawn.
+/// as the sweep leaves it alone, and the caller asks again once the claim has ended. (The one exception is a revoke,
+/// [`withdraw_people`], which takes a claimed card too.) Returns whether it was withdrawn.
 pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness) -> Result<bool> {
+    let dead = dead_claims(core, live)?;
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     let n = tx.execute(
         &format!(
             "UPDATE cards SET state = 'withdrawn', {CLEAR_CLAIM} WHERE id = ?1 AND state IN ({OPEN_STATES})
@@ -745,11 +761,48 @@ pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness)
     Ok(n == 1)
 }
 
+/// The people's access ended (A7, M2-11b): every open card and unused once-grant asked by one of `people` (a person
+/// and their bots) is withdrawn, inside the caller's transaction so it commits with the revoke. Like the host's
+/// `cards_withdraw_person` it takes a card whose claim is held too, and drops the claim: after a revoke nothing of
+/// theirs may stay answerable, and the holder's `saved` then finds a closed card. Returns the ids that moved. The owner
+/// (an empty person) is never named here.
+pub(crate) fn withdraw_people(tx: &rusqlite::Connection, people: &[String]) -> Result<Vec<String>> {
+    // the caller passes each person's old ids too (`people.was`, see `revoke::was_ids`): a run that began before a
+    // rename can raise under the old id after it
+    let mut named: Vec<String> = people.to_vec();
+    named.sort();
+    named.dedup();
+    let people = &named[..];
+    let mut gone = Vec::new();
+    for p in people.iter().filter(|p| !p.is_empty()) {
+        let moved = move_where(
+            tx,
+            &format!("person = ?1 AND state IN ({OPEN_STATES},'approved')"),
+            params![p],
+            State::Withdrawn,
+            false,
+        )?;
+        gone.extend(moved.into_iter().map(|c| c.id));
+    }
+    Ok(gone)
+}
+
+/// A person's new id (`people.renamePerson`): their cards follow in the rename's own transaction, so a later revoke
+/// of the new id finds them (like `doors::renamed`). A renamed person's bots keep their ids.
+pub(crate) fn renamed(tx: &rusqlite::Connection, old: &str, new: &str) -> Result<()> {
+    tx.execute(
+        "UPDATE cards SET person = ?2 WHERE person = ?1",
+        params![old, new],
+    )?;
+    Ok(())
+}
+
 /// Past its deadline (or its claim's time): open cards and unused grants expire, silence is no. Returns the cards as
 /// they were. A claim that is held keeps its card.
 pub(crate) fn sweep(core: &mut Core, now: i64, live: &dyn Liveness) -> Result<Vec<Card>> {
+    let dead = dead_claims(core, live)?;
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     let moved = move_where(
         &tx,
         // An approved card whose wake is in the queue stays until a turn carried it: expiring it would lose the yes.

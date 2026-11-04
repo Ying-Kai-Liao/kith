@@ -560,11 +560,17 @@ fn a_connected_core_keeps_renewing_the_holders_lease() {
             pid: std::process::id(),
             tied_to_starter: false,
             generation: hello.generation,
+            lease_lost: false,
             procs: Vec::new(),
         };
         wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
         while let Ok(Some((kind, _, payload))) = wire::read(&mut s) {
             match kind {
+                proto::PING => {
+                    let ping: proto::Ping = wire::parse(&payload).expect("ping");
+                    let _ =
+                        wire::write_json(&mut s, proto::PONG, 0, &proto::Pong { seq: ping.seq });
+                }
                 proto::RENEW => {
                     let r: proto::Renew = wire::parse(&payload).expect("renew");
                     RENEWALS.lock().expect("lock").push(r.ms);
@@ -739,6 +745,7 @@ fn remote_holder(sock: &std::path::Path, secret_file: std::path::PathBuf) {
                     pid: 1,
                     tied_to_starter: false,
                     generation: hello.generation,
+                    lease_lost: false,
                     procs: vec![],
                 };
                 wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
@@ -849,10 +856,15 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
         "people.may",
         &view(json!({"person": "sam", "agent": "house"})),
     ) {
-        Reached::Answered(v) => assert_eq!(
-            (v["allowed"].clone(), v["why"].clone()),
-            (json!(true), json!("member"))
-        ),
+        Reached::Answered(v) => {
+            assert_eq!(
+                (v["allowed"].clone(), v["why"].clone()),
+                (json!(true), json!("member"))
+            );
+            // M2-16: not the owner, and the preset the grant carries (the host's guard reads both)
+            assert_eq!(v["owner"], false);
+            assert_eq!(v["preset"], "member", "{v}");
+        }
         other => panic!("{other:?}"),
     }
     match read(
@@ -905,4 +917,52 @@ fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
         other => panic!("{other:?}"),
     }
     drop(daemon);
+}
+
+#[test]
+fn the_gate_answers_over_the_owner_socket_and_frees_a_holder_whose_process_is_gone() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let _d = serving(&p, quiet());
+    let call = |method: &str, params: Value| match read(&p, method, &params) {
+        Reached::Answered(v) => v,
+        other => panic!("{method}: {other:?}"),
+    };
+    let me = std::process::id();
+    assert_eq!(
+        call("gate.take", json!({"holder": "a", "max": 1, "pid": me}))["state"],
+        "granted"
+    );
+    // A process that ended and was reaped: its pid is gone for the system.
+    let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+        .args(if cfg!(windows) {
+            vec!["/C", "exit"]
+        } else {
+            vec![]
+        })
+        .spawn()
+        .expect("child");
+    let dead = child.id();
+    child.wait().expect("child");
+    assert_eq!(
+        call("gate.take", json!({"holder": "b", "pid": dead}))["state"],
+        "waiting"
+    );
+    assert_eq!(
+        call("gate.release", json!({"holder": "a"}))["released"],
+        true
+    );
+    // b's process is gone: its place is freed by the next call, so c is first in line and granted.
+    assert_eq!(
+        call("gate.take", json!({"holder": "c", "pid": me}))["state"],
+        "granted"
+    );
+    let listed = call("gate.list", json!({}));
+    assert_eq!(listed["running"], 1);
+    assert_eq!(listed["slots"][0]["holder"], "c");
+    assert_eq!(listed["waiting"], json!([]));
+    assert!(matches!(
+        read(&p, "gate.take", &json!({"holder": "d", "max": 1})),
+        Reached::Refused(Error::BadParams(_))
+    ));
 }

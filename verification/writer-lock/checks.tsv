@@ -33,4 +33,11 @@ Holder	holder-crash-minimal	pass	-	fast
 Holder	holder-crash-nolock	fail	RunOnce	fast
 Holder	holder-crash-noredeem	fail	RunOnce	fast
 Holder	holder-crash-nohighwater	fail	RunOnce	fast
-Holder	holder-crash-donetruth	fail	DoneTruth	fast
+Holder	holder-crash-donetruth	pass	-	fast
+Holder	holder-crash-donetruth-nowrite	fail	DoneTruth	fast
+Holder	holder-crash-donetruth-nocas	fail	DoneTruth	fast
+Holder	holder-crash-donetruth-release	fail	DoneTruth	fast
+Holder	holder-crash-donetruth-nokey	pass	-	fast
+Holder	holder-crash-donetruth-norecord	pass	-	fast
+Holder	holder-crash-donetruth-minimal	pass	-	fast
+Holder	holder-crash-all-write	pass	-	fast

@@ -7,7 +7,9 @@
 //! 1. **claim** ([`begin`]): an open card before its deadline, nobody else holding it. The holder is unique to this call
 //!    (a second owner device is another holder), the claim carries this process's pid, and it is long enough
 //!    ([`CLAIM_MS`]) to outlast the key store's tools, which are killed at their own timeout inside the call. A second
-//!    `provide`, a plain answer, a no, the sweep, a withdrawal and a park all find the claim and leave the card alone.
+//!    `provide`, a plain answer, a no, the sweep, a single-card withdrawal and a park all find the claim and leave the card
+//!    alone. A revoke of the asker (`withdraw_people`) is the exception: it withdraws the card and drops the claim, and
+//!    [`commit`] then finds it closed and writes nothing.
 //! 2. **warm** ([`commit`]): the master key is read from the key store BEFORE the write transaction, so a slow or locked
 //!    key store cannot hold core.db's write lock. (Only the very first key of a computer is minted inside it.)
 //! 3. **write and save, one commit**: the same transaction checks that the claim is still ours and the card is still
@@ -33,8 +35,8 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use super::{
-    CLEAR_CLAIM, Card, Claim, OPEN_STATES, State, bad, card, claim, get, new_id, now_ms, release,
-    saved_in, text, void_dead_claims,
+    CLEAR_CLAIM, Card, Claim, OPEN_STATES, State, bad, card, claim, dead_claims, get, new_id,
+    now_ms, release, saved_in, text, void_dead_claims,
 };
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -245,8 +247,9 @@ fn commit(
                 .into(),
         )
     };
+    let dead = dead_claims(core, live)?;
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     let still = get(&tx, &held.id)?
         .filter(|k| k.state.open() && k.claim_by.as_deref() == Some(held.holder.as_str()))
         .ok_or_else(lost)?;

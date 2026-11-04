@@ -247,8 +247,9 @@ NeverKilled == ~killedGuest
 NeverLost == ~lostSeen
 NeverRestored == ~restored
 NeverHandSleptWithGuest == ~(~awake.hand /\ guest)
-\* A hand wakes with its lease already lapsed (the sleep-aware clock at work).
-NeverWokeIntoLapse == [][~(~awake.hand /\ awake'.hand /\ ExpiryDue)]_vars
+\* A lease lapses (on the hand's clock) while the hand sleeps with a guest alive: only a clock that counts sleep does
+\* that, so on `fixed` it happens (the property FAILS) and on `sleep-stops` it never does.
+NeverLapsedAsleep == [][~(~awake.hand /\ ~awake'.hand /\ ~ExpiryDue /\ ExpiryDue' /\ guest)]_vars
 \* A stale RENEW (its deadline already past) is in the hand's hands and gets ignored.
 NeverStaleRenewIgnored == ~(awake.hand /\ \E m \in msgs : m.k = "RENEW" /\ AnchorOf(m) # NONE /\ AnchorOf(m) + L <= clk)
 ====
