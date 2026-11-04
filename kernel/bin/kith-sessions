@@ -222,15 +222,19 @@ def host_call(method, body):
         return None
 
 
+def procstart():
+    """kernel/lib/kith_procstart.py: process start stamps, the same string core/procstart writes."""
+    lib = str(Path(__file__).resolve().parent.parent / 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_procstart
+    return kith_procstart
+
+
 def proc_start(pid):
-    """The start time of pid as `ps` prints it in the C locale (the host writes and reads the same text; the caller's locale
-    would print another one), whitespace squeezed; None when it can't be read."""
-    try:
-        out = subprocess.run(['ps', '-o', 'lstart=', '-p', str(pid)], capture_output=True, text=True, timeout=3,
-                             env={**os.environ, 'LC_ALL': 'C'}).stdout
-    except Exception:  # noqa: BLE001
-        return None
-    return ' '.join(out.split()) or None
+    """The start stamp of pid (`e<ms>` on macOS, `b<boot id>:<ticks>` on Linux; the host and the core write and read the same
+    one); None when it can't be read. Claims from before this carry `ps -o lstart=` text: an unknown start, read as alive."""
+    return procstart().start_stamp(pid)
 
 
 def pid_alive(pid):
@@ -260,7 +264,7 @@ def claim_live(c):
     if not c or not pid_alive(c.get('pid')):
         return False
     claimed, actual = c.get('procStart'), proc_start(c['pid'])
-    return not (claimed and actual) or ' '.join(claimed.split()) == actual
+    return not (claimed and actual) or procstart().same_process(claimed, actual)
 
 
 def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_owner=False):
@@ -470,7 +474,7 @@ def release_own(sid):
         fcntl.flock(lock, fcntl.LOCK_EX)
         c = read_claim(f)
         claimed, actual = (c or {}).get('procStart'), proc_start(ppid)
-        if c and c.get('pid') == ppid and not (claimed and actual and ' '.join(claimed.split()) != actual):
+        if c and c.get('pid') == ppid and not (claimed and actual and not procstart().same_process(claimed, actual)):
             f.unlink(missing_ok=True)
             return True
         return False

@@ -292,6 +292,7 @@ jobs:
               Load check|kernel/tests/kith-load-check
               Guest helper check|kernel/tests/kith-guest-helper-check
               Wake check|kernel/tests/kith-wake-check
+              Procstart check (Python process start stamps, the same string core/procstart writes)|kernel/tests/kith-procstart-check
               Guest jobs check|kernel/tests/kith-guest-jobs-check
               Schedule jobs file check|kernel/tests/kith-sched-jobs-check
               Send check|kernel/tests/kith-send-check

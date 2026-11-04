@@ -127,21 +127,6 @@ fn a_retarget_moves_the_claim_to_another_pid_only_while_it_is_the_givers() {
     assert!(!claim_path(&t.reg(), "r1", false).exists());
 }
 
-/// The native start time is the text `ps` prints, for the processes this user owns: this one and its parent. (Another
-/// user's, init's say, is refused by the OS: None, and the caller asks `ps`.)
-#[cfg(target_os = "macos")]
-#[test]
-fn the_native_start_time_is_the_text_ps_prints() {
-    for pid in [std::process::id(), std::os::unix::process::parent_id()] {
-        assert_eq!(
-            native_proc_start(pid),
-            os::proc_start(i64::from(pid)),
-            "pid {pid}"
-        );
-    }
-    assert_eq!(native_proc_start(0x7fff_fff0), None, "a pid nobody has");
-}
-
 // --- the claim ---------------------------------------------------------------------------------------------------------
 
 #[test]
@@ -240,21 +225,54 @@ fn a_claim_whose_pid_is_gone_is_taken_over() {
 }
 
 #[test]
-fn a_reused_pid_is_stale_when_it_started_at_another_time() {
+fn a_reused_pid_is_stale_when_it_has_another_start_stamp() {
     let t = Tmp::new();
     let c = ctx(&t, &no_env);
     let other = Sleeper::new();
-    t.put("s-1.claim", &format!("{{\"pid\": {}, \"procStart\": \"Mon Jan  1 00:00:00 1990\", \"at\": \"x\", \"kind\": \"terminal\"}}", other.pid()));
+    // The same form as this system's stamps, another start: a reused pid.
+    let stamp = other_start(os::proc_start(other.pid()).unwrap());
+    t.put(
+        "s-1.claim",
+        &format!(
+            "{{\"pid\": {}, \"procStart\": \"{stamp}\", \"at\": \"x\", \"kind\": \"terminal\"}}",
+            other.pid()
+        ),
+    );
     take(&c, "s-1", me()).unwrap();
     assert_eq!(on_disk(&t, "s-1").pid, Some(me()));
 }
 
+/// A stamp of the same form as `real` that is not it.
+fn other_start(real: String) -> String {
+    match real.split_once(':') {
+        Some((boot, _)) => format!("{boot}:1"),
+        None => "e1".to_owned(),
+    }
+}
+
 #[test]
-fn a_start_time_with_other_spacing_still_matches() {
+fn an_old_lstart_text_is_an_unknown_start_and_the_claim_holds() {
     let t = Tmp::new();
     let c = ctx(&t, &no_env);
     let other = Sleeper::new();
-    let start = os::proc_start(other.pid()).unwrap().replace(' ', "  ");
+    // Written before stamps: it cannot be told from the live process, so it is never called a different one.
+    t.put(
+        "s-1.claim",
+        &format!(
+            "{{\"pid\": {}, \"procStart\": \"Mon Jan  1 00:00:00 1990\", \"at\": \"x\", \"kind\": \"terminal\"}}",
+            other.pid()
+        ),
+    );
+    assert!(take(&c, "s-1", me()).is_err());
+}
+
+#[test]
+fn a_claim_with_the_processs_own_stamp_holds() {
+    let t = Tmp::new();
+    let c = ctx(&t, &no_env);
+    let other = Sleeper::new();
+    let start = os::proc_start(other.pid()).unwrap();
+    assert!(crate::procstart::is_stamp(&start), "{start}");
     t.put(
         "s-1.claim",
         &format!(

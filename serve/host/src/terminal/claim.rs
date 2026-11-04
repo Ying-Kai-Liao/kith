@@ -2,7 +2,7 @@
 //! holds it is the one writer of that session, even before the registry file (written by the session's own hook seconds
 //! later) exists and even while the host is down. The kernel (`kernel/bin/kith-sessions`) writes and reads the same file.
 //!
-//! `{"pid": <claimer>, "procStart": "<ps lstart>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot" | <any other string>, "takeover": bool}`
+//! `{"pid": <claimer>, "procStart": "<start stamp>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot" | <any other string>, "takeover": bool}`
 //!
 //! A claim whose pid is gone, or whose pid now started at another time, is stale and is replaced under a lock file
 //! (`<sid>.claim.lock`, flock). A claimer is a long-lived process: `kith <agent> --resume` claims for the shell
@@ -63,14 +63,29 @@ fn terminal() -> Kind {
 }
 
 impl Claim {
-    /// The claimer still runs, and is the process that took the claim (a reused pid started at another time).
+    /// The claimer still runs, and is the process that took the claim (a reused pid has another start stamp; a claim from before stamps holds `ps` text, an unknown start: judged by the pid alone).
     pub fn is_live(&self) -> bool {
         if !pid_runs(self.pid) {
             return false;
         }
         match (&self.proc_start, proc_start(self.pid)) {
-            (Some(claimed), Some(actual)) => claimed.split_whitespace().collect::<Vec<_>>().join(" ") == actual,
+            (Some(claimed), Some(actual)) => kith_kernel::procstart::same_process(claimed, &actual),
             _ => true,
+        }
+    }
+}
+
+impl Claim {
+    /// Whether the claimer's process is positively the one that took the claim, which is what a signal needs: [`Self::is_live`]
+    /// says "cannot tell apart" for a start in another form, and a claim from before stamps holds `ps` text. That text is
+    /// compared the old way here, and only a match counts; a claim with no start recorded is judged by its pid, as before.
+    pub fn is_claimer(&self) -> bool {
+        use kith_kernel::procstart::{comparable, is_stamp, same_process};
+        match self.proc_start.as_deref().filter(|s| !s.trim().is_empty()) {
+            None => true,
+            Some(claimed) if is_stamp(claimed) => proc_start(self.pid)
+                .is_some_and(|actual| comparable(claimed, &actual) && same_process(claimed, &actual)),
+            Some(text) => super::registry::lstart_matches(self.pid, text) == Some(true),
         }
     }
 }
@@ -198,7 +213,11 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
             continue;
         }
         let Some(claim) = read(&path) else { continue };
-        if claim.person.as_deref().is_some_and(|p| persons.iter().any(|x| x == p)) && !keep(&claim) && claim.is_live() {
+        if claim.person.as_deref().is_some_and(|p| persons.iter().any(|x| x == p))
+            && !keep(&claim)
+            && claim.is_live()
+            && claim.is_claimer()
+        {
             holders.push((path, claim));
         }
     }
@@ -302,7 +321,8 @@ pub enum Stopped {
     /// SIGKILL was sent but something of the tree is still in the process table after the wait: the claim is kept, so a
     /// take-over is refused until it is really gone (Stop again).
     StillEnding(Claim),
-    /// This platform cannot signal a process tree: nothing was done and the claim is kept.
+    /// This platform cannot signal a process tree, or the claim's start cannot be matched to the process: nothing was done
+    /// and the claim is kept.
     CantStop(Claim),
 }
 
@@ -330,7 +350,9 @@ pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Dura
     if parent_of(claim.pid) == Some(std::process::id()) {
         return Stopped::OwnTurn(claim);
     }
-    if cfg!(not(unix)) {
+    if cfg!(not(unix)) || !claim.is_claimer() {
+        // No signalling here, or the claim's start cannot be matched to the process (an old text that no longer reads the
+        // same): it keeps holding the session, and nothing is signalled.
         return Stopped::CantStop(claim);
     }
     // Descendants first, the claimer last (as the revoke `sweep` does): for a one-shot the claimer is kith-stub, which

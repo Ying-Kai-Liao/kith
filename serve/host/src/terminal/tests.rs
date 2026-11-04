@@ -521,11 +521,33 @@ async fn a_pid_started_at_another_time_is_not_the_session() {
         let v = json!({"pid": me, "sessionId": "s1", "status": "idle", "procStart": proc_start});
         std::fs::write(r.dir.join("sessions").join(format!("{me}.json")), v.to_string()).unwrap();
     };
-    let actual = registry::proc_start(me).expect("ps knows the process");
+    let actual = registry::proc_start(me).expect("the process has a start stamp");
     write(&actual);
     assert_eq!(registry::liveness(&reg, sessions.as_deref()), Live::Idle);
+    write(&reused_start());
+    assert_eq!(registry::liveness(&reg, sessions.as_deref()), Live::Closed, "a reused pid has another start stamp");
+    // Claude Code's own file holds `ps` text, compared as before: another time is a reused pid.
     write("Mon Jan  1 00:00:00 2001");
     assert_eq!(registry::liveness(&reg, sessions.as_deref()), Live::Closed, "a reused pid started at another time");
+}
+
+/// A stamp in this system's form that no running process has: a pid reused after a crash.
+fn reused_start() -> String {
+    match registry::proc_start(std::process::id()).as_deref().and_then(|s| s.split_once(':')) {
+        Some((boot, _)) => format!("{boot}:1"),
+        None => "e1".to_owned(),
+    }
+}
+
+/// A claim written before stamps holds `ps -o lstart=` text: an unknown start, so a live pid keeps the session.
+#[tokio::test]
+async fn a_claim_with_old_lstart_text_still_holds_while_its_process_lives() {
+    let r = Rig::new();
+    let me = r.sleeper();
+    let path = claim::path(&r.state(), "s1", false);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, json!({"pid": me, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t"}).to_string()).unwrap();
+    assert_eq!(claim::holder(&r.state(), "s1").map(|c| c.pid), Some(me));
 }
 
 /// Claude Code writes its session file's `procStart` in UTC; `ps` prints the Mac's local time. Away from UTC the two
@@ -567,7 +589,7 @@ fn the_start_time_is_read_in_the_c_locale_under_any_caller_locale() {
             "C-locale lstart, got {start:?}"
         );
     }
-    assert_eq!(registry::lstart_via(zh(), me, false), registry::proc_start(me));
+    assert_eq!(registry::lstart_via(zh(), me, false), registry::lstart(me, false));
 }
 
 #[test]
@@ -718,8 +740,7 @@ async fn a_claim_of_a_dead_or_reused_pid_is_taken_over() {
     assert_eq!(claim::read(&path).unwrap().pid, me);
     // A live pid that started at another time is a reused pid.
     let other = r.sleeper();
-    std::fs::write(&path, json!({"pid": other, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t"}).to_string())
-        .unwrap();
+    std::fs::write(&path, json!({"pid": other, "procStart": reused_start(), "at": "t"}).to_string()).unwrap();
     assert!(claim::holder(&r.state(), "s1").is_none());
     assert!(claim::take(&r.state(), "s1", Kind::Terminal, me, false).unwrap().is_ok());
     // No temp files are left behind (the lock file stays, empty).
@@ -1058,7 +1079,7 @@ async fn a_claim_of_an_unknown_kind_is_a_live_holder_and_take_as_never_removes_i
     assert_eq!(held.0.pid, pid);
     assert!(p.exists(), "take_as must not delete a live claim it cannot name");
     // Judged by pid + start only: a reused pid (another start time) is stale whatever the kind, and replaced.
-    let stale = json!({"pid": pid, "procStart": "Thu Jan  1 00:00:00 1970", "kind": "newer-kind"});
+    let stale = json!({"pid": pid, "procStart": reused_start(), "kind": "newer-kind"});
     std::fs::write(&p, stale.to_string()).unwrap();
     assert!(claim::holder(&r.state(), "s1").is_none());
     assert!(claim::take(&r.state(), "s1", Kind::Terminal, std::process::id(), false).unwrap().is_ok());
@@ -1201,7 +1222,7 @@ async fn the_sweep_leaves_a_reused_pid_alone() {
     let path = claim::path(&r.state(), "g2", false);
     std::fs::write(
         &path,
-        json!({"pid": stranger, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t", "kind": "oneshot", "person": "sam"})
+        json!({"pid": stranger, "procStart": reused_start(), "at": "t", "kind": "oneshot", "person": "sam"})
             .to_string(),
     )
     .unwrap();
@@ -1335,7 +1356,7 @@ async fn a_pid_reused_after_a_crash_does_not_keep_a_one_shot_working() {
     r.register_one_shot("a3", "ask", "asked from a terminal", pid, None);
     let path = registry::dir(&r.dir.join("state")).join("a3.json");
     let mut reg: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    reg["procStart"] = "Mon Jan  1 00:00:00 2001".into();
+    reg["procStart"] = reused_start().into();
     std::fs::write(&path, reg.to_string()).unwrap();
     let parsed = registry::read_one(&r.dir.join("state"), "a3").unwrap();
     assert_eq!(registry::liveness(&parsed, Some(&r.dir.join("sessions"))), Live::Closed);

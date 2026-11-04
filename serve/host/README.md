@@ -167,8 +167,9 @@ entries with `data.writerChange` (`startedInTerminal`, `openedInTerminal`, `took
 A thread is one Claude session and two writers corrupt it, so a check alone is not enough: the writer takes a claim first
 (`src/terminal/claim.rs`; the kernel's `bin/kith-sessions` writes the same file). `<state>/live/terminal/<session>.claim` is
 made whole in a temp file and linked into place (exclusive, 0600): `{"pid", "procStart", "at", "kind": terminal|app|bot,
-"takeover"}`. A claim whose pid is dead, or started at another time (`ps -o lstart=` in the C locale), is stale and is replaced under
-a `flock` on `<session>.claim.lock`. It works with the host down.
+"takeover"}`. A claim whose pid is dead, or whose start stamp differs (`procStart` is `e<ms>` on macOS, `b<boot id>:<ticks>` on Linux, the
+OS's own record; a claim from before stamps holds `ps -o lstart=` text, an unknown start that keeps it held), is stale and is
+replaced under a `flock` on `<session>.claim.lock`. It works with the host down.
 
 - `kith <agent> --resume` claims the session for the launcher's shell, THEN asks `resolveThread`; `hostBusy` counts a
   running turn and a queued send, read under the thread's lock. A busy answer releases the claim and refuses. The run

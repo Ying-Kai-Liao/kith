@@ -1,11 +1,11 @@
 {
   "fakes": "",
-  "state:home/.kith/live/terminal/s-1.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/s-1.claim": "{\"pid\": 1, \"procStart\": \"Mon Jan  1 00:00:00 1990\", \"at\": \"<TS>\", \"kind\": \"terminal\"}",
   "state:home/.kith/live/terminal/s-1.claim.lock": "",
-  "step0.exit": "0\n",
-  "step0.stderr": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: that session is busy: held by terminal (pid 1); try again in a moment\n",
   "step0.stdout": "",
-  "step1.exit": "1\n",
-  "step1.stderr": "",
-  "step1.stdout": ""
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"at\": \"<TS>\",\n  \"kind\": \"terminal\",\n  \"pid\": 1,\n  \"procStart\": \"Mon Jan  1 00:00:00 1990\"\n}\n",
+  "step1.stderr": ""
 }

@@ -1,6 +1,6 @@
 //! The few process facts the claim protocol needs, and the only `unsafe` in the crate (`kill(2)`). Process start times
-//! come from `ps` in the C locale, because that is the text the claims carry (`kith-sessions proc_start` and the host's
-//! `terminal/registry.rs` write and read the same one).
+//! are stamps (`crate::procstart`: `e<ms>` or `b<boot id>:<ticks>`), the string `kith-sessions` (`kith_procstart.py`) and the
+//! host's `terminal/registry.rs` write and read too. Claims from before carry `ps -o lstart=` text: an unknown start.
 
 use std::process::Command;
 
@@ -38,73 +38,9 @@ pub fn signal(pid: i64, sig: libc::c_int) {
 pub const SIGTERM: libc::c_int = libc::SIGTERM;
 pub const SIGKILL: libc::c_int = libc::SIGKILL;
 
-/// The start time of `pid` as `ps` prints it in the C locale, whitespace squeezed; `None` when it can't be read.
+/// The start stamp of `pid`; `None` when it can't be read (or the process is gone).
 pub fn proc_start(pid: i64) -> Option<String> {
-    let out = Command::new("ps")
-        .env("LC_ALL", "C")
-        .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    let squeezed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    (!squeezed.is_empty()).then_some(squeezed)
-}
-
-/// The start time of `pid` in the text `ps -o lstart=` prints (C locale, whitespace squeezed), read without running `ps`:
-/// on macOS from the kernel's own record (`proc_pidinfo`, the field `ps` itself prints, so the two agree), formatted
-/// `%a %b %e %H:%M:%S %Y` in local time. `None` where this is not implemented (other systems: ask [`proc_start`]) or the
-/// process is gone. The claims still use [`proc_start`]; this is for the core's own holder line.
-pub fn native_proc_start(pid: u32) -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        let pid = libc::c_int::try_from(pid).ok()?;
-        // SAFETY: an all-zero proc_bsdinfo is a valid value for proc_pidinfo to fill in.
-        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-        let size = libc::c_int::try_from(size_of::<libc::proc_bsdinfo>()).ok()?;
-        // SAFETY: `info` is `size` bytes and outlives the call; proc_pidinfo writes at most `size` bytes into it.
-        let got = unsafe {
-            libc::proc_pidinfo(
-                pid,
-                libc::PROC_PIDTBSDINFO,
-                0,
-                (&raw mut info).cast::<libc::c_void>(),
-                size,
-            )
-        };
-        if got != size {
-            return None;
-        }
-        let secs = libc::time_t::try_from(info.pbi_start_tvsec).ok()?;
-        // SAFETY: an all-zero tm is a valid value for localtime_r to fill in.
-        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        // SAFETY: both pointers are valid for the call.
-        if unsafe { libc::localtime_r(&raw const secs, &raw mut tm) }.is_null() {
-            return None;
-        }
-        let mut buf = [0 as libc::c_char; 64];
-        // SAFETY: `buf` is 64 bytes, the format is NUL-terminated, and strftime writes at most 64 bytes with its NUL.
-        let n = unsafe {
-            libc::strftime(
-                buf.as_mut_ptr(),
-                buf.len(),
-                c"%a %b %e %H:%M:%S %Y".as_ptr(),
-                &raw const tm,
-            )
-        };
-        if n == 0 {
-            return None;
-        }
-        // SAFETY: strftime wrote `n` bytes, then the NUL.
-        let text = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
-            .to_string_lossy()
-            .into_owned();
-        Some(text.split_whitespace().collect::<Vec<_>>().join(" "))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = pid;
-        None
-    }
+    crate::procstart::start_stamp(u32::try_from(pid).ok()?)
 }
 
 /// `(parent pid, command)` of `pid`; `(0, "")` when `ps` has no such row.

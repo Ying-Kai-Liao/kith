@@ -19,7 +19,6 @@ pub mod intent;
 // The one place with `unsafe` (kill(2)); the crate denies it everywhere else.
 #[allow(unsafe_code)]
 pub(crate) mod os;
-pub use os::native_proc_start;
 pub mod registry;
 pub mod resolve;
 #[cfg(test)]
@@ -230,8 +229,8 @@ impl Claim {
             .map_or_else(|| "None".to_owned(), |p| p.to_string())
     }
 
-    /// The claimer still runs, and is the process that took the claim (a reused pid started at another time). A claim
-    /// that records no start time, or one `ps` cannot give, is judged by the pid alone.
+    /// The claimer still runs, and is the process that took the claim (a reused pid has another start stamp). A claim
+    /// that records no start, one in another form (old `ps` text) or one that cannot be read now is judged by the pid alone.
     pub fn is_live(&self) -> bool {
         let Some(pid) = self.pid else { return false };
         if !os::pid_runs(pid) {
@@ -241,9 +240,7 @@ impl Claim {
             self.proc_start.as_deref().filter(|s| !s.is_empty()),
             os::proc_start(pid),
         ) {
-            (Some(claimed), Some(actual)) => {
-                claimed.split_whitespace().collect::<Vec<_>>().join(" ") == actual
-            }
+            (Some(claimed), Some(actual)) => crate::procstart::same_process(claimed, &actual),
             _ => true,
         }
     }
