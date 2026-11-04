@@ -432,7 +432,20 @@ pub fn classify(tool: &str, input: &Value, roots: &Roots) -> Classified {
     if shown.len() > MAX_SHOWN {
         return Classified::Malformed("it is too long to show in full for approval");
     }
-    Classified::Card { key: format!("{tool}:{}", digest(input)), shown }
+    Classified::Card { key: input_key(tool, input), shown }
+}
+
+/// The key of a call bound by its whole input. A Bash call's description is the model's own wording, rewritten between
+/// tries and never run, so it is left out: a retry joins the open card or uses its yes (as kith-permit's `once_key`).
+pub fn input_key(tool: &str, input: &Value) -> String {
+    match input {
+        Value::Object(m) if tool == "Bash" && m.contains_key("description") => {
+            let mut m = m.clone();
+            m.remove("description");
+            format!("{tool}:{}", digest(&Value::Object(m)))
+        }
+        _ => format!("{tool}:{}", digest(input)),
+    }
 }
 
 #[cfg(test)]
@@ -609,5 +622,27 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, classify("Bash", &json!({"command": "ls -la", "description": "list"}), &none));
         assert!(matches!(classify("", &json!({}), &none), Classified::Malformed(_)));
+    }
+
+    #[test]
+    fn a_bash_retry_in_other_words_is_the_same_ask() {
+        let none = Roots::default();
+        let card = |tool: &str, input: Value| match classify(tool, &input, &none) {
+            Classified::Card { key, shown } => (key, shown),
+            other => panic!("{other:?}"),
+        };
+        let (a, shown_a) = card("Bash", json!({"command": "ls", "description": "a"}));
+        let (b, shown_b) = card("Bash", json!({"command": "ls", "description": "b"}));
+        assert_eq!(a, b, "the description is the model's wording, not what runs");
+        assert_eq!((shown_a.as_str(), shown_b.as_str()), ("ls", "ls"));
+        assert_ne!(a, card("Bash", json!({"command": "pwd", "description": "a"})).0);
+        let (timed, shown) = card("Bash", json!({"command": "ls", "description": "a", "timeout": 5000}));
+        assert_ne!(a, timed, "everything else stays in the key");
+        assert!(shown.contains("\"description\":\"a\"") && shown.contains("5000"), "shown unchanged: {shown}");
+        // Only Bash: another tool's description is part of what it does.
+        assert_ne!(
+            card("mcp__x__post", json!({"description": "a"})).0,
+            card("mcp__x__post", json!({"description": "b"})).0
+        );
     }
 }
