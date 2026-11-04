@@ -3,7 +3,7 @@
   "state:home/.kith/live/terminal/s-1.claim.lock": "",
   "state:home/.kith/live/terminal/s-1.takeover.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"app\", \"takeover\": true}",
   "state:home/.kith/live/terminal/s-1.takeover.claim.lock": "",
-  "state:home/.kith/live/terminal/s-2.claim": "{\"pid\": 2, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"oneshot\"}",
+  "state:home/.kith/live/terminal/s-2.claim": "{\"pid\": 2147482999, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"oneshot\"}",
   "state:home/.kith/live/terminal/s-2.claim.lock": "",
   "state:home/.kith/live/terminal/s-2.takeover.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"app\", \"takeover\": true}",
   "state:home/.kith/live/terminal/s-2.takeover.claim.lock": "",

@@ -24,6 +24,8 @@
 //! belongs to someone else, or is a symlink, is refused (`Error::Folder`). On Windows an existing folder is used
 //! as found, and lock files are opened without FILE_SHARE_DELETE so a held file cannot be deleted under us.
 
+pub mod resident;
+
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -36,6 +38,9 @@ use unix as os;
 mod windows;
 #[cfg(windows)]
 use windows as os;
+/// For the stub binary's `--ctl-pipe` check.
+#[cfg(windows)]
+pub use windows::{parent_pid, pipe_server_pid};
 
 #[derive(Debug)]
 pub enum Error {

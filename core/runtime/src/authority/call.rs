@@ -142,9 +142,24 @@ pub(crate) fn call_in(
                 need(params, "agent").map_err(|d| store::refusal(&d))?,
             );
             store::read(core, |a| {
-                match Rules::new(c, a).may(person, agent, None, false) {
-                    Ok((allowed, why)) => json!({ "allowed": allowed, "why": why }),
-                    Err(d) => json!({ "allowed": false, "why": d.msg }),
+                let rules = Rules::new(c, a);
+                match rules.may(person, agent, None, false) {
+                    Ok((allowed, why)) => {
+                        // M2-16: the host's guard also needs to know the owner (never a guest) and the preset (a
+                        // member answers their own cards), so `resolve`'s preset rides along. No preset when the
+                        // rules have none to give; the caller then reads "not a member".
+                        let owner = why == "owner";
+                        let preset = (allowed && !owner)
+                            .then(|| rules.resolve(agent, person, None, false).ok())
+                            .flatten()
+                            .and_then(|r| {
+                                r.get("preset").and_then(Value::as_str).map(str::to_owned)
+                            });
+                        json!({ "allowed": allowed, "why": why, "owner": owner, "preset": preset })
+                    }
+                    Err(d) => {
+                        json!({ "allowed": false, "why": d.msg, "owner": false, "preset": null })
+                    }
                 }
             })
         }
