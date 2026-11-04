@@ -1,0 +1,1914 @@
+[
+  {
+    "name": "pkg-resolve-usage",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": true,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve"
+      ],
+      [
+        "-",
+        "resolve",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "ghost"
+      ],
+      [
+        "-",
+        "resolve",
+        "ghost",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "--all",
+        "extra"
+      ],
+      [
+        "-",
+        "resolve",
+        "--all"
+      ],
+      [
+        "-",
+        "resolve",
+        "--all",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "scratch"
+      ],
+      [
+        "-",
+        "resolve",
+        "scratch",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "pkg-resolve-one",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": false,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\neffort: high\nmodel: sonnet\n---\nYou echo. Read `skills/hello/SKILL.md` and `hello/SKILL.md`.\n\n  \n"
+      },
+      {
+        "write": "kith/agents/echo/role/settings.json",
+        "text": "{\"permissions\": {\"allow\": [\"Read({{HOME_DIR}}/**)\"]}}\n"
+      },
+      {
+        "write": "kith/agents/echo/role/capabilities.yaml",
+        "text": "needs: [anthropic]\nrequires:\n  jq: brew install jq  # json\n"
+      },
+      {
+        "write": "kith/agents/echo/role/skills/hello/SKILL.md",
+        "text": "---\nname: hello\ndescription: hi\n---\nsay hello\n"
+      },
+      {
+        "write": "kith/agents/echo/role/tools/run.sh",
+        "text": "#!/bin/sh\necho run\n",
+        "mode": "755"
+      },
+      {
+        "write": "kith/agents/echo/role/memory/MEMORY.md",
+        "text": "state, never snapshotted\n"
+      },
+      {
+        "write": "kith/agents/echo/role/data/x.json",
+        "text": "{}\n"
+      },
+      {
+        "write": "kith/agents/echo/role/sub/memory/keep.md",
+        "text": "nested memory is package\n"
+      },
+      {
+        "write": "kith/agents/echo/role/node_modules/x/index.js",
+        "text": "skipped\n"
+      },
+      {
+        "write": "kith/agents/echo/role/sub/__pycache__/a.pyc",
+        "text": "skipped\n"
+      },
+      {
+        "write": "kith/agents/echo/role/sub/.DS_Store",
+        "text": "skipped\n"
+      },
+      {
+        "write": "kith/agents/echo/role/notes.md",
+        "text": "notes\n"
+      },
+      {
+        "link": "kith/agents/echo/role/shared",
+        "to": "tools"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo",
+        "--json"
+      ],
+      [
+        "notes",
+        "resolve",
+        "echo",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo"
+      ]
+    ],
+    "ignore": [
+      "/store/[^/]*@[0-9a-f]{10}/"
+    ]
+  },
+  {
+    "name": "pkg-resolve-snapshot-contents",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": true,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\neffort: high\nmodel: sonnet\n---\nYou echo. Read `skills/hello/SKILL.md` and `hello/SKILL.md`.\n\n  \n"
+      },
+      {
+        "write": "kith/agents/echo/role/settings.json",
+        "text": "{\"permissions\": {\"allow\": [\"Read({{HOME_DIR}}/**)\"]}}\n"
+      },
+      {
+        "write": "kith/agents/echo/role/capabilities.yaml",
+        "text": "needs: [anthropic]\nrequires:\n  jq: brew install jq  # json\n"
+      },
+      {
+        "write": "kith/agents/echo/role/skills/hello/SKILL.md",
+        "text": "---\nname: hello\ndescription: hi\n---\nsay hello\n"
+      },
+      {
+        "write": "kith/agents/echo/role/tools/run.sh",
+        "text": "#!/bin/sh\necho run\n",
+        "mode": "755"
+      },
+      {
+        "write": "kith/agents/echo/role/memory/MEMORY.md",
+        "text": "state, never snapshotted\n"
+      },
+      {
+        "write": "kith/agents/echo/role/data/x.json",
+        "text": "{}\n"
+      },
+      {
+        "write": "kith/agents/echo/role/sub/memory/keep.md",
+        "text": "nested memory is package\n"
+      },
+      {
+        "write": "kith/agents/echo/role/node_modules/x/index.js",
+        "text": "skipped\n"
+      },
+      {
+        "write": "kith/agents/echo/role/sub/__pycache__/a.pyc",
+        "text": "skipped\n"
+      },
+      {
+        "write": "kith/agents/echo/role/sub/.DS_Store",
+        "text": "skipped\n"
+      },
+      {
+        "write": "kith/agents/echo/role/notes.md",
+        "text": "notes\n"
+      },
+      {
+        "link": "kith/agents/echo/role/shared",
+        "to": "tools"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "echo"
+      ]
+    ]
+  },
+  {
+    "name": "pkg-resolve-several",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": true,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/alpha/role/agent.md",
+        "text": "---\nname: alpha\ndescription: test agent alpha\n---\nYou are alpha.\n"
+      },
+      {
+        "write": "kith/agents/beta/role/agent.md",
+        "text": "---\nname: beta\ndescription: test agent beta\n---\nYou are beta.\n"
+      },
+      {
+        "write": "kith/agents/gamma/agent.md",
+        "text": "---\nname: gamma\ndescription: test agent gamma\n---\nYou are gamma.\n"
+      },
+      {
+        "write": "kith/agents/zed/role/agent.md",
+        "text": "---\nname: zed\ndescription: test agent zed\n---\nYou are zed.\n"
+      },
+      {
+        "write": "kith/agents/zed/role/a/b/c.txt",
+        "text": "deep\n"
+      },
+      {
+        "write": "kith/agents/.hid/role/agent.md",
+        "text": "---\nname: hid\ndescription: test agent hid\n---\nYou are hid.\n"
+      },
+      {
+        "mkdir": "kith/agents/empty/role"
+      },
+      {
+        "write": "kith/agents/nonagent/readme.md",
+        "text": "not an agent\n"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "--all"
+      ],
+      [
+        "-",
+        "resolve",
+        "--all",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "zed",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "--all"
+      ]
+    ]
+  },
+  {
+    "name": "pkg-resolve-git",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": false,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent echo\n---\nYou are echo.\n"
+      },
+      {
+        "run": [
+          "git",
+          "init",
+          "-q",
+          "-b",
+          "main"
+        ],
+        "cwd": "kith/agents/echo/role"
+      },
+      {
+        "run": [
+          "git",
+          "add",
+          "-A"
+        ],
+        "cwd": "kith/agents/echo/role"
+      },
+      {
+        "run": [
+          "git",
+          "commit",
+          "-qm",
+          "first"
+        ],
+        "cwd": "kith/agents/echo/role"
+      },
+      {
+        "write": "kith/agents/big/role/agent.md",
+        "text": "---\nname: big\ndescription: test agent big\n---\nYou are big.\n"
+      },
+      {
+        "write": "kith/agents/big/memory/log.md",
+        "text": "life\n"
+      },
+      {
+        "run": [
+          "git",
+          "init",
+          "-q",
+          "-b",
+          "main"
+        ],
+        "cwd": "kith/agents/big"
+      },
+      {
+        "run": [
+          "git",
+          "add",
+          "-A"
+        ],
+        "cwd": "kith/agents/big"
+      },
+      {
+        "run": [
+          "git",
+          "commit",
+          "-qm",
+          "first"
+        ],
+        "cwd": "kith/agents/big"
+      },
+      {
+        "run": [
+          "sh",
+          "-c",
+          "echo scratch > {KITH_HOME}/agents/echo/role/untracked.md"
+        ]
+      },
+      {
+        "run": [
+          "sh",
+          "-c",
+          "echo scratch > {KITH_HOME}/agents/big/role/untracked.md; echo more >> {KITH_HOME}/agents/big/memory/log.md"
+        ]
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "notes",
+        "resolve",
+        "echo"
+      ],
+      [
+        "-",
+        "resolve",
+        "big",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "big"
+      ]
+    ],
+    "ignore": [
+      "/store/[^/]*@[0-9a-f]{10}/"
+    ]
+  },
+  {
+    "name": "pkg-resolve-pin",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": false,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent echo\n---\nYou are echo.\n"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "pin-good,notes",
+        "resolve",
+        "echo",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "pin-missing",
+        "resolve",
+        "echo",
+        "--json"
+      ],
+      [
+        "unpin",
+        "resolve",
+        "echo"
+      ]
+    ],
+    "ignore": [
+      "/store/[^/]*@[0-9a-f]{10}/"
+    ]
+  },
+  {
+    "name": "pkg-resolve-editing",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": false,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent echo\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/beta/role/agent.md",
+        "text": "---\nname: beta\ndescription: test agent beta\n---\nYou are beta.\n"
+      }
+    ],
+    "run": [
+      [
+        "editing-beta",
+        "resolve",
+        "beta"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "editing",
+        "resolve",
+        "echo",
+        "--json"
+      ],
+      [
+        "notes",
+        "resolve",
+        "echo"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "editing-old",
+        "resolve",
+        "echo",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo"
+      ]
+    ],
+    "ignore": [
+      "/store/[^/]*@[0-9a-f]{10}/"
+    ]
+  },
+  {
+    "name": "pkg-resolve-fails-after-good",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": false,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent echo\n---\nYou are echo.\n"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "break",
+        "resolve",
+        "echo"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo",
+        "--json"
+      ],
+      [
+        "fix",
+        "resolve",
+        "echo"
+      ]
+    ],
+    "ignore": [
+      "/store/[^/]*@[0-9a-f]{10}/"
+    ]
+  },
+  {
+    "name": "pkg-resolve-problems",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": true,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/nodesc/role/agent.md",
+        "text": "---\nname: nodesc\n---\nbody\n"
+      },
+      {
+        "write": "kith/agents/nofront/role/agent.md",
+        "text": "no frontmatter at all\n"
+      },
+      {
+        "write": "kith/agents/badeffort/role/agent.md",
+        "text": "---\nname: x\ndescription: d\neffort: extreme\n---\nbody\n"
+      },
+      {
+        "write": "kith/agents/badmodel/role/agent.md",
+        "text": "---\nname: x\ndescription: d\nmodel: bad model!\n---\nbody\n"
+      },
+      {
+        "write": "kith/agents/quirk/role/agent.md",
+        "text": "---\nname: x\ndescription:\nname: next line is the value\neffort:   \n---\nbody\n"
+      },
+      {
+        "write": "kith/agents/crlf/role/agent.md",
+        "text": "---\r\nname: x\r\ndescription: crlf agent\r\n---\r\nYou are crlf.\r\n\r\n"
+      },
+      {
+        "write": "kith/agents/badsettings/role/agent.md",
+        "text": "---\nname: badsettings\ndescription: test agent badsettings\n---\nYou are badsettings.\n"
+      },
+      {
+        "write": "kith/agents/badsettings/role/settings.json",
+        "text": "{not json"
+      },
+      {
+        "write": "kith/agents/badmcp/role/agent.md",
+        "text": "---\nname: badmcp\ndescription: test agent badmcp\n---\nYou are badmcp.\n"
+      },
+      {
+        "write": "kith/agents/badmcp/role/mcp.json",
+        "text": ""
+      },
+      {
+        "write": "kith/agents/placeholders/role/agent.md",
+        "text": "---\nname: x\ndescription: d\n---\n{{ZED}} {{AGENT}}\n"
+      },
+      {
+        "write": "kith/agents/placeholders/role/settings.json",
+        "text": "{\"a\": \"{{NOPE}} {{HOME_DIR}} {{ALSO_NO}} {{lower}} {{NOPE}}\"}"
+      },
+      {
+        "write": "kith/agents/badcaps/role/agent.md",
+        "text": "---\nname: badcaps\ndescription: test agent badcaps\n---\nYou are badcaps.\n"
+      },
+      {
+        "write": "kith/agents/badcaps/role/capabilities.yaml",
+        "text": "needs:\n  - a\n  - b\n"
+      },
+      {
+        "write": "kith/agents/capsok/role/agent.md",
+        "text": "---\nname: capsok\ndescription: test agent capsok\n---\nYou are capsok.\n"
+      },
+      {
+        "write": "kith/agents/capsok/role/capabilities.yaml",
+        "text": "# x\nneeds:\n   [anthropic ,\n  notion]\n"
+      },
+      {
+        "write": "kith/agents/needsmissing/role/agent.md",
+        "text": "---\nname: needsmissing\ndescription: test agent needsmissing\n---\nYou are needsmissing.\n"
+      },
+      {
+        "write": "kith/agents/needsmissing/role/capabilities.yaml",
+        "text": "needs: [nosuch, anthropic, ghostsvc]\n"
+      },
+      {
+        "write": "kith/agents/needsmissing/role/services/mine.json",
+        "text": "{\"kind\": \"cli\"}"
+      },
+      {
+        "write": "kith/agents/needsown/role/agent.md",
+        "text": "---\nname: needsown\ndescription: test agent needsown\n---\nYou are needsown.\n"
+      },
+      {
+        "write": "kith/agents/needsown/role/capabilities.yaml",
+        "text": "needs: [mine]\n"
+      },
+      {
+        "write": "kith/agents/needsown/role/services/mine.json",
+        "text": "{\"kind\": \"cli\"}"
+      },
+      {
+        "write": "kith/agents/needsown/role/services/nokind.json",
+        "text": "{}"
+      },
+      {
+        "write": "kith/agents/needsown/role/services/broken.json",
+        "text": "[1,"
+      },
+      {
+        "write": "kith/agents/needsown/role/services/.hidden.json",
+        "text": "{\"kind\": \"login\"}"
+      },
+      {
+        "write": "kith/agents/needsown/role/services/readme.md",
+        "text": "x"
+      },
+      {
+        "write": "kith/agents/missingskill/role/agent.md",
+        "text": "---\nname: x\ndescription: d\n---\n`skills/ok/SKILL.md` `skills/nope/SKILL.md` `ok/SKILL.md` `other/SKILL.md` `/SKILL.md` `x/SKILL.md y`\n"
+      },
+      {
+        "write": "kith/agents/missingskill/role/skills/ok/SKILL.md",
+        "text": "ok\n"
+      },
+      {
+        "write": "kith/agents/skills-badjson/role/agent.md",
+        "text": "---\nname: skills-badjson\ndescription: test agent skills-badjson\n---\nYou are skills-badjson.\n"
+      },
+      {
+        "write": "kith/agents/skills-badjson/role/skills.json",
+        "text": "{nope"
+      },
+      {
+        "write": "kith/agents/skills-badname/role/agent.md",
+        "text": "---\nname: skills-badname\ndescription: test agent skills-badname\n---\nYou are skills-badname.\n"
+      },
+      {
+        "write": "kith/agents/skills-badname/role/skills.json",
+        "text": "{\"skills\": {\"Bad Name\": {}}}"
+      },
+      {
+        "write": "kith/agents/skills-badrepo/role/agent.md",
+        "text": "---\nname: skills-badrepo\ndescription: test agent skills-badrepo\n---\nYou are skills-badrepo.\n"
+      },
+      {
+        "write": "kith/agents/skills-badrepo/role/skills.json",
+        "text": "{\"skills\": {\"a\": {\"repo\": \"nope\"}}}"
+      },
+      {
+        "write": "kith/agents/skills-badref/role/agent.md",
+        "text": "---\nname: skills-badref\ndescription: test agent skills-badref\n---\nYou are skills-badref.\n"
+      },
+      {
+        "write": "kith/agents/skills-badref/role/skills.json",
+        "text": "{\"skills\": {\"a\": {\"repo\": \"o/r\", \"ref\": \"main\"}}}"
+      },
+      {
+        "write": "kith/agents/skills-badpath/role/agent.md",
+        "text": "---\nname: skills-badpath\ndescription: test agent skills-badpath\n---\nYou are skills-badpath.\n"
+      },
+      {
+        "write": "kith/agents/skills-badpath/role/skills.json",
+        "text": "{\"skills\": {\"a\": {\"repo\": \"o/r\", \"ref\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"path\": \"../x\"}}}"
+      },
+      {
+        "write": "kith/agents/skills-nopath/role/agent.md",
+        "text": "---\nname: skills-nopath\ndescription: test agent skills-nopath\n---\nYou are skills-nopath.\n"
+      },
+      {
+        "write": "kith/agents/skills-nopath/role/skills.json",
+        "text": "{\"skills\": {\"a\": {\"repo\": \"o/r\", \"ref\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}}"
+      },
+      {
+        "write": "kith/agents/skills-notdict/role/agent.md",
+        "text": "---\nname: skills-notdict\ndescription: test agent skills-notdict\n---\nYou are skills-notdict.\n"
+      },
+      {
+        "write": "kith/agents/skills-notdict/role/skills.json",
+        "text": "[1, 2]"
+      },
+      {
+        "write": "kith/agents/services-list/role/agent.md",
+        "text": "---\nname: services-list\ndescription: test agent services-list\n---\nYou are services-list.\n"
+      },
+      {
+        "write": "kith/agents/services-list/role/services/x.json",
+        "text": "[]"
+      },
+      {
+        "write": "kith/agents/mustask/role/agent.md",
+        "text": "---\nname: mustask\ndescription: test agent mustask\n---\nYou are mustask.\n"
+      },
+      {
+        "write": "kith/agents/mustask/role/settings.json",
+        "text": "{\"permissions\": {\"allow\": [\"Bash(git push:*)\", \"Read(~/.ssh/id_rsa)\", \"Edit(~/.zshrc)\", \"Bash(ls:*)\", \"mcp__x__y\", \"Write\"]}, \"autoMode\": {\"allow\": [\"push to the remote\", \"$defaults\", \"read the docs\", 3]}}"
+      },
+      {
+        "write": "kith/agents/mustask-clean/role/agent.md",
+        "text": "---\nname: mustask-clean\ndescription: test agent mustask-clean\n---\nYou are mustask-clean.\n"
+      },
+      {
+        "write": "kith/agents/mustask-clean/role/settings.json",
+        "text": "{\"permissions\": {\"allow\": [\"Bash(ls:*)\", \"Read(//tmp/**)\"]}, \"autoMode\": {\"allow\": [\"read the docs\"]}}"
+      },
+      {
+        "write": "kith/agents/settings-shapes/role/agent.md",
+        "text": "---\nname: settings-shapes\ndescription: test agent settings-shapes\n---\nYou are settings-shapes.\n"
+      },
+      {
+        "write": "kith/agents/settings-shapes/role/settings.json",
+        "text": "{\"permissions\": [\"x\"], \"autoMode\": \"y\"}"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "nodesc"
+      ],
+      [
+        "-",
+        "resolve",
+        "nofront"
+      ],
+      [
+        "-",
+        "resolve",
+        "badeffort"
+      ],
+      [
+        "-",
+        "resolve",
+        "badmodel"
+      ],
+      [
+        "-",
+        "resolve",
+        "quirk"
+      ],
+      [
+        "-",
+        "resolve",
+        "crlf"
+      ],
+      [
+        "-",
+        "resolve",
+        "badsettings"
+      ],
+      [
+        "-",
+        "resolve",
+        "badmcp"
+      ],
+      [
+        "-",
+        "resolve",
+        "placeholders"
+      ],
+      [
+        "-",
+        "resolve",
+        "badcaps"
+      ],
+      [
+        "-",
+        "resolve",
+        "capsok"
+      ],
+      [
+        "-",
+        "resolve",
+        "needsmissing"
+      ],
+      [
+        "-",
+        "resolve",
+        "needsown"
+      ],
+      [
+        "-",
+        "resolve",
+        "missingskill"
+      ],
+      [
+        "-",
+        "resolve",
+        "skills-badjson"
+      ],
+      [
+        "-",
+        "resolve",
+        "skills-badname"
+      ],
+      [
+        "-",
+        "resolve",
+        "skills-badrepo"
+      ],
+      [
+        "-",
+        "resolve",
+        "skills-badref"
+      ],
+      [
+        "-",
+        "resolve",
+        "skills-badpath"
+      ],
+      [
+        "-",
+        "resolve",
+        "skills-nopath"
+      ],
+      [
+        "-",
+        "resolve",
+        "skills-notdict"
+      ],
+      [
+        "-",
+        "resolve",
+        "services-list"
+      ],
+      [
+        "-",
+        "resolve",
+        "mustask"
+      ],
+      [
+        "-",
+        "resolve",
+        "mustask-clean"
+      ],
+      [
+        "-",
+        "resolve",
+        "settings-shapes"
+      ],
+      [
+        "-",
+        "resolve",
+        "--all",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "nodesc",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "pkg-resolve-snapshot-fails",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": true,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/badutf/role/agent.md",
+        "text": "---\nname: badutf\ndescription: test agent badutf\n---\nYou are badutf.\n"
+      },
+      {
+        "run": [
+          "sh",
+          "-c",
+          "printf '\\377\\376' > {KITH_HOME}/agents/badutf/role/agent.md"
+        ]
+      },
+      {
+        "write": "kith/agents/dangling/role/agent.md",
+        "text": "---\nname: dangling\ndescription: test agent dangling\n---\nYou are dangling.\n"
+      },
+      {
+        "link": "kith/agents/dangling/role/gone.md",
+        "to": "nowhere.md"
+      },
+      {
+        "write": "kith/agents/fine/role/agent.md",
+        "text": "---\nname: fine\ndescription: test agent fine\n---\nYou are fine.\n"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "badutf"
+      ],
+      [
+        "-",
+        "resolve",
+        "dangling",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "--all"
+      ],
+      [
+        "-",
+        "resolve",
+        "--all",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "pkg-resolve-fetch",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_GITHUB_GIT": "{TMP}/gh"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ],
+      [
+        "(?s)(git (?:fetch|checkout|init|remote|sparse-checkout) failed: ).*?(?=\\nkith: |\\Z)",
+        "\\1<GIT>"
+      ]
+    ],
+    "normalize_paths": true,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "mkdir": "tmp/gh/owner/skills.git"
+      },
+      {
+        "run": [
+          "git",
+          "init",
+          "-q",
+          "-b",
+          "main"
+        ],
+        "cwd": "tmp/gh/owner/skills.git"
+      },
+      {
+        "run": [
+          "git",
+          "config",
+          "uploadpack.allowAnySHA1InWant",
+          "true"
+        ],
+        "cwd": "tmp/gh/owner/skills.git"
+      },
+      {
+        "write": "tmp/gh/owner/skills.git/pick/SKILL.md",
+        "text": "---\nname: pick\ndescription: picked\n---\nthe picked skill\n"
+      },
+      {
+        "write": "tmp/gh/owner/skills.git/pick/extra.txt",
+        "text": "more\n"
+      },
+      {
+        "write": "tmp/gh/owner/skills.git/other/SKILL.md",
+        "text": "---\nname: other\n---\nother\n"
+      },
+      {
+        "write": "tmp/gh/owner/skills.git/empty/readme.md",
+        "text": "no skill file\n"
+      },
+      {
+        "write": "tmp/gh/owner/skills.git/SKILL.md",
+        "text": "---\nname: whole\n---\nthe repo is the skill\n"
+      },
+      {
+        "run": [
+          "git",
+          "add",
+          "-A"
+        ],
+        "cwd": "tmp/gh/owner/skills.git"
+      },
+      {
+        "run": [
+          "git",
+          "commit",
+          "-qm",
+          "skills"
+        ],
+        "cwd": "tmp/gh/owner/skills.git"
+      },
+      {
+        "write": "kith/agents/linked/role/agent.md",
+        "text": "---\nname: linked\ndescription: test agent linked\n---\nYou are linked.\n"
+      },
+      {
+        "write": "kith/agents/linked/role/skills.json",
+        "text": "{\"skills\": {\"pick\": {\"repo\": \"owner/skills\", \"ref\": \"3c311a746a1133db2e0969f98690b3fc635c735b\", \"path\": \"pick\"}, \"again\": {\"repo\": \"owner/skills\", \"ref\": \"3c311a746a1133db2e0969f98690b3fc635c735b\", \"path\": \"other\"}}}"
+      },
+      {
+        "write": "kith/agents/whole/role/agent.md",
+        "text": "---\nname: whole\ndescription: test agent whole\n---\nYou are whole.\n"
+      },
+      {
+        "write": "kith/agents/whole/role/skills.json",
+        "text": "{\"skills\": {\"w\": {\"repo\": \"owner/skills\", \"ref\": \"3c311a746a1133db2e0969f98690b3fc635c735b\", \"path\": \".\"}}}"
+      },
+      {
+        "write": "kith/agents/noskillfile/role/agent.md",
+        "text": "---\nname: noskillfile\ndescription: test agent noskillfile\n---\nYou are noskillfile.\n"
+      },
+      {
+        "write": "kith/agents/noskillfile/role/skills.json",
+        "text": "{\"skills\": {\"e\": {\"repo\": \"owner/skills\", \"ref\": \"3c311a746a1133db2e0969f98690b3fc635c735b\", \"path\": \"empty\"}}}"
+      },
+      {
+        "write": "kith/agents/badref/role/agent.md",
+        "text": "---\nname: badref\ndescription: test agent badref\n---\nYou are badref.\n"
+      },
+      {
+        "write": "kith/agents/badref/role/skills.json",
+        "text": "{\"skills\": {\"x\": {\"repo\": \"owner/skills\", \"ref\": \"0000000000000000000000000000000000000000\", \"path\": \"pick\"}}}"
+      },
+      {
+        "write": "kith/agents/norepo/role/agent.md",
+        "text": "---\nname: norepo\ndescription: test agent norepo\n---\nYou are norepo.\n"
+      },
+      {
+        "write": "kith/agents/norepo/role/skills.json",
+        "text": "{\"skills\": {\"x\": {\"repo\": \"owner/nothere\", \"ref\": \"1111111111111111111111111111111111111111\", \"path\": \"pick\"}}}"
+      },
+      {
+        "write": "kith/agents/fresh/role/agent.md",
+        "text": "---\nname: fresh\ndescription: test agent fresh\n---\nYou are fresh.\n"
+      },
+      {
+        "write": "kith/agents/fresh/role/skills.json",
+        "text": "{\"skills\": {\"pick\": {\"repo\": \"owner/skills\", \"ref\": \"3c311a746a1133db2e0969f98690b3fc635c735b\", \"path\": \"pick\"}}}"
+      },
+      {
+        "write": "kith/agents/fresh/role/skills/pick/SKILL.md",
+        "text": "stale\n"
+      },
+      {
+        "write": "kith/agents/fresh/role/skills/pick/.source",
+        "text": "old/repo@old:pick\n"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "linked"
+      ],
+      [
+        "-",
+        "resolve",
+        "linked",
+        "--json"
+      ],
+      [
+        "-",
+        "resolve",
+        "whole"
+      ],
+      [
+        "-",
+        "resolve",
+        "noskillfile"
+      ],
+      [
+        "-",
+        "resolve",
+        "badref"
+      ],
+      [
+        "-",
+        "resolve",
+        "norepo"
+      ],
+      [
+        "-",
+        "resolve",
+        "fresh"
+      ],
+      [
+        "-",
+        "resolve",
+        "linked"
+      ]
+    ],
+    "ignore": [
+      "^tmp/gh/"
+    ]
+  },
+  {
+    "name": "pkg-resolve-gc",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ]
+    ],
+    "normalize_paths": false,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent echo\n---\nYou are echo.\n"
+      }
+    ],
+    "run": [
+      [
+        "gc-fixture",
+        "resolve",
+        "echo"
+      ],
+      [
+        "-",
+        "resolve",
+        "echo"
+      ],
+      [
+        "notes",
+        "resolve",
+        "echo",
+        "--json"
+      ]
+    ],
+    "ignore": [
+      "/store/[^/]*@[0-9a-f]{10}/"
+    ]
+  },
+  {
+    "name": "pkg-resolve-no-network",
+    "command": "pkg",
+    "needs": "rust",
+    "unswitched": "kith kernel pkg is not built yet",
+    "program": {
+      "old": [
+        "sh",
+        "w.sh"
+      ],
+      "new": [
+        "sh",
+        "w.sh"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_GITHUB_GIT": "{TMP}/offline"
+    },
+    "mask_keys": [
+      "made"
+    ],
+    "normalize": [
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<fingerprint>"
+      ],
+      [
+        "(?s)(git (?:fetch|checkout|init|remote|sparse-checkout) failed: ).*?(?=\\nkith: |\\Z)",
+        "\\1<GIT>"
+      ]
+    ],
+    "normalize_paths": true,
+    "setup": [
+      {
+        "write": "home/w.sh",
+        "text": "#!/bin/sh\n# One kith-pkg line. $1 changes the agents first (- for nothing); the rest is the line, which Python's kith-pkg answers on\n# the OLD side and `kith kernel pkg` on the NEW side. Edits are made by the script so each side's own folders change.\nops=$1; shift\nA=$KITH_HOME/agents\nS=$KITH_STATE/store\nfor op in $(echo \"$ops\" | tr ',' ' '); do\ncase $op in\n  -) ;;\n  notes) echo more >> \"$A/echo/role/notes.md\" ;;\n  break) printf -- '---\\nname: echo\\n---\\nno description\\n' > \"$A/echo/role/agent.md\" ;;\n  fix) printf -- '---\\nname: echo\\ndescription: test agent\\n---\\nYou echo.\\n' > \"$A/echo/role/agent.md\" ;;\n  editing) touch \"$A/echo/role/.editing\" ;;\n  editing-old) touch -t 202001010000 \"$A/echo/role/.editing\" ;;\n  editing-beta) touch \"$A/beta/role/.editing\" ;;\n  pin-good) cp \"$S/.pointers/echo.good\" \"$S/.pointers/echo.pin\" ;;\n  pin-missing) echo feedface00x > \"$S/.pointers/echo.pin\" ;;\n  unpin) rm -f \"$S/.pointers/echo.pin\" ;;\n  gc-fixture)\n    now=$(date +%s)\n    for i in 1 2 3 4 5; do mkdir -p \"$S/echo@old$i\"; printf '{\"agent\": \"echo\", \"made\": %s.5}' $((1000000000 + i)) > \"$S/echo@old$i/.meta.json\"; done\n    mkdir -p \"$S/echo@rec1\" \"$S/echo@rec2\" \"$S/echo@rec3\"\n    printf '{\"made\": %s}' $((now - 100000)) > \"$S/echo@rec1/.meta.json\"\n    printf '{\"made\": %s}' $((now - 150000)) > \"$S/echo@rec2/.meta.json\"\n    printf '{\"made\": %s}' $((now - 200000)) > \"$S/echo@rec3/.meta.json\"\n    mkdir -p \"$S/echo@old3/.runs\" \"$S/echo@old2/.runs\" \"$S/echo@old4/.runs\"\n    : > \"$S/echo@old3/.runs/1.live\"; : > \"$S/echo@old3/.runs/999999.dead\"; : > \"$S/echo@old3/.runs/notapid.x\"\n    : > \"$S/echo@old2/.runs/999999.dead\"\n    : > \"$S/echo@old4/.runs/1.live\"\n    ;;\n  *) echo \"w.sh: unknown change $op\" >&2; exit 99 ;;\nesac\ndone\nif [ \"$KITH_CORE\" = rust ]; then \"$KITH_BIN\" kernel pkg --kernel \"$HOME/k\" \"$@\"; else \"$HOME/k/bin/kith-pkg\" \"$@\"; fi\nrc=$?\n# what the store holds after this line, versions counted (their names carry a hash that differs per side)\necho \"store: $(ls -A \"$S\" 2>/dev/null | sed -E 's/@[0-9a-f]{10}$/@V/' | sort | uniq -c | sed -E 's/^ +//' | tr '\\n' ';')\" >> \"$DIFFTEST_FAKELOG\"\nexit $rc\n"
+      },
+      {
+        "mkdir": "home/k/bin"
+      },
+      {
+        "mkdir": "home/k/agents/scratch"
+      },
+      {
+        "link": "home/k/lib",
+        "to": "{KERNEL}/lib"
+      },
+      {
+        "link": "home/k/services",
+        "to": "{KERNEL}/services"
+      },
+      {
+        "run": [
+          "cp",
+          "{KERNEL}/bin/kith-pkg",
+          "{HOME}/k/bin/kith-pkg"
+        ]
+      },
+      {
+        "write": "home/k/PROTOCOL.md",
+        "text": "# Protocol\nfixed for the difftest\n"
+      },
+      {
+        "write": "home/k/agents/scratch/agent.md",
+        "text": "---\nname: scratch\ndescription: builtin stand-in\n---\nYou are scratch.\n"
+      },
+      {
+        "write": "kith/agents/linked/role/agent.md",
+        "text": "---\nname: linked\ndescription: test agent linked\n---\nYou are linked.\n"
+      },
+      {
+        "write": "kith/agents/linked/role/skills.json",
+        "text": "{\"skills\": {\"pick\": {\"repo\": \"owner/skills\", \"ref\": \"3c311a746a1133db2e0969f98690b3fc635c735b\", \"path\": \"pick\"}}}"
+      }
+    ],
+    "run": [
+      [
+        "-",
+        "resolve",
+        "linked"
+      ],
+      [
+        "-",
+        "resolve",
+        "linked",
+        "--json"
+      ]
+    ]
+  }
+]

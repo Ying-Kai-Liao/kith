@@ -72,6 +72,33 @@ files with one masked name are an error), and `unswitched` (text saying why the 
 with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
 red until the verb exists. The Python replay always runs every case.
 
+### Package resolve (M5-3)
+
+`golden/pkg-resolve.json` freezes `kith-pkg resolve` (the launch path: `bin/kith` asks it for the pinned package dir) as the Python
+kernel prints and does it: usage errors, an unknown agent, `--all`, one and several packages (role layout, plain layout, hidden and
+empty folders), the snapshot (`prompt.md`, `settings.json`, `.home`, `.meta.json`, what the fingerprint skips), version pins,
+`.editing` (fresh, stale, with no good version yet), the failure ladder (checks fail with a good version to fall back to, or without
+one: an unchecked snapshot and its `.unchecked` note, then the second run), every check `problems()` makes, the fallback to the live
+folder when the snapshot itself throws, linked third-party skills fetched from a local stand-in for GitHub (`KITH_GITHUB_GIT`), a
+fetch that cannot reach its source, the commit of every good version into the agent's own repo, and the store's garbage collection.
+`resolve` is not read-only: it fetches, snapshots, moves the `.good` pointer, collects old versions and commits.
+
+How it is made hermetic:
+
+- **The kernel.** Each case copies `bin/kith-pkg` into `home/k/bin` next to a linked `lib/` and `services/`, with its own one-line
+  `PROTOCOL.md` and a stand-in `agents/scratch`, so a snapshot's `prompt.md` does not hold this checkout's protocol text. The Rust
+  side runs `kith kernel pkg --kernel home/k resolve ...`.
+- **`w.sh`.** One call: `$1` is a change to the agents made first (`-` for none, `a,b` for two; edit, break, pin, `.editing`, an old
+  store), the rest is the line. After it, the store's listing (versions counted, their hash masked) goes to the fake log, because the
+  folder names carry a fingerprint that differs per side (it hashes the agent's path and its files' mtimes).
+- **Fingerprints.** Masked in text. Cases that make several versions of one agent leave the hashed folders out of the state
+  comparison (`ignore`) and compare the listing instead; the others compare every file of the snapshot (`normalize_paths`).
+  The algorithm itself is checked by the Rust unit tests against values the Python printed.
+- **Python's own error texts.** An `invalid JSON (...)` reason is Python's `json` wording (`Expecting value: line 1 column 1 (char 0)`);
+  the Rust side takes it from `secrets::pyjson::error_of`. Git's own words in a failed fetch are masked.
+- **The one Python left.** The judging of `settings.json` allow rules against the must-ask classes (`kith_guard.must_ask_rule`)
+  stays in Python until the host moves; the Rust side calls it only when `settings.json` has rules to judge.
+
 ### Schedules (M4-0)
 
 `golden/sched.json` freezes `kith-sched` before M4 replaces it (39 cases, `unswitched`: "kith-sched has no Rust side yet"):
