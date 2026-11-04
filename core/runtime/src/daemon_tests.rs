@@ -1068,7 +1068,8 @@ fn the_host_secret_is_owner_only_and_in_no_environment() {
     }
     assert!(l.files().contains(&l.host_token));
     drop(d);
-=======
+}
+
 #[test]
 fn the_gate_answers_over_the_owner_socket_and_frees_a_holder_whose_process_is_gone() {
     let (_t, m) = machine();
@@ -1115,5 +1116,25 @@ fn the_gate_answers_over_the_owner_socket_and_frees_a_holder_whose_process_is_go
         read(&p, "gate.take", &json!({"holder": "d", "max": 1})),
         Reached::Refused(Error::BadParams(_))
     ));
->>>>>>> origin/rust-rebuild
+}
+
+#[test]
+fn a_missing_or_empty_host_secret_reaches_no_daemon_and_never_falls_back_to_the_owner() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let d = serving(&p, quiet());
+    std::fs::remove_file(&l.host_token).expect("remove");
+    assert!(matches!(
+        host(&p, "syncLease.link", &json!({})),
+        Reached::NoDaemon
+    ));
+    std::fs::write(&l.host_token, "").expect("empty");
+    assert!(matches!(
+        host(&p, "syncLease.link", &json!({})),
+        Reached::NoDaemon
+    ));
+    // The owner's own reads still work: the failure did not change who anyone is.
+    answered(read(&p, "syncLease.status", &json!({})));
+    drop(d);
 }
