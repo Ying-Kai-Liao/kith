@@ -7103,6 +7103,97 @@
           }
         }
       }
+    },
+    {
+      "name": "conversation.list",
+      "summary": "The conversations, newest first, with the engine, the account and whether a writer holds each.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "conversations",
+          "list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "conversation.show",
+      "summary": "One conversation in full: its engine session pointer, the transcript hash, its live claim and its queued or parked turns. Refuses an id that is no conversation.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The conversation.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "conversations",
+          "show"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "claim.list",
+      "summary": "The writer claims: the live ones (queued, claimed, running) and the recent ended ones, as `{live, recent}`.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "claims",
+          "list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
     }
   ],
   "components": {
