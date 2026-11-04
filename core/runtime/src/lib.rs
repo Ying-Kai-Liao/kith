@@ -73,6 +73,10 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+// The revoke order (M3-10d): claims of the person and their bots, then their ask tree. First caller is the kith-auth bridge (M2-18).
+#[cfg(unix)]
+#[allow(dead_code, reason = "first caller is the kith-auth bridge after M2-18")]
+mod revoke_order;
 // The agents' jobs.json indexed with the run state in core.db (M4-2); the host switches to it at M4-5.
 #[allow(
     dead_code,

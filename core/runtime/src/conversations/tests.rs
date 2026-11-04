@@ -873,6 +873,7 @@ fn new_turn<'a>(
         person: "sam",
         prompt: "hi",
         deadline,
+        revoke_seen: 0,
     }
 }
 

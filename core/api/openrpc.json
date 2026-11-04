@@ -8990,6 +8990,101 @@
       }
     },
     {
+      "name": "ask.to",
+      "summary": "`kith ask --to ID`, the check before anything is queued: whether the ask still takes a follow-up. An ask that was stopped or ended refuses with `was stopped; ask anew` (the stopped fence never lifts; the Python `--to` queued the message and the wake fence dropped it). Answers `{id, ok}`; refuses an id that is no ask.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "to"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.revokeEverywhere",
+      "summary": "The revoke order for conversations, once the authority revoke is visible to the may check: the person's claims and each of their bots' (queued and parked turns cancelled, live claims to `ending`, the revoke epoch bumped so a claim that passed its may check before is refused), THEN the asks of the person and their bots with every ask below them (`ask.end --persons`). `ask.end` alone is not a revoke. One claim transaction per principal, then one for the asks. Safe to repeat; a retry (with the same bots) finishes a crash between the steps, and a crash after the person's step leaves the bots' in-flight claims unfenced until it. On a removal pass `--bots`, read before the write: the rows are gone after. Kills no process: answers `{principals, cancelledTurns, ended, sessions, kill}`.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person revoked.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "bots",
+          "summary": "Bots of the person (the whole transitive set) read before an authority removal deleted their rows; the bots still in `people.bot_of` are added.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "revoke-everywhere"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "bots": {
+            "kind": "flag",
+            "spellings": [
+              "--bots"
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "ask.delegations",
       "summary": "`kith ask delegations --json`: every ask record, newest first, as `{delegations}` (money in micro-dollars, times in ms).",
       "params": [

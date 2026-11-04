@@ -1,0 +1,23 @@
+{
+  "fakes": "",
+  "state:home/.kith/ask-bg/b1.cmd": "x",
+  "state:home/.kith/ask-bg/b1.json": "{\n  \"agent\": \"echo\",\n  \"at\": \"<MASKED>\",\n  \"dir\": \"/\",\n  \"key\": \"k\",\n  \"person\": \"kai\"\n}\n",
+  "state:home/.kith/ask-bg/b1.sid": "sess-b1",
+  "state:home/.kith/ask-bg/b1.to": "ask-to:b1/<ID12>\n",
+  "state:home/.kith/live/ask/.lock": "",
+  "state:home/.kith/live/ask/b1.read": "0",
+  "state:home/.kith/live/ask/b1.reg": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-caller\", \"ask\": null}, \"chain\": \"b1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"stopped\", \"at\": <EPOCH>.0, \"pid\": 1, \"pid_at\": <EPOCH>.0, \"ended_at\": <EPOCH>.0, \"done\": true, \"answered_at\": <EPOCH>.0}",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"enqueue\", \"session\": \"sess-b1\", \"id\": \"ask-to:b1/<ID12>\", \"door\": \"host\", \"merged\": false}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/fb6991d1eee2ed36844d129a82c2f730.json": "{\n  \"agent\": \"echo\",\n  \"door\": \"host\",\n  \"next\": \"<MASKED>\",\n  \"person\": \"kai\",\n  \"requests\": [\n    {\n      \"at\": \"<MASKED>\",\n      \"id\": \"ask-to:b1/<ID12>\",\n      \"run\": null,\n      \"text\": \"after the stop\",\n      \"why\": \"the owner sent a follow-up to kith ask b1\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"sess-b1\",\n  \"tries\": 0,\n  \"turn\": null,\n  \"v\": 1\n}\n",
+  "state:home/.kith/sessions/waits/.lock": "",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "ended b1\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "b1 is still running: your message reaches it when its turn ends; follow it: kith ask --wait b1\n",
+  "step1.stdout": "queued\n",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"delegations\": [\n    {\n      \"agent\": \"echo\",\n      \"answered_ms\": \"<MASKED>\",\n      \"brief\": null,\n      \"caller\": {\n        \"agent\": \"coder\",\n        \"person\": \"kai\",\n        \"via\": \"terminal\"\n      },\n      \"cap_card_ms\": \"<MASKED>\",\n      \"cap_micro_usd\": 5000000,\n      \"capped_ms\": \"<MASKED>\",\n      \"chain\": \"b1\",\n      \"chain_cost_micro_usd\": 0,\n      \"cost_micro_usd\": 0,\n      \"cross_hops\": 0,\n      \"crossed\": false,\n      \"hop\": 0,\n      \"id\": \"b1\",\n      \"reply_to\": {\n        \"ask\": null,\n        \"session\": \"s-caller\"\n      },\n      \"session\": \"sess-b1\",\n      \"started_ms\": \"<MASKED>\",\n      \"state\": \"stopped\"\n    }\n  ]\n}\n",
+  "step2.stderr": ""
+}

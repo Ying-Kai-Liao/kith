@@ -839,3 +839,68 @@ fn an_account_with_a_session_resumes_it_and_is_not_fresh() {
     assert!(!fresh);
     assert_eq!(session.session_id, "s-main");
 }
+
+impl World {
+    /// A stopped ask on `c1` (its wake and ask turns are fenced for good).
+    fn stopped_ask(&self) {
+        self.core
+            .conn()
+            .execute(
+                "INSERT INTO asks (id, chain, parent, hop, caller_person, conversation, state, at_ms, cost)
+                 VALUES ('a1', 'r', NULL, 0, 'sam', 'c1', 'stopped', 1, 0.0)",
+                [],
+            )
+            .unwrap();
+    }
+}
+
+#[test]
+fn claim_next_cancels_a_turn_of_a_stopped_ask() {
+    let mut w = world(&["claude", "claude:a"]);
+    w.switch();
+    let turn = w.turn();
+    w.core
+        .conn()
+        .execute("UPDATE turns SET source = 'wake' WHERE id = ?1", [turn])
+        .unwrap();
+    w.stopped_ask();
+    assert!(matches!(w.next(turn, "s-x"), Err(Error::Stopped(_))));
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "cancelled"
+    );
+    assert_eq!(w.one("SELECT count(*) FROM claims"), "0");
+}
+
+#[test]
+fn a_stopped_asks_wake_that_finds_no_account_is_cancelled_not_failed() {
+    let mut w = world(&["claude"]);
+    w.switch();
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    w.out_report(first, 100, Some(T0 + 600));
+    w.core
+        .conn()
+        .execute("UPDATE turns SET source = 'wake' WHERE id = ?1", [turn])
+        .unwrap();
+    w.stopped_ask();
+    assert!(matches!(w.next(turn, "s-y"), Err(Error::Stopped(_))));
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "cancelled"
+    );
+}
+
+#[test]
+fn a_stale_revoke_epoch_leaves_the_turn_queued_in_claim_next() {
+    let mut w = world(&["claude"]);
+    w.switch();
+    // the person was revoked and restored; the turn was queued after that, and the claimer's epoch is the old one
+    crate::conversations::claims::revoke_person(&mut w.core, "sam", MS).unwrap();
+    let turn = w.turn();
+    assert!(matches!(w.next(turn, "s-x"), Err(Error::Refused(_))));
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "queued"
+    );
+}
