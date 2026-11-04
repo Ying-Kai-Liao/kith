@@ -41,7 +41,7 @@ kith_launch_json_flag() {
 
 # Held terminals (docs/plans/runtime-design.md section 4, M1-7): `kith AGENT --held` asks the core daemon to start the engine in
 # the holder (terminal.open) and attaches to it; `kith attach` comes back to one. The calls go through the hidden Rust verb
-# `kith kernel core-call` (owner socket only, terminal.* methods only); the keys and the screen through `kith kernel attach`.
+# `kith kernel core-call` (owner socket only; terminal.* methods, and the people.suspend, people.undo and people.removePerson that kith-auth mirrors); the keys and the screen through `kith kernel attach`.
 # Exit codes of core-call: 0 answered, 3 no daemon answers (nothing ran), 4 refused, 5 lost after the call went out.
 
 # kith_held_get KEY   prints a field of the JSON on stdin (a string as it is, anything else as JSON), empty when absent.
