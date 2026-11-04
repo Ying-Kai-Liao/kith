@@ -61,7 +61,12 @@ fn strip(s: &str) -> &str {
 }
 
 fn git(args: &[&str], cwd: &Path) -> String {
-    match Command::new("git").args(args).current_dir(cwd).stdin(Stdio::null()).output() {
+    match Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .output()
+    {
         Ok(o) if o.status.success() => strip(&String::from_utf8_lossy(&o.stdout)).to_owned(),
         _ => String::new(),
     }
@@ -84,9 +89,9 @@ pub fn normalize(url: &str) -> String {
     let mut url = url.to_owned();
     // re.match(r"^[^/]+:[^/]", url): a colon after the first character, before any slash, with a non-slash behind it.
     let head = url.find('/').unwrap_or(url.len());
-    let scp = url
-        .char_indices()
-        .any(|(i, c)| i > 0 && i < head && c == ':' && url[i + 1..].chars().next().is_some_and(|n| n != '/'));
+    let scp = url.char_indices().any(|(i, c)| {
+        i > 0 && i < head && c == ':' && url[i + 1..].chars().next().is_some_and(|n| n != '/')
+    });
     if scp {
         url = url.replacen(':', "/", 1);
     }
@@ -98,11 +103,22 @@ pub fn normalize(url: &str) -> String {
 fn locate(d: &str) -> (String, String) {
     let dir = Path::new(d);
     let remote = git(&["remote", "get-url", "origin"], dir);
-    let remote = if remote.is_empty() { remote } else { normalize(&remote) };
-    let common = git(&["rev-parse", "--path-format=absolute", "--git-common-dir"], dir);
+    let remote = if remote.is_empty() {
+        remote
+    } else {
+        normalize(&remote)
+    };
+    let common = git(
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        dir,
+    );
     let root = if let Some(head) = common.strip_suffix("/.git") {
         let head = head.trim_end_matches('/');
-        if head.is_empty() { "/".to_owned() } else { head.to_owned() }
+        if head.is_empty() {
+            "/".to_owned()
+        } else {
+            head.to_owned()
+        }
     } else {
         let top = git(&["rev-parse", "--show-toplevel"], dir);
         if top.is_empty() { d.to_owned() } else { top }
@@ -112,7 +128,11 @@ fn locate(d: &str) -> (String, String) {
 
 /// Python's `repr()` of a string, for the "no project" lines.
 fn repr(s: &str) -> String {
-    let quote = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let quote = if s.contains('\'') && !s.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
     let mut out = String::from(quote);
     for c in s.chars() {
         match c {
@@ -152,7 +172,11 @@ fn text<'v>(p: &'v Value, key: &str) -> Option<&'v str> {
 fn list(p: &Value, key: &str) -> Vec<String> {
     p.get(key)
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -166,7 +190,11 @@ impl Run<'_> {
     }
 
     fn projects_mut(&mut self) -> &mut Map<String, Value> {
-        match self.reg.entry("projects").or_insert_with(|| Value::Object(Map::new())) {
+        match self
+            .reg
+            .entry("projects")
+            .or_insert_with(|| Value::Object(Map::new()))
+        {
             Value::Object(m) => m,
             _ => unreachable!("run() checked the projects object"),
         }
@@ -241,7 +269,9 @@ impl Run<'_> {
     /// Where a project is on this Mac: its home, else the first of its folders that exists.
     fn here(&self, p: &Value) -> Option<String> {
         let home = text(p, "home").map(str::to_owned);
-        home.into_iter().chain(list(p, "paths")).find(|d| !d.is_empty() && self.is_dir(d))
+        home.into_iter()
+            .chain(list(p, "paths"))
+            .find(|d| !d.is_empty() && self.is_dir(d))
     }
 
     /// The project for directory `d`: its git remote, else the longest path alias that holds it.
@@ -275,7 +305,8 @@ impl Run<'_> {
     }
 
     fn known(&self, argv: &[String]) -> bool {
-        argv.get(1).is_some_and(|id| self.projects().contains_key(id))
+        argv.get(1)
+            .is_some_and(|id| self.projects().contains_key(id))
     }
 
     fn register(&mut self, argv: &[String]) -> Out {
@@ -305,8 +336,11 @@ impl Run<'_> {
         }
         let valid = args.first().is_some_and(|id| {
             let mut cs = id.chars();
-            cs.next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-                && cs.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+            cs.next()
+                .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && cs.all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-')
+                })
         });
         if !valid {
             out.err("project-id: --register needs an ID of lowercase letters, digits, . _ -");
@@ -320,14 +354,23 @@ impl Run<'_> {
             // Inside the closest parent's home, else under the root.
             let from = match parent.as_deref() {
                 Some(p) if !p.is_empty() => Some(p.to_owned()),
-                _ => self.projects().get(&pid).and_then(|p| text(p, "parent")).map(str::to_owned),
+                _ => self
+                    .projects()
+                    .get(&pid)
+                    .and_then(|p| text(p, "parent"))
+                    .map(str::to_owned),
             };
             let near = self
                 .chain(from.as_deref())
                 .iter()
                 .find_map(|q| text(&self.projects()[q], "home").map(str::to_owned));
             let base = near
-                .or_else(|| self.reg.get("homes").and_then(Value::as_str).map(str::to_owned))
+                .or_else(|| {
+                    self.reg
+                        .get("homes")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
                 .unwrap_or_else(|| ROOT.to_owned());
             let dir = format!("{}/{pid}", self.real(&base).trim_end_matches('/'));
             made = !Path::new(&dir).is_dir();
@@ -368,11 +411,17 @@ impl Run<'_> {
             out.err(format!("made {}", self.tilde(h)));
         }
         let (remote, root) = if args.len() > 1 || home.is_none() {
-            let d = args.get(1).map_or_else(|| self.ctx.cwd.to_string_lossy().into_owned(), |d| (*d).to_owned());
+            let d = args.get(1).map_or_else(
+                || self.ctx.cwd.to_string_lossy().into_owned(),
+                |d| (*d).to_owned(),
+            );
             locate(&self.real(&d))
         } else {
             // A home is matched by its path, even when it sits inside a repo.
-            (String::new(), self.real(home.as_deref().unwrap_or_default()))
+            (
+                String::new(),
+                self.real(home.as_deref().unwrap_or_default()),
+            )
         };
         let home_stored = home.as_deref().map(|h| self.tilde(&self.real(h)));
         let root_stored = self.tilde(&root);
@@ -449,12 +498,22 @@ pub fn run(ctx: &Ctx, argv: &[String]) -> Out {
             let mut all: Vec<(&String, &Value)> = run.projects().iter().collect();
             all.sort_by(|a, b| a.0.cmp(b.0));
             for (pid, p) in all {
-                let was = text(p, "formerly").map(|f| format!(" (formerly {f})")).unwrap_or_default();
-                let more = text(p, "parent").map(|x| format!(" in:{x}")).unwrap_or_default()
-                    + &text(p, "home").map(|x| format!(" home:{x}")).unwrap_or_default();
+                let was = text(p, "formerly")
+                    .map(|f| format!(" (formerly {f})"))
+                    .unwrap_or_default();
+                let more = text(p, "parent")
+                    .map(|x| format!(" in:{x}"))
+                    .unwrap_or_default()
+                    + &text(p, "home")
+                        .map(|x| format!(" home:{x}"))
+                        .unwrap_or_default();
                 let home = text(p, "home");
                 let mut aliases = list(p, "remotes");
-                aliases.extend(list(p, "paths").into_iter().filter(|a| Some(a.as_str()) != home));
+                aliases.extend(
+                    list(p, "paths")
+                        .into_iter()
+                        .filter(|a| Some(a.as_str()) != home),
+                );
                 out.say(format!("{pid}{was}{more}\t{}", aliases.join(" ")));
             }
             out
@@ -465,7 +524,9 @@ pub fn run(ctx: &Ctx, argv: &[String]) -> Out {
                 return out.with_code(1);
             }
             for pid in run.chain(Some(&argv[1])) {
-                let home = text(&run.projects()[&pid], "home").unwrap_or("-").to_owned();
+                let home = text(&run.projects()[&pid], "home")
+                    .unwrap_or("-")
+                    .to_owned();
                 out.say(format!("{pid}\t{home}"));
             }
             out
@@ -478,7 +539,9 @@ pub fn run(ctx: &Ctx, argv: &[String]) -> Out {
             let deep = argv[2..].iter().any(|a| a == "--all");
             let mut seen = vec![argv[1].clone()];
             for pid in run.children(&argv[1], deep, &mut seen) {
-                let at = run.here(&run.projects()[&pid]).unwrap_or_else(|| "-".into());
+                let at = run
+                    .here(&run.projects()[&pid])
+                    .unwrap_or_else(|| "-".into());
                 out.say(format!("{pid}\t{at}"));
             }
             out
@@ -512,7 +575,12 @@ pub fn run(ctx: &Ctx, argv: &[String]) -> Out {
                     return out.with_code(1);
                 }
             }
-            let homes = run.reg.get("homes").and_then(Value::as_str).unwrap_or(ROOT).to_owned();
+            let homes = run
+                .reg
+                .get("homes")
+                .and_then(Value::as_str)
+                .unwrap_or(ROOT)
+                .to_owned();
             out.say(homes);
             out
         }

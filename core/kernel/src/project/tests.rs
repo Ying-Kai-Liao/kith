@@ -7,7 +7,12 @@ use super::{Ctx, Out, normalize, repr, run};
 fn ctx(root: &Path) -> Ctx {
     let state = root.join("state");
     std::fs::create_dir_all(&state).unwrap();
-    Ctx { state, home: root.join("home"), cwd: root.to_path_buf(), guest: false }
+    Ctx {
+        state,
+        home: root.join("home"),
+        cwd: root.to_path_buf(),
+        guest: false,
+    }
 }
 
 fn go(c: &Ctx, args: &[&str]) -> Out {
@@ -64,14 +69,22 @@ fn register_then_match_by_path_and_list() {
     let top = root.join("work dir");
     let top_s = top.to_str().unwrap();
     let out = go(&c, &["--register", "alpha", top_s, "--home", ""]);
-    assert_eq!((out.code, out.stdout.as_str()), (0, "alpha\n"), "{}", out.stderr);
+    assert_eq!(
+        (out.code, out.stdout.as_str()),
+        (0, "alpha\n"),
+        "{}",
+        out.stderr
+    );
     let got = go(&c, &[dir.to_str().unwrap()]);
     assert_eq!((got.code, got.stdout.as_str()), (0, "alpha\n"));
     assert_eq!(go(&c, &[root.to_str().unwrap()]).code, 1);
     let list = go(&c, &["--list"]);
     assert_eq!(list.stdout, format!("alpha\t{top_s}\n"));
     let bad = go(&c, &["--info", "nope"]);
-    assert_eq!((bad.code, bad.stderr.as_str()), (1, "project-id: no project 'nope'\n"));
+    assert_eq!(
+        (bad.code, bad.stderr.as_str()),
+        (1, "project-id: no project 'nope'\n")
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -86,7 +99,10 @@ fn the_file_is_written_as_python_dumps_it() {
         "{\"projects\": {\"é\": {\"remotes\": [], \"paths\": []}}, \"note\": \"é\"}",
     )
     .unwrap();
-    let out = go(&c, &["--register", "p1", dir.to_str().unwrap(), "--home", ""]);
+    let out = go(
+        &c,
+        &["--register", "p1", dir.to_str().unwrap(), "--home", ""],
+    );
     assert_eq!(out.code, 0, "{}", out.stderr);
     let text = std::fs::read_to_string(c.state.join("projects.json")).unwrap();
     let want = format!(
@@ -104,6 +120,9 @@ fn register_refuses_a_bad_id_and_an_unknown_parent() {
     assert_eq!(go(&c, &["--register", "Bad"]).code, 2);
     let out = go(&c, &["--register", "x", "--home", "", "--in", "ghost"]);
     assert_eq!(out.code, 2);
-    assert_eq!(out.stderr, "project-id: 'ghost' is not a project (register it first)\n");
+    assert_eq!(
+        out.stderr,
+        "project-id: 'ghost' is not a project (register it first)\n"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
