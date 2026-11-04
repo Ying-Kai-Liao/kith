@@ -135,11 +135,7 @@ impl Shared {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let mut answer = self.with_core(|c| {
-                if crate::authority::cut_off_in(c.conn(), person)? {
-                    return Err(Error::NotAllowed(format!(
-                        "kith-core: run.mint: {person} is revoked, so no run of theirs starts"
-                    )));
-                }
+                crate::call::run_person_allowed(c.conn(), person, method)?;
                 self.runs.owner_call(method, params).unwrap_or_else(|| {
                     Err(Error::NoSuchMethod("kith-core: no method run.mint".into()))
                 })
@@ -430,8 +426,16 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
     }
     // The run socket is not the owner's way in: a daemon that cannot open it still serves the owner, and says so.
     let for_runs = shared.clone();
-    let run_handler: Arc<RunHandler> =
-        Arc::new(move |who, row, params| for_runs.with_core(|c| c.call_run(who, row, params)));
+    let run_handler: Arc<RunHandler> = Arc::new(move |who, row, params| {
+        for_runs.with_core(|c| {
+            // Under the lock an end or a revoke commits under: a run whose token is gone (ended, revoked, the
+            // person removed) is refused even if its request resolved a moment before.
+            if !for_runs.runs.is_live(&who.run_id) {
+                return Err(Error::NotAllowed("kith-core: this run has ended".into()));
+            }
+            c.call_run(who, row, params)
+        })
+    });
     match runsock::Server::bind(layout, shared.runs.clone(), run_handler) {
         Ok(server) => {
             *shared

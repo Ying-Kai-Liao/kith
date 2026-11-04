@@ -122,3 +122,46 @@ fn a_token_that_resolved_before_the_revoke_is_refused_at_the_run_door() {
     call_with(&mut rig.core, &rig.c, "people.undo", &json!({"id": "sam"})).unwrap();
     assert_eq!(ask(&rig).unwrap()["stdout"], "alpha\n");
 }
+
+#[test]
+fn a_removed_person_is_refused_at_the_run_door_and_a_ghost_never_mints() {
+    let mut rig = Rig::new(&base());
+    let amy = who("amy");
+    let ask = |rig: &Rig| {
+        rig.core
+            .call_run(&amy, "run.projectId", &json!({"args": []}))
+    };
+    assert!(ask(&rig).is_ok());
+    call_with(
+        &mut rig.core,
+        &rig.c,
+        "people.removePerson",
+        &json!({"id": "amy"}),
+    )
+    .unwrap();
+    assert!(matches!(ask(&rig), Err(crate::error::Error::NotAllowed(_))));
+    assert!(
+        crate::call::run_person_allowed(rig.core.conn(), "ghost", "run.mint").is_err(),
+        "an id that was never a person"
+    );
+    assert!(crate::call::run_person_allowed(rig.core.conn(), "sam", "run.mint").is_ok());
+}
+
+#[test]
+fn removing_an_unused_person_still_ends_the_named_id_and_a_token_is_live_until_ended() {
+    let mut rig = Rig::new(&base());
+    let (t, tok) = table(&["amy"]);
+    let run_id = t.mint(who("amy")).unwrap().1.run_id;
+    assert!(t.is_live(&run_id));
+    // `--unused` answers no ids: the id in the params is what ends.
+    assert_eq!(
+        write(
+            &mut rig,
+            &t,
+            "people.removePerson",
+            &json!({"id": "amy", "unused": true})
+        ),
+        2
+    );
+    assert!(!live(&t, &tok[0]) && !t.is_live(&run_id));
+}

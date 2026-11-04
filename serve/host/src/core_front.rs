@@ -158,7 +158,8 @@ pub enum Minted {
     /// The core answered and said no (a revoked person): the run gets no token, and the host's own table is NOT asked
     /// in its place.
     Refused,
-    /// No daemon answers, or it cannot mint (an older one, a connection that broke): the host mints as it did.
+    /// No daemon answers, or it cannot mint (an older one, a connection that broke). With the switch on the caller
+    /// gives the run no token (the core is the authority); only with it off does the host mint in its own table.
     Unavailable,
 }
 
@@ -304,7 +305,7 @@ mod tests {
     }
 
     /// The host mints through a real core daemon, binds and ends there, is refused for a revoked person, and where no
-    /// daemon answers it says so (the caller then mints in its own table).
+    /// daemon answers it says so (the caller then gives the run no token).
     #[cfg(unix)]
     #[test]
     fn the_host_mints_through_a_real_daemon_and_falls_back_when_there_is_none() {
@@ -342,7 +343,7 @@ mod tests {
         assert!(matches!(mint_run_in(&paths, &who("sam")), Minted::Run(_)));
 
         daemon.stop();
-        assert!(matches!(mint_run_in(&paths, &who("sam")), Minted::Unavailable), "a stopped daemon is a fallback");
+        assert!(matches!(mint_run_in(&paths, &who("sam")), Minted::Unavailable), "a stopped daemon is unavailable");
         let _ = std::fs::remove_dir_all(paths.home.parent().unwrap_or(&paths.home));
     }
 

@@ -357,17 +357,16 @@ pub fn grant_for(
     if crate::core_front::run_tokens_via_core() {
         let conversation = session_of(person, session);
         let who = crate::core_front::RunWho { person, agent, conversation: &conversation, room, project };
-        match crate::core_front::mint_run(&who) {
+        // With the switch on the core is the authority: if it refuses (a revoked person) or does not answer there is no
+        // token (fail closed), and the host's table is not asked instead. The host mints only with the switch off.
+        return match crate::core_front::mint_run(&who) {
             crate::core_front::Minted::Run(run) => {
                 let grant = RunGrant::from_core(run);
                 let env = grant.env(Path::new(""));
-                return Some((grant, env));
+                Some((grant, env))
             }
-            // The core said no: no run of this person starts with a token, and the host's table is not asked instead.
-            crate::core_front::Minted::Refused => return None,
-            // No core answers: mint here, as without the switch.
-            crate::core_front::Minted::Unavailable => {}
-        }
+            crate::core_front::Minted::Refused | crate::core_front::Minted::Unavailable => None,
+        };
     }
     let socket = SOCKET.get()?;
     let identity = RunIdentity {

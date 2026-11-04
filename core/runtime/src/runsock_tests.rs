@@ -473,6 +473,7 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
         crate::Reached::Answered(v) => v,
         other => panic!("{method}: {other:?}"),
     };
+    owner("people.addPerson", &json!({"id": "sam"}));
     let minted = owner(
         "run.mint",
         &json!({"agent": "echo", "person": "sam", "conversation": "t1", "project": "alpha", "claim": "c1"}),
@@ -631,6 +632,16 @@ fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() 
         let _ = sh.wait();
         out[0]["ok"] == true
     };
+    // Nobody is minted for an id that is not a person here.
+    assert!(matches!(
+        crate::reach(
+            &p,
+            "run.mint",
+            &json!({"agent": "echo", "person": "ghost", "conversation": "t1"}),
+            false
+        ),
+        crate::Reached::Refused(Error::NotAllowed(_))
+    ));
     let (sam, bot, amy) = (mint("sam"), mint("bot-a"), mint("amy"));
     assert_eq!(sam.2, sock.to_string_lossy(), "the mint says where to ask");
     assert!(works(&sam) && works(&bot) && works(&amy));
@@ -649,7 +660,7 @@ fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() 
             false,
         ) {
             crate::Reached::Refused(Error::NotAllowed(why)) => {
-                assert!(why.contains("is revoked"), "{why}");
+                assert!(why.contains("is revoked or not a person"), "{why}");
             }
             other => panic!("{person}: {other:?}"),
         }

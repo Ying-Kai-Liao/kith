@@ -182,6 +182,11 @@ impl RunTokens {
         }
     }
 
+    /// Whether the run still has a token (not ended, not revoked).
+    pub(crate) fn is_live(&self, run_id: &str) -> bool {
+        self.locked().values().any(|e| e.identity.run_id == run_id)
+    }
+
     /// Ends every token of these people (a person and their bots), bound or not. The count of tokens ended. This is
     /// the revoke hook: the daemon calls it inside the core call that committed the suspension or removal.
     pub(crate) fn end_people(&self, people: &[&str]) -> usize {
@@ -201,21 +206,25 @@ impl RunTokens {
         params: &Value,
         answer: &Value,
     ) -> usize {
-        let ids: Vec<&str> = match method {
-            "people.suspend" | "people.removePerson" => answer
-                .get("ids")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .collect(),
-            "people.removeBot" => params
-                .get("id")
-                .and_then(Value::as_str)
-                .into_iter()
-                .collect(),
+        // The id the caller named always ends (`removePerson --unused` answers no ids); the answer's ids add the
+        // canonical id and the person's bots.
+        let mut ids: Vec<&str> = params
+            .get("id")
+            .and_then(Value::as_str)
+            .into_iter()
+            .collect();
+        match method {
+            "people.suspend" | "people.removePerson" => ids.extend(
+                answer
+                    .get("ids")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str),
+            ),
+            "people.removeBot" => {}
             _ => return 0,
-        };
+        }
         self.end_people(&ids)
     }
 

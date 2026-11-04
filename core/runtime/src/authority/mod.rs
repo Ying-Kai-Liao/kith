@@ -97,11 +97,17 @@ impl<'a> Authority<'a> {
     }
 }
 
-/// Whether `person` (or the owner of the bot `person`) is revoked, read from core.db alone: the run tokens' check
-/// (M2-13), which has no `Ctx` to give. An unknown id is not cut off here; whether a run exists for it is the host's.
-pub(crate) fn cut_off_in(conn: &Connection, person: &str) -> Result<bool> {
+/// Whether a run may exist for `person` (M2-13): they are a known person or bot and neither they nor the owner of
+/// the bot are revoked. A removed or never-added id is "no", the same as a revoked one. Read from core.db alone (the
+/// run tokens have no `Ctx` to give).
+pub(crate) fn run_allowed_in(conn: &Connection, person: &str) -> Result<bool> {
     let auth = snapshot(conn)?;
-    Ok(secrets::cut_off(&auth, person))
+    let id = secrets::canonical(&auth, person);
+    let known = auth
+        .get("people")
+        .and_then(Value::as_object)
+        .is_some_and(|p| p.contains_key(&id));
+    Ok(known && !secrets::cut_off(&auth, &id))
 }
 
 /// A rule that stopped with a refusal `kith-auth` would `die` with (a membership naming a preset nobody defined, which
