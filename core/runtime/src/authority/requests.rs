@@ -25,8 +25,21 @@
 //!   approval. Denying one is plain.
 //! - `members`: the owner's other devices answer members' requests only, never the owner's own (the host's
 //!   `is_member_request`); anything else is "This can only be done at the computer itself.", for an unknown id too.
+//! - Bots and the owner are never members: a request naming a bot id or the owner's own id is denied on approval and
+//!   refused on filing (the host cannot produce either, because only invited Kith accounts have a membership).
 //! - Two devices answering at once: each answer is a `BEGIN IMMEDIATE` claim transaction, so the second one finds the
 //!   request decided and is refused.
+//!
+//! # Known gaps (M2-17 MUST)
+//!
+//! - **The membership gone from the cloud.** The host's check is its membership table, and the cloud can report a
+//!   membership gone while the person stays in kith-auth (`remote/members.rs`, `remote/cloud.rs`). The core reads only
+//!   kith-auth (`cut_off`), so it cannot see that event and would still approve. The parity script marks this as a
+//!   known, expected difference (scenario `membership_gone`, `known_difference`, steps with `core_expect`); it is not
+//!   parity. M2-17 MUST: on every membership sync the host denies the pending requests of any person with no
+//!   membership (every pass, not only on change).
+//! - **`members` defaults to full power** when omitted (see `call.rs`): M2-17 derives "at the computer" from the
+//!   caller's connection, or defaults to the narrow answer.
 
 use kith_kernel::secrets::{self, Ctx};
 use rusqlite::{Connection, OptionalExtension as _, Row, params};
@@ -139,8 +152,10 @@ fn end(tx: &Connection, c: &Ctx, id: &str, to: &str) -> Result<()> {
     }
 }
 
-/// Whether the person still has an account on this computer: someone kith knows who is not cut off. (The host asks its
-/// membership table, which the removal and the suspension of a person end.)
+/// Whether the person still has an account on this computer: someone kith knows who is not cut off, and who is neither
+/// a bot nor the owner. (The host asks its membership table, which the removal and the suspension of a person end;
+/// only invited Kith accounts have a membership there, so a bot or the owner can never be a member. Bots and the owner
+/// both live in `people`, so this refuses them by their marks.)
 fn is_member(tx: &Connection, person: &str) -> Result<bool> {
     let mut auth = super::read_tables(tx, &mut || {})?;
     write::tables(&mut auth);
@@ -148,7 +163,14 @@ fn is_member(tx: &Connection, person: &str) -> Result<bool> {
         .get("people")
         .and_then(|p| p.get(person))
         .is_some_and(Value::is_object);
-    Ok(known && !secrets::cut_off(&auth, &secrets::canonical(&auth, person)))
+    if !known {
+        return Ok(false);
+    }
+    let id = secrets::canonical(&auth, person);
+    let ordinary = secrets::parent_of(&auth, &id).is_none()
+        && secrets::parent_of(&auth, person).is_none()
+        && secrets::owner(&auth).as_deref() != Some(id.as_str());
+    Ok(ordinary && !secrets::cut_off(&auth, &id))
 }
 
 /// A web browser is only ever an invitee's device (the platform is the device's own claim; a missing one counts as
@@ -160,7 +182,8 @@ fn is_web(platform: &str) -> bool {
 /// `people.requests` (`accessRequests`): the requests waiting for the owner, oldest first. `members`: only the
 /// members' (what the owner's other devices see).
 pub(super) fn list(core: &mut Core, c: &Ctx, members: bool) -> Result<Value> {
-    let tx = core.claim_tx()?;
+    // A read, so no write lock: a deferred transaction only gives one consistent view.
+    let tx = core.conn().unchecked_transaction()?;
     let now = now_of(c);
     let mut q = tx.prepare(&format!(
         "SELECT {COLUMNS} FROM access_requests WHERE status = 'pending' ORDER BY created_at, id"

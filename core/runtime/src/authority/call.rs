@@ -164,6 +164,9 @@ pub(crate) fn call_in(
             })
         }
         // The device-pairing access requests (M2-3): a table of their own, not `store::run`'s auth.json-shaped write.
+        // `members` is the caller's say, and leaving it out means full owner power (the owner's own request too, with
+        // `screen`). Today the host refuses remote devices itself (`api/remote.rs`) before it asks. M2-17 must derive
+        // "at the computer" from the caller's connection, or default to the narrow answer (`members` on).
         "people.requests" => requests::list(core, c, switch(params, "members")),
         "people.approve" => {
             let id = need(params, "id").map_err(|d| store::refusal(&d))?;
