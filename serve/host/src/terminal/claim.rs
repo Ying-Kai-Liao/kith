@@ -2,7 +2,7 @@
 //! holds it is the one writer of that session, even before the registry file (written by the session's own hook seconds
 //! later) exists and even while the host is down. The kernel (`kernel/bin/kith-sessions`) writes and reads the same file.
 //!
-//! `{"pid": <claimer>, "procStart": "<ps lstart>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot" | <any other string>, "takeover": bool}`
+//! `{"pid": <claimer>, "procStart": "<start stamp>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot" | <any other string>, "takeover": bool}`
 //!
 //! A claim whose pid is gone, or whose pid now started at another time, is stale and is replaced under a lock file
 //! (`<sid>.claim.lock`, flock). A claimer is a long-lived process: `kith <agent> --resume` claims for the shell
@@ -63,15 +63,31 @@ fn terminal() -> Kind {
 }
 
 impl Claim {
-    /// The claimer still runs, and is the process that took the claim (a reused pid started at another time).
+    /// Whether the claimer's process is the one that took the claim: `Some(true)` positively, `Some(false)` positively
+    /// not (a reused pid), `None` when that cannot be told (an unreadable start, a stamp of the other form). A claim with no
+    /// start recorded is judged by its pid alone (`Some(true)`). A claim from before stamps holds `ps -o lstart` text, which
+    /// is compared the old way ([`super::registry::lstart_matches`]).
+    pub fn identity(&self) -> Option<bool> {
+        use kith_kernel::procstart::{comparable, is_stamp, same_process};
+        match self.proc_start.as_deref().filter(|s| !s.trim().is_empty()) {
+            None => Some(true),
+            Some(claimed) if is_stamp(claimed) => proc_start(self.pid)
+                .filter(|actual| comparable(claimed, actual))
+                .map(|actual| same_process(claimed, &actual)),
+            Some(text) => super::registry::lstart_matches(self.pid, text),
+        }
+    }
+
+    /// The claimer still runs, and is not positively another process (a reused pid has another start). Held when the start
+    /// cannot be read or compared: a wrong "free" would let a second writer in.
     pub fn is_live(&self) -> bool {
-        if !pid_runs(self.pid) {
-            return false;
-        }
-        match (&self.proc_start, proc_start(self.pid)) {
-            (Some(claimed), Some(actual)) => claimed.split_whitespace().collect::<Vec<_>>().join(" ") == actual,
-            _ => true,
-        }
+        pid_runs(self.pid) && self.identity() != Some(false)
+    }
+
+    /// Whether the claimer is positively the process that took the claim, which is what a signal needs: [`Self::is_live`]
+    /// also says "held" when the start cannot be compared.
+    pub fn is_claimer(&self) -> bool {
+        self.identity() == Some(true)
     }
 }
 
@@ -198,7 +214,11 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
             continue;
         }
         let Some(claim) = read(&path) else { continue };
-        if claim.person.as_deref().is_some_and(|p| persons.iter().any(|x| x == p)) && !keep(&claim) && claim.is_live() {
+        if claim.person.as_deref().is_some_and(|p| persons.iter().any(|x| x == p))
+            && !keep(&claim)
+            && claim.is_live()
+            && claim.is_claimer()
+        {
             holders.push((path, claim));
         }
     }
@@ -302,7 +322,8 @@ pub enum Stopped {
     /// SIGKILL was sent but something of the tree is still in the process table after the wait: the claim is kept, so a
     /// take-over is refused until it is really gone (Stop again).
     StillEnding(Claim),
-    /// This platform cannot signal a process tree: nothing was done and the claim is kept.
+    /// This platform cannot signal a process tree, or the claim's start cannot be matched to the process: nothing was done
+    /// and the claim is kept.
     CantStop(Claim),
 }
 
@@ -323,6 +344,13 @@ fn core_pid() -> Option<u32> {
 /// [`stop_holder`] with the core's pid given. A claim naming the core's own pid is never signalled, whatever its kind:
 /// that is `kith serve` (or an older kernel's claim of it), and a Stop would end the daemon, not a terminal.
 pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Duration, core: Option<u32>) -> Stopped {
+    // A claim on a pid that was reused (positively another process) holds nothing: given back, so it does not sit there
+    // as a held thread. (The readers already see it as free.)
+    for takeover in [false, true] {
+        if let Some(c) = read(&path(state, sid, takeover)).filter(|c| pid_runs(c.pid) && c.identity() == Some(false)) {
+            release(state, sid, c.pid, takeover);
+        }
+    }
     let Some(claim) = holder(state, sid) else { return Stopped::Nobody };
     if claim.kind == Kind::Starting || core == Some(claim.pid) {
         return Stopped::Busy(claim);
@@ -332,6 +360,18 @@ pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Dura
     }
     if cfg!(not(unix)) {
         return Stopped::CantStop(claim);
+    }
+    match claim.identity() {
+        Some(true) => {}
+        // Positively another process (the pid was reused since the claim was written): nothing to stop, and nothing is
+        // signalled. The claim is given back so the thread is free.
+        Some(false) => {
+            release(state, sid, claim.pid, claim.takeover);
+            return Stopped::Nobody;
+        }
+        // The claim's start cannot be matched to the process (ps unreadable, another stamp form): it keeps holding the
+        // session, and nothing is signalled.
+        None => return Stopped::CantStop(claim),
     }
     // Descendants first, the claimer last (as the revoke `sweep` does): for a one-shot the claimer is kith-stub, which
     // holds the conversation's lock, and the lock must not be free while claude still runs.

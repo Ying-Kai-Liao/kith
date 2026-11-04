@@ -32,6 +32,8 @@ getrandom = "0.4"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 # Run tokens and terminal tickets are kept as their SHA-256 (the holder links the same crate).
 sha2 = "0.10"
+# Webhook signatures (X-Hub-Signature-256): the same crate the holder links, on the same digest as sha2 above.
+hmac = "0.12"
 # The secrets envelope (docs/plans/runtime-design.md section 9b): XChaCha20-Poly1305 records under one master key.
 # Pinned exactly; the host links the same version.
 chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
