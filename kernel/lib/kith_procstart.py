@@ -6,6 +6,8 @@ process, so a claim written by either side reads right on the other. A start is 
 
 Never `ps -o lstart=`: local-time text moves with the time zone. Records from before this carry that text (or nothing);
 `same_process` reads those as an unknown start: the same process, because a wrong "different" would free a live writer.
+A caller that signals, or frees a claim, asks `claimer` instead: the old text is compared the old way (`ps`), a positive match
+lets a signal go, and only a positive mismatch frees the claim.
 A form mismatch or an unreadable start is never "dead"; a process is gone only when the system says so (ESRCH, a zombie).
 
 `python3 kith_procstart.py <pid>` prints the stamp (nothing when it can't be read); the parity test in
@@ -53,6 +55,44 @@ def same_process(recorded, current):
     """Whether a recorded start and a current reading are one process: equality when both are in one form, and yes when the
     forms differ or the record is unknown (empty, old lstart text, e against b)."""
     return recorded == current if comparable(recorded, current) else True
+
+
+def _lstart_text(pid, utc):
+    """`ps -o lstart=` for pid in the C locale (UTC when asked), whitespace squeezed; None when it can't be read."""
+    import subprocess
+
+    env = dict(os.environ, LC_ALL='C')
+    if utc:
+        env['TZ'] = 'UTC'
+    try:
+        out = subprocess.run(['ps', '-o', 'lstart=', '-p', str(int(pid))], capture_output=True, text=True, env=env).stdout
+    except (OSError, ValueError):
+        return None
+    out = ' '.join(out.split())
+    return out or None
+
+
+def lstart_matches(pid, claimed):
+    """Whether pid started at the old `ps -o lstart=` text `claimed` (local time or UTC): True / False, None when ps can't
+    read the start. The twin of the host's registry::lstart_matches; the one comparison of the old text left."""
+    claimed = ' '.join(str(claimed).split())
+    local = _lstart_text(pid, False)
+    if local is None:
+        return None
+    return local == claimed or _lstart_text(pid, True) == claimed
+
+
+def claimer(pid, recorded):
+    """Whether pid is the process that recorded `recorded` (a stamp, old lstart text or nothing): True when it positively is,
+    False when it positively is not (a reused pid), None when that can't be told (unreadable start, a stamp of the other
+    form). Nothing recorded is True: the pid alone is the claim. The twin of the host's Claim::identity; a caller that
+    signals needs True, a reader that asks "is it still held" needs anything but False."""
+    if not recorded or not str(recorded).strip():
+        return True
+    if is_stamp(recorded):
+        current = start_stamp(pid)
+        return recorded == current if current and comparable(recorded, current) else None
+    return lstart_matches(pid, recorded)
 
 
 def parse_linux_stat(stat):

@@ -189,8 +189,7 @@ def alive(pid, started=None):
         pass
     except (OSError, TypeError, ValueError):
         return False
-    actual = proc_start(pid)
-    return not (started and actual) or kith_procstart.same_process(started, actual)
+    return kith_procstart.claimer(pid, started) is not False   # old lstart text that positively differs: a reused pid
 
 
 def writer_live(sid):

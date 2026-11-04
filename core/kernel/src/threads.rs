@@ -229,20 +229,30 @@ impl Claim {
             .map_or_else(|| "None".to_owned(), |p| p.to_string())
     }
 
-    /// The claimer still runs, and is the process that took the claim (a reused pid has another start stamp). A claim
-    /// that records no start, one in another form (old `ps` text) or one that cannot be read now is judged by the pid alone.
+    /// Whether the claimer is the process that took the claim: `Some(true)` positively, `Some(false)` positively not (a
+    /// reused pid), `None` when that cannot be told (an unreadable start, a stamp of the other form). A claim that records
+    /// no start is judged by its pid alone. Old `ps` text is compared the old way (`os::lstart_matches`).
+    pub fn identity(&self) -> Option<bool> {
+        use crate::procstart::{comparable, is_stamp, same_process};
+        let pid = self.pid?;
+        match self.proc_start.as_deref().filter(|s| !s.trim().is_empty()) {
+            None => Some(true),
+            Some(claimed) if is_stamp(claimed) => os::proc_start(pid)
+                .filter(|actual| comparable(claimed, actual))
+                .map(|actual| same_process(claimed, &actual)),
+            Some(text) => os::lstart_matches(pid, text),
+        }
+    }
+
+    /// The claimer still runs, and is not positively another process (a reused pid has another start). A start that cannot
+    /// be read or compared keeps the claim held: a wrong "free" would let a second writer in.
     pub fn is_live(&self) -> bool {
-        let Some(pid) = self.pid else { return false };
-        if !os::pid_runs(pid) {
-            return false;
-        }
-        match (
-            self.proc_start.as_deref().filter(|s| !s.is_empty()),
-            os::proc_start(pid),
-        ) {
-            (Some(claimed), Some(actual)) => crate::procstart::same_process(claimed, &actual),
-            _ => true,
-        }
+        self.pid.is_some_and(os::pid_runs) && self.identity() != Some(false)
+    }
+
+    /// Whether the claimer is positively the process that took the claim: what a signal needs.
+    pub fn is_claimer(&self) -> bool {
+        self.pid.is_some_and(os::pid_runs) && self.identity() == Some(true)
     }
 }
 
@@ -581,8 +591,8 @@ pub fn proc_claim(c: &Ctx, pid: i64, person: &str, agent: &str) -> std::io::Resu
 
 /// The kernel's twin of the host's claim sweep, for a revoke or removal made with no host running: the live holders of
 /// claims that name one of `persons`, and their descendants, get SIGTERM, and SIGKILL after `grace`. A claim without a
-/// person is the owner's and is never touched; each holder is checked live first (pid and start time), so a reused pid is
-/// left alone. Returns the pids it signalled.
+/// person is the owner's and is never touched; each holder is checked first (pid and start
+/// time, positively: a claim from before stamps whose old text `ps` cannot match is not signalled), so a reused pid is left alone. Returns the pids it signalled.
 pub fn sweep_persons(c: &Ctx, persons: &[String], grace: Duration) -> Vec<i64> {
     let Some(dir) = c.reg_dir() else {
         return Vec::new();
@@ -594,7 +604,7 @@ pub fn sweep_persons(c: &Ctx, persons: &[String], grace: Duration) -> Vec<i64> {
         }
         if let Some(claim) = read_claim(&e.path())
             && claim.person.as_ref().is_some_and(|p| persons.contains(p))
-            && claim.is_live()
+            && claim.is_claimer()
             && let Some(pid) = claim.pid.filter(|p| *p > 1)
         {
             holders.push(pid);

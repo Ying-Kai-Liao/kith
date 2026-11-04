@@ -233,7 +233,8 @@ def procstart():
 
 def proc_start(pid):
     """The start stamp of pid (`e<ms>` on macOS, `b<boot id>:<ticks>` on Linux; the host and the core write and read the same
-    one); None when it can't be read. Claims from before this carry `ps -o lstart=` text: an unknown start, read as alive."""
+    one); None when it can't be read. Claims from before this carry `ps -o lstart=` text: compared the old way
+    (kith_procstart.claimer): a start that differs is a reused pid, one `ps` can't read is believed alive."""
     return procstart().start_stamp(pid)
 
 
@@ -263,8 +264,14 @@ def read_claim(path):
 def claim_live(c):
     if not c or not pid_alive(c.get('pid')):
         return False
-    claimed, actual = c.get('procStart'), proc_start(c['pid'])
-    return not (claimed and actual) or procstart().same_process(claimed, actual)
+    return procstart().claimer(c['pid'], c.get('procStart')) is not False   # held unless positively another process
+
+
+def claim_claimer(c):
+    """Whether the claim's holder is positively the process that took it: what a signal needs (the twin of the host's
+    Claim::is_claimer). claim_live says "held" for a start it can't compare (old lstart text that ps can't read, another stamp
+    form); that is no reason to signal whatever has the pid now."""
+    return bool(c) and pid_alive(c.get('pid')) and procstart().claimer(c['pid'], c.get('procStart')) is True
 
 
 def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_owner=False):
@@ -401,12 +408,12 @@ def sweep_persons(persons, grace=2.0):
     """The kernel's twin of the host's claim sweep (terminal/claim.rs sweep), for a revoke or removal made with no host
     running: the live holders of claims that name one of `persons`, and their descendants, get SIGTERM, and SIGKILL after
     `grace` seconds. A claim without a person is the owner's and is never touched; each holder is checked live first (pid and
-    start time), so a reused pid is left alone. Returns the pids it signalled."""
+    start time, positively: a claim from before stamps whose old text ps cannot match is not signalled), so a reused pid is left alone. Returns the pids it signalled."""
     d = reg_dir()
     holders = []
     for f in (d.glob('*.claim') if d and d.is_dir() else ()):
         c = read_claim(f)
-        if c and c.get('person') in persons and claim_live(c) and c.get('pid', 0) > 1:
+        if c and c.get('person') in persons and claim_claimer(c) and c.get('pid', 0) > 1:
             holders.append(c['pid'])
     if not holders:
         return []
@@ -473,8 +480,7 @@ def release_own(sid):
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
         c = read_claim(f)
-        claimed, actual = (c or {}).get('procStart'), proc_start(ppid)
-        if c and c.get('pid') == ppid and not (claimed and actual and not procstart().same_process(claimed, actual)):
+        if c and c.get('pid') == ppid and procstart().claimer(ppid, c.get('procStart')) is not False:
             f.unlink(missing_ok=True)
             return True
         return False

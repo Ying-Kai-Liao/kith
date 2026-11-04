@@ -251,11 +251,11 @@ fn other_start(real: &str) -> String {
 }
 
 #[test]
-fn an_old_lstart_text_is_an_unknown_start_and_the_claim_holds() {
+fn an_old_lstart_text_holds_only_while_it_matches_the_process() {
     let t = Tmp::new();
     let c = ctx(&t, &no_env);
     let other = Sleeper::new();
-    // Written before stamps: it cannot be told from the live process, so it is never called a different one.
+    // Written before stamps: compared the old way. Another start time is a reused pid, and the claim is free.
     t.put(
         "s-1.claim",
         &format!(
@@ -263,7 +263,39 @@ fn an_old_lstart_text_is_an_unknown_start_and_the_claim_holds() {
             other.pid()
         ),
     );
+    assert!(take(&c, "s-1", me()).is_ok());
+}
+
+#[test]
+fn an_old_lstart_text_that_matches_the_process_holds() {
+    let t = Tmp::new();
+    let c = ctx(&t, &no_env);
+    let other = Sleeper::new();
+    let text = os::lstart(other.pid(), false).expect("ps knows the process");
+    t.put(
+        "s-1.claim",
+        &format!(
+            "{{\"pid\": {}, \"procStart\": \"{text}\", \"at\": \"x\", \"kind\": \"terminal\"}}",
+            other.pid()
+        ),
+    );
     assert!(take(&c, "s-1", me()).is_err());
+}
+
+#[test]
+fn the_sweep_leaves_an_old_text_claim_on_a_reused_pid_alone() {
+    let t = Tmp::new();
+    let c = ctx(&t, &no_env);
+    let other = Sleeper::new();
+    t.put(
+        "s-1.claim",
+        &format!(
+            "{{\"pid\": {}, \"procStart\": \"Mon Jan  1 00:00:00 1990\", \"at\": \"x\", \"kind\": \"oneshot\", \"person\": \"p1\"}}",
+            other.pid()
+        ),
+    );
+    assert_eq!(sweep_persons(&c, &["p1".to_owned()], Duration::ZERO), Vec::<i64>::new());
+    assert!(os::pid_runs(other.pid()), "nothing was signalled");
 }
 
 #[test]

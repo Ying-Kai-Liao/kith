@@ -1,6 +1,6 @@
 //! The few process facts the claim protocol needs, and the only `unsafe` in the crate (`kill(2)`). Process start times
 //! are stamps (`crate::procstart`: `e<ms>` or `b<boot id>:<ticks>`), the string `kith-sessions` (`kith_procstart.py`) and the
-//! host's `terminal/registry.rs` write and read too. Claims from before carry `ps -o lstart=` text: an unknown start.
+//! host's `terminal/registry.rs` write and read too. Claims from before carry `ps -o lstart=` text, compared the old way (`lstart_matches`).
 
 use std::process::Command;
 
@@ -41,6 +41,33 @@ pub const SIGKILL: libc::c_int = libc::SIGKILL;
 /// The start stamp of `pid`; `None` when it can't be read (or the process is gone).
 pub fn proc_start(pid: i64) -> Option<String> {
     crate::procstart::start_stamp(u32::try_from(pid).ok()?)
+}
+
+/// `ps -o lstart=` for `pid` in the C locale (UTC when asked), whitespace squeezed; `None` when `ps` cannot read it.
+pub fn lstart(pid: i64, utc: bool) -> Option<String> {
+    let mut ps = Command::new("ps");
+    ps.env("LC_ALL", "C");
+    if utc {
+        ps.env("TZ", "UTC");
+    }
+    let out = ps
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout)
+        .ok()?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.is_empty()).then_some(text)
+}
+
+/// Whether `pid` started at the old `ps -o lstart=` text `claimed` (local time or UTC); `None` when `ps` cannot read the
+/// start. The one comparison of the old text left, as the host's `registry::lstart_matches` and `kith_procstart.py` do.
+pub fn lstart_matches(pid: i64, claimed: &str) -> Option<bool> {
+    let claimed = claimed.split_whitespace().collect::<Vec<_>>().join(" ");
+    let local = lstart(pid, false)?;
+    Some(local == claimed || lstart(pid, true).is_some_and(|utc| utc == claimed))
 }
 
 /// `(parent pid, command)` of `pid`; `(0, "")` when `ps` has no such row.

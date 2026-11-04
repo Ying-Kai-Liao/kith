@@ -539,15 +539,61 @@ fn reused_start() -> String {
     }
 }
 
-/// A claim written before stamps holds `ps -o lstart=` text: an unknown start, so a live pid keeps the session.
+/// A claim written before stamps holds `ps -o lstart=` text. It is compared the old way: text that positively differs from
+/// the live pid's start is a reused pid and the claim is free (as before stamps); text that matches holds.
 #[tokio::test]
-async fn a_claim_with_old_lstart_text_still_holds_while_its_process_lives() {
+async fn a_claim_with_old_lstart_text_holds_only_while_the_text_matches_the_process() {
     let r = Rig::new();
     let me = r.sleeper();
     let path = claim::path(&r.state(), "s1", false);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, json!({"pid": me, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t"}).to_string()).unwrap();
-    assert_eq!(claim::holder(&r.state(), "s1").map(|c| c.pid), Some(me));
+    assert!(claim::holder(&r.state(), "s1").is_none(), "another start time: a reused pid, free");
+    assert!(claim::take(&r.state(), "s1", Kind::Terminal, me, false).unwrap().is_ok(), "and taken over");
+    let text = registry::lstart(me, false).expect("ps knows the process");
+    std::fs::write(&path, json!({"pid": me, "procStart": text, "at": "t"}).to_string()).unwrap();
+    assert_eq!(claim::holder(&r.state(), "s1").map(|c| c.pid), Some(me), "the same start time holds");
+}
+
+/// An owner's Stop on a claim whose old text says another start (the pid was reused by a process the claim never named):
+/// nothing is signalled, the claim is given back, and the thread is free. A matching old text is stopped as before.
+#[tokio::test]
+async fn stopping_an_old_text_claim_on_a_reused_pid_frees_it_without_a_signal() {
+    let r = Rig::new();
+    let (mut shell, held) = shell_with_child();
+    let path = claim::path(&r.state(), "o1", false);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, json!({"pid": held, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t"}).to_string())
+        .unwrap();
+    let got = claim::stop_holder(&r.state(), "o1", GRACE);
+    assert!(matches!(got, claim::Stopped::Nobody), "{got:?}");
+    assert!(claim::read(&path).is_none(), "the claim is given back");
+    assert!(shell.try_wait().unwrap().is_none() && registry::pid_runs(held), "nothing was signalled");
+    // Pressed twice: nobody holds it.
+    assert!(matches!(claim::stop_holder(&r.state(), "o1", GRACE), claim::Stopped::Nobody));
+    // The same claim with text that matches the process is the claimer: stopped.
+    let text = registry::lstart(held, false).expect("ps knows the process");
+    std::fs::write(&path, json!({"pid": held, "procStart": text, "at": "t"}).to_string()).unwrap();
+    let got = claim::stop_holder(&r.state(), "o1", GRACE);
+    assert!(matches!(got, claim::Stopped::Ended(_)), "{got:?}");
+    shell.wait().unwrap();
+}
+
+/// A start that cannot be compared (a stamp of the other form) is not "different": the claim holds, and Stop refuses.
+#[tokio::test]
+async fn stopping_a_claim_whose_start_cannot_be_compared_signals_nothing() {
+    let r = Rig::new();
+    let (mut shell, held) = shell_with_child();
+    let other_form = if reused_start().starts_with('e') { "bx:1" } else { "e1" };
+    let path = claim::path(&r.state(), "o2", false);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, json!({"pid": held, "procStart": other_form, "at": "t"}).to_string()).unwrap();
+    assert_eq!(claim::holder(&r.state(), "o2").map(|c| c.pid), Some(held));
+    let got = claim::stop_holder(&r.state(), "o2", GRACE);
+    assert!(matches!(got, claim::Stopped::CantStop(_)), "{got:?}");
+    assert!(shell.try_wait().unwrap().is_none(), "nothing was signalled");
+    shell.kill().unwrap();
+    shell.wait().unwrap();
 }
 
 /// Claude Code writes its session file's `procStart` in UTC; `ps` prints the Mac's local time. Away from UTC the two
