@@ -1107,3 +1107,65 @@ fn the_models_secret_rows_stay_off_the_answer_row() {
         "{err}"
     );
 }
+
+#[test]
+fn a_claim_that_could_not_be_released_is_freed_by_the_next_row_call() {
+    // The release after a failed write can fail too (a busy database). The claim then names this very live process, which
+    // nothing else would ever drop; rows are served one at a time, so at the next call none of ours is in flight.
+    let (_t, _l, mut c) = core();
+    let k = key_card(&mut c, "github");
+    let stale = begin(&mut c, &k.id, T0 + 1, &Nobody)
+        .unwrap()
+        .expect("claims");
+    assert_eq!(
+        stored(&mut c, &k.id).claim_by.as_deref(),
+        Some(stale.holder.as_str())
+    );
+    call(&mut c, "cards.list", &json!({}), &Nobody).unwrap();
+    assert!(stored(&mut c, &k.id).claim_by.is_none());
+    // A claim of another process, or one with no pid, is left alone.
+    let other = crate::cards::Claim {
+        holder: "provide:elsewhere",
+        pid: Some(std::process::id().wrapping_add(1)),
+        until: T0 + CLAIM_MS,
+    };
+    claim(&mut c, &k.id, &other, T0 + 2, &Nobody)
+        .unwrap()
+        .expect("claims");
+    call(&mut c, "cards.list", &json!({}), &Nobody).unwrap();
+    assert_eq!(
+        stored(&mut c, &k.id).claim_by.as_deref(),
+        Some("provide:elsewhere")
+    );
+}
+
+#[test]
+fn a_damaged_record_does_not_make_a_card_unprovidable_and_an_account_is_taken_by_prefix() {
+    let (_t, _l, mut c) = core();
+    let store = MemoryKeyStore::default();
+    let mut e = env(&store);
+    // An older key of the account with a variable this card does not ask for: the account is taken.
+    e.put(c.conn(), "key/github/work/OLD_VAR", b"x").unwrap();
+    let k = key_card(&mut c, "github");
+    let err = prov(&mut c, &mut e, &k.id, &two(), T0 + 1, &Nobody).expect_err("taken");
+    assert!(matches!(err, Error::BadParams(_)), "{err}");
+    assert_eq!(stored(&mut c, &k.id).state, State::Pending);
+    // A record that no longer opens does not make the card unprovidable: only the key is read to warm up.
+    c.conn()
+        .execute(
+            "UPDATE secret_records SET ciphertext = x'00' WHERE name = 'key/github/work/OLD_VAR'",
+            [],
+        )
+        .unwrap();
+    let mut fresh = env(&store);
+    let (done, _) = saved(provide(
+        &mut c,
+        &mut fresh,
+        &k.id,
+        Some("home"),
+        &two(),
+        &|| T0 + 2,
+        &Nobody,
+    ));
+    assert_eq!(done.state, State::Used);
+}

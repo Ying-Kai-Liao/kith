@@ -33,8 +33,8 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use super::{
-    Card, Claim, State, bad, card, claim, get, new_id, now_ms, release, saved_in, text,
-    void_dead_claims,
+    CLEAR_CLAIM, Card, Claim, OPEN_STATES, State, bad, card, claim, get, new_id, now_ms, release,
+    saved_in, text, void_dead_claims,
 };
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -118,6 +118,7 @@ fn spec_of(card: &Card) -> Result<Spec> {
 #[derive(Debug)]
 struct Plan {
     service: String,
+    account: String,
     profile: String,
     replaces: bool,
     /// `(variable, record name)` in the card's order.
@@ -153,6 +154,7 @@ fn plan_for(
     }
     Ok(Plan {
         service: spec.service.clone(),
+        account: account.to_owned(),
         profile: format!("{}/{account}", spec.service),
         replaces: spec.replaces,
         records: spec
@@ -234,9 +236,9 @@ fn commit(
     now: i64,
     live: &dyn Liveness,
 ) -> Result<Card> {
-    // Reads the master key from the key store (or finds there is none to read, which a first key mints inside the
-    // transaction below). A locked store fails here, before the write lock is taken.
-    env.get(core.conn(), &plan.records[0].1)?;
+    // Reads the master key from the key store (no record is opened, so a damaged one cannot block it); a first key is
+    // minted inside the transaction below. A locked store fails here, before the write lock is taken.
+    env.warm(core.conn())?;
     let lost = || {
         Error::Refused(
             "kith-core: cards: the card was closed or its claim lost before the key could be saved; nothing was written"
@@ -251,7 +253,9 @@ fn commit(
     if !plan.replaces {
         // A new account never silently replaces a key the owner already has under that name.
         let have = Envelope::list(&tx)?;
-        if plan.records.iter().any(|(_, name)| have.contains(name)) {
+        // Any record of the account, not only this card's names: a stale variable of an older key also makes it taken.
+        let prefix = format!("key/{}/{}/", plan.service, plan.account);
+        if have.iter().any(|name| name.starts_with(&prefix)) {
             return Err(bad("that account name can't be used"));
         }
     }
@@ -308,7 +312,7 @@ pub(crate) fn provide(
     let outcome = match done {
         Ok(r) => r,
         Err(panic) => {
-            let _ = release(core, &held.id, &held.holder, live);
+            release_twice(core, &held, live);
             resume_unwind(panic);
         }
     };
@@ -319,11 +323,33 @@ pub(crate) fn provide(
             vars: plan.records.into_iter().map(|(v, _)| v).collect(),
         }),
         Err(e) => {
-            // Best effort: if this fails too the claim ends with this process, or its time, as the sweep reads it.
-            let _ = release(core, &held.id, &held.holder, live);
+            release_twice(core, &held, live);
             Err(e)
         }
     }
+}
+
+/// Ends a failed writer's claim, once more if the first try failed. If both fail the claim stays under this live pid,
+/// and [`forget_own_claims`] frees it at the next row call (calls are serialized, so none of ours can be in flight).
+fn release_twice(core: &mut Core, held: &Held, live: &dyn Liveness) {
+    if release(core, &held.id, &held.holder, live).is_err() {
+        let _ = release(core, &held.id, &held.holder, live);
+    }
+}
+
+/// At the start of a row call: any provide claim carrying this process's pid is a leftover of a call that could not
+/// release it. Rows are served one at a time (`with_core`), so no writer of this process can be running.
+pub(super) fn forget_own_claims(core: &mut Core) -> Result<()> {
+    let tx = core.claim_tx()?;
+    tx.execute(
+        &format!(
+            "UPDATE cards SET {CLEAR_CLAIM} WHERE claim_pid = ?1 AND claim_by LIKE 'provide:%'
+                AND state IN ({OPEN_STATES})"
+        ),
+        [i64::from(std::process::id())],
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// The params of a `cards.provide` row, read and shape-checked (no card, no key store yet). A refusal names the field,

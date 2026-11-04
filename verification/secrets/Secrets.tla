@@ -17,7 +17,9 @@
 (*   Sweep    = cards_sweep: an open card past its deadline expires.       *)
 (*   Deny     = respondPermission deny: refused while a slot is held.      *)
 (*                                                                         *)
-(*   Withdraw = withdraw: the asker cancelled; refused while a claim holds.*)
+(*   Withdraw = withdraw: the asker cancelled; waits for a held claim       *)
+(*              (WithdrawWaits: the core's withdraw, and the host's since   *)
+(*              M2-12: cards::secret::claimed).                             *)
 (*   Crash    = the writer's process died; its claim stays until it is     *)
 (*              dropped (Lapse). Only with CrashPossible: the host's       *)
 (*              restarts are not modeled, the core's daemon can die.       *)
@@ -44,7 +46,7 @@
 (***************************************************************************)
 EXTENDS Naturals
 
-CONSTANTS Exclusive, ClaimBlocksClose, FailWritesNothing, AtomicCommit, CrashPossible, LapseNeedsDeadWriter
+CONSTANTS Exclusive, ClaimBlocksClose, FailWritesNothing, AtomicCommit, CrashPossible, LapseNeedsDeadWriter, WithdrawWaits
 
 Devices == {"d1", "d2"}
 
@@ -152,7 +154,7 @@ Sweep ==
 
 Withdraw ==
     /\ card = "open"
-    /\ (ClaimBlocksClose => ~Held)
+    /\ (WithdrawWaits => ~Held)
     /\ card' = "withdrawn"
     /\ UNCHANGED <<late, claim, pc, writes, wroteOpen>>
 

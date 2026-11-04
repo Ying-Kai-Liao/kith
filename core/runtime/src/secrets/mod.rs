@@ -49,6 +49,12 @@ impl Envelope {
         Self { store, key: None }
     }
 
+    /// Loads the master key from the key store without opening any record (a locked store fails here; with records and
+    /// no key it refuses, as every call does). Mints nothing.
+    pub(crate) fn warm(&mut self, conn: &Connection) -> Result<()> {
+        self.key(conn, false).map(drop)
+    }
+
     /// Stores `bytes` under `name`, replacing an earlier value (one statement, so last write wins atomically).
     pub(crate) fn put(&mut self, conn: &Connection, name: &str, bytes: &[u8]) -> Result<()> {
         check_name(name)?;

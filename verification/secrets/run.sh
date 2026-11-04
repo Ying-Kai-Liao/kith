@@ -11,18 +11,19 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# variant -> "Exclusive ClaimBlocksClose FailWritesNothing AtomicCommit CrashPossible LapseNeedsDeadWriter"
+# variant -> "Exclusive ClaimBlocksClose FailWritesNothing AtomicCommit CrashPossible LapseNeedsDeadWriter WithdrawWaits"
 # code .. fail-writes: the host as built (two steps, no restarts modeled). core*: the core's secret path (cards/secret.rs).
 switches() {
   case $1 in
-    code) echo "TRUE TRUE TRUE FALSE FALSE TRUE" ;;
-    no-slot) echo "FALSE TRUE TRUE FALSE FALSE TRUE" ;;
-    no-claim) echo "TRUE FALSE TRUE FALSE FALSE TRUE" ;;
-    fail-writes) echo "TRUE TRUE FALSE FALSE FALSE TRUE" ;;
-    core) echo "TRUE TRUE TRUE TRUE TRUE TRUE" ;;
-    core-split) echo "TRUE TRUE TRUE FALSE TRUE TRUE" ;;
-    core-lapse-live) echo "TRUE TRUE TRUE FALSE FALSE FALSE" ;;
-    core-atomic-lapse-live) echo "TRUE TRUE TRUE TRUE TRUE FALSE" ;;
+    code) echo "TRUE TRUE TRUE FALSE FALSE TRUE TRUE" ;;
+    no-slot) echo "FALSE TRUE TRUE FALSE FALSE TRUE TRUE" ;;
+    no-claim) echo "TRUE FALSE TRUE FALSE FALSE TRUE TRUE" ;;
+    fail-writes) echo "TRUE TRUE FALSE FALSE FALSE TRUE TRUE" ;;
+    core) echo "TRUE TRUE TRUE TRUE TRUE TRUE TRUE" ;;
+    core-split) echo "TRUE TRUE TRUE FALSE TRUE TRUE TRUE" ;;
+    core-lapse-live) echo "TRUE TRUE TRUE FALSE FALSE FALSE TRUE" ;;
+    host-old-withdraw) echo "TRUE TRUE TRUE FALSE FALSE TRUE FALSE" ;;
+    core-atomic-lapse-live) echo "TRUE TRUE TRUE TRUE TRUE FALSE TRUE" ;;
     *) echo "run.sh: unknown variant $1" >&2; exit 2 ;;
   esac
 }
@@ -34,7 +35,7 @@ if [[ ${1:-} == --list ]]; then grep -v '^#' "$HERE/checks.tsv"; exit 0; fi
 one() {   # one VARIANT KIND NAME WANT
   local work out res
   work=$(mktemp -d "${TMPDIR:-/tmp}/kith-verify-secrets.XXXXXX")
-  read -r ex blocks failnone atomic crash lapse < <(switches "$1")
+  read -r ex blocks failnone atomic crash lapse withdraws < <(switches "$1")
   mkdir -p "$work/tmp"
   {
     echo "CONSTANTS"
@@ -44,6 +45,7 @@ one() {   # one VARIANT KIND NAME WANT
     echo "AtomicCommit = $atomic"
     echo "CrashPossible = $crash"
     echo "LapseNeedsDeadWriter = $lapse"
+    echo "WithdrawWaits = $withdraws"
     echo "SPECIFICATION Spec"
     echo "$2 $3"
   } > "$work/Secrets.cfg"

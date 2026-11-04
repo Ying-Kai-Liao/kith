@@ -21,7 +21,7 @@ The model is `verification/secrets/Secrets.tla`. This skill is its only document
 ## Run it
 
 ```
-verification/secrets/run.sh                          # every row of checks.tsv (24 rows, about a minute)
+verification/secrets/run.sh                          # every row of checks.tsv (26 rows, about a minute)
 verification/secrets/run.sh --show VARIANT PROPERTY   # one row with TLC's full output (the counterexample)
 verification/secrets/run.sh --list                   # the rows
 verification/secrets/drift.sh                        # covered files changed since the sync commit?
@@ -51,13 +51,13 @@ denied, withdrawn, expired or unswept-expired card writes nothing; a failed writ
 open with the claim released and no half a key; a second device is refused while the first holds the claim; a writer
 that lost its claim writes nothing; a claim that ran out by time is not taken over while its writer's pid lives
 (precondition 1); the claim carries this process's pid and start time (precondition 2); a parked card is provided and a
-held claim survives park_run and withdraw; eight threads write one card once; and a random sequence (provide, no,
+held claim survives park_run and withdraw; a claim that could not be released is freed at the next row call; a damaged record does not block the warm-up and an account is taken by its `key/<service>/<account>/` prefix; eight threads, serialised behind one Core as the daemon does, write one card once (so contention is decided in the rows, not by real parallelism: a second Core on one folder cannot exist); and a random sequence (provide, no,
 sweep, park_run, withdraw, a writer in flight, a crash, the clock) checks at-most-once, nothing-after-close and
 written-iff-saved after every step.
 
 ## Sync commit
 
-**b764339bc37a8afc57f2bfd9b436706400e41722** (2026-11-04, M2-12: the core's secret cards, `core/runtime/src/cards/{mod,secret}.rs` over `secrets/`, covered from here; the model gained `Withdraw`, `Crash`, `Lapse`, `Commit` and three switches, 24 rows pass, host rows unchanged in meaning). Before that: **0872ea58892e0f648d4206bd64e455b25cdf2d5c** (2026-11-03: rust-rebuild at 0872ea58892e with F5 (kith-auth refuses built-in agents; narrower only). Re-run: `run.sh` every row as expected (14 rows), `cargo test cards::secret` and `a_secret_card_is_written_at_most_once` pass, `kith-auth-secret-check` passes. Read since the last sync: `secret.rs` gained the holder redirect, `openKeyCard` (an owner-opened card through the same `card_open`/provide write path), `answerable_by` and the card lane; the claim, slot, `write_key` and deny steps are unchanged. The resume claim added in `store/cards.rs` is a different claim from the write claim. Earlier: **b241d7bbd3372fb6bd31bf1024c10b179ef2645b** (origin/main on 2026-10-28; first written at ed2ceb63, after the secret
+**b764339bc37a8afc57f2bfd9b436706400e41722** (2026-11-04, M2-12: the core's secret cards, `core/runtime/src/cards/{mod,secret}.rs` over `secrets/`, covered from here; the model gained `Withdraw`, `Crash`, `Lapse`, `Commit` and three switches, 26 rows pass. The host rows gained `Withdraw` too; it found a host gap, fixed in the same change: the host's `card_withdraw` (from `delivered` and `withdraw_entry`) closed a card whose key was being written. Both callers now skip a card whose `Slot` is held, `secret::claimed`; test `a_withdrawal_waits_for_a_key_being_written`). Before that: **0872ea58892e0f648d4206bd64e455b25cdf2d5c** (2026-11-03: rust-rebuild at 0872ea58892e with F5 (kith-auth refuses built-in agents; narrower only). Re-run: `run.sh` every row as expected (14 rows), `cargo test cards::secret` and `a_secret_card_is_written_at_most_once` pass, `kith-auth-secret-check` passes. Read since the last sync: `secret.rs` gained the holder redirect, `openKeyCard` (an owner-opened card through the same `card_open`/provide write path), `answerable_by` and the card lane; the claim, slot, `write_key` and deny steps are unchanged. The resume claim added in `store/cards.rs` is a different claim from the write claim. Earlier: **b241d7bbd3372fb6bd31bf1024c10b179ef2645b** (origin/main on 2026-10-28; first written at ed2ceb63, after the secret
 cards, host d8713608 and kernel 7863e2e9, and the limit cards, adcfb2f7, which only add a branch after the secret
 routing in `respondPermission`). Between the two, the covered files changed only around access cards (the escape
 card's once grants in `store/cards.rs`, `cards::answer` writing the entry first), the grants ledger and other
@@ -113,10 +113,11 @@ permission requests, `self.perms`; a secret card's entry is added by `show`, not
 | `core` | all six TRUE | the core as built: single commit, writers can crash, a live writer's claim is never lapsed | nothing |
 | `core-split` | `AtomicCommit` FALSE, rest as `core` | the core's order if it wrote the key and then saved the card in two steps (the host's) | `AtMostOneWrite`, `WrittenEndsSaved`: the writer dies between the two steps, its claim lapses, the owner retries and writes twice |
 | `core-lapse-live` | `AtomicCommit`, `CrashPossible`, `LapseNeedsDeadWriter` FALSE | M2-11 precondition 1 undone: a claim that runs out by time is taken over under a live writer, in the two-step order | `AtMostOneWrite` |
+| `host-old-withdraw` | `WithdrawWaits` FALSE, rest as `code` | the host's withdraw before M2-12, which ignored the claim | `ClosedNeverWritten`, `WriteWhileOpen` |
 | `core-atomic-lapse-live` | `LapseNeedsDeadWriter` FALSE, rest as `core` | the same lapse with the single commit | nothing: the zombie's commit finds the claim gone. The pid rule only saves the work; the single commit is what makes it safe |
 
-The switch order is `Exclusive ClaimBlocksClose FailWritesNothing AtomicCommit CrashPossible LapseNeedsDeadWriter`; the
-first four host variants have the last three at FALSE FALSE TRUE.
+The switch order is `Exclusive ClaimBlocksClose FailWritesNothing AtomicCommit CrashPossible LapseNeedsDeadWriter WithdrawWaits`; the
+first four host variants have the last four at FALSE FALSE TRUE TRUE.
 
 ## Bounds and assumptions
 
@@ -143,6 +144,9 @@ first four host variants have the last three at FALSE FALSE TRUE.
   see: the key store's own state (the master key is read before the transaction, so a first-ever key is minted inside it,
   where a crash can leave a key in the OS store and no records, which the next put adopts), and the Access card ("use
   this account"), which waits for lane B's grants table.
+- Not modeled in the core: a `release` that fails after a failed commit (the claim then names the live daemon; the next
+  row call frees it, `forget_own_claims`); the key store's child tools are not killed if the daemon is (they are bounded
+  at 30 s); no grant is written on save (the host's `kith-auth set --grant`), which waits for lane B's grants table.
 - The value itself never leaving `provideSecret` -> stdin is not modeled; `the_key_is_in_the_keychain_call_alone...`
   in `cards/secret/tests.rs` checks it.
 

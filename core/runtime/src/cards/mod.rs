@@ -861,6 +861,8 @@ pub(crate) fn call(
     params: &Value,
     live: &dyn Liveness,
 ) -> Result<Value> {
+    // A key write that could not release its claim leaves it under this live pid: free it before anything reads cards.
+    secret::forget_own_claims(core)?;
     match method {
         "cards.list" => {
             let (open, recent) = listing(core, RECENT)?;
