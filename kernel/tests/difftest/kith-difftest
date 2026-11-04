@@ -110,14 +110,6 @@ class Normalizer:
             s = rx.sub(repl, s)
         return s
 
-    def unparsed_json(self, s):
-        """A .json file that does not parse: the mask keys' scalars are masked as text, leading zeros and all, so a
-        clock reading that JSON cannot hold still means nothing. Only the quoted key and a scalar value match."""
-        for k in self.mask_keys:
-            s = re.sub(r'"%s"(\s*:\s*)(?:-?\d[\d.eE+-]*|null|true|false|"(?:[^"\\]|\\.)*")' % re.escape(k),
-                       lambda m: f'"{k}"{m.group(1)}<MASKED>', s)
-        return s
-
     def own_text(self, s):
         """Only the case's own rules (a file name is not masked by the generic ones: two sessions' queue files must stay two.)"""
         for rx, repl in self.own:
@@ -381,8 +373,7 @@ def snapshot(side_dir, case, norm):
                         continue
                     except ValueError:
                         pass
-                # Not JSON (a clock read as 012345678 is a number JSON forbids): the case's mask keys still apply.
-                facets[f'state:{rel}'] = norm.unparsed_json(norm.text(text)) if f.endswith('.json') else norm.text(text)
+                facets[f'state:{rel}'] = norm.text(text)
     log = side_dir / 'fakelog'
     facets['fakes'] = norm.text(log.read_text()) if log.exists() else ''
     if case.get('sort_lines'):   # parallel status checks (kith account list) make the order of fake calls mean nothing

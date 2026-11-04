@@ -142,12 +142,22 @@ class SelfTest(unittest.TestCase):
             del os.environ['KITH_HOME']
         self.assertEqual(failed, [], out)
 
+    def test_mask_keys_mask_a_leading_zero_clock_string(self):
+        """Deterministic stand-in for the %N clock: one side's value starts with 0, the other's does not. The file must stay
+        valid JSON (a bare 012345678 is not), so mask_keys apply and the two sides are equal."""
+        def sh(clock):
+            return ['/bin/sh', '-c', 'mkdir -p "$HOME/w"; echo "{\\"n\\": 1, \\"at\\": \\"%s\\"}" > "$HOME/w/a.json"' % clock, 'sh']
+        case = {'name': 'zero', 'run': [['x']], 'mask_keys': ['at']}
+        out = io.StringIO()
+        failed, _, _ = D.run_all([case], {'default': {}, 'old': sh('012345678'), 'new': sh('987654321')}, [], jobs=1, out=out)
+        self.assertEqual(failed, [], out.getvalue())
+
     def test_mask_keys_and_masked_file_names(self):
         """mask_keys: a case's own meaningless values (a clock, a pid) are masked in JSON; normalize_paths: a file named by
         an id the program makes up is one facet whatever the id, and two files with one masked name are an error."""
         def sh(script):
             return ['/bin/sh', '-c', script, 'sh']
-        prog = sh('id=$(date +%N)$$; mkdir -p "$HOME/w"; echo "{\\"n\\": 1, \\"at\\": $(date +%N), \\"pid\\": $$}" > "$HOME/w/id$id.json"')
+        prog = sh('id=$(date +%N)$$; mkdir -p "$HOME/w"; echo "{\\"n\\": 1, \\"at\\": \\"$(date +%N)\\", \\"pid\\": $$}" > "$HOME/w/id$id.json"')
         base = {'name': 'mask', 'run': [['x']], 'normalize': [['id\\d+', 'ID']]}
         both = {'default': {}, 'old': prog, 'new': prog}
         out = io.StringIO()
@@ -161,18 +171,6 @@ class SelfTest(unittest.TestCase):
         failed, _, _ = D.run_all([dict(base, normalize_paths=True)], {'default': {}, 'old': two, 'new': two}, [], jobs=1, out=out)
         self.assertEqual(failed, ['mask'])
         self.assertIn('once masked', out.getvalue())
-
-    def test_mask_keys_mask_a_leading_zero_clock_in_text_that_is_not_json(self):
-        # %N gives nine digits, so a clock can start with 0; JSON forbids that, so the file does not parse and is text.
-        with tempfile.TemporaryDirectory() as t:
-            n = D.Normalizer(Path(t), mask_keys=['at', 'pid'])
-        self.assertEqual(n.unparsed_json('{"n": 1, "at": 012345678, "pid": 21895}'),
-                         '{"n": 1, "at": <MASKED>, "pid": <MASKED>}')
-        self.assertEqual(n.unparsed_json('{"at": "09:30", "pid": null, "at": -07, "pid": true}'),
-                         '{"at": <MASKED>, "pid": <MASKED>, "at": <MASKED>, "pid": <MASKED>}')
-        # Negative: other keys (even ones that end in or start with a mask key) and other values are left alone.
-        self.assertEqual(n.unparsed_json('{"hat": 012, "atlas": 012, "n": 012, "at": {"x": 1}}'),
-                         '{"hat": 012, "atlas": 012, "n": 012, "at": {"x": 1}}')
 
     def test_mask_keys_mask_any_scalar_and_only_last_started_is_epoch(self):
         # A pid is a number on one machine and null on another: a case's own mask key must give the same text for both.
