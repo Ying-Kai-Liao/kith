@@ -651,6 +651,23 @@ pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<En
     Ok(out)
 }
 
+/// `kith ask --to ID`: whether a follow-up may be sent to the ask. The stopped fence never lifts, so an ended or stopped ask
+/// refuses at send ("ask anew"): the Python `send_to` queued the message and let the wake fence drop it silently, which
+/// the caller could not tell from a delivery. Reads only.
+pub(crate) fn check_to(conn: &Connection, id: &str) -> Result<()> {
+    let Some(a) = get(conn, id)? else {
+        return Err(Error::Refused(format!(
+            "kith-core: asks: no ask {id} on this Mac"
+        )));
+    };
+    if a.state == "stopped" || a.ended_ms.is_some() {
+        return Err(Error::Stopped(format!(
+            "kith-core: ask {id} was stopped; ask anew"
+        )));
+    }
+    Ok(())
+}
+
 #[allow(clippy::cast_possible_truncation)]
 fn micro(usd: f64) -> i64 {
     (usd * 1e6).round_ties_even() as i64

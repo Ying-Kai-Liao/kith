@@ -462,6 +462,7 @@ fn error_reply(id: &Value, e: &Error) -> Value {
         Error::BadParams(_) => (-32602, "bad_params"),
         Error::NotAllowed(_) => (-32001, "not_allowed"),
         Error::NotServed(_) => (-32004, "not_served"),
+        Error::Stopped(_) => (-32005, "stopped"),
         _ => (-32000, "failed"),
     };
     failure(id, code, kind, &e.to_string())
@@ -474,6 +475,7 @@ fn from_error(message: &str, kind: &str) -> Error {
         "bad_params" => Error::BadParams(m),
         "not_allowed" => Error::NotAllowed(m),
         "not_served" => Error::NotServed(m),
+        "stopped" => Error::Stopped(m),
         _ => Error::Io(m),
     }
 }

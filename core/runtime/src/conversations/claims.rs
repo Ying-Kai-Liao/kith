@@ -301,7 +301,8 @@ pub(crate) fn claim_in(
             )
             .optional()?;
         if let Some(ask) = fenced {
-            return Err(Error::Refused(format!(
+            // Its own kind: the fence never lifts, so a drain withdraws the turn as stopped instead of retrying.
+            return Err(Error::Stopped(format!(
                 "kith-core: ask {ask} was stopped; conversation {} takes no ask or wake turn",
                 req.conversation
             )));
