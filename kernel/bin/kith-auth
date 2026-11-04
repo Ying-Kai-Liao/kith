@@ -84,7 +84,7 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           can't be reached (--local: this Mac's file only, what kith serve writes)
                                           Until the core is the authority, a revoke, an undo and a removal also reach
                                           core.db (people.suspend / undo / removePerson) once auth.json is written; a core
-                                          that can't be reached is said on stderr and replayed (kith-auth core-sync [--all])
+                                          that can't be reached is said on stderr (no retry)
   kith-auth person <id> --clear-temp        removes their runs' Claude Code temp folder (<machine>/run/t/<id>);
                                           --rm and a revoke do it too, kith serve once it has stopped their runs
   kith-auth person <id> id=<new>            rename: memberships, grants, owned profiles and invites come along; the
@@ -2454,132 +2454,31 @@ def sweep_kernel(persons):
 # ---- the core's copy of a person's access (M2-revoke-bridge) --------------------------------------------------------
 # Until M2-18 flips the authority switch, auth.json decides and the Rust core's core.db holds a second copy of people.
 # A revoke, an undo or a removal made here is mirrored to it (people.suspend / people.undo / people.removePerson, over
-# `kith kernel core-call`), AFTER auth.json is written: auth.json stays authoritative and a core that is down never fails
-# or rolls back the command. So the mirror can't be lost, the intent is written to <auth dir>/core-mirror.json (under
-# the auth lock) before the core is asked, and cleared only once the core confirmed it. The file keeps ONE entry per
-# person, the last action, with a rising `seq`: a revoke followed by an undo while the core was down replays as the undo
-# alone, never revoke-after-undo. Every call is idempotent in the core, so a replay after a lost answer is harmless.
-# Replayed by the next revoke, undo or removal and by `kith-auth core-sync`; `core-sync --all` also pushes the state of
-# every person in auth.json, which catches a miss that has no entry.
+# `kith kernel core-call`) AFTER auth.json is written. No queue: a replayed revoke could land after a later re-grant or
+# undo and wrongly win. A call that fails only prints a warning and the command still succeeds; the host's same-answer
+# guard (M2-18) covers a miss.
 MIRROR_METHOD = {'suspend': 'people.suspend', 'undo': 'people.undo', 'remove': 'people.removePerson'}
+MIRROR_WARNING = {'suspend': 'revoked in auth.json; core.db not updated',
+                  'undo': 'unrevoked in auth.json; core.db not updated',
+                  'remove': 'removed in auth.json; core.db not updated'}
 CORE_CALL_SECS = 15
 MIRROR_ENV = ('KITH_STATE', 'HQ_STATE', 'KITH_HOME', 'HQ_HOME', 'KITH_AGENTS', 'HQ_AGENTS')
 
 
-def mirror_file():
-    return AUTH.with_name('core-mirror.json')
-
-
-def mirror_read():
-    try:
-        d = json.loads(mirror_file().read_text())
-        return d if isinstance(d, dict) and isinstance(d.get('people'), dict) else {'seq': 0, 'people': {}}
-    except (OSError, ValueError):
-        return {'seq': 0, 'people': {}}
-
-
-def mirror_write(d):
-    f = mirror_file()
-    if not d['people']:
-        f.unlink(missing_ok=True)
-        return
-    f.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=f.name + '.', suffix='.tmp', dir=f.parent)
-    try:
-        with os.fdopen(fd, 'w') as out:
-            out.write(json.dumps(d, indent=2) + '\n')
-            out.flush()
-            os.fsync(out.fileno())
-        os.replace(tmp, f)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
-
-
-def mirror_note(pid, action):
-    """Writes the intent (the last action for pid wins, with a higher seq than anything before). Under the auth lock."""
-    lock_auth()
-    d = mirror_read()
-    d['seq'] = int(d.get('seq', 0)) + 1
-    d['people'][pid] = {'action': action, 'seq': d['seq'], 'at': int(time.time())}
-    mirror_write(d)
-
-
-def core_ask(method, pid):
-    """One call to the core over `kith kernel core-call`: ('ok', '') the core confirmed it; ('down', why) no kith program,
-    no daemon, or the call was lost or timed out (it may or may not have run: idempotent, so it is asked again);
-    ('refused', why) the core answered no (e.g. the person is not in core.db yet: the M2-8 import has not run)."""
-    from kith_paths import kith_bin
-    try:
-        bin_ = kith_bin()
-    except Exception as e:   # a lookup that fails is a core that can't be reached
-        return 'down', f'no kith program ({e})'
-    if not bin_:
-        return 'down', 'this Mac has no kith program with a core'
-    params = {'id': pid, 'kernel': str(KITH), 'home': str(Path.home()),
-              'env': {k: os.environ[k] for k in MIRROR_ENV if os.environ.get(k)}}
-    try:
-        r = subprocess.run([bin_, 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(params),
-                           capture_output=True, text=True, timeout=CORE_CALL_SECS)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return 'down', f'the core did not answer ({type(e).__name__})'
-    why = (r.stderr or r.stdout).strip().splitlines()[-1:] or ['']
-    if r.returncode == 0:
-        return 'ok', ''
-    if r.returncode == 4:
-        return 'refused', why[0]
-    return 'down', why[0] or f'exit {r.returncode}'
-
-
-def mirror_replay():
-    """Asks the core for every pending entry, oldest first. A confirmed entry is cleared (only that entry: a newer
-    action for the person is a newer seq and stays). Returns {pid: (state, why)}. Needs the auth lock."""
-    lock_auth()
-    out = {}
-    for pid, e in sorted(mirror_read()['people'].items(), key=lambda kv: kv[1].get('seq', 0)):
-        state, why = core_ask(MIRROR_METHOD.get(e.get('action'), ''), pid)
-        out[pid] = (state, why)
-        if state == 'ok':
-            d = mirror_read()
-            if d['people'].get(pid, {}).get('seq') == e.get('seq'):
-                d['people'].pop(pid)
-                mirror_write(d)
-    return out
-
-
 def mirror_to_core(pid, action):
-    """After auth.json is written: note the intent, tell the core, and say on stderr when it is not confirmed. Older
-    pending entries are tried again too (their order is kept by the seq). Never fails the command."""
+    """After auth.json is written: tell the core, once. On any failure say so on stderr and return (exit stays 0)."""
     try:
-        mirror_note(pid, action)
-        state, why = mirror_replay().get(pid, ('down', 'not asked'))
-        if state != 'ok':
-            print(f'kith-auth: warning: {pid}: the {action} is recorded in auth.json (the authority today) but is '
-                  f'PENDING in the core ({why}); the next revoke, undo or removal, or `kith-auth core-sync`, replays it',
-                  file=sys.stderr)
-    except Exception as e:   # the mirror must never undo a revoke that auth.json already holds
-        print(f'kith-auth: warning: {pid}: the {action} is in auth.json but the core mirror failed ({e})', file=sys.stderr)
-
-
-def cmd_core_sync(args):
-    """core-sync [--all]: replays what is pending; --all also asks the core for every person's state in auth.json (a
-    revoked person is suspended, any other person is undone: a no-op for one who is not suspended), so a miss with no
-    entry is caught too. Exit 1 while anything is not confirmed."""
-    if set(args) - {'--all'}:
-        die('core-sync [--all]', 2)
-    lock_auth()
-    if '--all' in args:
-        auth = load_auth()
-        pending = mirror_read()['people']
-        for pid, p in auth['people'].items():
-            if not p.get('bot_of') and not is_owner(auth, pid) and pid not in pending:
-                mirror_note(pid, 'suspend' if p.get('revoked') else 'undo')
-    res = mirror_replay()
-    for pid, (state, why) in sorted(res.items()):
-        print(f'{pid}: ' + ('core confirmed' if state == 'ok' else f'pending in the core ({why})'))
-    if not res:
-        print('nothing pending')
-    sys.exit(0 if all(s == 'ok' for s, _ in res.values()) else 1)
+        from kith_paths import kith_bin
+        bin_ = kith_bin()
+        params = {'id': pid, 'kernel': str(KITH), 'home': str(Path.home()),
+                  'env': {k: os.environ[k] for k in MIRROR_ENV if os.environ.get(k)}}
+        r = subprocess.run([bin_, 'kernel', 'core-call', MIRROR_METHOD[action], '--params-stdin'] if bin_ else [],
+                           input=json.dumps(params), capture_output=True, text=True, timeout=CORE_CALL_SECS)
+        if r.returncode == 0:
+            return
+    except Exception:   # no kith program, no daemon, a timeout: all the same warning
+        pass
+    print(MIRROR_WARNING[action], file=sys.stderr)
 
 
 def revoke_person(pid, revoke, local):
@@ -3136,8 +3035,6 @@ def main(argv):
         print(why)
     elif cmd == 'person':
         cmd_person(rest)
-    elif cmd == 'core-sync':
-        cmd_core_sync(rest)
     elif cmd == 'handle':
         cmd_handle(rest)
     elif cmd == 'whois':

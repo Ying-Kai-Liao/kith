@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
 # kith-auth-core-mirror-check — until M2-18, a revoke / undo / removal made through kith-auth also reaches the core's copy
 # of people (core.db): people.suspend / people.undo / people.removePerson over `kith kernel core-call`, after auth.json is
-# written. With a fake `kith` program standing in for the core (a JSON file is its core.db; the file `down` is "no daemon"):
-#   1. core up: a revoke reaches it, and so does the undo; nothing is left pending; revoking twice is fine
-#   2. core down: the revoke still succeeds and auth.json is revoked, stderr says it is PENDING in the core and the intent
-#      is on disk; the core comes back and `core-sync` (or the next revoke) replays it: the person is revoked in core.db
-#   3. core down, revoke then undo, core back: the person is NOT revoked in core.db, and no suspend is ever sent after the undo
-#   4. the core has never heard of the person (not imported yet): kith-auth succeeds, the entry stays pending, and once the
-#      core has them the replay lands
-#   5. no kith program at all: kith-auth succeeds and warns; --rm is mirrored as people.removePerson; core-sync --all
-#      pushes every person's state; a refused revoke (the owner) never reaches the core
+# written. No queue: a failed call only prints a warning and the command still succeeds. With a fake `kith` program
+# standing in for the core (a JSON file is its core.db):
+#   1. core up: a revoke and an undo reach it
+#   2. core down, or no kith program: kith-auth exits 0, auth.json shows the person revoked, the warning is on stderr
 # The rules themselves: kith-auth-revoke-check. Throwaway dirs, never ~/.kith.
 #
 #   kernel/tests/kith-auth-core-mirror-check     a few seconds; prints each check, exits 1 when one fails
@@ -59,7 +54,6 @@ export KITH_BIN=$T/fakekith
 A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
 fail=0
 check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
-core_has() { echo "{\"$1\": {\"revoked\": false}}" >/dev/null; }
 core_add() { python3 - "$FAKE_DIR/core.json" "$@" <<'PY'
 import json, os, sys
 f = sys.argv[1]
@@ -71,7 +65,6 @@ PY
 }
 core_revoked() { python3 -c "import json; print(json.load(open('$FAKE_DIR/core.json')).get('$1', {}).get('revoked', 'absent'))"; }
 auth_revoked() { python3 -c "import json; print('revoked' in json.load(open('$KITH_AUTH'))['people']['$1'])"; }
-pending() { python3 -c "import json,os; f='$T/core-mirror.json'; d=json.load(open(f))['people'] if os.path.exists(f) else {}; print(json.dumps({k: v['action'] for k, v in d.items()}, sort_keys=True))"; }
 down() { touch "$FAKE_DIR/down"; }
 up() { rm -f "$FAKE_DIR/down"; }
 
@@ -80,93 +73,28 @@ for p in sam ann bob; do A person $p name=$p >/dev/null; A member house $p >/dev
 core_add sam ann
 
 # 1. core up
-A person sam --revoke >"$T/out" 2>"$T/err"
-cat $T/err $FAKE_DIR/calls >&2; check "up: the revoke succeeded" "[ \$? -eq 0 ] && grep -q 'access removed' $T/out"
+A person sam --revoke >"$T/out" 2>"$T/err"; rc=$?
+check "up: the revoke succeeded" "[ $rc -eq 0 ] && grep -q 'access removed' $T/out"
 check "up: auth.json says revoked" "[ \"\$(auth_revoked sam)\" = True ]"
-check "up: core.db says revoked" "[ \"\$(core_revoked sam)\" = True ]"
-check "up: no warning, nothing pending" "[ ! -s $T/err ] && [ \"\$(pending)\" = '{}' ]"
-A person sam --revoke >/dev/null 2>&1
-check "up: revoking twice is fine, still revoked in the core" "[ \"\$(core_revoked sam)\" = True ]"
+check "up: the revoke reached the core" "grep -q 'people.suspend sam' $FAKE_DIR/calls && [ \"\$(core_revoked sam)\" = True ]"
+check "up: no warning" "! grep -q 'core.db not updated' $T/err"
 A person sam --unrevoke >/dev/null 2>&1
-check "up: the undo reaches the core" "[ \"\$(core_revoked sam)\" = False ]"
+check "up: the undo reaches the core" "grep -q 'people.undo sam' $FAKE_DIR/calls && [ \"\$(core_revoked sam)\" = False ]"
 
-# 2. core down, then back
-down
+# 2. core down
+touch "$FAKE_DIR/down"
 A person sam --revoke >"$T/out" 2>"$T/err"; rc=$?
 check "down: the revoke still succeeds" "[ $rc -eq 0 ]"
-check "down: auth.json is revoked (it stays the authority)" "[ \"\$(auth_revoked sam)\" = True ]"
-check "down: stderr says it is pending in the core" "grep -q 'PENDING in the core' $T/err && grep -q 'recorded in auth.json' $T/err"
-check "down: the intent is on disk" "[ \"\$(pending)\" = '{\"sam\": \"suspend\"}' ]"
-check "down: the core did not change" "[ \"\$(core_revoked sam)\" = False ]"
-up
-A core-sync >"$T/out" 2>&1; rc=$?
-check "back: core-sync confirms and exits 0" "[ $rc -eq 0 ] && grep -q 'sam: core confirmed' $T/out"
-check "back: the person is revoked in core.db" "[ \"\$(core_revoked sam)\" = True ]"
-check "back: nothing is pending" "[ \"\$(pending)\" = '{}' ]"
-A core-sync >"$T/out" 2>&1
-check "core-sync with nothing pending says so" "grep -q 'nothing pending' $T/out"
+check "down: auth.json is revoked" "[ \"\$(auth_revoked sam)\" = True ]"
+check "down: the warning is on stderr" "grep -qx 'revoked in auth.json; core.db not updated' $T/err"
+A person sam --unrevoke >/dev/null 2>"$T/err"
+check "down: the undo warns too" "grep -qx 'unrevoked in auth.json; core.db not updated' $T/err"
+rm -f "$FAKE_DIR/down"
 
-# the next revoke replays an older miss too
-A person sam --unrevoke >/dev/null 2>&1
-down; A person sam --revoke >/dev/null 2>&1; up
-A person ann --revoke >/dev/null 2>&1
-check "back: the next revoke replays the older miss (sam) and does its own (ann)" \
-  "[ \"\$(core_revoked sam)\" = True ] && [ \"\$(core_revoked ann)\" = True ] && [ \"\$(pending)\" = '{}' ]"
-
-# 3. revoke then undo while down
-A person sam --unrevoke >/dev/null 2>&1; A person ann --unrevoke >/dev/null 2>&1
-: > "$FAKE_DIR/calls"
-down
-A person sam --revoke >/dev/null 2>&1
-A person sam --unrevoke >"$T/out" 2>"$T/err"
-check "down: revoke then undo leaves one entry, the undo" "[ \"\$(pending)\" = '{\"sam\": \"undo\"}' ]"
-check "down: auth.json is not revoked" "[ \"\$(auth_revoked sam)\" = False ]"
-up
-A core-sync >/dev/null 2>&1
-check "back: the person is NOT revoked in core.db" "[ \"\$(core_revoked sam)\" = False ]"
-check "back: the core never saw a suspend after the undo" "! grep -q 'people.suspend sam' $FAKE_DIR/calls && grep -q 'people.undo sam' $FAKE_DIR/calls"
-check "back: nothing is pending" "[ \"\$(pending)\" = '{}' ]"
-# and the other way round: undo then revoke while down
-down
-A person sam --unrevoke >/dev/null 2>&1
-A person sam --revoke >/dev/null 2>&1
-up
-A core-sync >/dev/null 2>&1
-check "undo then revoke while down: revoked in the core after it is back" "[ \"\$(core_revoked sam)\" = True ]"
-A person sam --unrevoke >/dev/null 2>&1
-
-# 4. the core has not got the person yet
-: > "$FAKE_DIR/calls"
-A person bob --revoke >"$T/out" 2>"$T/err"; rc=$?
-check "unknown to the core: the revoke succeeds" "[ $rc -eq 0 ] && [ \"\$(auth_revoked bob)\" = True ]"
-check "unknown to the core: warned, and kept pending" "grep -q 'PENDING in the core' $T/err && [ \"\$(pending)\" = '{\"bob\": \"suspend\"}' ]"
-A core-sync >/dev/null 2>&1; rc=$?
-check "unknown to the core: core-sync still exits 1" "[ $rc -eq 1 ]"
-core_add bob
-A core-sync >/dev/null 2>&1
-check "once the core has them the replay lands" "[ \"\$(core_revoked bob)\" = True ] && [ \"\$(pending)\" = '{}' ]"
-A person bob --unrevoke >/dev/null 2>&1
-
-# 5. no kith program, --rm, --all, a refused revoke
+# no kith program at all
 export KITH_BIN=$T/nothing-here PATH=/usr/bin:/bin
 A person ann --revoke >"$T/out" 2>"$T/err"; rc=$?
-check "no kith program: the revoke succeeds and warns" "[ $rc -eq 0 ] && [ \"\$(auth_revoked ann)\" = True ] && grep -q 'PENDING in the core' $T/err"
-export KITH_BIN=$T/fakekith
-A core-sync --all >"$T/out" 2>&1
-check "core-sync --all: the revoked person is revoked in the core" "[ \"\$(core_revoked ann)\" = True ]"
-check "core-sync --all: the others are not" "[ \"\$(core_revoked sam)\" = False ] && [ \"\$(core_revoked bob)\" = False ]"
-: > "$FAKE_DIR/calls"
-A person kai --revoke >/dev/null 2>&1; rc=$?
-check "the owner can not be revoked, and the core hears nothing of it" "[ $rc -ne 0 ] && [ ! -s $FAKE_DIR/calls ]"
-A person ghost --revoke >/dev/null 2>&1; rc=$?
-check "a person who does not exist is refused before the core" "[ $rc -ne 0 ] && [ ! -s $FAKE_DIR/calls ]"
-A person ann --rm >"$T/out" 2>"$T/err"; rc=$?
-check "--rm succeeds and is mirrored as a removal" "[ $rc -eq 0 ] && grep -q 'people.removePerson ann' $FAKE_DIR/calls && [ \"\$(core_revoked ann)\" = absent ]"
-down
-A person bob --rm >/dev/null 2>"$T/err"
-check "--rm with the core down: removed here, pending there" "grep -q 'PENDING in the core' $T/err && [ \"\$(pending)\" = '{\"bob\": \"remove\"}' ]"
-up; A core-sync >/dev/null 2>&1
-check "--rm replayed once the core is back" "[ \"\$(core_revoked bob)\" = absent ] && [ \"\$(pending)\" = '{}' ]"
+check "no kith program: exits 0, revoked, warned" "[ $rc -eq 0 ] && [ \"\$(auth_revoked ann)\" = True ] && grep -qx 'revoked in auth.json; core.db not updated' $T/err"
 
 [ $fail -eq 0 ] && echo "all ok" || echo "FAILED"
 exit $fail
