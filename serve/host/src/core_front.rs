@@ -74,6 +74,27 @@ pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
     }
 }
 
+/// What an owner-socket call came to, for the callers that must tell the core's "no" from a core that was not there
+/// (M2-17: the owner's grants and the access requests fail closed on the second, and show the first as it was said).
+pub enum Answer {
+    Done(Value),
+    /// The core ran the rules and refused (its words, or a call that does not fit the method's row).
+    Refused(String),
+    /// Nothing answered, or the connection ended before an answer: `lost` says the call had gone out and may have run.
+    Down { why: String, lost: bool },
+}
+
+/// One call of the owner's to the daemon. `repeatable` is for reads; a write is never sent a second time.
+pub fn call_owner(folders: &Paths, method: &str, params: &Value, repeatable: bool) -> Answer {
+    match kith_core::reach(folders, method, params, repeatable) {
+        kith_core::Reached::Answered(v) => Answer::Done(v),
+        kith_core::Reached::Refused(e) => Answer::Refused(e.to_string()),
+        kith_core::Reached::NoDaemon => Answer::Down { why: "no core is running".to_owned(), lost: false },
+        kith_core::Reached::Mismatch(note) => Answer::Down { why: note, lost: false },
+        kith_core::Reached::Lost(why) => Answer::Down { why, lost: true },
+    }
+}
+
 /// A daemon started for a test of a caller that asks it (`ask`).
 #[cfg(test)]
 pub struct TestDaemon(kith_core::Daemon);

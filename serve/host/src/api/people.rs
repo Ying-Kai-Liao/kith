@@ -114,6 +114,20 @@ async fn grant(bin: &Path, person: &str, agent: &str, role: &str, fresh: bool) -
     account::run(bin, &args).await.map(drop)
 }
 
+/// [`grant`] through the core: `people.grant`, with the settings `kith-auth member` gets.
+async fn core_grant(person: &str, agent: &str, role: &str, fresh: bool) -> Result<()> {
+    let mut params = json!({"person": person, "agent": agent, "preset": role});
+    if fresh {
+        params["budget"] = BUDGET.into();
+    }
+    super::authority::owner_call("people.grant", params, false).await.map(drop)
+}
+
+/// `member agent person --rm` through the core.
+async fn core_revoke(person: &str, agent: &str) -> Result<()> {
+    super::authority::owner_call("people.revoke", json!({"person": person, "agent": agent}), false).await.map(drop)
+}
+
 /// What a failed `createInvite` puts back.
 #[derive(Default)]
 struct Undo {
@@ -294,8 +308,9 @@ async fn people(hub: &Arc<Hub>) -> Result<Value> {
     // Read and mirror under the lock `setPersonAccess` takes, so an older list never overwrites a newer copy.
     let auth = {
         let _w = AUTH_WRITES.lock().await;
-        let auth =
-            crate::remote::members::auth_people(&bin).await.context("can't list people: kith-auth wasn't readable")?;
+        let auth = crate::remote::members::auth_people_now(&bin)
+            .await
+            .context("can't list people: kith-auth wasn't readable")?;
         crate::remote::members::mirror_agents(&hub.store, &auth);
         auth
     };
@@ -357,7 +372,7 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
             let want = roles_of(&b["agents"])?;
             // What kith-auth says they hold by their own row, whoever made it (the owner may have added one with the
             // CLI): a read that fails stops here, before anything is changed.
-            let held: Vec<String> = crate::remote::members::auth_person(&bin, id)
+            let held: Vec<String> = crate::remote::members::auth_person_now(&bin, id)
                 .await
                 .context("couldn't read what kith-auth says they hold")?
                 .ok_or_else(|| anyhow!("`{id}` isn't a person in kith-auth"))?
@@ -367,9 +382,17 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
                 .map(|r| r.agent)
                 .collect();
             let mut made = person.made.clone();
+            // With KITH_CORE_AUTHORITY=1 the owner's change is the core's (M2-17): kith-auth is not written at all, and
+            // a core that can't be reached stops the change here.
+            let on_core = super::authority::guard_on_core();
             for (agent, role) in &want {
                 let had = roles::may_use(id, agent).await;
-                grant(&bin, id, agent, role, !had).await.with_context(|| format!("giving {id} {agent}"))?;
+                let given = if on_core {
+                    core_grant(id, agent, role, !had).await
+                } else {
+                    grant(&bin, id, agent, role, !had).await
+                };
+                given.with_context(|| format!("giving {id} {agent}"))?;
                 if !had && !made.contains(agent) {
                     made.push(agent.clone());
                 }
@@ -378,13 +401,20 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
             // (say the agent's folder is gone) must not stop the rest: it is reported, and the row stays in `made`
             // so a later change tries again.
             for agent in held.iter().filter(|a| !want.contains_key(*a)) {
-                match account::run(&bin, &["member", agent, id, "--rm"]).await {
-                    Ok(_) => made.retain(|m| m != agent),
+                let taken = if on_core {
+                    core_revoke(id, agent).await
+                } else {
+                    account::run(&bin, &["member", agent, id, "--rm"]).await.map(drop)
+                };
+                match taken {
+                    Ok(()) => made.retain(|m| m != agent),
+                    // A core that can't be asked is no "agent folder is gone": the change fails, as a grant does.
+                    Err(e) if e.downcast_ref::<super::authority::CoreDown>().is_some() => return Err(e),
                     Err(e) => warnings.push(format!("couldn't take {agent} away from {id}: {e:#}")),
                 }
             }
             // The copy follows kith-auth, not what was asked: a row that wouldn't go still shows.
-            match crate::remote::members::auth_people(&bin).await {
+            match crate::remote::members::auth_people_now(&bin).await {
                 Ok(auth) => crate::remote::members::mirror_agents(&hub.store, &auth),
                 Err(e) => {
                     warnings.push(format!("couldn't read kith-auth after the change: {e:#}"));

@@ -5997,6 +5997,14 @@
           }
         },
         {
+          "name": "local",
+          "summary": "The owner at the computer itself: every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -6050,6 +6058,202 @@
               "--members"
             ]
           },
+          "local": {
+            "kind": "switch",
+            "spellings": [
+              "--local"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.fileRequest",
+      "summary": "A device's access request, as the host took it up from the cloud: files it (pending) or, when the id is known, only adds the code once the device has shown it. The host calls this on every state pull while it asks the core, so a core that was down gets the request on the next one. Refuses a member who is not a member and a device with a request already waiting for its code.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "deviceKey",
+          "summary": "The device's key.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "deviceName",
+          "summary": "The device's name.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "platform",
+          "summary": "The device's platform.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "email",
+          "summary": "The account's email, if the cloud gave one.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The member the account is on this computer; none is the owner's own device.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "createdAt",
+          "summary": "When the cloud made it (ms).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "expiresAt",
+          "summary": "When it runs out (ms).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "code",
+          "summary": "The code to compare, once the device has shown it.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "file-request"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "deviceKey": {
+            "kind": "flag",
+            "spellings": [
+              "--device-key"
+            ]
+          },
+          "deviceName": {
+            "kind": "flag",
+            "spellings": [
+              "--device-name"
+            ]
+          },
+          "platform": {
+            "kind": "flag",
+            "spellings": [
+              "--platform"
+            ]
+          },
+          "email": {
+            "kind": "flag",
+            "spellings": [
+              "--email"
+            ]
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "createdAt": {
+            "kind": "flag",
+            "spellings": [
+              "--created-at"
+            ]
+          },
+          "expiresAt": {
+            "kind": "flag",
+            "spellings": [
+              "--expires-at"
+            ]
+          },
+          "code": {
+            "kind": "flag",
+            "spellings": [
+              "--code"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -6080,6 +6284,14 @@
         {
           "name": "members",
           "summary": "Answer as one of the owner's other devices: members' requests only.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "local",
+          "summary": "The owner at the computer itself: every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
           "required": false,
           "schema": {
             "type": "boolean"
@@ -6142,6 +6354,12 @@
               "--members"
             ]
           },
+          "local": {
+            "kind": "switch",
+            "spellings": [
+              "--local"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -6172,6 +6390,14 @@
         {
           "name": "members",
           "summary": "Answer as one of the owner's other devices: members' requests only.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "local",
+          "summary": "The owner at the computer itself: every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
           "required": false,
           "schema": {
             "type": "boolean"
@@ -6232,6 +6458,12 @@
             "kind": "switch",
             "spellings": [
               "--members"
+            ]
+          },
+          "local": {
+            "kind": "switch",
+            "spellings": [
+              "--local"
             ]
           },
           "kernel": {
