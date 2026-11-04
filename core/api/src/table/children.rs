@@ -121,8 +121,16 @@ pub(super) const ROWS: &[Method] = &[
     ),
     ask(
         "ask.revokeEverywhere",
-        "The revoke order for conversations, once the authority revoke is visible to the may check: the person's claims and each of their bots' (queued and parked turns cancelled, live claims to `ending`, the revoke epoch bumped so a claim that passed its may check before is refused), THEN the asks of the person and their bots with every ask below them (`ask.end --persons`). `ask.end` alone is not a revoke. Safe to repeat; a retry finishes a crash between the steps. Kills no process: answers `{principals, cancelledTurns, ended, sessions, kill}`.",
-        &[pos("person", "string", true, "The person revoked.")],
+        "The revoke order for conversations, once the authority revoke is visible to the may check: the person's claims and each of their bots' (queued and parked turns cancelled, live claims to `ending`, the revoke epoch bumped so a claim that passed its may check before is refused), THEN the asks of the person and their bots with every ask below them (`ask.end --persons`). `ask.end` alone is not a revoke. One claim transaction per principal, then one for the asks. Safe to repeat; a retry (with the same bots) finishes a crash between the steps, and a crash after the person's step leaves the bots' in-flight claims unfenced until it. On a removal pass `--bots`, read before the write: the rows are gone after. Kills no process: answers `{principals, cancelledTurns, ended, sessions, kill}`.",
+        &[
+            pos("person", "string", true, "The person revoked."),
+            flag(
+                "bots",
+                "[string]",
+                &["--bots"],
+                "Bots of the person (the whole transitive set) read before an authority removal deleted their rows; the bots still in `people.bot_of` are added.",
+            ),
+        ],
         &["asks", "revoke-everywhere"],
     ),
     ask(

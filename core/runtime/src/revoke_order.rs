@@ -10,14 +10,22 @@
 //! 2. [`asks::end_tree`] for the same principals: their asks, and every ask below those, settled `stopped`, the children's
 //!    conversations stopped, the wakes the callers are owed withdrawn.
 //!
-//! The order matters. Ending the asks first leaves a window in which the person's (or a bot's) turn still passes the
-//! may check and claims a conversation the stop has just emptied; the verification model (`verification/revoke`, variants
-//! `broken-asks-first` and `broken-bots-skipped`) fails both. `ask.end` alone is not a revoke: it never touches a claim
-//! of a turn that is not an ask's.
+//! Claims first means a claim that passed its may check just before the revoke is refused by the epoch fence instead of
+//! starting on a conversation the stop has just emptied. The verification model (`verification/revoke`) pins the order
+//! structurally: `OrderKept` is the same condition as the `AskSweep` guard, so `broken-asks-first` fails because the guard
+//! is gone, not because a harm property catches an in-flight claim (a structural pin, not a behaviour proof);
+//! `broken-bots-skipped` does fail on a harm property. `ask.end` alone is not a revoke: it never touches a claim of a turn
+//! that is not an ask's.
 //!
-//! The two steps are two claim transactions, not one: `revoke_person` and `end_tree` each own theirs, and a rewrite to
-//! share one is the claims lane's. A crash between them leaves the claims revoked and the asks not yet ended, which is the
-//! safe half (nothing of theirs can start); calling this again finishes it, because both steps are idempotent: a second
+//! The bots: on a removal (`person --rm`) the authority write deletes the person's and their bots' `people` rows, so a
+//! walk of `people.bot_of` run afterwards finds nothing. The caller therefore passes the bots it read BEFORE the write
+//! (`removed_bots`, the whole transitive set); the table walk still runs and is unioned in, which is what a suspend (rows
+//! kept) relies on.
+//!
+//! One claim transaction per principal (`revoke_person` each), then one for the asks (`end_tree`); a rewrite to share one
+//! is the claims lane's. A crash after the person's step leaves the bots' in-flight claims unfenced until the retry, and
+//! the asks not yet ended; nothing new of the person's can start. Calling this again (with the same bots) finishes it,
+//! because every step is idempotent: a second
 //! `revoke_person` bumps the epoch again and finds nothing new to cancel, and `end_tree` settles only asks not yet
 //! ended. The kills come back from both calls and are re-sent until gone (`claims::end_gone`).
 
@@ -63,11 +71,19 @@ fn bots_of(core: &Core, person: &str) -> Result<Vec<String>> {
 }
 
 /// Revokes `person` in the conversations: their claims and their bots', then their ask tree. Call it after the authority
-/// revoke is visible to the may check (see [`claims::revoke_person`]). Safe to repeat.
-pub(crate) fn revoke_everywhere(core: &mut Core, person: &str, now: i64) -> Result<Everywhere> {
+/// revoke is visible to the may check (see [`claims::revoke_person`]). `removed_bots` are the bots (the whole transitive
+/// set) read before an authority removal deleted their rows; pass `&[]` when the rows are still there. Safe to repeat.
+pub(crate) fn revoke_everywhere(
+    core: &mut Core,
+    person: &str,
+    removed_bots: &[String],
+    now: i64,
+) -> Result<Everywhere> {
     let mut out = Everywhere::default();
     out.principals.push(person.to_owned());
-    out.principals.extend(bots_of(core, person)?);
+    let mut bots: BTreeSet<String> = bots_of(core, person)?.into_iter().collect();
+    bots.extend(removed_bots.iter().filter(|b| *b != person).cloned());
+    out.principals.extend(bots);
     for p in out.principals.clone() {
         let r = claims::revoke_person(core, &p, now)?;
         out.cancelled_turns += r.cancelled_turns;

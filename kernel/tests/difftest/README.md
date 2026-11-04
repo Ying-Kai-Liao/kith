@@ -61,6 +61,10 @@ terminal, proc, sweep, release, latest, pick).
   later; the core refuses at send with `was stopped; ask anew` (`asks-to-after-end-python-sends`, step 1, `ask.to`).
 - `--end --person P`: the core also ends the asks of P's bots when the revoke order is used (`ask.revokeEverywhere`), which Python's
   `--end --person` does only for the persons it is given.
+- `--end --session`: the core walks the subtree below the session's asks (`asks/mod.rs` `end_tree`); Python leaves a child ask (`r2` in
+  `asks-end-usage`, step 1) open. That case goes red on the switch.
+- `end_tree` sets `ended_ms` on answered and delivered asks too, so `ask.to` refuses a follow-up to answered `h1`/`h2` with "was stopped"
+  (for an ask that was answered and not stopped: "was ended"); Python keeps them `answered` with no `ended_at`.
 
 Extra case fields these use: `mask_keys` (names whose value means nothing: a number becomes `<EPOCH>`, anything else `<MASKED>`),
 `normalize_paths` (the case's own `normalize` rules also apply to file names, for files named by an id the program makes up; two

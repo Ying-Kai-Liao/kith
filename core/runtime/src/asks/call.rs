@@ -136,7 +136,12 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             Ok(json!({ "id": id, "ok": true }))
         }
         "ask.revokeEverywhere" => {
-            let out = crate::revoke_order::revoke_everywhere(core, need(params, "person")?, now)?;
+            let out = crate::revoke_order::revoke_everywhere(
+                core,
+                need(params, "person")?,
+                &strings(params, "bots"),
+                now,
+            )?;
             let kill: Vec<Value> = out
                 .kill
                 .iter()

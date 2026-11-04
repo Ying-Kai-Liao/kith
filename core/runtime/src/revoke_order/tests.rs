@@ -131,7 +131,7 @@ fn a_person_with_two_bots_and_a_two_deep_ask_tree_is_stopped_everywhere_and_othe
     let live = world(&mut f);
     // a queued turn of a bot, waiting behind nothing
     let queued = turn(&mut f.core, "c-queued", "schedule", "mia-b1");
-    let out = revoke_everywhere(&mut f.core, "mia", NOW).unwrap();
+    let out = revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
     assert_eq!(out.principals, ["mia", "mia-b1", "mia-b2"]);
     assert_eq!(out.ended, ["a1", "a2", "a3"]);
     assert_eq!(out.cancelled_turns, 1);
@@ -157,12 +157,12 @@ fn a_person_with_two_bots_and_a_two_deep_ask_tree_is_stopped_everywhere_and_othe
 #[test]
 fn a_person_without_bots_is_revoked_alone() {
     let mut f = fixture();
-    let out = revoke_everywhere(&mut f.core, "ghost", NOW).unwrap();
+    let out = revoke_everywhere(&mut f.core, "ghost", &[], NOW).unwrap();
     assert_eq!(out.principals, ["ghost"]);
     assert!(out.kill.is_empty() && out.ended.is_empty());
     ask(&f.core, "a1", None, "solo", "c-a1");
     run(&mut f.core, "c-a1", "solo", "ask", 11);
-    let out = revoke_everywhere(&mut f.core, "solo", NOW).unwrap();
+    let out = revoke_everywhere(&mut f.core, "solo", &[], NOW).unwrap();
     assert_eq!(out.principals, ["solo"]);
     assert_eq!(out.ended, ["a1"]);
     assert_eq!(out.kill.len(), 1);
@@ -172,8 +172,8 @@ fn a_person_without_bots_is_revoked_alone() {
 fn revoking_twice_ends_nothing_more_and_answers_the_kills_again_until_they_are_gone() {
     let mut f = fixture();
     world(&mut f);
-    let first = revoke_everywhere(&mut f.core, "mia", NOW).unwrap();
-    let again = revoke_everywhere(&mut f.core, "mia", NOW + 1).unwrap();
+    let first = revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
+    let again = revoke_everywhere(&mut f.core, "mia", &[], NOW + 1).unwrap();
     assert_eq!(again.ended, Vec::<String>::new());
     assert_eq!(again.cancelled_turns, 0);
     assert_eq!(again.kill.len(), first.kill.len(), "re-sent until gone");
@@ -188,7 +188,7 @@ fn a_retry_after_a_crash_between_the_steps_finishes_the_asks() {
     // the first step alone, as a crash after it leaves things
     revoke_person(&mut f.core, "mia", NOW).unwrap();
     assert_eq!(state_of(&f.core, "asks", "id", "a1"), "open");
-    let out = revoke_everywhere(&mut f.core, "mia", NOW + 1).unwrap();
+    let out = revoke_everywhere(&mut f.core, "mia", &[], NOW + 1).unwrap();
     assert_eq!(out.ended, ["a1", "a2", "a3"]);
 }
 
@@ -203,7 +203,7 @@ fn a_claim_that_passed_its_may_check_before_the_revoke_is_refused_for_the_person
         .iter()
         .map(|(p, _)| turn(&mut f.core, &format!("c-{p}"), "app", p))
         .collect();
-    revoke_everywhere(&mut f.core, "mia", NOW).unwrap();
+    revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
     for ((p, e), t) in seen.iter().zip(&turns) {
         let err = claim(&mut f.core, &new_claim(&format!("c-{p}"), p, *t, *e), 5).unwrap_err();
         assert!(
@@ -218,7 +218,7 @@ fn a_stopped_asks_conversation_refuses_its_ask_turn_with_the_stopped_kind_not_th
     let mut f = fixture();
     ask(&f.core, "a1", None, "mia", "c-a1");
     let t = turn(&mut f.core, "c-a1", "wake", "kai");
-    revoke_everywhere(&mut f.core, "mia", NOW).unwrap();
+    revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
     let err = claim(&mut f.core, &new_claim("c-a1", "kai", t, 0), 5).unwrap_err();
     assert!(matches!(err, Error::Stopped(_)), "{err}");
     // a busy conversation stays a plain refusal
@@ -237,7 +237,7 @@ fn a_follow_up_to_an_ended_ask_is_refused_at_send_and_one_to_an_open_ask_is_not(
     let mut f = fixture();
     ask(&f.core, "live1", None, "kai", "c-live");
     ask(&f.core, "gone1", None, "mia", "c-gone");
-    revoke_everywhere(&mut f.core, "mia", NOW).unwrap();
+    revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
     let ok = call_at(&mut f.core, "ask.to", &json!({"id": "live1"}), NOW).unwrap();
     assert_eq!(ok["ok"], true);
     let err = call_at(&mut f.core, "ask.to", &json!({"id": "gone1"}), NOW).unwrap_err();
@@ -257,4 +257,43 @@ fn a_follow_up_to_an_ended_ask_is_refused_at_send_and_one_to_an_open_ask_is_not(
     .unwrap();
     assert_eq!(out["principals"], json!(["kai", "kai-b"]));
     assert_eq!(out["ended"], json!(["live1"]));
+}
+
+#[test]
+fn a_removed_person_whose_bot_rows_are_gone_is_revoked_through_the_bots_the_caller_passes() {
+    let mut f = fixture();
+    // a bot of a bot, with a live run and an ask of its own
+    f.core
+        .conn()
+        .execute(
+            "INSERT INTO people (id, bot_of) VALUES ('mia-b1-b', 'mia-b1')",
+            [],
+        )
+        .unwrap();
+    ask(&f.core, "a1", None, "mia", "c-a1");
+    ask(&f.core, "a9", None, "mia-b1-b", "c-a9");
+    let live = [
+        run(&mut f.core, "c-app", "mia", "app", 10),
+        run(&mut f.core, "c-b1", "mia-b1", "app", 12),
+        run(&mut f.core, "c-b1b", "mia-b1-b", "app", 13),
+    ];
+    let bots = ["mia-b1", "mia-b1-b", "mia-b2", "mia"].map(str::to_owned);
+    // the authority removal: the person's and every bot's row is deleted
+    f.core
+        .conn()
+        .execute("DELETE FROM people WHERE id LIKE 'mia%'", [])
+        .unwrap();
+    let out = revoke_everywhere(&mut f.core, "mia", &bots, NOW).unwrap();
+    assert_eq!(out.principals, ["mia", "mia-b1", "mia-b1-b", "mia-b2"]);
+    assert_eq!(out.ended, ["a1", "a9"]);
+    for id in live {
+        assert_eq!(state_of(&f.core, "claims", "claim_id", id), "ending");
+    }
+    for p in &out.principals {
+        assert_eq!(revoke_epoch(&f.core, p).unwrap(), 1, "{p}");
+    }
+    // kai's side is untouched, and a repeat with the same bots finds nothing new
+    assert_eq!(revoke_epoch(&f.core, "kai").unwrap(), 0);
+    let again = revoke_everywhere(&mut f.core, "mia", &bots, NOW + 1).unwrap();
+    assert!(again.ended.is_empty() && again.cancelled_turns == 0);
 }
