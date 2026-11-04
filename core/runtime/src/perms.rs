@@ -177,22 +177,40 @@ fn user() -> String {
 enum Verdict {
     Private,
     Open,
-    /// `icacls` failed and the file is gone: `SQLite` deletes the -wal and -shm when the last connection closes, which
-    /// can happen between the existence check and the read. A file that no longer exists holds nothing to protect.
+    /// `icacls` failed and the file is gone (a real NotFound), and it is one of `SQLite`'s sidecars: they are deleted
+    /// when the last connection closes, which can happen between the existence check and the read. Nothing to protect.
     Vanished,
-    /// `icacls` failed on a file that is still there (e.g. delete-pending, or a handle opening): worth another try.
+    /// `icacls` failed and the file is not provably gone: still there, a handle opening, access denied, a dangling
+    /// link, or any file other than a sidecar that went missing. Worth another try, then refused. (A delete-pending
+    /// file under legacy delete semantics fails the metadata call too, so it reads as gone, i.e. Vanished for a
+    /// sidecar.)
     Unreadable,
 }
 
+/// `SQLite`'s -wal and -shm: the only files allowed to vanish mid-check.
 #[cfg_attr(unix, allow(dead_code))]
-fn judge(read_ok: bool, text: &str, path: &str, user: &str, still_exists: bool) -> Verdict {
+fn is_sidecar(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with("-wal") || n.ends_with("-shm"))
+}
+
+#[cfg_attr(unix, allow(dead_code))]
+fn judge(
+    read_ok: bool,
+    text: &str,
+    path: &str,
+    user: &str,
+    still_exists: bool,
+    allow_vanish: bool,
+) -> Verdict {
     if read_ok {
         if acl_is_owner_only(text, path, user) {
             Verdict::Private
         } else {
             Verdict::Open
         }
-    } else if still_exists {
+    } else if still_exists || !allow_vanish {
         Verdict::Unreadable
     } else {
         Verdict::Vanished
@@ -201,6 +219,7 @@ fn judge(read_ok: bool, text: &str, path: &str, user: &str, still_exists: bool) 
 
 #[cfg(not(unix))]
 fn check_acl(path: &Path) -> Result<()> {
+    let allow_vanish = is_sidecar(path);
     // A -shm being created or torn down by another connection answers `icacls` with an error for a moment; a real
     // open list never goes away, so a few short retries cost nothing on the normal path.
     for attempt in 0..5 {
@@ -214,7 +233,9 @@ fn check_acl(path: &Path) -> Result<()> {
                 &String::from_utf8_lossy(&o.stdout),
                 &path.to_string_lossy(),
                 &user(),
-                path.exists(),
+                // Only a real NotFound is gone; access denied or a dangling link is not.
+                !matches!(fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound),
+                allow_vanish,
             ),
             Err(e) => {
                 return Err(Error::Permissions(format!(
@@ -226,8 +247,18 @@ fn check_acl(path: &Path) -> Result<()> {
         match verdict {
             Verdict::Private | Verdict::Vanished => return Ok(()),
             Verdict::Open => break,
-            Verdict::Unreadable => {}
+            Verdict::Unreadable => unreadable = true,
         }
+        if verdict == Verdict::Open {
+            unreadable = false;
+        }
+    }
+    if unreadable {
+        return Err(Error::Permissions(format!(
+            "kith-core: can't read the access list of {}; kith won't start until it can: check that the file is there and readable by you (icacls \"{}\")",
+            path.display(),
+            path.display()
+        )));
     }
     Err(Error::Permissions(format!(
         "kith-core: {} is open to other accounts; kith won't start until it is private: icacls \"{}\" /inheritance:r /grant:r \"{}:(OI)(CI)F\"",
@@ -264,19 +295,38 @@ mod tests {
 
     #[test]
     fn a_sidecar_deleted_while_being_read_is_not_an_open_file() {
-        assert_eq!(judge(false, "", "x", "me", false), Verdict::Vanished);
-        assert_eq!(judge(false, "", "x", "me", true), Verdict::Unreadable);
+        assert_eq!(judge(false, "", "x", "me", false, true), Verdict::Vanished);
+        assert_eq!(judge(false, "", "x", "me", true, true), Verdict::Unreadable);
+    }
+
+    #[test]
+    fn only_sidecars_may_vanish() {
+        assert_eq!(
+            judge(false, "", "x", "me", false, false),
+            Verdict::Unreadable
+        );
+        assert!(is_sidecar(Path::new("C:\\m\\core.db-wal")));
+        assert!(is_sidecar(Path::new("C:\\m\\core.db-shm")));
+        for n in [
+            "core.db",
+            "core.lock",
+            "core.holder",
+            "core.token",
+            "snap.db",
+        ] {
+            assert!(!is_sidecar(Path::new(n)), "{n}");
+        }
     }
 
     #[test]
     fn a_readable_list_is_still_judged_by_its_entries() {
         assert_eq!(
-            judge(true, OWNER_ONLY, "C:\\m\\core.db-shm", "me", true),
+            judge(true, OWNER_ONLY, "C:\\m\\core.db-shm", "me", true, true),
             Verdict::Private
         );
         let open = format!("{OWNER_ONLY} BUILTIN\\Users:(R)\n");
         assert_eq!(
-            judge(true, &open, "C:\\m\\core.db-shm", "me", true),
+            judge(true, &open, "C:\\m\\core.db-shm", "me", true, true),
             Verdict::Open
         );
     }
