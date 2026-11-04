@@ -3,4 +3,6 @@
 
 use super::Migration;
 
-pub(super) const STEPS: &[Migration] = &[];
+mod m0070_import_log;
+
+pub(super) const STEPS: &[Migration] = &[m0070_import_log::MIGRATION];

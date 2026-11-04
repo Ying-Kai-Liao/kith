@@ -25,11 +25,19 @@
 //! pid is checked on every call as the gate checks its holders: a pid that is gone, or now has another start time,
 //! drops the claim; a failed probe never does.
 //!
+//! A claim with a pid is not a timer. While that process is alive the claim holds past its `claim_until`: a second
+//! claimer, a plain answer, the sweep and a withdrawal all leave the card alone (M2-11 review, precondition 1: a claim
+//! that ran out by time must not be taken over under a writer that is still going). Only the holder's own end, or its
+//! death (start time and ESRCH-only, as above), frees it. A claim with no pid is the caller's own timer: it ends at
+//! `claim_until`. The secret path ([`secret`]) claims with the daemon's own pid, so the writer is the claimer and no
+//! child outlives it: the key store's tools are waited for and killed at their timeout inside the same call.
+//!
 //! What differs from the host, on purpose:
 //! - Who may answer is the owner alone. The host also lets a card's `answerable_by` person answer (`approver_of`,
 //!   needs the member's devices); that and the bot approvers come with lane A's tables.
-//! - A secret card (a Key or Access card, [`SECRET_TOOLS`]) is never answered by the `cards.answer` row: its yes writes
-//!   the Keychain, which M2-12 does on the envelope. The row refuses and points to the app.
+//! - A secret card (a Key card, [`SECRET_TOOLS`]) is never answered by the `cards.answer` row: its yes writes a key, which
+//!   [`secret`] does on the envelope (`cards.provide`, claim, write and save, at most once). The row refuses and points
+//!   to the app. An escape card (`request_access`) stays refused here too: its yes changes a guest's access (M2-3).
 //! - Times are milliseconds, as the host's `now_ms`; every call takes `now` so tests (and a replay) set the clock.
 //!
 //! Not here yet: the host-side effects of an answer (waking the asker, closing the entry, the auto-allow and edge
@@ -43,8 +51,9 @@ use crate::db::Core;
 use crate::error::{Error, Result};
 use crate::gate::Liveness;
 
-/// The tools whose card writes a secret or an access grant on yes. Their answer is not the core's yet (M2-12). Fail
-/// safe: an Access card is held back too, since its yes changes what a guest may reach.
+/// The tools whose card writes a secret or an access grant on yes. `cards.answer` never takes their yes: a key card is
+/// provided through [`secret`], and an escape card's yes waits for M2-3. Fail safe: it is held back, since its yes
+/// changes what a guest may reach.
 pub(crate) const SECRET_TOOLS: &[&str] = &["request_secret", "request_access"];
 
 /// Where the person is sent when a secret card is answered from a terminal.
@@ -53,6 +62,9 @@ const SECRET_HINT: &str = "this card asks for a key or access; answer it in the 
 const OPEN_STATES: &str = "'pending','live','parked'";
 const CLEAR_CLAIM: &str =
     "claim_by = NULL, claim_until = NULL, claim_pid = NULL, claim_started = ''";
+/// A claim whose holder gave a pid: it holds while that process lives, whatever `claim_until` says (`void_dead_claims`
+/// has already dropped the dead ones in the same transaction).
+const PID_HELD: &str = "(claim_by IS NOT NULL AND claim_pid IS NOT NULL)";
 /// The deadline the clock goes by: the card's own, or the claim's time while one is held.
 const EFFECTIVE: &str = "MAX(deadline, CASE WHEN claim_by IS NULL THEN 0 ELSE claim_until END)";
 
@@ -139,6 +151,7 @@ pub(crate) struct Card {
     pub options: Option<String>,
     pub claim_by: Option<String>,
     pub claim_until: Option<i64>,
+    pub claim_pid: Option<i64>,
 }
 
 impl Card {
@@ -173,7 +186,8 @@ impl Card {
     /// The holder of a claim that is still in force at `now`.
     fn holder(&self, now: i64) -> Option<&str> {
         match (&self.claim_by, self.claim_until) {
-            (Some(h), Some(until)) if until >= now => Some(h.as_str()),
+            // A claim with a pid is still in force after its time: its process was found alive in this transaction.
+            (Some(h), Some(until)) if until >= now || self.claim_pid.is_some() => Some(h.as_str()),
             _ => None,
         }
     }
@@ -246,7 +260,7 @@ pub(crate) struct Claim<'a> {
 
 const COLS: &str = "id, session, source, bot_id, run_id, entry_id, person, agent, approver, tool, input, resource, shown, \
     scope, state, created_at, deadline, answer, allowed, answered_by, answered_at, answered_parked, granted_at, resumed_at, \
-    applied_at, used_by_ask, reply_to, asked_by, answerable_by, in_grants, options, claim_by, claim_until";
+    applied_at, used_by_ask, reply_to, asked_by, answerable_by, in_grants, options, claim_by, claim_until, claim_pid";
 
 fn row(r: &Row<'_>) -> rusqlite::Result<Card> {
     Ok(Card {
@@ -283,6 +297,7 @@ fn row(r: &Row<'_>) -> rusqlite::Result<Card> {
         options: r.get(30)?,
         claim_by: r.get(31)?,
         claim_until: r.get(32)?,
+        claim_pid: r.get(33)?,
     })
 }
 
@@ -402,7 +417,7 @@ pub(crate) fn raise(core: &mut Core, n: &NewCard, now: i64, live: &dyn Liveness)
     tx.execute(
         &format!(
             "UPDATE cards SET state = 'expired', {CLEAR_CLAIM} WHERE session = ?1 AND resource = ?2 AND {EFFECTIVE} < ?3
-               AND state IN ({OPEN_STATES},'approved')"
+               AND NOT {PID_HELD} AND state IN ({OPEN_STATES},'approved')"
         ),
         params![n.session, n.resource, now],
     )?;
@@ -685,6 +700,22 @@ pub(crate) fn saved(
     }
     let tx = core.claim_tx()?;
     void_dead_claims(&tx, live)?;
+    let done = saved_in(&tx, id, holder, by, now, keep_until)?;
+    let card = if done { get(&tx, id)? } else { None };
+    tx.commit()?;
+    Ok(card)
+}
+
+/// [`saved`] inside a transaction of the caller's, so a secret card's write and its save are one commit. True when the
+/// holder's claim ended the card.
+fn saved_in(
+    tx: &Transaction<'_>,
+    id: &str,
+    holder: &str,
+    by: &str,
+    now: i64,
+    keep_until: i64,
+) -> Result<bool> {
     let done = tx.execute(
         &format!(
             "UPDATE cards SET state = 'used', used_by_ask = 1, answer = 'saved', allowed = 1, answered_by = ?3,
@@ -694,9 +725,7 @@ pub(crate) fn saved(
         ),
         params![id, holder, by, now, keep_until],
     )?;
-    let card = if done == 1 { get(&tx, id)? } else { None };
-    tx.commit()?;
-    Ok(card)
+    Ok(done == 1)
 }
 
 /// An open card is withdrawn (the asker cancelled, the person's access ended). A card whose claim is held is not: its
@@ -708,7 +737,7 @@ pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness)
     let n = tx.execute(
         &format!(
             "UPDATE cards SET state = 'withdrawn', {CLEAR_CLAIM} WHERE id = ?1 AND state IN ({OPEN_STATES})
-                AND NOT (claim_by IS NOT NULL AND claim_until >= ?2)"
+                AND NOT (claim_by IS NOT NULL AND (claim_until >= ?2 OR claim_pid IS NOT NULL))"
         ),
         params![id, now],
     )?;
@@ -725,7 +754,7 @@ pub(crate) fn sweep(core: &mut Core, now: i64, live: &dyn Liveness) -> Result<Ve
         &tx,
         // An approved card whose wake is in the queue stays until a turn carried it: expiring it would lose the yes.
         &format!(
-            "{EFFECTIVE} < ?1 AND state IN ({OPEN_STATES},'approved')
+            "{EFFECTIVE} < ?1 AND NOT {PID_HELD} AND state IN ({OPEN_STATES},'approved')
                 AND NOT (state = 'approved' AND resumed_at IS NOT NULL AND applied_at IS NULL)"
         ),
         params![now],
@@ -832,6 +861,8 @@ pub(crate) fn call(
     params: &Value,
     live: &dyn Liveness,
 ) -> Result<Value> {
+    // A key write that could not release its claim leaves it under this live pid: free it before anything reads cards.
+    secret::forget_own_claims(core)?;
     match method {
         "cards.list" => {
             let (open, recent) = listing(core, RECENT)?;
@@ -848,11 +879,13 @@ pub(crate) fn call(
                 .ok_or_else(|| bad(&format!("no card {id}")))
         }
         "cards.answer" => answer_row(core, params, live),
+        "cards.provide" => secret::provide_row(core, params, live),
         _ => Err(Error::NotServed(format!(
             "kith-core: {method} is not answered in the core yet"
         ))),
     }
 }
 
+mod secret;
 #[cfg(test)]
 mod tests;
