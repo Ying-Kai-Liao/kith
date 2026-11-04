@@ -11,6 +11,13 @@
 //!   [`NoRule`] answers, and a row's `next` is `null` with a note; the wiring is one `Rule` impl and one argument.
 
 mod call;
+// The fire decides with the authority tables, which are Unix only for now.
+#[cfg(unix)]
+mod fire;
+#[cfg(all(test, unix))]
+mod fire_tests;
+#[cfg(unix)]
+mod sync;
 // The import it is tested with is Unix-only for now (like the authority one).
 #[cfg(all(test, unix))]
 mod tests;
@@ -18,6 +25,7 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use kith_kernel::paths::Paths;
+use kith_kernel::schedule::{Trigger, Zone};
 use serde_json::Value;
 
 use crate::error::{Error, Result};
@@ -25,6 +33,8 @@ use crate::error::{Error, Result};
 #[cfg(all(test, unix))]
 pub(crate) use call::call_with;
 pub(crate) use call::{call, serves};
+#[cfg(unix)]
+pub(crate) use fire::{call_write, serves_write};
 
 /// The cron rule `next` needs: when a job runs after `now_ms`, as the local minute `YYYY-MM-DDTHH:MM` that
 /// `kith-sched` prints, or `None` when it never does. The kernel's Trigger (M4-1) is the real one.
@@ -41,7 +51,30 @@ pub(crate) enum RuleError {
     Bad(String),
 }
 
-/// Stands in until the kernel's Trigger is wired: every job's `next` is unknown, and says so.
+/// The kernel's Trigger (M4-1) as the rule `next` asks: a `kith-sched` job's `cron` is a cron trigger that follows the Mac.
+pub(crate) struct TriggerRule;
+
+impl Rule for TriggerRule {
+    fn next(&self, cron: &str, now_ms: i64) -> std::result::Result<Option<String>, RuleError> {
+        let t = Trigger::Cron {
+            expr: cron.to_owned(),
+            tz: Zone::Local,
+        };
+        t.validate().map_err(|e| RuleError::Bad(e.0))?;
+        Ok(t.next_after(now_ms).and_then(local_minute))
+    }
+}
+
+/// The local minute `YYYY-MM-DDTHH:MM` of an instant, as `kith-sched` prints it.
+fn local_minute(ms: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(ms).map(|t| {
+        t.with_timezone(&chrono::Local)
+            .format("%Y-%m-%dT%H:%M")
+            .to_string()
+    })
+}
+
+/// Stands in where no rule is wired (a test of the listing alone): every job's `next` is unknown, and says so.
 pub(crate) struct NoRule;
 
 impl Rule for NoRule {
@@ -62,9 +95,13 @@ pub(crate) fn valid_run_state(s: &str) -> bool {
     matches!(s, "started" | "done" | "failed" | "skipped")
 }
 
-/// A slot: a UTC instant in whole minutes (`2026-11-04T00:00:00Z`) or `manual:<id>`.
+/// A slot: a UTC instant in whole minutes (`2026-11-04T00:00:00Z`), `manual:<id>` (a run started by hand) or
+/// `event:<id>` (a webhook or event delivery).
 pub(crate) fn valid_slot(s: &str) -> bool {
-    if let Some(id) = s.strip_prefix("manual:") {
+    if let Some(id) = s
+        .strip_prefix("manual:")
+        .or_else(|| s.strip_prefix("event:"))
+    {
         return !id.is_empty()
             && id
                 .bytes()
@@ -86,6 +123,18 @@ pub(crate) fn slot_of_local(local: &str) -> Option<String> {
             .format("%Y-%m-%dT%H:%M:%SZ")
             .to_string(),
     )
+}
+
+/// The slot text of an instant in ms (whole minutes; `None` out of range).
+pub(crate) fn slot_of_ms(ms: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(ms).map(|t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+}
+
+/// The instant of a timed slot in ms; `None` for `manual:` and `event:` slots and for text that is no slot.
+pub(crate) fn ms_of_slot(slot: &str) -> Option<i64> {
+    chrono::NaiveDateTime::parse_from_str(slot, "%Y-%m-%dT%H:%M:%SZ")
+        .ok()
+        .map(|t| t.and_utc().timestamp_millis())
 }
 
 /// The file in the machine folder that names this machine, for the `mac` field of schedule rows and, later, of a
@@ -175,6 +224,8 @@ pub(crate) struct AgentJobs {
     pub agent: String,
     /// The jobs in the file in file order; empty when there is none or it could not be read.
     pub jobs: Vec<Value>,
+    /// Hash of the file's text as read (of no text when there is no file); empty when it could not be read.
+    pub hash: String,
     /// Why the file could not be read as a list of jobs, if so. A missing file is not a problem: it is no jobs.
     pub problem: Option<String>,
 }
@@ -214,14 +265,16 @@ pub(crate) fn index(paths: &Paths, only: Option<&str>) -> Index {
         .map(|agent| {
             let file = jobs_file(paths, &agent);
             match read_jobs(&paths.machine, &agent, &file) {
-                Ok(jobs) => AgentJobs {
+                Ok((hash, jobs)) => AgentJobs {
                     agent,
                     jobs,
+                    hash,
                     problem: None,
                 },
                 Err(e) => AgentJobs {
                     agent,
                     jobs: Vec::new(),
+                    hash: String::new(),
                     problem: Some(format!("{}: {e}", file.display())),
                 },
             }
@@ -234,8 +287,19 @@ pub(crate) fn index(paths: &Paths, only: Option<&str>) -> Index {
     }
 }
 
+pub(crate) fn sha_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest as _, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            use std::fmt::Write as _;
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
 /// Where an agent's jobs live (`jobs_file` of kith-sched).
-fn jobs_file(paths: &Paths, agent: &str) -> PathBuf {
+pub(crate) fn jobs_file(paths: &Paths, agent: &str) -> PathBuf {
     let pkg = paths.agents.join(agent);
     if pkg.join("role").is_dir() {
         pkg.join("jobs.json")
@@ -244,9 +308,14 @@ fn jobs_file(paths: &Paths, agent: &str) -> PathBuf {
     }
 }
 
-/// The jobs in `file` (none when there is no file), read under the shared side of kith-sched's `<agent>.jobs.lock`
-/// when that lock file exists. Never creates the lock: a reader leaves nothing behind.
-fn read_jobs(machine: &Path, agent: &str, file: &Path) -> std::result::Result<Vec<Value>, String> {
+/// The jobs in `file` (none when there is no file) and the hash of the text they were read from, read under the shared
+/// side of kith-sched's `<agent>.jobs.lock` when that lock file exists. Never creates the lock: a reader leaves nothing
+/// behind. The fire compares the hash with the index's (`sync`).
+pub(crate) fn read_jobs(
+    machine: &Path,
+    agent: &str,
+    file: &Path,
+) -> std::result::Result<(String, Vec<Value>), String> {
     let lock = std::fs::File::open(machine.join("sched").join(format!("{agent}.jobs.lock"))).ok();
     if let Some(l) = &lock {
         // A writer holds it for a moment; a lock that cannot be taken (an odd filesystem) is read without.
@@ -254,17 +323,20 @@ fn read_jobs(machine: &Path, agent: &str, file: &Path) -> std::result::Result<Ve
     }
     let text = match std::fs::read_to_string(file) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((sha_hex(b""), Vec::new()));
+        }
         Err(e) => return Err(e.to_string()),
     };
     drop(lock);
+    let hash = sha_hex(text.as_bytes());
     let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let list = v.as_array().ok_or("not a list of jobs")?;
     if list
         .iter()
         .all(|j| j.as_object().is_some_and(|o| o.contains_key("id")))
     {
-        Ok(list.clone())
+        Ok((hash, list.clone()))
     } else {
         Err("not a list of jobs".into())
     }

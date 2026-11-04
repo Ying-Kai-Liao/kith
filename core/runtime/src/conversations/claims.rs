@@ -859,6 +859,14 @@ pub(crate) struct NewTurn<'a> {
 
 /// Queues a turn (`queued`), creating the conversation when needed.
 pub(crate) fn enqueue_turn(core: &mut Core, t: &NewTurn<'_>, now: i64) -> Result<i64> {
+    check_turn(t)?;
+    let tx = core.claim_tx()?;
+    let id = enqueue_turn_in(&tx, t, now)?;
+    tx.commit()?;
+    Ok(id)
+}
+
+fn check_turn(t: &NewTurn<'_>) -> Result<()> {
     if !SOURCES.contains(&t.source) {
         return Err(Error::BadParams(format!(
             "kith-core: no such turn source {}",
@@ -868,7 +876,13 @@ pub(crate) fn enqueue_turn(core: &mut Core, t: &NewTurn<'_>, now: i64) -> Result
     if t.person.is_empty() {
         return Err(Error::BadParams("kith-core: a turn needs a person".into()));
     }
-    let tx = core.claim_tx()?;
+    Ok(())
+}
+
+/// [`enqueue_turn`] inside a transaction the caller holds (a `Core::claim_tx`) and commits: the schedule fire writes its
+/// fire row, the turn and the watermark in one.
+pub(crate) fn enqueue_turn_in(tx: &Transaction<'_>, t: &NewTurn<'_>, now: i64) -> Result<i64> {
+    check_turn(t)?;
     tx.execute(
         "INSERT OR IGNORE INTO conversations (id, agent, engine, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
         params![t.conversation, t.agent, t.engine, now],
@@ -896,25 +910,29 @@ pub(crate) fn enqueue_turn(core: &mut Core, t: &NewTurn<'_>, now: i64) -> Result
             now
         ],
     )?;
-    let id = tx.last_insert_rowid();
-    tx.commit()?;
-    Ok(id)
+    Ok(tx.last_insert_rowid())
 }
 
 /// Parks a queued turn (no claim, no run token) as waiting for `lock_busy` or `terminal_live`. False when the turn is not
 /// queued (the busy path of [`report`] parks a claimed one itself).
 pub(crate) fn park(core: &mut Core, turn_id: i64, reason: &str, now: i64) -> Result<bool> {
+    let tx = core.claim_tx()?;
+    let parked = park_in(&tx, turn_id, reason, now)?;
+    tx.commit()?;
+    Ok(parked)
+}
+
+/// [`park`] inside a transaction the caller holds.
+pub(crate) fn park_in(tx: &Transaction<'_>, turn_id: i64, reason: &str, now: i64) -> Result<bool> {
     if !PARK_REASONS.contains(&reason) {
         return Err(Error::BadParams(format!(
             "kith-core: no such park reason {reason}"
         )));
     }
-    let tx = core.claim_tx()?;
     let n = tx.execute(
         "UPDATE turns SET state = 'parked', parked_reason = ?2, parked_at = ?3 WHERE id = ?1 AND state = 'queued'",
         params![turn_id, reason, now],
     )?;
-    tx.commit()?;
     Ok(n == 1)
 }
 
@@ -969,6 +987,13 @@ pub(crate) fn unpark_ready(
 /// q218: queued and parked turns past their `deadline` become `expired`.
 pub(crate) fn expire_parked(core: &mut Core, now: i64) -> Result<Vec<i64>> {
     let tx = core.claim_tx()?;
+    let ids = expire_parked_in(&tx, now)?;
+    tx.commit()?;
+    Ok(ids)
+}
+
+/// [`expire_parked`] inside a transaction the caller holds.
+pub(crate) fn expire_parked_in(tx: &Transaction<'_>, now: i64) -> Result<Vec<i64>> {
     let mut ids: Vec<i64> = Vec::new();
     {
         let mut st = tx.prepare(
@@ -985,6 +1010,68 @@ pub(crate) fn expire_parked(core: &mut Core, now: i64) -> Result<Vec<i64>> {
             params![id, now],
         )?;
     }
-    tx.commit()?;
     Ok(ids)
+}
+
+/// [`expire_parked_in`] for these turns only (the schedule fire sweeps its own job's turns).
+pub(crate) fn expire_turns_in(tx: &Transaction<'_>, ids: &[i64], now: i64) -> Result<Vec<i64>> {
+    let mut out = Vec::new();
+    for id in ids {
+        let n = tx.execute(
+            "UPDATE turns SET state = 'expired', parked_reason = NULL, parked_at = NULL, finished_at = ?2
+             WHERE id = ?1 AND state IN ('queued', 'parked') AND deadline IS NOT NULL AND deadline <= ?2",
+            params![id, now],
+        )?;
+        if n == 1 {
+            out.push(*id);
+        }
+    }
+    Ok(out)
+}
+
+/// Cancels these turns while nothing is running them: a `queued` or `parked` turn is cancelled; a `claimed` turn whose
+/// claim has no process yet has its claim ended with the same check-and-set `revoke_person` uses (a later redeem then
+/// fails) and is cancelled. A `running` turn (or a claim with a process) is left alone. Returns the turns cancelled.
+pub(crate) fn cancel_waiting_in(
+    tx: &Transaction<'_>,
+    ids: &[i64],
+    reason: &str,
+    now: i64,
+) -> Result<Vec<i64>> {
+    let mut out = Vec::new();
+    for id in ids {
+        let n = tx.execute(
+            "UPDATE turns SET state = 'cancelled', parked_reason = NULL, parked_at = NULL, finished_at = ?2
+             WHERE id = ?1 AND state IN ('queued', 'parked')",
+            params![id, now],
+        )?;
+        if n == 1 {
+            out.push(*id);
+            continue;
+        }
+        let claim: Option<i64> = tx
+            .query_row(
+                "SELECT claim_id FROM turns WHERE id = ?1 AND state = 'claimed'",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let Some(claim) = claim else { continue };
+        let ended = tx.execute(
+            "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = ?3
+             WHERE claim_id = ?1 AND state = 'claimed' AND pid IS NULL",
+            params![claim, now, reason],
+        )?;
+        if ended == 1 {
+            cancel_turn(tx, claim, now)?;
+            out.push(*id);
+        }
+    }
+    Ok(out)
+}
+
+/// [`revoke_epoch`] inside a transaction.
+pub(crate) fn revoke_epoch_in(tx: &Transaction<'_>, person: &str) -> Result<i64> {
+    epoch(tx, person)
 }

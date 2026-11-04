@@ -17,7 +17,7 @@ pub(crate) fn serves(method: &str) -> bool {
 
 /// Answers a `schedule.*` read for the caller's view of the folders (`params`), with the cron rule that is wired.
 pub(crate) fn call(core: &Core, method: &str, params: &Value) -> Result<Value> {
-    call_with(core, method, params, &super::NoRule, now_ms())
+    call_with(core, method, params, &super::TriggerRule, now_ms())
 }
 
 /// [`call`] with the rule and the clock given (a test fixes both).
