@@ -312,7 +312,8 @@ fn a_changed_source_makes_the_opt_in_guard_check_again_and_the_kith_auth_side_an
 #[test]
 fn fingerprint_follows_the_vault_rows_and_the_serve_db() {
     let (r, reg) = rig();
-    let db = Connection::open_in_memory().unwrap();
+    drop(crate::start_with(&r.env.layout, MIGRATIONS).unwrap());
+    let db = r.db();
     let a = reg[0].fingerprint(&r.env, &db).unwrap();
     assert!(a.contains("novault"), "{a}");
     let serve = r.dir.path().join("serve");
@@ -476,4 +477,135 @@ fn a_secret_that_cannot_go_back_stops_the_rollback_before_the_file_is_written() 
 
 fn phase(env: &Env, n: &str) -> Option<Phase> {
     state::read(&env.layout, n).unwrap().map(|s| s.phase)
+}
+
+#[test]
+fn a_core_only_change_closes_a_cached_ok() {
+    let (r, reg) = imported();
+    let g = Guard::default();
+    let db = r.db();
+    assert!(g.may_serve(reg[0].as_ref(), &r.env, &db, true).ok);
+    let before = reg[0].fingerprint(&r.env, &db).unwrap();
+    // A core-side revoke: auth.json and serve.db are as they were, only core.db moved.
+    r.db()
+        .execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", [])
+        .unwrap();
+    assert_ne!(reg[0].fingerprint(&r.env, &db).unwrap(), before);
+    let s = g.may_serve(reg[0].as_ref(), &r.env, &db, true);
+    assert!(!s.ok, "the cached yes must not outlive a core-only write");
+    assert!(s.warning.unwrap().contains("difference(s)"));
+    // Written back the way it was, the answer is the file's again.
+    r.db()
+        .execute("UPDATE people SET revoked = 0 WHERE id = 'sam'", [])
+        .unwrap();
+    assert!(g.may_serve(reg[0].as_ref(), &r.env, &db, true).ok);
+}
+
+/// A keychain that rewrites auth.json when it is read, which happens in the middle of the import.
+struct Touching(PathBuf);
+
+impl ItemSource for Touching {
+    fn read(&self, _: &str, _: &str) -> Item {
+        let mut text = std::fs::read_to_string(&self.0).unwrap();
+        text.push('\n');
+        std::fs::write(&self.0, text).unwrap();
+        Item::Found(Zeroizing::new("tok".into()))
+    }
+}
+
+#[test]
+fn a_failed_force_import_leaves_the_old_rows() {
+    let (r, _reg) = imported();
+    r.db()
+        .execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", [])
+        .unwrap();
+    let log = r.count("import_log");
+    let module = AuthorityModule::with(
+        Box::new(Touching(r.auth())),
+        Box::new(MemSink(Shared::default())),
+        Box::new(MemVault(Shared::default())),
+        Box::new(MemOs {
+            items: Shared::default(),
+            puts: Rc::new(Cell::new(0)),
+        }),
+        None,
+    );
+    let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+    let forced = Opts {
+        force: true,
+        ..Opts::default()
+    };
+    let e = module
+        .import(&r.env, Some(&mut core), forced)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("changed while the import ran"), "{e}");
+    drop(core);
+    let revoked: i64 = r
+        .db()
+        .query_row("SELECT revoked FROM people WHERE id = 'sam'", [], |x| {
+            x.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        revoked, 1,
+        "the rows the force would have replaced are still there"
+    );
+    assert_eq!(r.count("people"), 4);
+    assert_eq!(
+        r.count("import_log"),
+        log,
+        "no log row for an import that did not happen"
+    );
+}
+
+#[test]
+fn the_import_runs_under_the_lock_the_framework_holds_and_does_not_take_it_again() {
+    let (r, reg) = rig();
+    let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+    // The lifetime lock is exclusive (flock): a second taker is refused while `core` lives.
+    assert!(crate::start_with(&r.env.layout, MIGRATIONS).is_err());
+    reg[0].import(&r.env, Some(&mut core), opts()).unwrap();
+    assert_eq!(
+        r.count("people"),
+        4,
+        "it wrote through the core it was given"
+    );
+    assert!(
+        crate::start_with(&r.env.layout, MIGRATIONS).is_err(),
+        "and the lock is still ours afterwards"
+    );
+}
+
+#[test]
+fn a_rollback_writes_auth_json_private_and_keeps_a_newer_keychain_value() {
+    let (r, reg) = rig_with(None);
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    // The Keychain moved on after the step; the sealed copy is the older one.
+    r.vault
+        .borrow_mut()
+        .insert("keychain:svc#a".into(), "sealed-old".into());
+    r.vault
+        .borrow_mut()
+        .insert("keychain:svc#b".into(), "same".into());
+    r.os.borrow_mut()
+        .insert("keychain:svc#a".into(), "rotated-new".into());
+    r.os.borrow_mut()
+        .insert("keychain:svc#b".into(), "same".into());
+    let lines = rollback(&reg, &r.env, "authority", opts()).unwrap();
+    assert_eq!(r.os.borrow()["keychain:svc#a"], "rotated-new", "kept");
+    assert!(said(&lines, "secret kept: keychain:svc#a"), "{lines:?}");
+    assert!(
+        !lines
+            .iter()
+            .any(|l| l.contains("rotated-new") || l.contains("sealed-old")),
+        "names only, never a value"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(r.auth()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    assert!(!r.auth().with_extension("restore.tmp").exists());
 }

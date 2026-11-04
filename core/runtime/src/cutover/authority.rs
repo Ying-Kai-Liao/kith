@@ -6,8 +6,8 @@
 //! |------------------|------------------------------------------------------------------------------------------------------|
 //! | `tombstones`     | the caller's `auth.json`. (The host vault's rows in serve.db are not tombstoned: the host moves them itself at its first unlock, M2-7.) |
 //! | `import`         | `import::run_in` (M2-8, `kith kernel core-migrate --authority`): idempotent, a snapshot first, `--dry-run`, `--force`, the Keychain items sealed into the envelope |
-//! | `same_answer`    | `import::same_answer`: revoked flags, bots, `was`, `retired`, owner and people order row by row, then `check.rs` over every person x agent x via |
-//! | `fingerprint`    | serve.db and its WAL (size, mtime) and the number of vault rows in it; the framework adds auth.json's inode, size and mtime |
+//! | `same_answer`    | `import::same_answer`: per person owner, revoked (yes/no), `bot_of`, `was`; the `retired` ids; the order of people; then `check.rs`: `may`, `resolve`, `resolve_bot`, `cut_off` over every person x agent x via x once, at the caller's "now" (so a grant that has expired or not started yet counts as the answer it gives now). NOT compared: the contents of invites, presets, `owner_bots_budget`, a bot's caps, and when a revoke or a grant was written. None of them is read by the host guard today (`may`, `resolve`, `resolve_bot`, `cut_off`); the host reading one of them is the point at which it joins the compare |
+//! | `fingerprint`    | serve.db and its WAL (size, mtime), the number of vault rows in it, and the digest of core.db's authority tables (so a write made only through the core changes it); the framework adds auth.json's inode, size and mtime |
 //! | `digest`         | the first 16 hex of the SHA-256 of core.db's authority tables, as the marker stores it                |
 //! | `export_back`    | core.db -> auth.json, the shape `kith-auth` reads: the tables from core.db over the pre-cutover copy's other keys (`profiles`, `grants`, `env`, a person's `handles` ...) |
 //! | `restore_secrets`| the envelope's `keychain:` records -> the OS store, before `export_back`                              |
@@ -110,12 +110,13 @@ impl Vault for EnvelopeVault {
             let Some(bytes) = envelope.get(conn, &name)? else {
                 continue;
             };
-            let text = String::from_utf8(bytes.to_vec()).map_err(|_| {
+            // Checked in place: the one copy made is the Zeroizing one, and the error path holds none (`bytes` zeroes itself).
+            let text = std::str::from_utf8(&bytes).map_err(|_| {
                 Error::Refused(format!(
                     "authority: the secret {name} is not text; it cannot go back to the Keychain. Nothing was written back"
                 ))
             })?;
-            out.insert(name, Zeroizing::new(text));
+            out.insert(name, Zeroizing::new(text.to_owned()));
         }
         Ok(out)
     }
@@ -425,7 +426,23 @@ impl Module for AuthorityModule {
             .map_err(|e| Error::Io(format!("authority: auth.json: {e}")))?;
         let io = |e: std::io::Error| Error::Io(format!("authority: {}: {e}", ctx.auth.display()));
         let tmp = ctx.auth.with_extension("restore.tmp");
-        std::fs::write(&tmp, format!("{text}\n")).map_err(io)?;
+        // auth.json holds the owner's access rules: the temporary file is private from its first byte, and on disk before
+        // the rename makes it the file.
+        let _ = std::fs::remove_file(&tmp);
+        let mut file = {
+            let mut o = std::fs::OpenOptions::new();
+            o.write(true).create_new(true);
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+            o.open(&tmp).map_err(io)?
+        };
+        {
+            use std::io::Write as _;
+            file.write_all(format!("{text}\n").as_bytes()).map_err(io)?;
+        }
+        file.sync_all().map_err(io)?;
+        drop(file);
+        // (Windows has no mode at open: the check there is `make_private`'s.)
         crate::perms::make_private(&tmp)?;
         std::fs::rename(&tmp, &ctx.auth).map_err(io)?;
         let n = |t: &str| snap.get(t).and_then(Value::as_object).map_or(0, Map::len);
@@ -456,13 +473,28 @@ impl Module for AuthorityModule {
                 )));
             }
         }
-        let mut items: BTreeMap<String, String> = records
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
-            .collect();
-        let done = secrets_back::restore_all(&mut **self.os.borrow_mut(), &items, self.limit);
+        let mut os = self.os.borrow_mut();
+        // The Keychain may have moved on since the import sealed its copy (a key rotated after the step): an item that
+        // holds a different value is kept as it is. Only its NAME is reported.
+        let mut kept = Vec::new();
+        let mut items: BTreeMap<String, String> = BTreeMap::new();
+        for (name, value) in records {
+            match secrets_back::read_back(&**os, &name)? {
+                Some(current) if current.as_str() != value.as_str() => {
+                    kept.push(format!(
+                        "secret kept: {name} (the Keychain holds a different value than the sealed one; left as it is)"
+                    ));
+                }
+                _ => {
+                    items.insert(name, value.to_string());
+                }
+            }
+        }
+        let done = secrets_back::restore_all(&mut **os, &items, self.limit);
         items.values_mut().for_each(String::zeroize);
-        done
+        let mut lines = done?;
+        lines.extend(kept);
+        Ok(lines)
     }
 
     fn digest(&self, _env: &Env, db: &Connection) -> Result<String> {
@@ -471,7 +503,15 @@ impl Module for AuthorityModule {
         ))
     }
 
-    fn fingerprint(&self, env: &Env, _db: &Connection) -> Result<String> {
+    /// The old stores' stat lines and the number of vault rows, plus a digest of core.db's own authority tables. The
+    /// digest is what makes a core-only write (a revoke, add or remove done through the core) change the fingerprint, so
+    /// a cached `ok` for the opt-in cannot outlive it. Chosen over `PRAGMA data_version` (which does not move for writes
+    /// made on the asking connection itself, so it can miss the daemon's own writes) and over a counter (every writer of
+    /// the tables would have to bump it in its transaction, and one that forgot would leave the hole open). The digest
+    /// reads the same tables `same_answer` reads, so it moves exactly when the compare could answer differently; it costs
+    /// one read of small tables per ask, which the 2 s poll can afford.
+    fn fingerprint(&self, env: &Env, db: &Connection) -> Result<String> {
+        let core = self.digest(env, db)?;
         let db = serve_db(ctx(env)?);
         let wal = PathBuf::from(format!("{}-wal", db.display()));
         let vault_rows =
@@ -485,7 +525,7 @@ impl Module for AuthorityModule {
                 })
                 .map_or_else(|_| "novault".to_owned(), |n| n.to_string());
         Ok(format!(
-            "{}{}vault:{vault_rows}",
+            "{}{}vault:{vault_rows};core:{core}",
             stat_line(&db),
             stat_line(&wal)
         ))
