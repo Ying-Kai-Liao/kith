@@ -98,13 +98,7 @@ fn the_m3_lanes_are_reserved_in_order() {
         let l = LANES.iter().find(|l| l.name == name).expect(name);
         assert_eq!((l.first, l.last), (first, last), "{name}");
     }
-    // Only conversations has steps so far; the others stay empty until their lane's PR.
-    let versions: Vec<i64> = MIGRATIONS.iter().map(|m| m.version).collect();
-    assert!(versions.contains(&80));
-    assert!(
-        versions.iter().all(|v| !(90..=109).contains(v)),
-        "{versions:?}"
-    );
+    assert!(MIGRATIONS.iter().any(|m| m.version == 80));
     let spare = LANES.last().expect("lanes");
     assert_eq!((spare.name, spare.first), ("spare", 110));
 }

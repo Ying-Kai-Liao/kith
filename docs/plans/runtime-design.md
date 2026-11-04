@@ -164,7 +164,7 @@ live turn:
 
 **Start protocol** (checked in the model):
 1. Claim transaction: re-check may (person not revoked, agent granted, sync lease held for non-owners), take the
-   claim (conversation, claim id, core generation), keep the turn queued. One transaction.
+   claim (conversation, claim id, core generation) and mark the turn claimed (it goes back to queued if the claim ends before running). One transaction.
 2. Then send `spawn(conv, claim, gen)` to the holder (record first, then start).
 3. The holder spawns only for the newest generation it accepted; the first thing it runs is kith's start stub, which
    takes the conversation's writer lock (fd CLOEXEC; busy = the claim ends and the turn parks, see the writer lock),

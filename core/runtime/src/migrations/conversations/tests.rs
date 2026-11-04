@@ -180,3 +180,26 @@ fn reports_are_kept_per_claim_and_a_retry_is_idempotent() {
         .expect("count");
     assert_eq!(unacked, 2);
 }
+
+#[test]
+fn a_claim_being_killed_is_still_the_writer_and_one_takeover_may_wait() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    let c = start_with(&l, MIGRATIONS).expect("start");
+    let db = c.conn();
+    conversation(db, "c1");
+    let put = |id: i64, state: &str| {
+        db.execute(
+            "INSERT INTO claims (claim_id, conversation, generation, kind, state, created_at) VALUES (?1, 'c1', 1, 'turn', ?2, 1)",
+            params![id, state],
+        )
+    };
+    put(1, "ending").expect("ending");
+    assert!(put(2, "running").is_err(), "ending still holds the writer");
+    put(2, "queued").expect("a take-over waits");
+    assert!(put(3, "queued").is_err(), "at most one waiting");
+    db.execute("UPDATE claims SET state = 'ended' WHERE claim_id = 1", [])
+        .expect("gone");
+    db.execute("UPDATE claims SET state = 'claimed' WHERE claim_id = 2", [])
+        .expect("take-over proceeds");
+}
