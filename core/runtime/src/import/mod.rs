@@ -33,6 +33,7 @@
 mod authority;
 mod check;
 pub(crate) mod items;
+pub mod schedules;
 #[cfg(test)]
 mod tests;
 

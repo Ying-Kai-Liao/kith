@@ -53,6 +53,12 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+// The agents' jobs.json indexed with the run state in core.db (M4-2); the host switches to it at M4-5.
+#[allow(
+    dead_code,
+    reason = "first callers are M4-3 and M4-5; the rows are reached through Core::call"
+)]
+mod schedules;
 // Held terminals start on Unix only for now; elsewhere `terminal.open` answers `direct` and most of it is unused.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod terminal;
@@ -75,6 +81,8 @@ pub use daemon::Daemon;
 pub use daemon::status;
 pub use db::Core;
 pub use error::Error;
+#[cfg(unix)]
+pub use import::schedules::Report as SchedulesReport;
 pub use owner::Reached;
 
 use kith_kernel::paths::Paths;
@@ -157,6 +165,13 @@ pub fn migrate_authority(
         &import::items::Keychain,
         &mut import::items::OsEnvelope::default(),
     )
+}
+
+/// `kith migrate --schedules`: copies `kith-sched`'s state files (the last tick and each job's last run) into core.db
+/// (see `import::schedules`). Idempotent, read-only on the sources, `--dry-run` writes nothing; jobs.json is not imported.
+#[cfg(unix)]
+pub fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<SchedulesReport, Error> {
+    import::schedules::run(&Layout::new(&paths.machine), &paths.machine, dry_run)
 }
 
 /// Opens the core inside this process for one command.
