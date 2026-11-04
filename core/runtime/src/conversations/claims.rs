@@ -11,6 +11,7 @@
 //! | 6 revoke a person | [`revoke_person`] |
 //! | 7 a different holder instance | [`different_holder`] |
 //! | `ending` -> `ended` once the pid is gone | [`end_gone`] |
+//! | an exit on a usage limit: mark out, requeue | [`report`] -> `accounts::failover` (M3-9b) |
 //!
 //! The rules the writer-lock model (`verification/writer-lock/Holder.tla`, switch `RedeemWrite`) checks, and the
 //! function that carries each:
@@ -475,6 +476,12 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
                     )?;
                 } else {
                     requeue_turn(tx, claim_id)?;
+                    // The account ran out (M3-9b): the same ack records why and marks it out, so the turn's next claim
+                    // starts from the top of the chain without it.
+                    if b.get("out_of_usage").and_then(serde_json::Value::as_bool) == Some(true) {
+                        let resets_at = b.get("resets_at").and_then(serde_json::Value::as_i64);
+                        crate::accounts::failover::on_exit(tx, claim_id, resets_at, now)?;
+                    }
                 }
             }
             Ok(n == 1)

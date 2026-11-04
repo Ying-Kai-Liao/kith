@@ -9,7 +9,7 @@
 //! until every writer switches together. The writes in this module ([`replace_all`]) are for the import
 //! (`import/accounts.rs`) and the tests. The rows `account.state` and `account.pick` read core.db; nothing runs on its own. `account.pick` starts the harness status commands, but only on an owner's call.
 //!
-//! For failover (9b, not here): a running claim never moves to another account (q216); see the header of m0105.
+//! Failover (9b, `failover.rs`; the writer here is [`mark_out`], gated by [`core_writes`]): a running claim never moves to another account (q216); see the header of m0105.
 
 use rusqlite::{Connection, params, types::Value as Sql};
 use serde_json::Value;
@@ -19,6 +19,9 @@ use kith_kernel::accounts::StateSource;
 use crate::error::Result;
 
 pub(crate) mod call;
+pub(crate) mod failover;
+#[cfg(all(test, unix))]
+mod failover_tests;
 #[cfg(all(test, unix))]
 mod tests;
 
@@ -169,4 +172,80 @@ pub(crate) fn read_all(conn: &Connection) -> Result<Map> {
         out.insert(id, v);
     }
     Ok(out)
+}
+
+/// How long an account stays out when the provider did not say when its limit lifts (`OUT_FOR` of `kith_accounts.py`,
+/// and the host's `UNKNOWN_RESET_SECS`).
+pub(crate) const OUT_FOR: i64 = 3600;
+
+/// `meta` key: `1` once the core is the writer of account state (every writer switched together, see m0105). Until then
+/// the failover in the claims report path (`failover.rs`) records why a turn moved but writes no account row, so live
+/// Python stays the only writer. Nothing sets it in production.
+pub(crate) const CORE_WRITES: &str = "accounts_core_writes";
+
+/// Whether the core may write account state (see [`CORE_WRITES`]).
+pub(crate) fn core_writes(conn: &Connection) -> Result<bool> {
+    use rusqlite::OptionalExtension as _;
+    let v: Option<String> = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [CORE_WRITES],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(v.as_deref() == Some("1"))
+}
+
+/// `mark_out` of `kith_accounts.py`: the entry is out until `until` (default an hour from `now`), epoch seconds. With
+/// `extend_only` an entry already out for longer stays so. `since` is kept while the entry was already out. The write is
+/// the caller's to gate ([`core_writes`]); this is the writer the failover and, at the switch, `kith account out` use.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "epoch seconds fit an f64's mantissa; `pick` compares them as floats the same way"
+)]
+pub(crate) fn mark_out(
+    conn: &Connection,
+    id: &str,
+    until: Option<i64>,
+    reason: &str,
+    now: i64,
+    extend_only: bool,
+) -> Result<()> {
+    let until = until.filter(|u| *u != 0).unwrap_or(now + OUT_FOR);
+    let mut entry = read_all(conn)?
+        .remove(id)
+        .and_then(|v| match v {
+            Value::Object(m) => Some(m),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let cur = entry.get("out_until").and_then(Value::as_f64);
+    if extend_only && cur.is_some_and(|c| c > until.max(now) as f64) {
+        return Ok(());
+    }
+    let since = match (cur, entry.get("since")) {
+        (Some(c), Some(s)) if c > now as f64 => s.clone(),
+        _ => Value::from(now),
+    };
+    entry.insert("since".into(), since);
+    entry.insert("out_until".into(), Value::from(until));
+    entry.insert("reason".into(), Value::from(reason));
+    let p = split(&entry);
+    conn.execute(
+        &format!(
+            "INSERT OR REPLACE INTO account_state ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        ),
+        params![
+            id,
+            p.numbers[0],
+            p.reason,
+            p.numbers[1],
+            p.numbers[2],
+            p.numbers[3],
+            p.numbers[4],
+            p.usage,
+            p.extra
+        ],
+    )?;
+    Ok(())
 }
