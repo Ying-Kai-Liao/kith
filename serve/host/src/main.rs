@@ -500,7 +500,7 @@ enum KernelCmd {
         what: LaunchCmd,
     },
     /// Attaches this terminal to an agent's held terminal through the relay (M1-6): raw mode until detach or exit.
-    /// The ticket (from `terminal.open`) is one line on stdin. Exit: the engine's code, 75 busy, 0 detached, 1 otherwise.
+    /// The ticket (from `terminal.open`) is one line on stdin. Exit: the engine's code, 75 busy, 0 detached, 76 cut as too slow (attach again), 77 taken over, 78 holder lost, 1 otherwise.
     #[command(hide = true)]
     Attach {
         /// The relay's attach endpoint: a socket path, or a pipe name on Windows.

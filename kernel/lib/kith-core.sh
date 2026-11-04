@@ -65,7 +65,8 @@ kith_held_call() {
 }
 
 # kith_held_client TICKET [--observer] [--takeover]   attaches once; sets held_rc to the client's exit code. Its notes (written
-# after raw mode is off) are held back until it ends so they can be read: held_note says what ended it.
+# after raw mode is off) are held back until it ends so they can be read: held_note says what ended it. Exit codes: the
+# engine's, 75 busy, 0 detach, 76 cut as too slow, 77 taken over, 78 holder lost, 1 any other end.
 kith_held_client() {
   local ticket=$1 bin err
   shift
@@ -96,8 +97,8 @@ kith_held_attach() {
     fi
     kith_held_client "$ticket" "$@"
     ticket=""
-    # The client has no exit code of its own for `slow` (1, like any other end): its note says which it was.
-    if [[ $held_rc -eq 1 && $again -eq 0 && $held_note == *"could not keep up"* ]]; then again=1; continue; fi
+    # 76: the relay cut this client as too slow (the client's own code for it; 77 taken over, 78 holder lost).
+    if [[ $held_rc -eq 76 && $again -eq 0 ]]; then again=1; continue; fi
     if [[ $held_note == *owner_present* ]]; then echo "kith: another window is attached to $sid and types in it; kith attach --takeover $sid takes over, --observer only watches" >&2; fi
     return "$held_rc"
   done
@@ -133,9 +134,9 @@ for t in ts:
 import json, sys
 ts, w = json.load(sys.stdin).get("terminals", []), sys.argv[1]
 hit = [t for t in ts if t["session"] == w]
+if not hit: hit = sorted((t for t in ts if t.get("agent") == w), key=lambda t: (t.get("started", 0), (t.get("held_id") or {}).get("id", 0)))[-1:]
 if not hit and len(w) >= 4: hit = [t for t in ts if t["session"].startswith(w)]
 if len({t["session"] for t in hit}) > 1: sys.exit(3)
-if not hit: hit = sorted((t for t in ts if t.get("agent") == w), key=lambda t: (t.get("started", 0), t["held_id"]["id"]))[-1:]
 print(hit[0]["session"] if hit else "")' "$target") || rc=$?
   if [[ $rc -ne 0 ]]; then echo "kith: \"$target\" starts more than one held session; give more of the id" >&2; return 1; fi
   [[ -n $sid ]] || { echo "kith: nothing held for \"$target\" (kith attach lists what is)" >&2; return 1; }
@@ -146,27 +147,56 @@ print(hit[0]["session"] if hit else "")' "$target") || rc=$?
 
 # kith_held_launch AGENT SESSION RESUMED_SESSION CLAUDE_ARGS...   the interactive launch of `kith AGENT --held`: the same assembled
 # claude line as the direct path, handed to terminal.open instead of exec'd here. Ends the shell (exit) when the terminal was
-# opened or the session is busy; returns 1 for "run it here (--direct)", with one line saying why and the resume claim taken again.
+# opened, the session is busy, or the call may have run; returns 1 for "run it here (--direct)", with one line saying why.
+#
+# The writer claim. A --resume took the session's claim for this shell in `resolve`; terminal.open takes it itself, so it is given
+# back first, and only when a holder is up (terminal.list says link up): with no daemon or no holder, the common fallback, the
+# claim is never let go. If open then answers direct anyway (no stub, a remote holder), or the call is refused, the claim is taken
+# again before running here. What is left is the gap between the give-back and open's own take: a third writer taking the claim
+# there makes open answer busy (75), never a second engine. An atomic hand-over inside terminal.open is the proper fix (Later).
 kith_held_launch() {
-  local agent=$1 sid=$2 rsid=$3 params ans rc=0 status ticket note why=""
+  local agent=$1 sid=$2 rsid=$3 params ans rc=0 status ticket note why="" released=0
   shift 3
   if [[ ! $sid =~ ^[a-z0-9._-]+$ ]]; then why="this conversation has no id the lock can use"
   else
-    # terminal.open takes the session's claim itself: give back the one a --resume took for this shell.
-    [[ -z $rsid ]] || python3 "$KITH/bin/kith-sessions" release "$$" || true
-    params=$(python3 -I -c '
+    if [[ -n $rsid ]]; then
+      ans=$(echo '{}' | kith_held_call terminal.list) || rc=$?
+      if [[ $rc -ne 0 || $(printf '%s' "$ans" | kith_held_get link) != up ]]; then why="holder not reachable"
+      elif python3 "$KITH/bin/kith-sessions" release "$rsid"; then released=1
+      else why="the session's claim is not this shell's to hand over"
+      fi
+      rc=0
+      # Tests only: something that happens in the gap between the give-back and open (a third writer).
+      [[ -z ${KITH_HELD_GAP_HOOK:-} || $released -eq 0 ]] || eval "$KITH_HELD_GAP_HOOK"
+    fi
+    if [[ -z $why ]]; then
+      params=$(python3 -I -c '
 import json, os, sys
-try: cols, rows = os.get_terminal_size(1)
-except OSError: cols = rows = None
-p = {"agent": sys.argv[1], "session": sys.argv[2], "argv": ["claude"] + sys.argv[3:], "cwd": os.getcwd(), "env": dict(os.environ)}
-if cols: p["cols"], p["rows"] = cols, rows
+# The window and the run: nothing that names this terminal window or a run token goes to a terminal that outlives both
+# (the core drops the token names too; kith_env_sync mirrors KITH_ names as HQ_ ones, so both spellings are listed here).
+drop = {"TERM_SESSION_ID", "ITERM_SESSION_ID", "TMUX", "TMUX_PANE", "SSH_TTY", "WINDOWID", "COLUMNS", "LINES", "SHLVL", "_"}
+for p in ("KITH_", "HQ_"):
+    drop |= {p + n for n in ("RUN_TOKEN", "RUN_SOCKET", "ASK_TOKEN", "ASK_SOCKET")}
+env = {k: v for k, v in os.environ.items() if k not in drop and not k.startswith(("KITH_RUN_", "HQ_RUN_", "KITH_CALL_", "HQ_CALL_"))}
+size = None
+for fd in (2, 0, 1):
+    try: size = os.get_terminal_size(fd); break
+    except OSError: pass
+if size is None:
+    try:
+        fd = os.open("/dev/tty", os.O_RDONLY); size = os.get_terminal_size(fd); os.close(fd)
+    except OSError: pass
+p = {"agent": sys.argv[1], "session": sys.argv[2], "argv": ["claude"] + sys.argv[3:], "cwd": os.getcwd(), "env": env}
+if size: p["cols"], p["rows"] = size.columns, size.lines
 print(json.dumps(p))' "$agent" "$sid" "$@")
-    ans=$(printf '%s' "$params" | kith_held_call terminal.open) || rc=$?
-    case $rc in
-      0) ;;
-      4|5) exit 1 ;;   # the core said why (refused), or the call may have run: not to be repeated here
-      *) why="holder not reachable" ;;
-    esac
+      ans=$(printf '%s' "$params" | kith_held_call terminal.open) || rc=$?
+      case $rc in
+        0) ;;
+        5) echo "kith: the call may have started it; kith attach $sid joins it if it is held" >&2; exit 1 ;;   # not repeated
+        4) why="the core refused it" ;;   # nothing ran; the refusal was printed
+        *) why="holder not reachable" ;;
+      esac
+    fi
     if [[ -z $why ]]; then
       status=$(printf '%s' "$ans" | kith_held_get status)
       note=$(printf '%s' "$ans" | kith_held_get note)
@@ -181,13 +211,17 @@ print(json.dumps(p))' "$agent" "$sid" "$@")
           fi
           rc=0
           kith_held_attach "$sid" "$ticket" || rc=$?
-          [[ $rc -ne 0 ]] || echo "kith: reattach with: kith attach $sid" >&2
+          # The way back, unless the engine itself ended: a detach, or the attach failing while the terminal runs on.
+          if [[ $held_note == *"keeps running"* || ( $rc -ne 0 && $rc -ne 75 && $rc -lt 79 && -n $held_note ) ]]; then
+            echo "kith: reattach with: kith attach $sid" >&2
+          fi
           exit "$rc" ;;
         *) why=${note%%: use --direct*}; why=${why:-holder not reachable} ;;
       esac
     fi
   fi
-  echo "kith: ${why}; running here (--direct)" >&2
-  [[ -z $rsid ]] || python3 "$KITH/bin/kith-sessions" terminal "$rsid" "$$" || exit 1
+  if [[ -t 0 && -t 1 ]]; then echo "kith: ${why}; running here (--direct)" >&2
+  else echo "kith: ${why}; an interactive session needs a terminal to run here" >&2; fi
+  [[ $released -eq 0 ]] || python3 "$KITH/bin/kith-sessions" terminal "$rsid" "$$" || exit 1
   return 1
 }

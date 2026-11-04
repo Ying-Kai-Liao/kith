@@ -105,6 +105,7 @@ fn the_env_filter_drops_run_tokens_and_their_sockets_and_keeps_the_rest() {
     let env = json!({
         "KITH_RUN_TOKEN": "t", "KITH_RUN_SOCKET": "s", "KITH_RUN_KIND": "ask", "KITH_RUN_ANYTHING": "x",
         "KITH_ASK_TOKEN": "t", "KITH_ASK_SOCKET": "s", "HQ_ASK_TOKEN": "t", "HQ_ASK_SOCKET": "s",
+        "HQ_RUN_OUTBOX": "o", "HQ_RUN_TOKEN": "t",
         "PATH": "/bin", "KITH_AGENT": "kai", "ANTHROPIC_API_KEY": "k", "KITH_RUNNER": "kept", "N": 3
     });
     let got = filter_env(env.as_object().unwrap());
@@ -659,6 +660,19 @@ echo $$ > "$lock/$key.pid"
             !Layout::new(&rig.m).dir.join("locks/sess-w.args").exists(),
             "no stub ran"
         );
+        other.kill().unwrap();
+        other.wait().unwrap();
+    }
+
+    #[test]
+    fn a_session_the_app_is_taking_over_is_busy_and_gives_the_claim_back() {
+        let rig = Rig::new(RUNNING);
+        let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        claim::take_takeover(&rig.m, "sess-t", other.id());
+        let a = answered(open(&rig.m, "sess-t", &["sh", "-c", "cat"], &plain()));
+        assert_eq!(a["status"], "busy", "{a}");
+        assert!(a["note"].as_str().unwrap().contains("taken over"), "{a}");
+        assert!(!rig.claim_file("sess-t").exists(), "the claim it took is given back");
         other.kill().unwrap();
         other.wait().unwrap();
     }

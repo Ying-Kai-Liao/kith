@@ -124,7 +124,8 @@ pub(crate) const STUB_BUSY: i32 = 75;
 
 // --- the filter ----------------------------------------------------------------------------------------------------
 
-/// The names `serve/host/src/runauth.rs` scrubs for tokens and their sockets.
+/// The names `serve/host/src/runauth.rs` scrubs for tokens and their sockets (`KITH_RUN_*` and `HQ_RUN_*` are dropped by prefix:
+/// `kith_env_sync` mirrors every KITH_ name to its HQ_ spelling, so a run's outbox arrives as `HQ_RUN_OUTBOX` too).
 const SCRUBBED: [&str; 6] = [
     "KITH_RUN_TOKEN",
     "KITH_RUN_SOCKET",
@@ -137,7 +138,7 @@ const SCRUBBED: [&str; 6] = [
 /// The env a terminal is started with: the caller's, less what the module docs name.
 pub(crate) fn filter_env(env: &serde_json::Map<String, Value>) -> BTreeMap<String, String> {
     env.iter()
-        .filter(|(k, _)| !SCRUBBED.contains(&k.as_str()) && !k.starts_with("KITH_RUN_"))
+        .filter(|(k, _)| !SCRUBBED.contains(&k.as_str()) && !k.starts_with("KITH_RUN_") && !k.starts_with("HQ_RUN_"))
         .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
         .collect()
 }
@@ -599,6 +600,16 @@ impl Terminals {
         }
         // From here every way out but the open one gives the claim back.
         let give_back = |pid: u32| claim::release(state, &req.session, pid);
+        // The app taking the session over holds `<sid>.takeover.claim` until it has imported it: no writer starts meanwhile
+        // (`kith-sessions claim_start` and `resolve` refuse the same way).
+        if claim::takeover_live(state, &req.session) {
+            give_back(me);
+            return Ok(json!({
+                "status": "busy",
+                "note": format!("session {} is being taken over in the app right now; try again in a moment", req.session),
+                "held_by": {"pid": 0, "kind": "takeover"},
+            }));
+        }
         let locks = layout.dir.join("locks");
         if let Err(e) = crate::perms::ensure_dir(&locks) {
             give_back(me);
@@ -833,6 +844,19 @@ mod claim {
     /// Hands a claim this daemon took for itself to the stub's pid. `Ok(false)`: it is no longer ours.
     pub(super) fn retarget(state: &Path, sid: &str, from: u32, to: u32) -> io::Result<bool> {
         threads::retarget(&ctx(state), sid, i64::from(from), i64::from(to), "terminal")
+    }
+
+    /// A live `<sid>.takeover.claim`.
+    pub(super) fn takeover_live(state: &Path, sid: &str) -> bool {
+        let path = threads::claim_path(&threads::registry_dir(state), sid, true);
+        threads::read_claim(&path).as_ref().is_some_and(threads::Claim::is_live)
+    }
+
+    /// Takes the takeover claim for `pid` (what the host does while it imports a session). Tests only.
+    #[cfg(test)]
+    pub(super) fn take_takeover(state: &Path, sid: &str, pid: u32) {
+        let how = Take { takeover: true, ..Take::new("terminal") };
+        assert!(threads::take_claim(&ctx(state), sid, i64::from(pid), &how).unwrap().is_ok());
     }
 
     /// Gives the claim back if `pid` still holds it.

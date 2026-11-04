@@ -7,8 +7,11 @@
 //! stdin, never argv. With `--tty` the keys are read from the controlling terminal (`/dev/tty`, `CONIN$`) instead of
 //! stdin, for a caller whose stdin is the pipe the ticket came on.
 //!
-//! Exit codes: the engine's code on EXIT (a signal is 128 + n), 75 for "busy" (no retry), 0 for a detach, 1 for
-//! everything else that is not a normal end (refused ticket, error frame, connection lost, `slow`, `taken_over`).
+//! Exit codes: the engine's code on EXIT (a signal is 128 + n), 75 for "busy" (no retry), 0 for a detach, and for the
+//! relay ending the attach with DETACHED: 76 `slow` (the caller may attach again with a new ticket), 77 `taken_over`,
+//! 78 `holder_lost`. 1 for everything else that is not a normal end (refused ticket, error frame, connection lost). The
+//! stub's own codes are 70, 75, 126 and 127, so none of these collides with one (an engine that exits 76-78 itself is
+//! indistinguishable, as with any exit code).
 //!
 //! Resize is polled (every [`RESIZE_POLL`]) rather than taken from SIGWINCH / console events: one code path on both
 //! systems, and a storm of changes is coalesced to the size at each tick.
@@ -141,12 +144,12 @@ pub fn run(endpoint: &Path, opts: &Opts) -> i32 {
 fn detached_note(why: &str) -> (i32, String) {
     match why {
         "detach" => (0, "detached; the agent keeps running".into()),
-        "taken_over" => (1, "detached: another client took over this terminal".into()),
+        "taken_over" => (77, "detached: another client took over this terminal".into()),
         "slow" => (
-            1,
+            76,
             "detached: this client could not keep up with the output; attach again".into(),
         ),
-        "holder_lost" => (1, "detached: the process holder is gone".into()),
+        "holder_lost" => (78, "detached: the process holder is gone".into()),
         "refused" => (1, "detached: the relay refused this attach".into()),
         other => (1, format!("detached: {other}")),
     }
