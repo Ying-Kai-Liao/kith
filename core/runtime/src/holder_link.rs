@@ -721,3 +721,87 @@ fn signal_group(pid: u32, signal: &str) -> bool {
 fn group_alive(pid: u32) -> bool {
     signal_group(pid, "0")
 }
+
+// --- A warm turn's writer lock, through the holder (M3-4) ----------------------------------------------------------
+
+/// What the holder answered to a take.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TurnLock {
+    /// The conversation's lock is held by the process's resident stub for this claim (a take repeated is `Locked` again).
+    Locked,
+    /// Another writer holds the conversation (a terminal's stub, a `--direct` run, another claim's turn).
+    Busy,
+    /// Nothing was locked: a stale or already-released claim, a bad key, or the stub or process is gone (the reason).
+    Error(String),
+}
+
+/// What the holder answered to a release.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TurnRelease {
+    Released,
+    /// That claim's lock was not held (never taken, already released, another claim's, or the stub is gone). The lock,
+    /// if any other claim holds it, stays.
+    NotHeld,
+    Error(String),
+}
+
+/// An answer and the claim id it is for. The claim id rides on everything (runtime-design section 4): a caller acts
+/// only on an answer for its current claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Answered<T> {
+    pub claim: u64,
+    pub result: T,
+}
+
+/// Asks the holder to take conversation lock `key` for `claim` through the resident stub of the warm process `held`.
+///
+/// This only sends the request and returns the typed answer. It does not read or write claims, turns or reports:
+/// those rows belong to the claim transactions of M3-2, and M3-5 calls this from the `claimed -> running` step
+/// (a `Busy` there ends the claim and parks the turn) and `release_turn_lock` from the turn's end. An `Err` is a
+/// broken or silent link; the take may still have happened, and asking again is safe (the same claim is `Locked`
+/// again).
+#[allow(dead_code, reason = "first caller is the claim transitions of M3-5")]
+pub(crate) fn take_turn_lock(
+    client: &mut Client,
+    held: &proto::HeldId,
+    key: &str,
+    claim: u64,
+) -> std::io::Result<Answered<TurnLock>> {
+    let a = client.take_lock(held, key, claim)?;
+    let result = match a.word {
+        proto::LockWord::Locked => TurnLock::Locked,
+        proto::LockWord::Busy => TurnLock::Busy,
+        proto::LockWord::Error => TurnLock::Error(a.reason.unwrap_or_default()),
+        other => TurnLock::Error(format!("unexpected answer {other:?} to a take")),
+    };
+    Ok(Answered {
+        claim: a.claim,
+        result,
+    })
+}
+
+/// Releases the lock `take_turn_lock` took, at the turn's end. Like the take, it touches no claim, turn or report
+/// row. A release asked again is `NotHeld`, which is fine; a lost answer only delays.
+#[allow(dead_code, reason = "first caller is the claim transitions of M3-5")]
+pub(crate) fn release_turn_lock(
+    client: &mut Client,
+    held: &proto::HeldId,
+    key: &str,
+    claim: u64,
+) -> std::io::Result<Answered<TurnRelease>> {
+    let a = client.release_lock(held, key, claim)?;
+    let result = match a.word {
+        proto::LockWord::Released => TurnRelease::Released,
+        proto::LockWord::NotHeld => TurnRelease::NotHeld,
+        proto::LockWord::Error => TurnRelease::Error(a.reason.unwrap_or_default()),
+        other => TurnRelease::Error(format!("unexpected answer {other:?} to a release")),
+    };
+    Ok(Answered {
+        claim: a.claim,
+        result,
+    })
+}
+
+#[cfg(all(test, unix))]
+#[path = "holder_link_tests.rs"]
+mod tests;
