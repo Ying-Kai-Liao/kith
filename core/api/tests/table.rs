@@ -17,13 +17,14 @@ use serde_json::{Value, json};
 
 /// The rows only the host may call (M2-10b): the principal check in `every_row_is_well_formed` pins Host to exactly
 /// these, so a new row cannot gain Host unnoticed.
-const HOST_ROWS: [&str; 6] = [
+const HOST_ROWS: [&str; 7] = [
     "syncLease.link",
     "syncLease.unlink",
     "syncLease.changed",
     "syncLease.drop",
     "syncLease.pulled",
     "syncLease.renew",
+    "schedule.fire",
 ];
 
 fn repo(path: &str) -> PathBuf {
