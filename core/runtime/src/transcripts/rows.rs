@@ -86,6 +86,38 @@ pub(crate) fn put(conn: &Connection, s: &EngineSession, now: i64) -> Result<()> 
     Ok(())
 }
 
+/// Starts the conversation's engine session on `account` (a failover, q216): the account's own row when it has one (it
+/// was started there before; place-or-adopt decides what its files are), else a NEW row with a new session id. Another
+/// account's session is never copied: a Claude session is only loaded under the account that made it, so the backup
+/// begins empty and is told the latest messages by the host. `pointer` is where the engine will keep it (`''` when
+/// unknown, as the table says).
+pub(crate) fn start(
+    conn: &Connection,
+    conversation: &str,
+    account: &str,
+    cwd: &str,
+    new_session: &str,
+    pointer: &str,
+    now: i64,
+) -> Result<EngineSession> {
+    if let Some(have) = get(conn, conversation, account)? {
+        return Ok(have);
+    }
+    let s = EngineSession {
+        conversation: conversation.to_owned(),
+        account: account.to_owned(),
+        engine: super::engine_of(account).to_owned(),
+        session_id: new_session.to_owned(),
+        pointer: pointer.to_owned(),
+        cwd: cwd.to_owned(),
+        hash: None,
+        size: None,
+        last_read_at: None,
+    };
+    put(conn, &s, now)?;
+    Ok(s)
+}
+
 impl Core {
     /// `conversation.transcript`: the conversation's engine sessions as stored, with what the engine's copy is now
     /// (`present`, `changed` since the stored hash). Reads the files, writes nothing.
