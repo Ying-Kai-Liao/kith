@@ -1,0 +1,5 @@
+NS = 1
+MaxEdits = 1
+MaxRevs = 1
+MaxTurns = 2
+Holds = FALSE

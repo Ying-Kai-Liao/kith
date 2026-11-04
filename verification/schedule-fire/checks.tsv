@@ -1,0 +1,78 @@
+# variant	kind	property	expected
+# --- the design: one transaction per fire, every property holds ----------------------------------
+fixed	INVARIANT	TypeOK	pass
+fixed	INVARIANT	AtMostOncePerSlot	pass
+fixed	INVARIANT	NoStacking	pass
+fixed	INVARIANT	CrashSafe	pass
+rev	INVARIANT	NoRunForRevoked	pass
+fixed	INVARIANT	CatchUpWindow	pass
+fixed	INVARIANT	CatchUpOnce	pass
+fixed	INVARIANT	WatermarkRows	pass
+fixed	INVARIANT	AnswerIsRecorded	pass
+rev	PROPERTY	NoFireForRevokedPerson	pass
+fixed	PROPERTY	PausedNeverFires	pass
+fixed	PROPERTY	PausedNeverStarts	pass
+rev	PROPERTY	RevokedNeverStarts	pass
+fixed	PROPERTY	EditUsesNewDefinition	pass
+fixed	PROPERTY	DeadlineExpires	pass
+fixed	PROPERTY	SkipIsJustified	pass
+fixed	PROPERTY	FiredIsLive	pass
+fixed	PROPERTY	BusyWritesNoKey	pass
+wide-window	INVARIANT	CatchUpOnce	pass
+may-in-txn	PROPERTY	NoFireForRevokedPerson	pass
+# --- the authority revoke, then revoke_person (variant rev: one revoke per person, no edit) ---------------
+# --- an edit and a revoke together (variant edit-rev: NS 1, one edit, one revoke per person, no Hold) ---------
+edit-rev	INVARIANT	NoRunForRevoked	pass
+edit-rev	PROPERTY	NoFireForRevokedPerson	pass
+# --- liveness, time running while the core is down, any number of crashes (strong fairness) ------------
+live	PROPERTY	DueGetsRow	pass
+live	PROPERTY	TurnsEnd	pass
+hook	PROPERTY	HookRuns	pass
+# --- AtMostOncePerSlot needs the unique row (a retry that re-fires fails it); the crash needs one transaction
+no-unique	INVARIANT	AtMostOncePerSlot	fail
+insert-first	INVARIANT	CrashSafe	fail
+enqueue-first	INVARIANT	CrashSafe	fail
+enqueue-first	INVARIANT	AtMostOncePerSlot	fail
+# --- NoStacking needs the skip rule, for every kind of fire ---------------------------------------
+no-skip	INVARIANT	NoStacking	fail
+manual-bypass	INVARIANT	NoStacking	fail
+no-sweep	INVARIANT	NoStacking	pass
+no-sweep	PROPERTY	SkipIsJustified	fail
+# --- the caller's answer (requirement 8): a busy run now / webhook writes no key, or its retry is a silent no-op
+busy-row	PROPERTY	BusyWritesNoKey	fail
+hook-busy-row	PROPERTY	HookRuns	fail
+# --- the checks inside the transaction: the definition, may with revoke_seen -------------------------
+stale-may	PROPERTY	NoFireForRevokedPerson	fail
+stale-def	PROPERTY	PausedNeverFires	fail
+stale-def	PROPERTY	EditUsesNewDefinition	fail
+# --- what pause and revoke do to turns already enqueued; cancel in a second transaction ---------------
+pause-keeps	PROPERTY	PausedNeverStarts	fail
+pause-keeps	PROPERTY	PausedNeverFires	pass
+pause-later	PROPERTY	PausedNeverStarts	fail
+revoke-keeps	INVARIANT	NoRunForRevoked	fail
+claim-no-may	PROPERTY	RevokedNeverStarts	pass
+# --- the deadline -------------------------------------------------------------------------------
+no-deadline	PROPERTY	DeadlineExpires	fail
+dl-from-slot	PROPERTY	FiredIsLive	fail
+# --- catch-up, and a row for every slot the watermark passes (requirement j) ---------------------------
+no-window	INVARIANT	CatchUpWindow	fail
+catch-each	INVARIANT	CatchUpOnce	fail
+no-missed	INVARIANT	WatermarkRows	fail
+no-missed-live	PROPERTY	DueGetsRow	fail
+no-record	PROPERTY	DueGetsRow	fail
+tick-first	INVARIANT	WatermarkRows	fail
+tick-first-live	PROPERTY	DueGetsRow	fail
+# --- the runs are not vacuous: each of these happens (the invariant FAILS) -----------------------------
+fixed	INVARIANT	NeverFired	fail
+fixed	INVARIANT	NeverSkipPrev	fail
+fixed	INVARIANT	NeverSkipPaused	fail
+rev	INVARIANT	NeverSkipRevoked	fail
+fixed	INVARIANT	NeverSkipMissed	fail
+fixed	INVARIANT	NeverAdHocFired	fail
+fixed	INVARIANT	NeverBusy	fail
+fixed	INVARIANT	NeverCaughtUp	fail
+fixed	INVARIANT	NeverParked	fail
+fixed	INVARIANT	NeverExpired	fail
+fixed	INVARIANT	NeverDone	fail
+fixed	INVARIANT	NeverCancelled	fail
+fixed	INVARIANT	NeverDown	fail

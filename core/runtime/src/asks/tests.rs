@@ -1074,7 +1074,10 @@ mod stop {
         for source in ["wake", "ask"] {
             let w = turn_from(&mut core, "conv-r", source);
             let err = claim_for(&mut core, "conv-r", w).unwrap_err();
-            assert!(why(&err).contains("was stopped"), "{source}: {}", why(&err));
+            assert!(
+                matches!(&err, Error::Stopped(m) if m.contains("was stopped")),
+                "{source}: {err}"
+            );
             assert_eq!(turn_state(&core, w), "queued");
         }
         let p = turn_from(&mut core, "conv-r", "app");

@@ -241,6 +241,17 @@ pub(crate) fn run(layout: &Layout, machine: &Path, dry_run: bool) -> Result<Repo
              ON CONFLICT (mac) DO UPDATE SET tick = excluded.tick, updated_at = excluded.updated_at",
             params![mac, t, now * 1000],
         )?;
+        // The fire's watermark is a UTC instant (migration 121); the local minute is converted here, as a run's is.
+        // A local minute that did not exist has none, and the fire then starts from its own clock. Never backwards.
+        if let Some(ms) =
+            crate::schedules::slot_of_local(t).and_then(|s| crate::schedules::ms_of_slot(&s))
+        {
+            tx.execute(
+                "INSERT INTO sched_watermark (mac, at, updated_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (mac) DO UPDATE SET at = max(at, excluded.at), updated_at = excluded.updated_at",
+                params![mac, ms, now * 1000],
+            )?;
+        }
     }
     for &i in &new {
         let r = &src.runs[i];

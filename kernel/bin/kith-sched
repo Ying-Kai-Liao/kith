@@ -34,6 +34,10 @@ Runs start with `--permission-mode` from KITH_SCHED_PERMISSION_MODE when set, el
 defaultMode, else in kith's default (auto; ~/.kith/settings.json changes it): no one is there to approve a tool call, so
 one that would need it is refused. The agent's settings.json allow/deny rules still apply.
 Machine state (last tick, last runs): ~/.kith/sched/. Logs (tick.log, each run's output): ~/.kith/logs/sched/.
+
+KITH_SCHED_NOW (tests): the time kith-sched takes as now, instead of the clock: ISO local time ("2026-11-03T08:00") or
+epoch seconds. Unset, nothing changes. It sets the tick, the catch-up window, the 6 h still-running rule, `ls`'s next
+times and the stamps kith-sched writes; it does not move the clock of the runs it starts.
 """
 import contextlib, datetime as dt, fcntl, io, json, os, plistlib, re, subprocess, sys, time
 from pathlib import Path
@@ -60,6 +64,23 @@ KEEP_RUNS, KEEP_RUN_DAYS = 50, 30
 AUTH_LOG_MAX = 5 * 1024 * 1024
 TERMINAL_DAYS = 7
 PRUNE_EVERY = 3600   # seconds between prunes: the tick runs every minute, the files grow slowly
+
+
+def clock():
+    """Now, as local time without a zone. KITH_SCHED_NOW (ISO local time, or epoch seconds) hands tests a fixed one."""
+    v = os.environ.get('KITH_SCHED_NOW', '').strip()
+    if not v:
+        return dt.datetime.now()
+    try:
+        return dt.datetime.fromtimestamp(float(v))
+    except ValueError:
+        t = dt.datetime.fromisoformat(v)
+        return t.astimezone().replace(tzinfo=None) if t.tzinfo else t
+
+
+def epoch():
+    """clock() as epoch seconds; the real time.time() when KITH_SCHED_NOW is unset."""
+    return clock().timestamp() if os.environ.get('KITH_SCHED_NOW', '').strip() else time.time()
 
 
 # --- cron -------------------------------------------------------------------------------------------------------------
@@ -226,7 +247,7 @@ def run_outbox(agent, job, person):
         meta = root / (run + '.json')
         with open(str(meta) + '.tmp', 'w') as f:
             json.dump({'agent': agent, 'person': person, 'via': 'schedule', 'job': job['id'], 'cron': job['cron'],
-                       'at': time.time()}, f)
+                       'at': epoch()}, f)
         os.replace(str(meta) + '.tmp', meta)
     except OSError:
         return None
@@ -242,7 +263,7 @@ def tell_app(agent, jid, op):
     name = os.path.join(box, '%d.json' % time.time_ns())
     try:
         with open(name + '.tmp', 'w') as f:
-            json.dump({'as': agent, 'at': time.time(), 'schedule': {'id': jid, 'op': op}}, f)
+            json.dump({'as': agent, 'at': epoch(), 'schedule': {'id': jid, 'op': op}}, f)
         os.rename(name + '.tmp', name)   # whole or not at all: the host reads *.json only
     except OSError as e:
         print('kith-sched: the app was not told (%s)' % e, file=sys.stderr)
@@ -270,6 +291,7 @@ def start(agent, job, now, why):
               'KITH_BRIDGE_OUTBOX', 'KITH_RUN_OUTBOX', 'KITH_CALL_CHAT', 'KITH_CALL_KEY'):   # and the HQ_ twins that sync_env made
         env.pop('HQ_' + k[5:], None)
         env.pop(k, None)
+    env.pop('KITH_SCHED_NOW', None)   # the test clock is the tick's, not the run's
     env['KITH_BACKUP_CHAIN'] = 'on'   # no host picks the account: bin/kith walks the account candidates (kith account pick)
     if job.get('person'):   # none: whoever started this (launchd's tick: the owner; a run by hand: that run's person)
         env['KITH_PERSON'] = env['HQ_PERSON'] = job['person']
@@ -367,7 +389,7 @@ def prune_terminal(dirpath, now=None, days=TERMINAL_DAYS):
 def prune(force=False):
     """Hourly housekeeping from the tick: run logs, auth.log, terminal records. Deletes are idempotent."""
     s = machine()
-    t = time.time()
+    t = epoch()
     if not force and t - s.get('pruned', 0) < PRUNE_EVERY:
         return
     s['pruned'] = t
@@ -395,7 +417,7 @@ def tick():
         subprocess.run([sys.executable, str(KITH / 'bin/kith-wake'), 'drain'], timeout=30, stdout=subprocess.DEVNULL)
     except Exception as e:  # noqa: BLE001
         print('kith-sched: wake drain: %s' % e, file=sys.stderr)
-    now = dt.datetime.now().replace(second=0, microsecond=0)
+    now = clock().replace(second=0, microsecond=0)
     s = machine()
     last = dt.datetime.fromisoformat(s['tick']) if s.get('tick') else now - dt.timedelta(minutes=1)
     since = max(last, now - CATCH_UP)
@@ -463,7 +485,7 @@ def find(agent, jid, jobs=None):
 
 
 def ls(only=None):
-    now, last = dt.datetime.now(), machine().get('last', {})
+    now, last = clock(), machine().get('last', {})
     rows = [(a, j) for a, j in all_jobs() if only in (None, a)]
     if not rows:
         print('no jobs%s. Add one: kith schedule add <agent> "0 8 * * *" "the task"' % (' for ' + only if only else ''))
@@ -514,7 +536,7 @@ def job_row(agent, j, last, now):
 
 def json_cmd(cmd, rest):
     """The --json twin of a verb: returns the object to print. Failures arrive as SystemExit(message)."""
-    now = dt.datetime.now()
+    now = clock()
     if cmd == 'ls':
         if rest: need_agent(rest[0])
         last = machine().get('last', {})
@@ -641,7 +663,7 @@ def main(argv):
         agent, cron, task = pos
         need_agent(agent)
         try:
-            nxt = next_time(parse(cron), dt.datetime.now())
+            nxt = next_time(parse(cron), clock())
         except ValueError as e:
             sys.exit('kith-sched: %s' % e)
         if opts.get('e') and opts['e'] not in EFFORTS:
@@ -673,7 +695,7 @@ def main(argv):
                 if not me.get('owner') and me.get('person') != them.get('person'):
                     sys.exit('kith-sched: %s/%s runs for %s; only they or the owner can start it by hand'
                              % (agent, jid, job['person']))
-            log = start(agent, job, dt.datetime.now().replace(second=0, microsecond=0), 'run by hand')
+            log = start(agent, job, clock().replace(second=0, microsecond=0), 'run by hand')
             if not log:
                 sys.exit(1)
             print('started → %s' % log)

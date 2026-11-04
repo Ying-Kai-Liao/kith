@@ -6885,19 +6885,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "link"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -6909,19 +6907,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "unlink"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -6933,7 +6929,8 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "owner",
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
@@ -6957,19 +6954,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "changed"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -6981,19 +6976,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "drop"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -7022,15 +7015,12 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "pulled"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
@@ -7044,7 +7034,8 @@
               "--ms"
             ]
           }
-        }
+        },
+        "hidden": true
       }
     },
     {
@@ -7065,15 +7056,12 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "renew"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
@@ -7084,7 +7072,8 @@
               "--ms"
             ]
           }
-        }
+        },
+        "hidden": true
       }
     },
     {
@@ -7738,6 +7727,126 @@
         "args": {
           "agent": {
             "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.tick",
+      "summary": "Fire what is due at `now` (the caller's clock, ms; this machine's by default): one transaction per job that writes its fire row, its turn and the watermark. Catch-up fires only the latest due slot inside a day; older ones are kept as one `skipped:missed` row. Nothing runs this on a clock yet: `kith-sched` owns jobs.json until M4-5.",
+      "params": [
+        {
+          "name": "now",
+          "summary": "The clock, ms since the epoch (this machine's by default).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "tick"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.runNow",
+      "summary": "Run a job now through the same fire: it obeys the skip rule. A busy job answers `busy` and writes nothing, so a retry fires once it is free; a `key` that was decided answers what was decided; a paused or revoked job answers final.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "key",
+          "summary": "The run's own key (letters, digits, - _ .); a retry with the same key is the same run.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, ms since the epoch (this machine's by default).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "run-now"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "key": {
+            "kind": "flag",
+            "spellings": [
+              "--key"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
           }
         }
       }
@@ -8781,6 +8890,101 @@
             "kind": "flag",
             "spellings": [
               "--persons"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.to",
+      "summary": "`kith ask --to ID`, the check before anything is queued: whether the ask still takes a follow-up. An ask that was stopped or ended refuses with `was stopped; ask anew` (the stopped fence never lifts; the Python `--to` queued the message and the wake fence dropped it). Answers `{id, ok}`; refuses an id that is no ask.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "to"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.revokeEverywhere",
+      "summary": "The revoke order for conversations, once the authority revoke is visible to the may check: the person's claims and each of their bots' (queued and parked turns cancelled, live claims to `ending`, the revoke epoch bumped so a claim that passed its may check before is refused), THEN the asks of the person and their bots with every ask below them (`ask.end --persons`). `ask.end` alone is not a revoke. One claim transaction per principal, then one for the asks. Safe to repeat; a retry (with the same bots) finishes a crash between the steps, and a crash after the person's step leaves the bots' in-flight claims unfenced until it. On a removal pass `--bots`, read before the write: the rows are gone after. Kills no process: answers `{principals, cancelledTurns, ended, sessions, kill}`.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person revoked.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "bots",
+          "summary": "Bots of the person (the whole transitive set) read before an authority removal deleted their rows; the bots still in `people.bot_of` are added.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "revoke-everywhere"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "bots": {
+            "kind": "flag",
+            "spellings": [
+              "--bots"
             ]
           }
         }
