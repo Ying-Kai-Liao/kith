@@ -55,16 +55,50 @@ pub fn try_cli(args: &[OsString]) -> Option<i32> {
     }
 }
 
+/// The variables `paths` reads, as this process has them. `var_os`: a variable that is not UTF-8 must not stop
+/// `kith paths`; one paths reads is skipped if it is.
+pub fn caller_env() -> serde_json::Map<String, Value> {
+    PATHS_VARS
+        .iter()
+        .filter_map(|k| Some(((*k).to_owned(), Value::String(std::env::var_os(k)?.into_string().ok()?))))
+        .collect()
+}
+
+/// One read row asked of the daemon by the host itself (the event filter's authority questions, M2-15). `Some(answer)`
+/// only when a daemon answered; no daemon, a refusal, a mismatch or a lost connection are all `None`, which the asker
+/// must read as "no" for anything that grants.
+pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
+    match kith_core::reach(folders, method, params, true) {
+        kith_core::Reached::Answered(answer) => Some(answer),
+        _ => None,
+    }
+}
+
+/// A daemon started for a test of a caller that asks it (`ask`).
+#[cfg(test)]
+pub struct TestDaemon(kith_core::Daemon);
+
+#[cfg(test)]
+impl TestDaemon {
+    pub fn stop(self) {
+        self.0.stop();
+    }
+}
+
+/// Starts a daemon on `folders`, ready before it returns.
+#[cfg(test)]
+pub fn serve_for_test(folders: &Paths) -> TestDaemon {
+    let d = kith_core::Daemon::spawn(folders);
+    d.ready(std::time::Duration::from_secs(30)).expect("the daemon serves");
+    TestDaemon(d)
+}
+
 /// The caller's view of the environment, for the methods that read it: the daemon's own environment is not the one
 /// this process has (a hook or an agent run has its own `KITH_HOME`, `HOME`, `KITH_STATE` ...). `None` when the home or
 /// the kernel folder is not UTF-8: the daemon would be told another path than the caller has.
 fn caller_view(method: &str, mut params: Value, home: &std::path::Path) -> Option<Value> {
     if method == "paths" {
-        // var_os: a variable that is not UTF-8 must not stop `kith paths`; one paths reads is skipped if it is.
-        let env: serde_json::Map<String, Value> = PATHS_VARS
-            .iter()
-            .filter_map(|k| Some(((*k).to_owned(), Value::String(std::env::var_os(k)?.into_string().ok()?))))
-            .collect();
+        let env = caller_env();
         let object = params.as_object_mut().expect("parsed params are an object");
         if !object.contains_key("kernel") {
             let kernel: PathBuf = kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));

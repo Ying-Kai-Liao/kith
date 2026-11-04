@@ -3,6 +3,7 @@
 //! Everything an allowed method returns is shaped here too, so no handler has to know who is asking.
 //! The owner's devices and Local never come through here (see `dispatch`).
 
+use super::authority::Authority;
 use super::devices::NotAllowed;
 use crate::hub::Hub;
 use crate::remote::account;
@@ -349,7 +350,13 @@ fn bot_person(store: &Store, id: &str) -> Option<Option<String>> {
 /// an invitee sees only their own, and no invitee sees usage, screens or the cloud. A permission card says whether
 /// they may answer it (`canAnswer`).
 pub fn event_for(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
-    let mut v = route(store, who, v)?;
+    super::authority::with_selected(store, |access| event_for_with(access, store, who, v))
+}
+
+/// [`event_for`] with the answer to "is this person granted this agent" given (`authority::Authority`): the host's
+/// people mirror, or the core's.
+pub fn event_for_with(access: &dyn Authority, store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
+    let mut v = route(access, store, who, v)?;
     if v["type"] == "entry" {
         mark_can_answer(store, who, &mut v["entry"]);
     }
@@ -382,7 +389,7 @@ fn was_approver(e: &Value, me: &str) -> bool {
     e["kind"] == "permission" && e["data"]["formerApprovers"].as_array().is_some_and(|l| l.iter().any(|p| p == me))
 }
 
-fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
+fn route(access: &dyn Authority, store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
     let kind = v["type"].as_str().unwrap_or_default().to_owned();
     // A key or account card goes to the owner's devices and nobody else's.
     if who.is_some() && kind == "entry" && secret_card(&v["entry"]["data"]) {
@@ -428,10 +435,8 @@ fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
             .then_some(v),
         (None, _) => Some(v),
         (Some(me), Some(Some(p))) if p == me => {
-            let agents = store.person(me).map(|p| p.agents).unwrap_or_default();
-            let granted =
-                store.bot(bot.as_deref()?).ok().flatten()?.config.hq_agent.is_some_and(|a| agents.contains_key(&a));
-            if !granted {
+            let agent = store.bot(bot.as_deref()?).ok().flatten()?.config.hq_agent;
+            if !agent.is_some_and(|a| access.granted(me, &a)) {
                 return None;
             }
             let mut v = shape_bot(v);
