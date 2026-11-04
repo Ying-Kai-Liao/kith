@@ -34,4 +34,6 @@ check kith-core "$BANNED|keyring|openssl|openssl-sys"
 check kith-api "$BANNED|kith-core|kith-kernel|kith-acp|kith-holder|kith-serve|kith-mem|kith-guest"
 # kith-acp is the one async crate (tokio is its job), but no server stack, HTTP client, UI or host-only crate.
 check kith-acp 'axum|tower|tower-http|reqwest|ratatui|crossterm|kith-wire|kith-mem|kith-guest|kith-serve'
+# kith-attach (the raw-mode attach client) stands on the holder's wire and platform layer only; Windows CI builds it alone.
+check kith-attach "$BANNED|kith-core|kith-kernel|kith-acp|kith-serve|kith-mem|kith-guest"
 exit $fail
