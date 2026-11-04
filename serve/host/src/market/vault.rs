@@ -51,6 +51,11 @@ pub trait Link: Send + Sync {
     fn has(&self, name: &str) -> Result<bool>;
     /// Removes `name`; answers whether it was there. Needs no key.
     fn delete(&self, name: &str) -> Result<bool>;
+    /// [`Link::has`] for the paths that must not read "cannot ask" as "no" (a bot deciding whether to unlock): waits while
+    /// the core is starting, answers "no" only when this computer has no core database, and otherwise fails.
+    fn has_waiting(&self, name: &str) -> Result<bool> {
+        self.has(name)
+    }
     fn get(&self, name: &str) -> Result<Option<String>>;
     fn put(&self, name: &str, value: &str) -> Result<()>;
     /// The old vault's master key, or `None` when this computer never made one. Never makes one.
@@ -109,6 +114,14 @@ impl Link for CoreLink {
     fn has(&self, name: &str) -> Result<bool> {
         // One try: `has` runs on message paths, which must not wait for a core that is not there.
         Ok(Self::call("secrets.has", &json!({"name": name}), Duration::ZERO)?["has"] == true)
+    }
+
+    fn has_waiting(&self, name: &str) -> Result<bool> {
+        crate::core_front::secrets_has_waiting(name, DAEMON_WAIT).map_err(|e| {
+            anyhow!(
+                "Secure credential storage refused: {e:#}. Credentials are never saved as plain text, and nothing was changed."
+            )
+        })
     }
 
     fn delete(&self, name: &str) -> Result<bool> {
@@ -249,18 +262,39 @@ fn move_slot(store: &Store, slot: &str, key: Option<&Zeroizing<Vec<u8>>>) -> Res
     let Some(raw) = store.kv_read(slot)? else {
         bail!("There is no record to move");
     };
-    let value = if raw.starts_with(PREFIX) {
+    let was_plaintext = !raw.starts_with(PREFIX);
+    let value = if was_plaintext {
+        raw
+    } else {
         let key =
             key.ok_or_else(|| anyhow!("The old credential key is not available; the stored record was preserved"))?;
         open_old(key, slot, &raw)?
-    } else {
-        raw
     };
     store.vault.link.put(slot, &value)?;
     match store.vault.link.get(slot)? {
-        Some(back) if back == value => Ok(value),
+        Some(back) if back == value => {}
         _ => bail!("The moved credential did not read back; the old record was left in place"),
     }
+    if was_plaintext {
+        // A plaintext row must not stay plaintext in serve.db: sealed under the old key when it is at hand (a rollback
+        // still finds the value), else removed. Only now, after the envelope has answered with it.
+        match key {
+            Some(key) => store.kv_set(slot, &seal_old(key, slot, &value)?)?,
+            None => store.kv_delete(slot)?,
+        }
+    }
+    Ok(value)
+}
+
+/// An old-format record, the inverse of [`open_old`].
+fn seal_old(key: &[u8], slot: &str, value: &str) -> Result<String> {
+    let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|_| unavailable())?;
+    let mut nonce = [0; 24];
+    getrandom::fill(&mut nonce).map_err(|_| anyhow!("Could not make a nonce"))?;
+    let sealed = cipher
+        .encrypt(&XNonce::from(nonce), Payload { msg: value.as_bytes(), aad: slot.as_bytes() })
+        .map_err(|_| anyhow!("Could not seal the credential"))?;
+    Ok(format!("{PREFIX}{}", STANDARD.encode(nonce.into_iter().chain(sealed).collect::<Vec<u8>>())))
 }
 
 /// An old-format record: `vault:v1:` and base64 of a 24-byte nonce plus XChaCha20-Poly1305 ciphertext, slot as AD.
@@ -295,8 +329,9 @@ fn unavailable() -> anyhow::Error {
 pub fn read(store: &Store, slot: &str) -> Result<Option<String>> {
     if !store.vault.is_open() {
         // Before `unlock` a slot with nothing behind it is simply empty (callers ask without unlocking to find out
-        // whether a feature is set up); one that has a value needs the key store, which only `unlock` may wake.
-        if exists(store, slot)? {
+        // whether a feature is set up); one that has a value needs the key store, which only `unlock` may wake. A core
+        // that cannot be asked is an error, not "empty": a bot would start on the wrong credentials.
+        if exists_strict(store, slot)? {
             return Err(unavailable());
         }
         return Ok(None);
@@ -307,21 +342,48 @@ pub fn read(store: &Store, slot: &str) -> Result<Option<String>> {
     let Some(raw) = store.kv_read(slot)? else {
         return Ok(None);
     };
-    // Not moved yet (a plaintext value from before the vault, or a record `unlock` could not move): try it here.
-    let key = if raw.starts_with(PREFIX) { store.vault.link.legacy_key(store)? } else { None };
-    move_slot(store, slot, key.as_ref()).map(Some)
+    // A plaintext value from before the vault moves here, as it needs no key. A record under the old key does not: the
+    // key store can sit on a prompt, and only `unlock` (a blocking thread, with a timeout) may read it.
+    if raw.starts_with(PREFIX) {
+        bail!(
+            "This credential is still under the old key and has not been moved yet (the keychain did not answer when this computer unlocked); the stored record was preserved. Unlock Keychain and restart Kith."
+        );
+    }
+    move_slot(store, slot, None).map(Some)
 }
 
 /// Whether the slot has a value, sealed or still on an old row. Needs no key, so it never wakes the key store.
-/// A core that cannot be reached reads as "nothing sealed": callers ask this to learn whether a feature is set up
-/// (a bot starting without a connector list, a status line), and none of them may fail because the vault is down.
-/// What they then try to read or write is refused by the vault itself, with the reason.
+/// A core that cannot be reached reads as "nothing sealed": for status lines and the router only, which may not fail
+/// because the vault is down. Whatever decides about a secret to use (a bot starting, `read`) asks [`exists_strict`].
 pub fn exists(store: &Store, slot: &str) -> Result<bool> {
     let sealed = store.vault.link.has(slot).unwrap_or_else(|error| {
         tracing::debug!(slot, error = format!("{error:#}"), "could not ask the core whether a credential is sealed");
         false
     });
     Ok(sealed || store.kv_read(slot)?.is_some())
+}
+
+/// [`exists`] for the paths that act on the answer: an old row counts without asking the core; otherwise the core is
+/// waited for while it starts, and one that is down is an error, never "nothing sealed". Blocks (a socket call that may
+/// wait): off the async workers (see [`unlock_if_sealed`]).
+pub fn exists_strict(store: &Store, slot: &str) -> Result<bool> {
+    if store.kv_read(slot)?.is_some() {
+        return Ok(true);
+    }
+    store.vault.link.has_waiting(slot)
+}
+
+/// Unlocks the vault when `slot` (or anything else the caller names) has a value to use, for a bot about to start. Asks
+/// on a blocking thread.
+pub async fn unlock_if_sealed(hub: &Arc<crate::hub::Hub>, slot: String) -> Result<()> {
+    if hub.store.vault.is_open() {
+        return Ok(());
+    }
+    let asked = hub.clone();
+    if tokio::task::spawn_blocking(move || exists_strict(&asked.store, &slot)).await?? {
+        unlock(hub.clone()).await?;
+    }
+    Ok(())
 }
 
 /// Removes the slot's value. The old row, if any, goes too: this is the owner clearing a credential, not a move.
@@ -520,8 +582,8 @@ mod tests {
         store.kv_set("record", "private password").unwrap();
         assert_eq!(read(&store, "record").unwrap().as_deref(), Some("private password"));
         assert_eq!(link.values.locked().get("record").map(String::as_str), Some("private password"));
-        // The old row stays (a rollback still reads it); the envelope answers from now on.
-        assert_eq!(store.kv_read("record").unwrap().as_deref(), Some("private password"));
+        // No old key at hand: the plaintext row goes once the envelope has answered with it.
+        assert_eq!(store.kv_read("record").unwrap(), None);
         write(&store, "record", "newer").unwrap();
         assert_eq!(read(&store, "record").unwrap().as_deref(), Some("newer"));
     }
@@ -608,12 +670,69 @@ mod tests {
         store.vault.open.store(false, Ordering::Release);
         *link.refuse.lock().unwrap() = Some("the core is not running".into());
         assert!(!exists(&store, "connectors").unwrap());
-        assert_eq!(read(&store, "connectors").unwrap(), None);
+        // A read must not take "cannot ask" for "nothing there": a bot would start on the wrong credentials.
+        let error = format!("{:#}", read(&store, "connectors").unwrap_err());
+        assert!(error.contains("the core is not running"), "{error}");
+        assert!(exists_strict(&store, "connectors").is_err());
         // A value still on an old row is there to be seen, and needs the key: refused with the reason.
         store.kv_set("old", "vault:v1:sealed").unwrap();
         assert!(exists(&store, "old").unwrap());
         assert!(read(&store, "old").is_err());
         assert!(write(&store, "connectors", "[]").is_err());
+    }
+
+    #[test]
+    fn plaintext_is_resealed_under_the_old_key_when_it_is_at_hand() {
+        let (vault, link) = open_vault();
+        let store = store_with(vault);
+        let key = Zeroizing::new(vec![5u8; 32]);
+        store.kv_set("record", "private password").unwrap();
+        assert_eq!(move_slot(&store, "record", Some(&key)).unwrap(), "private password");
+        let row = store.kv_read("record").unwrap().unwrap();
+        assert!(row.starts_with(PREFIX), "still plaintext: {row}");
+        assert_eq!(open_old(&key, "record", &row).unwrap(), "private password");
+        assert_eq!(link.values.locked().get("record").map(String::as_str), Some("private password"));
+    }
+
+    #[test]
+    fn a_read_never_touches_the_old_key_and_says_an_unmoved_record_is_not_moved() {
+        let (vault, link) = open_vault();
+        *link.legacy.locked() = Some(vec![5u8; 32]);
+        let store = store_with(vault);
+        store.kv_set("slot", &old_record(&[5u8; 32], "slot", "v")).unwrap();
+        let error = format!("{:#}", read(&store, "slot").unwrap_err());
+        assert!(error.contains("not been moved yet") && error.contains("stored record was preserved"), "{error}");
+        assert_eq!(link.legacy_reads.load(Ordering::SeqCst), 0, "read() asked for the old key");
+        assert_eq!(link.values.locked().len(), 0);
+    }
+
+    /// A key saved after M2-7 lives in the envelope alone: the bot still has to unlock for it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_key_in_the_envelope_alone_unlocks_at_bot_start() {
+        use crate::remote::identity::Identity;
+        let dir = std::env::temp_dir().join(format!("kith-vault-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let link = Arc::new(MemoryLink::default());
+        link.values.locked().insert("agent-env:claude".into(), "{}".into());
+        let mut store = Store::open(&dir.join("kith.db")).unwrap();
+        store.vault = Vault::with_link(link.clone(), false);
+        assert_eq!(store.kv_read("agent-env:claude").unwrap(), None);
+        let hub =
+            crate::hub::Hub::new(store, "vault-test".into(), Identity::load_or_create(&dir).unwrap(), "t".into(), 0);
+        unlock_if_sealed(&hub, "agent-env:other".into()).await.unwrap();
+        assert!(!hub.store.vault.is_open(), "nothing sealed: no unlock");
+        unlock_if_sealed(&hub, "agent-env:claude".into()).await.unwrap();
+        assert!(hub.store.vault.is_open());
+        // A core that cannot be asked fails the start instead of starting without the key.
+        let (vault, down) = open_vault();
+        let mut store = Store::open(&dir.join("kith2.db")).unwrap();
+        store.vault = vault;
+        store.vault.open.store(false, Ordering::Release);
+        *down.refuse.lock().unwrap() = Some("the core is not running".into());
+        let hub =
+            crate::hub::Hub::new(store, "vault-test".into(), Identity::load_or_create(&dir).unwrap(), "t".into(), 0);
+        assert!(unlock_if_sealed(&hub, "agent-env:claude".into()).await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

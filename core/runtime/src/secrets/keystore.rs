@@ -20,6 +20,17 @@ pub(crate) const KEY_LEN: usize = 32;
 /// Item name in the OS store. One per machine, so the service names the product and the account names the use.
 const SERVICE: &str = "dev.kith.core.secrets";
 const ACCOUNT: &str = "master-key";
+/// Debug builds only (the tests' hosts): another item name, so a test never reads or makes the real master key.
+#[cfg(debug_assertions)]
+const ACCOUNT_ENV: &str = "KITH_SECRETS_KEYSTORE_ACCOUNT";
+
+fn account() -> String {
+    #[cfg(debug_assertions)]
+    if let Some(account) = std::env::var(ACCOUNT_ENV).ok().filter(|a| !a.is_empty()) {
+        return account;
+    }
+    ACCOUNT.to_owned()
+}
 
 /// A locked Keychain can sit on an access prompt nobody sees; a call that long is a refusal, not a hang.
 /// Absolute program paths only: a PATH lookup would let a planted binary read or forge the master key.
@@ -46,11 +57,11 @@ pub(crate) trait KeyStore: Send {
 pub(crate) fn os_key_store() -> Result<Box<dyn KeyStore>> {
     #[cfg(target_os = "macos")]
     {
-        Ok(Box::new(SecurityCli::new(SERVICE, ACCOUNT)))
+        Ok(Box::new(SecurityCli::new(SERVICE, &account())))
     }
     #[cfg(target_os = "linux")]
     {
-        Ok(Box::new(SecretTool::new(SERVICE, ACCOUNT)))
+        Ok(Box::new(SecretTool::new(SERVICE, &account())))
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {

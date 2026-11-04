@@ -23,6 +23,25 @@ fn machine_state(home: &Path) -> std::path::PathBuf {
     }
 }
 
+/// A test that picks its own `KITH_STATE` gets it through a short path in /tmp (a link to it), for the reason
+/// `machine_state` is short: the core binds its owner socket under it, and a socket path of a macOS temporary folder is
+/// too long to bind. Without the core the vault refuses (secrets need it), and a bot that reads a saved key cannot start.
+fn short_link(state: &str) -> String {
+    #[cfg(unix)]
+    {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        state.hash(&mut hash);
+        let link = std::path::PathBuf::from("/tmp").join(format!("ks-{:x}", hash.finish()));
+        let _ = std::fs::create_dir_all(state);
+        let _ = std::fs::remove_file(&link);
+        if std::os::unix::fs::symlink(state, &link).is_ok() {
+            return link.to_string_lossy().into_owned();
+        }
+    }
+    state.to_owned()
+}
+
 /// Runs `kith-serve serve` for `home` until it answers: the process and its base URL. A port
 /// picked here is only free for a moment; when something else takes it before the host binds, the
 /// host exits and this starts it again on another one.
@@ -62,11 +81,16 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 // Never this computer's state: the fake agents share a session id, and turn claims and terminal
                 // registries live under it. An explicit folder inside the test's home.
                 .env("KITH_STATE", machine_state(home))
+                // Never Kai's real master key item: a debug core reads this account name instead (see core keystore.rs).
+                .env(
+                    "KITH_SECRETS_KEYSTORE_ACCOUNT",
+                    format!("test-{}", machine_state(home).display().to_string().replace('/', "-")),
+                )
                 .env("CLAUDE_CONFIG_DIR", home.join("claude-config"))
                 .env("KITH_SERVE_MAX_RUNNING_AGENTS", "64")
                 .env("KITH_SERVE_MIN_FREE_MEMORY_PERCENT", "0")
                 .env("KITH_SERVE_MAX_SWAP_USED_GB", "0")
-                .envs(env.iter().copied())
+                .envs(env.iter().map(|(k, v)| (*k, if *k == "KITH_STATE" { short_link(v) } else { (*v).to_owned() })))
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()

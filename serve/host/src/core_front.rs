@@ -178,6 +178,42 @@ fn secrets_call_at(folders: &Paths, method: &str, params: &Value, wait: std::tim
     }
 }
 
+/// Whether the envelope holds `name`, for the paths that decide whether a secret must be unlocked (a bot starting).
+/// Unlike [`secrets_call`] it never reads "cannot ask" as "no": it waits up to `wait` while the daemon is not yet
+/// answering (starting, or a command holding the core) and then fails, with the reason. The one honest "no" without an
+/// answer is a computer with no core database at all: nothing was ever sealed there.
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+pub fn secrets_has_waiting(name: &str, wait: std::time::Duration) -> anyhow::Result<bool> {
+    secrets_has_at(&kernel::folders(&kith_kernel::paths::process_home()), name, wait)
+}
+
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+fn secrets_has_at(folders: &Paths, name: &str, wait: std::time::Duration) -> anyhow::Result<bool> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match kith_core::reach(folders, "secrets.has", &json!({"name": name}), true) {
+            kith_core::Reached::Answered(answer) => return Ok(answer["has"] == true),
+            kith_core::Reached::NoDaemon => {
+                let status = kith_core::status(folders);
+                let state = status["core"]["state"].as_str().unwrap_or("-");
+                if state == "no-core" {
+                    return Ok(false);
+                }
+                if std::time::Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "the core is not running ({state}: {}; kith doctor says more; secrets need it)",
+                        status["core"]["note"].as_str().unwrap_or("-")
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            kith_core::Reached::Refused(e) => anyhow::bail!("{e}"),
+            kith_core::Reached::Mismatch(note) => anyhow::bail!("the running core does not fit this host: {note}"),
+            kith_core::Reached::Lost(why) => anyhow::bail!("the connection to the core ended: {why}"),
+        }
+    }
+}
+
 // --- run tokens (M2-13) -----------------------------------------------------------------------------------------------
 
 /// Set to `1` (or `true`) to have the host get a guest run's token from the core daemon (`run.mint` / `run.bind` /
@@ -532,6 +568,34 @@ mod tests {
         let bad = secrets_call_at(&folders, "secrets.has", &json!({}), wait);
         assert!(bad.is_err(), "missing params are refused: {bad:?}");
         daemon.stop();
+        let _ = std::fs::remove_dir_all(&folders.home);
+    }
+
+    /// The bot-start question: a core that is starting is waited for, a core that is down is an error (never "no"),
+    /// and a computer with no core database has nothing sealed.
+    #[cfg(unix)]
+    #[test]
+    fn secrets_has_waits_for_a_starting_core_and_fails_loudly_for_a_down_one() {
+        let folders = short_folders("sh");
+        let none = std::time::Duration::from_millis(300);
+        // No core database yet: nothing was ever sealed, and nobody waits.
+        let t = std::time::Instant::now();
+        assert!(!secrets_has_at(&folders, "a", std::time::Duration::from_secs(10)).expect("no core"));
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        // A core database but no daemon: down, and a loud error.
+        serve_for_test(&folders).stop();
+        let err = secrets_has_at(&folders, "a", none).expect_err("down is not 'no'");
+        assert!(format!("{err:#}").contains("core is not running"), "{err:#}");
+        // A daemon that comes up while the caller waits.
+        let starting = folders.clone();
+        let late = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            serve_for_test(&starting)
+        });
+        let t = std::time::Instant::now();
+        assert!(!secrets_has_at(&folders, "a", std::time::Duration::from_secs(10)).expect("waits"));
+        assert!(t.elapsed() >= std::time::Duration::from_millis(500));
+        late.join().expect("daemon").stop();
         let _ = std::fs::remove_dir_all(&folders.home);
     }
 
