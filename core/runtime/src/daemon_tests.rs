@@ -1014,7 +1014,7 @@ fn the_host_connection_reaches_no_owner_row() {
     ] {
         match host(&p, name, &params) {
             Reached::Refused(Error::NotAllowed(note)) => {
-                assert!(note.contains("host"), "{name}: {note}")
+                assert!(note.contains("host"), "{name}: {note}");
             }
             other => panic!("{name}: the host got {other:?}"),
         }
