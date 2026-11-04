@@ -303,3 +303,74 @@ fn no_withdrawn_card_is_ever_answered_or_picked_up() {
         }
     }
 }
+
+fn rename(rig: &mut Rig, from: &str, to: &str) {
+    rig.call("people.renamePerson", &json!({"id": from, "to": to}))
+        .unwrap();
+}
+
+#[test]
+fn a_rename_carries_the_cards_so_a_suspension_of_the_new_id_withdraws_them() {
+    let mut rig = Rig::new(&world());
+    let open_n = ask("sam", "s1", "Bash:k");
+    let open_id = open(&mut rig, &open_n);
+    let grant_n = ask("sam", "s2", "Bash:g");
+    let grant_id = open(&mut rig, &grant_n);
+    let got = answer(&mut rig.core, &reply(&grant_id, true), T0 + 1, &Nobody).unwrap();
+    assert!(matches!(got, Answered::Applied { .. }));
+    rename(&mut rig, "sam", "samuel");
+    let said = rig.call("people.suspend", &id("samuel")).unwrap();
+    assert!(said.get("was").is_none(), "the old ids stay inside: {said}");
+    let (mut o, mut g) = (open_n, grant_n);
+    o.person = "samuel".into();
+    g.person = "samuel".into();
+    dead(&mut rig, &open_id, &o);
+    dead(&mut rig, &grant_id, &g);
+}
+
+#[test]
+fn a_double_rename_still_reaches_the_cards_and_one_raised_under_an_old_id() {
+    let mut rig = Rig::new(&world());
+    let first = ask("sam", "s1", "Bash:k");
+    let first_id = open(&mut rig, &first);
+    rename(&mut rig, "sam", "samuel");
+    rename(&mut rig, "samuel", "sammy");
+    // a run that began before the renames raises under the id it knows
+    let late = ask("sam", "s2", "Bash:late");
+    let late_id = open(&mut rig, &late);
+    let said = rig.call("people.suspend", &id("sammy")).unwrap();
+    assert!(said.get("was").is_none(), "{said}");
+    let mut moved = first;
+    moved.person = "sammy".into();
+    dead(&mut rig, &first_id, &moved);
+    dead(&mut rig, &late_id, &late);
+}
+
+#[test]
+fn a_removal_after_a_rename_withdraws_the_cards_of_every_old_id() {
+    let mut rig = Rig::new(&world());
+    let first = ask("sam", "s1", "Bash:k");
+    let first_id = open(&mut rig, &first);
+    rename(&mut rig, "sam", "samuel");
+    let late = ask("sam", "s2", "Bash:late");
+    let late_id = open(&mut rig, &late);
+    let said = rig.call("people.removePerson", &id("samuel")).unwrap();
+    assert!(said.get("was").is_none(), "{said}");
+    let mut moved = first;
+    moved.person = "samuel".into();
+    dead(&mut rig, &first_id, &moved);
+    dead(&mut rig, &late_id, &late);
+}
+
+#[test]
+fn a_renamed_persons_suspension_and_undo_revive_no_card() {
+    let mut rig = Rig::new(&world());
+    let n = ask("sam", "s1", "Bash:k");
+    let cid = open(&mut rig, &n);
+    rename(&mut rig, "sam", "samuel");
+    rig.call("people.suspend", &id("samuel")).unwrap();
+    rig.call("people.undo", &id("samuel")).unwrap();
+    let mut moved = n;
+    moved.person = "samuel".into();
+    dead(&mut rig, &cid, &moved);
+}

@@ -757,18 +757,9 @@ pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness)
 /// theirs may stay answerable, and the holder's `saved` then finds a closed card. Returns the ids that moved. The owner
 /// (an empty person) is never named here.
 pub(crate) fn withdraw_people(tx: &rusqlite::Connection, people: &[String]) -> Result<Vec<String>> {
-    // plus each named person's old ids (`people.was`): a run that began before a rename can raise under the old id
-    // after it, and cards written before cards followed a rename sit there too
+    // the caller passes each person's old ids too (`people.was`, see `revoke::was_ids`): a run that began before a
+    // rename can raise under the old id after it
     let mut named: Vec<String> = people.to_vec();
-    for p in people.iter().filter(|p| !p.is_empty()) {
-        let was: Option<String> = tx
-            .query_row("SELECT was FROM people WHERE id = ?1", [p], |r| r.get(0))
-            .optional()?
-            .flatten();
-        if let Some(Ok(Value::Array(a))) = was.map(|w| serde_json::from_str::<Value>(&w)) {
-            named.extend(a.iter().filter_map(|x| x.as_str().map(str::to_owned)));
-        }
-    }
     named.sort();
     named.dedup();
     let people = &named[..];
