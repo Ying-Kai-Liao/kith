@@ -2,7 +2,7 @@
   "fakes": "",
   "state:home/.claude/projects/-work/abc-1.jsonl": "{\"type\": \"summary\"}\n{\"cwd\": \"<HOME>/work\", \"type\": \"user\"}\n",
   "state:home/.claude/sessions/1.json": "{\n  \"sessionId\": \"abc-1\"\n}\n",
-  "state:home/.kith/live/terminal/abc-1.claim": "{\"pid\": 2, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/abc-1.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
   "state:home/.kith/live/terminal/abc-1.claim.lock": "",
   "state:home/.kith/live/terminal/abc-1.json": "{\n  \"agent\": \"coder\",\n  \"pid\": 1,\n  \"sessionId\": \"abc-1\",\n  \"v\": 1\n}\n",
   "state:home/work/": "<empty dir>\n",

@@ -95,7 +95,7 @@ def roots(side_dir):
 
 class Normalizer:
     def __init__(self, side_dir, extra=(), mask_keys=()):
-        self.mask_keys = set(mask_keys)   # a case's own keys whose value means nothing (a clock, a pid): a number is masked to <EPOCH> like last_started, any other value to <MASKED>
+        self.mask_keys = set(mask_keys)   # a case's own keys whose value means nothing (a clock, a pid): any scalar is masked to <MASKED> (last_started alone is <EPOCH>)
         self.roots = roots(side_dir)
         self.own = [(re.compile(p), r) for p, r in extra]
         self.rules = self.own + [(re.compile(p), r) for p, r in GENERIC]
@@ -103,6 +103,9 @@ class Normalizer:
     def text(self, s):
         for path, ph in self.roots:
             s = s.replace(path, ph)
+        # A checkout path with a space is shlex-quoted in a command line ('...<KERNEL>/bin/x' becomes ''"'"'<KERNEL>/bin/x'"'"'
+        # inside a quote); strip those quotes so the record does not depend on the path having a space.
+        s = re.sub(r"'\"'\"'(<KERNEL>[^']*?)'\"'\"'", r"\1", s)
         for rx, repl in self.rules:
             s = rx.sub(repl, s)
         return s
@@ -114,10 +117,12 @@ class Normalizer:
         return s
 
     def value(self, k, x):
-        if (k == 'last_started' or k in self.mask_keys) and isinstance(x, (int, float)) and not isinstance(x, bool):
-            return '<EPOCH>'
+        # A case's own key is <MASKED> whatever it holds: a pid is a number on one machine and null on another, so a
+        # value-dependent mask would not replay across machines. Only last_started keeps <EPOCH>.
         if k in self.mask_keys and not isinstance(x, (dict, list)):
             return '<MASKED>'
+        if k == 'last_started' and isinstance(x, (int, float)) and not isinstance(x, bool):
+            return '<EPOCH>'
         return self.data(x)
 
     def data(self, v):

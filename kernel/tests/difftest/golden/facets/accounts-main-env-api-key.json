@@ -6,7 +6,7 @@
   "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n",
   "step0.exit": "0\n",
   "step0.stderr": "",
-  "step0.stdout": "main_id=claude-api:main backup_harness=claude backup_account=main backup_cfg_var='' backup_cfg_dir='' backup_api_helper=''\"'\"'<KERNEL>/bin/kith-auth'\"'\"' get --for echo --profile anthropic/main anthropic ANTHROPIC_API_KEY' backup_model=''\n",
+  "step0.stdout": "main_id=claude-api:main backup_harness=claude backup_account=main backup_cfg_var='' backup_cfg_dir='' backup_api_helper='<KERNEL>/bin/kith-auth get --for echo --profile anthropic/main anthropic ANTHROPIC_API_KEY' backup_model=''\n",
   "step1.exit": "0\n",
   "step1.stderr": "",
   "step1.stdout": "main_id=codex backup_harness='' backup_account='' backup_cfg_var='' backup_cfg_dir='' backup_api_helper=''\n"
