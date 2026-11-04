@@ -7,7 +7,7 @@
 //! UNSWITCHED, and nothing here writes account state in production. Python's `kith account out|clear|usage`, a launch's
 //! `last_started` (Python and Rust), `--extend` and `own` keep writing `state.json`; the file stays the source of truth
 //! until every writer switches together. The writes in this module ([`replace_all`]) are for the import
-//! (`import/accounts.rs`) and the tests. The rows `account.state` and `account.pick` read core.db and run nothing.
+//! (`import/accounts.rs`) and the tests. The rows `account.state` and `account.pick` read core.db; nothing runs on its own. `account.pick` starts the harness status commands, but only on an owner's call.
 //!
 //! For failover (9b, not here): a running claim never moves to another account (q216); see the header of m0105.
 

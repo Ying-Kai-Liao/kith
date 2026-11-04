@@ -7,6 +7,9 @@
 //! file's writers do not update. Until then the rows come from `kith migrate --accounts` (import) and the tests, and the
 //! readers (`account.state`, `account.pick`) are not wired to a run.
 //!
+//! At the switch, a `CoreState` read error must fail loudly: today it reads as empty state (the file's "unreadable is no
+//! state" rule), which would hide every out mark and put a run on an account that is out.
+//!
 //! Column mapping (state.json entry -> row). The columns carry NO type affinity on purpose, so an integer stays an
 //! integer and a float a float exactly as the file had them (Python's `float(v)` readers treat both the same, but the
 //! stored value should read back as it was):

@@ -264,6 +264,8 @@ fn import_kernel_marks(machine: &Path) {
 pub struct Snapshot {
     /// `<machine>/accounts/state.json`, whether or not it exists.
     pub file: PathBuf,
+    /// The bytes of `state.json` as read under the same hold as the accounts (None: no file).
+    pub bytes: Option<Vec<u8>>,
     /// The accounts, as `read` returns them.
     pub accounts: Map,
     /// `state.json` exists but is not ours (unreadable, not an object, no `accounts` object): `read` sees it as empty.
@@ -287,6 +289,7 @@ pub fn snapshot(machine: &Path) -> Snapshot {
     }
     let mut snap = Snapshot {
         file: state_file(machine),
+        bytes: None,
         accounts: Map::new(),
         not_ours: false,
         extra_keys: vec![],
@@ -294,6 +297,7 @@ pub fn snapshot(machine: &Path) -> Snapshot {
         legacy_applied: false,
     };
     if let Ok(text) = std::fs::read(state_file(machine)) {
+        snap.bytes = Some(text.clone());
         match serde_json::from_slice::<Value>(&text) {
             Ok(Value::Object(mut d)) => {
                 snap.extra_keys = d

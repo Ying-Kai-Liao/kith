@@ -2,7 +2,7 @@
 //! `core/runtime/src/migrations/accounts/`). Experimental, owner only, not in `released.json`. UNSWITCHED: account state is
 //! still written to `<machine>/accounts/state.json` by `kith account out|clear|usage` and every launch, and read from there
 //! by every run; the core writes none (only `kith migrate --accounts` copies the file in), so these rows answer the copy
-//! the last import left. Nothing calls them yet.
+//! the last import left. Nothing calls them yet. `account.pick` starts the harnesses' status commands (to see who is signed in) in the core, only when the owner calls it.
 
 use super::build::*;
 

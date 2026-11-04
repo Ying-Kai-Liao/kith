@@ -20,8 +20,8 @@ fn word<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 impl Core {
-    /// `account.state` and `account.pick`, over this core's database. The harness status commands run for real (they are
-    /// how `pick` knows an account is signed in); a test calls [`pick_json`] with its own `Outside`.
+    /// `account.state` and `account.pick`, over this core's database. `account.pick` starts the harness status
+    /// commands in this process (how `pick` knows an account is signed in), only on an owner's call, never on its own.
     pub(crate) fn account_call(&self, method: &str, params: &Value) -> Result<Value> {
         match method {
             "account.state" => state_json(self, word(params, "entry")),
@@ -34,8 +34,7 @@ impl Core {
                     machine: folders.machine,
                     agents: folders.agents,
                     kernel,
-                    home: word(params, "home")
-                        .map_or_else(kith_kernel::paths::process_home, Into::into),
+                    home: kith_kernel::paths::process_home(),
                     claude_config_dir: None,
                     out: &system,
                 };
@@ -73,11 +72,15 @@ pub(crate) fn pick_json(core: &Core, ctx: &Ctx<'_>, params: &Value, now: f64) ->
     let s = accounts::settings::read(ctx);
     let src = CoreState(core.conn());
     let p = accounts::pick_from(ctx, &s, agent, md, deep, now, &src);
-    Ok(pick_value(agent, &p))
+    Ok(pick_value(
+        agent,
+        accounts::settings::cross_harness(&s, agent),
+        &p,
+    ))
 }
 
 /// Python's `pick()` dict (a skipped entry lists its `fix`-less status, as `skipped` does there).
-fn pick_value(agent: &str, p: &Pick) -> Value {
+fn pick_value(agent: &str, cross_harness: bool, p: &Pick) -> Value {
     let skipped: Vec<Value> = p
         .skipped
         .iter()
@@ -100,6 +103,7 @@ fn pick_value(agent: &str, p: &Pick) -> Value {
     json!({
         "version": 1,
         "agent": agent,
+        "cross_harness": cross_harness,
         "harness": p.harness,
         "policy": p.policy,
         "pin": p.pin.as_ref().map(|x| json!({"id": x.id, "only": x.only})),

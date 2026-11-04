@@ -72,7 +72,7 @@ pub fn migrate_accounts(paths: &Paths, opts: AccountsOptions) -> Result<Accounts
     let layout = Layout::new(&paths.machine);
     let snap = kith_kernel::accounts::snapshot(&paths.machine);
     let file = snap.file.clone();
-    let bytes = std::fs::read(&file).ok();
+    let bytes = snap.bytes.clone();
     let mut rep = AccountsReport {
         dry_run: opts.dry_run,
         ..AccountsReport::default()
@@ -103,6 +103,8 @@ pub fn migrate_accounts(paths: &Paths, opts: AccountsOptions) -> Result<Accounts
         ));
         return Ok(rep);
     }
+    // A file that is not ours says nothing: rows core.db already holds are kept, not deleted for it.
+    let keep = snap.not_ours && snap.accounts.is_empty();
     let desired = snap.accounts;
     let n = desired.len();
     let readable = if layout.db.is_file() {
@@ -115,6 +117,10 @@ pub fn migrate_accounts(paths: &Paths, opts: AccountsOptions) -> Result<Accounts
     let have = readable.as_ref().map(crate::accounts::read_all);
     if opts.dry_run {
         match have {
+            Some(Ok(h)) if keep && !h.is_empty() => rep.lines.push(format!(
+                "accounts: state.json is not ours; core.db's {} account row(s) would be kept",
+                h.len()
+            )),
             Some(Ok(h)) if h == desired => rep.lines.push(format!(
                 "accounts: core.db already holds exactly state.json's {n} account(s); nothing to change"
             )),
@@ -135,7 +141,7 @@ pub fn migrate_accounts(paths: &Paths, opts: AccountsOptions) -> Result<Accounts
         return Ok(rep);
     }
     drop(readable);
-    real(&layout, &file, bytes.as_deref(), &desired, &mut rep)?;
+    real(&layout, &file, bytes.as_deref(), &desired, keep, &mut rep)?;
     Ok(rep)
 }
 
@@ -153,12 +159,21 @@ fn real(
     file: &Path,
     bytes: Option<&[u8]>,
     desired: &serde_json::Map<String, serde_json::Value>,
+    keep: bool,
     rep: &mut AccountsReport,
 ) -> Result<()> {
     let n = desired.len();
     // The lifetime lock for the whole step; this also brings the schema up to date, as `kith migrate` does.
     let mut core = crate::start_with(layout, MIGRATIONS)?;
-    if crate::accounts::read_all(core.conn())? == *desired {
+    let held = crate::accounts::read_all(core.conn())?;
+    if keep && !held.is_empty() {
+        rep.lines.push(format!(
+            "state.json is not ours: core.db's {} account row(s) are kept",
+            held.len()
+        ));
+        return Ok(());
+    }
+    if held == *desired {
         rep.lines.push(format!(
             "nothing to change: core.db already holds state.json's {n} account(s)"
         ));

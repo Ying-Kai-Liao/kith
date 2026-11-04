@@ -647,3 +647,43 @@ fn the_rows_are_owner_only_and_read_only() {
         assert!(!row.allows(kith_api::Principal::RunToken), "{name}");
     }
 }
+
+#[test]
+fn a_file_that_is_not_ours_keeps_the_rows_core_db_already_holds() {
+    let (_t, m) = machine();
+    put(&m, "accounts/state.json", STATE);
+    migrate_accounts(&paths(&m), AccountsOptions::default()).unwrap();
+    put(&m, "accounts/state.json", "{not json");
+    for dry_run in [true, false] {
+        let r = migrate_accounts(&paths(&m), AccountsOptions { dry_run }).unwrap();
+        assert!(!r.changed && r.backup.is_none(), "{r:?}");
+    }
+    assert_eq!(core_rows(&Layout::new(&m)).len(), 2);
+}
+
+#[test]
+fn account_pick_says_whether_the_agent_may_cross_harnesses() {
+    let (_t, m) = machine();
+    put(
+        &m,
+        "settings.json",
+        r#"{"accounts": ["claude"], "account_cross_harness": true}"#,
+    );
+    put(
+        &m,
+        "agents/echo/role/agent.md",
+        "---\nname: echo\nharness: claude-code\n---\nbody\n",
+    );
+    let core = open_all(&Layout::new(&m));
+    let out = signed_in();
+    let ctx = Ctx {
+        machine: m.clone(),
+        agents: m.join("agents"),
+        kernel: m.join("kernel"),
+        home: m.join("home"),
+        claude_config_dir: None,
+        out: &out,
+    };
+    let p = super::call::pick_json(&core, &ctx, &json!({"agent": "echo"}), NOW).unwrap();
+    assert_eq!(p["cross_harness"], json!(true), "{p}");
+}
