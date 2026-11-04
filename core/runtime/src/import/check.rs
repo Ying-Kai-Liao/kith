@@ -13,8 +13,6 @@ use crate::error::Result;
 
 /// How many differences are collected before the check stops looking: the first few say what is wrong.
 const MAX_DIFFS: usize = 20;
-/// How many agents are tried as `via` besides none (the helper chain's caller).
-const MAX_VIA: usize = 8;
 
 fn said<T>(r: std::result::Result<T, secrets::Die>) -> std::result::Result<T, String> {
     r.map_err(|d| d.msg)
@@ -63,6 +61,16 @@ fn people(auth: &Value) -> Vec<String> {
         if let Some(b) = p.get("bot_of").and_then(Value::as_str) {
             v.insert(b.to_owned());
         }
+        // Old ids the person answers to (`canonical` follows them).
+        strings(p.get("was"), &mut v);
+    }
+    for (_, i) in auth
+        .get("invites")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        strings(i.get("person"), &mut v);
     }
     for extra in ["ghost", "*", ""] {
         v.insert(extra.to_owned());
@@ -70,8 +78,59 @@ fn people(auth: &Value) -> Vec<String> {
     v.into_iter().collect()
 }
 
-fn agents(auth: &Value, ctx: &Ctx) -> Vec<String> {
+/// Every text in `v` (a string, or the strings of an array / the keys and strings of an object, any depth).
+fn strings(v: Option<&Value>, out: &mut BTreeSet<String>) {
+    match v {
+        Some(Value::String(s)) => {
+            out.insert(s.clone());
+        }
+        Some(Value::Array(a)) => a.iter().for_each(|x| strings(Some(x), out)),
+        Some(Value::Object(o)) => {
+            for (k, x) in o {
+                out.insert(k.clone());
+                strings(Some(x), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Names the rows give agents (helpers, jobs, helpers a job lists) even where no folder exists for them.
+fn named_by_rows(auth: &Value) -> BTreeSet<String> {
     let mut v = BTreeSet::new();
+    for (_, rows) in auth
+        .get("members")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        for (_, r) in rows.as_object().into_iter().flatten() {
+            for k in ["helpers", "jobs", "helper_once"] {
+                strings(r.get(k), &mut v);
+            }
+        }
+    }
+    v
+}
+
+/// Whether an agent's package declares helpers or jobs (the only agents a `via` can matter for).
+fn has_helpers_or_jobs(ctx: &Ctx, agent: &str) -> bool {
+    [
+        ctx.agents.join(agent),
+        ctx.kernel.join("agents").join(agent),
+    ]
+    .iter()
+    .flat_map(|d| {
+        [
+            d.join("role/capabilities.yaml"),
+            d.join("capabilities.yaml"),
+        ]
+    })
+    .any(|f| std::fs::read_to_string(f).is_ok_and(|t| t.contains("helpers") || t.contains("jobs")))
+}
+
+fn agents(auth: &Value, ctx: &Ctx) -> Vec<String> {
+    let mut v = named_by_rows(auth);
     v.extend(
         auth.get("members")
             .and_then(Value::as_object)
@@ -95,8 +154,16 @@ pub(super) fn diffs(auth: &Value, conn: &Connection, ctx: &Ctx) -> Result<Vec<St
     let core = Authority::new(conn, &ctx);
     let rules = || Rules::new(&ctx, auth);
     let agents = agents(auth, &ctx);
+    // A `via` only changes an answer for an agent that can call helpers; every such agent is tried, and every agent a row
+    // names as a helper (their folders may be missing).
+    let named = named_by_rows(auth);
     let mut vias: Vec<Option<&str>> = vec![None];
-    vias.extend(agents.iter().take(MAX_VIA).map(|a| Some(a.as_str())));
+    vias.extend(
+        agents
+            .iter()
+            .filter(|a| named.contains(*a) || has_helpers_or_jobs(&ctx, a))
+            .map(|a| Some(a.as_str())),
+    );
     let mut out = Vec::new();
     for p in people(auth) {
         let (a, b) = (secrets::cut_off(auth, &p), core.cut_off(&p)?);

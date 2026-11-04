@@ -355,6 +355,7 @@ fn a_malformed_file_is_refused_never_corrupt() {
         r#"{"members": {"house": {"kai": {"trusted": "maybe"}}}}"#,
         r#"{"invites": {"abc": {"expires": 1.0}}}"#,
         r#"{"agent_access": {"house": {"domains": ["a.example"]}}}"#,
+        r#"{"members": {"house": {"*": {"preset": "x"}, "mia": null}}}"#,
     ];
     for text in bad {
         f.auth(text);
@@ -546,4 +547,84 @@ fn the_source_files_are_left_exactly_as_they_were() {
         1,
         "something else appeared beside auth.json: {names:?}"
     );
+}
+
+#[test]
+fn rows_that_differ_only_in_the_order_of_people_are_not_the_same() {
+    let f = Fixture::new();
+    f.auth(
+        &json!({
+            "people": {"kai": {"owner": true}, "mia": {"name": "Mia"}, "ana": {"name": "Ana"}},
+        })
+        .to_string(),
+    );
+    let mut sink = MemSink::default();
+    f.import(&mut sink).unwrap();
+    // The same people, kai now after the others: `owner()` and `canonical()` take the first match, so this is another answer.
+    open_all(&f.layout)
+        .conn()
+        .execute("UPDATE people SET seq = seq + 100 WHERE id = 'kai'", [])
+        .unwrap();
+    let e = f.import(&mut sink).unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("--force")),
+        "{e:?}"
+    );
+    let rep = f
+        .run(
+            AuthorityOptions {
+                dry_run: true,
+                force: false,
+            },
+            &FakeKeychain::default(),
+            &mut sink,
+        )
+        .unwrap_err();
+    assert!(matches!(rep, Error::Refused(_)));
+    f.run(
+        AuthorityOptions {
+            dry_run: false,
+            force: true,
+        },
+        &FakeKeychain::default(),
+        &mut sink,
+    )
+    .unwrap();
+    let first: String = open_all(&f.layout)
+        .conn()
+        .query_row("SELECT id FROM people ORDER BY seq LIMIT 1", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(first, "kai");
+}
+
+#[test]
+fn a_file_that_is_not_utf8_is_refused() {
+    let f = Fixture::new();
+    std::fs::write(&f.ctx.auth, b"{\"people\": {\"k\xff\": {}}}").unwrap();
+    let mut sink = MemSink::default();
+    let e = f.import(&mut sink).unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("UTF-8")),
+        "{e:?}"
+    );
+}
+
+#[test]
+fn a_rerun_whose_sealing_keeps_failing_leaves_no_backup_and_no_log_row() {
+    let f = Fixture::new();
+    f.auth(&real_shaped());
+    let kc = FakeKeychain::default().with("kith/github/work", "GITHUB_TOKEN", "tok");
+    let mut sink = MemSink {
+        refuse: true,
+        ..MemSink::default()
+    };
+    f.run(AuthorityOptions::default(), &kc, &mut sink).unwrap();
+    let (snaps, log) = (f.snapshots(), f.count("import_log"));
+    for _ in 0..2 {
+        let rep = f.run(AuthorityOptions::default(), &kc, &mut sink).unwrap();
+        assert!(!rep.changed && rep.backup.is_none(), "{:?}", rep.lines);
+    }
+    assert_eq!((f.snapshots(), f.count("import_log")), (snaps, log));
 }

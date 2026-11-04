@@ -8,10 +8,13 @@
 //!   writes in one transaction: the rows, the same-answer check over them, the sealed secrets, a row in `import_log`.
 //!   Anything failing leaves core.db as it was (the backup is then a copy of the same file).
 //! - The same-answer check (`check.rs`) runs first on a scratch copy and again on the real rows before they commit: for
-//!   every person x agent (and bots), `Authority` over core.db equals `Rules` over the original file. One difference
-//!   fails the step.
-//! - Idempotent: when core.db already holds exactly what the file says and every Keychain item has its record, nothing is
-//!   written at all, not even the log.
+//!   every person x agent x via (and bots), `Authority` over core.db equals `Rules` over the original file; one
+//!   difference fails the step. It proves storage fidelity (Rust rules over the file vs Rust rules over core.db), not
+//!   parity with Python `kith-auth`: the Rust rules lack `agent_domains`/`guest_domains` (which is why `agent_access` is
+//!   refused), and `kernel/tests/difftest` is what holds the Rust rules to the Python.
+//! - Idempotent: when core.db already holds exactly what the file says (people in the same order too) and every Keychain
+//!   item has its record, no row, record, backup or log line is written. (Opening the core still bumps its generation, as
+//!   every open does.)
 //! - core.db rows that differ from the file (the owner's M2-2 writes, an older import) are NOT merged: the step refuses
 //!   unless `--force`, which replaces the authority rows with the file's (after the backup).
 //! - It does not make core.db authoritative and does not tombstone auth.json: `kith-auth` and the host keep deciding
@@ -21,7 +24,11 @@
 //!
 //! Later (not here): cards (PR #711), access requests (M2-3), the host vault rows of serve.db (the host moves them itself
 //! at M2-7), `agent_access` (the rules lack `agent_domains`), `profiles`/`grants`/`env` (kith-auth, M2-18), the cutover
-//! and the auth.json tombstone (M2-23).
+//! and the auth.json tombstone (M2-23). Also later: `--force` could un-revoke a person once core.db writes come first
+//! (before the cutover it should refuse to clear `revoked` unless the file agrees); a rotated Keychain value is never
+//! resealed; the first envelope put can mint the master key outside the transaction; every put error reads as "store
+//! unavailable"; the check's cost on very large files; `\r` handling differs from Python's text mode; the dry run opens
+//! a WAL database read-only and needs its `-shm` to exist or be creatable.
 
 mod authority;
 mod check;
@@ -54,8 +61,13 @@ fn read_source(path: &Path) -> Result<Option<(Value, String)>> {
             )));
         }
     };
-    let text = String::from_utf8_lossy(&bytes);
-    let mut auth: Value = serde_json::from_str(&text).map_err(|e| {
+    let text = std::str::from_utf8(&bytes).map_err(|_| {
+        Error::Refused(format!(
+            "auth.json: {} is not UTF-8 text; nothing was imported",
+            path.display()
+        ))
+    })?;
+    let mut auth: Value = serde_json::from_str(text).map_err(|e| {
         Error::Refused(format!(
             "auth.json: {} is not valid JSON ({e}); nothing was imported",
             path.display()
@@ -73,13 +85,17 @@ fn read_source(path: &Path) -> Result<Option<(Value, String)>> {
         obj.entry(t)
             .or_insert_with(|| Value::Object(serde_json::Map::new()));
     }
-    let digest = Sha256::digest(&bytes);
-    let sha = digest.iter().fold(String::new(), |mut s, b| {
-        use std::fmt::Write as _;
-        let _ = write!(s, "{b:02x}");
-        s
-    });
-    Ok(Some((auth, sha)))
+    Ok(Some((auth, sha_hex(&bytes))))
+}
+
+fn sha_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            use std::fmt::Write as _;
+            let _ = write!(s, "{b:02x}");
+            s
+        })
 }
 
 /// The tables as the file would leave them, in a throwaway database.
@@ -149,8 +165,18 @@ enum Rows {
     Differs,
 }
 
+/// The order of people decides which row `owner()` and `canonical()` take first, and a JSON object compares equal whatever
+/// its key order, so the order is compared by itself.
+fn people_order(snapshot: &Value) -> Vec<&str> {
+    snapshot
+        .get("people")
+        .and_then(Value::as_object)
+        .map(|o| o.keys().map(String::as_str).collect())
+        .unwrap_or_default()
+}
+
 fn rows_state(existing: &Value, desired: &Value) -> Rows {
-    if existing == desired {
+    if existing == desired && people_order(existing) == people_order(desired) {
         Rows::Same
     } else if is_empty(existing) {
         Rows::Empty
@@ -163,7 +189,7 @@ fn refuse_differs(conn: &Connection) -> Error {
     let counts = authority::counts(conn).unwrap_or_default();
     Error::Refused(format!(
         "core.db already holds authority rows that differ from auth.json ({counts}), perhaps the owner's own writes or an \
-         earlier import. Nothing was changed. Run `kith migrate --authority --force` to replace them with the file's rows \
+         earlier import. Nothing was changed. Run `kith kernel core-migrate --authority --force` to replace them with the file's rows \
          (a backup of core.db is taken first)."
     ))
 }
@@ -368,6 +394,22 @@ fn real(
     let (sealed, mut seal_lines) = items::seal(&tx, fetched, sink);
     rep.lines.append(&mut lines);
     rep.lines.append(&mut seal_lines);
+    if state == Rows::Same && sealed == 0 {
+        // Nothing was sealed (the store keeps refusing): no log row, no backup left behind, rows as they were.
+        drop(tx);
+        let _ = std::fs::remove_file(&backup);
+        rep.backup = None;
+        rep.lines
+            .push("nothing was changed; the backup just taken was removed".into());
+        return Ok(());
+    }
+    // kith-auth may have written the file while this ran: what was checked is no longer what is there.
+    let now = std::fs::read(&ctx.auth).map(|b| sha_hex(&b)).ok();
+    if now.as_deref() != Some(sha) {
+        return Err(Error::Refused(
+            "auth.json changed while the import ran; nothing was imported. Run it again.".into(),
+        ));
+    }
     tx.execute(
         "INSERT INTO import_log (step, at, source, source_sha256, backup, summary) VALUES ('authority', ?1, ?2, ?3, ?4, ?5)",
         rusqlite::params![

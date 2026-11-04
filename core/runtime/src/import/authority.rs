@@ -8,7 +8,7 @@
 //! |   `owner` (truthy: true, or a non-empty obj)|   `owner` 0/1                                        |
 //! |   `revoked` (truthy), `revoked.at`          |   `revoked` 0/1, `revoked_at`                        |
 //! |   `was`                                     |   `was` (JSON text)                                  |
-//! | `members.<agent>.<person>`                  | `memberships (agent, person)`; a `null` row is "no row" and is not imported |
+//! | `members.<agent>.<person>`                  | `memberships (agent, person)`; a `null` row is REFUSED (it means no row and no `*` fallback) |
 //! |   `preset` `mode` `model` `budget`          |   text columns                                       |
 //! |   `trusted`                                 |   `trusted` 0/1                                      |
 //! |   `deny` `env` `helpers` `access` `jobs` `helper_once` `access_by` `access_since` | JSON text columns, order kept |
@@ -174,8 +174,10 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value) -> Result<()> {
         let rows = object(rows, &format!("members.{agent}"))?;
         for (person, r) in rows {
             let what = format!("members.{agent}.{person}");
+            // A null row means "no row, and no `*` fallback" to kith-auth; a NULL-column row would read as an empty row
+            // that falls back. The tables cannot say it, so the file is refused rather than imported as another answer.
             if r.is_null() {
-                continue;
+                return Err(bad(&what, "is null, which core.db cannot keep faithfully"));
             }
             object(r, &what)?;
             conn.execute(
@@ -325,19 +327,6 @@ pub(super) fn left_behind(auth: &Value) -> Vec<String> {
     if !extra_member.is_empty() {
         out.push(format!(
             "left behind: membership keys {extra_member:?}: not part of the decision's rows"
-        ));
-    }
-    let nulls = top
-        .get("members")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flatten()
-        .flat_map(|(_, rows)| rows.as_object().into_iter().flatten())
-        .filter(|(_, r)| r.is_null())
-        .count();
-    if nulls > 0 {
-        out.push(format!(
-            "left behind: {nulls} null membership row(s): kith-auth reads a null row as no row"
         ));
     }
     out
