@@ -604,11 +604,34 @@ pub(super) fn follow_in_cards(
             .map(str::to_owned)
             .into_iter()
             .collect(),
+        "people.renamePerson" => {
+            if let (Some(old), Some(new)) = (
+                params.get("id").and_then(Value::as_str),
+                params.get("to").and_then(Value::as_str),
+            ) {
+                crate::cards::renamed(conn, old, new)?;
+            }
+            return Ok(());
+        }
         _ => return Ok(()),
     };
+    // a removal has already dropped the person's row, so the write passes their old ids along (`was_ids`)
+    let mut ids = ids;
+    if let Some(Value::Array(was)) = said.as_object_mut().and_then(|o| o.remove("was")) {
+        ids.extend(was.iter().filter_map(|x| x.as_str().map(str::to_owned)));
+    }
     let gone = crate::cards::withdraw_people(conn, &ids)?;
     said["cards"] = Value::Array(gone.into_iter().map(Value::String).collect());
     Ok(())
+}
+
+/// The old ids (`was`) of a person and of their bots, for [`follow_in_cards`]: read before a removal drops the rows.
+pub(super) fn was_ids(auth: &Value, pid: &str) -> Vec<String> {
+    let canon = secrets::canonical(auth, pid);
+    std::iter::once(canon.clone())
+        .chain(bots_of(auth, &canon))
+        .flat_map(|x| words(people(auth).get(&x).and_then(|p| p.get("was"))))
+        .collect()
 }
 
 /// `person <id> --clear-temp`: the ids whose temp folders go (the person and their bots).

@@ -318,15 +318,20 @@ pub(super) fn write_in(
             revoke::person_remove_unused(a, life, need(params, "id")?)?,
         )),
         "people.removePerson" => {
+            let was = revoke::was_ids(a, need(params, "id")?);
             let (said, ids) = revoke::person_remove(a, life, c, need(params, "id")?)?;
             let mut out = lines(said);
             out["ids"] = json!(ids);
+            out["was"] = json!(was);
             Ok(out)
         }
         "people.suspend" | "people.undo" => {
             let (said, ids) =
                 revoke::person_suspend(a, c, need(params, "id")?, method == "people.suspend")?;
             let mut out = lines(said);
+            if method == "people.suspend" {
+                out["was"] = json!(revoke::was_ids(a, need(params, "id")?));
+            }
             out["ids"] = json!(ids);
             Ok(out)
         }

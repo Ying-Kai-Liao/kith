@@ -26,7 +26,8 @@
 //! drops the claim; a failed probe never does.
 //!
 //! A claim with a pid is not a timer. While that process is alive the claim holds past its `claim_until`: a second
-//! claimer, a plain answer, the sweep and a withdrawal all leave the card alone (M2-11 review, precondition 1: a claim
+//! claimer, a plain answer, the sweep and a single-card withdrawal all leave the card alone (a revoke's [`withdraw_people`] is the exception and
+//! takes a claimed card too, the holder's `saved` then finds it closed; M2-11 review, precondition 1: a claim
 //! that ran out by time must not be taken over under a writer that is still going). Only the holder's own end, or its
 //! death (start time and ESRCH-only, as above), frees it. A claim with no pid is the caller's own timer: it ends at
 //! `claim_until`. The secret path ([`secret`]) claims with the daemon's own pid, so the writer is the claimer and no
@@ -734,7 +735,8 @@ fn saved_in(
 
 /// An open card is withdrawn (the asker cancelled, the person's access ended). A card whose claim is held is not: its
 /// holder is mid-write, and closing the card under it would let the write land on a closed card, so this answers false
-/// as the sweep leaves it alone, and the caller asks again once the claim has ended. Returns whether it was withdrawn.
+/// as the sweep leaves it alone, and the caller asks again once the claim has ended. (The one exception is a revoke,
+/// [`withdraw_people`], which takes a claimed card too.) Returns whether it was withdrawn.
 pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness) -> Result<bool> {
     let tx = core.claim_tx()?;
     void_dead_claims(&tx, live)?;
@@ -755,6 +757,21 @@ pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness)
 /// theirs may stay answerable, and the holder's `saved` then finds a closed card. Returns the ids that moved. The owner
 /// (an empty person) is never named here.
 pub(crate) fn withdraw_people(tx: &rusqlite::Connection, people: &[String]) -> Result<Vec<String>> {
+    // plus each named person's old ids (`people.was`): a run that began before a rename can raise under the old id
+    // after it, and cards written before cards followed a rename sit there too
+    let mut named: Vec<String> = people.to_vec();
+    for p in people.iter().filter(|p| !p.is_empty()) {
+        let was: Option<String> = tx
+            .query_row("SELECT was FROM people WHERE id = ?1", [p], |r| r.get(0))
+            .optional()?
+            .flatten();
+        if let Some(Ok(Value::Array(a))) = was.map(|w| serde_json::from_str::<Value>(&w)) {
+            named.extend(a.iter().filter_map(|x| x.as_str().map(str::to_owned)));
+        }
+    }
+    named.sort();
+    named.dedup();
+    let people = &named[..];
     let mut gone = Vec::new();
     for p in people.iter().filter(|p| !p.is_empty()) {
         let moved = move_where(
@@ -767,6 +784,16 @@ pub(crate) fn withdraw_people(tx: &rusqlite::Connection, people: &[String]) -> R
         gone.extend(moved.into_iter().map(|c| c.id));
     }
     Ok(gone)
+}
+
+/// A person's new id (`people.renamePerson`): their cards follow in the rename's own transaction, so a later revoke
+/// of the new id finds them (like `doors::renamed`). A renamed person's bots keep their ids.
+pub(crate) fn renamed(tx: &rusqlite::Connection, old: &str, new: &str) -> Result<()> {
+    tx.execute(
+        "UPDATE cards SET person = ?2 WHERE person = ?1",
+        params![old, new],
+    )?;
+    Ok(())
 }
 
 /// Past its deadline (or its claim's time): open cards and unused grants expire, silence is no. Returns the cards as
