@@ -65,7 +65,7 @@ fn method_doc(m: &Method) -> Value {
             (p.name.to_owned(), how)
         })
         .collect();
-    json!({
+    let mut row = json!({
         "name": m.name,
         "summary": m.summary,
         "params": params,
@@ -80,5 +80,10 @@ fn method_doc(m: &Method) -> Value {
             "requires": m.cli.requires,
             "args": args,
         },
-    })
+    });
+    // Said only where it is so, so that the other rows (and their hashes) stay as they were.
+    if m.cli.hidden {
+        row["x-kith-cli"]["hidden"] = json!(true);
+    }
+    row
 }

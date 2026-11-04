@@ -264,6 +264,25 @@ pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable
     owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
 }
 
+/// [`reach`] as the host: proves the host secret (`<machine>/core/host.token`) instead of the owner token, so the daemon
+/// labels the connection `Host` and answers the rows only the host may call (the `syncLease` writes). Only `kith serve`
+/// calls this; the secret is never given to a run or child process, and the guest deny list covers the folder it is in.
+/// A write is never sent twice (pass `repeatable: false`).
+pub fn reach_as_host(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+    repeatable: bool,
+) -> Reached {
+    owner::reach_as_principal(
+        &Layout::new(&paths.machine),
+        kith_api::Principal::Host,
+        method,
+        params,
+        repeatable,
+    )
+}
+
 /// A line in the core log for the CLI's side of the front (a daemon that disagrees about the version or the method
 /// table), written once while it stays the same, so `kith paths` prints nothing about it.
 pub fn note_once(paths: &Paths, note: &str) {
