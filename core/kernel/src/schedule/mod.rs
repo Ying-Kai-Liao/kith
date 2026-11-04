@@ -23,17 +23,27 @@
 //!
 //! The grammar is `kith-sched`'s, exactly (see [`cron`]): five fields, `*`, numbers, `a-b`, lists, `/n` steps, `5/15`
 //! (to the end, every 15), `0` and `7` both Sunday, and the macros `@hourly @daily @midnight @weekly @monthly`. A spec
-//! it refuses is refused here with its message. Fields are expanded to explicit values and handed to croner (the host's
-//! engine, major 3) together with the zone, so DST and IANA zones behave as the host's routines do.
+//! it accepts keeps its exact meaning and next times. Fields are expanded to explicit values and handed to croner (the
+//! host's engine, major 3) together with the zone.
+//!
+//! A spec `kith-sched` refuses is still accepted when croner's `Cron::from_str` accepts it, because the host's routines
+//! may hold such specs and must not stop parsing at the migration: names (`MON-FRI`, `JAN`), `L`, `#`, `W`, `?`,
+//! `@yearly` and `@annually`. croner decides what those mean, as it does in the host. A spec both refuse is refused
+//! with `kith-sched`'s message.
 //!
 //! # Intended differences
 //!
-//! * Daylight saving: `kith-sched` matches plain local minutes, so a skipped hour never fires and a doubled one fires
-//!   twice. Under `Local` and under an IANA zone this module follows croner's rule for the zone instead.
+//! * Superset: the croner-only spellings above are accepted here and refused by `kith-sched`. (A leading seconds
+//!   and seventh year field are among them; fires are then not on whole minutes.)
+//! * Daylight saving follows croner's rule for the zone; `kith-sched` matches plain local minutes. Two jobs change:
+//!   `30 2 * * *` on the spring-forward day (2026-03-08 in New York) never fires under `kith-sched` and fires at 03:00
+//!   local here; `30 1 * * *` on the fall-back day (2026-11-01) fires twice under `kith-sched` (both 01:30s) and once
+//!   here, at the first 01:30. (Wildcard and stepped hours such as `*/30 * * * *` keep firing on every real half hour.)
 //! * No 366-day horizon: `kith-sched`'s `next_time` gives up a year out, so `0 0 29 2 *` asked in March has no next
-//!   there. Here it is the real date; a spec that can never fire (`0 0 31 2 *`, `5-3 * * * *`) has none.
+//!   there. Here it is the real date; a spec that can never fire (`0 0 31 2 *`, `5-3 * * * *`) validates and has none.
 //! * `Interval` and `Once` are rounded up to the one-minute tick: a due time inside a minute fires at the next whole
-//!   minute. The host's routines carry seconds.
+//!   minute. The host's routines carry seconds, so a 30 s interval becomes 60 s and a 90 s one steps by 2 minutes
+//!   (`next_n_in` chains from each rounded fire).
 //! * Digits are ASCII only (Python's `\d` also takes other scripts' digits).
 
 pub mod cron;
@@ -212,7 +222,9 @@ impl Trigger {
 
     /// The catch-up rule of `kith-sched tick`. The last tick `last` and `now` are cut to the minute; only the day before
     /// `now` is looked at (a miss of a day or more is forgotten), and the one fire found in `(since, now]` is the run
-    /// owed: once, however many slots were missed. `None` when nothing is due.
+    /// owed: once, however many slots were missed. `None` when nothing is due. This is a cron rule: for `Interval` and
+    /// `Once` it only asks whether the next fire after the cut-off is already past (`Interval` counts from `last`, so
+    /// with no `last` a 5-minute interval is not due), which is not how a store should schedule them.
     pub fn due_in<L: TimeZone>(&self, last: Option<i64>, now: i64, local: &L) -> Option<i64> {
         let now = now.div_euclid(TICK_MS) * TICK_MS;
         let last = last.map_or(now - TICK_MS, |t| t.div_euclid(TICK_MS) * TICK_MS);

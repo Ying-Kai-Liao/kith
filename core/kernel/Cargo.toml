@@ -13,7 +13,8 @@ workspace = "../../serve/host"
 name = "kith_kernel"
 path = "src/lib.rs"
 
-# Std and serde_json: the CLI and the host both link this, so it stays light as more kernel modules move in.
+# The CLI and the host both link this, so each dependency is one the host already has (chrono, chrono-tz and croner for
+# schedule triggers; the host's routines use the same majors).
 [dependencies]
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 # auth.json is locked with flock, as the Python kernel and the host do.

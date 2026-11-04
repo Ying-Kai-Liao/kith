@@ -3,10 +3,13 @@
 //!
 //! * `schedule_parity.json` is what `kith-sched`'s cron parser says (kernel/tests/kith-sched-cron-table). The clocks are
 //!   naive local times, read here as UTC: an offset-zero `Local`. When python3 is on the PATH the table is made again
-//!   and must equal the frozen one, so the file cannot go stale.
+//!   and must equal the frozen one, so the file cannot go stale (under CI a missing python3 fails the test).
+//!   The catch-up rows are tick's arithmetic copied into the script (kernel/bin/kith-sched, `tick`, around lines
+//!   398-405); a change to tick is not seen by the table.
 //! * `routines_next.json` is what serve/host/src/routines/schedule.rs answers for the same (trigger, zone, after). It
-//!   was made by compiling that file as it is and printing `Trigger::next`; the manager wires M4-0's golden copy in.
-//!   Cron must be equal; Interval and Once are the host's value rounded up to the minute (the intended difference).
+//!   was made by compiling that file as it is and printing `Trigger::next` (`tests/gen/routines_next.rs` says how). Cron
+//!   must be equal to the minute (the host keeps an `after`'s sub-second part, this one cuts it off); Interval and Once
+//!   are the host's value rounded up to the minute (the intended difference).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -39,8 +42,11 @@ fn check_python_table(table: &Value) {
     for case in cases {
         let spec = case["spec"].as_str().unwrap();
         if let Some(error) = case.get("error") {
-            let got = CronSpec::parse(spec).expect_err(spec);
-            assert_eq!(got.0, error.as_str().unwrap(), "{spec:?}");
+            // kith-sched refuses it; croner may still take it (the host's superset), else the message is kith-sched's.
+            match CronSpec::parse(spec) {
+                Err(got) => assert_eq!(got.0, error.as_str().unwrap(), "{spec:?}"),
+                Ok(parsed) => assert!(matches!(parsed, CronSpec::Croner(_)), "{spec:?}"),
+            }
             continue;
         }
         let trigger = Trigger::Cron {
@@ -102,6 +108,11 @@ fn frozen_table_is_what_kith_sched_says_now() {
         return;
     }
     let Ok(out) = Command::new("python3").arg(&script).output() else {
+        // CI must not pass without the check.
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "python3 not found: the frozen table cannot be re-checked"
+        );
         eprintln!("python3 not found: the frozen table is not re-checked");
         return;
     };
@@ -136,6 +147,7 @@ fn matches_the_host_routines() {
             Trigger::Interval { .. } | Trigger::Once { .. } => {
                 host.map(|t| (t + 59_999).div_euclid(60_000) * 60_000)
             }
+            Trigger::Cron { .. } => host.map(|t| t.div_euclid(60_000) * 60_000),
             _ => host,
         };
         assert_eq!(got, want, "{} after {after}", case["trigger"]);

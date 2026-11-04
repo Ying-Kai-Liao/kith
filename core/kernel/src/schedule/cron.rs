@@ -21,9 +21,19 @@ pub const MACROS: &[(&str, &str)] = &[
     ("@monthly", "0 0 1 * *"),
 ];
 
-/// A parsed spec: the values each field allows.
+/// A parsed spec.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CronSpec {
+pub enum CronSpec {
+    /// A spec `kith-sched` also accepts: the values each field allows, with its exact meaning.
+    Sets(Sets),
+    /// A spec only croner accepts (`MON-FRI`, `JAN`, `L`, `#`, `W`, `?`, `@yearly`, `@annually`): the host's routines may
+    /// hold these, so they must keep parsing. croner decides what they mean, as it does in the host.
+    Croner(String),
+}
+
+/// The values each field of a `kith-sched` spec allows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sets {
     minutes: BTreeSet<u64>,
     hours: BTreeSet<u64>,
     days: BTreeSet<u64>,
@@ -36,9 +46,47 @@ pub struct CronSpec {
 }
 
 impl CronSpec {
-    /// `kith-sched`'s `parse`, with its messages. A range that runs backwards (`5-3`) is accepted there and allows
+    /// `kith-sched`'s `parse`, with its messages; a spec it refuses but croner takes is kept for croner. A spec both
+    /// refuse is refused with `kith-sched`'s message. A range that runs backwards (`5-3`) is accepted there and allows
     /// nothing; it is accepted here and never fires.
     pub fn parse(cron: &str) -> Result<Self, Invalid> {
+        match Sets::parse(cron) {
+            Ok(sets) => Ok(Self::Sets(sets)),
+            Err(e) => {
+                let text = cron.trim();
+                if text.parse::<Cron>().is_ok() {
+                    Ok(Self::Croner(text.to_owned()))
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// The first fire strictly after `after` (ms), reading the clock in `zone`; `None` when it never fires.
+    pub fn next<Z: TimeZone>(&self, after: i64, zone: &Z) -> Option<i64> {
+        // Fires are whole minutes, so the next one after `after` is the next one after its minute. croner keeps the
+        // sub-second part of what it is given (and mishandles hh:59:59.999), so it is cut off first.
+        let after = after.div_euclid(60_000) * 60_000;
+        let from = DateTime::<Utc>::from_timestamp_millis(after)?.with_timezone(zone);
+        let cron: Cron = match self {
+            Self::Sets(sets) => {
+                if sets.never() {
+                    return None;
+                }
+                sets.croner_text().parse().ok()?
+            }
+            Self::Croner(text) => text.parse().ok()?,
+        };
+        // An Err is "no occurrence" (a day that no month has): croner searches a bounded span.
+        cron.find_next_occurrence(&from, false)
+            .ok()
+            .map(|t| t.timestamp_millis())
+    }
+}
+
+impl Sets {
+    fn parse(cron: &str) -> Result<Self, Invalid> {
         let trimmed = cron.trim();
         let text = MACROS
             .iter()
@@ -64,9 +112,8 @@ impl CronSpec {
         })
     }
 
-    /// The first fire strictly after `after` (ms), reading the clock in `zone`; `None` when it never fires.
-    pub fn next<Z: TimeZone>(&self, after: i64, zone: &Z) -> Option<i64> {
-        if [
+    fn never(&self) -> bool {
+        [
             &self.minutes,
             &self.hours,
             &self.days,
@@ -75,15 +122,6 @@ impl CronSpec {
         ]
         .iter()
         .any(|s| s.is_empty())
-        {
-            return None;
-        }
-        let from = DateTime::<Utc>::from_timestamp_millis(after)?.with_timezone(zone);
-        let cron: Cron = self.croner_text().parse().ok()?;
-        // An Err is "no occurrence" (a day that no month has): croner searches a bounded span.
-        cron.find_next_occurrence(&from, false)
-            .ok()
-            .map(|t| t.timestamp_millis())
     }
 
     fn croner_text(&self) -> String {

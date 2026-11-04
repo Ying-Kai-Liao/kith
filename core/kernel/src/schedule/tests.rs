@@ -73,7 +73,7 @@ fn validate_refuses_what_it_should() {
     assert!(cron("* * * * *", "UTC").validate().is_ok());
     assert!(
         Trigger::Cron {
-            expr: "* * * * * *".into(),
+            expr: "* * * * * * * *".into(),
             tz: Zone::Local
         }
         .validate()
@@ -199,21 +199,115 @@ fn next_strictly_increases() {
 
 #[test]
 fn dst_gap_and_overlap_in_new_york() {
-    // 2026-03-08 02:30 does not exist in New York; 2026-11-01 01:30 happens twice. Whatever croner does, a daily job
-    // fires once a day, and always strictly later.
+    // Pinned instants (a croner bump that changes the rule must show here). 2026-03-08 02:30 does not exist in New
+    // York: croner fires at 03:00 EDT. 2026-11-01 01:30 happens twice: only the first (EDT) fires.
     let t = cron("30 2 * * *", "America/New_York");
-    let fires = t.next_n_in(ms("2026-03-06T12:00:00Z"), 4, &Utc);
-    assert_eq!(fires.len(), 4);
-    let days: Vec<_> = fires.iter().map(|f| f.div_euclid(86_400_000)).collect();
-    assert!(days.windows(2).all(|w| w[0] < w[1]));
-    let t = cron("30 1 * * *", "America/New_York");
-    let fires = t.next_n_in(ms("2026-10-30T12:00:00Z"), 4, &Utc);
-    let days: Vec<_> = fires.iter().map(|f| f.div_euclid(86_400_000)).collect();
-    assert_eq!(days.len(), 4);
-    assert!(
-        days.windows(2).all(|w| w[0] < w[1]),
-        "the doubled hour fires once, not twice"
+    assert_eq!(
+        t.next_n_in(ms("2026-03-06T12:00:00Z"), 4, &Utc),
+        vec![
+            ms("2026-03-07T07:30:00Z"),
+            ms("2026-03-08T07:00:00Z"),
+            ms("2026-03-09T06:30:00Z"),
+            ms("2026-03-10T06:30:00Z"),
+        ]
     );
+    let t = cron("30 1 * * *", "America/New_York");
+    assert_eq!(
+        t.next_n_in(ms("2026-10-30T12:00:00Z"), 4, &Utc),
+        vec![
+            ms("2026-10-31T05:30:00Z"),
+            ms("2026-11-01T05:30:00Z"),
+            ms("2026-11-02T06:30:00Z"),
+            ms("2026-11-03T06:30:00Z"),
+        ]
+    );
+}
+
+#[test]
+fn local_on_a_dst_zone_follows_that_zone() {
+    // `Local` is whatever zone it is handed; a DST zone behaves as the IANA spelling does.
+    let ny: Tz = "America/New_York".parse().unwrap();
+    let local = cron("30 2 * * *", "local");
+    let named = cron("30 2 * * *", "America/New_York");
+    for after in ["2026-03-07T12:00:00Z", "2026-10-31T12:00:00Z"] {
+        assert_eq!(
+            local.next_n_in(ms(after), 4, &ny),
+            named.next_n_in(ms(after), 4, &Utc)
+        );
+    }
+    assert_eq!(
+        local.next_after_in(ms("2026-03-08T00:00:00Z"), &ny),
+        Some(ms("2026-03-08T07:00:00Z"))
+    );
+}
+
+#[test]
+fn sub_second_after_is_floored_to_the_minute() {
+    let t = cron("* * * * *", "UTC");
+    assert_eq!(
+        t.next_after(ms("2026-03-08T12:59:59.999Z")),
+        Some(ms("2026-03-08T13:00:00Z"))
+    );
+    assert_eq!(
+        t.next_after(ms("2026-03-08T12:34:00.123Z")),
+        Some(ms("2026-03-08T12:35:00Z"))
+    );
+    let t = cron("0 * * * *", "UTC");
+    assert_eq!(
+        t.next_after(ms("2026-03-08T12:59:59.999Z")),
+        Some(ms("2026-03-08T13:00:00Z"))
+    );
+}
+
+#[test]
+fn the_hosts_cron_superset_still_parses() {
+    // What serve/host/src/routines accepts (`Cron::from_str`): the presets and tests there, and croner-only spellings.
+    for expr in [
+        "0 9 * * *",
+        "*/15 * * * *",
+        "47 * * * *",
+        "47 23 * * 1,3,5",
+        "47 23 31 * *",
+        "37 * * * *",
+        "5 23 * * 1,3,6",
+        "45 8 31 * *",
+        "*/7 * * * *",
+        "20 14 * * 0",
+        "0 9 * * 1,3,5",
+        "0 9 31 * *",
+        "* * * * *",
+        "0 9 * * MON-FRI",
+        "0 0 * JAN *",
+        "0 0 L * *",
+        "0 0 * * FRI#2",
+        "0 0 15W * *",
+        "0 0 ? * *",
+        "@yearly",
+        "@annually",
+    ] {
+        let t = cron(expr, "UTC");
+        t.validate().expect(expr);
+        assert!(t.next_after(ms("2026-11-04T10:00:00Z")).is_some(), "{expr}");
+    }
+    // croner's meaning, not kith-sched's.
+    assert_eq!(
+        cron("0 9 * * MON-FRI", "UTC").next_after(ms("2026-11-06T10:00:00Z")),
+        Some(ms("2026-11-09T09:00:00Z"))
+    );
+    assert_eq!(
+        cron("@yearly", "UTC").next_after(ms("2026-11-04T10:00:00Z")),
+        Some(ms("2027-01-01T00:00:00Z"))
+    );
+    // A spec both refuse keeps kith-sched's message.
+    for (expr, msg) in [
+        ("61 9 * * *", "cron field '61' out of range 0-59"),
+        (
+            "a b c",
+            "cron needs 5 fields (minute hour day month weekday), got 'a b c'",
+        ),
+    ] {
+        assert_eq!(CronSpec::parse(expr).unwrap_err().0, msg);
+    }
 }
 
 #[test]
