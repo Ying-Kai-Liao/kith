@@ -155,13 +155,13 @@ impl Shared {
         }
         // The envelope's rows that need the master key read it first, outside the core lock (see `secrets::preload`).
         if matches!(method, "secrets.open" | "secrets.get" | "secrets.put") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            crate::call::check(Principal::Owner, method, params)?;
             let key = self.master_key()?;
             let answer = self.with_core(|c| {
                 if let Some(key) = key {
                     crate::secrets::adopt(&c.secrets, key)?;
                 }
-                c.call(kith_api::Principal::Owner, method, params)
+                c.call(Principal::Owner, method, params)
             })?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
