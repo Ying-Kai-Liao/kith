@@ -7,6 +7,9 @@
 #   1. core up: a revoke, an undo and a removal (--rm) reach it
 #   2. core down, or no kith program: kith-auth exits 0, auth.json shows the person revoked, the warning is on stderr
 #   3. a person the core doesn't know (refused, exit 4): the same warning; a lost answer (exit 5): "may not be updated"
+#   4. bot --rm: a renamed bot is removed under every id it had; "x is a person" is not "already gone"
+#   5. the fake refuses methods that are not in CORE_CALL_METHODS (read from serve/host/src/core_front.rs, as `kith kernel
+#      core-call` does), so MIRROR_METHOD in kith-auth can not drift outside that list without this check failing
 # The rules themselves: kith-auth-revoke-check. Throwaway dirs, never ~/.kith.
 #
 #   kernel/tests/kith-auth-core-mirror-check     a few seconds; prints each check, exits 1 when one fails
@@ -23,6 +26,14 @@ printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agent
 
 # The fake kith: `memory hook --help` answers like a current program; `kernel core-call METHOD --params-stdin` is the core.
 export FAKE_DIR=$T/fake; mkdir -p "$FAKE_DIR"
+# The methods core-call allows: the real list, read from the host source.
+export FAKE_ALLOWED=$(python3 -I - "$KERNEL/../serve/host/src/core_front.rs" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+body = re.search(r'const CORE_CALL_METHODS: &\[&str\] =\s*&\[(.*?)\];', src, re.S).group(1)
+print(' '.join(re.findall(r'"([^"]+)"', body)))
+PY
+)
 cat > "$T/fakekith" <<'PY'
 #!/usr/bin/env python3
 import json, os, sys
@@ -33,6 +44,8 @@ if a[:2] == ['memory', 'hook']:
 if a[:2] != ['kernel', 'core-call']:
     sys.exit(2)
 method, params = a[2], json.loads(sys.stdin.read() or '{}')
+if method not in os.environ['FAKE_ALLOWED'].split():
+    print(f'core-call: {method} is not one of ' + ', '.join(os.environ['FAKE_ALLOWED'].split()), file=sys.stderr); sys.exit(2)
 if os.path.exists(d + '/down'):
     print('no core daemon answers', file=sys.stderr); sys.exit(3)
 if os.path.exists(d + '/slow'):
@@ -43,6 +56,8 @@ pid = params['id']
 with open(d + '/calls', 'a') as f:
     f.write(f'{method} {pid}\n')
 db = json.load(open(d + '/core.json')) if os.path.exists(d + '/core.json') else {}
+if method == 'people.removeBot' and pid in db and not db[pid].get('bot'):
+    print(f"'{pid}' is a person, not a bot", file=sys.stderr); sys.exit(4)
 if pid not in db:
     print((f"no bot '{pid}'" if method == 'people.removeBot' else f"no person '{pid}' (kith-auth person {pid} name=..)"), file=sys.stderr); sys.exit(4)
 elif method in ('people.removePerson', 'people.removeBot'):
@@ -70,7 +85,7 @@ import json, os, sys
 f = sys.argv[1]
 db = json.load(open(f)) if os.path.exists(f) else {}
 for p in sys.argv[2:]:
-    db.setdefault(p, {'revoked': False})
+    db.setdefault(p, {'revoked': False, 'bot': p.startswith('bot-')})
 json.dump(db, open(f, 'w'))
 PY
 }
@@ -155,6 +170,37 @@ export KITH_BIN=$T/nothing-here PATH=/usr/bin:/bin
 A bot bot-none --rm >"$T/out" 2>"$T/err"; rc=$?
 check "bot rm with no kith program: removed, warned like person rm" "[ $rc -eq 0 ] && [ \"\$(auth_has bot-none)\" = False ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
 export KITH_BIN=$T/fakekith PATH=$ORIG_PATH
+
+
+# 6. a renamed bot: the core still holds the old id (a rename is not mirrored), the new one is unknown there
+A bot bot-old --of kai >/dev/null; core_add bot-old
+A person bot-old id=bot-ren >"$T/out" 2>"$T/err"
+check "rename: the bot is now bot-ren in auth.json" "[ \"\$(auth_has bot-ren)\" = True ]"
+A bot bot-ren --rm >"$T/out" 2>"$T/err"; rc=$?
+check "bot rm after a rename: the old id leaves the core too, no warning" "[ $rc -eq 0 ] && grep -q 'people.removeBot bot-old' $FAKE_DIR/calls && [ \"\$(core_revoked bot-old)\" = absent ] && [ ! -s $T/err ]"
+# a renamed bot the core never imported under either id: quiet
+A bot bot-o2 --of kai >/dev/null; A person bot-o2 id=bot-r2 >/dev/null 2>&1
+A bot bot-r2 --rm >"$T/out" 2>"$T/err"; rc=$?
+check "bot rm after a rename, unknown to the core under every id: quiet" "[ $rc -eq 0 ] && [ ! -s $T/err ]"
+# the core holds the id as a person: not 'no such id', so the loud line
+A bot bot-pp --of kai >/dev/null; python3 - "$FAKE_DIR/core.json" <<'PY'
+import json, sys
+db = json.load(open(sys.argv[1])); db['bot-pp'] = {'revoked': False, 'bot': False}; json.dump(db, open(sys.argv[1], 'w'))
+PY
+A bot bot-pp --rm >"$T/out" 2>"$T/err"; rc=$?
+check "bot rm of an id the core holds as a person: warned, not silent" "[ $rc -eq 0 ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
+
+# 7. drift: every method kith-auth mirrors is on the core-call allow list (the fake above refuses the rest, exit 2)
+mirror_drift() { python3 -I - "$KERNEL/bin/kith-auth" <<'PY'
+import os, re, sys
+src = open(sys.argv[1]).read()
+body = re.search(r'MIRROR_METHOD = \{(.*?)\}', src, re.S).group(1)
+mirrored = set(re.findall(r"'(people\.[A-Za-z]+)'", body))
+assert mirrored and mirrored <= set(os.environ['FAKE_ALLOWED'].split()), mirrored
+PY
+}
+check "every MIRROR_METHOD is on CORE_CALL_METHODS" "mirror_drift"
+A person ann --revoke >/dev/null 2>&1   # a mirrored method outside the list would have warned in every row above
 
 [ $fail -eq 0 ] && echo "all ok" || echo "FAILED"
 exit $fail

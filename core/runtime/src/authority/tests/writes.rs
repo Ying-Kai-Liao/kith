@@ -600,7 +600,12 @@ fn a_bot_is_added_to_a_person_and_removed_with_its_rows() {
     assert_eq!(
         rig.lines("people.removeBot", &json!({"id": "amy"}))
             .unwrap_err(),
-        "no bot 'amy'"
+        "'amy' is a person, not a bot"
+    );
+    assert_eq!(
+        rig.lines("people.removeBot", &json!({"id": "zed"}))
+            .unwrap_err(),
+        "no bot 'zed'"
     );
 }
 

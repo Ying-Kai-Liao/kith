@@ -2480,26 +2480,38 @@ def mirror_warning(action, may_have_applied):
 
 def mirror_to_core(pid, action, already_ok=None):
     """After auth.json is written: tell the core, once. On any failure say so on stderr and return (exit stays 0).
-    already_ok: a refusal text that means the core is already where auth.json is (a bot it never imported), so no line."""
-    may_have_applied = False
+    pid: one id, or a list (a renamed bot: the core may know it under any of its old ids; each is sent, one line at most).
+    already_ok: the core's refusal text that means it is already where auth.json is (a bot it never imported), so no line;
+    a callable gets the id and returns that text."""
+    ids = [pid] if isinstance(pid, str) else list(pid)
+    may_have_applied = failed = False
     try:
         from kith_paths import kith_bin
-        bin_ = kith_bin(budget=MIRROR_PROBE_SECS)   # picked once, for the one call below
-        if bin_:
-            params = {'id': pid, 'kernel': str(KITH), 'home': str(Path.home()),
+        bin_ = kith_bin(budget=MIRROR_PROBE_SECS)   # picked once, for the calls below
+        if not bin_:
+            failed = True
+        for one in ids if bin_ else []:
+            params = {'id': one, 'kernel': str(KITH), 'home': str(Path.home()),
                       'env': {k: os.environ[k] for k in MIRROR_ENV if os.environ.get(k)}}
-            r = subprocess.run([bin_, 'kernel', 'core-call', MIRROR_METHOD[action], '--params-stdin'],
-                               input=json.dumps(params), capture_output=True, text=True, timeout=CORE_CALL_SECS)
+            try:
+                r = subprocess.run([bin_, 'kernel', 'core-call', MIRROR_METHOD[action], '--params-stdin'],
+                                   input=json.dumps(params), capture_output=True, text=True, timeout=CORE_CALL_SECS)
+            except subprocess.TimeoutExpired:
+                may_have_applied = failed = True
+                continue
             if r.returncode == 0:
-                return
-            if already_ok and r.returncode == 4 and already_ok in (r.stderr or r.stdout):
-                return
-            may_have_applied = r.returncode == 5   # the call went out and the answer was lost
-    except subprocess.TimeoutExpired:
-        may_have_applied = True
+                continue
+            ok = already_ok(one) if callable(already_ok) else already_ok
+            if ok and r.returncode == 4 and ok in (r.stderr or r.stdout):
+                continue
+            failed = True
+            may_have_applied = may_have_applied or r.returncode == 5   # the call went out and the answer was lost
+            if r.returncode == 3:
+                break   # no daemon answers: the other ids would meet the same
     except Exception:   # no kith program, no daemon: all the same warning
-        pass
-    print(mirror_warning(action, may_have_applied), file=sys.stderr)
+        failed = True
+    if failed:
+        print(mirror_warning(action, may_have_applied), file=sys.stderr)
 
 
 def revoke_person(pid, revoke, local):
@@ -2824,10 +2836,13 @@ def cmd_bot(args):
     if '--rm' in flags:
         if not auth['people'].get(bid, {}).get('bot_of'):
             die(f"no bot '{bid}'")
+        # A rename is not mirrored, so the core may still hold the bot under an old id: send every id it had.
+        ids = [bid] + auth['people'][bid].get('was', [])
         auth['people'].pop(bid)
         forget(auth, [bid])
         save_auth(auth)
-        mirror_to_core(bid, 'remove-bot', already_ok=f"no bot '{bid}'")   # a bot the core never imported is already gone there
+        # Quiet only for "no bot 'x'" (never imported there, so already gone); "x is a person" is not that.
+        mirror_to_core(ids, 'remove-bot', already_ok=lambda i: f"no bot '{i}'")
         print(f'{bid} removed, with its memberships')
         return
     if not opts.get('--of'):
