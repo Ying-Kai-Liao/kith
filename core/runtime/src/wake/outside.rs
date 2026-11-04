@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use kith_kernel::procstart;
 use serde_json::Value;
 
 /// Seconds between two looks at a PR's checks (the tick is a minute).
@@ -82,10 +83,6 @@ pub(crate) struct System {
     pub state: PathBuf,
     /// `gh`, when the caller names one (the Python's `KITH_WAKE_GH`).
     pub gh: Option<PathBuf>,
-}
-
-fn squeeze(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 impl System {
@@ -169,14 +166,16 @@ impl Outside for System {
         if pid == 0 || crate::gate::pid_gone(pid) {
             return false;
         }
-        match (started, crate::lock::process_start(pid)) {
-            (Some(was), Some(now)) if !was.trim().is_empty() => squeeze(was) == now,
+        // Gone is the only "dead" besides another start in the same form: an unreadable start, an empty record, old
+        // `ps -o lstart=` text from an import, or the other form all read as alive (a wrong "dead" frees a live writer).
+        match (started, procstart::start_stamp(pid)) {
+            (Some(was), Some(now)) => procstart::same_process(was.trim(), &now),
             _ => true,
         }
     }
 
     fn proc_start(&self, pid: i64) -> Option<String> {
-        crate::lock::process_start(u32::try_from(pid).ok()?)
+        procstart::start_stamp(u32::try_from(pid).ok()?)
     }
 
     fn writer_live(&self, sid: &str) -> bool {
