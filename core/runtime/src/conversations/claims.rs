@@ -531,6 +531,20 @@ pub(crate) fn stop(
     now: i64,
 ) -> Result<Option<Kill>> {
     let tx = core.claim_tx()?;
+    let kill = stop_in(&tx, claim_id, reason, requeue, now)?;
+    tx.commit()?;
+    Ok(kill)
+}
+
+/// [`stop`] inside a transaction the caller began (`Core::claim_tx`) and commits, for a caller that stops several claims
+/// and settles its own rows in the same step (the ask tree's end).
+pub(crate) fn stop_in(
+    tx: &Transaction<'_>,
+    claim_id: i64,
+    reason: &str,
+    requeue: bool,
+    now: i64,
+) -> Result<Option<Kill>> {
     // Never redeemed and no process recorded: nothing can be writing, so it ends by CAS (a late redeem then fails)
     // instead of sticking at `ending`, which has no pid for `end_gone` to wait on.
     let unspawned = tx.execute(
@@ -540,11 +554,10 @@ pub(crate) fn stop(
     )?;
     if unspawned == 1 {
         if requeue {
-            requeue_turn(&tx, claim_id)?;
+            requeue_turn(tx, claim_id)?;
         } else {
-            cancel_turn(&tx, claim_id, now)?;
+            cancel_turn(tx, claim_id, now)?;
         }
-        tx.commit()?;
         return Ok(None);
     }
     let n = tx.execute(
@@ -554,17 +567,50 @@ pub(crate) fn stop(
     )?;
     if n == 1 {
         if requeue {
-            requeue_turn(&tx, claim_id)?;
+            requeue_turn(tx, claim_id)?;
         } else {
-            cancel_turn(&tx, claim_id, now)?;
+            cancel_turn(tx, claim_id, now)?;
         }
     }
-    let kill = match row(&tx, claim_id)? {
+    let kill = match row(tx, claim_id)? {
         Some(r) if r.state == "ending" => Some(kill_of(claim_id, r.pid, r.pid_started)),
         _ => None,
     };
-    tx.commit()?;
     Ok(kill)
+}
+
+/// Everything a conversation has in flight stops (`kith ask --end` of the ask that runs it): its queued and parked turns
+/// are cancelled, a queued take-over claim ends, and its live claim goes through [`stop_in`] (the turn cancelled, the kill
+/// returned to be re-sent until the process is gone; an unspawned claim ends at once). Nothing else is written. Safe to
+/// repeat: a second call finds nothing queued and answers an `ending` claim's kill again.
+pub(crate) fn stop_conversation_in(
+    tx: &Transaction<'_>,
+    conversation: &str,
+    reason: &str,
+    now: i64,
+) -> Result<Vec<Kill>> {
+    tx.execute(
+        "UPDATE turns SET state = 'cancelled', parked_reason = NULL, parked_at = NULL, finished_at = ?2
+         WHERE conversation = ?1 AND state IN ('queued', 'parked')",
+        params![conversation, now],
+    )?;
+    tx.execute(
+        "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = ?3
+         WHERE conversation = ?1 AND state = 'queued'",
+        params![conversation, now, reason],
+    )?;
+    let live: Vec<i64> = {
+        let mut st = tx.prepare(
+            "SELECT claim_id FROM claims WHERE conversation = ?1 AND state IN ('claimed', 'running', 'ending')",
+        )?;
+        st.query_map([conversation], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?
+    };
+    let mut kills = Vec::new();
+    for id in live {
+        kills.extend(stop_in(tx, id, reason, false, now)?);
+    }
+    Ok(kills)
 }
 
 /// Step 6: the person's queued and parked turns are cancelled, their queued take-overs ended, and their live claims go

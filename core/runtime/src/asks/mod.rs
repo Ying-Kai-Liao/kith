@@ -11,8 +11,8 @@
 //! An open adds no cost, so two opens can never take a chain over its cap between them; what the transaction excludes is a
 //! second open of the same id, and an open racing a settle that tips the cap.
 //!
-//! The seams for part b and the wake lane: [`end`] settles rows `stopped` and RETURNS the ids and the sessions that are owed
-//! a withdrawal of their wakes; it stops no process and withdraws nothing.
+//! Stopping (M3-8b): [`end_tree`] settles a tree of asks `stopped`, stops what each child's conversation runs through the
+//! claims API and withdraws the wakes the callers are owed through the wake lane. It kills no process: it returns the kills.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -21,8 +21,10 @@ use kith_kernel::delegation::{self as d, Reg};
 use rusqlite::{Connection, Row, params};
 use serde_json::{Map, Value, json};
 
+use crate::conversations::claims::{self, Kill};
 use crate::db::Core;
 use crate::error::{Error, Result};
+use crate::wake;
 
 pub(crate) mod call;
 #[cfg(test)]
@@ -395,6 +397,19 @@ pub(crate) fn open_in(
     let asks = load_all(tx)?;
     let by_id = regs(&asks);
     let place = d::lineage_with(&|id| by_id.get(id).cloned(), env, o.crossing).map_err(refuse)?;
+    // Under a stopped ask nothing new may open: its tree is ended (an open that won the race is ended with it).
+    if !check_only
+        && let Some(p) = place
+            .ask
+            .as_deref()
+            .and_then(|p| asks.iter().find(|a| a.id == p))
+        && (p.state == "stopped" || p.ended_ms.is_some())
+    {
+        return Err(Error::Refused(format!(
+            "kith-core: asks: ask {} was stopped; it cannot open another",
+            p.id
+        )));
+    }
     let costs = if place.chain.is_some() {
         d::chain_costs(&by_id)
     } else {
@@ -523,58 +538,101 @@ pub(crate) fn cap_told(core: &mut Core, chain: &str, now: i64) -> Result<usize> 
     Ok(n)
 }
 
-/// What [`end`] did, for the callers that stop processes and withdraw wakes.
-#[derive(Debug, Default, PartialEq, Eq)]
+/// What [`end_tree`] did.
+#[derive(Debug, Default, PartialEq)]
 pub(crate) struct Ended {
-    /// The asks settled `stopped`.
+    /// The asks settled `stopped` by this call.
     pub ids: Vec<String>,
-    /// The sessions owed a withdrawal of their wakes: the ones named, the callers' sessions and the `--bg` runs' own.
+    /// The sessions whose wakes and waiters were withdrawn: the ones named, the callers' sessions and the `--bg` runs' own.
     pub sessions: Vec<String>,
+    /// Writers to kill, from the claims of the children's conversations (to be re-sent until gone).
+    pub kill: Vec<Kill>,
 }
 
-/// Stop, revoke and removal (R5, R8), the record half: every ask whose caller is one of `sessions` (`reply_to.session`) or
-/// `persons` (the person it was asked for) is settled `stopped` and marked ended. One that was already delivered, answered
-/// to its caller or ended is history and stays. A record with no session belongs to no lane, unless its person is named.
-/// Stops no process and withdraws no wake: the answer says which.
+/// What to end: the roots of trees, the callers' sessions, the people. Any of them may be empty.
+#[derive(Debug, Default)]
+pub(crate) struct EndReq<'a> {
+    /// Asks whose whole subtree ends (the ask itself and every descendant by `parent`).
+    pub roots: &'a [String],
+    pub sessions: &'a [String],
+    pub persons: &'a [String],
+}
+
+/// Stop, revoke and removal (R5, R8), M3-8b: every ask whose caller is one of `sessions` (`reply_to.session`) or `persons`
+/// (the person it was asked for), or that is one of `roots`, is settled `stopped` and marked ended, with every descendant
+/// of those (a child's own children). The same transaction stops what each of them runs through the claims API: its
+/// conversation's queued and parked turns are cancelled and its live claim goes to `ending` (an unspawned one ends), and the
+/// kills come back. Then the wakes and waiters the callers are owed are withdrawn through the wake lane. One that was already
+/// delivered or answered to its caller is history and stays; so does its cost: chain cost keeps counting every record.
+/// A record with no session belongs to no lane, unless its person is named.
+///
+/// An answer, report or settle of a stopped ask is recorded (its cost joins the chain) but changes no state, so nothing
+/// wakes the caller afterwards ([`settle_in`] only moves an `open` ask). An [`open`] under a stopped ask is refused, so an
+/// open racing the end either lands first (and the end takes it with the tree) or is refused.
+///
+/// Repeating the call is safe, and finishes a call that died between its transaction and the withdrawals: asks already
+/// ended are not settled again, but their conversations are stopped again and their callers' wakes withdrawn again.
 ///
 /// Persons match the record's own `person` only: the `--bg` job's person (`ask-bg/ID.json`) is always the same value, since
 /// the child inherits `KITH_PERSON` from the run that opened the record, so nothing is lost by not storing it.
-pub(crate) fn end(
-    core: &mut Core,
-    sessions: &[String],
-    persons: &[String],
-    now: i64,
-) -> Result<Ended> {
+pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<Ended> {
     let tx = core.claim_tx()?;
     let mut out = Ended::default();
-    let mut owed: std::collections::BTreeSet<String> = sessions.iter().cloned().collect();
-    for mut a in load_all(&tx)? {
-        if a.ended_ms.is_some() || a.delivered || a.woke_answer {
+    let mut owed: std::collections::BTreeSet<String> = req.sessions.iter().cloned().collect();
+    let asks = load_all(&tx)?;
+    let mut hit: std::collections::BTreeSet<&str> = asks
+        .iter()
+        .filter(|a| {
+            req.roots.contains(&a.id)
+                || a.reply_session
+                    .as_ref()
+                    .is_some_and(|s| req.sessions.contains(s))
+                || a.caller_person
+                    .as_ref()
+                    .is_some_and(|p| req.persons.contains(p))
+        })
+        .map(|a| a.id.as_str())
+        .collect();
+    // The subtree: whatever hangs off a hit, to any depth.
+    loop {
+        let more: Vec<&str> = asks
+            .iter()
+            .filter(|a| {
+                !hit.contains(a.id.as_str()) && a.parent.as_deref().is_some_and(|p| hit.contains(p))
+            })
+            .map(|a| a.id.as_str())
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        hit.extend(more);
+    }
+    let mut conversations = Vec::new();
+    for mut a in asks.iter().filter(|a| hit.contains(a.id.as_str())).cloned() {
+        if a.delivered || a.woke_answer {
             continue;
         }
-        let by_session = a
-            .reply_session
-            .as_ref()
-            .is_some_and(|s| sessions.contains(s));
-        let by_person = a
-            .caller_person
-            .as_ref()
-            .is_some_and(|p| persons.contains(p));
-        if !(by_session || by_person) {
-            continue;
+        if a.ended_ms.is_none() {
+            "stopped".clone_into(&mut a.state);
+            a.ended_ms = Some(now);
+            a.done = true;
+            a.answered_ms = a.answered_ms.or(Some(now));
+            a.put(&tx)?;
+            out.ids.push(a.id.clone());
         }
-        "stopped".clone_into(&mut a.state);
-        a.ended_ms = Some(now);
-        a.done = true;
-        a.answered_ms = a.answered_ms.or(Some(now));
-        a.put(&tx)?;
         owed.extend(a.reply_session.clone());
         owed.extend(a.conversation.clone());
-        out.ids.push(a.id);
+        conversations.extend(a.conversation);
     }
+    for c in conversations.iter().filter(|c| !c.is_empty()) {
+        out.kill
+            .extend(claims::stop_conversation_in(&tx, c, "ask stopped", now)?);
+    }
+    tx.commit()?;
+    out.ids.sort();
     owed.remove("");
     out.sessions = owed.into_iter().collect();
-    tx.commit()?;
+    wake::withdraw_owed(core, now, &out.sessions, req.persons)?;
     Ok(out)
 }
 

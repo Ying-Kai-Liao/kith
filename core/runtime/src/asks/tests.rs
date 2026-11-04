@@ -686,3 +686,291 @@ fn the_import_is_idempotent_read_only_and_lists_what_it_leaves_out() {
         assert_eq!(&std::fs::read(t.root.join(p)).unwrap(), bytes, "{p}");
     }
 }
+
+// --- stopping a tree (M3-8b) ---------------------------------------------------------------------------------------------
+
+mod stop {
+    use super::*;
+    use crate::conversations::claims::{
+        Kind, NewClaim, NewTurn, Redeemed, claim, enqueue_turn, reconcile, redeem, report,
+    };
+    use crate::wake;
+
+    fn reg(t: &Tree, id: &str, parent: Option<&str>, session: &str, cost: f64, state: &str) {
+        t.reg(
+            id,
+            &json!({"asked": "x", "chain": "r", "hop": 1, "reply_to": {"session": session, "ask": parent},
+                    "at": 1.0, "state": state, "cost": cost, "person": "kai"}),
+        );
+    }
+
+    fn turn(core: &mut Core, conv: &str) -> i64 {
+        enqueue_turn(
+            core,
+            &NewTurn {
+                conversation: conv,
+                agent: "a",
+                engine: "claude",
+                source: "ask",
+                person: "kai",
+                prompt: "p",
+                deadline: None,
+            },
+            2,
+        )
+        .unwrap()
+    }
+
+    fn take(core: &mut Core, conv: &str, turn: i64) -> i64 {
+        claim(
+            core,
+            &NewClaim {
+                conversation: conv,
+                kind: Kind::Turn,
+                person: "kai",
+                turn: Some(turn),
+                holder_instance: Some("h1"),
+                account: None,
+                process: None,
+                revoke_seen: 0,
+            },
+            3,
+        )
+        .unwrap()
+        .claim_id
+    }
+
+    /// A running writer on `conv`.
+    fn run(core: &mut Core, conv: &str, pid: u32) -> i64 {
+        let t = turn(core, conv);
+        let id = take(core, conv, t);
+        redeem(core, id, pid, &format!("e{pid}"), "h1", 4).unwrap();
+        id
+    }
+
+    fn claim_state(core: &Core, id: i64) -> String {
+        core.conn()
+            .query_row("SELECT state FROM claims WHERE claim_id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    }
+
+    fn turn_state(core: &Core, id: i64) -> String {
+        core.conn()
+            .query_row("SELECT state FROM turns WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn set_conv(core: &Core, id: &str, conv: &str) {
+        core.conn()
+            .execute(
+                "UPDATE asks SET conversation = ?2 WHERE id = ?1",
+                [id, conv],
+            )
+            .unwrap();
+    }
+
+    fn owed(t: &Tree, core: &mut Core, session: &str, id: &str) {
+        wake::call(
+            core,
+            "wake.enqueue",
+            &with(
+                &t.params(&json!({})),
+                &json!({"session": session, "id": id, "agent": "a", "text": ["hi"]}),
+            ),
+        )
+        .unwrap();
+    }
+
+    fn queued(t: &Tree, core: &mut Core) -> usize {
+        wake::call(core, "wake.queueList", &t.params(&json!({}))).unwrap()["lines"]
+            .as_array()
+            .unwrap()
+            .len()
+    }
+
+    fn rec(core: &mut Core, id: &str) -> Value {
+        call(core, "ask.record", &json!({"id": id})).unwrap()
+    }
+
+    /// root r (caller s1) -> c1 (asked by r's run) -> g (asked by c1's run; crashed: still open, its cost kept), each with
+    /// a running writer on its own conversation.
+    fn tree() -> (Tree, Core, [i64; 3]) {
+        let t = Tree::new();
+        reg(&t, "r", None, "s1", 1.0, "open");
+        reg(&t, "c1", Some("r"), "conv-r", 2.0, "open");
+        reg(&t, "g", Some("c1"), "conv-c1", 3.0, "open");
+        t.import();
+        let mut core = t.core();
+        reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
+        let mut claims = [0; 3];
+        for (i, (id, conv)) in [("r", "conv-r"), ("c1", "conv-c1"), ("g", "conv-g")]
+            .into_iter()
+            .enumerate()
+        {
+            set_conv(&core, id, conv);
+            claims[i] = run(&mut core, conv, 100 + u32::try_from(i).unwrap());
+        }
+        (t, core, claims)
+    }
+
+    #[test]
+    fn a_root_ends_its_whole_tree_stops_each_childs_claim_and_withdraws_the_wakes() {
+        let (t, mut core, claims) = tree();
+        owed(&t, &mut core, "s1", "w1");
+        owed(&t, &mut core, "conv-r", "w2");
+        owed(&t, &mut core, "other", "w3");
+        let out = call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        assert_eq!(out["ended"], json!(["c1", "g", "r"]));
+        assert_eq!(out["kill"].as_array().unwrap().len(), 3);
+        for id in claims {
+            assert_eq!(
+                claim_state(&core, id),
+                "ending",
+                "stays the writer until gone"
+            );
+        }
+        for id in ["r", "c1", "g"] {
+            let r = rec(&mut core, id);
+            assert_eq!(r["state"], "stopped", "{id}");
+            assert!(r["ended_at"].as_f64().unwrap() > 0.0);
+        }
+        assert_eq!(
+            queued(&t, &mut core),
+            1,
+            "only the unrelated session keeps its wake"
+        );
+        // the crashed grandchild's cost still counts: 1 + 2 + 3
+        let d = call(&mut core, "ask.delegations", &t.params(&json!({}))).unwrap();
+        let g = d["delegations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == "g")
+            .unwrap();
+        assert_eq!(g["chain_cost_micro_usd"], 6_000_000);
+    }
+
+    #[test]
+    fn a_queued_turn_is_cancelled_and_an_unspawned_claim_ends_without_a_kill() {
+        let t = Tree::new();
+        reg(&t, "r", None, "s1", 0.0, "open");
+        t.import();
+        let mut core = t.core();
+        reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
+        set_conv(&core, "r", "conv-r");
+        let first = turn(&mut core, "conv-r");
+        let id = take(&mut core, "conv-r", first);
+        let second = turn(&mut core, "conv-r");
+        let out = call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        assert_eq!(out["kill"], json!([]));
+        assert_eq!(claim_state(&core, id), "ended");
+        assert_eq!(turn_state(&core, first), "cancelled");
+        assert_eq!(turn_state(&core, second), "cancelled");
+        // a redeem that comes late finds nothing to take
+        assert!(matches!(
+            redeem(&mut core, id, 9, "e9", "h1", 5).unwrap(),
+            Redeemed::Refused(_)
+        ));
+    }
+
+    #[test]
+    fn a_delivered_answer_stays_and_a_report_after_the_stop_is_recorded_without_waking() {
+        let (t, mut core, claims) = tree();
+        // c1's answer reached its caller first: history stays (its run is still stopped)
+        core.conn()
+            .execute(
+                "UPDATE asks SET state = 'answered', delivered = 1 WHERE id = 'c1'",
+                [],
+            )
+            .unwrap();
+        let out = call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        assert_eq!(out["ended"], json!(["g", "r"]));
+        assert_eq!(rec(&mut core, "c1")["state"], "answered");
+        assert_eq!(
+            claim_state(&core, claims[1]),
+            "running",
+            "history is not touched"
+        );
+        // r's run reports its turn after the stop: the exit ends the claim, the ask stays stopped, its cost counts
+        report(&mut core, claims[0], "done", r#"{"pid":100}"#, 50).unwrap();
+        assert_eq!(claim_state(&core, claims[0]), "ended");
+        let s = call(
+            &mut core,
+            "ask.settle",
+            &with(
+                &t.params(&json!({})),
+                &json!({"id": "r", "cost": 0.5, "state": "answered"}),
+            ),
+        )
+        .unwrap();
+        assert_eq!(s["state"], "stopped");
+        assert_eq!(s["cost"], 1.5);
+        assert_eq!(
+            rec(&mut core, "r")["answered_at"].as_f64().unwrap(),
+            NOW as f64 / 1000.0
+        );
+    }
+
+    #[test]
+    fn a_subtree_stop_leaves_its_parents_alone() {
+        let (_t, mut core, claims) = tree();
+        let out = call(&mut core, "ask.end", &json!({"roots": ["c1"]})).unwrap();
+        assert_eq!(out["ended"], json!(["c1", "g"]));
+        assert_eq!(rec(&mut core, "r")["state"], "open");
+        assert_eq!(claim_state(&core, claims[0]), "running");
+        assert_eq!(claim_state(&core, claims[2]), "ending");
+    }
+
+    #[test]
+    fn ending_twice_ends_nothing_more_and_answers_the_kills_again() {
+        let (t, mut core, claims) = tree();
+        let first = call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        assert_eq!(first["ended"].as_array().unwrap().len(), 3);
+        // a wake that came in after the first end (or one a crash left behind) goes with the retry
+        owed(&t, &mut core, "s1", "late");
+        let again = call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        assert_eq!(again["ended"], json!([]));
+        assert_eq!(
+            again["kill"].as_array().unwrap().len(),
+            3,
+            "re-sent until gone"
+        );
+        assert_eq!(claim_state(&core, claims[0]), "ending");
+        assert_eq!(queued(&t, &mut core), 0);
+    }
+
+    #[test]
+    fn an_open_under_a_stopped_ask_is_refused_and_one_that_won_the_race_is_ended_with_the_tree() {
+        let t = Tree::new();
+        reg(&t, "r", None, "s1", 0.0, "open");
+        t.import();
+        let mut core = t.core();
+        let p = |id: &str| {
+            with(
+                &t.params(&env(&[("KITH_ASK_ID", "r")])),
+                &json!({"id": id, "asked": "x"}),
+            )
+        };
+        // won the race: it opens, and the end that follows takes it with r
+        call(&mut core, "ask.open", &p("late")).unwrap();
+        let out = call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        assert_eq!(out["ended"], json!(["late", "r"]));
+        // lost the race: refused, and a check says what an open would
+        assert!(
+            why(&call(&mut core, "ask.open", &p("later")).unwrap_err()).contains("was stopped")
+        );
+    }
+
+    #[test]
+    fn a_session_or_person_ends_the_tree_below_its_asks() {
+        let (_t, mut core, claims) = tree();
+        let out = call(&mut core, "ask.end", &json!({"sessions": ["s1"]})).unwrap();
+        assert_eq!(out["ended"], json!(["c1", "g", "r"]));
+        assert!(out["sessions"].as_array().unwrap().contains(&json!("s1")));
+        for id in claims {
+            assert_eq!(claim_state(&core, id), "ending");
+        }
+    }
+}

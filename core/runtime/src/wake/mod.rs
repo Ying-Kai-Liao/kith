@@ -94,3 +94,25 @@ pub(crate) fn write_after<T>(
         "wake: the queue kept changing under the evaluation".into(),
     ))
 }
+
+/// What a stop owes the callers (`kith ask --end`): the requests and waiters of each session are withdrawn, and then of
+/// everything the persons are owed, in one claim transaction. Answers how many went. Withdrawing nothing is fine.
+pub(crate) fn withdraw_owed(
+    core: &mut Core,
+    now_ms: i64,
+    sessions: &[String],
+    persons: &[String],
+) -> Result<usize> {
+    #[allow(clippy::cast_precision_loss)]
+    let now = now_ms as f64 / 1000.0;
+    write(core, now, |st| {
+        let mut n: usize = sessions
+            .iter()
+            .map(|s| queue::withdraw(st, now, s, None))
+            .sum();
+        if !persons.is_empty() {
+            n += queue::withdraw_person(st, now, persons);
+        }
+        Ok(n)
+    })
+}
