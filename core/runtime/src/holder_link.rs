@@ -293,7 +293,8 @@ impl Drop for RenewalGuard {
 /// refused tagged spawn can be retried as soon as the lease is armed.
 ///
 /// What the core may assume: every RENEW it sent says "lease from now", so it stands behind a hand's guests for at
-/// most the send time plus `lease`. Nothing releases or requeues a guest run on that belief yet (no run is tagged
+/// most the core's clock at the PONG receipt plus `lease`
+/// (the hand's own deadline is anchored at its clock on reading the PING, so it lapses no later). Nothing releases or requeues a guest run on that belief yet (no run is tagged
 /// `kill_on_lease_loss` today). When one does, it must wait for belief + eps*lease (eps: how slow the hand clock may
 /// run) + the hand's 10 ms watcher + kill latency, or for the hand's report of the kill (`Exit::lapsed`, or
 /// `Welcome::lease_lost` on reconnect), whichever comes first (skill `holder-lease`, row `belief`).

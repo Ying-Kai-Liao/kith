@@ -97,6 +97,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn on_linux_it_is_never_behind_the_clock_that_stops_in_suspend() {
-        assert!(now() >= read(libc::CLOCK_MONOTONIC));
+        // Mono first: BOOTTIME read second can only be later, never earlier.
+        let mono = read(libc::CLOCK_MONOTONIC);
+        assert!(now() >= mono);
     }
 }
