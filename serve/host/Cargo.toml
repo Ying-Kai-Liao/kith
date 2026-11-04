@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 # The memory crate builds here and is mirrored to its own repository (docs/design/bot-memory.md#packaging).
 [workspace]
-members = ["crates/memory", "crates/tts", "crates/wire", "crates/guest", "../../core/kernel", "../../core/acp", "../../core/holder", "../../core/stub","../../core/api"]
+members = ["crates/memory", "crates/tts", "crates/wire", "crates/guest", "../../core/kernel", "../../core/acp", "../../core/holder", "../../core/stub","../../core/api", "../../core/attach"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -36,6 +36,8 @@ kith-kernel = { path = "../../core/kernel" }
 kith-core = { path = "../../core/runtime" }
 # The method table: the CLI reads a command line against it to know which verbs the daemon answers (core_front.rs).
 kith-api = { path = "../../core/api" }
+# The raw-mode attach client behind `kith kernel attach` (a small crate of its own so Windows CI can build it).
+kith-attach = { path = "../../core/attach" }
 kith-mem = { path = "crates/memory" }
 kith-guest = { path = "crates/guest" }
 kith-wire = { path = "crates/wire" }
