@@ -171,9 +171,12 @@ impl Ctx<'_> {
         let running = state == "started"
             && finished.is_none()
             && self.local == Some(mac.as_str())
-            && pid
-                .and_then(|p| u32::try_from(p).ok())
-                .is_some_and(|p| crate::lock::process_start(p).is_some());
+            && pid.and_then(|p| u32::try_from(p).ok()).is_some_and(|p| {
+                !matches!(
+                    kith_kernel::procstart::probe(p),
+                    kith_kernel::procstart::Probe::Gone
+                )
+            });
         Ok(Run {
             json: json!({
                 "at": r.get::<_, String>("at")?,
