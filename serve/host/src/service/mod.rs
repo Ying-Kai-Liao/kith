@@ -218,6 +218,7 @@ const EXITING_FRESH: Duration = Duration::from_secs(30);
 
 /// Set by [`mark_exiting`]. Waits for another process (the core) end on it: a host that is leaving must not hold its
 /// shutdown for a core that is leaving too (the runtime waits for blocking threads when it drops).
+/// Never cleared: no test may call `mark_exiting`, or every later test in the same binary would skip the core waits.
 static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Whether this host has begun to exit.
