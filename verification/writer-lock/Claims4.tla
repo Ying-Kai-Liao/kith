@@ -33,10 +33,30 @@
 (* P's turns of source ask or wake), one owner O whose take-over claims are *)
 (* never revoked. The lock is "a process of another claim is writing".      *)
 (*                                                                          *)
-(* Variant (default "fix" = the code at origin/rust-rebuild 2d15ddac):      *)
+(* Source: origin/rust-rebuild cf308ebc (the one sha for this module and    *)
+(* the skill's table).                                                      *)
+(*                                                                          *)
+(* Two places where the model is not the code, on purpose:                  *)
+(*  - TakeOver also cancels the live turn (ts claimed/running -> cancelled) *)
+(*    and stops its claim. That is the M3-11 rule (the terminal entrance);  *)
+(*    no code does it yet (claims.rs header: promotion is M3-11). The model *)
+(*    checks the rule it must follow, like PromoteTW.                       *)
+(*  - Claim's gate is the code's: claim_in refuses until the core           *)
+(*    generation's reconcile committed (claims.rs:268), and nothing about   *)
+(*    the holder being up. A claim made while the holder is down waits for  *)
+(*    it (Spawn needs hUp) and the new instance's Meet releases it.         *)
+(*                                                                          *)
+(* A refused claim (epoch: claims.rs:273; stopped-ask fence: :292-309, now  *)
+(* Error::Stopped) leaves its turn `queued`: claim_in's Err rolls back its  *)
+(* own transaction, so the cancel can only be done by the CALLER after the  *)
+(* refusal, in a transaction of its own (a drain, M3-10). The fencecancel   *)
+(* variant is that caller-side cancel, for both refusals.                   *)
+(*                                                                          *)
+(* Variant (default "fix" = the code at origin/rust-rebuild cf308ebc):      *)
 (*   nofence       claim does not refuse an ask/wake turn of a stopped ask  *)
-(*   fencecancel   the refusal also cancels the turn (the code leaves it    *)
-(*                 queued: see P3Strict)                                    *)
+(*   fencecancel   the caller cancels a turn claim_in refused (stopped ask  *)
+(*                 or stale revoke epoch); the code leaves it queued: see   *)
+(*                 P3Strict (c4-fenceleak, c4-epochleak)                    *)
 (*   noepoch       claim does not compare the revoke epoch                  *)
 (*   endearly      end_gone ends `ending` without the process being gone    *)
 (*   doneoverwrites a late done report marks a cancelled turn done          *)
@@ -102,15 +122,15 @@ Unpark(t) ==   \* unpark_ready: no live claim and the lock free (probed outside 
   /\ ts' = [ts EXCEPT ![t] = "queued"]
   /\ UNCHANGED <<claimV, procV, ms, rev, aSt, nTO, hV>>
 
-FenceCancel(t) ==   \* variant fencecancel: a refused turn does not stay queued
-  /\ Variant = "fencecancel" /\ Fenced(t) /\ ts[t] \in {"queued", "parked"}
+FenceCancel(t) ==   \* variant fencecancel: the caller cancels a turn claim_in refused (fence or stale epoch)
+  /\ Variant = "fencecancel" /\ (Fenced(t) \/ ms[t] # rev) /\ ts[t] \in {"queued", "parked"}
   /\ ts' = [ts EXCEPT ![t] = "cancelled"]
   /\ UNCHANGED <<claimV, procV, ms, rev, aSt, nTO, hV>>
 
 ---------------------------------------------------------------------------
 (* Claim, spawn, redeem, report *)
-Claim(t) ==   \* claim_in
-  /\ hUp /\ synced /\ nextC < MaxClaims /\ ~AnyLive
+Claim(t) ==   \* claim_in: gated on the core's reconcile only (not modelled: always done), not on the holder
+  /\ nextC < MaxClaims /\ ~AnyLive
   /\ ts[t] \in {"queued", "parked"}
   /\ (Variant = "noepoch" \/ ms[t] = rev)
   /\ ~Fenced(t)
@@ -190,6 +210,7 @@ Revoke ==   \* revoke_person: the epoch moves, P's turns are cancelled, P's live
 
 TakeOver ==   \* the owner's session: a queued take-over claim, the live turn claim stopped to free the writer
   /\ nTO < MaxTO /\ nextC < MaxClaims /\ nTO' = nTO + 1
+  /\ ~\E d \in Claims : cs[d] = "queued"   \* claims_one_queued (m0080): at most one queued claim per conversation
   /\ LET c == nextC + 1 IN
        /\ cs' = [d \in Claims |-> IF d = c THEN "queued" ELSE IF ck[d] = "turn" THEN AfterStop(d) ELSE cs[d]]
        /\ ck' = [ck EXCEPT ![c] = "tw"] /\ nextC' = c /\ ct' = ct /\ cp' = cp
@@ -282,7 +303,9 @@ AskSparesTakeOver == [][(aSt = "open" /\ aSt' = "stopped") => \A c \in Claims : 
 \* Every stop ends: an `ending` claim ends once the kill gets through (resent after a holder crash).
 EndingEnds == \A c \in Claims : (cs[c] = "ending") ~> (cs[c] = "ended")
 \* A turn the claims layer accepts ends done or cancelled. Exempt: a turn whose may check predates a revoke and one of a
-\* stopped ask (both are refused for ever; P3Strict says that is a leak), and a run out of claim numbers (the bound).
+\* stopped ask (both are refused for ever; P3Strict says that is a leak). The `nextC = MaxClaims` escape is only the bound
+\* of the model (a turn that waits when the claim numbers ran out); it hides no stuck state: P3Strict has it too, and
+\* c4-epochcancel / c4-fencecancel pass with it, so a fix is shown by cancelling, not by the escape.
 P3 == \A t \in Turns :
         (ts[t] = "queued" /\ ms[t] = rev /\ ~Fenced(t)) ~> (ts[t] \in {"done", "cancelled"} \/ nextC = MaxClaims)
 P3Strict == \A t \in Turns :

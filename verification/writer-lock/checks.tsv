@@ -56,3 +56,5 @@ Claims4	c4-promoteearly	fail	OneLive	fast
 Claims4	c4-stopall	fail	action	fast
 Claims4	c4-fenceleak	fail	temporal	fast
 Claims4	c4-fencecancel	pass	-	fast
+Claims4	c4-epochleak	fail	temporal	fast
+Claims4	c4-epochcancel	pass	-	fast

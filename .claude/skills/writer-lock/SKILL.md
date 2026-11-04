@@ -161,20 +161,20 @@ turn of source `ask` or `wake` (`TurnArrive` of an `Auto` turn) for the conversa
 The module does not model the lock itself (WriterLock4 does): "the lock is taken" = no other claim's process is writing.
 Bounds: 1 conversation, 2 turns (turn 2 is an ask/wake turn), 4 claims, 1 holder crash, 1 revoke, 1 take-over.
 
-Code, cited at `origin/rust-rebuild` 0bd2c21e (`core/runtime/src/...`):
+Code, cited at `origin/rust-rebuild` cf308ebc (`core/runtime/src/...`):
 
 | Action | Code |
 |---|---|
-| `MayCheck`, `TurnArrive` | `revoke_epoch` conversations/claims.rs:182 before the may check; `enqueue_turn` :958 |
-| `Park`, `Unpark` | `park` :1003, `unpark_ready` :1021 (no live claim, lock probed free) |
-| `Claim` (epoch, fence, one writer) | `claim_in` :257: epoch :273, the stopped-ask fence :292-309, the one-writer check :310-321, the turn CAS :348 |
-| `Spawn`, `SpawnedRep` | the holder starts the stub; `apply` kind `spawned` :557 |
-| `Redeem`, `Busy`, `EngineExit`, `Report` | `redeem` :373, `apply` busy :533 and done/exit :487 (fn :483), `report` :415 |
-| `AskStop` | asks/mod.rs `end_tree` :581 -> `stop_conversation_in` claims.rs:639 -> `stop_in` :592; wakes withdrawn (`withdraw_owed_in`, wake/mod.rs:101) |
-| `Revoke` | `revoke_person` :673 |
-| `TakeOver`, `PromoteTW` | a queued claim (`state = 'queued'`, kind terminal); **promotion is not in the code** (claims.rs header: M3-11); modelled as the rule it must follow |
-| `SendKill`, `HKill`, `EndGone` | the `Kill` the stops return, re-sent; `end_gone` :738 |
-| `HCrash`, `HUp`, `Meet` | `different_holder` :921 -> `release_unlisted` :778 |
+| `MayCheck`, `TurnArrive` | `revoke_epoch` conversations/claims.rs:182 before the may check; `enqueue_turn` :959 |
+| `Park`, `Unpark` | `park` :1016, `unpark_ready` :1040 (no live claim, lock probed free) |
+| `Claim` (epoch, fence, one writer) | `claim_in` :257: reconciled :268 (the only gate; no holder check), epoch :273, the stopped-ask fence :292-309 (`Error::Stopped`), the one-writer check :311-324, the turn CAS :349 |
+| `Spawn`, `SpawnedRep` | the holder starts the stub; `apply` kind `spawned` :558 |
+| `Redeem`, `Busy`, `EngineExit`, `Report` | `redeem` :374, `apply` busy :534 and done/exit :488 (fn :484), `report` :416 |
+| `AskStop` | asks/mod.rs `end_tree` :581 -> `stop_conversation_in` claims.rs:640 -> `stop_in` :593; wakes withdrawn (`withdraw_owed_in`, wake/mod.rs:101) |
+| `Revoke` | `revoke_person` :674 |
+| `TakeOver`, `PromoteTW` | a queued claim (`state = 'queued'`, kind terminal); **promotion is not in the code** (claims.rs header: M3-11); modelled as the rule it must follow. `TakeOver` also cancels the live turn and stops its claim: that is the M3-11 rule, not code. It queues one claim at most (`claims_one_queued`, m0080) |
+| `SendKill`, `HKill`, `EndGone` | the `Kill` the stops return, re-sent; `end_gone` :739 |
+| `HCrash`, `HUp`, `Meet` | `different_holder` :922 -> `release_unlisted` :779 |
 | give-back | wake/queue.rs `give_back` :288, `release` :296: only the wake's own bookkeeping; what restarts the conversation is a new turn, which `claim_in`'s fence refuses |
 
 Properties (`INVARIANTS` and `PROPERTIES` of the cfgs): `OneLive` (the unique index), `OneWriter`, `WriterHasClaim` (a writing
@@ -182,6 +182,8 @@ process's claim is `running` or `ending`, never `ended`), `StoppedNeverRuns` (af
 claimed or running), `RevokedQuiet`, `CancelledStays` (action: a cancelled turn stays cancelled), `AskSparesTakeOver` (action:
 the ask stop leaves the owner's take-over claim alone), `EndingEnds` (every `ending` claim ends once the kill gets through),
 `P3` (a turn the claims layer accepts ends done or cancelled), `P3Strict` (the same for every queued turn).
+
+The temporal and action rows (`c4-nokillresend`, `c4-doneoverwrites`, `c4-stopall`) each check one PROPERTY, so `checks.tsv`'s `temporal` / `action` pins the reason.
 
 Rows (`c4-*`): `fix-die` / `fix-survive` = the code with the holder's group dying with it or surviving a holder crash (180k and
 about 320k states); `fix-doubletake` = two take-overs, no crash. Broken variants, each failing:
@@ -195,6 +197,7 @@ about 320k states); `fix-doubletake` = two take-overs, no crash. Broken variants
 | `c4-nokillresend` | the kill owed again by `different_holder` / re-sent after a holder crash lost it | `EndingEnds` (a hung engine, holder crashed after the kill left) |
 | `c4-promoteearly` | promotion of a queued take-over claim waiting for no live claim (the index is the guard) | `OneLive` |
 | `c4-stopall` | `stop_conversation_in` sparing a person's (take-over) claim | `AskSparesTakeOver` |
+| `c4-fenceleak` / `c4-epochleak` | nothing (the code): a refused turn stays queued; `MaxRev=1` for the epoch | `P3Strict` (the `c4-fencecancel` / `c4-epochcancel` rows, where the caller cancels it, pass) |
 | `WriterLock4 r4-tonolock` | the take-over writer taking the lock | `P1_NoTwoWriters` |
 
 **Round-4 list to rows**: holder crash with the stub dying `r4-fix-die-*`, `c4-fix-die`; with it surviving `r4-fix-survive-*`,
@@ -205,10 +208,13 @@ Park and wake (q217/q218): `r4-edge`, `r4-parkclaim-*`, `c4-fix-*` (`P3`). Take-
 
 ### Findings for the claims switch (S2), from Claims4
 
-1. **A turn the fence refuses stays `queued` for ever** (`c4-fenceleak` fails `P3Strict`; `c4-fencecancel`, where the refusal
-   also cancels the turn, passes). `claim_in` returns `Refused` and rolls back; nothing moves the turn (only `expire_parked`
-   can, and only with a deadline). The same for a turn refused by the revoke epoch. The switch must cancel such a turn (in
-   `claim_in`'s transaction, or in the caller on that refusal), or the claimer retries it for ever.
+1. **A turn that `claim_in` refuses stays `queued` for ever**, for both refusals. The stopped-ask fence: `c4-fenceleak` fails
+   `P3Strict`, `c4-fencecancel` (the refusal also cancels the turn) passes. The revoke epoch (claims.rs:273): `c4-epochleak`
+   (`MaxRev=1`: the may check read epoch 0, the revoke ran, then the turn arrived) fails `P3Strict`, `c4-epochcancel` passes.
+   `claim_in` returns `Err` and its transaction rolls back, so the cancel cannot sit inside it after the refusal: it has to
+   be in the caller, in a transaction of its own, on that refusal (the fence now has its own `Error::Stopped` so a drain can
+   tell it from a retry; the epoch refusal is still a plain `Refused`). Nothing else moves the turn (`expire_parked` only
+   with a deadline), so the claimer would retry it for ever.
 2. **Promoting a queued take-over claim must wait for no live claim** (`c4-promoteearly` fails `OneLive`): the index would also
    refuse it, but the caller sees an error and the take-over is lost unless it retries. M3-11 must promote on `ended`, not
    insert-and-hope.
@@ -249,7 +255,7 @@ Park and wake (q217/q218): `r4-edge`, `r4-parkclaim-*`, `c4-fix-*` (`P3`). Take-
 ## Map of the folder
 
 - `WriterLock4.tla`, `r4-*.cfg`: the lock model and its runs (architect's; the `M3-0a` lines are the Q2 variant).
-- `Claims4.tla`, `c4-*.cfg`: the claim and turn rows against the processes (M3-10b1; derived from `claims.rs`, `asks/mod.rs`, `wake/queue.rs` at rust-rebuild 0bd2c21e).
+- `Claims4.tla`, `c4-*.cfg`: the claim and turn rows against the processes (M3-10b1; derived from `claims.rs`, `asks/mod.rs`, `wake/queue.rs` at rust-rebuild cf308ebc).
 - `Holder.tla`, `holder-*.cfg`: the holder model (architect's) and the runs M3-0a added.
 - `results4.md`: the architect's result table, plus what M3-0a added.
 - `checks.tsv`: the table `run.sh` enforces. `run.sh`: runner (tools from `verification/threads/run.sh --tools`).
