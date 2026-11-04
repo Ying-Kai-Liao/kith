@@ -376,8 +376,11 @@ impl CoreRun {
     }
 }
 
-/// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7).
-const CORE_CALL_METHODS: &[&str] = &["terminal.open", "terminal.attach", "terminal.list"];
+/// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7), and the three
+/// person-level writes `kith-auth` mirrors into the core until M2-18 makes the core the authority (a revoke, its undo and
+/// a removal; each is idempotent there, so a replay after a lost answer is harmless).
+const CORE_CALL_METHODS: &[&str] =
+    &["terminal.open", "terminal.attach", "terminal.list", "people.suspend", "people.undo", "people.removePerson"];
 
 /// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered, 3 no daemon
 /// answers (nothing ran, the caller falls back), 4 refused, 5 lost after sending, 2 usage.

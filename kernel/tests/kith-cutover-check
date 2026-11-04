@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# kith-cutover-check: the Python and bash halves of the cutover framework (core/runtime/src/cutover/): the tombstone
+# helper (lib/kith_tombstone.py) and the router's refusal of KITH_CORE=python for a switched module
+# (lib/kith-core.sh kith_cutover_refuse). The Rust half has its own unit tests. Nothing real is touched.
+#
+#   kernel/tests/kith-cutover-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-cutover-check.XXXXXX")
+trap 'rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; sed 's/^/     | /' "$T/out" 2>/dev/null | tail -8; fails=$((fails + 1)); fi; }
+
+# --- the tombstone helper -------------------------------------------------------------------------------------------
+TOMB='{"kith_tombstone": 1, "module": "authority", "message": "moved", "rollback": "kith rollback authority"}'
+printf '%s\n' "$TOMB" > "$T/auth.json"
+printf '{"people": {}}\n' > "$T/plain.json"
+HELP="python3 -I \"$KERNEL/lib/kith_tombstone.py\""
+check "a tombstone is refused (exit 3, one line)" "$HELP $T/auth.json >$T/out 2>&1; [[ \$? -eq 3 ]] && grep -q 'kith rollback authority' $T/out"
+check "a plain file passes" "$HELP $T/plain.json >$T/out 2>&1"
+check "a missing file is not a tombstone" "$HELP $T/none.json >$T/out 2>&1"
+check "garbage that mentions the key is not one" "printf 'x \"kith_tombstone\" y' > $T/g.json; $HELP $T/g.json >$T/out 2>&1"
+PYT="import sys; sys.path.insert(0, '$KERNEL/lib'); import kith_tombstone as k"
+check "load_json raises Tombstoned (an OSError) on a tombstone" \
+  "python3 -I -c \"$PYT
+try: k.load_json('$T/auth.json')
+except OSError as e: assert isinstance(e, k.Tombstoned) and e.module == 'authority'
+else: raise SystemExit('no error')\" >$T/out 2>&1"
+check "load_json reads a plain file" "python3 -I -c \"$PYT
+assert k.load_json('$T/plain.json') == {'people': {}}\" >$T/out 2>&1"
+
+# --- the router -----------------------------------------------------------------------------------------------------
+M=$T/machine
+mkdir -p "$M/core/cutover"
+export KITH=$KERNEL KITH_MACHINE=$M
+# shellcheck disable=SC1091
+. "$KERNEL/lib/kith-core.sh"
+run() { ( KITH_CORE=$1; export KITH_CORE; kith_core_exec "$2" >/dev/null 2>"$T/out" ); echo "rc=$?" >> "$T/out"; }
+check "KITH_CORE=python falls back for an unswitched module" "run python paths; grep -q 'rc=1' $T/out && ! grep -q moved $T/out"
+printf 'state=stepping\nat=1\n' > "$M/core/cutover/paths.switch"
+check "a module that is only stepping is not refused" "run python paths; ! grep -q 'has moved' $T/out"
+printf 'state=switched\nat=1\n' > "$M/core/cutover/paths.switch"
+check "KITH_CORE=python is refused after the switch, with one line" "run python paths; grep -q 'has moved to the core' $T/out && grep -q 'kith rollback paths' $T/out && [[ \$(grep -c . $T/out) -eq 2 ]]"
+check "the refusal exits 1 (never falls back to Python)" "run python paths; grep -q 'rc=1' $T/out"
+check "a verb of another module is not refused" "run python engines; ! grep -q 'has moved' $T/out"
+printf 'state=rolling-back\nat=1\n' > "$M/core/cutover/paths.switch"
+check "a half-done rollback is still refused" "run python paths; grep -q 'has moved to the core' $T/out"
+printf 'garbage\n' > "$M/core/cutover/paths.switch"
+check "a damaged switch file counts as switched" "run python paths; grep -q 'has moved to the core' $T/out"
+rm "$M/core/cutover/paths.switch"
+check "a rollback (file gone) lets KITH_CORE=python through again" "run python paths; ! grep -q 'has moved' $T/out"
+check "the machine folder is found without KITH_MACHINE" "(unset KITH_MACHINE; HOME=$T/h python3 \"$KERNEL/lib/kith_paths.py\" --machine >$T/out 2>&1 && [[ -s $T/out ]])"
+
+[[ $fails -eq 0 ]] && { echo "all cutover checks passed"; exit 0; }
+echo "$fails check(s) failed"
+exit 1

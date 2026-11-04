@@ -299,9 +299,15 @@ pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Res
             continue;
         }
         let flag = if revoked { "--revoke" } else { "--unrevoke" };
-        locked_run(bin, &["person", &p.id, flag, "--local"])
-            .await
-            .with_context(|| format!("kith-auth person {} {flag}", p.id))?;
+        // Each person is logged on their own (a pull can change several): a core that missed the change is said here, once
+        // per person, because kith-auth exits 0 for it.
+        let said = {
+            let _w = crate::api::people::AUTH_WRITES.lock().await;
+            account::run_noted(bin, &["person", &p.id, flag, "--local"]).await
+        }
+        .with_context(|| format!("kith-auth person {} {flag}", p.id))?
+        .1;
+        account::note_stderr(&p.id, &said);
         tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
         if revoked { out.cut.push(p.id) } else { out.restored.push(p.id) }
     }
