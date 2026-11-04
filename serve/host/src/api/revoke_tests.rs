@@ -151,12 +151,16 @@ async fn an_owner_who_is_also_revoked_old_data_is_undone_here_without_the_cloud(
     let path = r.dir.join("auth.json");
     let flag = |on: bool| {
         let mut d: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        d["people"]["kai"]["revoked"] = json!(on);
+        if on {
+            d["people"]["kai"]["revoked"] = json!({"at": 1});
+        } else {
+            d["people"]["kai"].as_object_mut().unwrap().remove("revoked");
+        }
         std::fs::write(&path, d.to_string()).unwrap();
     };
     let revoked = || {
         let d: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        d["people"]["kai"]["revoked"].as_bool().unwrap_or(false)
+        d["people"]["kai"].get("revoked").is_some()
     };
     flag(true);
     assert!(call(&r, "revokePerson", json!({"personId": "kai"})).await.is_err(), "a revoke on the owner stays refused");
