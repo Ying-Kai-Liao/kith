@@ -13,6 +13,11 @@
 //!   merge leave the note alone and log (`kith_kernel::accounts::tombstoned`).
 //! - `export_back`: the table's rows written as `state.json` again, over the tombstone (the original stays beside it as
 //!   `state.json.pre-cutover-<time>`).
+//! - `step_refusal`: `kith migrate step accounts` refuses today. After the tombstone every reader of the file fails closed, and
+//!   the core has no reader (`kith_accounts.py` pick/rows/list, `kernel.accounts.*`) or writer (`kith account out|clear|usage`)
+//!   for the account state yet, so a launch would stop. The plan gates the step on that lane (docs/plans/one-bot-model.md).
+//! - `source_lock`: an exclusive flock on `state.json.lock` from the import through the tombstone, the lock the Python and
+//!   Rust writers take, so no mark is lost in between and no writer's rename lands over the note.
 //! - Once switched the core is the writer: `accounts::core_writes` is true exactly when `may_serve` says yes, so the
 //!   failover's `mark_out` writes the row; a rolled-back or never-stepped core writes none.
 
@@ -21,12 +26,16 @@ use std::path::PathBuf;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use crate::cutover::{Env, Module, Opts};
+use crate::cutover::state::{self, Phase};
+use crate::cutover::{Env, Module, Opts, SourceLock};
 use crate::db::Core;
 use crate::error::{Error, Result};
 use crate::import::accounts::{AccountsOptions, import_accounts};
 
 pub(crate) struct Accounts;
+
+/// How long a step waits for a writer that holds `state.json.lock` (a launch's mark takes milliseconds).
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Module for Accounts {
     fn name(&self) -> &'static str {
@@ -37,15 +46,45 @@ impl Module for Accounts {
         vec![kith_kernel::accounts::state_file(&env.machine)]
     }
 
+    fn step_refusal(&self, _env: &Env) -> Option<String> {
+        // Past the tombstone nothing but the core may answer for the file, and the readers still read the file:
+        // `kith_accounts.py`'s read verbs (pick, rows, list), `kernel.accounts.*` and the out, clear and usage commands have
+        // no core reader or writer yet, so a step would stop every agent launch (`--record` hits the tombstone).
+        Some(
+            "not stepped: the core has no reader or writer for kith_accounts.py's read verbs, kernel.accounts.* or out/clear/usage yet; step accounts only after that lane exists"
+                .into(),
+        )
+    }
+
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        // `state.json.lock`: the lock `kith_accounts.py` and the Rust `update` take. A writer mid-update finishes first.
+        let held = kith_kernel::accounts::hold(&env.machine, LOCK_WAIT).map_err(|e| {
+            Error::Refused(format!(
+                "cutover: accounts: cannot take the writers' lock: {e}"
+            ))
+        })?;
+        Ok(Some(Box::new(held)))
+    }
+
     fn import(&self, env: &Env, core: Option<&mut Core>, opts: Opts) -> Result<Vec<String>> {
         let dry_run = opts.dry_run || core.is_none();
         Ok(import_accounts(&env.machine, AccountsOptions { dry_run }, core)?.lines)
     }
 
     fn same_answer(&self, env: &Env, db: &rusqlite::Connection) -> Result<Vec<String>> {
-        // Moved already: the core's rows are the only copy (the check is a pre-switch hook).
         if kith_kernel::accounts::tombstoned(&env.machine) {
-            return Ok(Vec::new());
+            // Moved already: the core's rows are the only copy (the check is a pre-switch hook).
+            let moved = state::read(&env.layout, self.name())?
+                .is_some_and(|s| matches!(s.phase, Phase::Switched | Phase::RollingBack));
+            if moved {
+                return Ok(Vec::new());
+            }
+            // Not switched, yet the note is there: a core.db restored from before the step, or a lost record. Whatever
+            // the core holds is not the answer the readers got, so a step must not switch on it.
+            return Ok(vec![
+                "state.json is a tombstone but accounts is not switched here (kith rollback accounts brings the file back)"
+                    .into(),
+            ]);
         }
         let snap = kith_kernel::accounts::snapshot(&env.machine);
         if (snap.bytes.is_none() && !snap.legacy_present)

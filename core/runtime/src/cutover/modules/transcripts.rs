@@ -9,9 +9,13 @@
 //! - Because Python still writes, `same_answer` can only say that every session the registry names is in the core with the
 //!   same engine, session id, pointer and working folder. It ignores the hash and the size (the core reads the transcript
 //!   itself and moves them on), and it ignores rows the core holds that the registry does not.
-//! - Re-running `step` (or `kith migrate --transcripts`) imports sessions registered since: an import leaves a row that is
-//!   there as it is. A rollback has nothing to export: the registry was never touched, so it clears the marker and the switch
-//!   file, and the imported rows stay (the next step finds them already there).
+//! - Switched means the core is the only writer, and here Python is not: sessions recorded after a step never reach the core,
+//!   and a switched module's `step` does not import again (only `kith migrate --transcripts` does). So `step` refuses until
+//!   S2's claims module is switched, which moves `kith-sessions record` into the core. Until then the core serves transcripts
+//!   through the opt-in path, whose guard re-checks whenever the registry changes (`fingerprint`).
+//! - Before a switch an import adds sessions registered since and replaces rows that differ (a resume rewrites the record).
+//!   A rollback has nothing to export: the registry was never touched, so it clears the marker and the switch file, and the
+//!   imported rows stay (the next step finds them already there).
 //!
 //! The registry needs `$KITH_STATE` and the home folder, which `Env` carries when the CLI built it from the machine's
 //! `Paths` (`Env::with_paths`).
@@ -40,6 +44,19 @@ fn ctx<'a>(env: &Env) -> Ctx<'a> {
 impl Module for Transcripts {
     fn name(&self) -> &'static str {
         "transcripts"
+    }
+
+    // TODO(M3-10e S2): once the claims module exists, replace the refusal below with `depends_on(&["claims"])`.
+    fn step_refusal(&self, _env: &Env) -> Option<String> {
+        Some(
+            "not stepped: Python still writes the session registry, so a switch would miss every session recorded after it; step transcripts only after S2's claims module is switched"
+                .into(),
+        )
+    }
+
+    fn guards_claims(&self) -> bool {
+        // Nothing to export: a live claim must not block the rollback of a module that never owned the registry.
+        false
     }
 
     fn tombstones(&self, _env: &Env) -> Vec<PathBuf> {

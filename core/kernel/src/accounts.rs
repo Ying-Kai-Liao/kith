@@ -30,8 +30,8 @@ pub use listing::rows_from;
 pub use pick::{Pick, Skipped, Status, pick_from};
 pub use settings::read_settings;
 pub use state::{
-    FileState, Snapshot, StateSource, out_marks_from, record_started, replace, snapshot,
-    state_file, tombstoned,
+    FileState, Snapshot, StateHold, StateSource, hold, out_marks_from, record_started, replace,
+    snapshot, state_file, tombstoned,
 };
 
 type Map = serde_json::Map<String, Value>;

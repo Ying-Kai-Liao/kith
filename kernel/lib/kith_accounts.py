@@ -1073,6 +1073,9 @@ if __name__ == '__main__':
             print(session_account(a[1]) or '')
         else:
             sys.exit(__doc__.strip())
+    except kith_tombstone.Tombstoned as e:   # accounts state moved to the core (kith migrate step accounts)
+        print(f'kith: {e}', file=sys.stderr)
+        sys.exit(4)
     except ValueError as e:
         print(f'kith: {e}', file=sys.stderr)
         sys.exit(4)

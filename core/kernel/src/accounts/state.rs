@@ -142,6 +142,54 @@ fn lock(machine: &Path) -> std::io::Result<std::fs::File> {
     Ok(l)
 }
 
+thread_local! {
+    /// This thread holds the writers' lock through [`hold`]: its own `snapshot` must not wait on it (flock conflicts between
+    /// two opens of the file even in one process).
+    static HELD: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The writers' lock (`state.json.lock`), held by the cutover step from the import through the tombstone so no writer's
+/// mark is lost in between and no writer's rename can replace the tombstone. Released when dropped.
+pub struct StateHold(std::fs::File);
+
+impl Drop for StateHold {
+    fn drop(&mut self) {
+        HELD.with(|h| h.set(h.get().saturating_sub(1)));
+        let _ = fs2::FileExt::unlock(&self.0);
+    }
+}
+
+/// Takes the writers' lock exclusively, waiting up to `wait` for a writer that holds it (a clear error after that; the
+/// lock is never left taken on failure). While it is held this thread's [`snapshot`] reads without waiting on it.
+pub fn hold(machine: &Path, wait: std::time::Duration) -> std::io::Result<StateHold> {
+    let f = state_file(machine);
+    if let Some(dir) = f.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut name = f.into_os_string();
+    name.push(".lock");
+    let l = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(false)
+        .create(true)
+        .open(PathBuf::from(name))?;
+    let deadline = std::time::Instant::now() + wait;
+    while l.try_lock_exclusive().is_err() {
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!(
+                    "state.json.lock is held by another writer (waited {}s); try again in a moment",
+                    wait.as_secs()
+                ),
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    HELD.with(|h| h.set(h.get() + 1));
+    Ok(StateHold(l))
+}
+
 /// The file is a cutover tombstone (`kith migrate step accounts`): the state moved to the core. Nothing here may write the
 /// file then, or it would overwrite the note (and `read_raw` would call the note corrupt and move it aside).
 pub fn tombstoned(machine: &Path) -> bool {
@@ -304,7 +352,9 @@ pub struct Snapshot {
 pub fn snapshot(machine: &Path) -> Snapshot {
     let mut lockname = state_file(machine).into_os_string();
     lockname.push(".lock");
-    let held = std::fs::File::open(PathBuf::from(lockname)).ok();
+    let held = std::fs::File::open(PathBuf::from(lockname))
+        .ok()
+        .filter(|_| HELD.with(std::cell::Cell::get) == 0);
     if let Some(l) = &held {
         let _ = fs2::FileExt::lock_shared(l);
     }

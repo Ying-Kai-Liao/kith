@@ -19,6 +19,24 @@ struct Fake {
     /// Tombstone path in a folder that does not exist: the tombstone step fails.
     bad_tomb: Cell<bool>,
     fail_export: Cell<bool>,
+    /// The source lock: a flock on `fake.lock` held by `step`; `seen` records whether it was held at each hook.
+    lock: bool,
+    refuse: Option<&'static str>,
+    seen: std::cell::RefCell<Vec<(&'static str, bool)>>,
+}
+
+impl Fake {
+    fn probe(&self, env: &Env, at: &'static str) {
+        use fs2::FileExt as _;
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(env.machine.join("fake.lock"))
+            .expect("lock file");
+        let held = f.try_lock_exclusive().is_err();
+        self.seen.borrow_mut().push((at, held));
+    }
 }
 
 fn fake(name: &'static str) -> Fake {
@@ -49,7 +67,27 @@ impl Module for Fake {
     fn depends_on(&self) -> &'static [&'static str] {
         self.deps
     }
+    fn step_refusal(&self, _env: &Env) -> Option<String> {
+        self.refuse.map(str::to_owned)
+    }
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        use fs2::FileExt as _;
+        if !self.lock {
+            return Ok(None);
+        }
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(env.machine.join("fake.lock"))
+            .map_err(|e| Error::Io(e.to_string()))?;
+        f.lock_exclusive().map_err(|e| Error::Io(e.to_string()))?;
+        Ok(Some(Box::new(f)))
+    }
     fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
+        if self.lock {
+            self.probe(env, "tombstones");
+        }
         if self.bad_tomb.get() {
             return vec![env.machine.join("no-such-folder").join("src.json")];
         }
@@ -57,6 +95,9 @@ impl Module for Fake {
     }
     fn import(&self, env: &Env, core: Option<&mut Core>, _: Opts) -> Result<Vec<String>> {
         let src = env.machine.join(format!("{}-src.json", self.name));
+        if self.lock {
+            self.probe(env, "import");
+        }
         if tombstone::is_tombstone(&src) {
             return Err(Error::Refused("the source is a tombstone".into()));
         }
@@ -71,6 +112,9 @@ impl Module for Fake {
         Ok(vec!["imported".into()])
     }
     fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
+        if self.lock {
+            self.probe(env, "same_answer");
+        }
         let src = env.machine.join(format!("{}-src.json", self.name));
         let have = meta_get(db, &format!("{}-data", self.name));
         // After the tombstone the source is gone: the core's copy is the answer.
@@ -631,4 +675,86 @@ fn the_cli_words_parse() {
         run(&crate::tests::paths(&env.machine), &a(&["status"])).unwrap(),
         vec!["accounts: not switched", "transcripts: not switched"]
     );
+}
+
+#[test]
+fn the_source_lock_is_held_from_the_import_through_the_tombstone_and_let_go_after() {
+    let (_t, env) = setup(&["fa"]);
+    let f = Fake {
+        lock: true,
+        ..fake("fa")
+    };
+    // `reg` boxes the fake; keep a second handle to read what it saw.
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    struct Spy(
+        Fake,
+        std::rc::Rc<std::cell::RefCell<Vec<(&'static str, bool)>>>,
+    );
+    impl Module for Spy {
+        fn name(&self) -> &'static str {
+            self.0.name()
+        }
+        fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
+            let t = self.0.tombstones(env);
+            self.1
+                .borrow_mut()
+                .extend(self.0.seen.borrow_mut().drain(..));
+            t
+        }
+        fn import(&self, env: &Env, core: Option<&mut Core>, o: Opts) -> Result<Vec<String>> {
+            self.0.import(env, core, o)
+        }
+        fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
+            self.0.same_answer(env, db)
+        }
+        fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
+            self.0.export_back(env, core)
+        }
+        fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+            self.0.source_lock(env)
+        }
+    }
+    let r: Vec<Box<dyn Module>> = vec![Box::new(Spy(f, seen.clone()))];
+    step(&r, &env, "fa", opts()).expect("step");
+    let seen = seen.borrow();
+    for at in ["import", "same_answer", "tombstones"] {
+        assert!(
+            seen.iter().any(|(a, held)| *a == at && *held),
+            "{at} ran without the lock: {seen:?}"
+        );
+    }
+    assert!(seen.iter().all(|(_, held)| *held), "{seen:?}");
+    // And it is let go when the step ends.
+    use fs2::FileExt as _;
+    let f = std::fs::File::open(env.machine.join("fake.lock")).expect("lock file");
+    f.try_lock_exclusive().expect("the step let the lock go");
+}
+
+#[test]
+fn a_refused_step_leaves_no_snapshot_record_marker_or_tombstone_and_refuses_again() {
+    let (_t, env) = setup(&["fa"]);
+    let r = reg(vec![Fake {
+        refuse: Some("the readers are not in the core"),
+        lock: true,
+        ..fake("fa")
+    }]);
+    for _ in 0..2 {
+        for dry_run in [false, true] {
+            let e = step(
+                &r,
+                &env,
+                "fa",
+                Opts {
+                    dry_run,
+                    ..Opts::default()
+                },
+            )
+            .unwrap_err();
+            assert!(e.to_string().contains("the readers are not in the core"));
+        }
+    }
+    assert_eq!(phase(&env, "fa"), None);
+    assert!(!tombstone::is_tombstone(&env.machine.join("fa-src.json")));
+    assert!(!env.layout.db.exists(), "no core.db was opened or made");
+    assert!(!env.machine.join("fake.lock").exists(), "no lock was taken");
 }

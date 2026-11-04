@@ -13,7 +13,8 @@
 //! knows which switch to look at).
 //!
 //! # Operations (all idempotent, all under core.db's lifetime lock, so two shells or a daemon refuse instead of racing)
-//! - `step`: refuse unless dependencies are switched; `VACUUM INTO` snapshot (recorded, reused on resume); record
+//! - `step`: refuse when the module says it is not ready (`step_refusal`, before anything is written) or unless dependencies
+//!   are switched; take the old store's writer lock (`source_lock`, held to the end); `VACUUM INTO` snapshot (recorded, reused on resume); record
 //!   `stepping`; `import`; `same_answer` must be empty or the step fails and stays `stepping` (Python is still the writer;
 //!   re-run to resume, or roll back); write the marker (`marker.rs`); record `switched`; put the tombstones. The tombstone comes AFTER the record so a
 //!   crash between them is repaired by running `step` again (the import cannot be re-run once its sources are gone, and
@@ -124,7 +125,22 @@ pub(crate) trait Module {
     fn guards_claims(&self) -> bool {
         true
     }
+    /// Why `step` must refuse right now (one line), checked before anything is read or written, so a refused step leaves no
+    /// snapshot, record, marker or tombstone. Default: never. A module whose readers or writers are not all in the core yet
+    /// says so here instead of switching.
+    fn step_refusal(&self, _env: &Env) -> Option<String> {
+        None
+    }
+    /// The lock the old store's own writers take, held by `step` from the import through the tombstone: a write between
+    /// the two would be lost, and a writer that checked the file before the tombstone and renames after it would put the
+    /// old file back over the note. Waits for a writer, or fails with a clear error; the lock is let go when the step ends.
+    fn source_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
+        Ok(None)
+    }
 }
+
+/// What [`Module::source_lock`] holds; dropping it lets the lock go.
+pub(crate) type SourceLock = Box<dyn std::any::Any>;
 
 /// The registered modules, in switch order (S1 here; S2 claims+turns, S4 wake, S3 asks and S5 failover plug in after them,
 /// and M2's `authority`). Registered is not switched: nothing steps a module but `kith migrate step`.
@@ -174,6 +190,9 @@ pub(crate) fn step(
     opts: Opts,
 ) -> Result<Vec<String>> {
     let m = find(reg, name)?;
+    if let Some(why) = m.step_refusal(env) {
+        return Err(Error::Refused(format!("cutover: {name}: {why}")));
+    }
     let cur = state::read(&env.layout, name)?;
     let mut lines = Vec::new();
     if cur.as_ref().is_some_and(|s| s.phase == Phase::RollingBack) {
@@ -197,6 +216,8 @@ pub(crate) fn step(
         return Ok(lines);
     }
     let mut core = lock(env)?;
+    // Held to the end of the step: the import, the check, the marker, the record and the tombstones.
+    let _source = m.source_lock(env)?;
     let mut snapshot = cur.as_ref().and_then(|s| s.snapshot.clone());
     // A finished switch whose record was lost: every tombstone names this module and the core holds the marker. The
     // sources are gone, so there is nothing to import; the record is written again and that is all.

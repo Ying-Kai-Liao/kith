@@ -1059,3 +1059,32 @@ fn shell_words_are_quoted_like_shlex() {
     assert_eq!(sh_quote("a b'c"), "'a b'\"'\"'c'");
     assert_eq!(sh_quote("claude:work@x"), "claude:work@x");
 }
+
+#[test]
+fn a_hold_keeps_the_writers_out_and_the_holders_own_snapshot_gets_through() {
+    let h = Home::new("state-hold");
+    h.put_state(r#"{"version": 1, "accounts": {"claude": {"last_started": 1}}}"#);
+    let held = hold(&h.machine(), Duration::from_secs(5)).unwrap();
+    // The holder reads without waiting on its own lock.
+    assert_eq!(snapshot(&h.machine()).accounts.len(), 1);
+    // A second taker waits and then gives up with a clear error, leaving the first hold alone.
+    let Err(err) = hold(&h.machine(), Duration::from_millis(200)) else {
+        panic!("a second hold must wait")
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    assert!(err.to_string().contains("state.json.lock"));
+    // A writer on another thread does not get in until the hold is dropped.
+    let machine = h.machine();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = done.clone();
+    let writer = std::thread::spawn(move || {
+        record_started(&machine, "codex", 2);
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!done.load(std::sync::atomic::Ordering::SeqCst));
+    drop(held);
+    writer.join().unwrap();
+    assert!(done.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(h.state()["accounts"]["codex"]["last_started"], 2);
+}

@@ -66,12 +66,62 @@ fn writes(env: &Env) -> bool {
     crate::accounts::core_writes(&db(env)).unwrap()
 }
 
+/// The S1 registry with the step refusals lifted: the tests below exercise the modules' own import, check, switch and
+/// rollback, which the refusals (`refused_*`) keep nobody from reaching in production until their lanes exist.
+struct Open(Box<dyn Module>);
+
+impl Module for Open {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn tombstones(&self, env: &Env) -> Vec<std::path::PathBuf> {
+        self.0.tombstones(env)
+    }
+    fn import(
+        &self,
+        env: &Env,
+        core: Option<&mut crate::db::Core>,
+        o: Opts,
+    ) -> crate::error::Result<Vec<String>> {
+        self.0.import(env, core, o)
+    }
+    fn same_answer(&self, env: &Env, db: &Connection) -> crate::error::Result<Vec<String>> {
+        self.0.same_answer(env, db)
+    }
+    fn export_back(
+        &self,
+        env: &Env,
+        core: &mut crate::db::Core,
+    ) -> crate::error::Result<Vec<String>> {
+        self.0.export_back(env, core)
+    }
+    fn digest(&self, env: &Env, db: &Connection) -> crate::error::Result<String> {
+        self.0.digest(env, db)
+    }
+    fn fingerprint(&self, env: &Env, db: &Connection) -> crate::error::Result<String> {
+        self.0.fingerprint(env, db)
+    }
+    fn guards_claims(&self) -> bool {
+        self.0.guards_claims()
+    }
+    fn source_lock(&self, env: &Env) -> crate::error::Result<Option<crate::cutover::SourceLock>> {
+        self.0.source_lock(env)
+    }
+}
+
+fn open_registry() -> Vec<Box<dyn Module>> {
+    registry()
+        .into_iter()
+        .map(|m| Box::new(Open(m)) as Box<dyn Module>)
+        .collect()
+}
+
 // --- accounts ------------------------------------------------------------------------------------------------------------
 
 #[test]
 fn accounts_nothing_is_switched_by_default() {
     let (_t, env) = setup();
-    let reg = registry();
+    let reg = open_registry();
     assert!(reg.iter().any(|m| m.name() == "accounts"));
     assert_eq!(
         crate::cutover::status(&reg, &env).unwrap()[0],
@@ -87,7 +137,7 @@ fn accounts_nothing_is_switched_by_default() {
 #[test]
 fn accounts_a_step_makes_the_core_the_writer_and_the_file_a_tombstone() {
     let (_t, env) = setup();
-    let reg = registry();
+    let reg = open_registry();
     let before = read_state(&env);
     let out = step(&reg, &env, "accounts", opts()).unwrap();
     assert!(out.iter().any(|l| l.contains("same answer")), "{out:?}");
@@ -114,7 +164,7 @@ fn accounts_a_step_makes_the_core_the_writer_and_the_file_a_tombstone() {
 #[test]
 fn accounts_the_rust_writers_leave_the_note_alone_and_the_core_row_writes() {
     let (_t, env) = setup();
-    step(&registry(), &env, "accounts", opts()).unwrap();
+    step(&open_registry(), &env, "accounts", opts()).unwrap();
     let file = kith_kernel::accounts::state_file(&env.machine);
     let note = std::fs::read(&file).unwrap();
     kith_kernel::accounts::record_started(&env.machine, "claude", 5);
@@ -142,7 +192,7 @@ fn accounts_the_rust_writers_leave_the_note_alone_and_the_core_row_writes() {
 #[test]
 fn accounts_a_tampered_marker_or_switch_file_denies_everything() {
     let (_t, env) = setup();
-    step(&registry(), &env, "accounts", opts()).unwrap();
+    step(&open_registry(), &env, "accounts", opts()).unwrap();
     // The marker is gone (core.db from before the step, or another machine's).
     db(&env)
         .execute("DELETE FROM meta WHERE key = 'cutover:accounts'", [])
@@ -162,7 +212,7 @@ fn accounts_a_missing_tombstone_still_serves_the_core_but_warns() {
     // The framework's rule (same_answer.rs): the core is the truth, but a plain file back means something wrote the old
     // store after the switch, which is said loudly. (A missing marker is the deny, above.)
     let (_t, env) = setup();
-    step(&registry(), &env, "accounts", opts()).unwrap();
+    step(&open_registry(), &env, "accounts", opts()).unwrap();
     std::fs::write(
         kith_kernel::accounts::state_file(&env.machine),
         r#"{"version": 1, "accounts": {}}"#,
@@ -176,7 +226,7 @@ fn accounts_a_missing_tombstone_still_serves_the_core_but_warns() {
 #[test]
 fn accounts_a_rollback_gives_python_the_file_back_and_the_core_denies() {
     let (_t, env) = setup();
-    let reg = registry();
+    let reg = open_registry();
     let before = read_state(&env);
     step(&reg, &env, "accounts", opts()).unwrap();
     // The core changed an entry while it was the writer.
@@ -221,7 +271,7 @@ fn accounts_a_rollback_gives_python_the_file_back_and_the_core_denies() {
 #[test]
 fn accounts_a_repeated_step_and_a_crash_part_way_resume() {
     let (_t, env) = setup();
-    let reg = registry();
+    let reg = open_registry();
     step(&reg, &env, "accounts", opts()).unwrap();
     let again = step(&reg, &env, "accounts", opts()).unwrap();
     assert!(
@@ -254,7 +304,7 @@ fn accounts_a_repeated_step_and_a_crash_part_way_resume() {
 #[test]
 fn accounts_same_answer_catches_a_seeded_difference() {
     let (_t, env) = setup();
-    let reg = registry();
+    let reg = open_registry();
     // Nothing is in the core yet: every entry differs.
     crate::tests::open_all(&env.layout);
     let first = check(&reg, &env, "accounts").unwrap();
@@ -311,11 +361,11 @@ fn accounts_two_steps_at_once_one_refuses() {
     let (_t, env) = setup();
     // The first holds the core's lifetime lock (a daemon or another shell would): the step refuses instead of racing.
     let held = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
-    let err = step(&registry(), &env, "accounts", opts()).unwrap_err();
+    let err = step(&open_registry(), &env, "accounts", opts()).unwrap_err();
     drop(held);
     assert_ne!(err.to_string(), "");
     assert!(!kith_kernel::accounts::tombstoned(&env.machine));
-    step(&registry(), &env, "accounts", opts()).unwrap();
+    step(&open_registry(), &env, "accounts", opts()).unwrap();
 }
 
 // --- transcripts ---------------------------------------------------------------------------------------------------------
@@ -337,7 +387,7 @@ fn register(env: &Env, sid: &str, cwd: &str) {
 #[test]
 fn transcripts_have_no_python_writer_to_tombstone_and_the_step_switches() {
     let (_t, env) = setup();
-    let reg = registry();
+    let reg = open_registry();
     register(&env, "s-one", "/work");
     register(&env, "s-two", "/other");
     let m = super::transcripts::Transcripts;
@@ -389,7 +439,7 @@ fn transcripts_same_answer_catches_a_missing_and_a_changed_session() {
 #[test]
 fn transcripts_a_rollback_clears_the_switch_and_a_step_resumes() {
     let (_t, env) = setup();
-    let reg = registry();
+    let reg = open_registry();
     register(&env, "s-one", "/work");
     let m = super::transcripts::Transcripts;
     step(&reg, &env, "transcripts", opts()).unwrap();
@@ -420,7 +470,7 @@ fn transcripts_a_rollback_clears_the_switch_and_a_step_resumes() {
 fn both_s1_modules_are_listed_and_checkable() {
     let (_t, env) = setup();
     register(&env, "s-one", "/work");
-    let reg = registry();
+    let reg = open_registry();
     let a = |s: &[&str]| s.iter().map(|x| (*x).to_owned()).collect::<Vec<_>>();
     assert_eq!(
         crate::cutover::run_with(&reg, &env, &a(&["modules"])).unwrap(),
@@ -435,4 +485,131 @@ fn both_s1_modules_are_listed_and_checkable() {
         step(&reg, &env, m, opts()).unwrap();
         assert!(check(&reg, &env, m).unwrap()[0].contains("only store"));
     }
+}
+
+// --- the step refusals, the source lock, and the SHOULDs -----------------------------------------------------------------
+
+#[test]
+fn refused_accounts_step_names_the_missing_lane_and_leaves_nothing_behind() {
+    let (_t, env) = setup();
+    let before = std::fs::read(kith_kernel::accounts::state_file(&env.machine)).unwrap();
+    for dry_run in [false, true, false] {
+        let e = step(
+            &registry(),
+            &env,
+            "accounts",
+            Opts {
+                dry_run,
+                ..Opts::default()
+            },
+        )
+        .unwrap_err();
+        let text = e.to_string();
+        assert!(text.contains("out/clear/usage"), "{text}");
+        assert!(text.contains("kernel.accounts.*"), "{text}");
+        assert_eq!(text.lines().count(), 1, "{text}");
+    }
+    assert!(state::read(&env.layout, "accounts").unwrap().is_none());
+    assert!(!kith_kernel::accounts::tombstoned(&env.machine));
+    assert_eq!(
+        std::fs::read(kith_kernel::accounts::state_file(&env.machine)).unwrap(),
+        before
+    );
+    assert!(!env.layout.db.exists(), "no core.db was opened or made");
+}
+
+#[test]
+fn refused_transcripts_step_waits_for_the_claims_module_and_leaves_nothing_behind() {
+    let (_t, env) = setup();
+    register(&env, "s-one", "/work");
+    for dry_run in [false, true, false] {
+        let e = step(
+            &registry(),
+            &env,
+            "transcripts",
+            Opts {
+                dry_run,
+                ..Opts::default()
+            },
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("claims module"), "{e}");
+    }
+    assert!(state::read(&env.layout, "transcripts").unwrap().is_none());
+    assert!(!env.layout.db.exists(), "no core.db was opened or made");
+    assert!(registry_dir(&env).join("s-one.json").is_file());
+}
+
+#[test]
+fn accounts_the_source_lock_is_the_writers_lock_and_a_step_through_it_does_not_deadlock() {
+    use fs2::FileExt as _;
+    let (_t, env) = setup();
+    let m = super::accounts::Accounts;
+    let lock_file = || {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(kith_kernel::accounts::state_file(&env.machine).with_extension("json.lock"))
+            .unwrap()
+    };
+    let held = m.source_lock(&env).unwrap().unwrap();
+    assert!(
+        lock_file().try_lock_exclusive().is_err(),
+        "a Python or Rust writer would wait"
+    );
+    drop(held);
+    lock_file().try_lock_exclusive().unwrap();
+    // The whole step (import, same-answer check and tombstone read the file through `snapshot`) runs under it.
+    let out = step(&open_registry(), &env, "accounts", opts()).unwrap();
+    assert!(out.iter().any(|l| l.contains("switched")), "{out:?}");
+    lock_file().try_lock_exclusive().unwrap();
+}
+
+#[test]
+fn accounts_a_tombstone_on_a_module_that_is_not_switched_is_a_difference() {
+    let (_t, env) = setup();
+    let m = super::accounts::Accounts;
+    let core = crate::tests::open_all(&env.layout);
+    tombstone::ensure(
+        &kith_kernel::accounts::state_file(&env.machine),
+        "accounts",
+        1,
+    )
+    .unwrap();
+    let diffs = m.same_answer(&env, core.conn()).unwrap();
+    assert_eq!(diffs.len(), 1, "{diffs:?}");
+    assert!(diffs[0].contains("not switched"), "{diffs:?}");
+    // Switched (or rolling back): the core's rows are the only copy, so there is nothing to compare.
+    for phase in [state::Phase::Switched, state::Phase::RollingBack] {
+        state::write(
+            &env.layout,
+            "accounts",
+            &state::Switch {
+                phase,
+                snapshot: None,
+                at: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
+    }
+}
+
+#[test]
+fn transcripts_an_import_before_the_switch_replaces_a_row_that_differs() {
+    let (_t, env) = setup();
+    register(&env, "s-one", "/work");
+    let m = super::transcripts::Transcripts;
+    let mut core = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
+    m.import(&env, Some(&mut core), opts()).unwrap();
+    // A resume rewrote the record: the working folder moved.
+    register(&env, "s-one", "/elsewhere");
+    assert_eq!(m.same_answer(&env, core.conn()).unwrap().len(), 1);
+    m.import(&env, Some(&mut core), opts()).unwrap();
+    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
+    assert!(
+        !m.guards_claims(),
+        "nothing to export, so a live claim does not block the rollback"
+    );
 }

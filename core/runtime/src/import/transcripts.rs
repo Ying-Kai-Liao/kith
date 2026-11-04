@@ -213,7 +213,7 @@ fn has_tables(c: &Connection) -> bool {
         })
 }
 
-/// Which records are not in the tables yet: `(conversation missing, session missing)`.
+/// Which records need writing: `(conversation missing, session missing or different from the registry)`.
 fn missing(c: Option<&Connection>, s: &EngineSession) -> Result<(bool, bool)> {
     let Some(c) = c else {
         return Ok((true, true));
@@ -223,10 +223,16 @@ fn missing(c: Option<&Connection>, s: &EngineSession) -> Result<(bool, bool)> {
         [&s.conversation],
         |r| r.get(0),
     )?;
-    Ok((
-        conv == 0,
-        rows::get(c, &s.conversation, &s.account)?.is_none(),
-    ))
+    // A row that differs is redone as well as a missing one: the registry is the truth until the switch, and a resume that
+    // rewrites a record (its working folder, its pointer) would otherwise fail the same-answer check on every try. The
+    // hash and the size are not compared: the core reads the transcript itself and moves them on.
+    let row_stale = rows::get(c, &s.conversation, &s.account)?.is_none_or(|got| {
+        got.engine != s.engine
+            || got.session_id != s.session_id
+            || got.pointer != s.pointer
+            || got.cwd != s.cwd
+    });
+    Ok((conv == 0, row_stale))
 }
 
 fn add_conversation(c: &Connection, s: &EngineSession, agent: &str, now: i64) -> Result<()> {

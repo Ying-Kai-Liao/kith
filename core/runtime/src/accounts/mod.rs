@@ -204,6 +204,7 @@ pub(crate) fn core_writes(conn: &Connection) -> Result<bool> {
 #[cfg(unix)]
 fn switched(conn: &Connection) -> bool {
     use crate::cutover::{Env, modules::accounts::Accounts, same_answer::may_serve};
+    static WARNED: std::sync::Once = std::sync::Once::new();
     let Some(db) = conn.path().map(std::path::Path::new) else {
         return false;
     };
@@ -211,7 +212,17 @@ fn switched(conn: &Connection) -> bool {
         return false;
     };
     let env = Env::new(machine);
-    env.layout.db == db && may_serve(&Accounts, &env, conn, false).ok
+    if env.layout.db != db {
+        return false;
+    }
+    let s = may_serve(&Accounts, &env, conn, false);
+    // The one place the core acts although the old file is no tombstone any more (the framework serves on, loudly): say so
+    // in the core log, once, not on every write.
+    if let Some(w) = s.warning.as_ref().filter(|_| s.ok) {
+        WARNED
+            .call_once(|| kith_kernel::log::note(&format!("accounts: core writes continue: {w}")));
+    }
+    s.ok
 }
 
 #[cfg(not(unix))]
