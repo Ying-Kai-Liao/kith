@@ -24,6 +24,9 @@ sha2 = "0.11.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 # kill(2) for the claim sweep and "is that pid running" (threads::os); the host links the same version.
 libc = "0.2"
+# OpenProcess + GetProcessTimes for the process start time (procstart); the holder links the same version.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [lints.rust]
 # `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).

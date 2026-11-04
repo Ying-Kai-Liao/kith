@@ -124,7 +124,7 @@ fn take(c: &mut Core, conv: &str) -> (i64, i64) {
 
 fn running(c: &mut Core, conv: &str, pid: u32) -> (i64, i64) {
     let (id, t) = take(c, conv);
-    let r = redeem(c, id, pid, &format!("s{pid}"), "h1", 20).expect("redeem");
+    let r = redeem(c, id, pid, &format!("e{pid}"), "h1", 20).expect("redeem");
     assert_eq!(r, Redeemed::Running { again: false });
     (id, t)
 }
@@ -163,7 +163,7 @@ fn a_second_claim_is_refused_while_the_first_is_claimed_running_or_ending() {
     let (id, _) = take(&mut c, "c1");
     let again = |c: &mut Core| claim(c, &new_claim("c1", None), 11);
     assert!(matches!(again(&mut c), Err(Error::Refused(m)) if m.contains("claimed")));
-    redeem(&mut c, id, 100, "s100", "h1", 12).expect("redeem");
+    redeem(&mut c, id, 100, "e100", "h1", 12).expect("redeem");
     assert!(matches!(again(&mut c), Err(Error::Refused(m)) if m.contains("running")));
     stop(&mut c, id, "stop", false, 13).expect("stop");
     assert_eq!(state(&c, id), "ending");
@@ -305,11 +305,11 @@ fn a_retried_redeem_is_idempotent_and_another_process_is_refused() {
     let (_t, mut c) = open();
     let (id, _) = running(&mut c, "c1", 100);
     assert_eq!(
-        redeem(&mut c, id, 100, "s100", "h1", 21).expect("again"),
+        redeem(&mut c, id, 100, "e100", "h1", 21).expect("again"),
         Redeemed::Running { again: true }
     );
     assert_eq!(
-        redeem(&mut c, id, 101, "s101", "h1", 22).expect("other pid"),
+        redeem(&mut c, id, 101, "e101", "h1", 22).expect("other pid"),
         Redeemed::Refused("running".into())
     );
     // The same pid with another start time is another process.
@@ -339,7 +339,7 @@ fn a_redeem_of_an_unknown_or_ended_claim_changes_nothing() {
     report(&mut c, id, "exit", "{}", 30).expect("exit");
     assert_eq!(state(&c, id), "ended");
     assert_eq!(
-        redeem(&mut c, id, 5, "s5", "h1", 31).expect("late"),
+        redeem(&mut c, id, 5, "e5", "h1", 31).expect("late"),
         Redeemed::Refused("ended".into())
     );
     assert_eq!(
@@ -357,7 +357,7 @@ fn a_redeem_after_a_release_on_a_new_holder_instance_fails() {
     assert_eq!(state(&c, id), "ended");
     assert_eq!(turn_state(&c, t), "queued", "the turn is given back");
     assert_eq!(
-        redeem(&mut c, id, 100, "s100", "h1", 31).expect("late redeem"),
+        redeem(&mut c, id, 100, "e100", "h1", 31).expect("late redeem"),
         Redeemed::Refused("ended".into())
     );
     assert_eq!(state(&c, id), "ended");
@@ -559,7 +559,7 @@ fn precedence_is_done_then_exit_then_busy_then_spawned() {
 fn spawned_records_the_stub_so_a_lost_redeem_still_leaves_a_pid() {
     let (_t, mut c) = open();
     let (id, _) = take(&mut c, "c1");
-    let r = report(&mut c, id, "spawned", r#"{"pid":55,"started":"s55"}"#, 30).expect("spawned");
+    let r = report(&mut c, id, "spawned", r#"{"pid":55,"started":"e55"}"#, 30).expect("spawned");
     assert_eq!(
         r,
         Reported::Stored {
@@ -574,7 +574,7 @@ fn spawned_records_the_stub_so_a_lost_redeem_still_leaves_a_pid() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .expect("row");
-    assert_eq!((pid, started.as_str()), (55, "s55"));
+    assert_eq!((pid, started.as_str()), (55, "e55"));
     assert_eq!(state(&c, id), "claimed");
 }
 
@@ -584,7 +584,7 @@ fn spawned_records_the_stub_so_a_lost_redeem_still_leaves_a_pid() {
 fn a_running_claim_keeps_one_writer_through_ending_until_the_pid_is_gone() {
     let (_t, mut c) = open();
     let procs = Procs::default();
-    procs.spawn(100, "s100");
+    procs.spawn(100, "e100");
     let (id, t) = running(&mut c, "c1", 100);
     let kill = stop(&mut c, id, "revoked", false, 30)
         .expect("stop")
@@ -594,7 +594,7 @@ fn a_running_claim_keeps_one_writer_through_ending_until_the_pid_is_gone() {
         Kill {
             claim_id: Some(id),
             pid: Some(100),
-            started: Some("s100".into())
+            started: Some("e100".into())
         }
     );
     assert_eq!(state(&c, id), "ending");
@@ -620,11 +620,11 @@ fn a_running_claim_keeps_one_writer_through_ending_until_the_pid_is_gone() {
 fn a_reused_pid_counts_as_gone_and_a_probe_that_cannot_tell_does_not() {
     let (_t, mut c) = open();
     let procs = Procs::default();
-    procs.spawn(100, "s100");
+    procs.spawn(100, "e100");
     let (id, _) = running(&mut c, "c1", 100);
     stop(&mut c, id, "stop", true, 30).expect("stop");
     // The pid now belongs to a stranger.
-    procs.spawn(100, "another start");
+    procs.spawn(100, "e999");
     assert_eq!(end_gone(&mut c, &procs, 31).expect("probe"), vec![id]);
 
     // A probe that neither reads a start time nor says "gone".
@@ -744,7 +744,7 @@ fn reconcile_ends_unlisted_claimed_claims_and_holds_unlisted_running_ones_as_end
         vec![Kill {
             claim_id: Some(run),
             pid: Some(20),
-            started: Some("s20".into())
+            started: Some("e20".into())
         }]
     );
     assert_eq!(out.kill_listed, vec![4242], "listed with no row");
@@ -768,12 +768,12 @@ fn a_different_holder_instance_kills_recorded_processes_with_no_redeem() {
     let strays = [
         RecordedProc {
             pid: 100,
-            started: "s100".into(),
+            started: "e100".into(),
             conv: "c1".into(),
         },
         RecordedProc {
             pid: 300,
-            started: "s300".into(),
+            started: "e300".into(),
             conv: "c9".into(),
         },
     ];
@@ -783,7 +783,7 @@ fn a_different_holder_instance_kills_recorded_processes_with_no_redeem() {
         vec![Kill {
             claim_id: None,
             pid: Some(300),
-            started: Some("s300".into())
+            started: Some("e300".into())
         }],
         "the redeemed pid is the claim's kill, not a stray"
     );
@@ -798,10 +798,10 @@ fn holder_crash_donetruth_the_orphan_redeems_and_the_claim_goes_to_ending_not_en
     let (_t, mut c) = open();
     let procs = Procs::default();
     let (id, t) = take(&mut c, "c1");
-    procs.spawn(500, "s500");
+    procs.spawn(500, "e500");
     // The holder crashed; the orphan stub (pid 500) takes the lock and redeems claim 1, which is still current.
     assert_eq!(
-        redeem(&mut c, id, 500, "s500", "h1", 20).expect("orphan redeem"),
+        redeem(&mut c, id, 500, "e500", "h1", 20).expect("orphan redeem"),
         Redeemed::Running { again: false }
     );
     // The core meets holder instance h2, which lists nothing.
@@ -830,7 +830,7 @@ fn holder_crash_donetruth_other_order_the_release_wins_the_race() {
     different_holder(&mut c, "h2", &[], &[], i64::MAX, 30).expect("new instance");
     assert_eq!(state(&c, id), "ended");
     assert_eq!(
-        redeem(&mut c, id, 500, "s500", "h1", 31).expect("orphan"),
+        redeem(&mut c, id, 500, "e500", "h1", 31).expect("orphan"),
         Redeemed::Refused("ended".into())
     );
 }
@@ -853,7 +853,7 @@ fn a_second_connection_that_releases_between_claim_and_redeem_wins_the_cas() {
         .expect("release");
     assert_eq!(n, 1);
     assert_eq!(
-        redeem(&mut c, id, 7, "s7", "h1", 40).expect("redeem"),
+        redeem(&mut c, id, 7, "e7", "h1", 40).expect("redeem"),
         Redeemed::Refused("ended".into())
     );
 }
@@ -980,7 +980,7 @@ fn a_report_with_no_pid_moves_a_claim_with_a_recorded_pid_to_ending_and_end_gone
         claim(&mut c, &new_claim("c1", None), 32),
         Err(Error::Refused(_))
     ));
-    let alive = procs_with(&[(100, "s100")]);
+    let alive = procs_with(&[(100, "e100")]);
     assert!(end_gone(&mut c, &alive, 33).expect("alive").is_empty());
     assert_eq!(state(&c, id), "ending");
     assert_eq!(
@@ -994,7 +994,7 @@ fn a_report_with_no_pid_moves_a_claim_with_a_recorded_pid_to_ending_and_end_gone
         &mut c,
         id2,
         "spawned",
-        r#"{"pid":200,"started":"s200"}"#,
+        r#"{"pid":200,"started":"e200"}"#,
         40,
     )
     .expect("spawned");
@@ -1023,7 +1023,7 @@ fn a_report_with_no_pid_on_a_claim_with_no_pid_ends_a_claimed_one_only() {
 fn a_busy_naming_another_process_leaves_the_claim_alone() {
     let (_t, mut c) = open();
     let (id, _) = take(&mut c, "c1");
-    report(&mut c, id, "spawned", r#"{"pid":100,"started":"s100"}"#, 20).expect("spawned");
+    report(&mut c, id, "spawned", r#"{"pid":100,"started":"e100"}"#, 20).expect("spawned");
     report(&mut c, id, "busy", r#"{"pid":999}"#, 21).expect("busy");
     assert_eq!(state(&c, id), "claimed");
     report(&mut c, id, "busy", "{}", 22).expect("nameless busy");
@@ -1076,7 +1076,7 @@ fn a_revoke_between_the_may_check_and_the_claim_refuses_it_and_one_before_the_re
     // claim is never left `claimed` (a stuck writer slot).
     revoke_person(&mut c, "sam", 8).expect("revoke");
     assert!(matches!(
-        redeem(&mut c, got.claim_id, 100, "s100", "h1", 9).expect("redeem"),
+        redeem(&mut c, got.claim_id, 100, "e100", "h1", 9).expect("redeem"),
         Redeemed::Refused(_)
     ));
     assert_ne!(state(&c, got.claim_id), "claimed");
@@ -1085,7 +1085,7 @@ fn a_revoke_between_the_may_check_and_the_claim_refuses_it_and_one_before_the_re
 
 fn direct(c: &mut Core, conv: &str, pid: u32) -> i64 {
     conversation(c, conv);
-    let started = format!("s{pid}");
+    let started = format!("e{pid}");
     let mut req = new_claim(conv, None);
     req.kind = Kind::External;
     req.holder_instance = None;
@@ -1105,10 +1105,10 @@ fn a_direct_claim_survives_reconcile_and_a_holder_change_and_ends_when_its_pid_i
     assert_eq!(state(&c, id), "claimed");
     // A stray stub cannot take its pid over.
     assert_eq!(
-        redeem(&mut c, id, 701, "s701", "h1", 22).expect("stray"),
+        redeem(&mut c, id, 701, "e701", "h1", 22).expect("stray"),
         Redeemed::Refused("claimed".into())
     );
-    let alive = procs_with(&[(700, "s700")]);
+    let alive = procs_with(&[(700, "e700")]);
     assert!(end_gone(&mut c, &alive, 23).expect("alive").is_empty());
     assert_eq!(state(&c, id), "claimed");
     let none = Procs::default();
@@ -1145,7 +1145,7 @@ fn an_old_instance_process_of_an_ended_claim_is_still_killed() {
     report(&mut c, id, "exit", r#"{"pid":100}"#, 25).expect("exit");
     let strays = [RecordedProc {
         pid: 100,
-        started: "s100".into(),
+        started: "e100".into(),
         conv: "c1".into(),
     }];
     let out = different_holder(&mut c, "h2", &[], &strays, i64::MAX, 30).expect("holder change");
@@ -1193,7 +1193,7 @@ fn a_claimed_claim_with_no_process_stopped_is_ended_and_its_late_redeem_fails() 
     assert_eq!(state(&c, id), "ended", "no pid for end_gone to wait on");
     assert_eq!(turn_state(&c, t), "cancelled");
     assert_eq!(
-        redeem(&mut c, id, 100, "s100", "h1", 31).expect("late"),
+        redeem(&mut c, id, 100, "e100", "h1", 31).expect("late"),
         Redeemed::Refused("ended".into())
     );
     claim(&mut c, &new_claim("c1", None), 32).expect("claim again");
@@ -1203,7 +1203,7 @@ fn a_claimed_claim_with_no_process_stopped_is_ended_and_its_late_redeem_fails() 
 fn a_claimed_claim_with_a_spawned_process_stopped_is_ending_until_it_is_gone() {
     let (_t, mut c) = open();
     let (id, _) = take(&mut c, "c1");
-    report(&mut c, id, "spawned", r#"{"pid":100,"started":"s100"}"#, 20).expect("spawned");
+    report(&mut c, id, "spawned", r#"{"pid":100,"started":"e100"}"#, 20).expect("spawned");
     let kill = stop(&mut c, id, "stop", false, 30)
         .expect("stop")
         .expect("kill");

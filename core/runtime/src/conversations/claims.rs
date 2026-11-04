@@ -46,7 +46,7 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 
 use crate::db::{Core, RecordedProc};
 use crate::error::{Error, Result};
-use crate::gate::Liveness;
+use crate::gate::{Liveness, holder_alive};
 
 /// `meta` key: the core generation whose reconcile has committed. Claims are refused until it equals the core's.
 pub(super) const RECONCILED: &str = "claims_reconciled_generation";
@@ -630,12 +630,10 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
 }
 
 /// True when the system says this recorded process is gone: no such pid, or the pid now has another start time (reused).
-/// A probe that cannot tell is not "gone".
+/// A probe that cannot tell is not "gone", and neither is a claim whose start time is the old `lstart` text (the stub
+/// still records it): that only ends when the pid is gone.
 fn recorded_gone(live: &dyn Liveness, pid: u32, started: &str) -> bool {
-    match live.start(pid) {
-        Some(now) => now != started,
-        None => live.gone(pid),
-    }
+    !holder_alive(live, pid, started)
 }
 
 /// `ending -> ended` (and a `--direct` run's `claimed -> ended`), only once the recorded process is confirmed gone. Reads, probes outside any transaction, then one
