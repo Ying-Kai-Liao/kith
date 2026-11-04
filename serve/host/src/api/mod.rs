@@ -24,6 +24,8 @@ mod error_tests;
 mod events;
 mod files;
 mod folders;
+#[cfg(test)]
+mod guard_props;
 mod host;
 mod http;
 mod kith_info;
