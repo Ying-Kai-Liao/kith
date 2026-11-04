@@ -675,7 +675,7 @@ fn only_the_host_reads_a_secrets_value_and_the_owner_keeps_the_rest() {
 
 #[test]
 fn the_launch_keys_row_is_the_owners_alone() {
-    let row = method("secrets.launchEnv").unwrap();
+    let row = method("secrets.serviceKeys").unwrap();
     assert_eq!(row.principals, &[Principal::Owner]);
     for who in [
         Principal::Host,

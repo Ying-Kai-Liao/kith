@@ -1,6 +1,14 @@
-//! Version 21: which profile of secrets an agent may use for a service, for the launch's keys (`secrets.launchEnv`,
-//! M2-18b). Mapped from auth.json's `profiles` (profile -> VAR -> source) and `grants` (agent -> service -> profile, or
-//! a list of profiles). Nothing writes them yet and the import leaves them behind: the kith-auth switch (M2-18) does.
+//! Version 21: which profile of secrets an agent may use for a service (`secrets.serviceKeys`, M2-18b). Mapped from
+//! auth.json's `profiles` (profile -> VAR -> source, plus the profile's `person`, `with` and `browser`) and `grants`
+//! (agent -> service -> profile, or a list of profiles). Nothing writes them yet and the import leaves them behind: the
+//! kith-auth switch (M2-18) does.
+//!
+//! - `secret_grants.agent` is the grants key as auth.json spells it: `coder` for the agent's own grant, `coder@<person>`
+//!   for a grant made for one person's runs (looked up first). A list of profiles keeps its order in `seq`.
+//! - `secret_profiles` is one row per profile, including those with no variables (a browser profile, a login service's):
+//!   `person` is its owner (NULL: nobody's), `lent` a JSON list of people it is lent to (`with`), `browser` its browser.
+//! - `secret_vars` is one row per variable of a profile.
+//!
 //! No SQL foreign keys, as in the authority tables: auth.json holds a grant to a profile that does not exist, and that
 //! has to read back as it was so the launch can say which profile is missing.
 
@@ -11,6 +19,12 @@ pub(super) const MIGRATION: Migration = Migration {
     name: "secret_grants",
     sql: "
         CREATE TABLE secret_profiles (
+            profile TEXT PRIMARY KEY,
+            person TEXT,
+            lent TEXT,
+            browser TEXT
+        ) WITHOUT ROWID;
+        CREATE TABLE secret_vars (
             profile TEXT NOT NULL,
             var TEXT NOT NULL,
             source TEXT NOT NULL,

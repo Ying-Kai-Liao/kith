@@ -6623,13 +6623,48 @@
       }
     },
     {
-      "name": "secrets.launchEnv",
-      "summary": "The keys one agent is granted, for a launch: for each granted service, its profile and the values of that profile's variables. Only that agent's grants, never another agent's keys.",
+      "name": "secrets.serviceKeys",
+      "summary": "The keys one agent may use for one service, for a launch: the values of the service's declared variables, from the profile the agent is granted (the person's own grant first, then the agent's). A source that is not in the envelope (env:, env-file:) comes back unresolved for the caller to resolve itself. Refuses when there is no grant, the profile is another person's and not lent, or a declared variable has no row or an empty value. Writes no audit line: the caller (kith-auth) logs agent, service, profile and person, never the value.",
       "params": [
         {
           "name": "agent",
           "summary": "The agent being launched.",
           "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service whose server starts.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "vars",
+          "summary": "The variables the service declares as secrets (the core has no service specs). None declared: nothing is read.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Whom the run is for: their own grant (agent@person) comes first, and another person's profile is refused unless lent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "profile",
+          "summary": "Which of the granted profiles to use; the first granted otherwise.",
+          "required": false,
           "schema": {
             "type": "string"
           }
@@ -6654,6 +6689,24 @@
         "args": {
           "agent": {
             "kind": "positional"
+          },
+          "service": {
+            "kind": "positional"
+          },
+          "vars": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "profile": {
+            "kind": "flag",
+            "spellings": [
+              "--profile"
+            ]
           }
         },
         "hidden": true

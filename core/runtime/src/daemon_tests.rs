@@ -1790,3 +1790,59 @@ fn the_gate_answers_over_the_owner_socket_and_frees_a_holder_whose_process_is_go
         Reached::Refused(Error::BadParams(_))
     ));
 }
+
+/// `secrets.serviceKeys` through a real daemon: the owner gets the declared keys of the granted profile, the host
+/// connection is turned away, and a missing grant is a refusal with the hint.
+#[cfg(unix)]
+#[test]
+fn service_keys_go_through_a_real_daemon_to_the_owner_alone() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let cfg = Config {
+        key_load: Some(std::sync::Arc::new(|| {
+            Ok(Some(zeroize::Zeroizing::new(vec![9u8; 32])))
+        })),
+        ..hosted()
+    };
+    let d = serving(&p, cfg);
+    let conn = rusqlite::Connection::open(&Layout::new(&m).db).expect("core.db");
+    conn.busy_timeout(Duration::from_secs(5)).expect("timeout");
+    conn.execute_batch(
+        "INSERT INTO secret_profiles (profile, person) VALUES ('github/work', 'kai');
+         INSERT INTO secret_vars (profile, var, source) VALUES ('github/work', 'GITHUB_TOKEN', 'keychain:kith-github#work');
+         INSERT INTO secret_grants (agent, service, profile, seq) VALUES ('coder', 'github', 'github/work', 0);",
+    )
+    .expect("seed");
+    match read(
+        &p,
+        "secrets.put",
+        &json!({"name": "keychain:kith-github#work", "value": "ghp_work"}),
+    ) {
+        Reached::Answered(_) => {}
+        other => panic!("put: {other:?}"),
+    }
+    let ask = json!({"agent": "coder", "service": "github", "vars": ["GITHUB_TOKEN"]});
+    match read(&p, "secrets.serviceKeys", &ask) {
+        Reached::Answered(v) => assert_eq!(
+            v,
+            json!({"agent": "coder", "service": "github", "profile": "github/work",
+                   "keys": [{"var": "GITHUB_TOKEN", "value": "ghp_work"}], "unresolved": []})
+        ),
+        other => panic!("owner: {other:?}"),
+    }
+    assert!(matches!(
+        host(&p, "secrets.serviceKeys", &ask),
+        Reached::Refused(Error::NotAllowed(_))
+    ));
+    match read(
+        &p,
+        "secrets.serviceKeys",
+        &json!({"agent": "ghost", "service": "github", "vars": ["GITHUB_TOKEN"]}),
+    ) {
+        Reached::Refused(Error::Refused(note)) => {
+            assert!(note.contains("kith-auth grant ghost github"), "{note}")
+        }
+        other => panic!("no grant: {other:?}"),
+    }
+    d.stop();
+}
