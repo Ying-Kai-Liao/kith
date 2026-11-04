@@ -6,7 +6,12 @@
 //! - `secret_grants.agent` is the grants key as auth.json spells it: `coder` for the agent's own grant, `coder@<person>`
 //!   for a grant made for one person's runs (looked up first). A list of profiles keeps its order in `seq`.
 //! - `secret_profiles` is one row per profile, including those with no variables (a browser profile, a login service's):
-//!   `person` is its owner (NULL: nobody's), `lent` a JSON list of people it is lent to (`with`), `browser` its browser.
+//!   `person` is its owner as `kith-auth`'s
+//!   `owner_of` answers it, which the M2-18 import (and later the `kith-auth` writers) must store: the named person; the
+//!   owner's id (or 'the owner' when none is named) for an unmarked profile of a personal service (login, browser, or
+//!   `"personal": true`); NULL only for '*' (shared on purpose) or a service that is not personal. A change to a
+//!   service's `personal` setting re-derives the column. The core has no service specs, so it cannot work this out
+//!   itself. `lent` is a JSON list of people it is lent to (`with`), `browser` its browser.
 //! - `secret_vars` is one row per variable of a profile.
 //!
 //! No SQL foreign keys, as in the authority tables: auth.json holds a grant to a profile that does not exist, and that

@@ -69,16 +69,20 @@ pub(super) const ROWS: &[Method] = &[
     .formats(J),
     row(
         "secrets.serviceKeys",
-        "The keys one agent may use for one service, for a launch: the values of the service's declared variables, from the profile the agent is granted (the person's own grant first, then the agent's). A source that is not in the envelope (env:, env-file:) comes back unresolved for the caller to resolve itself. Refuses when there is no grant, the profile is another person's and not lent, or a declared variable has no row or an empty value. Writes no audit line: the caller (kith-auth) logs agent, service, profile and person, never the value.",
+        "The keys one agent may use for one service, for a launch: the values of the service's declared variables, from the profile the agent is granted (the person's own grant first, then the agent's). A source that is not in the envelope (env:, env-file:) comes back unresolved for the caller to resolve itself. Refuses when there is no grant or no such profile, the profile is another person's and not lent, or a declared variable has no row or an empty value. Writes no audit line: the caller (kith-auth) logs agent, service, profile and person, never the value.",
         &[
             pos("agent", "string", true, "The agent being launched."),
             pos("service", "string", true, "The service whose server starts."),
             caller(
                 "vars",
                 "[string]",
-                "The variables the service declares as secrets (the core has no service specs). None declared: nothing is read.",
+                "The variables the service declares as secrets (the core has no service specs). None declared: the grant and person rule still apply and the profile is returned, but no key is read.",
             ),
-            flag("person", "string", &["--person"], "Whom the run is for: their own grant (agent@person) comes first, and another person's profile is refused unless lent."),
+            caller(
+                "person",
+                "string",
+                "Whom the run is for (kith-auth's acting()): their own grant (agent@person) comes first, and another person's profile is refused unless lent, the owner's runs included. Only \"\" skips the check.",
+            ),
             flag("profile", "string", &["--profile"], "Which of the granted profiles to use; the first granted otherwise."),
         ],
         "json",

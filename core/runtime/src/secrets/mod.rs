@@ -98,7 +98,7 @@ pub(crate) fn call(
                     agent: text("agent")?,
                     service: text("service")?,
                     vars: &vars,
-                    person: opt("person"),
+                    person: text("person")?,
                     profile: opt("profile"),
                 },
             )
@@ -118,7 +118,8 @@ pub(crate) struct ServiceKeys<'a> {
     pub agent: &'a str,
     pub service: &'a str,
     pub vars: &'a [&'a str],
-    pub person: Option<&'a str>,
+    /// Who the run acts for (`acting()`'s answer); only "" means no person check.
+    pub person: &'a str,
     pub profile: Option<&'a str>,
 }
 
@@ -190,8 +191,13 @@ impl Envelope {
     /// else the lowest `seq`). Refuses, naming what is missing and never a value: no grant (with the `kith-auth grant`
     /// hint), another person's profile that is not lent, a declared variable with no row or an empty value. A source
     /// that is not a `keychain:` record (`env:`, `env-file:`) comes back unresolved: it names the caller's own
-    /// environment or files, which the core must not read for it. No `vars` means nothing is read, not even the
-    /// profile. The audit line (agent, service, profile, person) is the caller's to write; the core writes none.
+    /// environment or files, which the core must not read for it. With no `vars` the grant and the person rule
+    /// are still applied and the profile row must exist, but no variable row or record is read; the chosen profile is
+    /// returned for the caller's audit. `person` is required (the caller passes `acting()`): the run is checked like
+    /// anyone's, the owner's included, and only "" skips the check, as Python's empty `acting()` does. A `profile` pick
+    /// with a single-string grant refuses here where Python ignores `KITH_AUTH_PROFILE` for a string grant (the only
+    /// setter, kith-send-to, sets it for a granted profile, so no live path differs). "no profile" (no `secret_profiles`
+    /// row) and "not set" (a declared var with no row) stay distinct messages. The audit line (agent, service, profile, person) is the caller's to write; the core writes none.
     /// Through the daemon the master key is loaded before the call (see `daemon.rs`), so a locked key store refuses
     /// even a call that would read no record.
     pub(crate) fn service_keys(&mut self, conn: &Connection, p: &ServiceKeys) -> Result<Value> {
@@ -206,11 +212,6 @@ impl Envelope {
             }
         }
         let (agent, service) = (p.agent, p.service);
-        if p.vars.is_empty() {
-            return Ok(
-                json!({"agent": agent, "service": service, "profile": null, "keys": [], "unresolved": []}),
-            );
-        }
         let granted = |who: &str| -> Result<Vec<String>> {
             let mut stmt = conn.prepare(
                 "SELECT profile FROM secret_grants WHERE agent = ?1 AND service = ?2 ORDER BY seq",
@@ -220,9 +221,11 @@ impl Envelope {
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(rows)
         };
-        let mut list = match p.person {
-            Some(person) => granted(&format!("{agent}@{person}"))?,
-            None => Vec::new(),
+        let person = p.person;
+        let mut list = if person.is_empty() {
+            Vec::new()
+        } else {
+            granted(&format!("{agent}@{person}"))?
         };
         if list.is_empty() {
             list = granted(agent)?;
@@ -248,7 +251,12 @@ impl Envelope {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        if let (Some((Some(owner), lent)), Some(person)) = (&row, p.person) {
+        let Some(row) = row else {
+            return Err(Error::Refused(format!(
+                "kith-core: no profile '{profile}' (granted to {agent} for {service}; kith-auth set {profile} <var>)"
+            )));
+        };
+        if let (Some(owner), lent, false) = (&row.0, &row.1, person.is_empty()) {
             let lent: Vec<String> = lent
                 .as_deref()
                 .and_then(|t| serde_json::from_str(t).ok())

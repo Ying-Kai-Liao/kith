@@ -6950,7 +6950,7 @@
     },
     {
       "name": "secrets.serviceKeys",
-      "summary": "The keys one agent may use for one service, for a launch: the values of the service's declared variables, from the profile the agent is granted (the person's own grant first, then the agent's). A source that is not in the envelope (env:, env-file:) comes back unresolved for the caller to resolve itself. Refuses when there is no grant, the profile is another person's and not lent, or a declared variable has no row or an empty value. Writes no audit line: the caller (kith-auth) logs agent, service, profile and person, never the value.",
+      "summary": "The keys one agent may use for one service, for a launch: the values of the service's declared variables, from the profile the agent is granted (the person's own grant first, then the agent's). A source that is not in the envelope (env:, env-file:) comes back unresolved for the caller to resolve itself. Refuses when there is no grant or no such profile, the profile is another person's and not lent, or a declared variable has no row or an empty value. Writes no audit line: the caller (kith-auth) logs agent, service, profile and person, never the value.",
       "params": [
         {
           "name": "agent",
@@ -6970,7 +6970,7 @@
         },
         {
           "name": "vars",
-          "summary": "The variables the service declares as secrets (the core has no service specs). None declared: nothing is read.",
+          "summary": "The variables the service declares as secrets (the core has no service specs). None declared: the grant and person rule still apply and the profile is returned, but no key is read.",
           "required": false,
           "schema": {
             "type": "array",
@@ -6981,7 +6981,7 @@
         },
         {
           "name": "person",
-          "summary": "Whom the run is for: their own grant (agent@person) comes first, and another person's profile is refused unless lent.",
+          "summary": "Whom the run is for (kith-auth's acting()): their own grant (agent@person) comes first, and another person's profile is refused unless lent, the owner's runs included. Only \"\" skips the check.",
           "required": false,
           "schema": {
             "type": "string"
@@ -7023,10 +7023,7 @@
             "kind": "caller"
           },
           "person": {
-            "kind": "flag",
-            "spellings": [
-              "--person"
-            ]
+            "kind": "caller"
           },
           "profile": {
             "kind": "flag",

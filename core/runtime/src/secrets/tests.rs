@@ -474,6 +474,7 @@ fn launch_fixture(c: &Connection, e: &mut Envelope) {
     profile("github/lent", Some("kai"), Some("[\"sam\"]"));
     profile("mail/me", Some("kai"), None);
     profile("browser/coder", None, None); // no variables, by design
+    profile("browser/kai", Some("kai"), None); // the owner's own browser, no variables
     var("github/work", "GITHUB_TOKEN", "keychain:kith-github#work");
     var("github/work", "UNUSED", "keychain:kith-github#unused");
     var("github/other", "GITHUB_TOKEN", "keychain:kith-github#other");
@@ -486,6 +487,8 @@ fn launch_fixture(c: &Connection, e: &mut Envelope) {
     grant("coder", "github", "github/other", 1);
     grant("coder", "mail", "mail/me", 0);
     grant("coder", "browser", "browser/coder", 0);
+    grant("guestbot", "browser", "browser/kai", 0);
+    grant("ghostly", "browser", "browser/missing", 0); // a grant whose profile row is gone
     grant("coder@sam", "github", "github/sam", 0);
     grant("house", "github", "github/other", 0);
     for (name, value) in [
@@ -506,6 +509,11 @@ fn keys(
     s: &std::sync::Mutex<Option<Envelope>>,
     p: serde_json::Value,
 ) -> crate::error::Result<serde_json::Value> {
+    // `person` is required; the tests that do not care whom a run is for pass "" (no person check).
+    let mut p = p;
+    if let Some(o) = p.as_object_mut() {
+        o.entry("person").or_insert(serde_json::json!(""));
+    }
     super::call(c, s, "secrets.serviceKeys", &p)
 }
 
@@ -565,14 +573,23 @@ fn service_keys_returns_only_the_declared_variables_of_the_granted_profile() {
         .expect("browser")["keys"],
         json!([])
     );
+    // No vars still applies the grant rule, and names the profile for the caller's audit.
+    let e = keys(
+        &c,
+        &s,
+        json!({"agent": "nobody", "service": "x", "vars": []}),
+    )
+    .expect_err("no grant even with no vars")
+    .to_string();
+    assert!(e.contains("kith-auth grant nobody x"), "{e}");
     assert_eq!(
         keys(
             &c,
             &s,
-            json!({"agent": "nobody", "service": "x", "vars": []})
+            json!({"agent": "coder", "service": "browser", "vars": []})
         )
-        .expect("none")["profile"],
-        json!(null)
+        .expect("browser")["profile"],
+        json!("browser/coder")
     );
 }
 
@@ -614,8 +631,61 @@ fn service_keys_applies_the_person_rules_and_refuses_what_kith_auth_refuses() {
             .to_string()
             .contains("ghp_work")
     );
-    // The owner's own run (no person) is never refused for whose profile it is.
+    // The owner's own run is checked like anyone's: their own profiles pass, another person's unlent one is refused.
+    assert!(g(json!({"person": "kai"})).is_ok());
+    let e = keys(
+        &c,
+        &s,
+        json!({"agent": "house", "service": "github", "vars": ["GITHUB_TOKEN"], "person": "sam"}),
+    )
+    .expect_err("kai's")
+    .to_string();
+    assert!(e.contains("kai's"), "{e}");
+    c.execute(
+        "UPDATE secret_grants SET agent = 'coder@kai' WHERE profile = 'github/sam'",
+        [],
+    )
+    .expect("regrant");
+    let e = g(json!({"person": "kai"}))
+        .expect_err("sam's profile on kai's run")
+        .to_string();
+    assert!(e.contains("sam's") && !e.contains("ghp_"), "{e}");
+    // "" is the only no-check value.
     assert!(g(json!({})).is_ok());
+    // No vars does not skip the grant or the person rule: a guest asking for the owner's browser is refused, the owner
+    // is not, and a grant whose profile row is gone says "no profile" (not "not set").
+    let browser_of = |agent: &str, person: &str| {
+        keys(
+            &c,
+            &s,
+            json!({"agent": agent, "service": "browser", "vars": [], "person": person}),
+        )
+    };
+    let e = browser_of("guestbot", "jo").expect_err("guest").to_string();
+    assert!(e.contains("kai's") && e.contains("jo"), "{e}");
+    assert_eq!(
+        browser_of("guestbot", "kai").expect("owner")["profile"],
+        json!("browser/kai")
+    );
+    let e = browser_of("ghostly", "kai")
+        .expect_err("no row")
+        .to_string();
+    assert!(
+        e.contains("no profile 'browser/missing'") && !e.contains("not set"),
+        "{e}"
+    );
+    let e = g(json!({"vars": ["NOPE"]})).expect_err("var").to_string();
+    assert!(e.contains("not set") && !e.contains("no profile"), "{e}");
+    // `person` itself is required through the call.
+    assert!(
+        super::call(
+            &c,
+            &s,
+            "secrets.serviceKeys",
+            &json!({"agent": "coder", "service": "github", "vars": []})
+        )
+        .is_err()
+    );
     // No grant: the hint, not a value.
     let e = keys(
         &c,

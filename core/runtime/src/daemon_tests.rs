@@ -1825,7 +1825,8 @@ fn service_keys_go_through_a_real_daemon_to_the_owner_alone() {
         Reached::Answered(_) => {}
         other => panic!("put: {other:?}"),
     }
-    let ask = json!({"agent": "coder", "service": "github", "vars": ["GITHUB_TOKEN"]});
+    let ask =
+        json!({"agent": "coder", "service": "github", "vars": ["GITHUB_TOKEN"], "person": "kai"});
     match read(&p, "secrets.serviceKeys", &ask) {
         Reached::Answered(v) => assert_eq!(
             v,
@@ -1841,7 +1842,7 @@ fn service_keys_go_through_a_real_daemon_to_the_owner_alone() {
     match read(
         &p,
         "secrets.serviceKeys",
-        &json!({"agent": "ghost", "service": "github", "vars": ["GITHUB_TOKEN"]}),
+        &json!({"agent": "ghost", "service": "github", "vars": ["GITHUB_TOKEN"], "person": "kai"}),
     ) {
         // The wire carries a refusal as its text, which the client reads back as Io.
         Reached::Refused(Error::Io(note)) => {
