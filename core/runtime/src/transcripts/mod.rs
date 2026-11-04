@@ -142,7 +142,7 @@ pub(crate) fn config_dir(ctx: &Ctx<'_>, account: &str) -> Option<PathBuf> {
     };
     Some(match name {
         Some(n) => accounts::account_dir(&actx, "claude", n),
-        None => accounts::mirror::main_claude_paths(&actx).0,
+        None => accounts::main_claude_paths(&actx).0,
     })
 }
 

@@ -66,29 +66,33 @@ pub(crate) fn step(
         last_read,
         mine.as_ref().map(|d| d.hash.as_str()),
     );
-    apply(
-        choice,
-        ours,
-        engine,
-        theirs.as_ref().map(|d| d.hash.as_str()),
-    )
+    apply(choice, ours, engine, theirs.as_ref(), mine.as_ref())
 }
 
-/// Does what [`decide`] said, given the hash of the engine's copy it was decided on (`seen`). A [`Choice::Place`] hashes
-/// the engine's copy again first: if it is no longer `seen`, something wrote it since the decision and the core's copy
-/// must not overwrite it, so the engine's copy is adopted instead. After an adopt the copy is hashed again and must be
-/// the engine's copy as it is now; the hash returned is the one to record as the last read.
+/// Does what [`decide`] said, given the engine's copy it was decided on (`seen`) and the core's own (`mine`). A
+/// [`Choice::Place`] hashes the engine's copy again first: if it is no longer `seen`, something wrote it since the
+/// decision and the core's copy must not overwrite it, so the engine's copy is adopted instead. After an adopt the copy
+/// is hashed again and must be the engine's copy as it is now.
+///
+/// The hash returned is the one to record as the last read, and it is never taken after the decision from the engine's
+/// folder: a place records `mine` (what was written), `InSync` and `Nothing` record `seen`. A writer that appends after the
+/// step then makes the next [`decide`] an adopt, instead of being recorded as already read and overwritten.
+///
+/// The window between that re-hash and the renames covers the whole sidecar copy, not just the main file. Staging every
+/// file as `.kith-tmp`, re-hashing, then renaming with the main file last would shrink it to the renames; that is left
+/// for before the switch (nothing calls this in production yet).
 pub(crate) fn apply(
     choice: Choice,
     ours: &SessionPtr,
     engine: &SessionPtr,
-    seen: Option<&str>,
+    seen: Option<&Digest>,
+    mine: Option<&Digest>,
 ) -> std::io::Result<Outcome> {
     let mut choice = choice;
     if choice == Choice::Place {
         let now = hash_session(engine)?;
         // Gone since the decision is still safe to place over; anything else there is newer than what was decided on.
-        if now.is_some() && now.as_ref().map(|d| d.hash.as_str()) != seen {
+        if now.is_some() && now.as_ref().map(|d| &d.hash) != seen.map(|d| &d.hash) {
             choice = Choice::Adopt;
         }
     }
@@ -97,7 +101,7 @@ pub(crate) fn apply(
             copy_session(ours, engine)?;
             Ok(Outcome {
                 choice,
-                engine: hash_session(engine)?,
+                engine: mine.cloned(),
             })
         }
         Choice::Adopt => {
@@ -114,7 +118,7 @@ pub(crate) fn apply(
         }
         Choice::Nothing | Choice::InSync => Ok(Outcome {
             choice,
-            engine: hash_session(engine)?,
+            engine: seen.cloned(),
         }),
     }
 }

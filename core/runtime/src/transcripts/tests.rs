@@ -685,13 +685,15 @@ fn a_place_is_refused_when_the_engine_copy_changed_after_the_decision() {
     let engine = w.session(&w.main(), "p", SID);
     write(&ours.jsonl(), "ours\nnewer\n");
     write(&engine.jsonl(), "ours\n");
-    let seen = hash_session(&engine).unwrap().unwrap().hash;
+    let seen_d = hash_session(&engine).unwrap().unwrap();
+    let seen = seen_d.hash.clone();
     // The rule says place: the engine's copy is what was last read.
-    let mine = hash_session(&ours).unwrap().unwrap().hash;
+    let mine_d = hash_session(&ours).unwrap().unwrap();
+    let mine = mine_d.hash.clone();
     assert_eq!(decide(Some(&seen), Some(&seen), Some(&mine)), Choice::Place);
     // A writer appends between the decision and the copy.
     write(&engine.jsonl(), "ours\nlive\n");
-    let o = apply(Choice::Place, &ours, &engine, Some(&seen)).unwrap();
+    let o = apply(Choice::Place, &ours, &engine, Some(&seen_d), Some(&mine_d)).unwrap();
     assert_eq!(o.choice, Choice::Adopt, "falls back to adopt");
     assert_eq!(
         std::fs::read_to_string(engine.jsonl()).unwrap(),
@@ -702,6 +704,53 @@ fn a_place_is_refused_when_the_engine_copy_changed_after_the_decision() {
         "ours\nlive\n"
     );
     assert_eq!(o.engine, hash_session(&engine).unwrap());
+}
+
+#[test]
+fn a_writer_appending_after_a_step_makes_the_next_decision_an_adopt() {
+    let w = World::new();
+    let ours = w.session(&w.root.join("store"), "p", SID);
+    let engine = w.session(&w.main(), "p", SID);
+    write(&ours.jsonl(), "ours\n");
+
+    // Place: what is recorded is the core's own copy's hash, not a fresh look at the engine's folder.
+    let o = step(&ours, &engine, None).unwrap();
+    assert_eq!(o.choice, Choice::Place);
+    assert_eq!(o.engine, hash_session(&ours).unwrap());
+    let recorded = o.engine.unwrap().hash;
+    write(&engine.jsonl(), "ours\nlive\n");
+    assert_eq!(
+        step(&ours, &engine, Some(&recorded)).unwrap().choice,
+        Choice::Adopt
+    );
+    assert_eq!(
+        std::fs::read_to_string(ours.jsonl()).unwrap(),
+        "ours\nlive\n"
+    );
+
+    // InSync: the hash recorded is the one the decision saw, so an append right after is not recorded as read.
+    let seen = hash_session(&engine).unwrap().unwrap();
+    let o = apply(
+        Choice::InSync,
+        &ours,
+        &engine,
+        Some(&seen),
+        hash_session(&ours).unwrap().as_ref(),
+    )
+    .unwrap();
+    write(&engine.jsonl(), "ours\nlive\nmore\n");
+    assert_eq!(o.engine.as_ref(), Some(&seen));
+    let recorded = o.engine.unwrap().hash;
+    assert_eq!(
+        step(&ours, &engine, Some(&recorded)).unwrap().choice,
+        Choice::Adopt
+    );
+
+    // Nothing: no copy on either side is recorded as none.
+    let a = w.session(&w.root.join("s3"), "p", "none");
+    let b = w.session(&w.root.join("e3"), "p", "none");
+    let o = apply(Choice::Nothing, &a, &b, None, None).unwrap();
+    assert_eq!(o.engine, None);
 }
 
 #[test]

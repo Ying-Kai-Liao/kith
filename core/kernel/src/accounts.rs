@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 
 mod clock;
 mod listing;
-pub mod mirror;
+mod mirror;
+pub use mirror::main_claude_paths;
 mod pick;
 mod pyjson;
 pub mod settings;
