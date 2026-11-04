@@ -8,6 +8,12 @@
   kith migrate run --force       go on although an agent run, a scheduled run or kith ask is active
   kith migrate run --status      where it stands (kith doctor says the same)
 
+Cutover of a module to the Kith core (the framework in core/runtime/src/cutover/; no module registers one yet):
+  kith migrate step MODULE [--dry-run] [--force]   snapshot, import, same-answer check, switch, tombstone the old files
+  kith migrate status                              each module's state
+  kith migrate check MODULE                        the same-answer check on its own
+  kith migrate rollback MODULE [--force]           export back (also: kith rollback MODULE); refuses while a claim is live
+
 Safe to run again: a finished migration is a no-op, a stopped one continues. The backup ~/.kith-migrate-backup-<time>/ is
 never deleted. Details: kernel/lib/kith_migrate.py, docs/moving-from-hq.md.
 """

@@ -39,6 +39,13 @@ mod cards;
 // The claim code (M3-2): the holder pipes, the warm runner and `terminal.open` call it from M3-4 on.
 #[allow(dead_code, reason = "first callers are M3-4, M3-5 and M3-11")]
 mod conversations;
+// The module-keyed cutover framework (M3-10a): `kith migrate step|status`, `kith rollback`. No module registered yet.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "lanes register their modules at their switch (M3-10b..g, M2-23)"
+)]
+mod cutover;
 mod daemon;
 // Nothing calls the doors but the daemon's `doors.*` rows and the tests: the host's sweep and `kith_door.py` switch later.
 #[cfg(unix)]
@@ -201,6 +208,14 @@ pub fn migrate_authority(
 #[allow(dead_code, reason = "first caller is M3-10 / M4-5")]
 pub(crate) fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<AuthorityReport, Error> {
     import::schedules::run(&Layout::new(&paths.machine), &paths.machine, dry_run)
+}
+
+/// `kith kernel cutover ...` (M3-10a): the cutover framework's verbs (`step MODULE [--dry-run] [--force]`, `rollback MODULE
+/// [--force]`, `status`, `check MODULE`, `modules`). Returns the lines to print. Takes the core's lifetime lock for the
+/// verbs that write, so a running daemon refuses them.
+#[cfg(unix)]
+pub fn cutover(paths: &Paths, args: &[String]) -> Result<Vec<String>, Error> {
+    cutover::run(&paths.machine, args)
 }
 
 /// Opens the core inside this process for one command.

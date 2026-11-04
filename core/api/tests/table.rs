@@ -75,7 +75,9 @@ fn every_row_is_well_formed() {
             &[Principal::RunToken]
         } else if HOST_ROWS.contains(&m.name) {
             &[Principal::Host]
-        } else if m.name == "syncLease.mark" {
+        // The host also reads two owner rows: the lease counter (`mark`) and the cutover gate (`cutover.mayServe`, which
+        // the host-start guard calls). `kernel.cutover`, the write side, stays Owner only.
+        } else if m.name == "syncLease.mark" || m.name == "cutover.mayServe" {
             &[Principal::Owner, Principal::Host]
         } else {
             &[Principal::Owner]
@@ -293,6 +295,7 @@ fn every_switched_verb_has_a_row() {
         "kernel threads resolve s1",
         "kernel run-once claude -- hi",
         "kernel core-migrate",
+        "kernel cutover status",
         "kernel core-status --json",
         "kernel core-daemon",
     ];
@@ -301,6 +304,15 @@ fn every_switched_verb_has_a_row() {
         let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
         assert_eq!(parsed.method.served, Served::Core, "{line}");
     }
+}
+
+/// M3-10a: the cutover verbs switch whole modules and roll them back, so only the owner may call them; never a host
+/// bridge, a run token or a guest.
+#[test]
+fn the_cutover_row_is_owner_only_and_experimental() {
+    let m = method("kernel.cutover").expect("kernel.cutover has a row");
+    assert_eq!(m.principals, &[Principal::Owner]);
+    assert_eq!(m.stability, Stability::Experimental);
 }
 
 #[test]

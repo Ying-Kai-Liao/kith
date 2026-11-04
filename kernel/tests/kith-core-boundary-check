@@ -46,6 +46,7 @@ PUBLIC = {
     ("lib.rs", "migrate_authority"), ("lib.rs", "AuthorityOptions"), ("lib.rs", "AuthorityReport"),
     ("lib.rs", "field:dry_run"), ("lib.rs", "field:force"), ("lib.rs", "field:changed"), ("lib.rs", "field:backup"),
     ("lib.rs", "field:lines"),
+    ("lib.rs", "cutover"),   # `kith kernel cutover ...` (M3-10a): argv in, lines out
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
     ("call.rs", "call"),
     ("daemon.rs", "Daemon"), ("daemon.rs", "spawn"), ("daemon.rs", "ready"), ("daemon.rs", "served"), ("daemon.rs", "stop"),
