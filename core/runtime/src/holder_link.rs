@@ -284,8 +284,20 @@ impl Drop for RenewalGuard {
     }
 }
 
-/// Renews the lease at once, then from a thread of its own every third of the lease: never behind a listing or a
-/// reconcile, which can take long enough on a loaded machine for a leftover deadline to lapse.
+/// Keeps the lease alive: a ping at once, then one from a thread of its own every third of the lease, never behind a
+/// listing or a reconcile, which can take long enough on a loaded machine for a leftover deadline to lapse. A renewal
+/// is a round (verification/lease): the hand answers PONG(seq) and remembers its clock, and the client's reader thread
+/// answers that PONG with RENEW(seq, lease), so the hand's deadline is its own clock when it read the PING plus the
+/// lease (so at or after the core's send plus the lease). That is safe because the core's belief starts later, at the
+/// PONG receipt. The same reader pings again at once on a `LEASE_LOST` (at most one such ping outstanding), so a
+/// refused tagged spawn can be retried as soon as the lease is armed.
+///
+/// What the core may assume: every RENEW it sent says "lease from now", so it stands behind a hand's guests for at
+/// most the core's clock at the PONG receipt plus `lease`
+/// (the hand's own deadline is anchored at its clock on reading the PING, so it lapses no later). Nothing releases or requeues a guest run on that belief yet (no run is tagged
+/// `kill_on_lease_loss` today). When one does, it must wait for belief + eps*lease (eps: how slow the hand clock may
+/// run) + the hand's 10 ms watcher + kill latency, or for the hand's report of the kill (`Exit::lapsed`, or
+/// `Welcome::lease_lost` on reconnect), whichever comes first (skill `holder-lease`, row `belief`).
 fn start_renewing(
     shared: &Arc<Shared>,
     client: &Client,
@@ -293,8 +305,9 @@ fn start_renewing(
 ) -> std::result::Result<RenewalGuard, String> {
     let renewer = client.renewer();
     let lease = cfg.lease;
+    client.answer_pongs(lease);
     renewer
-        .renew(lease)
+        .ping()
         .map_err(|e| format!("the holder stopped answering: {e}"))?;
     let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (stop, shared) = (done.clone(), shared.clone());
@@ -305,7 +318,7 @@ fn start_renewing(
         while !stopped() {
             std::thread::sleep(Duration::from_millis(10).min(every));
             if Instant::now() >= due {
-                if renewer.renew(lease).is_err() {
+                if renewer.ping().is_err() {
                     return; // the link is gone; its loop notices on its next listing
                 }
                 due = Instant::now() + every;
