@@ -37,6 +37,7 @@ mod people;
 mod run_tokens;
 mod runs;
 mod schedule_store;
+mod schedules;
 mod secrets;
 mod switched;
 mod transcripts;
@@ -81,6 +82,8 @@ const PARTS: &[&[Method]] = &[
     import::ROWS,
     // M3: conversations and their claims.
     conversations::ROWS,
+    // M4: schedules.
+    schedules::ROWS,
     // M4: the schedule store's reads and its unserved write rows.
     schedule_store::ROWS,
     transcripts::ROWS,

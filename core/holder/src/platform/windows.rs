@@ -6,7 +6,7 @@
 //! Windows: named pipes only this account can open, ConPTY, one job object per held process, detaching out of the
 //! parent's job.
 
-use super::{Spec, Started};
+use super::{AcceptCtl, Ctl, CtlStart, Spec, Started};
 use crate::proto::{Exit, Mode};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -866,9 +866,46 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
                 input: Box::new(in_w),
                 out: Box::new(out_r),
                 err: None,
+                ctl: None,
             })
         }
         Mode::Pipes => {
+            // A warm engine runs under `kith-stub --resident`, which opens a named pipe made here as its control
+            // channel: owner-only DACL, remote clients rejected and FILE_FLAG_FIRST_PIPE_INSTANCE (`new_instance`), so
+            // no other process can have made the name first. The stub checks that this process serves it.
+            let ctl_name = spec
+                .resident
+                .as_ref()
+                .map(|_| PathBuf::from(format!(r"\\.\pipe\kith-ctl-{}", super::random_hex())));
+            let argv: Vec<String> = match (&spec.resident, &ctl_name) {
+                (Some(r), Some(name)) => {
+                    let mut v: Vec<String> = [
+                        r.stub,
+                        "--resident",
+                        "--lock-dir",
+                        r.lock_dir,
+                        "--ctl-pipe",
+                        &name.to_string_lossy(),
+                        "--",
+                    ]
+                    .map(String::from)
+                    .into();
+                    v.extend(spec.argv.iter().cloned());
+                    v
+                }
+                _ => spec.argv.to_vec(),
+            };
+            let run = Spec {
+                argv: &argv,
+                env: spec.env,
+                cwd: spec.cwd,
+                mode: spec.mode,
+                cols: spec.cols,
+                rows: spec.rows,
+                resident: None,
+            };
+            // Listening before the stub starts, so its open never meets a missing name or a busy pipe.
+            let listener = ctl_name.as_deref().map(listen).transpose()?;
             let (child_in, input) = anon_pipe()?;
             let (out, child_out) = anon_pipe()?;
             let (err, child_err) = anon_pipe()?;
@@ -882,21 +919,63 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
                     SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)
                 })?;
             }
-            let (pid, handle) = create_in_job(spec, &ends, Some(ends), None, &job)?;
+            let (pid, handle) = create_in_job(&run, &ends, Some(ends), None, &job)?;
             drop((child_in, child_out, child_err));
+            let proc = Proc {
+                pid,
+                handle,
+                job,
+                console: None,
+            };
+            // Not waited for here: the holder holds its state lock while it spawns, and a stub that is slow to start
+            // (a virus scan, a cold disk) would stall every other process for up to the whole wait.
+            let ctl = match (listener, ctl_name) {
+                (Some(l), Some(name)) => {
+                    let accept: AcceptCtl = Box::new(move |proc| accept_stub(l, &name, proc));
+                    Some(CtlStart::Accept(accept))
+                }
+                _ => None,
+            };
             Ok(Started {
-                proc: Proc {
-                    pid,
-                    handle,
-                    job,
-                    console: None,
-                },
+                proc,
                 input: Box::new(input),
                 out: Box::new(out),
                 err: Some(Box::new(err)),
+                ctl,
             })
         }
     }
+}
+
+/// Waits for the stub to open its control pipe. A stub that never does (it exited on a bad flag, or hangs) ends the
+/// spawn: its tree is killed and the blocked accept is released by connecting to the name ourselves.
+fn accept_stub(listener: Listener, name: &Path, proc: &Proc) -> io::Result<Ctl> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(accept(&listener));
+    });
+    let begun = std::time::Instant::now();
+    let failed = loop {
+        match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(Ok(stream)) => {
+                return Ok(Ctl {
+                    write: Box::new(stream.clone()),
+                    read: Box::new(stream),
+                });
+            }
+            Ok(Err(e)) => break e,
+            Err(_) if begun.elapsed() > std::time::Duration::from_secs(15) || proc.tree_empty() => {
+                break io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "kith-stub did not open its control pipe",
+                );
+            }
+            Err(_) => {}
+        }
+    };
+    proc.kill_tree();
+    let _ = connect(name);
+    Err(failed)
 }
 
 /// Whether this process lives in any job: the holder was started inside its starter's job because breakaway

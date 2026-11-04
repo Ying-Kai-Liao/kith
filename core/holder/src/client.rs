@@ -521,6 +521,53 @@ impl Client {
         Ok(wire::parse::<p::Acked>(&payload)?.state)
     }
 
+    /// Asks the holder to take conversation lock `key` for `claim` through process `h`'s resident stub, and waits for
+    /// the answer to that claim. `Locked`, `Busy` or `Error`; the same claim again is `Locked` again.
+    pub fn take_lock(&mut self, h: &p::HeldId, key: &str, claim: u64) -> io::Result<p::LockAnswer> {
+        self.lock_call(p::TAKE, p::LockOp::Take, h, key, claim)
+    }
+
+    /// Releases it at turn end: `Released`, or `NotHeld` for a claim the stub does not hold (the lock then stays).
+    pub fn release_lock(
+        &mut self,
+        h: &p::HeldId,
+        key: &str,
+        claim: u64,
+    ) -> io::Result<p::LockAnswer> {
+        self.lock_call(p::RELEASE, p::LockOp::Release, h, key, claim)
+    }
+
+    /// Tells the holder the answers for `claim` arrived, so it forgets them.
+    pub fn ack_lock(&mut self, h: &p::HeldId, claim: u64) -> io::Result<()> {
+        let body = serde_json::to_vec(&p::LockAcked { claim }).map_err(io::Error::other)?;
+        self.send_for(p::LOCK_ACK, &h.instance, h.id, &body)
+    }
+
+    fn lock_call(
+        &mut self,
+        kind: u8,
+        op: p::LockOp,
+        h: &p::HeldId,
+        key: &str,
+        claim: u64,
+    ) -> io::Result<p::LockAnswer> {
+        let body = serde_json::to_vec(&p::LockReq {
+            key: key.to_owned(),
+            claim,
+        })
+        .map_err(io::Error::other)?;
+        self.send_for(kind, &h.instance, h.id, &body)?;
+        let mine = |f: &Frame| {
+            f.0 == p::LOCK_ANSWER
+                && f.1 == h.id
+                && wire::parse::<p::LockAnswer>(&f.2).is_ok_and(|a| a.op == op && a.claim == claim)
+        };
+        let (_, _, payload) = self
+            .take(Duration::from_secs(10), mine)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
+        wire::parse(&payload)
+    }
+
     /// Everything the process printed so far that is still in the holder's tail.
     pub fn tail(&mut self, h: &p::HeldId) -> io::Result<Vec<u8>> {
         self.send_for(p::TAIL, &h.instance, h.id, &[])?;
