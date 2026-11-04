@@ -24,6 +24,8 @@
 //! belongs to someone else, or is a symlink, is refused (`Error::Folder`). On Windows an existing folder is used
 //! as found, and lock files are opened without FILE_SHARE_DELETE so a held file cannot be deleted under us.
 
+pub mod resident;
+
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
