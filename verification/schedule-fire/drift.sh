@@ -8,15 +8,13 @@
 # set SYNC below to the commit you checked (and in .claude/skills/schedule-fire/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below. The model was written BEFORE the code
-# (M4-3 does not exist yet): SYNC is origin/rust-rebuild when the architect's review was applied (the M3-2 turn API
-# and the M4-2 store are on it; the code table in the skill cites their lines). When M4-3 lands, the first reader replaces this with the M4-3 merge commit after checking the code
-# against the table in the skill.
-SYNC=0bd2c21e87899a07b766d77932e1a4215d3415ec
+# The commit at which the model was confirmed to describe the files below: origin/rust-rebuild after M4-3 (the fire
+# transaction) and M4-4a, with the code table in the skill checked against fire.rs / sync.rs.
+SYNC=cf308ebcbc3fb43e8d2a983bce57ab18efbe0135
 
 FILES=(
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)
-  core/runtime/src/schedules          # M4-2 store and index; M4-3 will add tick, fire (the one transaction), run now, the webhook entry
+  core/runtime/src/schedules          # M4-2 store and index; M4-3 tick, fire (the one transaction), run now, the webhook entry
   core/runtime/src/migrations/schedules  # sched_tick, sched_fires, sched_runs (unique keys)
   core/runtime/src/conversations/claims.rs  # enqueue_turn, claim, park, unpark_ready, expire_parked, revoke_person
 )

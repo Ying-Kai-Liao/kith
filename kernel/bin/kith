@@ -148,7 +148,10 @@ case $1 in
                       if [[ $2 == --all ]]; then rc=0; "$KITH/bin/kith-self-update" || rc=$?; "$KITH/bin/kith-pkg" "$@" || rc=$?; exit $rc; fi
                       exec "$KITH/bin/kith-pkg" "$@" ;;
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
-  rollback)           shift; exec "$KITH/bin/kith-pkg" pin "$@" ;;
+  rollback)           shift
+                      # A cutover module's name (kith migrate status) goes back to Python's files; anything else is an agent.
+                      if [[ -n ${1:-} && $1 != -* ]] && "$KITH/bin/kith-migrate" is-module "$1" >/dev/null 2>&1; then exec "$KITH/bin/kith-migrate" rollback "$@"; fi
+                      exec "$KITH/bin/kith-pkg" pin "$@" ;;
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
   connectors)         exec "$KITH/bin/kith-auth" "$@" ;;
   skills)             exec "$KITH/bin/kith-skills" "$@" ;;
