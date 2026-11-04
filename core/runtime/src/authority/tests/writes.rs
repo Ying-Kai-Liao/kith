@@ -965,7 +965,7 @@ fn the_handler_takes_the_callers_view_of_where_the_agents_are() {
         "scratch is a built-in agent: only the owner runs it, it can't be given to sam"
     );
     // a method this module does not answer is not served
-    let e = call(&mut rig.core, "people.approve", &view(json!({"id": "r1"}))).unwrap_err();
+    let e = call(&mut rig.core, "people.rename", &view(json!({"id": "r1"}))).unwrap_err();
     assert!(matches!(e, Error::NotServed(_)), "{e}");
 }
 

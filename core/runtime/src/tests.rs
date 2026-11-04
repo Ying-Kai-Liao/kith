@@ -767,6 +767,42 @@ fn a_fresh_database_and_a_migrated_one_end_with_the_same_schema() {
 }
 
 #[test]
+fn only_the_host_principal_calls_the_sync_lease_writes() {
+    let (_t, m) = machine();
+    let c = open(&Layout::new(&m));
+    for name in [
+        "syncLease.link",
+        "syncLease.unlink",
+        "syncLease.changed",
+        "syncLease.drop",
+        "syncLease.renew",
+    ] {
+        for other in [
+            kith_api::Principal::Owner,
+            kith_api::Principal::Member,
+            kith_api::Principal::Bot,
+            kith_api::Principal::RunToken,
+        ] {
+            assert!(
+                matches!(
+                    c.call(other, name, &serde_json::json!({})),
+                    Err(Error::NotAllowed(_))
+                ),
+                "{name} for {}",
+                other.name()
+            );
+        }
+        assert!(
+            !matches!(
+                c.call(kith_api::Principal::Host, name, &serde_json::json!({})),
+                Err(Error::NotAllowed(_))
+            ),
+            "{name} for host"
+        );
+    }
+}
+
+#[test]
 fn the_m2_stub_rows_answer_not_served_so_the_caller_falls_back() {
     let (_t, m) = machine();
     let c = open(&Layout::new(&m));

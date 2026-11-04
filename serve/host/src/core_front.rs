@@ -74,6 +74,20 @@ pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
     }
 }
 
+/// One row the daemon takes from the host alone (the sync-lease writes, M2-10b), called on a connection that proves the
+/// host secret. `Some(answer)` only when the daemon answered; any refusal, a missing daemon or a lost connection is `None`.
+/// Only the relay owner's code calls this: the secret is read from the core folder by `kith_core`, never put in an
+/// environment or passed to a child, and a write is never sent twice.
+// No relay code calls the lease rows through the core yet (the host's lease is still its own file until M3), so only
+// the tests use it today.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn call_as_host(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
+    match kith_core::reach_as_host(folders, method, params, false) {
+        kith_core::Reached::Answered(answer) => Some(answer),
+        _ => None,
+    }
+}
+
 /// A daemon started for a test of a caller that asks it (`ask`).
 #[cfg(test)]
 pub struct TestDaemon(kith_core::Daemon);
@@ -142,6 +156,77 @@ fn folders_from(answer: &Value) -> Option<Paths> {
         cache: get("KITH_CACHE")?,
         store: get("KITH_STORE")?,
     })
+}
+
+/// A `secrets.*` row on the owner socket, for the host's vault (M2-7): the host may not name the core elsewhere, so
+/// this is its one door to the envelope. Waits up to `wait` for a daemon that is still starting; every other outcome
+/// (no daemon, a daemon of another version, a lost connection, a refusal such as a locked key store) is an error whose
+/// text says why. The rows are idempotent, so a lost connection is retried once inside `reach`.
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+pub fn secrets_call(method: &str, params: &Value, wait: std::time::Duration) -> anyhow::Result<Value> {
+    secrets_call_at(&kernel::folders(&kith_kernel::paths::process_home()), method, params, wait)
+}
+
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+fn secrets_call_at(folders: &Paths, method: &str, params: &Value, wait: std::time::Duration) -> anyhow::Result<Value> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match kith_core::reach(folders, method, params, true) {
+            kith_core::Reached::Answered(answer) => return Ok(answer),
+            kith_core::Reached::Refused(e) => anyhow::bail!("{e}"),
+            kith_core::Reached::NoDaemon if std::time::Instant::now() < deadline && !crate::service::is_exiting() => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            kith_core::Reached::NoDaemon => {
+                let status = kith_core::status(folders);
+                let why = |k: &str| status["core"][k].as_str().unwrap_or("-").to_owned();
+                anyhow::bail!(
+                    "the core is not running ({}: {}; kith doctor says more; secrets need it)",
+                    why("state"),
+                    why("note")
+                )
+            }
+            kith_core::Reached::Mismatch(note) => anyhow::bail!("the running core does not fit this host: {note}"),
+            kith_core::Reached::Lost(why) => anyhow::bail!("the connection to the core ended: {why}"),
+        }
+    }
+}
+
+/// Whether the envelope holds `name`, for the paths that decide whether a secret must be unlocked (a bot starting).
+/// Unlike [`secrets_call`] it never reads "cannot ask" as "no": it waits up to `wait` while the daemon is not yet
+/// answering (starting, or a command holding the core) and then fails, with the reason. The one honest "no" without an
+/// answer is a computer with no core database at all: nothing was ever sealed there.
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+pub fn secrets_has_waiting(name: &str, wait: std::time::Duration) -> anyhow::Result<bool> {
+    secrets_has_at(&kernel::folders(&kith_kernel::paths::process_home()), name, wait)
+}
+
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+fn secrets_has_at(folders: &Paths, name: &str, wait: std::time::Duration) -> anyhow::Result<bool> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match kith_core::reach(folders, "secrets.has", &json!({"name": name}), true) {
+            kith_core::Reached::Answered(answer) => return Ok(answer["has"] == true),
+            kith_core::Reached::NoDaemon => {
+                let status = kith_core::status(folders);
+                let state = status["core"]["state"].as_str().unwrap_or("-");
+                if state == "no-core" {
+                    return Ok(false);
+                }
+                // A leaving host stops waiting: the core goes with it, and the runtime waits for this thread.
+                if std::time::Instant::now() >= deadline || crate::service::is_exiting() {
+                    anyhow::bail!(
+                        "the core is not running ({state}: {}; kith doctor says more; secrets need it)",
+                        status["core"]["note"].as_str().unwrap_or("-")
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            kith_core::Reached::Refused(e) => anyhow::bail!("{e}"),
+            kith_core::Reached::Mismatch(note) => anyhow::bail!("the running core does not fit this host: {note}"),
+            kith_core::Reached::Lost(why) => anyhow::bail!("the connection to the core ended: {why}"),
+        }
+    }
 }
 
 // --- run tokens (M2-13) -----------------------------------------------------------------------------------------------
@@ -367,6 +452,27 @@ mod tests {
         std::iter::once("kith serve").chain(line.split(' ')).map(OsString::from).collect()
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn the_host_calls_the_lease_writes_on_its_own_proof_and_the_owner_connection_cannot() {
+        let home = std::env::temp_dir().join(format!("kcf-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+        std::fs::create_dir_all(&home).expect("home");
+        let f = kernel::folders(&home);
+        let machine = f.machine.clone();
+        let daemon = serve_for_test(&f);
+        // The ordinary (owner) connection is refused the write; the host's own proof is not.
+        assert_eq!(ask(&f, "syncLease.link", &json!({})), None);
+        assert_eq!(call_as_host(&f, "syncLease.link", &json!({})), Some(json!({"cloud": "linked"})));
+        assert_eq!(ask(&f, "syncLease.status", &json!({})).expect("owner reads")["cloud"], "linked");
+        // And the host's connection reads nothing of the owner's.
+        assert_eq!(call_as_host(&f, "syncLease.status", &json!({})), None);
+        // The secret is a file in the core folder, never an environment variable of this process.
+        let secret = std::fs::read_to_string(machine.join("core/host.token")).expect("host secret");
+        assert!(std::env::vars().all(|(_, v)| !v.contains(secret.trim())));
+        daemon.stop();
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     #[test]
     fn the_run_token_switch_is_off_unless_asked() {
         for off in [None, Some(""), Some("0"), Some("yes"), Some("false")] {
@@ -456,6 +562,80 @@ mod tests {
         ] {
             assert_eq!(try_cli(&args(line)), None, "{line}");
         }
+    }
+
+    fn short_folders(tag: &str) -> Paths {
+        // A Unix socket path holds about a hundred bytes, so not the long per-user temp folder.
+        let p = PathBuf::from("/tmp").join(format!("kfs-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("folder");
+        Paths {
+            home: p.clone(),
+            state: p.clone(),
+            agents: p.clone(),
+            home_real: p.clone(),
+            state_real: p.clone(),
+            agents_real: p.clone(),
+            machine: p.clone(),
+            secrets: p.clone(),
+            logs: p.clone(),
+            cache: p.clone(),
+            store: p,
+        }
+    }
+
+    /// The vault's own door to a real daemon: the rows that need no key answer, a refusal arrives as an error, and no
+    /// daemon is one fast error rather than a wait. (Rows that need the key are tested in the core with a stand-in key
+    /// store, as the host may not pick one.)
+    #[cfg(unix)]
+    #[test]
+    fn secrets_call_reaches_a_real_daemon_and_fails_fast_without_one() {
+        let folders = short_folders("sc");
+        let none = std::time::Instant::now();
+        let err = secrets_call_at(&folders, "secrets.has", &json!({"name": "a"}), std::time::Duration::ZERO)
+            .expect_err("no daemon yet");
+        assert!(format!("{err:#}").contains("core is not running"), "{err:#}");
+        assert!(none.elapsed() < std::time::Duration::from_secs(5));
+
+        let daemon = serve_for_test(&folders);
+        let wait = std::time::Duration::from_secs(5);
+        assert_eq!(secrets_call_at(&folders, "secrets.has", &json!({"name": "a"}), wait).expect("has")["has"], false);
+        assert_eq!(
+            secrets_call_at(&folders, "secrets.delete", &json!({"name": "a"}), wait).expect("delete")["deleted"],
+            false
+        );
+        let bad = secrets_call_at(&folders, "secrets.has", &json!({}), wait);
+        assert!(bad.is_err(), "missing params are refused: {bad:?}");
+        daemon.stop();
+        let _ = std::fs::remove_dir_all(&folders.home);
+    }
+
+    /// The bot-start question: a core that is starting is waited for, a core that is down is an error (never "no"),
+    /// and a computer with no core database has nothing sealed.
+    #[cfg(unix)]
+    #[test]
+    fn secrets_has_waits_for_a_starting_core_and_fails_loudly_for_a_down_one() {
+        let folders = short_folders("sh");
+        let none = std::time::Duration::from_millis(300);
+        // No core database yet: nothing was ever sealed, and nobody waits.
+        let t = std::time::Instant::now();
+        assert!(!secrets_has_at(&folders, "a", std::time::Duration::from_secs(10)).expect("no core"));
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        // A core database but no daemon: down, and a loud error.
+        serve_for_test(&folders).stop();
+        let err = secrets_has_at(&folders, "a", none).expect_err("down is not 'no'");
+        assert!(format!("{err:#}").contains("core is not running"), "{err:#}");
+        // A daemon that comes up while the caller waits.
+        let starting = folders.clone();
+        let late = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            serve_for_test(&starting)
+        });
+        let t = std::time::Instant::now();
+        assert!(!secrets_has_at(&folders, "a", std::time::Duration::from_secs(10)).expect("waits"));
+        assert!(t.elapsed() >= std::time::Duration::from_millis(500));
+        late.join().expect("daemon").stop();
+        let _ = std::fs::remove_dir_all(&folders.home);
     }
 
     #[test]

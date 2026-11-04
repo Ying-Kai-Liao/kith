@@ -463,6 +463,7 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
         &p,
         Config {
             holder_on: false,
+            key_load: None,
             ..Config::default()
         },
     );
