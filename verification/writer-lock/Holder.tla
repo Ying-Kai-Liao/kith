@@ -145,7 +145,7 @@ Hear(e) ==
   /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, cst, cpid, idmap, rec, recInst, writers>>
 
 \* The core takes a heard exit as the end of the claim it maps the id to (claims.rs report, kinds done and exit). With
-\* RedeemWrite an exit that names another process than the recorded redeemer ends nothing (apply: `said != rec`).
+\* RedeemWrite an exit that names another process than the recorded redeemer ends nothing, and so does one that names none (apply: the pid must equal `rec`).
 Settle(h) ==
   /\ h \in heard /\ ~curDone /\ MapsTo(h.inst, h.id, cur)
   /\ (RedeemWrite /\ cst \in {"running", "ending"}) => h.pid = cpid

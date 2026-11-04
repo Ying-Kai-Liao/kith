@@ -1,7 +1,10 @@
 //! Generated step sequences against the real claim code and a real core.db: whatever order claims, redeems, reports,
 //! stops, revokes, holder changes and process deaths come in, a conversation never has two writers, and a claim is never
-//! `ended` while the process its redeem recorded is alive. The holder is honest the way the real one is: it reports
-//! `done` or `exit` for a pid only after that process is gone. Run only these: `cargo test -p kith-core conversations::props`.
+//! `ended` while the process its redeem recorded is alive. The holder is honest the way the real one is for `Done` and
+//! `Exit` (it reports a pid only after that process is gone), and also careless: `ReportOther` and `ReportBlind` send
+//! reports that name another process or none, which must end nothing and must not shadow the writer's own report.
+//! After the sequence the liveness check kills every recorded writer and reports its exit: every such claim must reach
+//! `ended`. Run only these: `cargo test -p kith-core conversations::props`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -11,7 +14,7 @@ use proptest::test_runner::{Config, TestCaseError, TestRunner};
 use super::claims::{
     Redeemed, claim, different_holder, end_gone, reconcile, redeem, report, revoke_person, stop,
 };
-use super::tests::{Procs, conversation, count, new_claim, open};
+use super::tests::{Procs, conversation, count, new_claim, open, state, unreconcile};
 use crate::db::Core;
 
 #[derive(Clone, Debug)]
@@ -21,6 +24,10 @@ enum Step {
     Done(usize),
     Exit(usize),
     Busy(usize),
+    /// done (true) or exit (false) naming a fresh pid, killing nothing: a respawn that lost the lock.
+    ReportOther(usize, bool),
+    /// done or exit naming no pid at all.
+    ReportBlind(usize, bool),
     Stop(usize, bool),
     Revoke,
     Different(bool),
@@ -36,6 +43,8 @@ fn step() -> impl Strategy<Value = Step> {
         2 => (0..8usize).prop_map(Step::Done),
         2 => (0..8usize).prop_map(Step::Exit),
         1 => (0..8usize).prop_map(Step::Busy),
+        2 => ((0..8usize), any::<bool>()).prop_map(|(i, d)| Step::ReportOther(i, d)),
+        2 => ((0..8usize), any::<bool>()).prop_map(|(i, d)| Step::ReportBlind(i, d)),
         2 => ((0..8usize), any::<bool>()).prop_map(|(i, r)| Step::Stop(i, r)),
         1 => Just(Step::Revoke),
         2 => any::<bool>().prop_map(Step::Different),
@@ -104,8 +113,8 @@ fn run(steps: &[Step]) -> Result<(), TestCaseError> {
                 if let Some(id) = pick(*i) {
                     next_pid += 1;
                     let inst = format!("h{instance}");
-                    let r =
-                        redeem(&mut c, id, next_pid, &format!("s{next_pid}"), &inst, now).unwrap();
+                    let r = redeem(&mut c, id, next_pid, &format!("s{next_pid}"), &inst, 0, now)
+                        .unwrap();
                     // A refused stub exits; only a redeemed one goes on to run the engine.
                     if matches!(r, Redeemed::Running { again: false }) {
                         procs.spawn(next_pid, &format!("s{next_pid}"));
@@ -132,6 +141,19 @@ fn run(steps: &[Step]) -> Result<(), TestCaseError> {
                     report(&mut c, id, "busy", "{}", now).unwrap();
                 }
             }
+            Step::ReportOther(i, done) => {
+                if let Some(id) = pick(*i) {
+                    next_pid += 1;
+                    let kind = if *done { "done" } else { "exit" };
+                    report(&mut c, id, kind, &format!(r#"{{"pid":{next_pid}}}"#), now).unwrap();
+                }
+            }
+            Step::ReportBlind(i, done) => {
+                if let Some(id) = pick(*i) {
+                    let kind = if *done { "done" } else { "exit" };
+                    report(&mut c, id, kind, "{}", now).unwrap();
+                }
+            }
             Step::Stop(i, requeue) => {
                 if let Some(id) = pick(*i) {
                     stop(&mut c, id, "stop", *requeue, now).unwrap();
@@ -143,11 +165,14 @@ fn run(steps: &[Step]) -> Result<(), TestCaseError> {
             Step::Different(list_all) => {
                 instance += 1;
                 let listed: Vec<i64> = if *list_all { ids.clone() } else { Vec::new() };
-                different_holder(&mut c, &format!("h{instance}"), &listed, &[], now).unwrap();
+                different_holder(&mut c, &format!("h{instance}"), &listed, &[], i64::MAX, now)
+                    .unwrap();
             }
             Step::Reconcile(list_all) => {
                 let listed: Vec<i64> = if *list_all { ids.clone() } else { Vec::new() };
-                reconcile(&mut c, &listed, &[], now).unwrap();
+                // A reconcile is once per generation: this is a new core's.
+                unreconcile(&c);
+                reconcile(&mut c, &listed, &[], i64::MAX, now).unwrap();
             }
             Step::Die(i) => {
                 if let Some(p) = pick(*i).and_then(|id| recorded_pid(&c, id)) {
@@ -159,6 +184,31 @@ fn run(steps: &[Step]) -> Result<(), TestCaseError> {
             }
         }
         invariants(&c, &procs)?;
+    }
+    liveness(&mut c, &procs, now)
+}
+
+/// Once the recorded pid is gone and its exit reported, the claim reaches `ended` (or `end_gone` ends it): no live claim
+/// keeps a dead writer.
+fn liveness(c: &mut Core, procs: &Procs, mut now: i64) -> Result<(), TestCaseError> {
+    let mut st = c
+        .conn()
+        .prepare(
+            "SELECT claim_id, pid FROM claims WHERE state IN ('running', 'ending') AND pid IS NOT NULL",
+        )
+        .unwrap();
+    let live: Vec<(i64, i64)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    drop(st);
+    for (id, pid) in live {
+        now += 1;
+        procs.kill(u32::try_from(pid).unwrap());
+        report(c, id, "exit", &format!(r#"{{"pid":{pid}}}"#), now).unwrap();
+        let after = state(c, id);
+        prop_assert_eq!(after, "ended", "claim {} still live after its exit", id);
     }
     Ok(())
 }

@@ -120,7 +120,7 @@ in the cfg). `RefuseOlder`, `HighWater`, `RefuseWhileRunning`, `KeyByInstance`, 
 | `holder-crash-donetruth-minimal` | `RedeemWrite`, only HighWater, WriterLock, RedeemChecksClaim | pass | None of `RefuseOlder`, `KeyByInstance`, `RecordAtSpawn` is needed for `DoneTruth` (the code keeps `spawned` pid recording anyway as a cheap extra). |
 
 Code for the `RedeemWrite` actions: `core/runtime/src/conversations/claims.rs` (`redeem` = `TakeLock`'s CAS,
-`release_unlisted` = `Connect`'s release, `report` = `Settle` with the pid check, `end_gone` = `KillRecorded` +
+`release_unlisted` = `Connect`'s release, `report` = `Settle` with the pid check (a report without the recorded pid applies nothing), `end_gone` = `KillRecorded` +
 `ConfirmGone`). Not modelled: revoke and stop (`stop`, `revoke_person` also go to `ending`), the stub's lock and redeem as
 two steps, a queued take-over claim.
 
@@ -144,7 +144,7 @@ M3-2 added the redeem write to `Holder.tla` (switches `RedeemWrite`, `RedeemCAS`
 `DoneTruth` rows above; the first three rules are in `claims.rs` with tests (`holder_crash_donetruth_*`) and a proptest of
 random step sequences. Still open: the fourth rule. `WriterLock4.tla` keeps its omniscient `Orphan`; replacing it needs a
 recorded "redeemed under instance" bit in a model whose slow rows take 15-30 min each and were not re-run here.
-Also open: an exit report that names no pid (`{}`) ends a running claim; the holder's report must carry the pid (M3-4).
+A `done` or `exit` that names no pid, or another pid, ends a running or ending claim in neither the code nor the model (`Settle`'s `h.pid = cpid`); reports are keyed by `(claim_id, kind, pid)` so the writer's own is never shadowed. A `--direct` claim (kind `external`) is outside the model: reconcile and a holder change skip it and only `end_gone` ends it.
 
 ## When you change covered code
 

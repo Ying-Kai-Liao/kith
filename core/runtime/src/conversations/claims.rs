@@ -23,7 +23,13 @@
 //!   (the partial unique index `claims_one_writer` blocks a second claim) until its recorded pid is confirmed gone
 //!   ([`end_gone`]) or the holder reports the exit of that same pid ([`report`]).
 //! - A `done` or `exit` report ends a `running` or `ending` claim only when it names the recorded pid (a report of
-//!   another process of the same claim, such as a respawn that lost the lock, is acked and changes nothing).
+//!   another process of the same claim, such as a respawn that lost the lock, or one that names no pid, is acked and
+//!   changes nothing). Reports are keyed by `(claim_id, kind, pid)` (migration 81), so the real writer's own report is
+//!   never shadowed by another process's.
+//! - A `--direct` (`external`) claim has no stub and no holder entry: reconcile and a holder change leave it alone, and
+//!   only its recorded pid being gone ends it ([`end_gone`]).
+//! - The may check is the caller's, but the revoke it saw is carried in: [`revoke_epoch`] before the check, passed in
+//!   [`NewClaim::revoke_seen`] and [`redeem`], refused in the transaction if [`revoke_person`] bumped it since.
 //!
 //! Process probes (`ps`, `kill -0`) happen outside the transaction ([`end_gone`] reads, probes, then CASes): the CAS
 //! decides. Times are milliseconds, passed in so tests set the clock. Not here: promoting a queued take-over claim
@@ -38,7 +44,10 @@ use crate::error::{Error, Result};
 use crate::gate::Liveness;
 
 /// `meta` key: the core generation whose reconcile has committed. Claims are refused until it equals the core's.
-const RECONCILED: &str = "claims_reconciled_generation";
+pub(super) const RECONCILED: &str = "claims_reconciled_generation";
+
+/// `meta` key prefix: how many times a person was revoked. `revoke_person` bumps it in its transaction.
+const REVOKED: &str = "revoked:";
 
 /// What kind of writer a claim is (the SQL CHECK of `claims.kind`; it cannot grow without a table rebuild).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +79,8 @@ pub(crate) struct NewClaim<'a> {
     pub account: Option<&'a str>,
     /// An `external` run's own process (pid and `lock::process_start` text); required for that kind.
     pub process: Option<(u32, &'a str)>,
+    /// [`revoke_epoch`] of `person`, read before the caller's may check. The claim is refused if a revoke committed since.
+    pub revoke_seen: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,6 +168,33 @@ fn is_newest(tx: &Transaction<'_>, claim_id: i64, conversation: &str) -> Result<
     Ok(newest == Some(claim_id))
 }
 
+/// How many times `person` has been revoked. Read it before the may check and pass it to [`claim`] and [`redeem`]: a
+/// revoke that commits between the check and the claim moves it, and the claim is refused.
+pub(crate) fn revoke_epoch(core: &Core, person: &str) -> Result<i64> {
+    epoch(core.conn(), person)
+}
+
+fn epoch(conn: &rusqlite::Connection, person: &str) -> Result<i64> {
+    let v: Option<String> = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [format!("{REVOKED}{person}")],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(v.and_then(|t| t.parse().ok()).unwrap_or(0))
+}
+
+/// The newest claim id handed out. Read it before asking the holder what it runs and pass it to [`reconcile`] and
+/// [`different_holder`], which then touch only claims at or below it.
+pub(crate) fn claim_high_water(core: &Core) -> Result<i64> {
+    Ok(core.conn().query_row(
+        "SELECT value FROM counters WHERE name = 'claim_id'",
+        [],
+        |r| r.get(0),
+    )?)
+}
+
 fn reconciled(tx: &Transaction<'_>) -> Result<Option<i64>> {
     let text: Option<String> = tx
         .query_row("SELECT value FROM meta WHERE key = ?1", [RECONCILED], |r| {
@@ -207,6 +245,12 @@ pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Cla
     if reconciled(&tx)? != Some(generation) {
         return Err(Error::Refused(format!(
             "kith-core: claims wait for the reconcile of generation {generation}"
+        )));
+    }
+    if epoch(&tx, req.person)? != req.revoke_seen {
+        return Err(Error::Refused(format!(
+            "kith-core: {} was revoked after the may check",
+            req.person
         )));
     }
     let known: Option<i64> = tx
@@ -261,13 +305,16 @@ pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Cla
     if let Some(turn) = req.turn {
         let n = tx.execute(
             "UPDATE turns SET claim_id = ?1, state = 'claimed', parked_reason = NULL, parked_at = NULL
-             WHERE id = ?2 AND conversation = ?3 AND state IN ('queued', 'parked')",
-            params![claim_id, turn, req.conversation],
+             WHERE id = ?2 AND conversation = ?3 AND state IN ('queued', 'parked') AND person = ?4
+               AND (deadline IS NULL OR deadline > ?5)",
+            params![claim_id, turn, req.conversation, req.person, now],
         )?;
         if n != 1 {
+            // Not waiting, past its deadline (expire_parked has not swept it yet), or another person's turn: a claim
+            // for one person must not run another's, or the second person's revoke would miss the run.
             return Err(Error::Refused(format!(
-                "kith-core: turn {turn} is not waiting in conversation {}",
-                req.conversation
+                "kith-core: turn {turn} is not waiting for {} in conversation {}",
+                req.person, req.conversation
             )));
         }
     }
@@ -288,12 +335,26 @@ pub(crate) fn redeem(
     pid: u32,
     started: &str,
     holder_instance: &str,
+    revoke_seen: i64,
     now: i64,
 ) -> Result<Redeemed> {
     let tx = core.claim_tx()?;
+    let person: Option<String> = tx
+        .query_row(
+            "SELECT person FROM claims WHERE claim_id = ?1",
+            [claim_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(person) = person
+        && epoch(&tx, &person)? != revoke_seen
+    {
+        return Ok(Redeemed::Refused("revoked".into()));
+    }
+    // An `external` claim has its own process and no stub: a stray redeem must not overwrite the run's pid.
     let n = tx.execute(
         "UPDATE claims SET state = 'running', running_at = ?2, pid = ?3, pid_started = ?4, holder_instance = ?5
-         WHERE claim_id = ?1 AND state = 'claimed'",
+         WHERE claim_id = ?1 AND state = 'claimed' AND kind <> 'external'",
         params![claim_id, now, pid, started, holder_instance],
     )?;
     if n == 1 {
@@ -339,27 +400,32 @@ pub(crate) fn report(
     let Some(claim) = row(&tx, claim_id)? else {
         return Ok(Reported::Unknown);
     };
+    // Keyed by the process it names, so another process's report of the same kind never shadows the writer's own.
+    let said = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|b| b.get("pid").and_then(serde_json::Value::as_i64))
+        .unwrap_or(0);
     tx.execute(
-        "INSERT OR IGNORE INTO reports (claim_id, kind, body, received_at) VALUES (?1, ?2, ?3, ?4)",
-        params![claim_id, kind, body, now],
+        "INSERT OR IGNORE INTO reports (claim_id, kind, pid, body, received_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![claim_id, kind, said, body, now],
     )?;
     let mut applied = None;
     if is_newest(&tx, claim_id, &claim.conversation)? {
         let mut unacked: Vec<(String, String)> = Vec::new();
         {
             let mut st = tx.prepare(
-                "SELECT kind, body FROM reports WHERE claim_id = ?1 AND acked_at IS NULL",
+                "SELECT kind, body FROM reports WHERE claim_id = ?1 AND acked_at IS NULL ORDER BY received_at, pid",
             )?;
             for r in st.query_map([claim_id], |r| Ok((r.get(0)?, r.get(1)?)))? {
                 unacked.push(r?);
             }
         }
-        for k in PRECEDENCE {
-            if let Some((_, b)) = unacked.iter().find(|(uk, _)| uk == k)
-                && apply(&tx, claim_id, k, b, now)?
-            {
-                applied = Some(k);
-                break;
+        'kinds: for k in PRECEDENCE {
+            for (_, b) in unacked.iter().filter(|(uk, _)| uk == k) {
+                if apply(&tx, claim_id, k, b, now)? {
+                    applied = Some(k);
+                    break 'kinds;
+                }
             }
         }
     }
@@ -377,15 +443,15 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
     let said_pid = b.get("pid").and_then(serde_json::Value::as_i64);
     match kind {
         "done" | "exit" => {
-            // A report that names a process other than the one the redeem recorded is about another process of the
-            // same claim (a respawn that lost the lock). It says nothing about the writer, so it ends nothing.
+            // A report that names a process other than the one the redeem recorded (or none) is about another process of
+            // the same claim (a respawn that lost the lock). It says nothing about the writer, so it ends nothing.
             let Some(r) = row(tx, claim_id)? else {
                 return Ok(false);
             };
-            if matches!(r.state.as_str(), "running" | "ending")
-                && let (Some(said), Some(rec)) = (said_pid, r.pid)
-                && said != rec
-            {
+            if r.pid.is_some() && said_pid != r.pid {
+                return Ok(false);
+            }
+            if r.pid.is_none() && r.state != "claimed" {
                 return Ok(false);
             }
             let n = tx.execute(
@@ -407,6 +473,14 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
             Ok(n == 1)
         }
         "busy" => {
+            // A busy names the stub that found the lock taken; with a recorded stub, only that one's counts.
+            if let Some(r) = row(tx, claim_id)?
+                && r.pid.is_some()
+                && said_pid.is_some()
+                && said_pid != r.pid
+            {
+                return Ok(false);
+            }
             let n = tx.execute(
                 "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = 'busy'
                  WHERE claim_id = ?1 AND state = 'claimed'",
@@ -450,6 +524,22 @@ pub(crate) fn stop(
     now: i64,
 ) -> Result<Option<Kill>> {
     let tx = core.claim_tx()?;
+    // Never redeemed and no process recorded: nothing can be writing, so it ends by CAS (a late redeem then fails)
+    // instead of sticking at `ending`, which has no pid for `end_gone` to wait on.
+    let unspawned = tx.execute(
+        "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = ?3
+         WHERE claim_id = ?1 AND state = 'claimed' AND pid IS NULL",
+        params![claim_id, now, reason],
+    )?;
+    if unspawned == 1 {
+        if requeue {
+            requeue_turn(&tx, claim_id)?;
+        } else {
+            cancel_turn(&tx, claim_id, now)?;
+        }
+        tx.commit()?;
+        return Ok(None);
+    }
     let n = tx.execute(
         "UPDATE claims SET state = 'ending', end_reason = ?2
          WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
@@ -474,6 +564,12 @@ pub(crate) fn stop(
 /// to `ending` (kills returned, to be re-sent until gone).
 pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<Revoked> {
     let tx = core.claim_tx()?;
+    // A claim that checked may before this commit sees the bump and is refused.
+    tx.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, '1')
+         ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
+        [format!("{REVOKED}{person}")],
+    )?;
     let cancelled_turns = tx.execute(
         "UPDATE turns SET state = 'cancelled', parked_reason = NULL, parked_at = NULL, finished_at = ?2
          WHERE person = ?1 AND state IN ('queued', 'parked')",
@@ -496,6 +592,15 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
     }
     let mut kill = Vec::new();
     for (id, pid, started) in live {
+        let unspawned = tx.execute(
+            "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = 'revoked'
+             WHERE claim_id = ?1 AND state = 'claimed' AND pid IS NULL",
+            params![id, now],
+        )?;
+        if unspawned == 1 {
+            cancel_turn(&tx, id, now)?;
+            continue;
+        }
         let n = tx.execute(
             "UPDATE claims SET state = 'ending', end_reason = 'revoked'
              WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
@@ -522,14 +627,15 @@ fn recorded_gone(live: &dyn Liveness, pid: u32, started: &str) -> bool {
     }
 }
 
-/// `ending -> ended`, only once the recorded process is confirmed gone. Reads, probes outside any transaction, then one
+/// `ending -> ended` (and a `--direct` run's `claimed -> ended`), only once the recorded process is confirmed gone. Reads, probes outside any transaction, then one
 /// CAS per claim that still names the same process. Returns the claims it ended.
 pub(crate) fn end_gone(core: &mut Core, live: &dyn Liveness, now: i64) -> Result<Vec<i64>> {
     let mut candidates: Vec<(i64, i64, String)> = Vec::new();
     {
         let mut st = core.conn().prepare(
             "SELECT claim_id, pid, pid_started FROM claims
-             WHERE state = 'ending' AND pid IS NOT NULL AND pid_started IS NOT NULL",
+             WHERE (state = 'ending' OR (kind = 'external' AND state IN ('claimed', 'running')))
+               AND pid IS NOT NULL AND pid_started IS NOT NULL",
         )?;
         for r in st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))? {
             candidates.push(r?);
@@ -549,7 +655,8 @@ pub(crate) fn end_gone(core: &mut Core, live: &dyn Liveness, now: i64) -> Result
     for (id, pid, started) in gone {
         let n = tx.execute(
             "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = COALESCE(end_reason, 'gone')
-             WHERE claim_id = ?1 AND state = 'ending' AND pid = ?3 AND pid_started = ?4",
+             WHERE claim_id = ?1 AND pid = ?3 AND pid_started = ?4
+               AND (state = 'ending' OR (kind = 'external' AND state IN ('claimed', 'running')))",
             params![id, now, pid, started],
         )?;
         if n == 1 {
@@ -567,24 +674,39 @@ fn release_unlisted(
     listed: &HashSet<i64>,
     foreign_to: Option<&str>,
     procs: &[RecordedProc],
+    high_water: i64,
     now: i64,
 ) -> Result<Released> {
     let mut out = Released::default();
-    let mut live: Vec<(i64, String, Option<i64>, Option<String>)> = Vec::new();
+    #[allow(
+        clippy::type_complexity,
+        reason = "one row of the query below, used once"
+    )]
+    let mut live: Vec<(i64, String, bool, Option<i64>, Option<String>)> = Vec::new();
     {
+        // Only claims at or below the high-water mark read before the holder's list: a newer one may simply be missing
+        // from a list that was read before it was taken.
         let mut st = tx.prepare(
-            "SELECT claim_id, state, pid, pid_started FROM claims
-             WHERE state IN ('claimed', 'running', 'ending')
+            "SELECT claim_id, state, kind = 'external', pid, pid_started FROM claims
+             WHERE state IN ('claimed', 'running', 'ending') AND claim_id <= ?2
                AND (?1 IS NULL OR holder_instance IS NULL OR holder_instance <> ?1)",
         )?;
-        for r in st.query_map([foreign_to], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        for r in st.query_map(params![foreign_to, high_water], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })? {
             live.push(r?);
         }
     }
-    for (id, state, pid, started) in live {
+    for (id, state, external, pid, started) in live {
         if listed.contains(&id) {
+            continue;
+        }
+        // A `--direct` run has no stub or holder entry: the holder not listing it says nothing. `end_gone` ends it
+        // when its recorded pid is gone; a stop's kill is still re-sent.
+        if external {
+            if state == "ending" {
+                out.kill.push(kill_of(id, pid, started));
+            }
             continue;
         }
         match state.as_str() {
@@ -631,8 +753,10 @@ fn release_unlisted(
     }
     let mut known: HashSet<(i64, String)> = HashSet::new();
     {
+        // Only live claims count: an old-instance process whose claim ended must still be killed (step 7).
         let mut st = tx.prepare(
-            "SELECT pid, pid_started FROM claims WHERE pid IS NOT NULL AND pid_started IS NOT NULL",
+            "SELECT pid, pid_started FROM claims
+             WHERE state IN ('claimed', 'running', 'ending') AND pid IS NOT NULL AND pid_started IS NOT NULL",
         )?;
         for r in st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))? {
             known.insert(r?);
@@ -652,17 +776,24 @@ fn release_unlisted(
 
 /// Step 5: after the generation bump and hello, one transaction releases the claims the holder does not list, lists the
 /// holder entries to kill (their claim is ended or unknown), and marks this generation reconciled, so claims open.
-/// `listed` is the holder's claim ids; `procs` the old instance's recorded processes with no redeem (step 7), if any.
+/// `listed` is the holder's claim ids; `procs` the old instance's recorded processes with no redeem (step 7), if any;
+/// `high_water` is [`claim_high_water`] read before the holder was asked. A second reconcile in one generation is refused.
 pub(crate) fn reconcile(
     core: &mut Core,
     listed: &[i64],
     procs: &[RecordedProc],
+    high_water: i64,
     now: i64,
 ) -> Result<Released> {
     let generation = core.generation();
     let tx = core.claim_tx()?;
+    if reconciled(&tx)? == Some(generation) {
+        return Err(Error::Refused(format!(
+            "kith-core: generation {generation} is already reconciled"
+        )));
+    }
     let set: HashSet<i64> = listed.iter().copied().collect();
-    let mut out = release_unlisted(&tx, &set, None, procs, now)?;
+    let mut out = release_unlisted(&tx, &set, None, procs, high_water, now)?;
     for id in listed {
         let state = row(&tx, *id)?.map(|r| r.state);
         if !matches!(state.as_deref(), Some("claimed" | "running" | "ending")) {
@@ -686,11 +817,12 @@ pub(crate) fn different_holder(
     new_instance: &str,
     listed: &[i64],
     procs: &[RecordedProc],
+    high_water: i64,
     now: i64,
 ) -> Result<Released> {
     let tx = core.claim_tx()?;
     let set: HashSet<i64> = listed.iter().copied().collect();
-    let out = release_unlisted(&tx, &set, Some(new_instance), procs, now)?;
+    let out = release_unlisted(&tx, &set, Some(new_instance), procs, high_water, now)?;
     tx.commit()?;
     Ok(out)
 }
@@ -698,7 +830,9 @@ pub(crate) fn different_holder(
 // ---- turns: the queue other lanes (wake, asks, accounts, transcripts) call; none of them writes these tables
 
 /// Where a turn came from (`turns.source` is checked here, not in SQL, so a new source needs no table rebuild).
-const SOURCES: [&str; 6] = ["app", "schedule", "ask", "wake", "terminal", "cli"];
+pub(crate) const SOURCES: [&str; 9] = [
+    "app", "schedule", "ask", "wake", "terminal", "cli", "channel", "room", "bot",
+];
 /// Why a turn waits without a claim (`turns.parked_reason`, checked here).
 const PARK_REASONS: [&str; 2] = ["lock_busy", "terminal_live"];
 
@@ -722,11 +856,25 @@ pub(crate) fn enqueue_turn(core: &mut Core, t: &NewTurn<'_>, now: i64) -> Result
             t.source
         )));
     }
+    if t.person.is_empty() {
+        return Err(Error::BadParams("kith-core: a turn needs a person".into()));
+    }
     let tx = core.claim_tx()?;
     tx.execute(
         "INSERT OR IGNORE INTO conversations (id, agent, engine, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
         params![t.conversation, t.agent, t.engine, now],
     )?;
+    let (agent, engine): (String, String) = tx.query_row(
+        "SELECT agent, engine FROM conversations WHERE id = ?1",
+        [t.conversation],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    if agent != t.agent || engine != t.engine {
+        return Err(Error::Refused(format!(
+            "kith-core: conversation {} belongs to {agent} on {engine}, not {} on {}",
+            t.conversation, t.agent, t.engine
+        )));
+    }
     tx.execute(
         "INSERT INTO turns (conversation, person, source, prompt, state, deadline, queued_at)
          VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?6)",
