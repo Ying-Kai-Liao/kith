@@ -349,8 +349,10 @@ fn bot_person(store: &Store, id: &str) -> Option<Option<String>> {
 /// One live or catch-up event, for the owner (`who` None) or for `person`: the owner never sees an invitee's chats,
 /// an invitee sees only their own, and no invitee sees usage, screens or the cloud. A permission card says whether
 /// they may answer it (`canAnswer`).
+/// The streams build their [`super::authority::Selected`] once instead (events.rs); this one is for a single call.
+#[cfg(test)]
 pub fn event_for(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
-    super::authority::with_selected(store, |access| event_for_with(access, store, who, v))
+    super::authority::Selected::from_env().event(store, who, v)
 }
 
 /// [`event_for`] with the answer to "is this person granted this agent" given (`authority::Authority`): the host's

@@ -65,10 +65,12 @@ fn chat(id: &str, person: Option<&str>, agent: &str) -> crate::store::BotConfig 
     .unwrap()
 }
 
-/// One generated world: per person, the agents granted and whether they are suspended.
+/// One generated world: per person, the agents granted by their own row, the agents the `*` (everyone) row grants, and
+/// whether each person is suspended.
 #[derive(Clone, Debug)]
 struct World {
     granted: [[bool; 2]; 2],
+    star: [bool; 2],
     suspended: [bool; 2],
 }
 
@@ -103,12 +105,8 @@ impl Rig {
             }
         }
         let env = json!({"KITH_AGENTS": home.join("agents").to_string_lossy()});
-        let core = CoreData {
-            folders: folders(&machine),
-            home: home.clone(),
-            kernel: home.join("kernel"),
-            env: env.as_object().unwrap().clone(),
-        };
+        let core =
+            CoreData::new(folders(&machine), home.clone(), home.join("kernel"), env.as_object().unwrap().clone());
         let daemon = crate::core_front::serve_for_test(&core.folders);
         let rig = Self { _dir: dir, store, core, daemon: Some(daemon), chats };
         rig.ask("people.addPerson", json!({"id": "kai", "owner": true})).expect("kai");
@@ -125,14 +123,21 @@ impl Rig {
         crate::core_front::ask(&self.core.folders, method, &params)
     }
 
-    /// Puts `w` into the host's mirror and into the core. A suspended person has no grants in the host's mirror (the host
-    /// takes them away when it revokes), and is `people.suspend`ed in the core.
+    /// Puts `w` into the host's mirror and into the core. The mirror holds a person's own agents and the `*` row's
+    /// (`members::mirror_agents`), and a suspended person's copy stands (it skips a revoked person); the core
+    /// `people.suspend`s them.
     fn load(&self, w: &World) {
+        for (j, a) in AGENTS.iter().enumerate() {
+            self.ask("people.revoke", json!({"person": "*", "agent": a}));
+            if w.star[j] {
+                self.ask("people.grant", json!({"person": "*", "agent": a, "preset": "guest"})).expect("star");
+            }
+        }
         for (i, p) in PEOPLE.iter().enumerate() {
             let agents: BTreeMap<String, String> = AGENTS
                 .iter()
                 .enumerate()
-                .filter(|(j, _)| w.granted[i][*j] && !w.suspended[i])
+                .filter(|(j, _)| w.granted[i][*j] || w.star[*j])
                 .map(|(_, a)| ((*a).to_owned(), "member".to_owned()))
                 .collect();
             self.store.set_person_agents(p, &agents).unwrap();
@@ -166,7 +171,11 @@ fn runner(default: u32) -> TestRunner {
 }
 
 fn world() -> impl Strategy<Value = World> {
-    (any::<[[bool; 2]; 2]>(), any::<[bool; 2]>()).prop_map(|(granted, suspended)| World { granted, suspended })
+    (any::<[[bool; 2]; 2]>(), any::<[bool; 2]>(), any::<[bool; 2]>()).prop_map(|(granted, star, suspended)| World {
+        granted,
+        star,
+        suspended,
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -199,47 +208,89 @@ fn events(rig: &Rig) -> impl Strategy<Value = Ev> + use<> {
     })
 }
 
-/// For generated worlds and events, the host's answer and the core's are the same for the owner and for each invitee,
-/// and an invitee is only ever sent what the grant allows.
+/// For generated worlds and events: the owner's events are the same either way; an invitee who is not suspended is
+/// sent exactly the same; a suspended invitee is sent nothing by the core (the host's mirror still stands for them
+/// until its next sync, so it may send more: the core never sends more than the host does).
 #[test]
 fn the_core_and_the_host_filter_events_alike() {
     let rig = Rig::new();
     let strategy = (world(), proptest::collection::vec(events(&rig), 12));
     let seen = std::cell::Cell::new(0usize);
+    let by_star = std::cell::Cell::new(0usize);
     runner(24)
         .run(&strategy, |(w, evs)| {
             rig.load(&w);
             let host = HostData(&rig.store);
             for e in &evs {
                 let v = event(&rig, e);
-                for who in [None, Some("sam"), Some("ann")] {
+                for (who, idx) in [(None, None), (Some("sam"), Some(0)), (Some("ann"), Some(1))] {
                     let a = roles::event_for_with(&host, &rig.store, who, v.clone());
                     let b = roles::event_for_with(&rig.core, &rig.store, who, v.clone());
-                    prop_assert_eq!(&a, &b, "who={:?} world={:?} event={:?}", who, w, e);
-                    if a.is_some() && who.is_some() {
+                    let suspended = idx.is_some_and(|i| w.suspended[i]);
+                    if suspended {
+                        prop_assert!(b.is_none(), "a suspended person was sent {b:?}, world={w:?}");
+                    } else {
+                        prop_assert_eq!(&a, &b, "who={:?} world={:?} event={:?}", who, w, e);
+                    }
+                    if b.is_some() && who.is_some() {
                         seen.set(seen.get() + 1);
+                        if let Some(i) = idx
+                            && !AGENTS.iter().enumerate().any(|(j, _)| {
+                                let own = w.granted[i][j];
+                                own && rig.chats[e.chat].ends_with(AGENTS[j])
+                            })
+                        {
+                            by_star.set(by_star.get() + 1);
+                        }
                     }
                 }
             }
             // Each answer itself, not only the events: the grant of every person and agent.
             for (i, p) in PEOPLE.iter().enumerate() {
                 for (j, a) in AGENTS.iter().enumerate() {
-                    let want = w.granted[i][j] && !w.suspended[i];
-                    prop_assert_eq!(host.granted(p, a), want);
-                    prop_assert_eq!(rig.core.granted(p, a), want, "core, world={:?}", w);
+                    let held = w.granted[i][j] || w.star[j];
+                    prop_assert_eq!(host.granted(p, a), held);
+                    prop_assert_eq!(rig.core.granted(p, a), held && !w.suspended[i], "core, world={:?}", w);
                 }
             }
             Ok(())
         })
         .unwrap();
     assert!(seen.get() > 0, "no event ever reached an invitee, so the parity above proves little");
+    assert!(by_star.get() > 0, "no event ever reached an invitee through the `*` row");
+}
+
+/// A person who holds an agent only through the `*` row is sent their chat of it, and loses it with the row.
+#[test]
+fn the_everyone_row_grants_and_its_removal_stops_events() {
+    let rig = Rig::new();
+    let w = World { granted: [[false; 2]; 2], star: [true, false], suspended: [false, false] };
+    rig.load(&w);
+    let v = event(&rig, &Ev { kind: 0, chat: 1, entry_kind: 0 });
+    assert_eq!(rig.chats[1], "sam-house");
+    assert!(roles::event_for_with(&rig.core, &rig.store, Some("sam"), v.clone()).is_some());
+    rig.ask("people.revoke", json!({"person": "*", "agent": "house"})).expect("revoke the row");
+    assert!(roles::event_for_with(&rig.core, &rig.store, Some("sam"), v).is_none());
+}
+
+/// The catch-up memo asks once per pair and the live path never remembers.
+#[test]
+fn a_catch_up_batch_asks_once_and_a_live_event_asks_afresh() {
+    let rig = Rig::new();
+    let w = World { granted: [[true, false], [false, false]], star: [false, false], suspended: [false, false] };
+    rig.load(&w);
+    let batch = rig.core.with_memo();
+    assert!(batch.granted("sam", "house"));
+    rig.ask("people.revoke", json!({"person": "sam", "agent": "house"})).expect("revoke");
+    assert!(batch.granted("sam", "house"), "the batch remembers within itself");
+    assert!(!rig.core.granted("sam", "house"), "a live question does not");
 }
 
 /// A revoke is seen on the next event: nothing is remembered between them.
 #[test]
 fn a_revoke_stops_the_next_event() {
     let rig = Rig::new();
-    let w = World { granted: [[true, false], [false, false]], suspended: [false, false] };
+    let w = World { granted: [[true, false], [false, false]], star: [false, false], suspended: [false, false] };
     rig.load(&w);
     let v = event(&rig, &Ev { kind: 0, chat: 1, entry_kind: 0 });
     assert_eq!(rig.chats[1], "sam-house");
@@ -253,19 +304,19 @@ fn a_revoke_stops_the_next_event() {
 #[test]
 fn a_core_that_does_not_answer_drops_the_invitees_events_and_not_the_owners() {
     let rig = Rig::new();
-    let w = World { granted: [[true, true], [true, true]], suspended: [false, false] };
+    let w = World { granted: [[true, true], [true, true]], star: [false, false], suspended: [false, false] };
     rig.load(&w);
     let v = event(&rig, &Ev { kind: 0, chat: 1, entry_kind: 0 });
     let host = HostData(&rig.store);
     assert!(roles::event_for_with(&host, &rig.store, Some("sam"), v.clone()).is_some());
 
     let nobody = Tmp::new();
-    let silent = CoreData {
-        folders: folders(&nobody.path().join("machine")),
-        home: rig.core.home.clone(),
-        kernel: rig.core.kernel.clone(),
-        env: rig.core.env.clone(),
-    };
+    let silent = CoreData::new(
+        folders(&nobody.path().join("machine")),
+        rig.core.home.clone(),
+        rig.core.kernel.clone(),
+        rig.core.env.clone(),
+    );
     assert!(roles::event_for_with(&silent, &rig.store, Some("sam"), v.clone()).is_none());
     assert_eq!(
         roles::event_for_with(&silent, &rig.store, None, v.clone()),
@@ -275,7 +326,7 @@ fn a_core_that_does_not_answer_drops_the_invitees_events_and_not_the_owners() {
     // The daemon serves but knows nobody (the core empty): the same "not granted".
     let empty = Tmp::new();
     let machine = empty.path().join("machine");
-    let blank = CoreData { folders: folders(&machine), ..silent };
+    let blank = CoreData::new(folders(&machine), silent.home.clone(), silent.kernel.clone(), silent.env.clone());
     let daemon = crate::core_front::serve_for_test(&blank.folders);
     assert!(roles::event_for_with(&blank, &rig.store, Some("sam"), v).is_none());
     daemon.stop();
