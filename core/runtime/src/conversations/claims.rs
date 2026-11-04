@@ -274,6 +274,24 @@ pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Cla
             req.conversation
         )));
     }
+    // A stopped ask's conversation takes no new automated turn (the durable half of the stop: a wake given back or left
+    // by a crash, a card resume). A person's turn to that thread stays allowed. Mirrors kith-ask:472, :834 and :430.
+    if let Some(turn) = req.turn {
+        let fenced: Option<String> = tx
+            .query_row(
+                "SELECT a.id FROM turns t JOIN asks a ON a.conversation = t.conversation
+                 WHERE t.id = ?1 AND t.source IN ('ask', 'wake') AND (a.state = 'stopped' OR a.ended_ms IS NOT NULL)",
+                [turn],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(ask) = fenced {
+            return Err(Error::Refused(format!(
+                "kith-core: ask {ask} was stopped; conversation {} takes no ask or wake turn",
+                req.conversation
+            )));
+        }
+    }
     let writer: Option<(i64, String)> = tx
         .query_row(
             "SELECT claim_id, state FROM claims
@@ -579,13 +597,16 @@ pub(crate) fn stop_in(
     Ok(kill)
 }
 
-/// Everything a conversation has in flight stops (`kith ask --end` of the ask that runs it): its queued and parked turns
-/// are cancelled, a queued take-over claim ends, and its live claim goes through [`stop_in`] (the turn cancelled, the kill
-/// returned to be re-sent until the process is gone; an unspawned claim ends at once). Nothing else is written. Safe to
-/// repeat: a second call finds nothing queued and answers an `ending` claim's kill again.
+/// What a conversation's automated work stops (`kith ask --end` of the ask that runs it): its queued and parked turns are
+/// cancelled, and each live claim of kind `turn` goes through [`stop_in`] (the turn cancelled, the kill returned to be
+/// re-sent until the process is gone; an unspawned claim ends at once), and so does an `external` claim whose pid is the
+/// one the ask recorded (`ask_pid`: the ask's own `--direct` run). A person's writers are left alone: a queued take-over
+/// and a terminal or other external claim are what someone resumed to steer the thread, and the stop is what frees the
+/// writer for them. Safe to repeat: a second call finds nothing queued and answers an `ending` claim's kill again.
 pub(crate) fn stop_conversation_in(
     tx: &Transaction<'_>,
     conversation: &str,
+    ask_pid: Option<i64>,
     reason: &str,
     now: i64,
 ) -> Result<Vec<Kill>> {
@@ -594,16 +615,13 @@ pub(crate) fn stop_conversation_in(
          WHERE conversation = ?1 AND state IN ('queued', 'parked')",
         params![conversation, now],
     )?;
-    tx.execute(
-        "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = ?3
-         WHERE conversation = ?1 AND state = 'queued'",
-        params![conversation, now, reason],
-    )?;
     let live: Vec<i64> = {
         let mut st = tx.prepare(
-            "SELECT claim_id FROM claims WHERE conversation = ?1 AND state IN ('claimed', 'running', 'ending')",
+            "SELECT claim_id FROM claims
+             WHERE conversation = ?1 AND state IN ('claimed', 'running', 'ending')
+               AND (kind = 'turn' OR (kind = 'external' AND pid = ?2))",
         )?;
-        st.query_map([conversation], |r| r.get(0))?
+        st.query_map(params![conversation, ask_pid], |r| r.get(0))?
             .collect::<std::result::Result<_, _>>()?
     };
     let mut kills = Vec::new();

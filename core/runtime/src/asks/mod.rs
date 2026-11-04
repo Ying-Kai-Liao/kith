@@ -397,18 +397,20 @@ pub(crate) fn open_in(
     let asks = load_all(tx)?;
     let by_id = regs(&asks);
     let place = d::lineage_with(&|id| by_id.get(id).cloned(), env, o.crossing).map_err(refuse)?;
-    // Under a stopped ask nothing new may open: its tree is ended (an open that won the race is ended with it).
-    if !check_only
-        && let Some(p) = place
-            .ask
-            .as_deref()
-            .and_then(|p| asks.iter().find(|a| a.id == p))
-        && (p.state == "stopped" || p.ended_ms.is_some())
-    {
-        return Err(Error::Refused(format!(
-            "kith-core: asks: ask {} was stopped; it cannot open another",
-            p.id
-        )));
+    // Under a stopped ask, at any depth, nothing new may open: its tree is ended (an open that won the race is ended with
+    // it). The check answers what an open would.
+    let mut up = place.ask.as_deref();
+    for _ in 0..=asks.len() {
+        let Some(p) = up.and_then(|p| asks.iter().find(|a| a.id == p)) else {
+            break;
+        };
+        if p.state == "stopped" || p.ended_ms.is_some() {
+            return Err(Error::Refused(format!(
+                "kith-core: asks: ask {} was stopped; it cannot open another",
+                p.id
+            )));
+        }
+        up = p.parent.as_deref();
     }
     let costs = if place.chain.is_some() {
         d::chain_costs(&by_id)
@@ -570,8 +572,9 @@ pub(crate) struct EndReq<'a> {
 /// wakes the caller afterwards ([`settle_in`] only moves an `open` ask). An [`open`] under a stopped ask is refused, so an
 /// open racing the end either lands first (and the end takes it with the tree) or is refused.
 ///
-/// Repeating the call is safe, and finishes a call that died between its transaction and the withdrawals: asks already
-/// ended are not settled again, but their conversations are stopped again and their callers' wakes withdrawn again.
+/// Repeating the call is safe: asks already ended are not settled again, but their conversations are stopped again and their
+/// callers' wakes withdrawn again. The stop is one transaction; a stopped ask's conversation also takes no new ask or wake
+/// turn ([`claims::claim`] refuses it), so a wake given back afterwards cannot restart it.
 ///
 /// Persons match the record's own `person` only: the `--bg` job's person (`ask-bg/ID.json`) is always the same value, since
 /// the child inherits `KITH_PERSON` from the run that opened the record, so nothing is lost by not storing it.
@@ -607,32 +610,44 @@ pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<En
         }
         hit.extend(more);
     }
-    let mut conversations = Vec::new();
+    let mut conversations: Vec<(String, Option<i64>)> = Vec::new();
     for mut a in asks.iter().filter(|a| hit.contains(a.id.as_str())).cloned() {
-        if a.delivered || a.woke_answer {
-            continue;
-        }
+        // A delivered or answered ask is history: its record and its caller's wakes stay, but its run stops and the
+        // record is marked ended, so nothing opens under it or starts its conversation again.
+        let history = a.delivered || a.woke_answer;
         if a.ended_ms.is_none() {
-            "stopped".clone_into(&mut a.state);
+            if !history {
+                "stopped".clone_into(&mut a.state);
+                a.done = true;
+                a.answered_ms = a.answered_ms.or(Some(now));
+                out.ids.push(a.id.clone());
+            }
             a.ended_ms = Some(now);
-            a.done = true;
-            a.answered_ms = a.answered_ms.or(Some(now));
             a.put(&tx)?;
-            out.ids.push(a.id.clone());
         }
-        owed.extend(a.reply_session.clone());
+        if !history {
+            owed.extend(a.reply_session.clone());
+        }
         owed.extend(a.conversation.clone());
-        conversations.extend(a.conversation);
+        if let Some(c) = a.conversation {
+            conversations.push((c, a.pid));
+        }
     }
-    for c in conversations.iter().filter(|c| !c.is_empty()) {
-        out.kill
-            .extend(claims::stop_conversation_in(&tx, c, "ask stopped", now)?);
+    for (c, pid) in conversations.iter().filter(|(c, _)| !c.is_empty()) {
+        out.kill.extend(claims::stop_conversation_in(
+            &tx,
+            c,
+            *pid,
+            "ask stopped",
+            now,
+        )?);
     }
-    tx.commit()?;
     out.ids.sort();
     owed.remove("");
     out.sessions = owed.into_iter().collect();
-    wake::withdraw_owed(core, now, &out.sessions, req.persons)?;
+    // The wakes go in the same step as the records and the claims: no window where a stopped ask's answer wakes its caller.
+    wake::withdraw_owed_in(&tx, now, &out.sessions, req.persons)?;
+    tx.commit()?;
     Ok(out)
 }
 

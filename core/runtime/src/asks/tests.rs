@@ -705,13 +705,17 @@ mod stop {
     }
 
     fn turn(core: &mut Core, conv: &str) -> i64 {
+        turn_from(core, conv, "ask")
+    }
+
+    fn turn_from(core: &mut Core, conv: &str, source: &str) -> i64 {
         enqueue_turn(
             core,
             &NewTurn {
                 conversation: conv,
                 agent: "a",
                 engine: "claude",
-                source: "ask",
+                source,
                 person: "kai",
                 prompt: "p",
                 deadline: None,
@@ -878,7 +882,7 @@ mod stop {
     #[test]
     fn a_delivered_answer_stays_and_a_report_after_the_stop_is_recorded_without_waking() {
         let (t, mut core, claims) = tree();
-        // c1's answer reached its caller first: history stays (its run is still stopped)
+        // c1's answer reached its caller first: its record stays (its run is stopped too)
         core.conn()
             .execute(
                 "UPDATE asks SET state = 'answered', delivered = 1 WHERE id = 'c1'",
@@ -890,9 +894,10 @@ mod stop {
         assert_eq!(rec(&mut core, "c1")["state"], "answered");
         assert_eq!(
             claim_state(&core, claims[1]),
-            "running",
-            "history is not touched"
+            "ending",
+            "the record is history, its run is not"
         );
+        assert_eq!(claim_state(&core, claims[2]), "ending");
         // r's run reports its turn after the stop: the exit ends the claim, the ask stays stopped, its cost counts
         report(&mut core, claims[0], "done", r#"{"pid":100}"#, 50).unwrap();
         assert_eq!(claim_state(&core, claims[0]), "ended");
@@ -972,5 +977,122 @@ mod stop {
         for id in claims {
             assert_eq!(claim_state(&core, id), "ending");
         }
+    }
+
+    fn claim_for(core: &mut Core, conv: &str, turn: i64) -> crate::error::Result<i64> {
+        claim(
+            core,
+            &NewClaim {
+                conversation: conv,
+                kind: Kind::Turn,
+                person: "kai",
+                turn: Some(turn),
+                holder_instance: Some("h1"),
+                account: None,
+                process: None,
+                revoke_seen: 0,
+            },
+            6,
+        )
+        .map(|c| c.claim_id)
+    }
+
+    fn take_over(core: &mut Core, conv: &str, kind: Kind, process: Option<(u32, &str)>) -> i64 {
+        claim(
+            core,
+            &NewClaim {
+                conversation: conv,
+                kind,
+                person: "kai",
+                turn: None,
+                holder_instance: None,
+                account: None,
+                process,
+                revoke_seen: 0,
+            },
+            3,
+        )
+        .unwrap()
+        .claim_id
+    }
+
+    #[test]
+    fn a_persons_terminal_or_external_claim_on_the_child_survives_the_stop() {
+        let t = Tree::new();
+        reg(&t, "r", None, "s1", 0.0, "open");
+        reg(&t, "x", None, "s2", 0.0, "open");
+        t.import();
+        let mut core = t.core();
+        reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
+        set_conv(&core, "r", "conv-r");
+        set_conv(&core, "x", "conv-x");
+        // a terminal on r's thread; an external run on x's thread whose pid is not the ask's
+        turn(&mut core, "conv-r");
+        turn(&mut core, "conv-x");
+        let t1 = take_over(&mut core, "conv-r", Kind::Terminal, None);
+        let e1 = take_over(&mut core, "conv-x", Kind::External, Some((777, "e777")));
+        let out = call(&mut core, "ask.end", &json!({"roots": ["r", "x"]})).unwrap();
+        assert_eq!(out["kill"], json!([]));
+        for id in [t1, e1] {
+            assert!(
+                !["ending", "ended"].contains(&claim_state(&core, id).as_str()),
+                "claim {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_asks_own_external_run_is_stopped_by_its_recorded_pid() {
+        let t = Tree::new();
+        t.reg(
+            "r",
+            &json!({"asked": "x", "chain": "r", "hop": 0, "reply_to": {"session": "s1"}, "at": 1.0, "state": "open",
+                    "cost": 0.0, "person": "kai", "pid": 777}),
+        );
+        t.import();
+        let mut core = t.core();
+        reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
+        set_conv(&core, "r", "conv-r");
+        turn(&mut core, "conv-r");
+        let id = take_over(&mut core, "conv-r", Kind::External, Some((777, "e777")));
+        let out = call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        assert_eq!(out["kill"].as_array().unwrap().len(), 1);
+        assert_eq!(claim_state(&core, id), "ending");
+    }
+
+    #[test]
+    fn a_stopped_asks_conversation_takes_no_ask_or_wake_turn_but_a_persons_turn_is_fine() {
+        let t = Tree::new();
+        reg(&t, "r", None, "s1", 0.0, "open");
+        t.import();
+        let mut core = t.core();
+        reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
+        set_conv(&core, "r", "conv-r");
+        turn(&mut core, "conv-r");
+        call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        // a wake given back after the stop, an ask turn: both fenced
+        for source in ["wake", "ask"] {
+            let w = turn_from(&mut core, "conv-r", source);
+            let err = claim_for(&mut core, "conv-r", w).unwrap_err();
+            assert!(why(&err).contains("was stopped"), "{source}: {}", why(&err));
+            assert_eq!(turn_state(&core, w), "queued");
+        }
+        let p = turn_from(&mut core, "conv-r", "app");
+        let id = claim_for(&mut core, "conv-r", p).unwrap();
+        assert_eq!(claim_state(&core, id), "claimed");
+    }
+
+    #[test]
+    fn an_open_under_a_stopped_grandparent_is_refused_and_so_is_its_check() {
+        let (t, mut core, _claims) = tree();
+        call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
+        // the open comes from g's run: g is stopped, and so is everything above it
+        let p = with(
+            &t.params(&env(&[("KITH_ASK_ID", "g")])),
+            &json!({"id": "n", "asked": "x"}),
+        );
+        assert!(why(&call(&mut core, "ask.open", &p).unwrap_err()).contains("was stopped"));
+        let c = with(&p, &json!({"checkOnly": true}));
+        assert!(why(&call(&mut core, "ask.open", &c).unwrap_err()).contains("was stopped"));
     }
 }
