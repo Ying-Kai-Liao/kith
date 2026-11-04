@@ -538,57 +538,78 @@ fn counts_from(
     })
 }
 
-/// Ticks in a row a job may fail on the same slot before the slot is given a `skipped:error` row. A failed fire holds the
-/// watermark for every job (the failed slot must be found again), and each tick plans everyone from there, so a job that
-/// never recovers would cost the others more with every minute; a few ticks is room for a busy database or a file being
-/// replaced, and short enough that the hold stays small. The count is in the job's row, so a restart keeps it.
+/// Ticks in a row a job's fire may fail before it is given up on. A failed fire holds the watermark for every job (the
+/// failed slot must be found again), and each tick plans everyone from there, so a job that never recovers would cost
+/// the others more with every minute; a few ticks is room for a busy database or a file being replaced, and short enough
+/// that the hold stays small. Counted per job whatever the slot (`plan` fires the latest due slot, so a minute cron has a
+/// new slot every tick), at most once per tick minute, and kept in the job's row so a restart keeps it.
 const STUCK_TICKS: i64 = 3;
 
-/// A fire of this job failed on `slot` this tick. After [`STUCK_TICKS`] in a row on the same slot the slot gets a
-/// `skipped:error: <why>` row (the job's fault is on record, the slot is decided and the watermark can move past it).
-/// Own transaction: the failed fire rolled back with everything it wrote.
+/// A fire of this job failed this tick. Returns whether the job is given up on: at [`STUCK_TICKS`] failing ticks in a row
+/// (and on every failing tick after, until a fire goes through) the tick's slot gets a `skipped:error: <why>` row and so
+/// does the missed span the failed fire rolled back, so the watermark can pass with a row for every slot it passes. When
+/// not, the caller holds the watermark. Own transaction: the failed fire rolled back with everything it wrote.
+///
+/// `counted` is false when the error may be the core's and not the job's (nothing else went through this tick and other
+/// jobs were due): the failure is then not counted and nothing is given up.
 fn note_failure(
     core: &mut Core,
     agent: &str,
     job: &str,
-    slot: &str,
+    w: &Work,
     why: &str,
     now: i64,
-) -> Result<()> {
+    counted: bool,
+) -> Result<bool> {
+    if !counted {
+        return Ok(false);
+    }
+    // The slot to give up on: the fire's, else the end of the missed span it carried.
+    let slot = w
+        .slot
+        .clone()
+        .or_else(|| w.missed.as_ref().and_then(|m| slot_of_ms(m.key_ms)));
+    let Some(slot) = slot else {
+        return Ok(false);
+    };
+    let minute = floor_minute(now);
     let tx = core.claim_tx()?;
-    let row: Option<(Option<String>, i64)> = tx
+    let row: Option<(Option<i64>, i64)> = tx
         .query_row(
-            "SELECT fail_slot, fail_count FROM sched_jobs WHERE agent = ?1 AND job = ?2",
+            "SELECT fail_minute, fail_count FROM sched_jobs WHERE agent = ?1 AND job = ?2",
             params![agent, job],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
     // A job with no row (gone from the index) has nothing to count on.
-    let Some((was, count)) = row else {
-        return Ok(());
+    let Some((last, count)) = row else {
+        return Ok(false);
     };
-    let count = if was.as_deref() == Some(slot) {
-        count + 1
+    // A restart inside the minute is the same tick as far as the limit goes.
+    let count = if last == Some(minute) {
+        count
     } else {
-        1
+        count + 1
     };
-    if count >= STUCK_TICKS {
+    tx.execute(
+        "UPDATE sched_jobs SET fail_minute = ?3, fail_count = ?4 WHERE agent = ?1 AND job = ?2",
+        params![agent, job, minute, count],
+    )?;
+    let given_up = count >= STUCK_TICKS;
+    if given_up {
+        if let Some(m) = &w.missed {
+            tx.execute(
+                "INSERT OR IGNORE INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+                params![agent, job, slot_of_ms(m.key_ms), m.outcome(), now],
+            )?;
+        }
         tx.execute(
             "INSERT OR IGNORE INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
             params![agent, job, slot, format!("skipped:error: {why}"), now],
         )?;
-        tx.execute(
-            "UPDATE sched_jobs SET fail_slot = NULL, fail_count = 0 WHERE agent = ?1 AND job = ?2",
-            params![agent, job],
-        )?;
-    } else {
-        tx.execute(
-            "UPDATE sched_jobs SET fail_slot = ?3, fail_count = ?4 WHERE agent = ?1 AND job = ?2",
-            params![agent, job, slot, count],
-        )?;
     }
     tx.commit()?;
-    Ok(())
+    Ok(given_up)
 }
 
 /// A fire of this job went through: its run of failures, if it had one, is over ("in a row").
@@ -601,7 +622,7 @@ fn clear_failure(core: &mut Core, agent: &str, job: &str) -> Result<()> {
     if failing > 0 {
         let tx = core.claim_tx()?;
         tx.execute(
-            "UPDATE sched_jobs SET fail_slot = NULL, fail_count = 0 WHERE agent = ?1 AND job = ?2",
+            "UPDATE sched_jobs SET fail_minute = NULL, fail_count = 0 WHERE agent = ?1 AND job = ?2",
             params![agent, job],
         )?;
         tx.commit()?;
@@ -614,7 +635,8 @@ fn clear_failure(core: &mut Core, agent: &str, job: &str) -> Result<()> {
 /// tick finds the decided slots by their keys and fires the rest.
 ///
 /// One job's failure is that job's: it goes in `problems`, the other jobs go on, and the watermark does not move (so the
-/// failed slot is found again) until the same slot has failed [`STUCK_TICKS`] ticks in a row and gets a `skipped:error` row. An agent whose file cannot be read is planned from the index.
+/// failed slot is found again) until the job has failed [`STUCK_TICKS`] ticks in a row; it then gets a `skipped:error` row
+/// for each failing tick and no longer holds the watermark. An agent whose file cannot be read is planned from the index.
 pub(super) fn tick(
     core: &mut Core,
     paths: &Paths,
@@ -700,6 +722,10 @@ pub(super) fn tick(
         }
     }
     let mut report = Vec::new();
+    // Fires that failed this tick, given up on or not once the whole tick is known: whether a failure is the job's own
+    // depends on what else went through.
+    let mut failed: Vec<(usize, String)> = Vec::new();
+    let mut went_through = false;
     for (i, w) in work.iter().enumerate() {
         let a = &agents[w.agent];
         // An agent planned from its index has no file to compare with.
@@ -721,7 +747,8 @@ pub(super) fn tick(
                 mac: &mac,
                 person: &w.person,
                 revoke_seen: w.revoke_seen,
-                advance_to: (last && !blocked).then_some(nowf),
+                // A failure may be given up on below, which then moves the watermark.
+                advance_to: (last && !blocked && failed.is_empty()).then_some(nowf),
                 ctx,
                 after,
             },
@@ -733,6 +760,7 @@ pub(super) fn tick(
                 blocked = true;
             }
             Ok(out) => {
+                went_through = true;
                 if let Err(e) = clear_failure(core, &a.agent, &w.job) {
                     problems.push(json!({"agent": a.agent, "job": w.job, "error": e.to_string()}));
                 }
@@ -741,21 +769,29 @@ pub(super) fn tick(
             Err(e) => {
                 let why = e.to_string();
                 problems.push(json!({"agent": a.agent, "job": w.job, "error": why}));
-                blocked = true;
-                // The slot to give up on is the one that failed: the fire's, else the end of the missed span it carried.
-                let slot = w
-                    .slot
-                    .clone()
-                    .or_else(|| w.missed.as_ref().and_then(|m| slot_of_ms(m.key_ms)));
-                if let Some(slot) = slot
-                    && let Err(e) = note_failure(core, &a.agent, &w.job, &slot, &why, now)
-                {
-                    problems.push(json!({"agent": a.agent, "job": w.job, "error": e.to_string()}));
-                }
+                failed.push((i, why));
             }
         }
     }
-    if work.is_empty() && !blocked {
+    // A failure counts toward giving up when the job is likely the fault: something else went through this tick, or it
+    // was the only job due. Otherwise it may be the core (a locked keychain, a file that cannot be read now) and a retry
+    // decides again, as before.
+    let counted = went_through || work.len() == 1;
+    let had_failures = !failed.is_empty();
+    for (i, why) in failed {
+        let w = &work[i];
+        let a = &agents[w.agent];
+        match note_failure(core, &a.agent, &w.job, w, &why, now, counted) {
+            Ok(true) => {}
+            Ok(false) => blocked = true,
+            Err(e) => {
+                problems.push(json!({"agent": a.agent, "job": w.job, "error": e.to_string()}));
+                blocked = true;
+            }
+        }
+    }
+    // Also after fires that failed and were given up on: their rolled-back transaction held the move.
+    if !blocked && (work.is_empty() || had_failures) {
         let tx = core.claim_tx()?;
         let seen = watermark_in(&tx, &mac)?;
         advance_in(&tx, &mac, nowf, seen, now)?;

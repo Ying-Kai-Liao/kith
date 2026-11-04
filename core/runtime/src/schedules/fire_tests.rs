@@ -1365,10 +1365,10 @@ fn a_job_that_fails_three_ticks_running_gets_an_error_row_and_the_watermark_move
     assert!(rows[0].1.contains("injected"), "{rows:?}");
     assert_eq!(
         rep["watermark"],
-        json!(before),
-        "the tick that gave up still holds"
+        json!(at(2026, 11, 3, 8, 32)),
+        "the tick that gave up moves the watermark: a's slot has its row"
     );
-    // The next tick finds a's slot decided and the watermark moves; b is not planned again.
+    // b is not planned again, and a's old slot stays decided.
     let rep = run(&mut r, at(2026, 11, 3, 8, 33));
     assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 33)), "{rep}");
     assert_eq!(r.outcomes("b"), ["fired"]);
@@ -1403,4 +1403,142 @@ fn a_failure_that_stops_before_the_limit_starts_the_count_again() {
     assert_eq!(fired(&go(&mut r, at(2026, 11, 3, 8, 32), false)), ["a"]);
     assert_eq!(r.n("SELECT fail_count FROM sched_jobs WHERE job = 'a'"), 0);
     assert_eq!(r.outcomes("a"), ["fired"]);
+}
+
+fn minute(id: &str) -> Value {
+    daily(id, "* * * * *")
+}
+
+#[test]
+fn a_minute_job_that_fails_every_tick_stops_holding_the_watermark() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([minute("bad"), minute("good")]));
+    let start = at(2026, 11, 3, 8, 29);
+    r.set_wm(start);
+    // `bad` is the first enqueue of a tick and always fails; `good` is the second and goes through. Its turn is
+    // finished first, so its skip rule does not turn the next tick's enqueue into a skip.
+    let seen = Cell::new(0);
+    let run = |r: &mut Rig, now: i64| {
+        r.finish_all();
+        tick(&mut r.core, &r.p, &r.ctx, now, &|s| {
+            if s == Step::Enqueue {
+                seen.set(seen.get() + 1);
+                if seen.get() % 2 == 1 {
+                    return Err(Error::Io("injected".into()));
+                }
+            }
+            Ok(())
+        })
+        .unwrap()
+    };
+    // The slot changes every tick (plan fires the latest due one); the count is the job's, not the slot's.
+    run(&mut r, at(2026, 11, 3, 8, 30));
+    run(&mut r, at(2026, 11, 3, 8, 31));
+    assert_eq!(r.wm(), Some(start), "held for the first two ticks");
+    assert!(
+        r.rows("bad").is_empty(),
+        "nothing recorded for bad yet: {:?}",
+        r.rows("bad")
+    );
+    let rep = run(&mut r, at(2026, 11, 3, 8, 32));
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 32)), "{rep}");
+    let rep = run(&mut r, at(2026, 11, 3, 8, 33));
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 33)), "{rep}");
+    // Every slot the watermark passed holds a row for bad: the missed span the failed fire rolled back, and the error.
+    let rows = r.rows("bad");
+    assert!(
+        rows.iter()
+            .any(|(s, o)| s == "2026-11-03T08:33:00Z" && o.starts_with("skipped:error: ")),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter()
+            .any(|(s, o)| s == "2026-11-03T08:32:00Z" && o.starts_with("skipped:error: ")),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter().any(|(_, o)| o.starts_with("skipped:missed")),
+        "the missed span of the third tick: {rows:?}"
+    );
+    // The healthy job fired on every tick, and no turn was made for bad.
+    assert_eq!(
+        r.outcomes("good").iter().filter(|o| *o == "fired").count(),
+        4
+    );
+    assert_eq!(
+        r.n("SELECT count(*) FROM turns WHERE conversation LIKE '%bad%'"),
+        0
+    );
+}
+
+#[test]
+fn restarts_inside_one_minute_count_as_one_failing_tick() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("a", "30 8 * * *")]));
+    r.set_wm(at(2026, 11, 3, 8, 29));
+    let go = |r: &mut Rig, now: i64| {
+        tick(&mut r.core, &r.p, &r.ctx, now, &|s| {
+            if s == Step::Enqueue {
+                return Err(Error::Io("injected".into()));
+            }
+            Ok(())
+        })
+        .unwrap()
+    };
+    for _ in 0..5 {
+        go(&mut r, at(2026, 11, 3, 8, 30));
+    }
+    assert_eq!(r.n("SELECT fail_count FROM sched_jobs WHERE job = 'a'"), 1);
+    assert!(r.rows("a").is_empty());
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 29)));
+}
+
+#[test]
+fn failures_with_nothing_else_going_through_are_not_counted_when_other_jobs_are_due() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([daily("a", "30 8 * * *"), daily("b", "30 8 * * *")]),
+    );
+    r.set_wm(at(2026, 11, 3, 8, 29));
+    // Everything fails: it may be the core (a keychain that is locked), so nobody is given up on.
+    for m in 30..36 {
+        tick(&mut r.core, &r.p, &r.ctx, at(2026, 11, 3, 8, m), &|s| {
+            if s == Step::Enqueue {
+                return Err(Error::Io("injected".into()));
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+    assert_eq!(
+        r.n("SELECT sum(fail_count) FROM sched_jobs"),
+        0,
+        "never counted"
+    );
+    assert!(r.rows("a").is_empty() && r.rows("b").is_empty());
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 29)));
+    // The core recovers: both fire for the slot they never lost.
+    let rep = r.tick(at(2026, 11, 3, 8, 36));
+    assert_eq!(fired(&rep).len(), 2, "{rep}");
+}
+
+#[test]
+fn a_job_row_without_first_seen_falls_back_to_the_watermark() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([every("iv", 300)]));
+    r.tick(at(2026, 11, 3, 8, 0));
+    let conn = r.core.conn();
+    for set in ["NULL", "0"] {
+        conn.execute(&format!("UPDATE sched_jobs SET first_seen = {set}"), [])
+            .unwrap();
+        assert_eq!(super::sync::first_seen(conn, "mel", "iv").unwrap(), None);
+    }
+    // A row written by something that does not know the column.
+    conn.execute(
+        "INSERT INTO sched_jobs (agent, job, def, paused) VALUES ('mel', 'raw', '{}', 0)",
+        [],
+    )
+    .unwrap();
+    assert_eq!(super::sync::first_seen(conn, "mel", "raw").unwrap(), None);
 }

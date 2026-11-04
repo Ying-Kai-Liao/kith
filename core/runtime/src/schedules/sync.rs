@@ -88,13 +88,16 @@ pub(super) fn first_seen(
     agent: &str,
     job: &str,
 ) -> Result<Option<i64>> {
+    // NULL and 0 both mean "not known": 0 would count an interval from 1970.
     Ok(conn
         .query_row(
             "SELECT first_seen FROM sched_jobs WHERE agent = ?1 AND job = ?2",
             params![agent, job],
-            |r| r.get(0),
+            |r| r.get::<_, Option<i64>>(0),
         )
-        .optional()?)
+        .optional()?
+        .flatten()
+        .filter(|t| *t != 0))
 }
 
 /// The latest timed slot of the job with a row, whatever it decided (ms): where an interval counts from.
