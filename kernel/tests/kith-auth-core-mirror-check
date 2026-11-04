@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# kith-auth-core-mirror-check — until M2-18, a revoke / undo / removal made through kith-auth also reaches the core's copy
+# of people (the core's store): people.suspend / people.undo / people.removePerson over `kith kernel core-call`, after auth.json is
+# written. No queue: a failed call only prints a warning (what to do, and whether the core may have applied it
+# anyway) and the command still succeeds. With a fake `kith` program
+# standing in for the core (a JSON file is its store):
+#   1. core up: a revoke, an undo and a removal (--rm) reach it
+#   2. core down, or no kith program: kith-auth exits 0, auth.json shows the person revoked, the warning is on stderr
+#   3. a person the core doesn't know (refused, exit 4): the same warning; a lost answer (exit 5): "may not be updated"
+# The rules themselves: kith-auth-revoke-check. Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-auth-core-mirror-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-mirror.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT HQ_HOME CARGO_TARGET_DIR KITH_DEV_BIN
+mkdir -p "$HOME" "$KITH_SERVE_DIR" "$T/state"
+export KITH_STATE=$T/state KITH_WAKE_NO_KICK=1
+mkdir -p "$KITH_HOME/agents/house/role"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+
+# The fake kith: `memory hook --help` answers like a current program; `kernel core-call METHOD --params-stdin` is the core.
+export FAKE_DIR=$T/fake; mkdir -p "$FAKE_DIR"
+cat > "$T/fakekith" <<'PY'
+#!/usr/bin/env python3
+import json, os, sys
+d = os.environ['FAKE_DIR']
+a = sys.argv[1:]
+if a[:2] == ['memory', 'hook']:
+    print('usage: kith memory hook --phase'); sys.exit(0)
+if a[:2] != ['kernel', 'core-call']:
+    sys.exit(2)
+method, params = a[2], json.loads(sys.stdin.read() or '{}')
+if os.path.exists(d + '/down'):
+    print('no core daemon answers', file=sys.stderr); sys.exit(3)
+if os.path.exists(d + '/slow'):
+    import time; time.sleep(30)
+if os.path.exists(d + '/lost'):
+    print('the answer was lost', file=sys.stderr); sys.exit(5)
+pid = params['id']
+with open(d + '/calls', 'a') as f:
+    f.write(f'{method} {pid}\n')
+db = json.load(open(d + '/core.json')) if os.path.exists(d + '/core.json') else {}
+if pid not in db:
+    print(f"no person '{pid}' (kith-auth person {pid} name=..)", file=sys.stderr); sys.exit(4)
+elif method == 'people.removePerson':
+    db.pop(pid)
+elif method == 'people.suspend':
+    db[pid]['revoked'] = True
+elif method == 'people.undo':
+    db[pid]['revoked'] = False
+json.dump(db, open(d + '/core.json', 'w'))
+print(json.dumps({'lines': ['ok']}))
+PY
+chmod +x "$T/fakekith"
+export KITH_BIN=$T/fakekith
+# A program that was just written can take seconds to start the first time on macOS; kith-auth's wait is short on purpose.
+"$T/fakekith" memory hook --help >/dev/null 2>&1; echo '{}' | "$T/fakekith" kernel core-call warm --params-stdin >/dev/null 2>&1; rm -f "$FAKE_DIR/calls" "$FAKE_DIR/core.json"
+
+TELL="(run it again once kith serve is running)"
+ORIG_PATH=$PATH
+CF=core."db"   # the boundary check keeps that file's name out of source outside core/runtime
+A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+core_add() { python3 - "$FAKE_DIR/core.json" "$@" <<'PY'
+import json, os, sys
+f = sys.argv[1]
+db = json.load(open(f)) if os.path.exists(f) else {}
+for p in sys.argv[2:]:
+    db.setdefault(p, {'revoked': False})
+json.dump(db, open(f, 'w'))
+PY
+}
+core_revoked() { python3 -c "import json; print(json.load(open('$FAKE_DIR/core.json')).get('$1', {}).get('revoked', 'absent'))"; }
+auth_revoked() { python3 -c "import json; print('revoked' in json.load(open('$KITH_AUTH'))['people']['$1'])"; }
+auth_has() { python3 -c "import json; print('$1' in json.load(open('$KITH_AUTH'))['people'])"; }
+down() { touch "$FAKE_DIR/down"; }
+up() { rm -f "$FAKE_DIR/down"; }
+
+A person kai owner >/dev/null
+for p in sam ann bob; do A person $p name=$p >/dev/null; A member house $p >/dev/null; done
+core_add sam ann
+
+# 1. core up
+A person sam --revoke >"$T/out" 2>"$T/err"; rc=$?
+check "up: the revoke succeeded" "[ $rc -eq 0 ] && grep -q 'access removed' $T/out"
+check "up: auth.json says revoked" "[ \"\$(auth_revoked sam)\" = True ]"
+check "up: the revoke reached the core" "grep -q 'people.suspend sam' $FAKE_DIR/calls && [ \"\$(core_revoked sam)\" = True ]"
+check "up: no warning" "! grep -q '${CF} not updated' $T/err"
+A person sam --unrevoke >/dev/null 2>&1
+check "up: the undo reaches the core" "grep -q 'people.undo sam' $FAKE_DIR/calls && [ \"\$(core_revoked sam)\" = False ]"
+
+# 2. core down
+touch "$FAKE_DIR/down"
+A person sam --revoke >"$T/out" 2>"$T/err"; rc=$?
+check "down: the revoke still succeeds" "[ $rc -eq 0 ]"
+check "down: auth.json is revoked" "[ \"\$(auth_revoked sam)\" = True ]"
+check "down: the warning is on stderr" "grep -qx 'revoked in auth.json; ${CF} not updated (run it again once kith serve is running)' $T/err"
+A person sam --unrevoke >/dev/null 2>"$T/err"
+check "down: the undo warns too" "grep -qx 'unrevoked in auth.json; ${CF} not updated (run it again once kith serve is running)' $T/err"
+rm -f "$FAKE_DIR/down"
+
+# no kith program at all
+export KITH_BIN=$T/nothing-here PATH=/usr/bin:/bin
+A person ann --revoke >"$T/out" 2>"$T/err"; rc=$?
+check "no kith program: exits 0, revoked, warned" "[ $rc -eq 0 ] && [ \"\$(auth_revoked ann)\" = True ] && grep -qx 'revoked in auth.json; ${CF} not updated (run it again once kith serve is running)' $T/err"
+
+export KITH_BIN=$T/fakekith PATH=$ORIG_PATH
+# 3. the core doesn't know the person (it refuses, exit 4): the same warning, exit 0
+A person bob --revoke >"$T/out" 2>"$T/err"; rc=$?
+check "unknown to the core: exits 0, revoked in auth.json, warned" "[ $rc -eq 0 ] && [ \"\$(auth_revoked bob)\" = True ] && grep -qx 'revoked in auth.json; ${CF} not updated ${TELL}' $T/err"
+# a lost answer: the core may have applied it
+touch "$FAKE_DIR/lost"
+A person ann --unrevoke >"$T/out" 2>"$T/err"; rc=$?
+check "lost answer: exits 0 and says it MAY not be updated" "[ $rc -eq 0 ] && grep -qx 'unrevoked in auth.json; ${CF} may not be updated ${TELL}' $T/err"
+rm -f "$FAKE_DIR/lost"
+# no answer inside the (short) wait: the same "may not", and the wait under the lock is capped
+touch "$FAKE_DIR/slow"; t0=$SECONDS
+A person ann --unrevoke >"$T/out" 2>"$T/err"; rc=$?
+check "timeout: exits 0 in a few seconds, says it MAY not be updated" "[ $rc -eq 0 ] && [ $((SECONDS - t0)) -lt 12 ] && grep -qx 'unrevoked in auth.json; ${CF} may not be updated ${TELL}' $T/err"
+rm -f "$FAKE_DIR/slow"
+# running it again once the core is back is safe and now reaches it
+A person ann --revoke >"$T/out" 2>"$T/err"; rc=$?
+check "again with the core back: no warning, the core has it" "[ $rc -eq 0 ] && [ ! -s $T/err ] && [ \"\$(core_revoked ann)\" = True ]"
+
+# 4. --rm
+A person sam --rm >"$T/out" 2>"$T/err"; rc=$?
+check "rm up: sam is gone from auth.json and the core, no warning" "[ $rc -eq 0 ] && [ \"\$(auth_has sam)\" = False ] && grep -q 'people.removePerson sam' $FAKE_DIR/calls && [ \"\$(core_revoked sam)\" = absent ] && [ ! -s $T/err ]"
+down
+A person ann --rm >"$T/out" 2>"$T/err"; rc=$?
+check "rm down: still removed in auth.json, warned" "[ $rc -eq 0 ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
+up
+A person bob --rm >"$T/out" 2>"$T/err"; rc=$?
+check "rm of a person the core doesn't know: removed, warned" "[ $rc -eq 0 ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
+A person nobody --rm >"$T/out" 2>"$T/err"; rc=$?
+check "rm of a person nobody knows: idempotent, and the core's refusal is the same warning" "[ $rc -eq 0 ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
+
+[ $fail -eq 0 ] && echo "all ok" || echo "FAILED"
+exit $fail

@@ -17,8 +17,17 @@ fn quiet() -> Config {
     Config {
         holder_on: false,
         key_load: None,
+        host: false,
         wait_for_embedded: Duration::from_secs(10),
         ..Config::default()
+    }
+}
+
+/// The daemon of a `kith serve`: the only kind that has a Host.
+fn hosted() -> Config {
+    Config {
+        host: true,
+        ..quiet()
     }
 }
 
@@ -119,7 +128,6 @@ fn the_socket_the_token_and_the_folder_are_owner_only() {
     assert_eq!(mode(&l.dir), 0o700);
     assert_eq!(mode(&crate::owner::endpoint(&l)), 0o600);
     assert_eq!(mode(&l.token), 0o600);
-    assert_eq!(mode(&l.host_token), 0o600);
     // And the daemon refuses to run on a folder that is open to others (the same rule as core.db).
     drop(d);
     std::fs::set_permissions(&l.dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
@@ -224,7 +232,7 @@ fn a_hello_naming_the_host_but_proving_the_owner_token_is_unauthorized_and_an_un
  {
     let (_t, m) = machine();
     let p = paths(&m);
-    let d = serving(&p, quiet());
+    let d = serving(&p, hosted());
     let schema = kith_api::schema_hash();
     let owner_token = std::fs::read_to_string(Layout::new(&m).token).expect("token");
 
@@ -250,6 +258,25 @@ fn a_hello_naming_the_host_but_proving_the_owner_token_is_unauthorized_and_an_un
         );
         assert!(c.recv().is_none(), "{who:?}: the connection is closed");
     }
+    assert_eq!(d.served(), 0, "nothing ran");
+}
+
+/// A standalone daemon has no Host: a hello naming the host gets the principals it serves and no proof, and no auth step
+/// follows, so there is nothing to guess at.
+#[cfg(unix)]
+#[test]
+fn a_hello_naming_the_host_to_a_daemon_without_one_gets_no_proof_and_no_next_step() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let schema = kith_api::schema_hash();
+    let mut c = Raw::connect(&m);
+    c.send(1, "hello", &json!({"protocol": crate::owner::PROTOCOL, "version": "x", "schema": schema, "nonce": "cc", "principal": "host"}));
+    let hello = c.recv().expect("hello");
+    assert_eq!(hello["result"]["principals"], json!(["owner"]));
+    assert!(hello["result"]["proof"].is_null() && hello["result"]["nonce"].is_null());
+    assert_eq!(hello["result"]["compatible"], false);
+    assert!(c.recv().is_none(), "and the connection is closed");
     assert_eq!(d.served(), 0, "nothing ran");
 }
 
@@ -387,6 +414,8 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
     Config {
         holder_on: true,
         key_load: None,
+        host: false,
+        exiting: || false,
         wait_for_embedded: Duration::from_secs(10),
         holder: HolderConfig {
             exe: Some(exe),
@@ -1197,11 +1226,15 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
         Reached::Refused(_)
     ));
     // the access requests (M2-3) are answered here too: no such request is a refusal of the rules, not "not served"
-    match read(&p, "people.approve", &view(json!({"id": "r1"}))) {
+    match read(
+        &p,
+        "people.approve",
+        &view(json!({"id": "r1", "local": true})),
+    ) {
         Reached::Refused(e) => assert!(e.to_string().contains("unknown request"), "{e}"),
         other => panic!("{other:?}"),
     }
-    match read(&p, "people.requests", &view(json!({}))) {
+    match read(&p, "people.requests", &view(json!({"local": true}))) {
         Reached::Answered(v) => assert_eq!(v["requests"], json!([])),
         other => panic!("{other:?}"),
     }
@@ -1259,7 +1292,7 @@ fn answered(r: Reached) -> Value {
 fn the_owner_token_alone_is_refused_every_host_row_and_the_host_secret_is_accepted() {
     let (_t, m) = machine();
     let p = paths(&m);
-    let d = serving(&p, quiet());
+    let d = serving(&p, hosted());
     for name in HOST_ROWS {
         let params = if name == "syncLease.pulled" {
             json!({"mark": 0})
@@ -1320,7 +1353,7 @@ fn the_owner_token_alone_is_refused_every_host_row_and_the_host_secret_is_accept
 fn the_host_connection_reaches_no_owner_row() {
     let (_t, m) = machine();
     let p = paths(&m);
-    let d = serving(&p, quiet());
+    let d = serving(&p, hosted());
     for (name, params) in [
         ("syncLease.status", json!({})),
         ("kernel.coreStatus", json!({})),
@@ -1342,47 +1375,248 @@ fn the_owner_token_does_not_prove_the_host() {
     let (_t, m) = machine();
     let p = paths(&m);
     let l = Layout::new(&m);
-    let d = serving(&p, quiet());
-    // Something that holds the owner token but not the host secret: here, the host's own file overwritten with it.
-    std::fs::copy(&l.token, &l.host_token).expect("copy");
-    assert!(matches!(
-        host(&p, "syncLease.link", &json!({})),
-        Reached::NoDaemon
-    ));
+    let d = serving(&p, hosted());
+    // A process that holds the owner token but not this serve's memory (another serve, a terminal): it has no host
+    // secret of its own to prove, or one of its own making that this daemon never heard of.
+    let mine = crate::owner::forget_host_secret(&l).expect("the serve's secret");
+    match host(&p, "syncLease.link", &json!({})) {
+        Reached::Mismatch(note) => assert!(note.contains("another kith serve"), "{note}"),
+        other => panic!("{other:?}"),
+    }
+    let owner_token = std::fs::read_to_string(&l.token).expect("owner token");
+    for foreign in [
+        owner_token.trim().to_owned(),
+        crate::owner::random_secret().expect("random"),
+    ] {
+        crate::owner::set_host_secret(&l, &foreign);
+        assert!(
+            matches!(host(&p, "syncLease.link", &json!({})), Reached::NoDaemon),
+            "a secret the daemon did not make proved Host"
+        );
+    }
+    crate::owner::set_host_secret(&l, &mine);
+    assert_eq!(
+        answered(host(&p, "syncLease.link", &json!({})))["cloud"],
+        "linked"
+    );
+    drop(d);
+}
+
+#[test]
+fn the_host_secret_is_in_no_file_and_no_environment() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let d = serving(&p, hosted());
+    let secret = crate::owner::forget_host_secret(&l).expect("the serve's secret");
+    crate::owner::set_host_secret(&l, &secret);
+    assert_eq!(secret.len(), 64);
+    // No file of the machine folder carries it, and none is called host.token.
+    let mut seen = vec![l.dir.clone()];
+    while let Some(dir) = seen.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                seen.push(path);
+                continue;
+            }
+            assert_ne!(
+                path.file_name().and_then(|n| n.to_str()),
+                Some("host.token")
+            );
+            let text = std::fs::read(&path).unwrap_or_default();
+            assert!(
+                !String::from_utf8_lossy(&text).contains(&secret),
+                "{} carries the host secret",
+                path.display()
+            );
+        }
+    }
+    // Nor does any variable of this process (and so any child it starts from its own environment).
+    for (k, v) in std::env::vars() {
+        assert!(!v.contains(&secret), "{k} carries the host secret");
+    }
+    assert_ne!(
+        secret,
+        std::fs::read_to_string(&l.token)
+            .expect("owner token")
+            .trim()
+    );
     drop(d);
 }
 
 #[cfg(unix)]
 #[test]
-fn the_host_secret_is_owner_only_and_in_no_environment() {
-    use std::os::unix::fs::PermissionsExt as _;
+fn a_leftover_host_token_file_is_deleted_at_start() {
     let (_t, m) = machine();
     let p = paths(&m);
     let l = Layout::new(&m);
-    let d = serving(&p, quiet());
-    let mode = std::fs::metadata(&l.host_token)
-        .expect("exists")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o600);
-    assert_eq!(l.host_token.parent(), Some(l.dir.as_path()));
-    let (owner, host_secret) = (
-        std::fs::read_to_string(&l.token).expect("owner token"),
-        std::fs::read_to_string(&l.host_token).expect("host secret"),
-    );
-    assert_ne!(owner.trim(), host_secret.trim());
-    // Neither the secret nor its path is in any variable this process (and so every child it starts from its own
-    // environment) has.
-    for (k, v) in std::env::vars() {
-        assert!(
-            !v.contains(host_secret.trim()),
-            "{k} carries the host secret"
-        );
-        assert!(!v.contains("host.token"), "{k} names the host secret file");
+    std::fs::create_dir_all(&l.dir).expect("core folder");
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&l.dir, std::fs::Permissions::from_mode(0o700)).expect("private");
     }
-    assert!(l.files().contains(&l.host_token));
+    let old = l.dir.join("host.token");
+    std::fs::write(&old, "from-an-older-serve").expect("old file");
+    // A standalone daemon removes it too: it is a secret on disk that proves nothing.
+    let d = serving(&p, quiet());
+    assert!(!old.exists());
     drop(d);
+}
+
+#[test]
+fn a_standalone_daemon_has_no_host_and_says_why() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    for name in ["syncLease.link", "secrets.get"] {
+        match host(&p, name, &json!({"name": "a"})) {
+            Reached::Mismatch(note) => assert!(note.contains("no host"), "{name}: {note}"),
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+    // The owner is untouched.
+    answered(read(&p, "syncLease.status", &json!({})));
+    drop(d);
+}
+
+#[test]
+fn the_serve_whose_daemon_holds_the_lock_alone_is_host() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let first = serving(&p, hosted());
+    let mine = crate::owner::forget_host_secret(&l).expect("the first serve's secret");
+    crate::owner::set_host_secret(&l, &mine);
+    // A second serve on this Mac: its daemon does not get the core lock, so it never binds and never has a secret,
+    // and the first serve's secret stays the one that proves.
+    let second = Daemon::spawn_with(&p, hosted());
+    assert!(second.ready(Duration::from_secs(1)).is_err());
+    assert_eq!(
+        crate::owner::forget_host_secret(&l).as_deref(),
+        Some(mine.as_str())
+    );
+    crate::owner::set_host_secret(&l, &mine);
+    assert_eq!(
+        answered(host(&p, "syncLease.link", &json!({})))["cloud"],
+        "linked"
+    );
+    // What the second serve could hold is a secret of its own, which the first daemon refuses.
+    let other = crate::owner::random_secret().expect("random");
+    crate::owner::set_host_secret(&l, &other);
+    assert!(matches!(
+        host(&p, "syncLease.link", &json!({})),
+        Reached::NoDaemon
+    ));
+    crate::owner::set_host_secret(&l, &mine);
+    drop(second);
+    drop(first);
+}
+
+/// A serve whose daemon starts while another daemon holds the lock (an old serve still exiting, a standalone daemon)
+/// keeps trying for it, and is the Host once the lock is free. Until then it has no secret and proves nothing.
+#[test]
+fn a_host_daemon_waits_out_a_daemon_that_holds_the_lock_and_then_is_host() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let standalone = serving(&p, quiet());
+    let serve = Daemon::spawn_with(&p, hosted());
+    assert!(serve.ready(Duration::from_millis(500)).is_err());
+    assert!(
+        crate::owner::forget_host_secret(&l).is_none(),
+        "no secret while another daemon holds the lock"
+    );
+    standalone.stop();
+    drop(standalone);
+    serve
+        .ready(Duration::from_secs(20))
+        .expect("the serve takes the lock");
+    let mine = crate::owner::forget_host_secret(&l).expect("the serve's secret");
+    crate::owner::set_host_secret(&l, &mine);
+    assert_eq!(
+        answered(host(&p, "syncLease.link", &json!({})))["cloud"],
+        "linked"
+    );
+    drop(serve);
+}
+
+/// The wait ends when the process is exiting.
+#[test]
+fn a_host_daemon_stops_waiting_when_the_process_is_exiting() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let standalone = serving(&p, quiet());
+    let serve = Daemon::spawn_with(
+        &p,
+        Config {
+            exiting: || true,
+            ..hosted()
+        },
+    );
+    assert!(serve.ready(Duration::from_secs(10)).is_err());
+    drop(serve);
+    drop(standalone);
+}
+
+#[test]
+fn a_restarted_daemon_makes_a_new_secret_and_the_client_picks_it_up() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let d = serving(&p, hosted());
+    let first = crate::owner::forget_host_secret(&l).expect("secret");
+    crate::owner::set_host_secret(&l, &first);
+    answered(host(&p, "syncLease.link", &json!({})));
+    d.stop();
+    drop(d);
+    // Stopped: the secret is gone with the daemon.
+    assert!(crate::owner::forget_host_secret(&l).is_none());
+    assert!(matches!(
+        host(&p, "syncLease.link", &json!({})),
+        Reached::NoDaemon
+    ));
+    let d = serving(&p, hosted());
+    let second = crate::owner::forget_host_secret(&l).expect("secret");
+    crate::owner::set_host_secret(&l, &second);
+    assert_ne!(first, second);
+    answered(host(&p, "syncLease.link", &json!({})));
+    drop(d);
+}
+
+/// A daemon from before the host principal ignores the claim and answers normally, with no `principals` field: said as
+/// "too old", not as "no daemon".
+#[cfg(unix)]
+#[test]
+fn a_daemon_too_old_for_host_rows_is_named() {
+    use std::io::{BufRead as _, BufReader, Write as _};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    std::fs::create_dir_all(&l.dir).expect("core folder");
+    let sock = crate::owner::endpoint(&l);
+    let listener = std::os::unix::net::UnixListener::bind(&sock).expect("bind");
+    let old = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("accept");
+        let mut line = String::new();
+        BufReader::new(stream.try_clone().expect("clone"))
+            .read_line(&mut line)
+            .expect("hello");
+        let mut out = stream;
+        writeln!(
+            out,
+            "{}",
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"protocol": crate::owner::PROTOCOL, "version": "0.0.0", "schema": "old", "generation": 1, "pid": 1, "nonce": "n", "proof": "p", "compatible": true}})
+        )
+        .expect("reply");
+    });
+    crate::owner::set_host_secret(&l, "irrelevant");
+    match host(&p, "syncLease.link", &json!({})) {
+        Reached::Mismatch(note) => assert!(note.contains("too old"), "{note}"),
+        other => panic!("{other:?}"),
+    }
+    old.join().expect("old daemon");
+    let _ = crate::owner::forget_host_secret(&l);
 }
 
 #[test]
@@ -1399,12 +1633,12 @@ fn a_stalled_key_store_holds_up_its_own_call_and_no_other_row() {
             let _ = wait.lock().expect("lock").recv();
             Ok(Some(zeroize::Zeroizing::new(vec![7u8; 32])))
         })),
-        ..quiet()
+        ..hosted()
     };
     let d = serving(&p, cfg);
     let blocked = {
         let p = p.clone();
-        std::thread::spawn(move || read(&p, "secrets.get", &json!({"name": "a"})))
+        std::thread::spawn(move || host(&p, "secrets.get", &json!({"name": "a"})))
     };
     until("the key load to begin", || {
         started.load(std::sync::atomic::Ordering::SeqCst)
@@ -1485,10 +1719,15 @@ fn the_secrets_rows_round_trip_through_a_real_daemon() {
             seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(Some(zeroize::Zeroizing::new(vec![9u8; 32])))
         })),
-        ..quiet()
+        ..hosted()
     };
     let d = serving(&p, cfg);
-    let ask = |method: &str, params: Value| match read(&p, method, &params) {
+    // `get` is the host's alone; the rest are the owner's.
+    let ask = |method: &str, params: Value| match if method == "secrets.get" {
+        host(&p, method, &params)
+    } else {
+        read(&p, method, &params)
+    } {
         Reached::Answered(v) => v,
         other => panic!("{method}: {other:?}"),
     };
@@ -1524,6 +1763,17 @@ fn the_secrets_rows_round_trip_through_a_real_daemon() {
         ask("secrets.has", json!({"name": "a"})),
         json!({"has": false})
     );
+    // The owner token alone never gets the value back, and the host connection gets no owner row.
+    ask("secrets.put", json!({"name": "a", "value": "one"}));
+    match read(&p, "secrets.get", &json!({"name": "a"})) {
+        Reached::Refused(Error::NotAllowed(note)) => assert!(note.contains("owner"), "{note}"),
+        other => panic!("the owner read a secret: {other:?}"),
+    }
+    assert!(matches!(
+        host(&p, "secrets.put", &json!({"name": "a", "value": "x"})),
+        Reached::Refused(Error::NotAllowed(_))
+    ));
+    ask("secrets.delete", json!({"name": "a"}));
     // The key was read until it was found, then kept.
     assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
     // A bad name is the caller's mistake, said as a refusal.
@@ -1580,25 +1830,4 @@ fn the_gate_answers_over_the_owner_socket_and_frees_a_holder_whose_process_is_go
         read(&p, "gate.take", &json!({"holder": "d", "max": 1})),
         Reached::Refused(Error::BadParams(_))
     ));
-}
-
-#[test]
-fn a_missing_or_empty_host_secret_reaches_no_daemon_and_never_falls_back_to_the_owner() {
-    let (_t, m) = machine();
-    let p = paths(&m);
-    let l = Layout::new(&m);
-    let d = serving(&p, quiet());
-    std::fs::remove_file(&l.host_token).expect("remove");
-    assert!(matches!(
-        host(&p, "syncLease.link", &json!({})),
-        Reached::NoDaemon
-    ));
-    std::fs::write(&l.host_token, "").expect("empty");
-    assert!(matches!(
-        host(&p, "syncLease.link", &json!({})),
-        Reached::NoDaemon
-    ));
-    // The owner's own reads still work: the failure did not change who anyone is.
-    answered(read(&p, "syncLease.status", &json!({})));
-    drop(d);
 }
