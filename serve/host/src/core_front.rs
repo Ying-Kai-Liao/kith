@@ -126,7 +126,13 @@ pub fn secrets_call(method: &str, params: &Value, wait: std::time::Duration) -> 
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
             kith_core::Reached::NoDaemon => {
-                anyhow::bail!("the core is not running (kith doctor says why; secrets need it)")
+                let status = kith_core::status(&folders);
+                let why = |k: &str| status["core"][k].as_str().unwrap_or("-").to_owned();
+                anyhow::bail!(
+                    "the core is not running ({}: {}; kith doctor says more; secrets need it)",
+                    why("state"),
+                    why("note")
+                )
             }
             kith_core::Reached::Mismatch(note) => anyhow::bail!("the running core does not fit this host: {note}"),
             kith_core::Reached::Lost(why) => anyhow::bail!("the connection to the core ended: {why}"),
