@@ -189,6 +189,8 @@ impl RunTokens {
 
     /// Ends every token of these people (a person and their bots), bound or not. The count of tokens ended. This is
     /// the revoke hook: the daemon calls it inside the core call that committed the suspension or removal.
+    // Called from the authority writes, which are Unix only for now.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn end_people(&self, people: &[&str]) -> usize {
         let mut entries = self.locked();
         let before = entries.len();
@@ -200,6 +202,8 @@ impl RunTokens {
     /// every id the answer names (the person and their bots); removing a bot ends its own. Undo ends nothing and
     /// revives nothing (the tokens are already gone; a new run mints a new one). Kept separate from the dispatch so a
     /// change to the doors' hook (M2-14) does not touch it.
+    // Called from the authority writes, which are Unix only for now.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn after_authority_write(
         &self,
         method: &str,
