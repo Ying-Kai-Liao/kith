@@ -268,7 +268,13 @@ pub(super) fn write_in(
                 &kv,
             )?))
         }
-        "people.removeBot" => Ok(lines(write::bot_remove(a, need(params, "id")?)?)),
+        "people.removeBot" => {
+            // read before the row goes: a renamed bot's cards may still sit under its old ids
+            let was = revoke::was_ids(a, need(params, "id")?);
+            let mut out = lines(write::bot_remove(a, need(params, "id")?)?);
+            out["was"] = json!(was);
+            Ok(out)
+        }
         "people.botsCap" => Ok(lines(write::bots_cap(a, need(params, "amount")?)?)),
         "people.invite" => {
             let said = write::invite_create(
