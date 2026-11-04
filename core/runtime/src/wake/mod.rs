@@ -25,8 +25,13 @@ mod tests;
 mod waiters;
 
 pub(crate) use call::{call, serves};
-pub(crate) use model::{Answered, Item, State, Waiter};
-pub(crate) use store::{counts, load, save};
+// The import (Unix only, like the rest of `import`) is the one outside user of the model and the counts.
+pub(crate) use model::State;
+#[cfg(unix)]
+pub(crate) use model::{Answered, Item, Waiter};
+#[cfg(unix)]
+pub(crate) use store::counts;
+pub(crate) use store::{load, save};
 
 use crate::db::Core;
 use crate::error::Result;
