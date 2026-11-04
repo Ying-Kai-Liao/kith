@@ -867,7 +867,7 @@ mod claim {
         };
         assert!(
             threads::take_claim(&ctx(state), sid, i64::from(pid), &how)
-                .unwrap()
+                .expect("take_claim ran")
                 .is_ok()
         );
     }
