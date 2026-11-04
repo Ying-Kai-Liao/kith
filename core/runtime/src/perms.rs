@@ -171,20 +171,63 @@ fn user() -> String {
     std::env::var("USERNAME").unwrap_or_default()
 }
 
+/// What reading one access list came to.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(unix, allow(dead_code))]
+enum Verdict {
+    Private,
+    Open,
+    /// `icacls` failed and the file is gone: `SQLite` deletes the -wal and -shm when the last connection closes, which
+    /// can happen between the existence check and the read. A file that no longer exists holds nothing to protect.
+    Vanished,
+    /// `icacls` failed on a file that is still there (e.g. delete-pending, or a handle opening): worth another try.
+    Unreadable,
+}
+
+#[cfg_attr(unix, allow(dead_code))]
+fn judge(read_ok: bool, text: &str, path: &str, user: &str, still_exists: bool) -> Verdict {
+    if read_ok {
+        if acl_is_owner_only(text, path, user) {
+            Verdict::Private
+        } else {
+            Verdict::Open
+        }
+    } else if still_exists {
+        Verdict::Unreadable
+    } else {
+        Verdict::Vanished
+    }
+}
+
 #[cfg(not(unix))]
 fn check_acl(path: &Path) -> Result<()> {
-    let out = std::process::Command::new("icacls")
-        .arg(path)
-        .output()
-        .map_err(|e| {
-            Error::Permissions(format!(
-                "kith-core: can't read the access list of {}: {e}",
-                path.display()
-            ))
-        })?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    if out.status.success() && acl_is_owner_only(&text, &path.to_string_lossy(), &user()) {
-        return Ok(());
+    // A -shm being created or torn down by another connection answers `icacls` with an error for a moment; a real
+    // open list never goes away, so a few short retries cost nothing on the normal path.
+    for attempt in 0..5 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
+        let out = std::process::Command::new("icacls").arg(path).output();
+        let verdict = match out {
+            Ok(o) => judge(
+                o.status.success(),
+                &String::from_utf8_lossy(&o.stdout),
+                &path.to_string_lossy(),
+                &user(),
+                path.exists(),
+            ),
+            Err(e) => {
+                return Err(Error::Permissions(format!(
+                    "kith-core: can't read the access list of {}: {e}",
+                    path.display()
+                )));
+            }
+        };
+        match verdict {
+            Verdict::Private | Verdict::Vanished => return Ok(()),
+            Verdict::Open => break,
+            Verdict::Unreadable => {}
+        }
     }
     Err(Error::Permissions(format!(
         "kith-core: {} is open to other accounts; kith won't start until it is private: icacls \"{}\" /inheritance:r /grant:r \"{}:(OI)(CI)F\"",
@@ -209,5 +252,62 @@ fn restrict(path: &Path) -> Result<()> {
             "kith-core: can't make {} private (icacls failed)",
             path.display()
         )))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    const OWNER_ONLY: &str = "C:\\m\\core.db-shm HOST\\me:(F)\n NT AUTHORITY\\SYSTEM:(F)\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
+
+    #[test]
+    fn a_sidecar_deleted_while_being_read_is_not_an_open_file() {
+        assert_eq!(judge(false, "", "x", "me", false), Verdict::Vanished);
+        assert_eq!(judge(false, "", "x", "me", true), Verdict::Unreadable);
+    }
+
+    #[test]
+    fn a_readable_list_is_still_judged_by_its_entries() {
+        assert_eq!(
+            judge(true, OWNER_ONLY, "C:\\m\\core.db-shm", "me", true),
+            Verdict::Private
+        );
+        let open = format!("{OWNER_ONLY} BUILTIN\\Users:(R)\n");
+        assert_eq!(
+            judge(true, &open, "C:\\m\\core.db-shm", "me", true),
+            Verdict::Open
+        );
+    }
+
+    /// The order from the CI flake: one connection creating and dropping the sidecars while the folder is checked.
+    #[cfg(windows)]
+    #[test]
+    fn checking_while_another_connection_makes_and_removes_sidecars_passes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("core");
+        ensure_dir(&dir).unwrap();
+        let db = dir.join("core.db");
+        let churn_db = db.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = stop.clone();
+        let t = std::thread::spawn(move || {
+            while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                let c = rusqlite::Connection::open(&churn_db).unwrap();
+                c.pragma_update(None, "journal_mode", "WAL").unwrap();
+                c.execute_batch("CREATE TABLE IF NOT EXISTS t(x)").unwrap();
+            }
+        });
+        for _ in 0..40 {
+            for f in ["core.db", "core.db-wal", "core.db-shm"] {
+                let p = dir.join(f);
+                if p.exists() {
+                    check_file(&p).unwrap();
+                }
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        t.join().unwrap();
     }
 }
