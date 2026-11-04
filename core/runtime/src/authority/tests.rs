@@ -17,6 +17,7 @@ use super::{Authority, snapshot};
 use crate::authority::load::{empty, load};
 
 mod cards;
+mod guest;
 mod requests;
 mod revoke;
 mod runs;

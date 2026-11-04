@@ -291,7 +291,21 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             );
         }
     }
+    let mut agent_access = Map::new();
+    {
+        let mut q =
+            tx.prepare("SELECT agent, domains, since, by FROM agent_access ORDER BY agent")?;
+        let mut rows = q.query([])?;
+        while let Some(r) = rows.next()? {
+            let mut row = Map::new();
+            set(&mut row, "domains", json(r, 1, "agent_access.domains")?);
+            set(&mut row, "since", json(r, 2, "agent_access.since")?);
+            set(&mut row, "by", json(r, 3, "agent_access.by")?);
+            agent_access.insert(r.get::<_, String>(0)?, Value::Object(row));
+        }
+    }
     let mut auth = Map::new();
+    auth.insert("agent_access".to_owned(), Value::Object(agent_access));
     auth.insert("invites".to_owned(), Value::Object(invites));
     auth.insert("retired".to_owned(), Value::Object(retired));
     auth.insert("people".to_owned(), Value::Object(people));
