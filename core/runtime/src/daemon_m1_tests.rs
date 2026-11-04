@@ -16,6 +16,7 @@ fn quiet() -> Config {
         holder: HolderConfig::default(),
         holder_on: false,
         key_load: None,
+        host: false,
         // Much shorter than the test waits: the daemon must keep going past it behind an embedded command.
         wait_for_embedded: Duration::from_millis(100),
     }

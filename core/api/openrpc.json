@@ -6553,15 +6553,12 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "secrets",
-          "get"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [
           "--json"
@@ -6571,7 +6568,8 @@
           "name": {
             "kind": "positional"
           }
-        }
+        },
+        "hidden": true
       }
     },
     {

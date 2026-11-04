@@ -17,10 +17,6 @@ pub(crate) struct Layout {
     /// The local owner token: what a CLI shows the daemon to be the owner (with the same OS user). Rewritten at each
     /// daemon start.
     pub token: PathBuf,
-    /// The host secret: what `kith serve`'s own client shows the daemon to be the host (the relay owner), apart from the
-    /// owner token so that a terminal or an owner agent holding only the owner token cannot speak as the host. Rewritten
-    /// at each daemon start; never in any run's environment (it sits in the core folder the guest deny list covers).
-    pub host_token: PathBuf,
     /// The key the holder was started with; it never leaves this folder (the holder reads it from a pipe).
     pub holder_secret: PathBuf,
     /// The holder's own folder (socket, lock, log), inside the core folder so the same lists cover it.
@@ -40,7 +36,6 @@ impl Layout {
             marker: dir.join("core.marker"),
             snapshots: dir.join("snapshots"),
             token: dir.join("owner.token"),
-            host_token: dir.join("host.token"),
             holder_secret: dir.join("holder.secret"),
             holder_dir: dir.join("holder"),
             dir,
@@ -58,7 +53,6 @@ impl Layout {
             self.holder.clone(),
             self.marker.clone(),
             self.token.clone(),
-            self.host_token.clone(),
             self.holder_secret.clone(),
         ]
     }

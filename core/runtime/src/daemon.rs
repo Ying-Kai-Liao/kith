@@ -39,6 +39,9 @@ pub(crate) struct Config {
     pub holder_on: bool,
     /// Reads the secrets master key before the core lock is taken; the OS key store when `None`.
     pub key_load: Option<crate::secrets::KeyLoader>,
+    /// The daemon of a `kith serve`: it makes the host secret in its memory. Off for a standalone daemon, which has no
+    /// Host.
+    pub host: bool,
 }
 
 impl Default for Config {
@@ -48,6 +51,7 @@ impl Default for Config {
             wait_for_embedded: Duration::from_secs(30),
             holder_on: true,
             key_load: None,
+            host: false,
         }
     }
 }
@@ -155,13 +159,13 @@ impl Shared {
         }
         // The envelope's rows that need the master key read it first, outside the core lock (see `secrets::preload`).
         if matches!(method, "secrets.open" | "secrets.get" | "secrets.put") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            crate::call::check(who, method, params)?;
             let key = self.master_key()?;
             let answer = self.with_core(|c| {
                 if let Some(key) = key {
                     crate::secrets::adopt(&c.secrets, key)?;
                 }
-                c.call(kith_api::Principal::Owner, method, params)
+                c.call(who, method, params)
             })?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
@@ -304,8 +308,22 @@ pub struct Daemon {
 impl Daemon {
     /// Starts the daemon on a thread of its own and returns at once: it never blocks the startup of what called it.
     /// Whether it came up is [`Daemon::ready`]; if it did not, the core log says why and the caller carries on.
+    /// A standalone daemon (`kith kernel core-daemon`): it serves the owner only and has no Host.
     pub fn spawn(paths: &Paths) -> Daemon {
         Self::spawn_with(paths, Config::default())
+    }
+
+    /// The daemon `kith serve` runs inside itself: as [`Daemon::spawn`], and it also makes the host secret in this
+    /// process's memory (never a file), so only this serve's own code can call the host rows. A serve whose daemon
+    /// does not get the core lock (another one holds it) never gets a secret.
+    pub fn spawn_as_host(paths: &Paths) -> Daemon {
+        Self::spawn_with(
+            paths,
+            Config {
+                host: true,
+                ..Config::default()
+            },
+        )
     }
 
     pub(crate) fn spawn_with(paths: &Paths, cfg: Config) -> Daemon {
@@ -466,7 +484,11 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
     let for_calls = shared.clone();
     let handler: Arc<Handler> =
         Arc::new(move |who, method, params| for_calls.dispatch(who, method, params));
-    match Server::bind(layout, generation, handler) {
+    // An earlier version kept the host secret in a file; it proves nothing now and must not stay on disk.
+    if let Err(e) = owner::remove_legacy_host_token(layout) {
+        log::note(&shared.logs, &format!("daemon: {e}"));
+    }
+    match Server::bind(layout, generation, handler, cfg.host) {
         Ok(server) => {
             let mut slot = shared
                 .server
