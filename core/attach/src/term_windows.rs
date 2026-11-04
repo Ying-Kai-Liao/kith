@@ -34,6 +34,7 @@ impl Tty {
     }
 
     /// The console window's size (what the viewer sees, not the scrollback buffer).
+    #[allow(clippy::unused_self)] // same shape as the Unix side, which asks the keys' tty
     pub(super) fn size_fn(&self) -> Arc<dyn Fn() -> Option<(u16, u16)> + Send + Sync> {
         Arc::new(|| {
             // SAFETY: the info struct is zeroed and only read after the call said it filled it in.
