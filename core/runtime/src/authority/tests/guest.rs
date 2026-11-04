@@ -328,7 +328,7 @@ fn a_call_without_a_home_resolves_the_serve_folder_from_the_process_home() {
         .serve
     {
         kith_kernel::secrets::ServeDir::Fixed(d) => d,
-        other => panic!("unexpected {other:?}"),
+        other @ kith_kernel::secrets::ServeDir::Endpoint { .. } => panic!("unexpected {other:?}"),
     };
     let process_home = kith_kernel::paths::process_home();
     assert_eq!(
