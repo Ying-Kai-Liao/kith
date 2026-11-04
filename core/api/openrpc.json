@@ -6688,7 +6688,7 @@
     },
     {
       "name": "doors.start",
-      "summary": "Starts a door for a person: the access check and the row in one step. Answers the door (`state` starting, its `version`) and `repeat` (true when this id was already starting or live, nothing written). Refuses a person who is cut off, who may not run the agent, whose Mac is out of sync with the cloud (anyone but the owner), a supervisor that is not running and an id that is a swept or ended door.",
+      "summary": "Starts a door for a person: the access check and the row in one step. Answers the door (`state` starting, its `version`) and `repeat` (true when this id was already starting or live, nothing written). Refuses, as `kith-auth door` does: the owner (doors are for the people an agent is shared with), a person who is cut off or may not run the agent, a Mac out of sync with the cloud, a door that is not among the doors their ticked jobs grant now (a bot's cut to its owner's); then a supervisor that is not running and an id that is a swept or ended door.",
       "params": [
         {
           "name": "agent",
@@ -6700,7 +6700,7 @@
         },
         {
           "name": "door",
-          "summary": "The door's name in the agent's capabilities.",
+          "summary": "The door as `name@digest`, the piece a job grants.",
           "required": true,
           "schema": {
             "type": "string"
