@@ -3,7 +3,7 @@
   "state:home/.kith/live/terminal/s1.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
   "state:home/.kith/sessions/queue/.lock": "",
   "state:home/.kith/sessions/waits/.lock": "",
-  "state:home/.kith/sessions/waits/wwwwwwwwwwww.json": "{\n  \"agent\": \"coder\",\n  \"checked\": \"<EPOCH>\",\n  \"created\": \"<EPOCH>\",\n  \"id\": \"wwwwwwwwwwww\",\n  \"kind\": \"pid\",\n  \"note\": \"\",\n  \"on\": \"pid:1\",\n  \"pid\": 1,\n  \"procStart\": null,\n  \"seen\": null,\n  \"session\": \"s1\",\n  \"until\": \"<EPOCH>\",\n  \"v\": 1,\n  \"why\": \"\"\n}\n",
+  "state:home/.kith/sessions/waits/wwwwwwwwwwww.json": "{\n  \"agent\": \"coder\",\n  \"checked\": \"<MASKED>\",\n  \"created\": \"<MASKED>\",\n  \"id\": \"wwwwwwwwwwww\",\n  \"kind\": \"pid\",\n  \"note\": \"\",\n  \"on\": \"pid:1\",\n  \"pid\": 1,\n  \"procStart\": null,\n  \"seen\": null,\n  \"session\": \"s1\",\n  \"until\": \"<MASKED>\",\n  \"v\": 1,\n  \"why\": \"\"\n}\n",
   "step0.exit": "0\n",
   "step0.stderr": "",
   "step0.stdout": "",

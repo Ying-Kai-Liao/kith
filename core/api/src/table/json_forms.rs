@@ -92,7 +92,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     plumbing(
         "run.mint",
-        "A run token for one run of an agent, for a person in a conversation (and the claim it holds, when it holds one). The token is shown once; it works on the run socket only for a peer that descends from the process bound with run.bind. Tokens live in the daemon's memory and are gone when it restarts.",
+        "A run token for one run of an agent, for a person in a conversation (and the claim it holds, when it holds one). The token is shown once; it works on the run socket only for a peer that descends from the process bound with run.bind. Tokens live in the daemon's memory and are gone when it restarts, and when the person (or the owner of a bot) is suspended or removed; a mint for a revoked person is refused. The answer also names the run socket (`socket`).",
         &[
             caller("agent", "string", "The agent the run is of."),
             caller(
