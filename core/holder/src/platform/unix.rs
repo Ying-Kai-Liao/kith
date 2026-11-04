@@ -3,11 +3,11 @@
 //
 //! Linux and macOS: Unix sockets only this user can open, PTYs, process groups.
 
-use super::{Spec, Started};
+use super::{Ctl, CtlStart, Spec, Started};
 use crate::proto::{Exit, Mode};
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -240,13 +240,45 @@ impl Proc {
     }
 }
 
+/// The control channel of a resident stub: a socketpair whose stub end is handed to the child as an inherited fd
+/// (3 or more, as `--ctl-fd` requires), and which the holder drops as soon as the child is started. Close-on-exec
+/// everywhere in the holder; only the child's own `pre_exec` clears it, so a spawn on another thread never leaks it.
+fn ctl_pair() -> io::Result<(std::os::unix::net::UnixStream, OwnedFd)> {
+    let (ours, theirs) = std::os::unix::net::UnixStream::pair()?;
+    let theirs = OwnedFd::from(theirs);
+    // std makes both ends close-on-exec; F_DUPFD_CLOEXEC keeps that and moves the number out of 0..3.
+    let fd = unsafe { libc::fcntl(theirs.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((ours, unsafe { OwnedFd::from_raw_fd(fd) }))
+}
+
 pub fn spawn(spec: &Spec) -> io::Result<Started> {
-    let program = spec
-        .argv
-        .first()
-        .ok_or_else(|| io::Error::other("empty argv"))?;
+    let (mut ours, mut theirs) = (None, None);
+    let argv: Vec<String> = match (&spec.mode, &spec.resident) {
+        (Mode::Pipes, Some(r)) => {
+            let (a, b) = ctl_pair()?;
+            let mut v: Vec<String> = [
+                r.stub,
+                "--resident",
+                "--lock-dir",
+                r.lock_dir,
+                "--ctl-fd",
+                &b.as_raw_fd().to_string(),
+                "--",
+            ]
+            .map(String::from)
+            .into();
+            v.extend(spec.argv.iter().cloned());
+            (ours, theirs) = (Some(a), Some(b));
+            v
+        }
+        _ => spec.argv.to_vec(),
+    };
+    let program = argv.first().ok_or_else(|| io::Error::other("empty argv"))?;
     let mut cmd = Command::new(program);
-    cmd.args(&spec.argv[1..])
+    cmd.args(&argv[1..])
         .env_clear()
         .envs(spec.env)
         .current_dir(spec.cwd);
@@ -298,21 +330,39 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
                 input: Box::new(master.try_clone()?),
                 out: Box::new(master),
                 err: None,
+                ctl: None,
             })
         }
         Mode::Pipes => {
             cmd.stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            let ctl_fd = theirs.as_ref().map(AsRawFd::as_raw_fd);
             unsafe {
-                cmd.pre_exec(|| {
+                cmd.pre_exec(move || {
                     if libc::setsid() < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    // Only this child inherits the stub's end of the control channel.
+                    if let Some(fd) = ctl_fd
+                        && libc::fcntl(fd, libc::F_SETFD, 0) < 0
+                    {
                         return Err(io::Error::last_os_error());
                     }
                     Ok(())
                 });
             }
             let mut child = cmd.spawn()?;
+            // The holder keeps no copy of the stub's end (a dead holder must produce EOF there), and `cmd` still
+            // owns nothing of it: it was passed by number.
+            drop(theirs.take());
+            let ctl = match ours.take() {
+                Some(s) => Some(CtlStart::Ready(Ctl {
+                    write: Box::new(s.try_clone()?),
+                    read: Box::new(s),
+                })),
+                None => None,
+            };
             let input: Box<dyn Write + Send> = Box::new(child.stdin.take().expect("piped"));
             let out: Box<dyn Read + Send> = Box::new(child.stdout.take().expect("piped"));
             let err: Box<dyn Read + Send> = Box::new(child.stderr.take().expect("piped"));
@@ -325,6 +375,7 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
                 input,
                 out,
                 err: Some(err),
+                ctl,
             })
         }
     }
@@ -425,6 +476,7 @@ mod tests {
             mode: Mode::Pipes,
             cols: 80,
             rows: 24,
+            resident: None,
         })
         .unwrap();
         let proc = started.proc;
