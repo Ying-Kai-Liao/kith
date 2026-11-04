@@ -56,6 +56,57 @@ files with one masked name are an error), and `unswitched` (text saying why the 
 with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
 red until the verb exists. The Python replay always runs every case.
 
+### Schedules (M4-0)
+
+`golden/sched.json` freezes `kith-sched` before M4 replaces it (39 cases, `unswitched`: "kith-sched has no Rust side yet"):
+`ls` / `log` / `--json` (empty, mixed jobs, a table of 26 cron strings read through `ls --json` at three clocks), unreadable
+`jobs.json` files, `add` (also as a replace, with `-m -e -H`, as a person, from an app run's outbox), `pause` / `resume` / `rm`,
+`run` (while running, as a person, as the owner, a refused person), and `tick` at fixed clocks: a job due, the first tick with no
+state, not due yet, catch-up after a sleep under a day (one run) and over a day (only what fell in the last 24 h runs), the edge
+of that day, paused, bad cron, a run still going inside 6 h (skipped) and past it, a refused / revoked / unknown person, `0` and `7`
+as Sunday, day-of-month together with day-of-week, the `@` macros, corrupt state, two agents, an epoch clock, the hourly prune.
+
+How it is made hermetic:
+
+- **The clock.** `kith-sched` takes `KITH_SCHED_NOW` (ISO local time or epoch seconds); unset it reads the real clock, and the runs it starts
+  do not inherit it. Every tick case ends with `log --json`, so its result can be read without `state.json` once that moves to core.db. Each
+  case line is `[CLOCK, ...verb]`, because one case needs several clocks: `w.sh` (written by the case's setup) exports it and
+  runs the program. It starts `kith-sched` from a copy of the kernel's `bin/` in `home/k/` (so the tick's helpers resolve there)
+  with `lib` linked, and on the Rust side runs `"$KITH_BIN" kernel schedule` (`KITH_CORE=rust`) with the same line. Whoever
+  builds the Rust verb makes it honour `KITH_SCHED_NOW` and look for `kith`, `kith-ask` and `kith-wake` in `home/k/bin` (an
+  env var of its own), as the Python tick calls `KITH/bin/kith-ask --sweep` and `KITH/bin/kith-wake drain`.
+- **Side effects.** Those three are stand-ins in `home/k/bin`: `kith-ask` and `kith-wake` log their call to the fake log (so
+  every tick shows `kith-ask --sweep` and `kith-wake drain`, never run), `kith` logs who the run was for (person, via, job, model,
+  effort, harness) and a job called `slow-*` stays running until `home/.release` exists, which is how "still running" gets a live pid without a
+  timer. A case ends such a run with the step `["-", "release"]` (handled by `w.sh`, not by `kith-sched`). `w.sh` waits for
+  each started stand-in to have written its record, and numbers the runs' outbox folders (named by the nanosecond) `-n1`, `-n2`.
+- **Masks.** `pid` (a key), the traceback line numbers and `(pid N)`; ISO times are kept readable (`2026-11-03@08:30`, a case
+  `normalize` rule ahead of the generic `<TS>`), because the clock is the point. `auth.json` is left out where a revoke
+  stamps the real time into it.
+
+Recorded as today's behaviour, bugs included (a golden is not a spec; fix them in M4 and re-record with a reason):
+`kith-sched log` in text mode crashes with `UnboundLocalError` (the name `log` is assigned later in `main`); `ls` of a job with
+no occurrence in 366 days (`0 0 29 2 *`) prints `bad cron: 'str' object has no attribute 'strftime'`; the 6 h rule compares
+`at` (minutes) with an ISO string that has seconds, so a run exactly 6 h old counts as old. Daylight saving (cases
+`sched-tick-dst-*`, `TZ=Australia/Sydney`, epoch clocks): kith-sched works in local time without a zone, so a job inside the
+skipped hour fires at 03:00 as `caught up after sleep` (02:30 never happens), and in the repeated hour the tick at the second
+02:00 is `clock behind` and returns, then 02:01 on runs again: a `30 2 * * *` job fires twice, once per pass. (The stamps stay
+right: an epoch clock keeps the second pass's fold.)
+
+`fixtures/routines-next.json` freezes the host's routines timing (`serve/host/src/routines/schedule.rs`): 132 rows of
+`Trigger::next(after)` (Cron in many IANA zones and across DST changes of New York, London, Sydney and Lord Howe, Interval,
+Once, Webhook / Event) with its `validate` verdict, and `Trigger::advance(due, now)`. The Rust test
+`routines::schedule_golden::routines_next_fire_times_are_frozen` (run by CI's `-f packages="kith-serve"`) fails when any answer
+changes. Re-record on purpose: `KITH_RECORD_ROUTINES_NEXT=1 cargo test -p kith-serve --bin kith-serve schedule_golden`, and say why in the PR.
+Note that the host rejects the `@` macros (it needs five fields) while kith-sched accepts them; M4 has to decide, the fixture records both.
+The fixture lives in `fixtures/`, not `golden/`, because the golden loader reads every `golden/*.json` as a list of cases.
+
+Bugs included on the host side too: `30 1 * * *` in America/New_York, `next` after 2026-11-01T06:00Z (01:00 EST, the second
+pass of the repeated hour) answers 05:30Z, which is *before* `after` (croner picks the earlier, EDT, reading of 01:30). The
+runner stores `advance(due, now)` = `next(now)`, so a missed 05:30Z fire leaves a due time in the past: the `advance` row
+(due 05:30Z, now 06:10Z) shows it. M4's Trigger must never answer a time at or before `after`; record that as an intended
+difference, do not copy it.
+
 ## Per-command summary
 
 `--summary FILE` (`-` for stdout) writes `{"commands": {"<command>": {"green": bool, "cases": {"<case>": "same" |

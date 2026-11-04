@@ -1,0 +1,13 @@
+{
+  "fakes": "\nkith-ask --sweep\nkith-wake drain",
+  "state:home/.kith/sched/state.json": "{\n  \"pruned\": 1775320200.0,\n  \"tick\": \"2026-04-05@02:30\"\n}\n",
+  "state:kith/agents/echo/jobs.json": "[\n  {\n    \"cron\": \"30 2 * * *\",\n    \"id\": \"half-two\",\n    \"task\": \"inside the hour that goes away or comes twice\"\n  },\n  {\n    \"cron\": \"0 3 * * *\",\n    \"id\": \"three\",\n    \"task\": \"after it\"\n  }\n]\n",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
+  "state:kith/state/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"agent\": null,\n  \"id\": null,\n  \"runs\": []\n}\n",
+  "step1.stderr": ""
+}

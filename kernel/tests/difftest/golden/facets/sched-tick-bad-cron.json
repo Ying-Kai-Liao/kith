@@ -1,0 +1,16 @@
+{
+  "fakes": "\nkith echo person=owner via=schedule job=d model= effort= harness= task=fine\nkith-ask --sweep\nkith-wake drain",
+  "state:home/.kith/logs/sched/runs/echo/d-20261103-0830.log": "# 2026-11-03@08:30 echo d (due 08:30)\n",
+  "state:home/.kith/outbox/sched-echo-d-n1.json": "{\n  \"agent\": \"echo\",\n  \"at\": 1793694600.0,\n  \"cron\": \"30 8 * * *\",\n  \"job\": \"d\",\n  \"person\": null,\n  \"via\": \"schedule\"\n}\n",
+  "state:home/.kith/outbox/sched-echo-d-n1/": "<empty dir>\n",
+  "state:home/.kith/sched/state.json": "{\n  \"last\": {\n    \"echo/d\": {\n      \"at\": \"2026-11-03@08:30\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/d-20261103-0830.log\",\n      \"pid\": \"<MASKED>\",\n      \"why\": \"due 08:30\"\n    }\n  },\n  \"pruned\": 1793694600.0,\n  \"tick\": \"2026-11-03@08:30\"\n}\n",
+  "state:kith/agents/echo/jobs.json": "[\n  {\n    \"cron\": \"99 8 * * *\",\n    \"id\": \"a\",\n    \"task\": \"the task\"\n  },\n  {\n    \"id\": \"b\",\n    \"task\": \"no cron\"\n  },\n  {\n    \"cron\": \"x y z a b\",\n    \"id\": \"c\",\n    \"task\": \"the task\"\n  },\n  {\n    \"cron\": \"30 8 * * *\",\n    \"id\": \"d\",\n    \"task\": \"fine\"\n  },\n  {\n    \"cron\": \"*/0 * * * *\",\n    \"id\": \"e\",\n    \"task\": \"the task\"\n  }\n]\n",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
+  "state:kith/state/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "kith-sched: echo/a: cron field '99' out of range 0-59\nkith-sched: echo/b: 'cron'\nkith-sched: echo/c: bad cron field 'b'\nkith-sched: echo/e: cron field '*/0' out of range 0-59\n",
+  "step0.stdout": "2026-11-03@08:30 started echo/d → <HOME>/.kith/logs/sched/runs/echo/d-20261103-0830.log\n",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"agent\": null,\n  \"id\": null,\n  \"runs\": [\n    {\n      \"agent\": \"echo\",\n      \"at\": \"2026-11-03@08:30\",\n      \"id\": \"d\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/d-20261103-0830.log\",\n      \"pid\": \"<MASKED>\",\n      \"running\": false,\n      \"why\": \"due 08:30\"\n    }\n  ]\n}\n",
+  "step1.stderr": ""
+}
