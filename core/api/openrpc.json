@@ -5359,6 +5359,45 @@
       }
     },
     {
+      "name": "secrets.delete",
+      "summary": "Remove a secret. Needs no key.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "delete"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
       "name": "secrets.get",
       "summary": "A secret's value, or that there is none.",
       "params": [

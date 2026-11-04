@@ -2,6 +2,7 @@
 //! (Typesafe's System One): stop it, restart it with a correction, give it its own turn, or join
 //! the queue. Without a key, or when Jev fails, the message joins the queue as before.
 
+use crate::LockExt;
 use crate::market::vault;
 use crate::store::Store;
 use anyhow::{Context, Result};
@@ -10,6 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const SLOT: &str = "router";
+/// The saved key after its first read.
+static SAVED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Narrow yes/no questions (Jev ignores negation inside a question); thresholds from probes on 2026-10-16.
@@ -103,10 +106,17 @@ impl Jev {
         let key = if let Some(key) = std::env::var("JEV_API_KEY").ok().filter(|k| !k.is_empty()) {
             key
         } else {
-            // No saved key: don't touch the keychain for every message.
-            hub.store.kv_read(SLOT).ok().flatten()?;
+            // The key is read once and kept; nothing saved means the key store is not touched for every message.
+            if let Some(key) = SAVED.locked().clone() {
+                return Some(Self::from_key(key));
+            }
+            if !vault::exists(&hub.store, SLOT).ok()? {
+                return None;
+            }
             vault::unlock(hub.clone()).await.ok()?;
-            vault::read(&hub.store, SLOT).ok().flatten().filter(|k| !k.is_empty())?
+            let key = vault::read(&hub.store, SLOT).ok().flatten().filter(|k| !k.is_empty())?;
+            *SAVED.locked() = Some(key.clone());
+            key
         };
         Some(Self::from_key(key))
     }
@@ -204,8 +214,9 @@ pub async fn route(hub: &Arc<crate::hub::Hub>, task: &str, recent: &[String], la
 /// Saves the Jev key on this computer (empty removes it).
 pub async fn set_key(hub: &Arc<crate::hub::Hub>, key: &str) -> Result<Value> {
     let key = key.trim();
+    *SAVED.locked() = None;
     if key.is_empty() {
-        hub.store.kv_delete(SLOT)?;
+        vault::remove(&hub.store, SLOT)?;
     } else {
         vault::unlock(hub.clone()).await?;
         vault::write(&hub.store, SLOT, key)?;
@@ -214,7 +225,7 @@ pub async fn set_key(hub: &Arc<crate::hub::Hub>, key: &str) -> Result<Value> {
 }
 
 pub fn status(store: &Store) -> Result<Value> {
-    let saved = store.kv_read(SLOT)?.is_some_and(|v| !v.is_empty());
+    let saved = vault::exists(store, SLOT)?;
     Ok(json!({"configured": saved || std::env::var("JEV_API_KEY").is_ok_and(|k| !k.is_empty())}))
 }
 

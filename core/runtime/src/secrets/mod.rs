@@ -60,6 +60,10 @@ pub(crate) fn call(
             .optional()?;
         return Ok(json!({"has": found.is_some()}));
     }
+    // Removing a record needs no key either.
+    if method == "secrets.delete" {
+        return Ok(json!({"deleted": Envelope::delete(conn, text("name")?)?}));
+    }
     let mut guard = slot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);

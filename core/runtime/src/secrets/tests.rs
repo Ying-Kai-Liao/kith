@@ -322,8 +322,20 @@ fn the_rows_open_put_and_get() {
         call("secrets.put", json!({"name": "a"})),
         Err(crate::Error::BadParams(_))
     ));
+    assert_eq!(
+        call("secrets.delete", json!({"name": "a"})).expect("delete"),
+        json!({"deleted": true})
+    );
+    assert_eq!(
+        call("secrets.delete", json!({"name": "a"})).expect("again"),
+        json!({"deleted": false})
+    );
+    assert_eq!(
+        call("secrets.has", json!({"name": "a"})).expect("has"),
+        json!({"has": false})
+    );
     assert!(matches!(
-        call("secrets.delete", json!({"name": "a"})),
+        call("secrets.list", json!({})),
         Err(crate::Error::NotServed(_))
     ));
 }

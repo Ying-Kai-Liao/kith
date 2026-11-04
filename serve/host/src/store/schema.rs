@@ -395,13 +395,10 @@ impl Store {
         )?;
         migrate(&c)?;
         kith_mem::schema::migrate(&c)?;
-        // A memory store is a test's: its vault is an open in-memory stand-in for the core's envelope.
+        // A test never talks to a daemon: its vault is an in-memory stand-in for the core's envelope, open for a memory
+        // store and locked until `unlock` for a file one, as the real one is.
         #[cfg(test)]
-        let vault = if path == Path::new(":memory:") {
-            crate::market::vault::memory::open_vault().0
-        } else {
-            crate::market::vault::Vault::new()
-        };
+        let vault = crate::market::vault::memory::vault(path == Path::new(":memory:"));
         #[cfg(not(test))]
         let vault = crate::market::vault::Vault::new();
         Ok(Self { db: Mutex::new(c), connector_lock: Mutex::new(()), vault })

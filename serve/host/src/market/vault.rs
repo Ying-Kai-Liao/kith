@@ -48,6 +48,8 @@ pub trait Link: Send + Sync {
     fn open(&self) -> Result<()>;
     /// Whether the envelope holds `name`. Needs no key, so it never prompts.
     fn has(&self, name: &str) -> Result<bool>;
+    /// Removes `name`; answers whether it was there. Needs no key.
+    fn delete(&self, name: &str) -> Result<bool>;
     fn get(&self, name: &str) -> Result<Option<String>>;
     fn put(&self, name: &str, value: &str) -> Result<()>;
     /// The old vault's master key, or `None` when this computer never made one. Never makes one.
@@ -102,6 +104,10 @@ impl Link for CoreLink {
 
     fn has(&self, name: &str) -> Result<bool> {
         Ok(Self::call("secrets.has", &json!({"name": name}), Duration::from_secs(2))?["has"] == true)
+    }
+
+    fn delete(&self, name: &str) -> Result<bool> {
+        Ok(Self::call("secrets.delete", &json!({"name": name}), Duration::from_secs(2))?["deleted"] == true)
     }
 
     fn get(&self, name: &str) -> Result<Option<String>> {
@@ -282,7 +288,7 @@ pub fn read(store: &Store, slot: &str) -> Result<Option<String>> {
     if !store.vault.is_open() {
         // Before `unlock` a slot with nothing behind it is simply empty (callers ask without unlocking to find out
         // whether a feature is set up); one that has a value needs the key store, which only `unlock` may wake.
-        if store.vault.link.has(slot)? || store.kv_read(slot)?.is_some() {
+        if exists(store, slot)? {
             return Err(unavailable());
         }
         return Ok(None);
@@ -296,6 +302,18 @@ pub fn read(store: &Store, slot: &str) -> Result<Option<String>> {
     // Not moved yet (a plaintext value from before the vault, or a record `unlock` could not move): try it here.
     let key = if raw.starts_with(PREFIX) { store.vault.link.legacy_key(store)? } else { None };
     move_slot(store, slot, key.as_ref()).map(Some)
+}
+
+/// Whether the slot has a value, sealed or still on an old row. Needs no key, so it never wakes the key store.
+pub fn exists(store: &Store, slot: &str) -> Result<bool> {
+    Ok(store.vault.link.has(slot)? || store.kv_read(slot)?.is_some())
+}
+
+/// Removes the slot's value. The old row, if any, goes too: this is the owner clearing a credential, not a move.
+pub fn remove(store: &Store, slot: &str) -> Result<()> {
+    let _writing = store.vault.writing.locked();
+    store.vault.link.delete(slot)?;
+    store.kv_delete(slot)
 }
 
 pub fn write(store: &Store, slot: &str, value: &str) -> Result<()> {
@@ -340,6 +358,10 @@ pub(crate) mod memory {
             self.check()?;
             Ok(self.values.locked().contains_key(name))
         }
+        fn delete(&self, name: &str) -> Result<bool> {
+            self.check()?;
+            Ok(self.values.locked().remove(name).is_some())
+        }
         fn get(&self, name: &str) -> Result<Option<String>> {
             self.check()?;
             Ok(self.values.locked().get(name).cloned())
@@ -353,6 +375,11 @@ pub(crate) mod memory {
         fn legacy_key(&self, _: &Store) -> Result<Option<Zeroizing<Vec<u8>>>> {
             Ok(self.legacy.locked().clone().map(Zeroizing::new))
         }
+    }
+
+    /// A vault over a fresh memory link.
+    pub fn vault(open: bool) -> Vault {
+        Vault::with_link(Arc::new(MemoryLink::default()), open)
     }
 
     /// An open vault over a fresh memory link.
@@ -552,6 +579,18 @@ mod tests {
         assert_eq!(store.kv_read("new").unwrap(), None, "no plaintext fallback");
         assert_eq!(store.kv_read("old").unwrap().as_deref(), Some("plain value"));
         assert!(link.open().is_err());
+    }
+
+    #[test]
+    fn removing_a_slot_clears_the_envelope_and_the_old_row() {
+        let (vault, _) = open_vault();
+        let store = store_with(vault);
+        store.kv_set("k", "old").unwrap();
+        write(&store, "k", "new").unwrap();
+        assert!(exists(&store, "k").unwrap());
+        remove(&store, "k").unwrap();
+        assert!(!exists(&store, "k").unwrap());
+        assert_eq!(read(&store, "k").unwrap(), None);
     }
 
     #[test]

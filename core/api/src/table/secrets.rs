@@ -27,6 +27,16 @@ pub(super) const ROWS: &[Method] = &[
     )
     .formats(J),
     row(
+        "secrets.delete",
+        "Remove a secret. Needs no key.",
+        &[pos("name", "string", true, "The secret's name.")],
+        "json",
+        &["secrets", "delete"],
+        Served::Core,
+        Stability::Experimental,
+    )
+    .formats(J),
+    row(
         "secrets.get",
         "A secret's value, or that there is none.",
         &[pos("name", "string", true, "The secret's name.")],
