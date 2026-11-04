@@ -249,8 +249,19 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::schedules::serves_write(method) {
-                crate::call::check(Principal::Owner, method, params)?;
-                let answer = self.with_core(|c| crate::schedules::call_write(c, method, params))?;
+                // `dispatch` checked the row for `who`: `schedule.fire` is the host's, the others the owner's. The webhook
+                // key is a secret record, so its master key is read first, outside the core lock (like `secrets.get`).
+                let key = if method == "schedule.fire" {
+                    self.master_key()?
+                } else {
+                    None
+                };
+                let answer = self.with_core(|c| {
+                    if let Some(key) = key {
+                        crate::secrets::adopt(&c.secrets, key)?;
+                    }
+                    crate::schedules::call_write(c, method, params)
+                })?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }

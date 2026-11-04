@@ -17,6 +17,10 @@ mod fire;
 #[cfg(all(test, unix))]
 mod fire_tests;
 #[cfg(unix)]
+mod hooks;
+#[cfg(all(test, unix))]
+mod hooks_tests;
+#[cfg(unix)]
 mod sync;
 // The import it is tested with is Unix-only for now (like the authority one).
 #[cfg(all(test, unix))]

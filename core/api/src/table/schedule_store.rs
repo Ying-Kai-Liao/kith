@@ -65,6 +65,22 @@ pub(super) const ROWS: &[Method] = &[
         ],
         &["schedule", "run-now"],
     ),
+    // The host takes a webhook or event delivery at its listener and hands it over whole: the core checks the proof, the
+    // event and the job, and fires. Not switched: the host's own routines keep deciding until M4-5.
+    act(
+        "schedule.fire",
+        "A webhook or event delivery for one job: checks the job's key (`Authorization: Bearer` or a GitHub-style `X-Hub-Signature-256` HMAC of the exact body, the key read from the secrets lane), the event against the job's trigger and filters, then fires through the same transaction as `schedule.runNow` with the slot `event:<hash of the delivery id>`, so a redelivery fires at most once. Answers `fired`, `busy` (retry), `ignored`, `ping`, `refused` (`unauthorized`, `paused`, `invalid`) or what an earlier delivery of the same id decided. The host calls it as itself with the real sender in `caller`.",
+        &[
+            pos("agent", "string", true, "The agent."),
+            pos("id", "string", true, "The job."),
+            pos("headers", "{string}", true, "The request headers, name to value."),
+            pos("body", "string", true, "The exact request body (text)."),
+            pos("caller", "string", true, "Who sent it, as the host knows (the real principal)."),
+        ],
+        &["schedule", "fire"],
+    )
+    .principals(HOST)
+    .no_cli(),
 ];
 
 const fn act(
