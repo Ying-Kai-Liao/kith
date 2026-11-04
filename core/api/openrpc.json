@@ -5986,40 +5986,41 @@
     },
     {
       "name": "people.requests",
-      "summary": "The access requests waiting for the owner.",
-      "params": [],
-      "result": {
-        "name": "result",
-        "schema": {}
-      },
-      "x-kith-principals": [
-        "owner"
-      ],
-      "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
-      "x-kith-cli": {
-        "path": [
-          "people",
-          "requests"
-        ],
-        "aliases": [],
-        "formats": [
-          "--json"
-        ],
-        "requires": [],
-        "args": {}
-      }
-    },
-    {
-      "name": "people.approve",
-      "summary": "Approve an access request.",
+      "summary": "The devices asking this computer for access, waiting for the owner (with the code to compare once the device has shown it).",
       "params": [
         {
-          "name": "id",
-          "summary": "The request.",
-          "required": true,
+          "name": "members",
+          "summary": "Only members' requests (what the owner's other devices see).",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       ],
@@ -6031,7 +6032,96 @@
         "owner"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "requests"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "members": {
+            "kind": "switch",
+            "spellings": [
+              "--members"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.approve",
+      "summary": "Approve a device's access request (it needs the device's code first). Answers the device to add.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "members",
+          "summary": "Answer as one of the owner's other devices: members' requests only.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "people",
@@ -6045,13 +6135,31 @@
         "args": {
           "id": {
             "kind": "positional"
+          },
+          "members": {
+            "kind": "switch",
+            "spellings": [
+              "--members"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
           }
         }
       }
     },
     {
       "name": "people.deny",
-      "summary": "Deny an access request.",
+      "summary": "Deny a device's access request.",
       "params": [
         {
           "name": "id",
@@ -6059,6 +6167,41 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "members",
+          "summary": "Answer as one of the owner's other devices: members' requests only.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       ],
@@ -6070,7 +6213,7 @@
         "owner"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "people",
@@ -6084,6 +6227,24 @@
         "args": {
           "id": {
             "kind": "positional"
+          },
+          "members": {
+            "kind": "switch",
+            "spellings": [
+              "--members"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
           }
         }
       }

@@ -1294,6 +1294,75 @@ mod tests {
             "hostNonce": host_nonce, "deviceNonce": device_nonce.map(|n| b64(&n)), "createdAt": 0, "expiresAt": 0})
     }
 
+    /// M2-3: the script the core's `people.requests|approve|deny` rows are held to
+    /// (`core/runtime/src/authority/tests/requests.rs` replays the same file). It runs through `decide`, the real
+    /// `settle`, against the fake cloud; a request arrives by being put in the list, as `sync_requests` does once the
+    /// device has revealed its code, and "the cloud stops listing it" is the pull that drops it.
+    #[tokio::test]
+    async fn access_request_parity_script() {
+        let script: Value =
+            serde_json::from_str(include_str!("../../../../kernel/tests/fixtures/access_requests_parity.json"))
+                .unwrap();
+        for scenario in script["scenarios"].as_array().unwrap() {
+            let name = scenario["name"].as_str().unwrap();
+            let hub = temp_hub();
+            let fake = Arc::new(FakeCloud::default());
+            let base = fake_cloud(fake.clone()).await;
+            hub.store.kv_set("test_cloud_url", &base).unwrap();
+            add_member(&hub);
+            let ids = |hub: &Hub| -> Vec<String> {
+                hub.cloud.requests_json_for(true).iter().map(|r| r["requestId"].as_str().unwrap().to_owned()).collect()
+            };
+            for (n, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
+                let at = format!("{name}: step {n} {step}");
+                if let Some(f) = step.get("file") {
+                    let key = [u8::try_from(f["device"].as_u64().unwrap()).unwrap(); 32];
+                    hub.cloud.requests.locked().push(Request {
+                        id: f["id"].as_str().unwrap().to_owned(),
+                        device_key: key,
+                        device_name: "Phone".into(),
+                        platform: f["platform"].as_str().unwrap().to_owned(),
+                        email: None,
+                        commit: [0; 32],
+                        host_nonce: [0; 32],
+                        code: (f["code"] == true).then(|| "123456".to_owned()),
+                        person: f["person"].as_str().map(str::to_owned),
+                        created_at: i64::try_from(n).unwrap(),
+                        expires_at: i64::MAX,
+                    });
+                } else if step.get("end_member").is_some() {
+                    hub.store.remove_membership("mem_m").unwrap();
+                } else if let Some(id) = step["expire"].as_str() {
+                    hub.cloud.requests.locked().retain(|r| r.id != id);
+                } else if let Some(want) = step.get("list") {
+                    assert_eq!(&serde_json::json!(ids(&hub)), want, "{at}");
+                } else {
+                    let (id, approve) = match step["approve"].as_str() {
+                        Some(id) => (id, true),
+                        None => (step["deny"].as_str().unwrap(), false),
+                    };
+                    let device = hub.cloud.requests.locked().iter().find(|r| r.id == id).map(|r| b64(&r.device_key));
+                    let got = decide(&hub, id, approve).await;
+                    match (&step["expect"]["err"], got) {
+                        (Value::String(want), Err(e)) => assert_eq!(&e.to_string(), want, "{at}"),
+                        (Value::Null, Ok(())) => {
+                            if let Some(want) = step["expect"].get("scopes") {
+                                let d = hub.store.device(&device.unwrap()).unwrap();
+                                let scopes: Vec<&str> = d
+                                    .scopes
+                                    .iter()
+                                    .map(|s| if *s == Scope::Control { "control" } else { "screen" })
+                                    .collect();
+                                assert_eq!(&serde_json::json!(scopes), want, "{at}");
+                            }
+                        }
+                        (want, got) => panic!("{at}: wanted {want}, got {got:?}"),
+                    }
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn in_code_mode_a_members_device_waits_for_the_code_too() {
         let hub = temp_hub();

@@ -222,6 +222,13 @@ What it can't see: two things at the same moment (two writers on one thread, a r
 and property tests (`thread-writers`, `revoke-access`, `secret-cards`, `run-tokens`, `invitee-access`) stay the spec
 for those, and run against the new core.
 
+## Later (after the rebuild)
+
+Features decided and parked, not part of any M-step above.
+
+- **Person asks for agents.** A new access-request type where an invited person asks the owner for more agents. Built
+  once in #712, parked at branch `parked/person-asks-for-agents` (3130fd77); post-rebuild (Kai, q215, 2026-11-04).
+
 ## Rules for whoever picks a step up
 
 - CLI command and `--json` first; the app calls it. Nothing new that only the app can do.
