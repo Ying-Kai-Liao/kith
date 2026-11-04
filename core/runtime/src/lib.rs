@@ -24,7 +24,7 @@ mod authority;
 mod call;
 // Nothing calls the store but the daemon's cards rows and the tests: the host's callers switch in lane H, and the raise,
 // claim and close verbs get theirs there and in M2-12.
-#[allow(dead_code, reason = "first callers are M2-12 and lane H")]
+#[allow(dead_code, reason = "first callers are lane H")]
 mod cards;
 mod daemon;
 mod db;

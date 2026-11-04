@@ -446,6 +446,7 @@ fn the_cards_rows_are_experimental_owner_only_unreleased_and_served_by_the_core(
         ("cards ls --json", "cards.list"),
         ("cards show c1", "cards.show"),
         ("cards answer c1 yes", "cards.answer"),
+        ("cards provide c1 --account work", "cards.provide"),
     ] {
         let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
         assert_eq!(m.stability, Stability::Experimental, "{name}");
@@ -460,6 +461,18 @@ fn the_cards_rows_are_experimental_owner_only_unreleased_and_served_by_the_core(
     for name in ["cards.show", "cards.answer"] {
         assert!(method(name).unwrap().params.iter().all(|p| p.required));
     }
+    // A key is never typed on a command line: the values come from the client (an app), and nothing else takes them.
+    let provide = method("cards.provide").unwrap();
+    let values = provide.params.iter().find(|p| p.name == "values").unwrap();
+    assert!(matches!(values.arg, Arg::Caller));
+    assert!(
+        provide
+            .params
+            .iter()
+            .filter(|p| matches!(p.arg, Arg::Flag(_)))
+            .all(|p| p.name == "account")
+    );
+    assert!(parse_argv(&["cards", "provide", "c1", "--values", "x"]).is_err());
 }
 
 #[test]
