@@ -202,6 +202,32 @@ fn inline(text: &str, key: &str) -> Vec<String> {
     Vec::new()
 }
 
+/// `kith_jobs.guest_domains`: the plain host names of the package's one-line `guest_domains: [a.example, ...]`. A line
+/// that is no list, and every name that is not a plain host, is left out.
+pub fn guest_domains(caps: &Path) -> Vec<String> {
+    let text = if caps.is_file() {
+        String::from_utf8_lossy(&std::fs::read(caps).unwrap_or_default()).into_owned()
+    } else {
+        String::new()
+    };
+    let Some(line) = text.lines().find_map(|l| {
+        l.strip_prefix("guest_domains:")
+            .map(|r| r.trim_start_matches([' ', '\t']))
+    }) else {
+        return Vec::new();
+    };
+    let V::List(raw) = value(line) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for d in raw {
+        if valid_domain(&d) && !out.contains(&d) {
+            out.push(d);
+        }
+    }
+    out
+}
+
 /// The agent-name rule (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`), for job, door and helper names.
 pub fn agent_name(s: &str) -> bool {
     let mut cs = s.chars();
