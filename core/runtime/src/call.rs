@@ -34,7 +34,6 @@ impl Core {
     /// params. Only `run.projectId` is answered here (it needs nothing but the identity); the kernel tools stay with
     /// the host's host.sock until a later step switches them.
     // A method of Core on purpose, though it reads nothing of it yet: no handler runs without the lock and generation.
-    #[allow(clippy::unused_self)]
     pub(crate) fn call_run(
         &self,
         who: &RunIdentity,
@@ -42,6 +41,9 @@ impl Core {
         params: &Value,
     ) -> Result<Value> {
         let row = check(kith_api::Principal::RunToken, method, params)?;
+        // A second door behind the token table: `people.suspend` ends the tokens inside the same locked core call, and
+        // this runs under that lock too, so a request that resolved just before the end is still refused here.
+        run_person_allowed(self.conn(), &who.person, method)?;
         let args = params.get("args").and_then(Value::as_array);
         match (row.name, args.map(Vec::as_slice)) {
             ("run.projectId", None | Some([])) => Ok(match &who.project {
@@ -92,6 +94,32 @@ impl Core {
             let kernel = folders.home.join("kernel");
             Ok((folders, kernel))
         }
+    }
+}
+
+/// Whether the person of a run may still have one: known, and not revoked (nor, for a bot, its owner). Used at mint and
+/// again at every run-socket call, under the core lock a revoke commits under. Where the authority tables are not served
+/// (not Unix yet) nothing can be checked, so it refuses: a run token is never minted or honoured unchecked.
+pub(crate) fn run_person_allowed(
+    conn: &rusqlite::Connection,
+    person: &str,
+    method: &str,
+) -> Result<()> {
+    #[cfg(unix)]
+    {
+        if crate::authority::run_allowed_in(conn, person)? {
+            return Ok(());
+        }
+        Err(Error::NotAllowed(format!(
+            "kith-core: {method}: {person} is revoked or not a person here, so no run of theirs is served"
+        )))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (conn, person);
+        Err(Error::NotAllowed(format!(
+            "kith-core: {method}: run tokens are not served on this platform yet"
+        )))
     }
 }
 

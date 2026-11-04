@@ -473,6 +473,7 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
         crate::Reached::Answered(v) => v,
         other => panic!("{method}: {other:?}"),
     };
+    owner("people.addPerson", &json!({"id": "sam"}));
     let minted = owner(
         "run.mint",
         &json!({"agent": "echo", "person": "sam", "conversation": "t1", "project": "alpha", "claim": "c1"}),
@@ -573,4 +574,124 @@ fn a_process_without_a_readable_start_time_is_never_bound() {
     assert!(t.resolve(&token, Some(4242)).is_none());
     assert_eq!(t.len(), 1, "the token is still the owner's to end");
     assert!(t.end(&who.run_id));
+}
+
+// --- revoke through the daemon (M2-13) -------------------------------------------------------------------------------
+
+/// A person's run and a bot's run answer on the run socket; the owner suspends the person and both stop at once; a
+/// mint for the suspended person is refused; undo revives neither token and a new mint works; a removed person's
+/// token ends too; the token is nowhere on disk but in the mint's answer.
+#[test]
+fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() {
+    use crate::daemon::{Config, Daemon};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = Daemon::spawn_with(
+        &p,
+        Config {
+            holder_on: false,
+            ..Config::default()
+        },
+    );
+    d.ready(Duration::from_secs(10)).expect("serving");
+    let sock = endpoint(&Layout::new(&m));
+    let owner = |method: &str, params: &Value| match crate::reach(&p, method, params, false) {
+        crate::Reached::Answered(v) => v,
+        other => panic!("{method}: {other:?}"),
+    };
+    owner("people.addPerson", &json!({"id": "sam"}));
+    owner("people.addPerson", &json!({"id": "amy"}));
+    owner("people.addBot", &json!({"id": "bot-a", "of": "sam"}));
+    let mint = |person: &str| {
+        let v = owner(
+            "run.mint",
+            &json!({"agent": "echo", "person": person, "conversation": "t1", "project": "alpha"}),
+        );
+        (
+            v["token"].as_str().unwrap().to_owned(),
+            v["runId"].as_str().unwrap().to_owned(),
+            v["socket"].as_str().unwrap().to_owned(),
+        )
+    };
+    let asks = AtomicU32::new(0);
+    // One request from a shell the run was bound to; true when the core answered as the run.
+    let works = |(token, run_id, _): &(String, String, String)| {
+        let go = _t
+            .path()
+            .join(format!("go-{}", asks.fetch_add(1, Ordering::SeqCst)));
+        let mut sh = shell(
+            &sock,
+            &Tree::Child,
+            &json!({"token": token, "method": "projectId", "args": []}),
+            &go,
+        );
+        // A run that already ended cannot be bound: the answer says so, and the ask below is refused anyway.
+        let _ = owner("run.bind", &json!({"runId": run_id, "pid": sh.id()}));
+        std::fs::write(&go, "go").unwrap();
+        let out = lines(&mut sh);
+        let _ = sh.wait();
+        out[0]["ok"] == true
+    };
+    // Nobody is minted for an id that is not a person here.
+    assert!(matches!(
+        crate::reach(
+            &p,
+            "run.mint",
+            &json!({"agent": "echo", "person": "ghost", "conversation": "t1"}),
+            false
+        ),
+        crate::Reached::Refused(Error::NotAllowed(_))
+    ));
+    let (sam, bot, amy) = (mint("sam"), mint("bot-a"), mint("amy"));
+    assert_eq!(sam.2, sock.to_string_lossy(), "the mint says where to ask");
+    assert!(works(&sam) && works(&bot) && works(&amy));
+
+    // The suspension commits and the tokens of sam and their bot are gone in that same call.
+    owner("people.suspend", &json!({"id": "sam"}));
+    assert!(!works(&sam), "the person's token died with the revoke");
+    assert!(!works(&bot), "the bot's token died with it");
+    assert!(works(&amy), "another person's token is untouched");
+    // No run starts for a revoked person or for their bot.
+    for person in ["sam", "bot-a"] {
+        match crate::reach(
+            &p,
+            "run.mint",
+            &json!({"agent": "echo", "person": person, "conversation": "t1"}),
+            false,
+        ) {
+            crate::Reached::Refused(Error::NotAllowed(why)) => {
+                assert!(why.contains("is revoked or not a person"), "{why}");
+            }
+            other => panic!("{person}: {other:?}"),
+        }
+    }
+    // Undo gives the person their access back, not the old tokens; a new run mints a new one.
+    owner("people.undo", &json!({"id": "sam"}));
+    assert!(!works(&sam) && !works(&bot));
+    let again = mint("sam");
+    assert!(works(&again) && again.0 != sam.0);
+
+    // A removal ends the token too.
+    owner("people.removePerson", &json!({"id": "amy"}));
+    assert!(!works(&amy));
+
+    // The token is shown once: no file of the machine folder holds any of them.
+    let mut dirs = vec![m.clone()];
+    while let Some(dir) = dirs.pop() {
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                for (token, ..) in [&sam, &bot, &amy, &again] {
+                    assert!(
+                        !bytes.windows(token.len()).any(|w| w == token.as_bytes()),
+                        "{} holds a token",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+    drop(d);
 }
