@@ -227,6 +227,17 @@ fn judge(
     }
 }
 
+/// What `icacls` printed, on one line and capped, for the refusal text.
+#[cfg(not(unix))]
+fn saw(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(500)
+        .collect()
+}
+
 #[cfg(not(unix))]
 fn check_acl(path: &Path) -> Result<()> {
     let allow_vanish = is_sidecar(path);
@@ -240,7 +251,11 @@ fn check_acl(path: &Path) -> Result<()> {
         }
         let out = std::process::Command::new("icacls").arg(path).output();
         if let Ok(o) = &out {
-            last_text = String::from_utf8_lossy(&o.stdout).into_owned();
+            last_text = format!(
+                "{} {}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            );
         }
         let verdict = match out {
             Ok(o) => judge(
@@ -261,9 +276,6 @@ fn check_acl(path: &Path) -> Result<()> {
         };
         match verdict {
             Verdict::Private | Verdict::Vanished => return Ok(()),
-            // A sidecar is made and torn down by other connections; give a fresh one a moment (bounded, and each
-            // try reads the list again) before calling it open. Any other file is refused at once.
-            Verdict::Open if allow_vanish && attempt < 4 => unreadable = false,
             Verdict::Open => {
                 unreadable = false;
                 break;
@@ -273,9 +285,10 @@ fn check_acl(path: &Path) -> Result<()> {
     }
     if unreadable {
         return Err(Error::Permissions(format!(
-            "kith-core: can't read the access list of {}; kith won't start until it can: check that the file is there and readable by you (icacls \"{}\")",
+            "kith-core: can't read the access list of {}; kith won't start until it can: check that the file is there and readable by you (icacls \"{}\") (icacls saw: {})",
             path.display(),
-            path.display()
+            path.display(),
+            saw(&last_text)
         )));
     }
     Err(Error::Permissions(format!(
@@ -283,7 +296,7 @@ fn check_acl(path: &Path) -> Result<()> {
         path.display(),
         path.display(),
         user(),
-        last_text.split_whitespace().collect::<Vec<_>>().join(" ")
+        saw(&last_text)
     )))
 }
 
