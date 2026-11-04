@@ -287,9 +287,10 @@ impl Drop for RenewalGuard {
 /// Keeps the lease alive: a ping at once, then one from a thread of its own every third of the lease, never behind a
 /// listing or a reconcile, which can take long enough on a loaded machine for a leftover deadline to lapse. A renewal
 /// is a round (verification/lease): the hand answers PONG(seq) and remembers its clock, and the client's reader thread
-/// answers that PONG with RENEW(seq, lease), so the hand's deadline is its own clock at the PONG plus the lease, never
-/// later than this core's send plus the lease. The same reader pings again at once on a LEASE_LOST, so a refused
-/// tagged spawn can be retried as soon as the lease is armed.
+/// answers that PONG with RENEW(seq, lease), so the hand's deadline is its own clock when it read the PING plus the
+/// lease (so at or after the core's send plus the lease). That is safe because the core's belief starts later, at the
+/// PONG receipt. The same reader pings again at once on a `LEASE_LOST` (at most one such ping outstanding), so a
+/// refused tagged spawn can be retried as soon as the lease is armed.
 ///
 /// What the core may assume: every RENEW it sent says "lease from now", so it stands behind a hand's guests for at
 /// most the send time plus `lease`. Nothing releases or requeues a guest run on that belief yet (no run is tagged

@@ -40,7 +40,7 @@ handled after the expiry check, expiry and the kill are one step, a tagged spawn
 `LEASE_LOST`, a renewal restores a lost lease, and on waking the first thing is the expiry check.
 
 The core's promise (`belief`): every RENEW it sends says "L from now", so the core stands behind the lease until
-the send time + L and no longer. The core needs no clock in the model: a core clock that stalls while the core
+its clock at the PONG receipt (when it sends the RENEW) + L and no longer. The core needs no clock in the model: a core clock that stalls while the core
 sleeps only makes the core wait longer.
 
 | Property | Plain sentence | Harm |
@@ -61,12 +61,12 @@ GuestsWithinBelief`). Two causes, each enough alone (`read-anchor`, `sleep-stops
 2. **Clock.** `Instant` stops while the machine sleeps or suspends (macOS and Linux). A hand that sleeps 10 minutes inside a 30 s lease woke with 29 s
    left, and the revoked guest ran on.
 
-The fix (`fixed` rows pass), now the code: the hand's deadline is its own clock at a moment before the core's send,
+The fix (`fixed` rows pass), now the code: the hand's deadline is its own clock when it reads the PING (after the core's send, before the core's PONG receipt),
 plus the period, and the clock counts sleep.
 
 - Ping round: the core sends PING(seq); the hand answers PONG(seq) and remembers its clock for that seq; the core
   answers a PONG with RENEW(seq) (the echo); the hand's deadline is the remembered clock for seq + the period.
-  The anchor is a hand event before the core's send, so deadline <= core's send + L whatever the delay, order or loss.
+  The hand's anchor is before the core's PONG receipt, where the core's belief starts (`CorePong`), so the hand's deadline <= the core's belief whatever the delay, order or loss.
   A renewal whose deadline is already past, or whose seq the hand never answered, arms nothing.
 - Without the echo (anchoring at the hand's latest PONG) it breaks again: `no-echo`.
 
@@ -77,11 +77,11 @@ Now (proto `VERSION` 4; holder.rs and friends as of the sync commit below):
 | Model action | Code | Notes |
 |---|---|---|
 | `SendPing`, `CorePong` (core) | `client.rs` `Renewer::ping` / `ping_on` send PING(seq); the reader thread (`over_parts`) answers each PONG with `renew_on` = RENEW(seq, ms) at once, never behind a listing; `holder_link.rs` `start_renewing` pings at once, then every `lease/3` | Seq counts per connection from 1. `Client::renew` is the blocking one-round form (tests) |
-| `belief` | not tracked: no run is tagged `kill_on_lease_loss` by the core yet | **Precondition, not code.** When the core starts tagging runs it may release/requeue a hand's guest run only after (send time of the last RENEW + lease) + eps*lease (eps = the hand clock's worst slowness) + the 10 ms watcher + kill latency, or once the hand reports the kill (`Exit::lapsed` on the exit, `Welcome::lease_lost` on reconnect). Written in the doc of `start_renewing` |
+| `belief` | not tracked: no run is tagged `kill_on_lease_loss` by the core yet | **Precondition, not code.** When the core starts tagging runs it may release/requeue a hand's guest run only after (core clock at the PONG receipt that it answered with the last RENEW + lease) + eps*lease (eps = the hand clock's worst slowness) + the 10 ms watcher + kill latency, or once the hand reports the kill (`Exit::lapsed` on the exit, `Welcome::lease_lost` on reconnect). Written in the doc of `start_renewing` |
 | `HandPing` | `holder.rs` `p::PING` arm: stores (seq, `clock()`) in `State::pongs` (newest `PONG_RING` = 8), answers PONG(seq) | The ring is cleared at every hello (`st.pongs.clear()`), so a seq of an older connection anchors nothing (Later L1: done) |
 | `HandRenew` | `holder.rs` `p::RENEW` arm: deadline = stored clock for the echoed seq + `ms` (capped at `MAX_LEASE_MS`); unknown seq, `ms = 0` or a deadline `<= clock()` arms nothing | Replaces an armed deadline, also with an earlier one (the model's `lease'`) |
 | `Expire`, `WakeHand` | `holder.rs` `expire_lease`: `clock() >= t` -> `Lease::Lost`, then `kill_tree()` for each `kill_on_lease_loss` entry (and marks it `lapsed`), one step under the state lock; `watch_lease` runs it every 10 ms and every frame runs it first | The first run after a wake sees the lapse because the clock counts sleep |
-| clock `clk` | `clock.rs` `lease_clock()`: Linux `CLOCK_BOOTTIME`; macOS `CLOCK_MONOTONIC_RAW` (clock_gettime(3): mach_continuous_time, counts sleep; not `CLOCK_UPTIME_RAW`); Windows `QueryInterruptTime` (counts sleep; not `QueryUnbiasedInterruptTime`); other Unix `CLOCK_MONOTONIC` | Tests inject `clock::fake::Fake`. The sleep behaviour itself is from the OS docs: it could not be observed on the machine this was built on (never slept) |
+| clock `clk` | `clock.rs` `lease_clock()`: Linux `CLOCK_BOOTTIME`; macOS `CLOCK_MONOTONIC_RAW` (clock_gettime(3): `CLOCK_UPTIME_RAW` is "in the same manner as CLOCK_MONOTONIC_RAW, but does not increment while the system is asleep", so RAW counts sleep; `CLOCK_MONOTONIC` is stated to "continue to increment while the system is asleep"; not `CLOCK_UPTIME_RAW`); Windows `QueryInterruptTime` (counts sleep; not `QueryUnbiasedInterruptTime`); other Unix `CLOCK_MONOTONIC` (unproven: on BSDs/Android it may not count sleep) | Tests inject `clock::fake::Fake`. The sleep behaviour itself is from the OS docs: it could not be observed on the machine this was built on (never slept) |
 | `HandSpawn` | `holder.rs` spawn: a tagged spawn while the lease is not `Until` -> `LEASE_LOST` frame with `why` (`unarmed` = never armed, `lapsed` = ran out), nothing started | The claim is not used up |
 | `CoreLeaseLost` | `client.rs` reader thread: on LEASE_LOST it pings again at once (the frame is still passed on); the retry of the spawn is the caller's | Nothing tags runs yet |
 | `OwnerNeverKilled` | `kill_on_lease_loss: false` entries are skipped in `expire_lease` | Unchanged; keep the row |

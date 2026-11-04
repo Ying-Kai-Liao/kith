@@ -495,8 +495,9 @@ impl Holder {
             match kind {
                 p::PING => {
                     let ping: p::Ping = wire::parse(&payload)?;
-                    // The anchor is read here, before the PONG leaves: whatever the core does with it, the deadline
-                    // it makes is never later than the core's own send plus the period.
+                    // The anchor is read here, before the PONG leaves, so the deadline a RENEW makes is this clock plus
+                    // the period: at or after the core's send plus the period. Safe because the core's belief only
+                    // starts at the PONG receipt, later than this read.
                     let now = (self.clock)();
                     if st.pongs.len() == PONG_RING {
                         st.pongs.pop_front();

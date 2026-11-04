@@ -4,8 +4,11 @@
 //! macOS and on Linux), so it is never used for a lease deadline.
 //!
 //! - Linux: `CLOCK_BOOTTIME`, which counts suspend (`CLOCK_MONOTONIC` does not).
-//! - macOS: `CLOCK_MONOTONIC_RAW`, which clock_gettime(3) documents as `mach_continuous_time` (the clock that keeps
-//!   counting while asleep; `CLOCK_UPTIME_RAW` / `mach_absolute_time` is the one that stops).
+//! - macOS: `CLOCK_MONOTONIC_RAW`. clock_gettime(3) says `CLOCK_MONOTONIC` will "continue to increment while the
+//!   system is asleep", and that `CLOCK_UPTIME_RAW` works "in the same manner as CLOCK_MONOTONIC_RAW, but does not
+//!   increment while the system is asleep", so RAW does count sleep (as in the XNU source). Not observed on a real
+//!   sleep yet. `CLOCK_UPTIME_RAW` / `mach_absolute_time` stop in sleep and are never used. Kept over
+//!   `CLOCK_MONOTONIC`, whose sleep guarantee the page states outright, only because RAW is unslewed.
 //! - Windows: `QueryInterruptTime`, the interrupt-time count, which includes sleep and hibernation (not
 //!   `QueryUnbiasedInterruptTime`, which leaves it out).
 //! - Other Unix: `CLOCK_MONOTONIC`, the best there is.

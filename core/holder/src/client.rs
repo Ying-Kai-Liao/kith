@@ -91,6 +91,19 @@ fn ping_on(writer: &Mutex<Box<dyn Write + Send>>, seq: &AtomicU64) -> io::Result
     send_on(writer, p::PING, 0, &payload)
 }
 
+/// The ping a LEASE_LOST asks for, at most one outstanding: a loop of refused tagged spawns must not push the
+/// holder's ring of answered pings (8) past a ping whose RENEW is still on its way. The next PONG frees it.
+fn ping_after_lost(
+    outstanding: &AtomicBool,
+    writer: &Mutex<Box<dyn Write + Send>>,
+    seq: &AtomicU64,
+) -> io::Result<()> {
+    if outstanding.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    ping_on(writer, seq)
+}
+
 fn renew_on(writer: &Mutex<Box<dyn Write + Send>>, period: Duration, seq: u64) -> io::Result<()> {
     let ms = u64::try_from(period.as_millis()).unwrap_or(u64::MAX);
     let payload = serde_json::to_vec(&p::Renew { ms, seq }).map_err(io::Error::other)?;
@@ -282,6 +295,7 @@ impl Client {
                 let seq = Arc::new(AtomicU64::new(0));
                 let (tx, frames) = std::sync::mpsc::channel();
                 let (w, l, n) = (writer.clone(), lease.clone(), seq.clone());
+                let lost_ping = Arc::new(AtomicBool::new(false));
                 std::thread::spawn(move || {
                     while let Ok(Some(frame)) = wire::read(&mut reader) {
                         // The lease round is answered here, not by whoever reads the frames next: a listing or a
@@ -290,6 +304,7 @@ impl Client {
                         if let Some(period) = period {
                             match frame.0 {
                                 p::PONG => {
+                                    lost_ping.store(false, Ordering::SeqCst);
                                     if let Ok(pong) = wire::parse::<p::Pong>(&frame.2) {
                                         let _ = renew_on(&w, period, pong.seq);
                                     }
@@ -298,7 +313,7 @@ impl Client {
                                 // Nothing started and nothing armed: ask again at once instead of waiting for
                                 // the next tick. The frame is still passed on.
                                 p::LEASE_LOST => {
-                                    let _ = ping_on(&w, &n);
+                                    let _ = ping_after_lost(&lost_ping, &w, &n);
                                 }
                                 _ => {}
                             }
@@ -520,6 +535,30 @@ impl Client {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn a_loop_of_lease_lost_sends_one_ping_until_a_pong_frees_it() {
+        struct Sink(Arc<Mutex<Vec<u8>>>);
+        impl Write for Sink {
+            fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let writer: Mutex<Box<dyn Write + Send>> = Mutex::new(Box::new(Sink(bytes.clone())));
+        let (out, seq) = (AtomicBool::new(false), AtomicU64::new(0));
+        for _ in 0..20 {
+            ping_after_lost(&out, &writer, &seq).unwrap();
+        }
+        assert_eq!(seq.load(Ordering::Relaxed), 1, "one ping for the burst");
+        out.store(false, Ordering::SeqCst); // what a PONG does
+        ping_after_lost(&out, &writer, &seq).unwrap();
+        assert_eq!(seq.load(Ordering::Relaxed), 2);
+    }
 
     #[test]
     fn the_tied_note_says_what_it_means_and_what_to_do() {
