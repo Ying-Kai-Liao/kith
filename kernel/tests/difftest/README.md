@@ -50,6 +50,18 @@ take, done, back, ls, status, the `[kith wake RUN]` recovery rule, waiters `ci:`
 `gh` and a held session so no turn starts, and `deliver` with a fake `kith`) and `sessions.json` (kith-sessions: resolve, claim,
 terminal, proc, sweep, release, latest, pick).
 
+`asks.json` (M3-10d) freezes `kith-ask` as the Python kernel prints and does it: `--answer` (answer, duplicate, progress, unknown id),
+`--wait`, `--to` (queued, duplicate, unknown job, no text), `--end` by session and by person (the whole tree of that person, a second
+`--end` ends nothing, delivered and woken asks stay), `delegations --json`, `--cap` and `--cap-told`. All cases are `unswitched`
+(`kith-ask` has no Rust side yet); the core rows they will be replayed against are `ask.open`, `ask.settle`, `ask.end`, `ask.delegations`,
+`ask.record`, `ask.limits` (already covered by `delegation.json`'s replay in `core/runtime/src/asks/tests.rs`) and `ask.to`. Not recorded: an
+`ask <agent> "task"` that runs an agent (needs a real engine; the open and its caps are `delegation.json`'s `check` cases), and `--bg`
+(detaches a process). Intended differences of the core, to list in `intended.json` when the CLI is switched:
+- `--to` to an ended or stopped ask: Python queues the message (`queued`, exit 0, "still running") and the stopped fence drops it
+  later; the core refuses at send with `was stopped; ask anew` (`asks-to-after-end-python-sends`, step 1, `ask.to`).
+- `--end --person P`: the core also ends the asks of P's bots when the revoke order is used (`ask.revokeEverywhere`), which Python's
+  `--end --person` does only for the persons it is given.
+
 Extra case fields these use: `mask_keys` (names whose value means nothing: a number becomes `<EPOCH>`, anything else `<MASKED>`),
 `normalize_paths` (the case's own `normalize` rules also apply to file names, for files named by an id the program makes up; two
 files with one masked name are an error), and `unswitched` (text saying why the Rust side has no such verb yet). A golden replay

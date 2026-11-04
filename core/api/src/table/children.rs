@@ -114,6 +114,18 @@ pub(super) const ROWS: &[Method] = &[
         &["asks", "end"],
     ),
     ask(
+        "ask.to",
+        "`kith ask --to ID`, the check before anything is queued: whether the ask still takes a follow-up. An ask that was stopped or ended refuses with `was stopped; ask anew` (the stopped fence never lifts; the Python `--to` queued the message and the wake fence dropped it). Answers `{id, ok}`; refuses an id that is no ask.",
+        &[pos("id", "string", true, "The ask.")],
+        &["asks", "to"],
+    ),
+    ask(
+        "ask.revokeEverywhere",
+        "The revoke order for conversations, once the authority revoke is visible to the may check: the person's claims and each of their bots' (queued and parked turns cancelled, live claims to `ending`, the revoke epoch bumped so a claim that passed its may check before is refused), THEN the asks of the person and their bots with every ask below them (`ask.end --persons`). `ask.end` alone is not a revoke. Safe to repeat; a retry finishes a crash between the steps. Kills no process: answers `{principals, cancelledTurns, ended, sessions, kill}`.",
+        &[pos("person", "string", true, "The person revoked.")],
+        &["asks", "revoke-everywhere"],
+    ),
+    ask(
         "ask.delegations",
         "`kith ask delegations --json`: every ask record, newest first, as `{delegations}` (money in micro-dollars, times in ms).",
         &[KERNEL, HOME, ENV],
