@@ -18,7 +18,8 @@
 //! | 100-104  | M3 delegation, children (reserved)     | `children/`                |
 //! | 105-109  | M3 account choice (reserved)           | `accounts/`                |
 //! | 110-119  | M3 transcripts (engine sessions)       | `transcripts/`             |
-//! | 120+     | spare (a new lane takes the next 10)   |                            |
+//! | 120-129  | M4 schedules' run state                | `schedules/`               |
+//! | 130+     | spare (a new lane takes the next 10)   |                            |
 //!
 //! A lane's versions start at its first number and run without a gap; the list is strictly increasing and no number
 //! appears twice ([`check`], run by a test on the real list and on bad ones). A step that has shipped is never edited.
@@ -50,6 +51,7 @@ mod gate;
 mod import;
 mod m0001_core;
 mod run_tokens;
+mod schedules;
 mod secrets;
 mod transcripts;
 mod wake;
@@ -131,8 +133,13 @@ pub(crate) const LANES: &[Lane] = &[
         last: 119,
     },
     Lane {
-        name: "spare",
+        name: "schedules",
         first: 120,
+        last: 129,
+    },
+    Lane {
+        name: "spare",
+        first: 130,
         last: i64::MAX,
     },
 ];
@@ -154,6 +161,7 @@ const PARTS: &[&[Migration]] = &[
     children::STEPS,
     accounts::STEPS,
     transcripts::STEPS,
+    schedules::STEPS,
 ];
 
 const LEN: usize = {
