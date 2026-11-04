@@ -148,6 +148,17 @@ impl Shared {
                 return Ok(answer);
             }
         }
+        // The guest doors: start, mark live, end and the sweep are claim transactions (M2-14).
+        #[cfg(unix)]
+        {
+            if crate::doors::serves(method) {
+                crate::call::check(kith_api::Principal::Owner, method, params)?;
+                let answer = self
+                    .with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))?;
+                self.served.fetch_add(1, Ordering::SeqCst);
+                return Ok(answer);
+            }
+        }
         // Same for the sync lease: a change is a claim transaction.
         if method.starts_with("syncLease.") {
             crate::call::check(kith_api::Principal::Owner, method, params)?;

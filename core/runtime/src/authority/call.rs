@@ -40,7 +40,7 @@ pub(crate) fn serves(method: &str) -> bool {
     )
 }
 
-fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
+pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let (folders, kernel) = core.folders_for(params)?;
     Ok(Ctx {
         auth: folders.secrets.join("auth.json"),
@@ -154,7 +154,13 @@ pub(crate) fn call_in(
             } else {
                 String::new()
             };
-            let said = store::run(core, c, |a| write_in(m, params, c, life, a, &fresh))?;
+            // A person cut off, removed or renamed takes their guest doors with it, in the same transaction (M2-14).
+            let said = store::run_with(
+                core,
+                c,
+                |a| write_in(m, params, c, life, a, &fresh),
+                |tx, said| revoke::follow_in_doors(tx, m, params, said, c.now_ms),
+            )?;
             // The folders follow a rename once it is committed. `kith-auth --local` clears no temp folder: the
             // caller stops their runs first and then asks `people.clearTemp` (the `ids` of a suspend or a removal
             // say whose).
