@@ -4,5 +4,9 @@
 use super::Migration;
 
 mod m0020_secret_records;
+mod m0021_secret_grants;
 
-pub(super) const STEPS: &[Migration] = &[m0020_secret_records::MIGRATION];
+pub(super) const STEPS: &[Migration] = &[
+    m0020_secret_records::MIGRATION,
+    m0021_secret_grants::MIGRATION,
+];

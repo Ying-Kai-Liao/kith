@@ -6949,6 +6949,93 @@
       }
     },
     {
+      "name": "secrets.serviceKeys",
+      "summary": "The keys one agent may use for one service, for a launch: the values of the service's declared variables, from the profile the agent is granted (the person's own grant first, then the agent's). A source that is not in the envelope (env:, env-file:) comes back unresolved for the caller to resolve itself. Refuses when there is no grant or no such profile, the profile is another person's and not lent, or a declared variable has no row or an empty value. Writes no audit line: the caller (kith-auth) logs agent, service, profile and person, never the value.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent being launched.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service whose server starts.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "vars",
+          "summary": "The variables the service declares as secrets (the core has no service specs). None declared: the grant and person rule still apply and the profile is returned, but no key is read.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Whom the run is for (kith-auth's acting()): their own grant (agent@person) comes first, and another person's profile is refused unless lent, the owner's runs included. Only \"\" skips the check.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "profile",
+          "summary": "Which of the granted profiles to use; the first granted otherwise.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "service": {
+            "kind": "positional"
+          },
+          "vars": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "profile": {
+            "kind": "flag",
+            "spellings": [
+              "--profile"
+            ]
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
       "name": "gate.list",
       "summary": "The gate's slots and the line, in the order the line is kept. Frees holders whose process is gone first.",
       "params": [],
