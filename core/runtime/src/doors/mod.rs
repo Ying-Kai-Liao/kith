@@ -39,9 +39,18 @@
 //! owner's doors stay. The answer of those rows carries the swept doors under `doors`, for the caller to stop the boxes.
 //! Undo does nothing here.
 //!
-//! What differs from `kith_door.py` / `kith-auth door`, on purpose: the recheck of a running door asks `may()` (the
-//! person may use the agent at all) and not the door's job tick (`door_state`'s job and `owner_cut` read the agent's
-//! `capabilities.yaml` jobs, which the core's rows do not carry yet); "held" never ends a running door, as there.
+//! The check is `kith-auth door_state` (`kernel/bin/kith-auth`), ported as far as core.db and the agent's
+//! `capabilities.yaml` allow, the same one for the start and for the recheck of a running door: the owner is refused
+//! ("doors are for the people an agent is shared with"), then `cut_off` and `may` (their words), then (start only) the
+//! sync lease, then the door itself: `door` is the piece `name@digest` and must be among the doors the person's ticked
+//! jobs grant, as `resolve` answers them: cut to the package as it is now, and for a bot cut to what its owner holds
+//! (`owner_cut`). "Held" never ends a running door, as there. What the core cannot tell apart yet, and so refuses with
+//! one sentence (fail closed): `no-job` / `stale` (no job of the agent has the door, or the package changed),
+//! `not-ticked`, `declined` / `widened` (`job_view`), and `owner-lacks` (a bot whose own tick has it and whose owner's
+//! does not). Each is a refusal in `kith-auth` too, only with its own words.
+//!
+//! Probes of a process (`ps`, `kill -0`) run before the transaction, never inside it: the version decides what the
+//! probe cannot (a row that changed in between loses its compare-and-swap).
 
 use kith_kernel::secrets::{self, Ctx};
 use rusqlite::{Connection, Row, params};
@@ -288,14 +297,28 @@ pub(crate) struct Started {
     pub repeat: bool,
 }
 
-/// Starts a door: the access check and the row, in one claim transaction. Refused (and nothing written) for a person
-/// who is cut off, who may not run the agent, or, for anyone but the owner, while the Mac is not in sync with the cloud.
+/// Starts a door: the access check and the row, in one claim transaction. Refused (and nothing written) by
+/// [`door_refusal`]: the owner, a person who is cut off or may not run the agent, a Mac out of sync with the cloud, or a
+/// door the person's jobs do not give them.
 pub(crate) fn start(
     core: &mut Core,
     ctx: &Ctx,
     live: &dyn Liveness,
     s: &Start<'_>,
     now: i64,
+) -> Result<Started> {
+    start_between(core, ctx, live, s, now, &mut || {})
+}
+
+/// [`start`], calling `between` after the access is decided and before the row is written, inside the transaction: a
+/// test commits a revoke from a second connection there, which must find the database locked.
+fn start_between(
+    core: &mut Core,
+    ctx: &Ctx,
+    live: &dyn Liveness,
+    s: &Start<'_>,
+    now: i64,
+    between: &mut dyn FnMut(),
 ) -> Result<Started> {
     if s.pid < 2 {
         return Err(Error::BadParams(
@@ -318,22 +341,20 @@ pub(crate) fn start(
         }
         None => new_id()?,
     };
+    // The supervisor, probed before the lock is taken (a probe is a process spawn).
+    let proc_start = live.start(s.pid);
+    if proc_start.is_none() && live.gone(s.pid) {
+        return Err(refuse(format_args!("supervisor {} is not running", s.pid)));
+    }
     let tx = core.claim_tx()?;
     let auth = authority::tables_within(&tx)?;
     let person = secrets::canonical(&auth, s.person);
     // The access, read in this transaction: a revoke commits before it or after the row, never between the two.
-    if secrets::cut_off(&auth, &person) {
-        return Err(refuse(format_args!("{person}'s access was removed")));
-    }
-    let (ok, why) = authority::may_in(ctx, &auth, &person, s.agent)?;
-    if !ok {
+    let in_sync = secrets::is_owner(&auth, &person) || crate::sync_lease::held_in(&tx, now)?;
+    if let Some(why) = door_refusal(ctx, &auth, s.agent, &person, s.door, in_sync) {
         return Err(refuse(why));
     }
-    if !secrets::is_owner(&auth, &person) && !crate::sync_lease::held_in(&tx, now)? {
-        return Err(refuse(
-            "this computer is out of sync with the Kith cloud; try again in a moment",
-        ));
-    }
+    between();
     if let Some(d) = by_id(&tx, &id)? {
         if d.agent == s.agent && d.door == s.door && d.person == person && d.is_open() {
             return Ok(Started {
@@ -346,10 +367,7 @@ pub(crate) fn start(
             d.state.name()
         )));
     }
-    if live.start(s.pid).is_none() && live.gone(s.pid) {
-        return Err(refuse(format_args!("supervisor {} is not running", s.pid)));
-    }
-    let proc_start = live.start(s.pid).unwrap_or_default();
+    let proc_start = proc_start.unwrap_or_default();
     tx.execute(
         "INSERT INTO doors (id, agent, door, person, folder, pid, proc_start, state, version, reaped, why, started_at, changed_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'starting', 0, 0, '', ?8, ?8)",
@@ -448,6 +466,30 @@ pub(crate) fn sweep(
     recheck: bool,
     now: i64,
 ) -> Result<Swept> {
+    sweep_between(core, ctx, live, persons, recheck, now, &mut || {})
+}
+
+/// [`sweep`], calling `between` after the doors to end are decided and before they are written (see [`start_between`]).
+fn sweep_between(
+    core: &mut Core,
+    ctx: &Ctx,
+    live: &dyn Liveness,
+    persons: &[String],
+    recheck: bool,
+    now: i64,
+    between: &mut dyn FnMut(),
+) -> Result<Swept> {
+    // Which supervisors are gone, probed before the lock is taken. A door started after this read is not in the set and
+    // is not swept for it; one whose row changes in between loses the compare-and-swap below.
+    let gone: Vec<String> = rows(
+        core.conn(),
+        &format!("SELECT {COLS} FROM doors WHERE {OPEN}"),
+        &[],
+    )?
+    .into_iter()
+    .filter(|d| supervisor_gone(d, live))
+    .map(|d| d.id)
+    .collect();
     let tx = core.claim_tx()?;
     let auth = authority::tables_within(&tx)?;
     let named: Vec<String> = persons
@@ -461,20 +503,25 @@ pub(crate) fn sweep(
         &[],
     )?;
     let mut out = Swept::default();
+    let mut doomed = Vec::new();
     for d in open {
         let person = secrets::canonical(&auth, &d.person);
         let why = if !secrets::is_owner(&auth, &person) && descends(&auth, &person, &named) {
             Some("its person was cut off")
-        } else if supervisor_gone(&d, live) {
+        } else if gone.contains(&d.id) {
             Some("its supervisor is gone")
-        } else if recheck && !may_still(ctx, &auth, &person, &d.agent) {
+        } else if recheck && door_refusal(ctx, &auth, &d.agent, &person, &d.door, true).is_some() {
             Some("its person may no longer run it")
         } else {
             None
         };
         if let Some(why) = why {
-            out.swept.extend(swept(&tx, &d, why, now)?);
+            doomed.push((d, why));
         }
+    }
+    between();
+    for (d, why) in doomed {
+        out.swept.extend(swept(&tx, &d, why, now)?);
     }
     out.pending = rows(
         &tx,
@@ -508,13 +555,48 @@ fn descends(auth: &Value, person: &str, named: &[String]) -> bool {
     false
 }
 
-/// `may()` for a running door: a person cut off, a removed one and a bot whose owner may not are all "no". A rule that
-/// has no answer (a membership naming a preset nobody defined) reads as "no" too: fail closed.
-fn may_still(ctx: &Ctx, auth: &Value, person: &str, agent: &str) -> bool {
-    if secrets::cut_off(auth, person) {
-        return false;
+/// `door_state`: why the person's run of `agent` may not have the door `piece` (`name@digest`) now, or `None`. The order
+/// and words are kith-auth's: the owner, then `cut_off` and `may`, then the sync lease (`in_sync`; a recheck passes true,
+/// as held never ends a door), then the door among the person's granted doors. A rule with no answer (a membership naming
+/// a preset nobody defined) reads as a refusal: fail closed.
+fn door_refusal(
+    ctx: &Ctx,
+    auth: &Value,
+    agent: &str,
+    person: &str,
+    piece: &str,
+    in_sync: bool,
+) -> Option<String> {
+    if secrets::is_owner(auth, person) {
+        return Some("doors are for the people an agent is shared with".to_owned());
     }
-    authority::may_in(ctx, auth, person, agent).is_ok_and(|(ok, _)| ok)
+    if secrets::cut_off(auth, person) {
+        return Some(format!("{person}'s access was removed"));
+    }
+    match authority::may_in(ctx, auth, person, agent) {
+        Ok((true, _)) => {}
+        Ok((false, why)) => return Some(why),
+        Err(e) => return Some(e.to_string()),
+    }
+    if !in_sync {
+        return Some(
+            "this computer is out of sync with the Kith cloud; try again in a moment".to_owned(),
+        );
+    }
+    match authority::resolve_in(ctx, auth, agent, person) {
+        Ok(got)
+            if got
+                .get("doors")
+                .and_then(Value::as_array)
+                .is_some_and(|d| d.iter().any(|x| x.as_str() == Some(piece))) =>
+        {
+            None
+        }
+        Ok(_) => Some(format!(
+            "the door {piece} is not part of a job given to {person} on {agent} now (no such job, the package changed, not ticked, changed since it was given, or more than their owner holds)"
+        )),
+        Err(e) => Some(e.to_string()),
+    }
 }
 
 /// The doors, open ones first (and swept ones not yet confirmed gone); `all` adds the closed.

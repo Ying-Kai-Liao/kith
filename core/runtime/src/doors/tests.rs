@@ -18,7 +18,7 @@ use kith_kernel::secrets::{Ctx, Sandbox, ServeDir};
 use serde_json::{Value, json};
 
 use super::call::call_at;
-use super::{Live, Start, State, end, list, mark_live, start, sweep};
+use super::{Live, Start, State, end, list, mark_live, start, start_between, sweep, sweep_between};
 use crate::authority::call::call_with;
 use crate::db::Core;
 use crate::error::Error;
@@ -27,6 +27,10 @@ use crate::layout::Layout;
 use crate::sync_lease;
 
 const T0: i64 = 1_000_000;
+/// The door `render` of the fixture below as a job grants it: `name@digest` (the digest of its declaration and lockfile,
+/// the one `kernel/lib/kith_jobs.py` computes; `core/kernel/src/secrets/tests.rs` pins it for the same text).
+const PIECE: &str = "render@03d245db65bb";
+const CAPS: &str = "helpers: []\ndoors:\n  - name: render\n    npm: [hyperframes@0.8.159]\n    lockfile: doors/render.lock.json\n    tools: [node, ffmpeg]\n    bin: hyperframes/bin/hyperframes.mjs\n    args: [render, --quality, draft]\n    writes: [renders]\n    env: [HYPERFRAMES_NO_UPDATE_CHECK=1, FF=$ffmpeg]\njobs:\n  - name: render-videos\n    doors: [render]\n";
 /// The clock of the authority writes (ms): the moment a suspension records and a hook sweeps at.
 const NOW: f64 = 1_800_000_000_000.0;
 
@@ -71,19 +75,25 @@ struct World {
     _agents: tempfile::TempDir,
     core: Core,
     c: Ctx,
+    db: PathBuf,
 }
 
 /// A machine with the agents `house` and `garden`, and core.db with the owner `kai`, `sam` and `amy`, a bot `bot-a` of
 /// sam, and `house` shared with sam and his bot. The cloud is off on purpose, so a non-owner's door is in sync.
 fn world() -> World {
     let (t, m) = crate::tests::machine();
-    let core = crate::tests::open_all(&Layout::new(&m));
+    let layout = Layout::new(&m);
+    let core = crate::tests::open_all(&layout);
     let agents = tempfile::tempdir().unwrap();
     for a in ["house", "garden"] {
         let d = agents.path().join("agents").join(a).join("role");
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("agent.md"), format!("---\nname: {a}\n---\n")).unwrap();
     }
+    let house = agents.path().join("agents/house/role");
+    std::fs::create_dir_all(house.join("doors")).unwrap();
+    std::fs::write(house.join("capabilities.yaml"), CAPS).unwrap();
+    std::fs::write(house.join("doors/render.lock.json"), "{}").unwrap();
     let c = Ctx {
         auth: agents.path().join("secrets/auth.json"),
         agents: agents.path().join("agents"),
@@ -98,6 +108,7 @@ fn world() -> World {
         _agents: agents,
         core,
         c,
+        db: layout.db.clone(),
     };
     say(
         &mut w,
@@ -119,8 +130,38 @@ fn world() -> World {
             &json!({"agent": "house", "person": p, "preset": preset}),
         );
     }
+    tick(&w, "sam", true);
+    tick(&w, "bot-a", true);
     sync_lease::unlink(&mut w.core, &sync_lease::System).unwrap();
     w
+}
+
+/// The person's tick of the job `render-videos` (or none), as `kith-auth job` leaves it on their own row.
+fn tick(w: &World, person: &str, on: bool) {
+    let jobs = on.then(|| json!({"render-videos": {"snapshot": {"doors": [PIECE]}}}).to_string());
+    let n = w
+        .core
+        .conn()
+        .execute(
+            "UPDATE memberships SET jobs = ?2 WHERE agent = 'house' AND person = ?1",
+            rusqlite::params![person, jobs],
+        )
+        .unwrap();
+    assert_eq!(n, 1, "{person} has a row on house");
+}
+
+/// A door row of the owner, which `start` would refuse: written directly, to see what a sweep leaves alone.
+fn owner_door(w: &World) -> String {
+    let id = "00000000000000aa".to_owned();
+    w.core
+        .conn()
+        .execute(
+            "INSERT INTO doors (id, agent, door, person, folder, pid, proc_start, state, version, reaped, why, started_at, changed_at) \
+             VALUES (?1, 'house', ?2, 'kai', '', 4242, 'T1', 'starting', 0, 0, '', ?3, ?3)",
+            rusqlite::params![id, PIECE, T0],
+        )
+        .unwrap();
+    id
 }
 
 fn say(w: &mut World, method: &str, params: &Value) -> Value {
@@ -139,7 +180,7 @@ fn begin_with(w: &mut World, person: &str, id: Option<&str>) -> Result<super::St
         &Start {
             id,
             agent: "house",
-            door: "render",
+            door: PIECE,
             person,
             folder: "/files/x",
             pid: 4242,
@@ -193,7 +234,7 @@ fn a_start_writes_one_starting_row_and_a_retry_with_its_id_is_the_same_door() {
     assert_eq!(again.door, d);
     assert_eq!(list(&mut w.core, true).unwrap().len(), 1);
     // the same id for another person is not the same door
-    let e = begin_with(&mut w, "kai", Some(&d.id)).unwrap_err();
+    let e = begin_with(&mut w, "bot-a", Some(&d.id)).unwrap_err();
     assert!(refusal(&e).contains("starting already"), "{e}");
 }
 
@@ -231,7 +272,7 @@ fn a_person_with_no_access_to_the_agent_and_an_unknown_one_start_nothing() {
         &Start {
             id: None,
             agent: "garden",
-            door: "render",
+            door: PIECE,
             person: "sam",
             folder: "",
             pid: 4242,
@@ -247,13 +288,69 @@ fn a_person_with_no_access_to_the_agent_and_an_unknown_one_start_nothing() {
 }
 
 #[test]
-fn only_the_owner_starts_while_the_mac_is_out_of_sync() {
+fn a_guest_starts_nothing_while_the_mac_is_out_of_sync() {
     let mut w = world();
     // a Mac never told about the cloud: fail closed for anyone but the owner (the model's DoorGate)
     sync_lease::link(&mut w.core, &sync_lease::System).unwrap();
     let e = begin_with(&mut w, "sam", None).unwrap_err();
     assert!(refusal(&e).contains("out of sync"), "{e}");
-    assert!(begin_with(&mut w, "kai", None).is_ok());
+    assert!(begin_with(&mut w, "bot-a", None).is_err());
+}
+
+#[test]
+fn the_owner_starts_no_door() {
+    let mut w = world();
+    let e = begin_with(&mut w, "kai", None).unwrap_err();
+    assert!(
+        refusal(&e).contains("doors are for the people an agent is shared with"),
+        "{e}"
+    );
+    assert!(list(&mut w.core, true).unwrap().is_empty());
+}
+
+#[test]
+fn a_door_their_jobs_do_not_give_them_is_not_started() {
+    let mut w = world();
+    for piece in ["render@000000000000", "other@03d245db65bb", "render"] {
+        let r = start(
+            &mut w.core,
+            &w.c,
+            &Started("T1"),
+            &Start {
+                id: None,
+                agent: "house",
+                door: piece,
+                person: "sam",
+                folder: "",
+                pid: 4242,
+            },
+            T0,
+        );
+        let e = r.unwrap_err();
+        assert!(
+            refusal(&e).contains("not part of a job given to sam"),
+            "{piece}: {e}"
+        );
+    }
+    // not ticked
+    tick(&w, "sam", false);
+    let e = begin_with(&mut w, "sam", None).unwrap_err();
+    assert!(refusal(&e).contains("not part of a job"), "{e}");
+    assert!(list(&mut w.core, true).unwrap().is_empty());
+}
+
+#[test]
+fn a_bot_gets_the_door_only_while_its_owner_holds_it() {
+    let mut w = world();
+    assert!(begin_with(&mut w, "bot-a", None).is_ok(), "both ticked");
+    // the owner's tick is taken back: the bot's own tick has it, its owner's does not (owner-lacks)
+    tick(&w, "sam", false);
+    let e = begin_with(&mut w, "bot-a", None).unwrap_err();
+    assert!(refusal(&e).contains("not part of a job"), "{e}");
+    // and the recheck ends the one that was running
+    let out = sweep_all(&mut w, &[], true, &Started("T1"));
+    assert_eq!(out.swept.len(), 1);
+    assert_eq!(out.swept[0].person, "bot-a");
 }
 
 #[test]
@@ -266,7 +363,7 @@ fn a_supervisor_that_is_not_running_starts_nothing() {
         &Start {
             id: None,
             agent: "house",
-            door: "render",
+            door: PIECE,
             person: "sam",
             folder: "",
             pid: 4242,
@@ -346,6 +443,7 @@ fn threads_starting_doors_while_a_revoke_commits_leave_none_open() {
             _agents,
             core,
             c,
+            db: _,
         } = world();
         let c = Arc::new(c);
         let core = Arc::new(Mutex::new(core));
@@ -365,7 +463,7 @@ fn threads_starting_doors_while_a_revoke_commits_leave_none_open() {
                         &Start {
                             id: None,
                             agent: "house",
-                            door: "render",
+                            door: PIECE,
                             person: who,
                             folder: "",
                             pid: 4242,
@@ -422,7 +520,7 @@ fn a_suspension_sweeps_the_doors_of_the_person_and_their_bots_and_not_the_owners
     let mut w = world();
     let sam = begin(&mut w, "sam");
     let bot = begin(&mut w, "bot-a");
-    let kai = begin(&mut w, "kai");
+    let kai = owner_door(&w);
     assert!(matches!(
         mark_live(&mut w.core, &sam.id, 0, T0).unwrap(),
         Live::Live(_)
@@ -438,11 +536,7 @@ fn a_suspension_sweeps_the_doors_of_the_person_and_their_bots_and_not_the_owners
     assert!(swept.contains(&sam.id.as_str()) && swept.contains(&bot.id.as_str()));
     assert_eq!(state_of(&mut w, &sam.id), State::Swept);
     assert_eq!(state_of(&mut w, &bot.id), State::Swept);
-    assert_eq!(
-        state_of(&mut w, &kai.id),
-        State::Starting,
-        "the owner's stays"
-    );
+    assert_eq!(state_of(&mut w, &kai), State::Starting, "the owner's stays");
     // twice: nothing left to sweep
     let again = say(&mut w, "people.suspend", &json!({"id": "sam"}));
     assert_eq!(again["doors"], json!([]));
@@ -522,11 +616,11 @@ fn sweeping_twice_reports_a_door_whose_box_is_not_confirmed_gone_until_it_is() {
 #[test]
 fn naming_the_owner_sweeps_nothing_but_naming_a_person_takes_their_bots() {
     let mut w = world();
-    let kai = begin(&mut w, "kai");
+    let kai = owner_door(&w);
     let bot = begin(&mut w, "bot-a");
-    let out = sweep_all(&mut w, &["kai"], true, &Started("T1"));
+    let out = sweep_all(&mut w, &["kai"], false, &Started("T1"));
     assert!(out.swept.is_empty());
-    assert_eq!(state_of(&mut w, &kai.id), State::Starting);
+    assert_eq!(state_of(&mut w, &kai), State::Starting);
     let out = sweep_all(&mut w, &["sam"], false, &Started("T1"));
     assert_eq!(out.swept.len(), 1, "bot-a answers to sam");
     assert_eq!(state_of(&mut w, &bot.id), State::Swept);
@@ -633,7 +727,7 @@ fn the_rows_start_mark_live_list_sweep_and_end() {
     let s = call_at(
         &mut w.core,
         "doors.start",
-        &params(json!({"agent": "house", "door": "render", "person": "sam", "pid": 4242})),
+        &params(json!({"agent": "house", "door": PIECE, "person": "sam", "pid": 4242})),
         &live,
         T0,
     )
@@ -671,4 +765,67 @@ fn the_rows_start_mark_live_list_sweep_and_end() {
     assert_eq!(none["doors"], json!([]));
     let e = call_at(&mut w.core, "doors.end", &json!({"id": "nope"}), &live, T0).unwrap_err();
     assert!(matches!(e, Error::Refused(_)));
+}
+
+// --- the access and the write under one lock -------------------------------------------------------------------------
+
+/// A second connection to core.db trying to commit a revoke: refused at once while the first holds its write
+/// transaction, so nothing can land between a start's access check and its row.
+fn revoke_from_outside(db: &std::path::Path) -> bool {
+    let other = rusqlite::Connection::open(db).unwrap();
+    other.busy_timeout(std::time::Duration::ZERO).unwrap();
+    other
+        .execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", [])
+        .is_ok()
+}
+
+#[test]
+fn a_start_decides_and_writes_under_one_lock() {
+    let mut w = world();
+    let db = w.db.clone();
+    let mut landed = None;
+    let r = start_between(
+        &mut w.core,
+        &w.c,
+        &Started("T1"),
+        &Start {
+            id: None,
+            agent: "house",
+            door: PIECE,
+            person: "sam",
+            folder: "",
+            pid: 4242,
+        },
+        T0,
+        &mut || landed = Some(revoke_from_outside(&db)),
+    );
+    assert!(r.is_ok());
+    assert_eq!(
+        landed,
+        Some(false),
+        "a revoke between the check and the row would have committed"
+    );
+    // once the start is done the same write goes through
+    assert!(revoke_from_outside(&db));
+}
+
+#[test]
+fn a_sweep_decides_and_writes_under_one_lock() {
+    let mut w = world();
+    let d = begin(&mut w, "sam");
+    let db = w.db.clone();
+    let mut landed = None;
+    let out = sweep_between(
+        &mut w.core,
+        &w.c,
+        &Started("T1"),
+        &["sam".to_owned()],
+        true,
+        T0 + 1,
+        &mut || landed = Some(revoke_from_outside(&db)),
+    )
+    .unwrap();
+    assert_eq!(out.swept.len(), 1);
+    assert_eq!(landed, Some(false));
+    assert_eq!(state_of(&mut w, &d.id), State::Swept);
 }

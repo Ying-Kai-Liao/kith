@@ -149,6 +149,18 @@ pub(crate) fn may_in(ctx: &Ctx, auth: &Value, person: &str, agent: &str) -> Resu
         .map_err(|d| refused(&d))
 }
 
+/// `resolve` over tables already read: what a run of `agent` for `person` gets (a bot's already cut to its owner's).
+pub(crate) fn resolve_in(
+    ctx: &Ctx,
+    auth: &Value,
+    agent: &str,
+    person: &str,
+) -> Result<Map<String, Value>> {
+    Rules::new(ctx, auth)
+        .resolve(agent, person, None, false)
+        .map_err(|d| refused(&d))
+}
+
 /// [`snapshot`], calling `between` after each table is read: a test writes there to prove the later tables are read
 /// from the same snapshot.
 fn snapshot_with(conn: &Connection, between: &mut dyn FnMut()) -> Result<Value> {

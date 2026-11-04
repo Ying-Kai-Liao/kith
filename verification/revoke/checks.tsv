@@ -48,6 +48,7 @@ core-door	PROPERTY	DoorNoResurrect	pass
 core-door	INVARIANT	DoorsCutWithRevoke	pass
 door	INVARIANT	DoorsCutWithRevoke	fail
 door	PROPERTY	DoorNoResurrect	pass
+broken-door-undo-revives	PROPERTY	DoorNoResurrect	fail
 core-bot-door	INVARIANT	TypeOK	pass
 core-bot-door	PROPERTY	BotDoorCut	pass
 core-bot-door	PROPERTY	DoorNoResurrect	pass

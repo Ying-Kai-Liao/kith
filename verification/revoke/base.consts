@@ -15,6 +15,7 @@ NoDoorSweep = FALSE
 BotDoor = FALSE
 BotDoorNoCut = FALSE
 CoreDoorHook = FALSE
+DoorUndoRevives = FALSE
 ItemsOn = FALSE
 DeleteItems = FALSE
 Asks = FALSE
