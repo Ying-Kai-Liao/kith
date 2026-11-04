@@ -70,10 +70,18 @@ const DYING: [libc::c_int; 4] = [libc::SIGTERM, libc::SIGHUP, libc::SIGINT, libc
 /// Puts the saved settings back, once. Async-signal-safe: an atomic swap and tcsetattr.
 fn restore_now(flush: bool) {
     if ARMED.swap(false, Ordering::AcqRel) {
-        let when = if flush { libc::TCSADRAIN } else { libc::TCSANOW };
+        let when = if flush {
+            libc::TCSADRAIN
+        } else {
+            libc::TCSANOW
+        };
         // SAFETY: SAVED was filled in before ARMED was set; this is the only caller that got `true` from the swap.
         unsafe {
-            libc::tcsetattr(SAVED_FD.load(Ordering::Acquire), when, (*SAVED.0.get()).as_ptr());
+            libc::tcsetattr(
+                SAVED_FD.load(Ordering::Acquire),
+                when,
+                (*SAVED.0.get()).as_ptr(),
+            );
         }
     }
 }
@@ -96,7 +104,9 @@ fn install_handlers() -> Vec<(libc::c_int, libc::sigaction)> {
         // SAFETY: a zeroed sigaction with the fields below set is a valid one; sigaction only reads `sa` and fills `prev`.
         unsafe {
             let mut prev: libc::sigaction = std::mem::zeroed();
-            if libc::sigaction(sig, std::ptr::null(), &raw mut prev) != 0 || prev.sa_sigaction == libc::SIG_IGN {
+            if libc::sigaction(sig, std::ptr::null(), &raw mut prev) != 0
+                || prev.sa_sigaction == libc::SIG_IGN
+            {
                 continue;
             }
             let mut sa: libc::sigaction = std::mem::zeroed();

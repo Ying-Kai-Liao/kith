@@ -86,7 +86,9 @@ pub fn parse_detach_key(s: &str) -> Result<u8, String> {
     let rest = ["ctrl-", "Ctrl-", "CTRL-", "^"]
         .iter()
         .find_map(|p| s.strip_prefix(p))
-        .ok_or_else(|| format!("detach key {s:?}: write it as ctrl-<char>, for example ctrl-\\ or ctrl-a"))?;
+        .ok_or_else(|| {
+            format!("detach key {s:?}: write it as ctrl-<char>, for example ctrl-\\ or ctrl-a")
+        })?;
     let mut chars = rest.chars();
     let (Some(c), None) = (chars.next(), chars.next()) else {
         return Err(format!("detach key {s:?}: one character after ctrl-"));
@@ -101,7 +103,9 @@ pub fn parse_detach_key(s: &str) -> Result<u8, String> {
         _ => return Err(format!("detach key {s:?}: ctrl-{c} is not a control key")),
     };
     if matches!(byte, 0 | 9 | 10 | 13 | 27) {
-        return Err(format!("detach key {s:?}: that key is needed for typing (nul, tab, newline, enter, escape)"));
+        return Err(format!(
+            "detach key {s:?}: that key is needed for typing (nul, tab, newline, enter, escape)"
+        ));
     }
     Ok(byte)
 }
@@ -123,7 +127,10 @@ pub fn run(endpoint: &Path, opts: &Opts) -> i32 {
     let stream = match platform::connect(endpoint) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("cannot reach the terminal relay at {}: {e}", endpoint.display());
+            eprintln!(
+                "cannot reach the terminal relay at {}: {e}",
+                endpoint.display()
+            );
             return 1;
         }
     };
@@ -149,7 +156,10 @@ fn detached_note(why: &str) -> (i32, String) {
     match why {
         "detach" => (0, "detached; the agent keeps running".into()),
         "taken_over" => (1, "detached: another client took over this terminal".into()),
-        "slow" => (1, "detached: this client could not keep up with the output; attach again".into()),
+        "slow" => (
+            1,
+            "detached: this client could not keep up with the output; attach again".into(),
+        ),
         "holder_lost" => (1, "detached: the process holder is gone".into()),
         "refused" => (1, "detached: the relay refused this attach".into()),
         other => (1, format!("detached: {other}")),
@@ -174,7 +184,13 @@ fn send(w: &Writer, kind: u8, payload: &[u8]) -> io::Result<()> {
 }
 
 pub(crate) fn session(stream: Stream, io: Io, opts: &Opts) -> i32 {
-    let Io { input, mut output, mut notes, size, raw } = io;
+    let Io {
+        input,
+        mut output,
+        mut notes,
+        size,
+        raw,
+    } = io;
     let Ok(mut read_half) = stream.try_clone() else {
         let _ = writeln!(notes, "cannot use the connection to the terminal relay");
         return 1;
@@ -210,7 +226,10 @@ pub(crate) fn session(stream: Stream, io: Io, opts: &Opts) -> i32 {
             } else if attached {
                 (1, Some("the connection to the terminal closed".into()))
             } else {
-                (1, Some("the terminal relay closed the connection without an answer".into()))
+                (
+                    1,
+                    Some("the terminal relay closed the connection without an answer".into()),
+                )
             };
         };
         match k {
@@ -235,10 +254,17 @@ pub(crate) fn session(stream: Stream, io: Io, opts: &Opts) -> i32 {
             }
             kind::OUTPUT => {
                 if !attached {
-                    break (1, Some("the terminal relay sent output before it accepted the attach".into()));
+                    break (
+                        1,
+                        Some("the terminal relay sent output before it accepted the attach".into()),
+                    );
                 }
                 saw_output = true;
-                if output.write_all(&payload).and_then(|()| output.flush()).is_err() {
+                if output
+                    .write_all(&payload)
+                    .and_then(|()| output.flush())
+                    .is_err()
+                {
                     let _ = send(&writer, kind::DETACH, b"");
                     break (1, Some("cannot write to the terminal".into()));
                 }
@@ -247,13 +273,22 @@ pub(crate) fn session(stream: Stream, io: Io, opts: &Opts) -> i32 {
                 let v: Value = serde_json::from_slice(&payload).unwrap_or(Value::Null);
                 let code = exit_code(&v);
                 if attached && !saw_output && code == BUSY {
-                    break (BUSY, Some("busy: another writer has this conversation".into()));
+                    break (
+                        BUSY,
+                        Some("busy: another writer has this conversation".into()),
+                    );
                 }
-                break (code, v.get("error").and_then(Value::as_str).map(|e| format!("error: {e}")));
+                break (
+                    code,
+                    v.get("error")
+                        .and_then(Value::as_str)
+                        .map(|e| format!("error: {e}")),
+                );
             }
             kind::DETACHED => {
                 let v: Value = serde_json::from_slice(&payload).unwrap_or(Value::Null);
-                let (code, note) = detached_note(v.get("why").and_then(Value::as_str).unwrap_or("unknown"));
+                let (code, note) =
+                    detached_note(v.get("why").and_then(Value::as_str).unwrap_or("unknown"));
                 break (code, Some(note));
             }
             kind::ERROR => {

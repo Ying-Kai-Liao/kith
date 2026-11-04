@@ -59,7 +59,13 @@ struct Rig {
 }
 
 fn opts(role: Role) -> Opts {
-    Opts { ticket: "t0".into(), role, takeover: false, detach_key: 0x1c, tty_input: false }
+    Opts {
+        ticket: "t0".into(),
+        role,
+        takeover: false,
+        detach_key: 0x1c,
+        tty_input: false,
+    }
 }
 
 fn rig(o: Opts) -> Rig {
@@ -86,12 +92,22 @@ fn rig(o: Opts) -> Rig {
         },
     };
     let client = thread::spawn(move || session(client_side, io, &o));
-    Rig { relay, keys, out, notes, events, size, client: Some(client) }
+    Rig {
+        relay,
+        keys,
+        out,
+        notes,
+        events,
+        size,
+        client: Some(client),
+    }
 }
 
 impl Rig {
     fn frame(&mut self) -> (u8, Vec<u8>) {
-        self.relay.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        self.relay
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
         let (k, id, p) = wire::read(&mut self.relay).unwrap().expect("a frame");
         assert_eq!(id, 0);
         (k, p)
@@ -108,7 +124,10 @@ impl Rig {
     }
 
     fn attached(&mut self) {
-        self.send(kind::ATTACHED, br#"{"v":1,"held_id":7,"role":"owner","cols":80,"rows":24,"replay":0}"#);
+        self.send(
+            kind::ATTACHED,
+            br#"{"v":1,"held_id":7,"role":"owner","cols":80,"rows":24,"replay":0}"#,
+        );
     }
 
     fn finish(&mut self) -> i32 {
@@ -122,9 +141,15 @@ impl Rig {
 
 #[test]
 fn attach_frame_carries_ticket_role_size_and_takeover() {
-    let mut r = rig(Opts { takeover: true, ..opts(Role::Owner) });
+    let mut r = rig(Opts {
+        takeover: true,
+        ..opts(Role::Owner)
+    });
     let a = r.attach_frame();
-    assert_eq!(a, json!({"v": 1, "ticket": "t0", "role": "owner", "cols": 80, "rows": 24, "takeover": true}));
+    assert_eq!(
+        a,
+        json!({"v": 1, "ticket": "t0", "role": "owner", "cols": 80, "rows": 24, "takeover": true})
+    );
     r.send(kind::EXIT, br#"{"code":0,"signal":null}"#);
     assert_eq!(r.finish(), 0);
 }
@@ -161,7 +186,10 @@ fn exit_in_the_middle_of_the_replay_ends_it_there() {
     r.attach_frame();
     r.attached();
     r.send(kind::OUTPUT, b"part");
-    r.send(kind::EXIT, br#"{"code":0,"signal":null,"error":"killed by the holder"}"#);
+    r.send(
+        kind::EXIT,
+        br#"{"code":0,"signal":null,"error":"killed by the holder"}"#,
+    );
     r.send(kind::OUTPUT, b"never read");
     assert_eq!(r.finish(), 0);
     assert_eq!(r.out.lock().unwrap().as_slice(), b"part");
@@ -193,8 +221,16 @@ fn code_75_after_output_is_just_the_engines_code() {
 fn detached_says_why_in_one_line() {
     for (why, code, text) in [
         ("detach", 0, "detached; the agent keeps running"),
-        ("taken_over", 1, "detached: another client took over this terminal"),
-        ("slow", 1, "detached: this client could not keep up with the output; attach again"),
+        (
+            "taken_over",
+            1,
+            "detached: another client took over this terminal",
+        ),
+        (
+            "slow",
+            1,
+            "detached: this client could not keep up with the output; attach again",
+        ),
         ("holder_lost", 1, "detached: the process holder is gone"),
         ("refused", 1, "detached: the relay refused this attach"),
         ("later_addition", 1, "detached: later_addition"),
@@ -225,7 +261,10 @@ fn a_relay_that_closes_without_a_frame_is_reported() {
     r.attach_frame();
     r.relay.shutdown(std::net::Shutdown::Both).unwrap();
     assert_eq!(r.finish(), 1);
-    assert_eq!(r.note(), "the terminal relay closed the connection without an answer\n");
+    assert_eq!(
+        r.note(),
+        "the terminal relay closed the connection without an answer\n"
+    );
 }
 
 #[test]
@@ -283,7 +322,10 @@ fn keys_go_as_input_and_the_detach_key_sends_detach_and_is_not_forwarded() {
 
 #[test]
 fn a_configured_detach_key_is_used() {
-    let mut r = rig(Opts { detach_key: parse_detach_key("ctrl-a").unwrap(), ..opts(Role::Owner) });
+    let mut r = rig(Opts {
+        detach_key: parse_detach_key("ctrl-a").unwrap(),
+        ..opts(Role::Owner)
+    });
     r.attach_frame();
     r.attached();
     // Ctrl+\ is now an ordinary key.
@@ -332,7 +374,9 @@ fn detach_key_parsing() {
     assert_eq!(parse_detach_key("ctrl-a").unwrap(), 1);
     assert_eq!(parse_detach_key("Ctrl-]").unwrap(), 0x1d);
     assert_eq!(parse_detach_key("^_").unwrap(), 0x1f);
-    for bad in ["", "ctrl-", "ctrl-ab", "a", "ctrl-1", "ctrl-m", "ctrl-i", "ctrl-@", "ctrl-["] {
+    for bad in [
+        "", "ctrl-", "ctrl-ab", "a", "ctrl-1", "ctrl-m", "ctrl-i", "ctrl-@", "ctrl-[",
+    ] {
         assert!(parse_detach_key(bad).is_err(), "{bad}");
     }
 }
