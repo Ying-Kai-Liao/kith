@@ -55,8 +55,18 @@ fn file(rig: &mut Rig, step: &Value, n: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// A call as the owner at the computer makes it: `local` on (the host sends it for a loopback owner caller, the auto-approval and the membership-gone deny). A call
+/// without it is the narrow answer, tested on its own.
+fn at_computer(rig: &mut Rig, method: &str, params: &Value) -> Result<Value, String> {
+    let mut p = params.clone();
+    if let Some(o) = p.as_object_mut() {
+        o.insert("local".into(), true.into());
+    }
+    rig.call(method, &p)
+}
+
 fn ids(rig: &mut Rig, params: &Value) -> Vec<String> {
-    rig.call("people.requests", params).unwrap()["requests"]
+    at_computer(rig, "people.requests", params).unwrap()["requests"]
         .as_array()
         .unwrap()
         .iter()
@@ -76,14 +86,28 @@ fn the_parity_script_gives_the_answers_the_host_gives() {
                 file(&mut rig, f, i64::try_from(n).unwrap())
                     .unwrap_or_else(|e| panic!("{at}: {e}"));
             } else if let Some(p) = step["suspend"].as_str() {
-                rig.call("people.suspend", &json!({ "id": p })).unwrap();
-            } else if step.get("membership_gone").is_some() {
-                // The core cannot see this event yet (M2-17 must, see the module doc of `requests.rs`): nothing
-                // happens here, and the steps after it carry `core_expect`, what the core answers today.
-                assert!(
-                    scenario.get("known_difference").is_some(),
-                    "{at}: a gap must be marked"
-                );
+                at_computer(&mut rig, "people.suspend", &json!({ "id": p })).unwrap();
+            } else if let Some(p) = step["undo"].as_str() {
+                at_computer(&mut rig, "people.undo", &json!({ "id": p })).unwrap();
+            } else if let Some(p) = step["membership_gone"].as_str().or(step["sync"].as_str()) {
+                // The cloud's event is the host's: it removes the membership and, on its next membership sync, denies
+                // the pending requests of a person with no membership (`cloud::deny_without_membership`), here through
+                // `people.deny`. The core cannot see the event itself. After a suspension the sync does the same, and
+                // the list no longer shows those rows, so they are found in the table.
+                let waiting: Vec<String> = {
+                    let mut q = rig
+                        .core
+                        .conn()
+                        .prepare("SELECT id FROM access_requests WHERE person = ?1 AND status = 'pending'")
+                        .unwrap();
+                    q.query_map([p], |r| r.get(0))
+                        .unwrap()
+                        .map(Result::unwrap)
+                        .collect()
+                };
+                for id in waiting {
+                    at_computer(&mut rig, "people.deny", &json!({ "id": id })).unwrap();
+                }
             } else if let Some(id) = step["expire"].as_str() {
                 // the cloud stops listing it; here the clock passes its time
                 rig.core
@@ -101,8 +125,8 @@ fn the_parity_script_gives_the_answers_the_host_gives() {
                 } else {
                     ("people.deny", step["deny"].as_str().unwrap())
                 };
-                let got = rig.call(method, &json!({ "id": id }));
-                let expect = step.get("core_expect").unwrap_or(&step["expect"]);
+                let got = at_computer(&mut rig, method, &json!({ "id": id }));
+                let expect = &step["expect"];
                 match (&expect["err"], got) {
                     (Value::String(want), Err(e)) => assert_eq!(&e, want, "{at}"),
                     (Value::Null, Ok(v)) => {
@@ -143,7 +167,7 @@ fn a_list_has_the_hosts_shape_and_the_approval_names_the_device_to_add() {
     )
     .unwrap();
     assert_eq!(
-        rig.call("people.requests", &json!({})).unwrap(),
+        at_computer(&mut rig, "people.requests", &json!({})).unwrap(),
         json!({"requests": [{
             "requestId": "req_1", "deviceKey": "S0VZ", "deviceName": "Sam's iPhone", "platform": "ios",
             "email": "sam@example.com", "personId": "sam", "code": null, "createdAt": t, "expiresAt": t + HOUR,
@@ -151,18 +175,17 @@ fn a_list_has_the_hosts_shape_and_the_approval_names_the_device_to_add() {
     );
     requests::reveal(&mut rig.core, "req_1", "246810").unwrap();
     assert_eq!(
-        rig.call("people.requests", &json!({})).unwrap()["requests"][0]["code"],
+        at_computer(&mut rig, "people.requests", &json!({})).unwrap()["requests"][0]["code"],
         "246810"
     );
     assert_eq!(
-        rig.call("people.approve", &json!({"id": "req_1"})).unwrap(),
+        at_computer(&mut rig, "people.approve", &json!({"id": "req_1"})).unwrap(),
         json!({"requestId": "req_1", "status": "approved", "device": {
             "key": "S0VZ", "name": "Sam's iPhone", "platform": "ios", "personId": "sam", "scopes": ["control"],
         }})
     );
     assert_eq!(
-        rig.call("people.deny", &json!({"id": "req_1"}))
-            .unwrap_err(),
+        at_computer(&mut rig, "people.deny", &json!({"id": "req_1"})).unwrap_err(),
         "unknown request"
     );
 }
@@ -179,23 +202,35 @@ fn the_owners_other_devices_answer_members_requests_only() {
     for id in ["mine", "nope"] {
         let p = json!({"id": id, "members": true});
         assert_eq!(
-            rig.call("people.approve", &p).unwrap_err(),
+            at_computer(&mut rig, "people.approve", &p).unwrap_err(),
             forbidden,
             "{id}"
         );
-        assert_eq!(rig.call("people.deny", &p).unwrap_err(), forbidden, "{id}");
+        assert_eq!(
+            at_computer(&mut rig, "people.deny", &p).unwrap_err(),
+            forbidden,
+            "{id}"
+        );
     }
     assert_eq!(
         requests::status_of(rig.core.conn(), "mine").as_deref(),
         Some("pending"),
         "a refusal changes nothing"
     );
-    rig.call("people.approve", &json!({"id": "sams", "members": true}))
-        .unwrap();
+    at_computer(
+        &mut rig,
+        "people.approve",
+        &json!({"id": "sams", "members": true}),
+    )
+    .unwrap();
     // once decided it is not a member's request any more: the host's `is_member_request` says no too
     assert_eq!(
-        rig.call("people.deny", &json!({"id": "sams", "members": true}))
-            .unwrap_err(),
+        at_computer(
+            &mut rig,
+            "people.deny",
+            &json!({"id": "sams", "members": true})
+        )
+        .unwrap_err(),
         forbidden
     );
 }
@@ -212,11 +247,9 @@ fn a_refusal_that_ends_the_request_is_kept() {
         )
         .unwrap();
     arrive(&mut rig, "ghosts", Some("sam"), true);
-    rig.call("people.removePerson", &json!({"id": "sam"}))
-        .unwrap();
+    at_computer(&mut rig, "people.removePerson", &json!({"id": "sam"})).unwrap();
     for id in ["w", "ghosts"] {
-        rig.call("people.approve", &json!({ "id": id }))
-            .unwrap_err();
+        at_computer(&mut rig, "people.approve", &json!({ "id": id })).unwrap_err();
         assert_eq!(
             requests::status_of(rig.core.conn(), id).as_deref(),
             Some("denied"),
@@ -225,8 +258,7 @@ fn a_refusal_that_ends_the_request_is_kept() {
     }
     // a refusal that leaves it waiting changes nothing
     arrive(&mut rig, "early", None, false);
-    rig.call("people.approve", &json!({"id": "early"}))
-        .unwrap_err();
+    at_computer(&mut rig, "people.approve", &json!({"id": "early"})).unwrap_err();
     assert_eq!(
         requests::status_of(rig.core.conn(), "early").as_deref(),
         Some("pending")
@@ -237,9 +269,9 @@ fn a_refusal_that_ends_the_request_is_kept() {
 fn a_person_undone_after_a_suspension_can_have_their_request_approved_again() {
     let mut rig = Rig::new(&world());
     arrive(&mut rig, "r", Some("sam"), true);
-    rig.call("people.suspend", &json!({"id": "sam"})).unwrap();
-    rig.call("people.undo", &json!({"id": "sam"})).unwrap();
-    assert!(rig.call("people.approve", &json!({"id": "r"})).is_ok());
+    at_computer(&mut rig, "people.suspend", &json!({"id": "sam"})).unwrap();
+    at_computer(&mut rig, "people.undo", &json!({"id": "sam"})).unwrap();
+    assert!(at_computer(&mut rig, "people.approve", &json!({"id": "r"})).is_ok());
 }
 
 #[test]
@@ -265,7 +297,7 @@ fn filing_has_the_rules_of_the_hosts_sync() {
     requests::reveal(&mut rig.core, "a", "111111").unwrap();
     file(&mut rig, &step, 1).unwrap();
     // an id the cloud lists again is not filed twice, even after it was decided
-    rig.call("people.deny", &json!({"id": "b"})).unwrap();
+    at_computer(&mut rig, "people.deny", &json!({"id": "b"})).unwrap();
     step["device"] = 9.into();
     assert!(
         file(&mut rig, &step, 2)
@@ -275,7 +307,7 @@ fn filing_has_the_rules_of_the_hosts_sync() {
     // a code is revealed once
     assert!(requests::reveal(&mut rig.core, "a", "222222").is_err());
     assert_eq!(
-        rig.call("people.requests", &json!({})).unwrap()["requests"][0]["code"],
+        at_computer(&mut rig, "people.requests", &json!({})).unwrap()["requests"][0]["code"],
         "111111"
     );
 }
@@ -284,7 +316,7 @@ fn filing_has_the_rules_of_the_hosts_sync() {
 fn old_decided_requests_are_forgotten_when_the_next_one_is_filed() {
     let mut rig = Rig::new(&world());
     arrive(&mut rig, "old", None, true);
-    rig.call("people.deny", &json!({"id": "old"})).unwrap();
+    at_computer(&mut rig, "people.deny", &json!({"id": "old"})).unwrap();
     rig.core
         .conn()
         .execute(
@@ -336,7 +368,7 @@ fn the_rows_are_owner_only_experimental_and_read_the_clock() {
     rig.c.now_ms += 7_200_000.0;
     assert_eq!(ids(&mut rig, &json!({})), Vec::<String>::new());
     assert_eq!(
-        rig.call("people.approve", &json!({"id": "r"})).unwrap_err(),
+        at_computer(&mut rig, "people.approve", &json!({"id": "r"})).unwrap_err(),
         "unknown request"
     );
     assert_eq!(
@@ -372,7 +404,7 @@ fn a_bot_is_never_a_member_device() {
     );
     plant(&mut rig, "b", "bot-a");
     assert_eq!(
-        rig.call("people.approve", &json!({"id": "b"})).unwrap_err(),
+        at_computer(&mut rig, "people.approve", &json!({"id": "b"})).unwrap_err(),
         NOT_A_MEMBER
     );
     assert_eq!(
@@ -394,8 +426,12 @@ fn the_owners_own_id_is_never_a_member_device() {
     for (id, members) in [("o1", false), ("o2", true)] {
         plant(&mut rig, id, "kai");
         assert_eq!(
-            rig.call("people.approve", &json!({"id": id, "members": members}))
-                .unwrap_err(),
+            at_computer(
+                &mut rig,
+                "people.approve",
+                &json!({"id": id, "members": members})
+            )
+            .unwrap_err(),
             NOT_A_MEMBER,
             "members: {members}"
         );
@@ -404,4 +440,102 @@ fn the_owners_own_id_is_never_a_member_device() {
             Some("denied")
         );
     }
+}
+
+#[test]
+fn without_local_only_members_requests_are_answered() {
+    let mut rig = Rig::new(&world());
+    arrive(&mut rig, "mine", None, true);
+    arrive(&mut rig, "sams", Some("sam"), true);
+    // the narrow answer is the default: the owner's own device is neither listed nor decidable
+    let list = rig.call("people.requests", &json!({})).unwrap();
+    assert_eq!(list["requests"].as_array().unwrap().len(), 1);
+    assert_eq!(list["requests"][0]["requestId"], "sams");
+    for m in ["people.approve", "people.deny"] {
+        assert_eq!(
+            rig.call(m, &json!({"id": "mine"})).unwrap_err(),
+            "This can only be done at the computer itself.",
+            "{m}"
+        );
+    }
+    assert_eq!(
+        requests::status_of(rig.core.conn(), "mine").as_deref(),
+        Some("pending")
+    );
+    // `members` stays narrow even next to `local`
+    let both = rig
+        .call("people.requests", &json!({"members": true, "local": true}))
+        .unwrap();
+    assert_eq!(both["requests"].as_array().unwrap().len(), 1);
+    // a member's request can be answered without it
+    assert!(rig.call("people.approve", &json!({"id": "sams"})).is_ok());
+}
+
+#[test]
+fn filing_by_the_host_is_idempotent_and_adds_the_code_when_it_comes() {
+    let mut rig = Rig::new(&world());
+    let t = now(&rig);
+    let file = json!({
+        "id": "r", "deviceKey": "S0VZ", "deviceName": "Phone", "platform": "ios", "person": "sam",
+        "createdAt": t, "expiresAt": t + HOUR,
+    });
+    assert_eq!(
+        rig.call("people.fileRequest", &file).unwrap()["filed"],
+        true
+    );
+    assert_eq!(
+        rig.call("people.fileRequest", &file).unwrap()["filed"],
+        false
+    );
+    let mut shown = file.clone();
+    shown["code"] = "654321".into();
+    rig.call("people.fileRequest", &shown).unwrap();
+    assert_eq!(
+        at_computer(&mut rig, "people.requests", &json!({})).unwrap()["requests"][0]["code"],
+        "654321"
+    );
+    // a known id filed with anything different is refused, and the row stays as it was
+    for (field, other) in [
+        ("code", "000000"),
+        ("deviceKey", "T1RIRVI="),
+        ("person", "sasha"),
+        ("platform", "android"),
+        ("deviceName", "Other"),
+    ] {
+        let mut changed = shown.clone();
+        changed[field] = other.into();
+        assert!(
+            rig.call("people.fileRequest", &changed)
+                .unwrap_err()
+                .contains("already known as a different request"),
+            "{field}"
+        );
+    }
+    let mut no_person = shown.clone();
+    no_person["person"] = Value::Null;
+    assert!(rig.call("people.fileRequest", &no_person).is_err());
+    assert_eq!(
+        at_computer(&mut rig, "people.requests", &json!({})).unwrap()["requests"][0]["code"],
+        "654321"
+    );
+    // a request already decided stays decided when the host files it again
+    at_computer(&mut rig, "people.deny", &json!({"id": "r"})).unwrap();
+    assert_eq!(
+        rig.call("people.fileRequest", &shown).unwrap()["filed"],
+        false
+    );
+    assert_eq!(
+        requests::status_of(rig.core.conn(), "r").as_deref(),
+        Some("denied")
+    );
+    // a member who is not one is refused, a request without a device key is a usage error
+    let mut ghost = file.clone();
+    ghost["id"] = "g".into();
+    ghost["person"] = "nobody".into();
+    assert!(
+        rig.call("people.fileRequest", &ghost)
+            .unwrap_err()
+            .contains("not a member")
+    );
+    assert!(rig.call("people.fileRequest", &json!({"id": "x"})).is_err());
 }

@@ -6,7 +6,8 @@
   kith_paths.py --json   the same as JSON (the Claude Code adapter)
   kith_paths.py --kernel the kernel path for plists and hooks (KITH_KERNEL, else <machine>/cli/current/share/kith/kernel)
   kith_paths.py --bin    the kith program (Rust), or nothing when this Mac has none
-  kith_paths.py --guest-sandbox   exit 0 inside the sandbox of a run for anyone but the owner, else 1
+  kith_paths.py --machine  this Mac's own folder (KITH_MACHINE)
+  kith_paths.py --guest-sandbox  exit 0 inside the sandbox of a run for anyone but the owner, else 1
   kith_paths.py --guest-tmp ID    makes that guest's Claude Code temp folder and prints it (nothing: no short one fits)
 Two places, like ~/.claude for Claude Code:
 
@@ -163,22 +164,25 @@ def launcher():
     return _first(bin_dir / 'kith-uv', bin_dir / 'hq-uv')
 
 
-def _has_hook(binary):
+def _has_hook(binary, timeout=10):
     """Does this kith program answer `kith memory hook`? An older one doesn't, and a hook that can't run checks nothing."""
     import subprocess
     try:
-        r = subprocess.run([binary, 'memory', 'hook', '--help'], capture_output=True, text=True, timeout=10)
+        r = subprocess.run([binary, 'memory', 'hook', '--help'], capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return False
     return r.returncode == 0 and 'phase' in r.stdout.lower()
 
 
-def kith_bin():
+def kith_bin(budget=None):
     """The kith program (the Rust host, which also answers `kith memory check|log|diff|undo|forget|hook`): KITH_BIN, else
     a kith on PATH that isn't the kernel's bash entry, else the host kith serve installed, else one built in this
     kernel's checkout (CARGO_TARGET_DIR or serve/host/target); the first that has `kith memory hook`. A dev build never
     beats an installed host by accident (CARGO_TARGET_DIR is set in sessions started from the repo): KITH_DEV_BIN=1 puts
-    the build right after KITH_BIN. '' when there is none."""
+    the build right after KITH_BIN. '' when there is none. `budget` (seconds) caps the probing of all the candidates
+    together (one probe may take 10 s otherwise); a candidate left unprobed when it runs out counts as none."""
+    import time
+    end = time.monotonic() + budget if budget else None
     own = KERNEL / 'bin' / 'kith'
     target = Path(os.environ.get('CARGO_TARGET_DIR') or KERNEL.parent / 'serve/host/target')
     built = [target / 'dev-app/kith', target / 'release/kith', target / 'debug/kith']
@@ -188,7 +192,7 @@ def kith_bin():
     for c in candidates:
         # Any kernel bash entry is out, not only this kernel's own: ~/.local/bin/kith may be another checkout's.
         if c and os.access(c, os.X_OK) and Path(c).is_file() and not (own.exists() and os.path.samefile(c, own)) \
-                and Path(os.path.realpath(c)).parts[-3:] != ('kernel', 'bin', 'kith') and _has_hook(str(c)):
+                and Path(os.path.realpath(c)).parts[-3:] != ('kernel', 'bin', 'kith') and _has_hook(str(c), 10 if end is None else min(10, max(end - time.monotonic(), 0.1))):
             return str(c)
     return ''
 
@@ -322,6 +326,8 @@ if __name__ == '__main__':
         print(stable_kernel())
     elif arg == '--bin':
         print(kith_bin())
+    elif arg == '--machine':
+        print(p['KITH_MACHINE'])
     elif arg == '--guest-sandbox':
         sys.exit(0 if guest_sandbox() else 1)
     elif arg == '--guest-tmp':

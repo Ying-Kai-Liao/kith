@@ -139,23 +139,22 @@ version assumed finitely many crashes; the review showed that hid slots missed w
 
 ## Code to model
 
-M4-3 (the fire transaction) does not exist yet; the M3-2 turn API and the M4-2 store do, at the sync commit (lines are
-`core/runtime/src/conversations/claims.rs`). The table maps each model action to the code; when M4-3 lands the first
-reader checks it row by row.
+M4-3 is `core/runtime/src/schedules/fire.rs` (with `sync.rs`, the index). The table maps each model action to the code
+(`claims.rs` lines are as of the M3-2 API).
 
 | Model action | Code |
 |---|---|
-| `TickFresh`, `TickStale` | M4-3 `schedules::tick` (not written): read clock, read `sched_tick`, pick the slot, fire, write `sched_tick`. Today `tick()` in `kernel/bin/kith-sched`; the `sched_tick` table in `core/runtime/src/migrations/schedules/m0120_schedules.rs` |
-| `FireOne` | M4-3 `schedules::fire` (not written): one `claim_tx` over `sched_fires` (unique per agent, job, slot) and the turn. Today the skip rules in `tick()`, `sched_fires` / `sched_runs` in m0120, the index in `core/runtime/src/schedules/mod.rs` |
-| `AdHocFire` | M4-3 `schedules::fire` for `manual:<id>` / `event:<id>` and the answer to the caller; today run now in kith-sched |
-| `Edit`, `CancelPaused` | the core re-indexing `jobs.json` (`index`, `read_jobs` in `schedules/mod.rs`); the pause cancel is M4-3 |
+| `TickFresh`, `TickStale` | `schedules::fire::tick`: reads the clock and the watermark, settles each agent's index, plans each job (`plan`: the latest due slot in the window fires, the rest are one `missed` span), fires, moves the watermark in the last fire's transaction. A clock read before the transaction is the stale case |
+| `FireOne` | `fire::fire` / `fire_in`: one `claim_tx` over `sched_fires` (unique per agent, job, slot) and the turn, steps 1-7 in the module header |
+| `AdHocFire` | `fire::run_now` and the webhook entry, `manual:<id>` / `event:<id>` slots, the answer to the caller (`Outcome::Busy` writes no key) |
+| `Edit`, `CancelPaused` | `sync::sync_in` (re-index on a hash change, `cancel_in` on every write with `paused`), `index` / `read_jobs` in `schedules/mod.rs` |
 | `RevokeAuth`, `Grant` | authority tables (M2) |
 | `RevokePerson` | `revoke_person` (`claims.rs:673`): cancels queued and parked turns, ends live claims, bumps the epoch |
 | `Claim` (may check) | `claim` (`:246`), `revoke_epoch` (`:182`), `NewClaim::revoke_seen` (`:91`, checked `:273`), the deadline check in the claim's UPDATE (`:350`) |
-| `Hold`, `Release`, park | `park` (`:1003`), `unpark_ready` (`:1021`) |
-| `Expire` | `expire_parked` (`:1067`, q218) |
+| `Hold`, `Release`, park | `park_in` (called by `fire_in` when the conversation is held), `unpark_ready` |
+| `Expire` | `expire_turns_in` (the sweep in `fire_in`, step 3), `expire_parked` (q218) |
 | `Start`, `Finish`, `Crash`, `Restart` | `redeem` (`:373`), `report` (`:415`), `reconcile` (`:887`) |
-| the turn row | `enqueue_turn` (`:958`), source `schedule` |
+| the turn row | `enqueue_turn_in` (`fire_in`, step 5), source `schedule` |
 
 ## Broken variants
 
@@ -207,8 +206,7 @@ The two "cancel in a second transaction" variants, run against every property (n
 4. A pass can have lost the ability to fail: break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `0bd2c21e87899a07b766d77932e1a4215d3415ec` (origin/rust-rebuild when the review was applied; M4-3 does not exist yet). When M4-3
-merges, the first reader checks the code against the table above and replaces this with the merge commit.
+**Sync commit:** `cf308ebcbc3fb43e8d2a983bce57ab18efbe0135` (origin/rust-rebuild after M4-3 and #776; the code table above was checked against `fire.rs` / `sync.rs` at M4-4a. The model itself, `Fire.tla`, was not run again: nothing in M4-3 or M4-4a changes a modelled action).
 
 ## Map of the folder
 

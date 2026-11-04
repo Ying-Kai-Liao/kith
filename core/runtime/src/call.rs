@@ -41,6 +41,8 @@ impl Core {
             #[cfg(unix)]
             "conversation.transcript" => self.transcript(params),
             m if crate::accounts::call::serves(m) => self.account_call(m, params),
+            #[cfg(unix)]
+            "cutover.mayServe" => crate::cutover::call_may_serve(self, params),
             _ => Err(Error::NotServed(format!(
                 "kith-core: {method} is not answered in the core yet"
             ))),
