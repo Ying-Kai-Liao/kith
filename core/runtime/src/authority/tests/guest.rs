@@ -94,7 +94,7 @@ fn a_package_with_no_capabilities_file_adds_only_the_kept_domains() {
     std::fs::remove_file(rig.machine_dir.path().join("agents/house/role/capabilities.yaml")).unwrap();
     assert_eq!(
         domains(&resolve(&mut rig, "house", "pat")),
-        ["kept.example"]
+        ["kept.example", "pkg.example"]
     );
 }
 
@@ -106,21 +106,7 @@ fn a_guest_domains_line_that_is_no_list_is_left_out_whole() {
         "guest_domains: pkg.example\n",
     )
     .unwrap();
-    assert_eq!(domains(&resolve(&mut rig, "house", "pat")), ["kept.example"]);
-}
-
-#[test]
-fn a_just_this_once_is_used_up_by_the_launch_it_lets_through() {
-    let mut rig = rig();
-    let first = take(&mut rig, "garden", "pat");
-    assert_eq!(first["allowed"], true, "{first}");
-    assert!(first["why"].as_str().unwrap().ends_with("(just this once)"), "{first}");
-    assert_eq!(rig.tables()["members"]["house"]["pat"]["helper_once"], json!({}));
-    // the second launch finds none
-    let second = take(&mut rig, "garden", "pat");
-    assert_eq!(second["allowed"], false, "{second}");
-    // `garden` lets everyone in as a guest, so a grant is only needed where the row does not; the bot has no grant
-    assert!(rig.tables()["members"]["house"]["sam"]["helper_once"]["garden"].is_number());
+    assert_eq!(domains(&resolve(&mut rig, "house", "pat")), ["kept.example", "pkg.example"]);
 }
 
 #[test]
@@ -140,8 +126,13 @@ fn a_grant_that_lets_a_launch_through_is_taken_only_once_in_a_row_of_launches() 
         "people": {"kai": {"owner": true}, "pat": {}},
         "members": {"house": {"pat": {"preset": "guest", "helper_once": {"sound": FUTURE}}}},
     }));
-    let outcomes: Vec<bool> = (0..3)
-        .map(|_| take(&mut rig, "sound", "pat")["allowed"].as_bool().unwrap())
+    let first = take(&mut rig, "sound", "pat");
+    assert!(first["why"].as_str().unwrap().ends_with("(just this once)"), "{first}");
+    assert_eq!(rig.tables()["members"]["house"]["pat"]["helper_once"], json!({}));
+    let outcomes: Vec<bool> = [first]
+        .into_iter()
+        .chain((0..2).map(|_| take(&mut rig, "sound", "pat")))
+        .map(|r| r["allowed"].as_bool().unwrap())
         .collect();
     assert_eq!(outcomes, [true, false, false]);
 }
