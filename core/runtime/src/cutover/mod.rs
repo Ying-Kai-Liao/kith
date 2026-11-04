@@ -1,6 +1,6 @@
 //! The cutover framework (M3-10a): ONE module-keyed way to move a part of Kith from its Python store to core.db, check it
 //! answers the same, make the move one-way for the old readers, and go back. M3's lanes and M2's `authority` plug into it;
-//! the framework registers no real module yet ([`registry`] is empty), the tests use a fake one.
+//! the framework's own tests use a fake module; the real ones are in [`modules`] (S1: `accounts`, `transcripts`).
 //!
 //! # A module
 //! A [`Module`] is a name plus six hooks: `import` (idempotent; `--dry-run` gets no core; `--force`), `same_answer`
@@ -42,6 +42,7 @@ use crate::error::{Error, Result};
 use crate::layout::Layout;
 
 pub(crate) mod marker;
+pub(crate) mod modules;
 pub(crate) mod same_answer;
 pub(crate) mod secrets_back;
 pub(crate) mod state;
@@ -56,6 +57,10 @@ use state::{Phase, Switch};
 pub(crate) struct Env {
     pub machine: PathBuf,
     pub layout: Layout,
+    /// `$KITH_STATE` (the session registry lives below it) and the home folder, for the modules that read more than the
+    /// machine folder (transcripts). `new` leaves them empty: a module that needs them says so.
+    pub state: Option<PathBuf>,
+    pub home: PathBuf,
 }
 
 impl Env {
@@ -63,6 +68,16 @@ impl Env {
         Self {
             machine: machine.to_path_buf(),
             layout: Layout::new(machine),
+            state: None,
+            home: machine.to_path_buf(),
+        }
+    }
+
+    pub(crate) fn with_paths(paths: &kith_kernel::paths::Paths) -> Self {
+        Self {
+            state: Some(paths.state.clone()),
+            home: paths.home.clone(),
+            ..Self::new(&paths.machine)
         }
     }
 }
@@ -111,9 +126,13 @@ pub(crate) trait Module {
     }
 }
 
-/// The registered modules. Empty until a lane switches (M3-10 b..g, M2-23).
+/// The registered modules, in switch order (S1 here; S2 claims+turns, S4 wake, S3 asks and S5 failover plug in after them,
+/// and M2's `authority`). Registered is not switched: nothing steps a module but `kith migrate step`.
 pub(crate) fn registry() -> Vec<Box<dyn Module>> {
-    Vec::new()
+    vec![
+        Box::new(modules::accounts::Accounts),
+        Box::new(modules::transcripts::Transcripts),
+    ]
 }
 
 fn now_secs() -> i64 {
@@ -397,12 +416,12 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
         .get("module")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| Error::BadParams("cutover.mayServe: module is required".into()))?;
-    let machine = core.folders().map(|p| p.machine.clone()).ok_or_else(|| {
+    let folders = core.folders().ok_or_else(|| {
         Error::NotServed("kith-core: this core was opened without its folders".into())
     })?;
     serve_json(
         &registry(),
-        &Env::new(&machine),
+        &Env::with_paths(folders),
         core.conn(),
         name,
         opt_in_env(name),
@@ -412,8 +431,8 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
 
 /// `kith kernel cutover ...`: `step MODULE [--dry-run] [--force]`, `rollback MODULE [--force]`, `status`, `check MODULE`,
 /// `modules`.
-pub(crate) fn run(machine: &std::path::Path, args: &[String]) -> Result<Vec<String>> {
-    run_with(&registry(), &Env::new(machine), args)
+pub(crate) fn run(paths: &kith_kernel::paths::Paths, args: &[String]) -> Result<Vec<String>> {
+    run_with(&registry(), &Env::with_paths(paths), args)
 }
 
 pub(crate) fn run_with(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<String>> {

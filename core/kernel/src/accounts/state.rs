@@ -142,12 +142,33 @@ fn lock(machine: &Path) -> std::io::Result<std::fs::File> {
     Ok(l)
 }
 
+/// The file is a cutover tombstone (`kith migrate step accounts`): the state moved to the core. Nothing here may write the
+/// file then, or it would overwrite the note (and `read_raw` would call the note corrupt and move it aside).
+pub fn tombstoned(machine: &Path) -> bool {
+    std::fs::read(state_file(machine))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|v| v.get("kith_tombstone").is_some())
+}
+
+/// Writes the file from these accounts, over a tombstone: the rollback's export-back (`kith rollback accounts`) and nothing
+/// else. Under the writers' lock, atomically, as `update` writes it.
+pub fn replace(machine: &Path, accts: &Map) -> std::io::Result<()> {
+    let _lock = lock(machine)?;
+    write_atomic(&state_file(machine), render(accts).as_bytes(), 0o600)
+}
+
 /// `change(accounts)` under the lock, then written back atomically. A disk that can't be written to loses the mark and the
 /// run goes on, but the loss is noted in the host's log (`crate::log`) instead of vanishing.
 pub fn update(machine: &Path, change: impl FnOnce(&mut Map)) {
     let done = (|| -> std::io::Result<()> {
         let _lock = lock(machine)
             .map_err(|e| std::io::Error::new(e.kind(), format!("can't take the lock: {e}")))?;
+        if tombstoned(machine) {
+            return Err(std::io::Error::other(
+                "the accounts state moved to the Kith core (kith rollback accounts brings it back)",
+            ));
+        }
         let (mut accts, corrupt) = read_raw(machine);
         if corrupt {
             let f = state_file(machine);
@@ -243,7 +264,7 @@ fn merge_kernel_marks(accts: &mut Map, marks: Vec<(String, Map)>) -> Option<()> 
 /// `serve/kernel-backups-out.json` into the state file, once: the later `out_until` wins; the old file is renamed.
 fn import_kernel_marks(machine: &Path) {
     let old = legacy_files(machine).1;
-    if !old.exists() {
+    if !old.exists() || tombstoned(machine) {
         return;
     }
     let _ = (|| -> Option<()> {

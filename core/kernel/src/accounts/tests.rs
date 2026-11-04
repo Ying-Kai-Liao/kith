@@ -110,11 +110,11 @@ impl Home {
     }
 
     fn state(&self) -> Value {
-        serde_json::from_slice(&std::fs::read(state::state_file(&self.machine())).unwrap()).unwrap()
+        serde_json::from_slice(&std::fs::read(state_file(&self.machine())).unwrap()).unwrap()
     }
 
     fn put_state(&self, json: &str) {
-        let f = state::state_file(&self.machine());
+        let f = state_file(&self.machine());
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
         std::fs::write(f, json).unwrap();
     }
@@ -384,7 +384,7 @@ fn the_default_login_has_no_environment() {
         "the main account asks the harness nothing"
     );
     assert!(
-        !state::state_file(&h.machine()).exists(),
+        !state_file(&h.machine()).exists(),
         "nothing recorded without --record"
     );
 }
@@ -527,7 +527,7 @@ fn a_launch_notes_when_the_account_started() {
     fake.login(std::slice::from_ref(&dir));
     let ctx = h.ctx(&fake);
     launch_env(&ctx, "echo", "codex:b", false, false).unwrap();
-    assert!(!state::state_file(&h.machine()).exists());
+    assert!(!state_file(&h.machine()).exists());
     launch_env(&ctx, "echo", "codex:b", false, true).unwrap();
     main_env(
         &ctx,
@@ -546,7 +546,7 @@ fn a_launch_notes_when_the_account_started() {
     let accts = s["accounts"].as_object().unwrap();
     assert_eq!(accts.keys().collect::<Vec<_>>(), ["codex:b", "claude"]);
     assert!(accts["claude"]["last_started"].as_i64().unwrap() > 1_700_000_000);
-    let text = std::fs::read_to_string(state::state_file(&h.machine())).unwrap();
+    let text = std::fs::read_to_string(state_file(&h.machine())).unwrap();
     assert!(text.starts_with(
         "{\n  \"version\": 1,\n  \"accounts\": {\n    \"codex:b\": {\n      \"last_started\": "
     ));
@@ -581,7 +581,7 @@ fn a_state_change_that_cannot_be_locked_or_written_is_noted_not_dropped_silently
     // "accounts" is a file: the lock file can't be made, so the mark is lost, and the log says so.
     let _ = std::fs::remove_dir_all(h.machine().join("accounts"));
     std::fs::write(h.machine().join("accounts"), "in the way").unwrap();
-    state::record_started(&h.machine(), "claude", 1_900_000_000);
+    record_started(&h.machine(), "claude", 1_900_000_000);
     let marker = h
         .machine()
         .join("accounts")
@@ -599,10 +599,38 @@ fn a_state_change_that_cannot_be_locked_or_written_is_noted_not_dropped_silently
 }
 
 #[test]
+fn a_tombstoned_state_file_is_never_written_over_and_replace_brings_it_back() {
+    let h = Home::new("tombstone");
+    let note =
+        r#"{"kith_tombstone": 1, "module": "accounts", "rollback": "kith rollback accounts"}"#;
+    h.put_state(note);
+    assert!(tombstoned(&h.machine()));
+    record_started(&h.machine(), "claude", 1_900_000_000);
+    let dir = h.machine().join("accounts");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("state.json")).unwrap(),
+        note
+    );
+    assert!(!dir.join("state.json.corrupt").exists(), "note not moved");
+    // The old kernel's marks are not merged in either (that would write the state file).
+    let old = h.machine().join("serve").join("kernel-backups-out.json");
+    std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+    std::fs::write(&old, r#"{"claude": {"out_until": 1900000000}}"#).unwrap();
+    assert!(state::read(&h.machine()).is_empty());
+    assert!(old.exists(), "not renamed");
+    // The rollback's export-back writes it again.
+    let mut accts = serde_json::Map::new();
+    accts.insert("claude".into(), serde_json::json!({"last_started": 5}));
+    replace(&h.machine(), &accts).unwrap();
+    assert!(!tombstoned(&h.machine()));
+    assert_eq!(h.state()["accounts"]["claude"]["last_started"], 5);
+}
+
+#[test]
 fn a_state_file_that_is_not_ours_is_kept_and_replaced() {
     let h = Home::new("corrupt");
     h.put_state("{not json");
-    state::record_started(&h.machine(), "claude", 1_900_000_000);
+    record_started(&h.machine(), "claude", 1_900_000_000);
     let dir = h.machine().join("accounts");
     assert_eq!(
         std::fs::read_to_string(dir.join("state.json.corrupt")).unwrap(),

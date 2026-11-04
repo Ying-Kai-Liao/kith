@@ -215,7 +215,7 @@ pub(crate) fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<Authorit
 /// verbs that write, so a running daemon refuses them.
 #[cfg(unix)]
 pub fn cutover(paths: &Paths, args: &[String]) -> Result<Vec<String>, Error> {
-    cutover::run(&paths.machine, args)
+    cutover::run(paths, args)
 }
 
 /// Opens the core inside this process for one command.

@@ -626,8 +626,9 @@ fn the_cli_words_parse() {
     run_with(&r, &env, &a(&["step", "fa"])).unwrap();
     assert!(run_with(&r, &env, &a(&["status"])).unwrap()[0].contains("switched"));
     assert!(run_with(&r, &env, &a(&["check", "fa"])).unwrap()[0].contains("only store"));
+    // The real registry: the S1 modules, none of them switched.
     assert_eq!(
-        run(&env.machine, &a(&["status"])).unwrap(),
-        vec!["no module has a cutover yet"]
+        run(&crate::tests::paths(&env.machine), &a(&["status"])).unwrap(),
+        vec!["accounts: not switched", "transcripts: not switched"]
     );
 }

@@ -29,7 +29,10 @@ mod state;
 pub use listing::rows_from;
 pub use pick::{Pick, Skipped, Status, pick_from};
 pub use settings::read_settings;
-pub use state::{FileState, Snapshot, StateSource, out_marks_from, snapshot};
+pub use state::{
+    FileState, Snapshot, StateSource, out_marks_from, record_started, replace, snapshot,
+    state_file, tombstoned,
+};
 
 type Map = serde_json::Map<String, Value>;
 
@@ -787,7 +790,7 @@ pub fn launch_env(
         String::new()
     };
     if record {
-        state::record_started(&ctx.machine, entry, now_secs());
+        record_started(&ctx.machine, entry, now_secs());
     }
     Ok(format!(
         "backup_harness={} backup_account={} backup_cfg_var={} backup_cfg_dir={} backup_api_helper={} backup_model={}",
@@ -815,7 +818,7 @@ pub fn env_for(ctx: &Ctx<'_>, agent: &str, entry: &str, record: bool) -> Result<
             .map_err(|e| format!("{agent}'s main account {e}; or run on the default login: kith account unpin {agent}"))?
     };
     if record {
-        state::record_started(&ctx.machine, entry, now_secs());
+        record_started(&ctx.machine, entry, now_secs());
     }
     Ok(format!("main_id={} {env}", sh_quote(entry)))
 }

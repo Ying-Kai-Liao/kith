@@ -22,7 +22,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use crate::db::MIGRATIONS;
+use crate::db::{Core, MIGRATIONS};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 use crate::transcripts::hash::CHANGED;
@@ -131,27 +131,59 @@ fn read_records(dir: &Path) -> (Vec<Record>, Vec<String>, String) {
     (records, skipped, digest)
 }
 
-/// The `engine_sessions` row a record stands for, hash computed now.
-/// The second answer is true when the transcript kept changing while it was read, so no hash was taken.
-fn session_of(ctx: &Ctx<'_>, r: &Record, now: i64) -> (EngineSession, bool) {
-    let engine = engine_of(&r.account).to_owned();
+/// Where a record's session is: the pointer it names, else where the engine keeps it; and the pointer text the row stores.
+fn pointer_of(ctx: &Ctx<'_>, r: &Record) -> (Option<SessionPtr>, String) {
     let ptr = SessionPtr::from_text(&r.transcript_path).or_else(|| {
         match locate(ctx, &r.account, &r.sid) {
             Located::Found(p) => Some(p),
             Located::Missing | Located::NotHeld => None,
         }
     });
+    let pointer = match (&ptr, r.transcript_path.is_empty()) {
+        (Some(p), _) => p.text(),
+        (None, false) => r.transcript_path.clone(),
+        (None, true) => String::new(),
+    };
+    (ptr, pointer)
+}
+
+/// The registry's sessions as the import would write them, but without reading any transcript (no hash, no size): what the
+/// cutover module's same-answer compares the core against. `agent` first. No registry folder = none.
+pub(crate) fn expected(ctx: &Ctx<'_>) -> Vec<(String, EngineSession)> {
+    let Some(dir) = ctx.reg_dir().filter(|d| d.is_dir()) else {
+        return Vec::new();
+    };
+    read_records(&dir)
+        .0
+        .iter()
+        .map(|r| {
+            let row = EngineSession {
+                conversation: r.sid.clone(),
+                account: r.account.clone(),
+                engine: engine_of(&r.account).to_owned(),
+                session_id: r.sid.clone(),
+                pointer: pointer_of(ctx, r).1,
+                cwd: r.cwd.clone(),
+                hash: None,
+                size: None,
+                last_read_at: None,
+            };
+            (r.agent.clone(), row)
+        })
+        .collect()
+}
+
+/// The `engine_sessions` row a record stands for, hash computed now.
+/// The second answer is true when the transcript kept changing while it was read, so no hash was taken.
+fn session_of(ctx: &Ctx<'_>, r: &Record, now: i64) -> (EngineSession, bool) {
+    let engine = engine_of(&r.account).to_owned();
+    let (ptr, pointer) = pointer_of(ctx, r);
     let read = ptr
         .as_ref()
         .filter(|_| engine == "claude")
         .map(hash_session);
     let churned = matches!(&read, Some(Err(e)) if e.to_string() == CHANGED);
     let digest = read.and_then(|r| r.ok().flatten());
-    let pointer = match (&ptr, r.transcript_path.is_empty()) {
-        (Some(p), _) => p.text(),
-        (None, false) => r.transcript_path.clone(),
-        (None, true) => String::new(),
-    };
     let row = EngineSession {
         conversation: r.sid.clone(),
         account: r.account.clone(),
@@ -208,6 +240,17 @@ fn add_conversation(c: &Connection, s: &EngineSession, agent: &str, now: i64) ->
 
 /// The step. `ctx.state` names the registry; `ctx.home`, `ctx.machine` and the env say where the transcripts are.
 pub(crate) fn run(layout: &Layout, ctx: &Ctx<'_>, opts: Options) -> Result<Report> {
+    run_in(layout, ctx, opts, None)
+}
+
+/// [`run`] for the cutover module (`cutover/modules/transcripts.rs`), which already holds the core's lifetime lock: a real
+/// run writes through that core instead of taking the lock again.
+pub(crate) fn run_in(
+    layout: &Layout,
+    ctx: &Ctx<'_>,
+    opts: Options,
+    held: Option<&mut Core>,
+) -> Result<Report> {
     let mut rep = Report {
         dry_run: opts.dry_run,
         ..Report::default()
@@ -284,7 +327,13 @@ pub(crate) fn run(layout: &Layout, ctx: &Ctx<'_>, opts: Options) -> Result<Repor
         return Ok(rep);
     }
     // The lifetime lock for the whole step; this also brings the schema up to date.
-    let mut core = crate::start_with(layout, MIGRATIONS)?;
+    let mut taken;
+    let core = if let Some(c) = held {
+        c
+    } else {
+        taken = crate::start_with(layout, MIGRATIONS)?;
+        &mut taken
+    };
     let todo: Vec<&(String, EngineSession)> = {
         let mut v = Vec::new();
         for item in &sessions {
