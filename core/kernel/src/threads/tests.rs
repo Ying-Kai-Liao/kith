@@ -294,7 +294,10 @@ fn the_sweep_leaves_an_old_text_claim_on_a_reused_pid_alone() {
             other.pid()
         ),
     );
-    assert_eq!(sweep_persons(&c, &["p1".to_owned()], Duration::ZERO), Vec::<i64>::new());
+    assert_eq!(
+        sweep_persons(&c, &["p1".to_owned()], Duration::ZERO),
+        Vec::<i64>::new()
+    );
     assert!(os::pid_runs(other.pid()), "nothing was signalled");
 }
 

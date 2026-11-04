@@ -252,7 +252,7 @@ rm -f $REG/cs-1.claim
 mkdir -p "$T/nops"; printf '#!/bin/sh\nexit 1\n' > "$T/nops/ps"; chmod +x "$T/nops/ps"
 printf '{"pid":%s,"procStart":"Mon Jan  1 00:00:00 2001","at":"x","person":"p-old"}' "$C2" > "$REG/cs-1.claim"
 is "claim with old lstart text and an unreadable start: held" "$(PATH=$T/nops:$PATH claimcli take cs-1 $C1)" "held $C2"
-is "revoke sweep: old text, unreadable start: not signalled" "$(PATH=$T/nops:$PATH python3 "$SK" sweep p-old; kill -0 $C2 2>/dev/null && echo alive)" alive
+is "revoke sweep: old text, unreadable start: not signalled" "$(PATH=$T/nops:$PATH python3 "$SK" sweep p-old >/dev/null; kill -0 $C2 2>/dev/null && echo alive)" alive
 # the revoke sweep signals only a positive match: old text on a reused pid is left alone, a matching one is ended
 printf '{"pid":%s,"procStart":"Mon Jan  1 00:00:00 2001","at":"x","person":"p-old"}' "$C2" > "$REG/cs-1.claim"
 python3 "$SK" sweep p-old >/dev/null; sleep 0.3
