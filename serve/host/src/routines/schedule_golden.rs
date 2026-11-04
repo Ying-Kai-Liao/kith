@@ -184,7 +184,7 @@ fn rows() -> Vec<Value> {
         "2026-11-03T08:00:00Z",
     );
     next(
-        Trigger::Event { source: "nope".into(), event: "*".into(), filters: Default::default() },
+        Trigger::Event { source: "nope".into(), event: "*".into(), filters: std::collections::BTreeMap::default() },
         "2026-11-03T08:00:00Z",
     );
 
