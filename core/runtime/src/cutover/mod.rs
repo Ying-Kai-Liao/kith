@@ -369,6 +369,9 @@ pub(crate) fn check(reg: &[Box<dyn Module>], env: &Env, name: &str) -> Result<Ve
 
 /// The env opt-in for a module: `KITH_CORE_<MODULE>=1` (dashes become underscores). Read here and nowhere else; it goes at
 /// M2-24.
+///
+/// It is read in the daemon's own environment, not the caller's: a standalone daemon that was not started with the
+/// variable fails closed (no opt-in), whatever the host that asks has set.
 fn opt_in_env(name: &str) -> bool {
     let var = format!("KITH_CORE_{}", name.to_ascii_uppercase().replace('-', "_"));
     std::env::var(var).is_ok_and(|v| v == "1")

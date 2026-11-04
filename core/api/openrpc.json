@@ -1879,7 +1879,7 @@
     },
     {
       "name": "cutover.mayServe",
-      "summary": "May the core serve this module now? Read-only gate over the cutover switch: `{ok, warning}`. `ok` needs the module's switch file, the marker `step` left in the core and its tombstones; an env opt-in changes nothing once the file exists. The host reaches the daemon as the owner, so Owner is the only principal; it writes nothing.",
+      "summary": "May the core serve this module now? Read-only gate over the cutover switch: `{ok, warning}`. `ok` needs the module's switch file, the marker `step` left in the core and its tombstones; an env opt-in changes nothing once the file exists. Owner and Host may ask (the host's start guard calls it as the Host principal); it writes nothing.",
       "params": [
         {
           "name": "module",
@@ -1895,7 +1895,8 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "owner",
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",

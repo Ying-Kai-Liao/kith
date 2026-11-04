@@ -268,13 +268,14 @@ pub(super) const ROWS: &[Method] = &[
     ),
     row(
         "cutover.mayServe",
-        "May the core serve this module now? Read-only gate over the cutover switch: `{ok, warning}`. `ok` needs the module's switch file, the marker `step` left in the core and its tombstones; an env opt-in changes nothing once the file exists. The host reaches the daemon as the owner, so Owner is the only principal; it writes nothing.",
+        "May the core serve this module now? Read-only gate over the cutover switch: `{ok, warning}`. `ok` needs the module's switch file, the marker `step` left in the core and its tombstones; an env opt-in changes nothing once the file exists. Owner and Host may ask (the host's start guard calls it as the Host principal); it writes nothing.",
         &[pos("module", "string", true, "The cutover module (`kith migrate status` lists them).")],
         "json",
         &["cutover", "may-serve"],
         Served::Core,
         Stability::Experimental,
-    ),
+    )
+    .principals(OWNER_HOST),
     row(
         "terminal.open",
         "Starts an agent's engine in a held terminal (the holder runs it under the start stub, so it outlives the window) and returns a single-use attach ticket; `direct` when the holder is not reachable, `busy` when another writer has the session.",

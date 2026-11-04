@@ -75,7 +75,9 @@ fn every_row_is_well_formed() {
             &[Principal::RunToken]
         } else if HOST_ROWS.contains(&m.name) {
             &[Principal::Host]
-        } else if m.name == "syncLease.mark" {
+        // The host also reads two owner rows: the lease counter (`mark`) and the cutover gate (`cutover.mayServe`, which
+        // the host-start guard calls). `kernel.cutover`, the write side, stays Owner only.
+        } else if m.name == "syncLease.mark" || m.name == "cutover.mayServe" {
             &[Principal::Owner, Principal::Host]
         } else {
             &[Principal::Owner]
