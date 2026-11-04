@@ -25,6 +25,10 @@ pub enum Error {
     /// column holds text that is not JSON). The file is not damaged, so nothing here says to restore a backup (which
     /// could undo a later revoke); the caller reads it as "no".
     Refused(String),
+    /// A claim or follow-up refused because its ask was stopped (or ended): the fence never lifts, so a drain withdraws the
+    /// request as `stopped` instead of retrying, unlike a busy or not-yet-reconciled [`Self::Refused`] that a later pass may
+    /// get through.
+    Stopped(String),
     /// [`crate::Core::call`]: the table has no such method.
     NoSuchMethod(String),
     /// [`crate::Core::call`]: the method is not open to this principal.
@@ -48,6 +52,7 @@ impl fmt::Display for Error {
         | Self::StaleGeneration(m)
         | Self::Io(m)
         | Self::Refused(m)
+        | Self::Stopped(m)
         | Self::NoSuchMethod(m)
         | Self::NotAllowed(m)
         | Self::BadParams(m)
