@@ -172,9 +172,12 @@ fn holder_record_names_the_stub() {
     let engine: i32 = first_line(&mut s).parse().unwrap();
     let path = dir.join("w-k.holder");
     let text = std::fs::read_to_string(&path).unwrap();
+    // The kith-procstart stamp of the stub itself (the runtime compares it with `same_process`), not `ps` text.
+    let stamp = kith_procstart::start_stamp(s.id()).expect("the stub is running");
+    assert_eq!(text, format!("pid={}\nstarted={stamp}\n", s.id()));
     assert!(
-        text.starts_with(&format!("pid={}\nstarted=", s.id())),
-        "{text:?}"
+        stamp.starts_with(if cfg!(target_os = "linux") { 'b' } else { 'e' }),
+        "{stamp}"
     );
     let mode = std::os::unix::fs::MetadataExt::mode(&std::fs::metadata(&path).unwrap());
     assert_eq!(mode & 0o777, 0o600);

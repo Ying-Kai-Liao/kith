@@ -7389,6 +7389,71 @@
       }
     },
     {
+      "name": "schedule.preview",
+      "summary": "The next fires of a trigger, as `{fires: [{at, iso}]}` (`at` in ms since the epoch): `{type: cron, expr, tz}` (tz `local` or an IANA zone), `{type: interval, every}` (seconds), `{type: once, at}`; a webhook or event has none. Refuses a spec `kith-sched` refuses, with its message.",
+      "params": [
+        {
+          "name": "trigger",
+          "summary": "The trigger, as JSON (`{\"type\":\"cron\",\"expr\":\"0 9 * * 1-5\",\"tz\":\"Europe/Paris\"}`).",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "after",
+          "summary": "Fires after this time, ms since the epoch (now by default).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "n",
+          "summary": "How many fires (5 by default, at most 100).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "preview"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "trigger": {
+            "kind": "positional"
+          },
+          "after": {
+            "kind": "flag",
+            "spellings": [
+              "--after"
+            ]
+          },
+          "n": {
+            "kind": "flag",
+            "spellings": [
+              "--n"
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "schedule.jobs",
       "summary": "Every job of every agent with its next run and its last run, from jobs.json and the core's run state. Also says which agents' files could not be read, the runs of jobs since removed, and the last tick.",
       "params": [
@@ -8483,8 +8548,19 @@
     },
     {
       "name": "ask.end",
-      "summary": "Settles `stopped` the asks whose caller is one of the sessions or persons (Stop, a revoke, a removal): an ask already delivered, answered to its caller or ended stays. Stops no process and withdraws no wake; answers `{ended, sessions}` (the ids, and the sessions owed a withdrawal) for the callers that do.",
+      "summary": "Stop, revoke, removal (`kith ask --end`): settles `stopped` the asks whose caller is one of the sessions or persons, or that are one of the roots, and every ask below them; stops what each one's conversation runs (queued and parked turns cancelled, the live claim to `ending`, an unspawned one ended); withdraws the wakes and waiters those callers are owed. An ask already delivered or answered to its caller stays. Repeating it is safe. Kills no process: answers `{ended, sessions, kill}` (the ids, the sessions withdrawn, and the writers `{claimId, pid, started}` to kill until gone).",
       "params": [
+        {
+          "name": "roots",
+          "summary": "Asks whose whole subtree ends.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
         {
           "name": "sessions",
           "summary": "Caller sessions whose asks end.",
@@ -8528,6 +8604,12 @@
         ],
         "requires": [],
         "args": {
+          "roots": {
+            "kind": "flag",
+            "spellings": [
+              "--roots"
+            ]
+          },
           "sessions": {
             "kind": "flag",
             "spellings": [

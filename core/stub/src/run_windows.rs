@@ -19,18 +19,37 @@ unsafe extern "system" fn handler(event: u32) -> i32 {
     (event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT) as i32
 }
 
-pub fn run(engine: &[OsString]) -> i32 {
+pub struct Spawned(std::process::Child);
+
+/// Starts the engine, or returns the stub's exit code when it cannot start. A resident stub does this before it serves
+/// its control channel, as on Unix.
+pub fn spawn(engine: &[OsString]) -> Result<Spawned, i32> {
     // SAFETY: handler matches the PHANDLER_ROUTINE signature.
     unsafe { SetConsoleCtrlHandler(Some(handler), 1) };
-    match Command::new(&engine[0]).args(&engine[1..]).status() {
-        Ok(s) => s.code().unwrap_or(1),
+    match Command::new(&engine[0]).args(&engine[1..]).spawn() {
+        Ok(c) => Ok(Spawned(c)),
         Err(e) => {
             eprintln!("kith-stub: cannot start {:?}: {e}", engine[0]);
-            if e.kind() == ErrorKind::NotFound {
+            Err(if e.kind() == ErrorKind::NotFound {
                 127
             } else {
                 126
-            }
+            })
         }
+    }
+}
+
+pub fn run(engine: &[OsString]) -> i32 {
+    match spawn(engine) {
+        Ok(child) => wait(child),
+        Err(code) => code,
+    }
+}
+
+/// Holds until the engine is gone; the stub's exit code.
+pub fn wait(mut child: Spawned) -> i32 {
+    match child.0.wait() {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(_) => 1,
     }
 }

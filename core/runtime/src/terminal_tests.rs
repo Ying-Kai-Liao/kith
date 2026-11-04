@@ -578,6 +578,8 @@ echo $$ > "$lock/$key.pid"
                     cols: 80,
                     rows: 24,
                     kill_on_lease_loss: false,
+                    stub: None,
+                    lock_dir: None,
                 },
                 agent: "kai".into(),
                 deadline: Instant::now() + Duration::from_secs(5),

@@ -616,12 +616,22 @@ fn leader() -> (u32, String) {
     std::thread::spawn(move || child.wait());
     let mut started = None;
     until("the process to have a start time", || {
-        started = crate::lock::process_start(pid);
+        started = kith_kernel::procstart::start_stamp(pid);
         started.is_some()
     });
     // Let the setsid happen before anything signals the group.
     std::thread::sleep(Duration::from_millis(300));
     (pid, started.expect("start time"))
+}
+
+/// A start stamp in the form this system writes that no live process has: a pid handed to a stranger.
+#[cfg(unix)]
+fn other_start() -> String {
+    if cfg!(target_os = "linux") {
+        "bGONE:1".into()
+    } else {
+        "e1".into()
+    }
 }
 
 #[cfg(unix)]
@@ -681,7 +691,7 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
         Some("one"),
         vec![
             proc(held_pid, &held_start),
-            proc(stranger_pid, "Thu Jan  1 00:00:00 1970"),
+            proc(stranger_pid, &other_start()),
         ],
     );
     crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("takeover");
@@ -693,10 +703,7 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
     assert_eq!(recorded().instance.as_deref(), Some("two"));
 
     // 4. Processes the new instance lists itself are not the old one's, whatever the record says.
-    record(
-        Some("two"),
-        vec![proc(stranger_pid, "Thu Jan  1 00:00:00 1970")],
-    );
+    record(Some("two"), vec![proc(stranger_pid, &other_start())]);
     crate::holder_link::reconcile(&d.shared, "three", &[proc(stranger_pid, "x")], &cfg)
         .expect("listed");
     assert!(alive(stranger_pid));
@@ -760,6 +767,271 @@ fn remote_holder(sock: &std::path::Path, secret_file: std::path::PathBuf) {
             });
         }
     });
+}
+
+/// Records from before procstart carry `ps -o lstart=` text (or nothing): an unknown start. A live pid with one is never
+/// signalled and holds the new instance back (the "still running" path), every hello alike; a gone pid does not.
+#[cfg(unix)]
+#[test]
+fn a_record_with_old_or_empty_starts_ends_nothing_and_waits_for_the_pid_to_go() {
+    use crate::db::{HolderRecord, RecordedProc};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig {
+        kill_wait: Duration::from_secs(2),
+        ..HolderConfig::default()
+    };
+    let (live_pid, live_start) = leader();
+    let gone_pid = {
+        let mut c = std::process::Command::new("true").spawn().expect("true");
+        let pid = c.id();
+        c.wait().expect("wait");
+        pid
+    };
+    let record = |procs: Vec<RecordedProc>| {
+        let rec = HolderRecord {
+            instance: Some("one".into()),
+            procs,
+        };
+        d.shared
+            .with_core(|c| c.save_holder_record(&rec))
+            .expect("record");
+    };
+    let proc = |pid, started: &str| RecordedProc {
+        pid,
+        started: started.to_owned(),
+        conv: "c".into(),
+    };
+    let instance = || {
+        d.shared
+            .with_core(|c| c.holder_record())
+            .expect("record")
+            .instance
+    };
+    // A gone pid is fine whatever it recorded.
+    record(vec![
+        proc(gone_pid, "Thu Jan  1 00:00:00 1970"),
+        proc(gone_pid, ""),
+    ]);
+    crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("gone pids end nothing");
+    assert_eq!(instance().as_deref(), Some("two"));
+    // A live pid with old text, with nothing, or with the other form: not ended, the old record kept, twice over.
+    let foreign = if cfg!(target_os = "linux") {
+        "e1"
+    } else {
+        "bGONE:1"
+    };
+    for old in ["Thu Jan  1 00:00:00 1970", "", foreign] {
+        record(vec![proc(live_pid, old)]);
+        for _ in 0..2 {
+            let err = crate::holder_link::reconcile(&d.shared, "three", &[], &cfg)
+                .expect_err("an unknown start holds the new instance back");
+            assert!(err.to_string().contains("still running"), "{err}");
+            assert!(alive(live_pid), "never signalled for {old:?}");
+            assert_eq!(instance().as_deref(), Some("one"));
+        }
+    }
+    // The same process with its own stamp is the one that is ended; with another start in the same form, left alone.
+    record(vec![proc(live_pid, &other_start())]);
+    crate::holder_link::reconcile(&d.shared, "three", &[], &cfg).expect("a stranger's pid");
+    assert!(alive(live_pid));
+    record(vec![proc(live_pid, &live_start)]);
+    crate::holder_link::reconcile(&d.shared, "four", &[], &cfg).expect("its own");
+    assert!(!alive(live_pid));
+    // Every holder spawn is its own session leader. A live pid that is not one, with a start nobody can compare, is
+    // provably not the recorded process: left alone, and it does not hold the new instance back.
+    let mut stranger = std::process::Command::new("sleep")
+        .arg("120")
+        .spawn()
+        .expect("sleep");
+    let stranger_pid = stranger.id();
+    for old in ["Thu Jan  1 00:00:00 1970", "", foreign] {
+        record(vec![proc(stranger_pid, old)]);
+        crate::holder_link::reconcile(&d.shared, "five", &[], &cfg)
+            .expect("not a session leader: a stranger");
+        assert!(alive(stranger_pid));
+        assert_eq!(instance().as_deref(), Some("five"));
+        record(vec![]);
+    }
+    let _ = stranger.kill();
+    let _ = stranger.wait();
+}
+
+/// A pid the holder listed that has exited before the start is read is not recorded: with no start it could be a
+/// stranger's by the time the instance changes. One that is there is recorded with the stamp it has now.
+#[cfg(unix)]
+#[test]
+fn a_listed_process_that_has_gone_is_not_recorded() {
+    let (live_pid, live_start) = leader();
+    let gone_pid = {
+        let mut c = std::process::Command::new("true").spawn().expect("true");
+        let pid = c.id();
+        c.wait().expect("wait");
+        pid
+    };
+    let held = |pid: u32| -> kith_holder::proto::Held {
+        serde_json::from_value(json!({
+            "instance": "i", "id": 1, "conv": "c", "claim": 1, "generation": 1, "pid": pid,
+            "mode": "pty", "cols": 80, "rows": 24, "exit": null
+        }))
+        .expect("held")
+    };
+    let got = crate::holder_link::record_procs(&[held(gone_pid), held(live_pid)]);
+    signal(live_pid, "KILL");
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(
+        (got[0].pid, got[0].started.as_str()),
+        (live_pid, live_start.as_str())
+    );
+}
+
+#[cfg(unix)]
+static WEDGE_SECRET: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+#[cfg(unix)]
+static WEDGE_INSTANCE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+#[cfg(unix)]
+static WEDGE_DROP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(unix)]
+static WEDGE_CONNECTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A holder instance that never lists anything and, once told to, hangs up on the connection it has.
+#[cfg(unix)]
+fn wedging(mut s: kith_holder::platform::Stream) {
+    use kith_holder::{auth, proto, wire};
+    use std::sync::atomic::Ordering::SeqCst;
+    WEDGE_CONNECTS.fetch_add(1, SeqCst);
+    let file = WEDGE_SECRET
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("secret file");
+    let secret = std::fs::read_to_string(file)
+        .expect("secret")
+        .trim()
+        .to_owned();
+    let Ok(Some((proto::HELLO, _, payload))) = wire::read(&mut s) else {
+        return;
+    };
+    let hello: proto::Hello = wire::parse(&payload).expect("hello");
+    let nonce = "ab".repeat(16);
+    let proof = auth::proof(
+        secret.as_bytes(),
+        auth::HOLDER,
+        &hello.nonce,
+        &nonce,
+        hello.generation,
+    );
+    wire::write_json(
+        &mut s,
+        proto::CHALLENGE,
+        0,
+        &proto::Challenge { nonce, proof },
+    )
+    .expect("challenge");
+    let Ok(Some((proto::AUTH, _, _))) = wire::read(&mut s) else {
+        return;
+    };
+    let welcome = proto::Welcome {
+        version: proto::VERSION,
+        instance: WEDGE_INSTANCE.lock().expect("lock").clone(),
+        pid: std::process::id(),
+        tied_to_starter: false,
+        generation: hello.generation,
+        lease_lost: false,
+        procs: Vec::new(),
+    };
+    wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
+    while let Ok(Some((kind, _, payload))) = wire::read(&mut s) {
+        if WEDGE_DROP.swap(false, SeqCst) {
+            return;
+        }
+        match kind {
+            proto::PING => {
+                let ping: proto::Ping = wire::parse(&payload).expect("ping");
+                let _ = wire::write_json(&mut s, proto::PONG, 0, &proto::Pong { seq: ping.seq });
+            }
+            proto::LIST => {
+                let _ = wire::write_json(
+                    &mut s,
+                    proto::LISTING,
+                    0,
+                    &proto::Listing { procs: Vec::new() },
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A new holder instance that finds a live session leader with an unreadable start in the old one's record is blocked:
+/// the supervisor says so (naming the pid and what was recorded), backs off at the slow rate instead of reconnecting
+/// every `retry_min`, logs it once, signals nothing, and records the new instance as soon as the pid is gone.
+#[cfg(unix)]
+#[test]
+fn a_blocked_reconcile_backs_off_and_says_so_once() {
+    use crate::db::{HolderRecord, RecordedProc};
+    use std::sync::atomic::Ordering::SeqCst;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    *WEDGE_SECRET.lock().expect("lock") = Some(Layout::new(&m).holder_secret);
+    "a".clone_into(&mut WEDGE_INSTANCE.lock().expect("lock"));
+    let exe = fake_holder(&m, wedging);
+    let mut cfg = holder_cfg(exe);
+    cfg.holder.retry_min = Duration::from_millis(20);
+    cfg.holder.retry_max = Duration::from_millis(400);
+    let d = serving(&p, cfg);
+    until("the first instance to be connected", || {
+        holder_state(&p) == "connected"
+    });
+    let (pid, _) = leader();
+    let old_text = "Thu Jan  1 00:00:00 1970";
+    let rec = HolderRecord {
+        instance: Some("old".into()),
+        procs: vec![RecordedProc {
+            pid,
+            started: old_text.into(),
+            conv: "c".into(),
+        }],
+    };
+    d.shared
+        .with_core(|c| c.save_holder_record(&rec))
+        .expect("record");
+    // The instance changes with the connection: the next hello meets the record above.
+    "b".clone_into(&mut WEDGE_INSTANCE.lock().expect("lock"));
+    WEDGE_DROP.store(true, SeqCst);
+    until("the link to be blocked", || holder_state(&p) == "blocked");
+    let before = WEDGE_CONNECTS.load(SeqCst);
+    std::thread::sleep(Duration::from_millis(1500));
+    let tries = WEDGE_CONNECTS.load(SeqCst) - before;
+    assert_eq!(holder_state(&p), "blocked");
+    assert!(
+        tries >= 2,
+        "it keeps looking ({tries} tries), so the record heals when the pid goes"
+    );
+    assert!(
+        tries <= 6,
+        "retry_min would be ~75 tries in that time; it backs off ({tries})"
+    );
+    let shown = crate::status(&p)["holder"]["error"].to_string();
+    assert!(shown.contains(&format!("pid {pid}")), "{shown}");
+    assert!(shown.contains(old_text), "{shown}");
+    assert!(alive(pid), "nothing was signalled");
+    let after = d.shared.with_core(|c| c.holder_record()).expect("record");
+    assert_eq!(after.instance.as_deref(), Some("old"));
+    let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
+    assert_eq!(
+        log.lines()
+            .filter(|l| l.contains("are still running and not ended"))
+            .count(),
+        1,
+        "{log}"
+    );
+    // The pid goes: the next try records the new instance and the link is up.
+    signal(pid, "KILL");
+    until("the link to heal", || holder_state(&p) == "connected");
+    let healed = d.shared.with_core(|c| c.holder_record()).expect("record");
+    assert_eq!(healed.instance.as_deref(), Some("b"));
 }
 
 #[cfg(unix)]
