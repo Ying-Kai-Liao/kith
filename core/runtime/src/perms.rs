@@ -213,8 +213,15 @@ fn judge(
     if read_ok {
         // `icacls` can exit 0 while naming no entry: its error text ("...being used by another process", "Failed
         // processing 1 files") stands where the list should be. That is no list at all, not an open one.
+        // When the sidecar is gone by now, that error text is its deletion ("The system cannot find the file
+        // specified", exit 0): the CI flake. Only a sidecar that is provably gone is excused; a list with entries is
+        // never reaching this branch, so an open file is still judged by its entries below.
         if !has_entries(text) || text.contains("Failed processing 1 ") {
-            Verdict::Unreadable
+            if !still_exists && allow_vanish {
+                Verdict::Vanished
+            } else {
+                Verdict::Unreadable
+            }
         } else if acl_is_owner_only(text, path, user) {
             Verdict::Private
         } else {
@@ -337,6 +344,32 @@ mod tests {
         assert_eq!(
             judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
             Verdict::Unreadable
+        );
+    }
+
+    /// The CI flake: `icacls` exits 0 with "Failed processing 1 files ... cannot find the file specified" when the
+    /// sidecar is deleted between the existence check and the read.
+    #[test]
+    fn icacls_exit_zero_with_a_deleted_sidecar_is_vanished_only_for_sidecars() {
+        let msg = "Successfully processed 0 files; Failed processing 1 files\nC:\\m\\core.db-wal: The system cannot find the file specified.\n";
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", false, true),
+            Verdict::Vanished
+        );
+        // Still there: not excused. Not a sidecar (core.db must never vanish): not excused.
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db", "me", false, false),
+            Verdict::Unreadable
+        );
+        // A real list open to Users is refused even when the sidecar is gone by the time we look.
+        let open = format!("{OWNER_ONLY} BUILTIN\\Users:(R)\n");
+        assert_eq!(
+            judge(true, &open, "C:\\m\\core.db-shm", "me", false, true),
+            Verdict::Open
         );
     }
 
