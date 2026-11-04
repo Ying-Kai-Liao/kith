@@ -13,9 +13,10 @@ written by the architect and run green in his own folder; M3-0a committed them h
 drift shows. Their origin (path, date) is in each file's header. `results4.md` is the architect's result table plus
 what M3-0a added. This skill is the only other documentation.
 
-State today: most of the claim code (the stub's lock, claim ids on the wire, the core's claim transaction) is M3 and
-not written. A green run says the design holds; `drift.sh` lists the code that exists and tells you when it moves.
-The models were not derived from that code yet; do that when M3-2/M3-4/M3-5 land (below).
+State today: the stub's lock primitive exists (`core/stub/src/lib.rs`); what is missing is holding it across the
+engine's life, claim ids on the wire, and the core's claim transaction with the redeem (M3-2, M3-4, M3-5). A green run
+says the design holds; it does not say the code follows it. `drift.sh` lists the code that exists and tells you when
+it moves. `Holder.tla` was derived from the holder at 73a03656; `WriterLock4.tla` models the design only.
 
 ## Run it
 
@@ -39,9 +40,10 @@ the architect's version; Temurin JRE 21 only when no Java 11+ is on PATH; cached
 
 ## Sync commit
 
-**Last confirmed: `387c7b5a09ade3d45055024983ff15005e489f54`** (rust-rebuild when M3-0a was written). The same sha is
-in `drift.sh` (`SYNC=`). Move it only after you have confirmed the models describe the code at the new commit, and
-change both places.
+**Pinned at `73a03656ad207a7abc854136eda0ab848a2ab591`** (the rust-rebuild commit `Holder.tla` was derived from; not
+"confirmed": the covered files have changed since and nobody has re-read them against the models, so `drift.sh` lists
+them on purpose). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have re-read the changes and
+confirmed the models describe the code at the new commit, and change both places.
 
 ## What is promised, and the harm if not
 
@@ -103,7 +105,7 @@ in the cfg). `RefuseOlder`, `HighWater`, `RefuseWhileRunning`, `KeyByInstance`, 
 | `holder-highwater` | StaleSends, HighWater | pass | `core/holder/src/holder.rs` already keeps "the highest claim seen per conversation, kept after the process is acked". |
 | `holder-lock` | + WriterLock | pass | The stub's lock on top. |
 | `holder-crash-all` | all guards + HolderCrash | pass (`OneWriter`, `RunOnce`) | A holder restart does not break them. |
-| `holder-crash-minimal` | HighWater, WriterLock, RedeemChecksClaim, HolderCrash, StaleSends | pass | `RefuseOlder`, `KeyByInstance`, `RecordAtSpawn` are **not needed** for these two properties at these bounds. |
+| `holder-crash-minimal` | HighWater, WriterLock, RedeemChecksClaim, HolderCrash, StaleSends | pass | `OneWriter` and `RunOnce` hold without `RefuseOlder`, `KeyByInstance`, `RecordAtSpawn`. Whether those three matter for `DoneTruth` cannot be judged yet: `DoneTruth` fails for every combination (masked by the open finding below), so there is no row for them. |
 | `holder-crash-nolock` | crash-all minus WriterLock | `RunOnce` fails | The lock is what keeps a respawned stale claim out after a holder restart (the high-water mark resets with the holder). |
 | `holder-crash-noredeem` | crash-all minus RedeemChecksClaim | `RunOnce` fails | The stub's redeem must refuse a claim that is not core.db's current one. |
 | `holder-crash-nohighwater` | crash-all minus HighWater | `RunOnce` fails | |
@@ -116,11 +118,18 @@ stub and answers, the reply is lost with the connection; the holder crashes (its
 orphan, takes the conversation lock and redeems claim 1 (it is still current); the core meets the new holder
 instance, finds no entry for claim 1 and no recorded pid for it (the reply was lost, so nothing was recorded at
 spawn), and releases the claim (`curDone`) while that engine writes. Every combination of the nine switches in a
-512-run grid failed `DoneTruth` once `HolderCrash` was on. What the model does not have: the redeem is a core.db
-transaction (`claimed -> running`), so in the design the core's record of a running claim exists before the engine
-runs and reconcile would not release it blindly. M3-2 (the claim transaction) and the reconcile rule must state
-that, and the model should gain the redeem's write; until then this row stays `fail` on purpose. If you make it pass,
-move the row and say what rule you added; do not drop the invariant.
+512-run grid failed `DoneTruth` once `HolderCrash` was on. What the model does not have: the redeem write. The rule M3-2 must state (and the model must then gain):
+
+- **Redeem** is a core.db CAS `claimed -> running`, only if the claim is current and not released, recording the
+  redeemer's pid and start time and the holder instance.
+- **Release on a new holder instance** is a CAS too: a `claimed` claim becomes released, so a later redeem fails.
+- A `running` claim the new instance does not list is **never released** until the recorded pid is killed and
+  confirmed gone (or the core can take the writer lock non-blockingly).
+- `WriterLock4.tla`'s omniscient `Orphan` (the core knowing a surviving group) should be replaced by the same record.
+
+Not done in M3-0a: adding the redeem write to `Holder.tla`, a broken variant that fails `DoneTruth` without it, and
+`DoneTruth` rows for `KeyByInstance` and `RecordAtSpawn`. Until then `holder-crash-donetruth` stays `fail` on purpose.
+If you make it pass, move the row and say what rule you added; do not drop the invariant.
 
 ## When you change covered code
 
@@ -144,6 +153,10 @@ move the row and say what rule you added; do not drop the invariant.
 - Trace checking (design "The oracle after Python"): `Runtime.tla` and the event replay are M3.
 - The TLA+ lease model is M3-0b (`Threads.tla` is retired or resynced in M3-15).
 - The slow rows in the PR job, if a runner with more cores is used.
+- The redeem write in `Holder.tla` and the rows above (the open finding).
+- `killidle` liveness, with a bounded wait for the kill (a terminal that waits for a kill while the holder is down).
+- An ack-after-settle switch in `Holder.tla` (the ACK only after the core has settled the exit).
+- `r4-fix-1d-safety` (no recorded result) and the cfgs that ran out of heap, if a bigger heap is ever used.
 
 ## Map of the folder
 

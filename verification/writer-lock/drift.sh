@@ -8,11 +8,12 @@
 # set SYNC below to the commit you checked (and in .claude/skills/writer-lock/SKILL.md).
 set -euo pipefail
 
-# The commit at which the models were confirmed to describe the files below. It is one commit of rust-rebuild:
-# the one M3-0a was written against. Most of the claim code (the writer lock in the stub, the claim ids on the wire,
-# the core's side of claims) does not exist yet: this pins what exists, and the files marked "(M3)" are added to
-# the list as they land. Until then a green run says the DESIGN holds, not that the code follows it.
-SYNC=387c7b5a09ade3d45055024983ff15005e489f54
+# Where the models were PINNED, not confirmed: Holder.tla was derived from rust-rebuild 73a03656 (M0d #663/#669 and
+# holder_link.rs, M0c); WriterLock4.tla models the design, not code. Files that changed in the covered paths since
+# are listed below as drift on purpose: nobody has re-read them against the models yet. Move SYNC only after that
+# re-read (skill, "When you change covered code"). The claim code proper (the stub's lock held across the engine's
+# life, claim ids on the wire, the core's claim transaction) is M3; add its files to FILES as they land.
+SYNC=73a03656ad207a7abc854136eda0ab848a2ab591
 
 FILES=(
   core/stub                           # the start stub: the writer lock (fd CLOEXEC, kept to the engine's exit), redeem, the engine as its child
