@@ -7,6 +7,7 @@
 //! exits. No parsing, no policy: it checks a secret and a generation and does what the newest core says.
 
 use crate::auth;
+use crate::clock::{self, Clock};
 use crate::platform::{self, Proc, Spec};
 use crate::proto::{self as p, Held, KillState, Refused, Why};
 use crate::wire;
@@ -54,6 +55,8 @@ struct Entry {
     gone: AtomicBool,
     /// Killed by the holder itself when the lease lapses.
     kill_on_lease_loss: bool,
+    /// The lease killed it (the exit then says `lapsed`).
+    lapsed: bool,
 }
 
 /// The lease the newest core keeps alive. See `proto` for the rules.
@@ -61,9 +64,14 @@ struct Entry {
 enum Lease {
     /// No renewal has ever arrived: nothing expires.
     Unarmed,
-    Until(Instant),
+    /// On the lease clock (`clock`, which counts sleep), not on `Instant`.
+    Until(Duration),
     Lost,
 }
+
+/// How many PONG readings the hand keeps for a RENEW to name. The core pings every third of the lease and echoes
+/// the seq at once, so a few is plenty; an older seq arms nothing.
+const PONG_RING: usize = 8;
 
 /// The connected core. Frames go out through its own writer thread: a core that stops reading must never block
 /// anyone holding the state lock.
@@ -118,6 +126,9 @@ struct State {
     closing: bool,
     idle_since: Option<Instant>,
     lease: Lease,
+    /// The lease clock at each PONG sent to the current core, newest last. Forgotten at every hello: a seq from an
+    /// older connection must not anchor a newer one (the skill's Later item L1).
+    pongs: VecDeque<(u64, Duration)>,
 }
 
 struct Holder {
@@ -128,6 +139,8 @@ struct Holder {
     secret: Vec<u8>,
     endpoint: PathBuf,
     idle: Duration,
+    /// The lease clock; the tests move their own.
+    clock: Clock,
 }
 
 /// Runs a holder in `cfg.dir` until it is idle or told to shut down.
@@ -261,12 +274,14 @@ impl Holder {
                 closing: false,
                 idle_since: Some(Instant::now()),
                 lease: Lease::Unarmed,
+                pongs: VecDeque::new(),
             }),
             changed: Condvar::new(),
             instance: platform::random_hex(),
             secret,
             endpoint,
             idle,
+            clock: clock::lease_clock(),
         }
     }
 
@@ -301,14 +316,15 @@ impl Holder {
     /// a tree that was slow to die must not be left alone.
     fn expire_lease(&self, st: &mut State) {
         if let Lease::Until(t) = st.lease
-            && Instant::now() >= t
+            && (self.clock)() >= t
         {
             st.lease = Lease::Lost;
         }
         if st.lease == Lease::Lost {
-            for e in st.procs.values() {
+            for e in st.procs.values_mut() {
                 if e.kill_on_lease_loss && e.held.exit.is_none() && !e.gone.load(Ordering::Relaxed)
                 {
+                    e.lapsed = true;
                     e.proc.kill_tree();
                 }
             }
@@ -425,6 +441,7 @@ impl Holder {
             st.newest = hello.generation;
             st.conns += 1;
             st.idle_since = None;
+            st.pongs.clear();
             let conn = st.conns;
             let (frames, queued) = std::sync::mpsc::channel();
             let backlog = Arc::new(Backlog {
@@ -446,6 +463,7 @@ impl Holder {
                 pid: std::process::id(),
                 tied_to_starter: platform::tied_to_starter(),
                 generation: st.newest,
+                lease_lost: st.lease == Lease::Lost,
                 procs: Self::held_list(&st),
             };
             self.to_core(&st, wire::json_frame(p::WELCOME, 0, &welcome));
@@ -475,13 +493,34 @@ impl Holder {
             }
             self.expire_lease(&mut st);
             match kind {
+                p::PING => {
+                    let ping: p::Ping = wire::parse(&payload)?;
+                    // The anchor is read here, before the PONG leaves: whatever the core does with it, the deadline
+                    // it makes is never later than the core's own send plus the period.
+                    let now = (self.clock)();
+                    if st.pongs.len() == PONG_RING {
+                        st.pongs.pop_front();
+                    }
+                    st.pongs.push_back((ping.seq, now));
+                    self.to_core(
+                        &st,
+                        wire::json_frame(p::PONG, 0, &p::Pong { seq: ping.seq }),
+                    );
+                }
                 p::RENEW => {
                     let renew: p::Renew = wire::parse(&payload)?;
-                    // A zero period would lapse at once; it is not a way to end a lease.
-                    // A huge period must neither panic this thread nor switch the kill off: it is capped.
+                    // A seq the hand never answered, a zero period, or a deadline already past (a stale RENEW read
+                    // after a wake) arms nothing. A huge period must neither panic this thread nor switch the kill
+                    // off: it is capped.
+                    let anchor = st
+                        .pongs
+                        .iter()
+                        .find(|(s, _)| *s == renew.seq)
+                        .map(|(_, t)| *t);
                     let period = Duration::from_millis(renew.ms.min(MAX_LEASE_MS));
-                    if let Some(deadline) =
-                        Instant::now().checked_add(period).filter(|_| renew.ms > 0)
+                    if let Some(deadline) = anchor
+                        .and_then(|t| t.checked_add(period))
+                        .filter(|d| renew.ms > 0 && *d > (self.clock)())
                     {
                         st.lease = Lease::Until(deadline);
                     }
@@ -638,6 +677,11 @@ impl Holder {
             let lost = p::LeaseLost {
                 conv: spec.conv,
                 claim: spec.claim,
+                why: if st.lease == Lease::Lost {
+                    p::LeaseWhy::Lapsed
+                } else {
+                    p::LeaseWhy::Unarmed
+                },
             };
             return self.to_core(&st, wire::json_frame(p::LEASE_LOST, 0, &lost));
         }
@@ -720,6 +764,7 @@ impl Holder {
                 readers: 1 + u8::from(started.err.is_some()),
                 gone: AtomicBool::new(false),
                 kill_on_lease_loss: spec.kill_on_lease_loss,
+                lapsed: false,
             },
         );
         let reader = |stream: Box<dyn std::io::Read + Send>, kind: u8| {
@@ -799,6 +844,7 @@ impl Holder {
                 p::Exit {
                     code: None,
                     signal: None,
+                    lapsed: false,
                     error: Some(e.to_string()),
                 }
             }
@@ -817,6 +863,8 @@ impl Holder {
                 .0;
         }
         if st.procs.get(&id).is_some_and(|e| e.held.exit.is_none()) {
+            let mut exit = exit;
+            exit.lapsed = st.procs.get(&id).is_some_and(|e| e.lapsed);
             self.to_core(&st, wire::json_frame(p::EXITED, id, &exit));
             if let Some(e) = st.procs.get_mut(&id) {
                 e.held.exit = Some(exit);
@@ -829,6 +877,7 @@ impl Holder {
 mod tests {
     use super::*;
     use crate::client::Client;
+    use crate::clock::fake::Fake;
     use std::os::unix::net::UnixStream;
 
     #[test]
@@ -870,6 +919,7 @@ mod tests {
                 readers: 0,
                 gone: AtomicBool::new(false),
                 kill_on_lease_loss: false,
+                lapsed: false,
             },
         );
         holder.reap(1, proc);
@@ -906,12 +956,209 @@ mod tests {
     fn a_renewal_from_a_connection_that_is_not_the_newest_is_refused_and_does_not_count() {
         let holder = test_holder();
         let (mut theirs, mut mine) = UnixStream::pair().unwrap();
-        wire::write_json(&mut theirs, p::RENEW, 0, &p::Renew { ms: 60_000 }).unwrap();
+        wire::write_json(&mut theirs, p::RENEW, 0, &p::Renew { ms: 60_000, seq: 1 }).unwrap();
         // No core is registered, so this connection is not the newest one.
         holder.commands(&mut mine, 7, 1).unwrap();
         assert_eq!(holder.lock().lease, Lease::Unarmed);
         let (kind, _, _) = wire::read(&mut theirs).unwrap().unwrap();
         assert_eq!(kind, p::REFUSED);
+    }
+
+    /// A holder on a clock the test moves, serving one core over a socket pair.
+    fn leased(clock: &Fake) -> (Arc<Holder>, Client) {
+        let mut holder = Holder::new(
+            b"0123456789abcdef".to_vec(),
+            PathBuf::from("unused"),
+            Duration::ZERO,
+        );
+        holder.clock = clock.clock();
+        let holder = Arc::new(holder);
+        let client = connect_to(&holder, 1);
+        (holder, client)
+    }
+
+    fn connect_to(holder: &Arc<Holder>, generation: u64) -> Client {
+        let (core, theirs) = UnixStream::pair().unwrap();
+        let served = holder.clone();
+        std::thread::spawn(move || served.serve(theirs));
+        Client::over(core, "0123456789abcdef", generation).expect("served")
+    }
+
+    fn guest(conv: &str, tagged: bool) -> p::Spawn {
+        p::Spawn {
+            conv: conv.into(),
+            claim: 1,
+            generation: 1,
+            argv: vec!["sleep".into(), "30".into()],
+            env: std::env::vars().collect(),
+            cwd: "/".into(),
+            mode: p::Mode::Pipes,
+            cols: 80,
+            rows: 24,
+            kill_on_lease_loss: tagged,
+        }
+    }
+
+    const LEASE_MS: u64 = 30_000;
+    const WAIT: Duration = Duration::from_secs(10);
+
+    fn ping(c: &mut Client, seq: u64) {
+        c.send_json(p::PING, 0, &p::Ping { seq }).unwrap();
+        let (_, _, payload) = c.expect(p::PONG, 0, WAIT).expect("pong");
+        assert_eq!(wire::parse::<p::Pong>(&payload).unwrap().seq, seq);
+    }
+
+    fn renew(c: &mut Client, seq: u64) {
+        c.send_json(p::RENEW, 0, &p::Renew { ms: LEASE_MS, seq })
+            .unwrap();
+    }
+
+    fn start(c: &mut Client, spec: &p::Spawn) -> p::HeldId {
+        c.spawn(spec).unwrap();
+        c.expect(p::SPAWNED, 0, WAIT).expect("spawned");
+        c.list()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.conv == spec.conv)
+            .expect("listed")
+            .held_id()
+    }
+
+    fn exit_of(c: &mut Client, id: &p::HeldId) -> Option<p::Exit> {
+        let until = Instant::now() + WAIT;
+        loop {
+            let held = c.list().unwrap().into_iter().find(|h| h.id == id.id);
+            if let Some(exit) = held.and_then(|h| h.exit) {
+                return Some(exit);
+            }
+            if Instant::now() > until {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn alive(c: &mut Client, id: &p::HeldId) -> bool {
+        c.list()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == id.id)
+            .is_some_and(|h| h.exit.is_none())
+    }
+
+    #[test]
+    fn a_renewal_read_late_still_ends_at_the_cores_send_plus_the_period() {
+        // Model row `today`/`read-anchor`: the old deadline was "when I read it + period".
+        let clock = Fake::default();
+        let (holder, mut c) = leased(&clock);
+        ping(&mut c, 1);
+        // The RENEW sits in the link for 20 s before the hand reads it.
+        clock.advance(Duration::from_secs(20));
+        renew(&mut c, 1);
+        let g = start(&mut c, &guest("g", true));
+        assert!(alive(&mut c, &g));
+        // 31 s after the ping (not after the read): the lease is over and the guest with it.
+        clock.advance(Duration::from_secs(11));
+        let exit = exit_of(&mut c, &g).expect("the guest outlived the core's belief");
+        assert!(exit.lapsed, "{exit:?}");
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
+    fn a_hand_that_sleeps_through_the_deadline_kills_guests_first_and_never_owners() {
+        let clock = Fake::default();
+        let (holder, mut c) = leased(&clock);
+        ping(&mut c, 1);
+        renew(&mut c, 1);
+        let g = start(&mut c, &guest("g", true));
+        let o = start(&mut c, &guest("o", false));
+        // The machine sleeps ten minutes: the lease clock counts it, and no frame came in between.
+        clock.advance(Duration::from_secs(600));
+        // The first thing the hand runs after waking is the expiry (the watcher's every 10 ms, or a frame's).
+        {
+            let mut st = holder.lock();
+            holder.expire_lease(&mut st);
+            assert_eq!(st.lease, Lease::Lost);
+        }
+        let exit = exit_of(&mut c, &g).expect("guest killed");
+        assert!(exit.lapsed);
+        assert!(
+            alive(&mut c, &o),
+            "lease expiry must never touch an owner run (I18)"
+        );
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
+    fn a_renewal_for_an_unknown_seq_or_with_a_past_deadline_arms_nothing() {
+        let clock = Fake::default();
+        let (holder, mut c) = leased(&clock);
+        // Never pinged: nothing to anchor on.
+        renew(&mut c, 7);
+        c.list().unwrap();
+        assert_eq!(holder.lock().lease, Lease::Unarmed);
+        // Pinged, but the RENEW is read after the period already ran out (a stale one, read after a wake).
+        ping(&mut c, 1);
+        clock.advance(Duration::from_secs(31));
+        renew(&mut c, 1);
+        c.list().unwrap();
+        assert_eq!(holder.lock().lease, Lease::Unarmed);
+        // A tagged spawn is still refused.
+        c.spawn(&guest("g", true)).unwrap();
+        let (_, _, payload) = c.expect(p::LEASE_LOST, 0, WAIT).expect("refused");
+        assert_eq!(
+            wire::parse::<p::LeaseLost>(&payload).unwrap().why,
+            p::LeaseWhy::Unarmed
+        );
+    }
+
+    #[test]
+    fn a_seq_from_an_older_connection_does_not_anchor_a_newer_one() {
+        let clock = Fake::default();
+        let (holder, mut old) = leased(&clock);
+        ping(&mut old, 1);
+        let mut new = connect_to(&holder, 1);
+        renew(&mut new, 1);
+        new.list().unwrap();
+        assert_eq!(holder.lock().lease, Lease::Unarmed);
+    }
+
+    #[test]
+    fn after_a_lapse_a_valid_renewal_restores_the_lease_but_a_stale_one_does_not() {
+        // The rule chosen for M3-0c (model `fixed`, RenewRestores = TRUE): restore on a valid renewal.
+        let clock = Fake::default();
+        let (holder, mut c) = leased(&clock);
+        ping(&mut c, 1);
+        renew(&mut c, 1);
+        let g = start(&mut c, &guest("g", true));
+        clock.advance(Duration::from_secs(31));
+        assert!(exit_of(&mut c, &g).expect("killed").lapsed);
+        // The refused spawn says why, and the claim is not used up.
+        let mut again = guest("g2", true);
+        again.claim = 2;
+        c.spawn(&again).unwrap();
+        let (_, _, payload) = c.expect(p::LEASE_LOST, 0, WAIT).expect("refused");
+        assert_eq!(
+            wire::parse::<p::LeaseLost>(&payload).unwrap().why,
+            p::LeaseWhy::Lapsed
+        );
+        // The RENEW of the old round is stale: its deadline is past.
+        renew(&mut c, 1);
+        c.list().unwrap();
+        assert_eq!(holder.lock().lease, Lease::Lost);
+        // A fresh round restores it.
+        ping(&mut c, 2);
+        renew(&mut c, 2);
+        c.list().unwrap();
+        assert!(matches!(holder.lock().lease, Lease::Until(_)));
+        let g2 = start(&mut c, &again);
+        assert!(alive(&mut c, &g2));
+        // A core coming back after the lapse is told: the welcome says the lease is lost.
+        clock.advance(Duration::from_secs(31));
+        c.list().unwrap();
+        let back = connect_to(&holder, 1);
+        assert!(back.welcome.lease_lost);
+        drop(holder.close_down(holder.lock()));
     }
 
     fn test_holder() -> Arc<Holder> {

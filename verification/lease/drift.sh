@@ -8,15 +8,16 @@
 # set SYNC below to the commit you checked (and in .claude/skills/holder-lease/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below (origin/rust-rebuild). The model describes
-# the lease as designed for M3-0c; holder.rs at this commit is the `today` variant, see the code-to-model table in the skill.
+# The commit at which the model was confirmed to describe the files below. Since M3-0c the code is the `fixed` variant,
+# see the code-to-model table in the skill.
 SYNC=387c7b5a09ade3d45055024983ff15005e489f54
 
 FILES=(
-  core/holder/src/holder.rs           # Lease, expire_lease, watch_lease, the RENEW arm, the LEASE_LOST answer in spawn
-  core/holder/src/proto.rs            # RENEW, LEASE_LOST, Renew, LeaseLost, the lease paragraph of the module doc
-  core/holder/src/client.rs           # Renewer::renew, Client::renew (what a RENEW frame carries)
-  core/runtime/src/holder_link.rs     # start_renewing: when and how often the core renews; what it does on LEASE_LOST
+  core/holder/src/holder.rs           # Lease, expire_lease, watch_lease, the PING and RENEW arms, the LEASE_LOST answer in spawn
+  core/holder/src/proto.rs            # PING, PONG, RENEW, LEASE_LOST, Renew, LeaseLost, Exit::lapsed, the lease paragraph of the module doc
+  core/holder/src/client.rs           # Renewer::ping, the reader thread's PONG answer (what a RENEW frame carries)
+  core/holder/src/clock.rs            # lease_clock: which OS clock, and that it counts sleep
+  core/runtime/src/holder_link.rs     # start_renewing: when and how often the core pings; the belief precondition
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

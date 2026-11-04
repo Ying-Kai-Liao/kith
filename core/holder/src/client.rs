@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -70,16 +70,31 @@ fn send_on(
     w.flush()
 }
 
-/// Sends lease renewals on a client's connection from a thread of its own.
+/// Keeps the lease alive from a thread of its own. A renewal is a round: `ping` sends PING(seq); the connection's
+/// reader thread answers the holder's PONG(seq) with RENEW(seq, period) at once (it never waits behind a listing),
+/// which anchors the deadline at the hand's clock when it answered. A holder that says LEASE_LOST gets a fresh ping.
 #[derive(Clone)]
-pub struct Renewer(Arc<Mutex<Box<dyn Write + Send>>>);
+pub struct Renewer {
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    seq: Arc<AtomicU64>,
+}
 
 impl Renewer {
-    pub fn renew(&self, period: Duration) -> io::Result<()> {
-        let ms = u64::try_from(period.as_millis()).unwrap_or(u64::MAX);
-        let payload = serde_json::to_vec(&p::Renew { ms }).map_err(io::Error::other)?;
-        send_on(&self.0, p::RENEW, 0, &payload)
+    pub fn ping(&self) -> io::Result<()> {
+        ping_on(&self.writer, &self.seq)
     }
+}
+
+fn ping_on(writer: &Mutex<Box<dyn Write + Send>>, seq: &AtomicU64) -> io::Result<()> {
+    let seq = seq.fetch_add(1, Ordering::Relaxed) + 1;
+    let payload = serde_json::to_vec(&p::Ping { seq }).map_err(io::Error::other)?;
+    send_on(writer, p::PING, 0, &payload)
+}
+
+fn renew_on(writer: &Mutex<Box<dyn Write + Send>>, period: Duration, seq: u64) -> io::Result<()> {
+    let ms = u64::try_from(period.as_millis()).unwrap_or(u64::MAX);
+    let payload = serde_json::to_vec(&p::Renew { ms, seq }).map_err(io::Error::other)?;
+    send_on(writer, p::RENEW, 0, &payload)
 }
 
 /// Sends commands for held processes on a client's connection from other threads: the core's attach relay forwards a
@@ -118,6 +133,9 @@ pub struct Client {
     /// Shared with a [`Renewer`]: a frame is written whole under the lock.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     close: Closer,
+    /// Set by `answer_pongs`: the reader thread then answers every PONG with a RENEW for this long.
+    lease: Arc<Mutex<Option<Duration>>>,
+    seq: Arc<AtomicU64>,
     frames: Receiver<Frame>,
     /// Frames read but not yet asked for, in order.
     pending: VecDeque<Frame>,
@@ -258,13 +276,48 @@ impl Client {
         generation: u64,
     ) -> Result<Client, ConnectError> {
         match Self::handshake(reader, writer, secret, generation) {
-            Ok((frames, welcome, writer)) => Ok(Client {
-                writer: Arc::new(Mutex::new(writer)),
-                close,
-                frames,
-                pending: VecDeque::new(),
-                welcome,
-            }),
+            Ok((mut reader, welcome, writer)) => {
+                let writer = Arc::new(Mutex::new(writer));
+                let lease: Arc<Mutex<Option<Duration>>> = Arc::new(Mutex::new(None));
+                let seq = Arc::new(AtomicU64::new(0));
+                let (tx, frames) = std::sync::mpsc::channel();
+                let (w, l, n) = (writer.clone(), lease.clone(), seq.clone());
+                std::thread::spawn(move || {
+                    while let Ok(Some(frame)) = wire::read(&mut reader) {
+                        // The lease round is answered here, not by whoever reads the frames next: a listing or a
+                        // reconcile must never delay a RENEW (it is the core's promise of "L from the ping").
+                        let period = *l.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Some(period) = period {
+                            match frame.0 {
+                                p::PONG => {
+                                    if let Ok(pong) = wire::parse::<p::Pong>(&frame.2) {
+                                        let _ = renew_on(&w, period, pong.seq);
+                                    }
+                                    continue;
+                                }
+                                // Nothing started and nothing armed: ask again at once instead of waiting for
+                                // the next tick. The frame is still passed on.
+                                p::LEASE_LOST => {
+                                    let _ = ping_on(&w, &n);
+                                }
+                                _ => {}
+                            }
+                        }
+                        if tx.send(frame).is_err() {
+                            break;
+                        }
+                    }
+                });
+                Ok(Client {
+                    writer,
+                    close,
+                    lease,
+                    seq,
+                    frames,
+                    pending: VecDeque::new(),
+                    welcome,
+                })
+            }
             // A refused or silent link leaves nothing behind (no child, no open socket).
             Err(e) => {
                 close();
@@ -280,7 +333,7 @@ impl Client {
         mut writer: Box<dyn Write + Send>,
         secret: &str,
         generation: u64,
-    ) -> Result<(Receiver<Frame>, p::Welcome, Box<dyn Write + Send>), ConnectError> {
+    ) -> Result<(Box<dyn Read + Send>, p::Welcome, Box<dyn Write + Send>), ConnectError> {
         let key = secret.as_bytes();
         let nonce = platform::random_hex();
         let hello = p::Hello {
@@ -311,15 +364,7 @@ impl Client {
         match first {
             (p::WELCOME, _, payload) => {
                 let welcome: p::Welcome = wire::parse(&payload)?;
-                let (tx, frames) = std::sync::mpsc::channel();
-                std::thread::spawn(move || {
-                    while let Ok(Some(frame)) = wire::read(&mut reader) {
-                        if tx.send(frame).is_err() {
-                            break;
-                        }
-                    }
-                });
-                Ok((frames, welcome, writer))
+                Ok((reader, welcome, writer))
             }
             (p::REFUSED, _, payload) => Err(ConnectError::Refused(wire::parse(&payload)?)),
             (kind, _, _) => {
@@ -351,7 +396,16 @@ impl Client {
 
     /// A handle that renews the lease from another thread, so renewals never wait behind a listing.
     pub fn renewer(&self) -> Renewer {
-        Renewer(self.writer.clone())
+        Renewer {
+            writer: self.writer.clone(),
+            seq: self.seq.clone(),
+        }
+    }
+
+    /// From now on the connection answers every PONG with a RENEW for `period`. Send a ping (a [`Renewer`]) to start
+    /// a round.
+    pub fn answer_pongs(&self, period: Duration) {
+        *self.lease.lock().unwrap_or_else(|p| p.into_inner()) = Some(period);
     }
 
     /// A command for process `id` of holder `instance`: the instance goes first in the payload (see proto.rs).
@@ -417,9 +471,15 @@ impl Client {
         self.send_json(p::SPAWN, 0, spec)
     }
 
-    /// Keeps the lease alive for `period` from now; the holder answers nothing.
+    /// One whole lease round, waiting for the PONG: the lease then lasts `period` from the moment the holder answered
+    /// it. Fails if the holder does not answer (a superseded or closed connection).
     pub fn renew(&mut self, period: Duration) -> io::Result<()> {
-        self.renewer().renew(period)
+        self.renewer().ping()?;
+        let pong = self
+            .expect(p::PONG, 0, Duration::from_secs(5))
+            .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
+        let pong: p::Pong = wire::parse(&pong.2)?;
+        renew_on(&self.writer, period, pong.seq)
     }
 
     pub fn list(&mut self) -> io::Result<Vec<p::Held>> {
@@ -482,6 +542,7 @@ mod tests {
                 pid: 1,
                 tied_to_starter: false,
                 generation: 1,
+                lease_lost: false,
                 procs: vec![],
             };
             wire::write_json(&mut fake, p::WELCOME, 0, &welcome).unwrap();
