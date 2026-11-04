@@ -66,6 +66,14 @@ mod runsock;
 // Held terminals start on Unix only for now; elsewhere `terminal.open` answers `direct` and most of it is unused.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod terminal;
+// Engine sessions held by the core (M3-6): built and tested, called by no start until the switch.
+// Unix only for now, like `authority`: it reads through `kith_kernel::threads`, which is.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "first callers are the start protocol after the switch"
+)]
+mod transcripts;
 // The claim path's read (`lease_held_for_non_owner`, `held_in`) and `restart` have no caller until M3 and the daemon start
 // wire them; the rows reach the rest.
 #[allow(dead_code)]

@@ -38,6 +38,7 @@ mod run_tokens;
 mod runs;
 mod secrets;
 mod switched;
+mod transcripts;
 mod wake;
 
 /// Types the switched verbs add to the contract's.
@@ -79,6 +80,7 @@ const PARTS: &[&[Method]] = &[
     import::ROWS,
     // M3: conversations and their claims.
     conversations::ROWS,
+    transcripts::ROWS,
     // M3-7: the wake queue and the waiters.
     wake::ROWS,
     // M3: delegation and children (the ask tree).
