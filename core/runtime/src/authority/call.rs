@@ -142,7 +142,7 @@ pub(crate) fn call_in(
             let pid = need(params, "id").map_err(|d| store::refusal(&d))?;
             let ids =
                 store::read(core, |a| revoke::temp_ids(a, pid))?.map_err(|d| store::refusal(&d))?;
-            // their runs are stopped by whoever asks; what is left is a folder, no table
+            // whoever asks has stopped their runs; what is left is a folder, no table
             for x in &ids {
                 revoke::guest_tmp_remove(life, x);
             }
@@ -155,27 +155,14 @@ pub(crate) fn call_in(
                 String::new()
             };
             let said = store::run(core, c, |a| write_in(m, params, c, life, a, &fresh))?;
-            // What a committed write also does outside the tables: the folders follow a rename, and the temp folders of
-            // the runs of those who lost their access go. Python does both after its save too.
-            match m {
-                "people.renamePerson" => {
-                    let (old, new) = (word(params, "id"), word(params, "to"));
-                    if let (Some(old), Some(new)) = (old, new) {
-                        revoke::move_life(life, old, new).map_err(|e| {
-                            Error::Io(format!(
-                                "kith-core: {old} is now {new}, but their folders did not move: {e}"
-                            ))
-                        })?;
-                    }
-                }
-                "people.suspend" | "people.removePerson" => {
-                    for x in said["ids"].as_array().into_iter().flatten() {
-                        if let Some(x) = x.as_str() {
-                            revoke::guest_tmp_remove(life, x);
-                        }
-                    }
-                }
-                _ => {}
+            // The folders follow a rename once it is committed. `kith-auth --local` clears no temp folder: the
+            // caller stops their runs first and then asks `people.clearTemp` (the `ids` of a suspend or a removal
+            // say whose).
+            if m == "people.renamePerson"
+                && let (Some(old), Some(new)) = (word(params, "id"), word(params, "to"))
+            {
+                let (moved, notes) = revoke::move_life(life, old, new);
+                return Ok(renamed(said, &moved, notes));
             }
             Ok(said)
         }
@@ -309,4 +296,23 @@ pub(super) fn write_in(
             code: 2,
         }),
     }
+}
+
+/// The answer of a committed rename, with the folders that really moved and a note for each that did not.
+fn renamed(mut said: Value, moved: &[String], notes: Vec<String>) -> Value {
+    let mut out = Vec::new();
+    for (i, l) in said["lines"].as_array().into_iter().flatten().enumerate() {
+        let line = l.as_str().unwrap_or_default();
+        match line.strip_suffix(revoke::RENAMED_TAIL) {
+            Some(head) if i == 0 && !moved.is_empty() => out.push(format!(
+                "{head}; moved their memory and files in {}{}",
+                moved.join(", "),
+                revoke::RENAMED_TAIL
+            )),
+            _ => out.push(line.to_owned()),
+        }
+    }
+    out.extend(notes);
+    said["lines"] = json!(out);
+    said
 }

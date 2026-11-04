@@ -8,8 +8,9 @@
 //! `resolve`, `resolve_bot`, `cut_off`) refuse a revoked person, and a bot of theirs, before they look at any row, the
 //! `*` row included; undo clears the fact and the same rows answer again. That is why undo restores exactly what they
 //! had, and why an owner's change to the rows in between (taking an agent away, a preset deleted) is kept, never
-//! undone by it: `kith-auth person X --unrevoke` is the same. A grant to a revoked person is refused by `member`, so
-//! the owner cannot add to what they had while it lasts. The model is `verification/revoke/RevokeDoors.tla` ("rows
+//! undone by it: `kith-auth person X --unrevoke` is the same. The owner may also add rows while someone is
+//! suspended (`member` writes the row and says it waits, as `kith-auth` does), and undo then gives those back too: it
+//! restores what the rows say at that moment, not a copy taken at the revoke. The model is `verification/revoke/RevokeDoors.tla` ("rows
 //! untouched": its `R4`, and `MayP`/`MayB`, which refuse before any row).
 //!
 //! Not here, with who owns it: what a revoke also ends on its own computer (the delegations and wakes they started,
@@ -121,6 +122,7 @@ pub(super) fn retired(auth: &Value, life: &Life, pid: &str, left: bool) -> Optio
             kept.join(", ")
         ));
     }
+    // TODO(lane B): `profiles` is not a core.db table, so this finds nothing yet; a reused id could inherit logins.
     let mut owned: Vec<&str> = auth
         .get("profiles")
         .and_then(Value::as_object)
@@ -272,7 +274,6 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
     }
     need_free(auth, life, new, true)?;
     forget(auth, &[new]);
-    let moved = kept_labels(life, old);
     let mut p = table(auth, "people")
         .shift_remove(old)
         .unwrap_or(Value::Null);
@@ -319,30 +320,43 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
             o.insert("person".to_owned(), new.into());
         }
     }
-    Ok(vec![format!(
-        "{old} is now {new}{} (profile names stay as they are: they name accounts, not people)",
-        if moved.is_empty() {
-            String::new()
-        } else {
-            format!("; moved their memory and files in {}", moved.join(", "))
-        }
-    )])
+    Ok(vec![format!("{old} is now {new}{RENAMED_TAIL}")])
 }
 
-/// After the commit of a rename: their folders take the new id.
-pub(super) fn move_life(life: &Life, old: &str, new: &str) -> std::io::Result<()> {
-    for (_, p) in person_folders(life, old) {
+/// What a rename's line ends with; the folders that really moved are said before it (`renamed` in `call.rs`).
+pub(super) const RENAMED_TAIL: &str =
+    " (profile names stay as they are: they name accounts, not people)";
+
+/// After the commit of a rename: their folders take the new id. Returns the labels of what moved and a note for each
+/// folder left as it was (the destination exists, or the move failed): the write happened, so none of it is an error.
+pub(super) fn move_life(life: &Life, old: &str, new: &str) -> (Vec<String>, Vec<String>) {
+    let (mut moved, mut notes) = (BTreeSet::new(), Vec::new());
+    for (label, p) in person_folders(life, old) {
         let dest = if p.extension().is_some_and(|e| e == "md") {
             p.with_file_name(format!("{new}.md"))
         } else {
             p.with_file_name(new)
         };
         if dest.exists() {
+            notes.push(format!(
+                "note: {} is already there; {} left as it is",
+                dest.display(),
+                p.display()
+            ));
             continue;
         }
-        std::fs::rename(&p, dest)?;
+        match std::fs::rename(&p, &dest) {
+            Ok(()) => {
+                moved.insert(label);
+            }
+            Err(e) => notes.push(format!(
+                "note: {} did not move to {}: {e}",
+                p.display(),
+                dest.display()
+            )),
+        }
     }
-    Ok(())
+    (moved.into_iter().collect(), notes)
 }
 
 /// `person <id> --rm`: they go, with their bots, memberships and open invites; the id is retired (and the ids they
@@ -403,6 +417,9 @@ pub(crate) fn person_remove_unused(auth: &mut Value, life: &Life, pid: &str) -> 
     check_id(pid)?;
     tables(auth);
     need_person(auth, pid)?;
+    // TODO(lane B): kith-auth also refuses a person who has `handles` (core.db has no such column yet), `agent@<id>`
+    // grants or owned/shared profiles; none of those tables are here. Until they are checked in this transaction,
+    // `--rm --unused` must not be switched (see docs/plans/one-bot-model.md).
     let p = people(auth).get(pid).cloned().unwrap_or(Value::Null);
     let mut has: Vec<String> = ["owner", "bot_of", "handles", "was", "revoked"]
         .into_iter()

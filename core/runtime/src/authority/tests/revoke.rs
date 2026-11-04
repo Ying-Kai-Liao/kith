@@ -536,21 +536,44 @@ fn temp_of(rig: &Rig, who: &str, owner: Option<&str>) -> std::path::PathBuf {
 }
 
 #[test]
-fn a_suspension_and_a_removal_clear_the_temp_folders_of_the_person_and_their_bots() {
+fn a_suspension_and_a_removal_leave_the_temp_folders_to_the_caller_who_stops_the_runs_first() {
     let mut rig = Rig::new(&world());
     let (sam, bot, amy) = (
         temp_of(&rig, "sam", Some("sam")),
         temp_of(&rig, "bot-a", Some("bot-a")),
         temp_of(&rig, "amy", Some("amy")),
     );
-    rig.lines("people.suspend", &id("sam")).unwrap();
-    assert!(
-        !sam.exists() && !bot.exists(),
-        "their runs' temp folders go"
-    );
+    // as `kith-auth --local`: runs are not stopped here, so nothing under them is pulled away
+    let said = rig.call("people.suspend", &id("sam")).unwrap();
+    assert_eq!(said["ids"], json!(["sam", "bot-a"]));
+    assert!(sam.exists() && bot.exists());
+    let said = rig.call("people.removePerson", &id("amy")).unwrap();
+    assert_eq!(said["ids"], json!(["amy", "bot-b"]));
     assert!(amy.exists());
-    rig.lines("people.removePerson", &id("amy")).unwrap();
-    assert!(!amy.exists());
+    // the caller then clears them
+    rig.call("people.clearTemp", &id("sam")).unwrap();
+    assert!(!sam.exists() && !bot.exists());
+    assert!(amy.exists());
+}
+
+#[test]
+fn a_folder_that_cannot_move_after_a_rename_is_a_note_and_not_an_error() {
+    let rig = Rig::new(&world());
+    let home = rig.machine_dir.path().to_path_buf();
+    let life = crate::authority::revoke::Life::beside(&rig.c);
+    std::fs::create_dir_all(home.join("agents/house/memory/people/sam")).unwrap();
+    std::fs::create_dir_all(home.join("agents/garden/files/people/sam")).unwrap();
+    // a destination that appeared after the check: left as it is, said, and the other folder still moves
+    std::fs::create_dir_all(home.join("agents/house/memory/people/anna")).unwrap();
+    let (moved, notes) = crate::authority::revoke::move_life(&life, "sam", "anna");
+    assert_eq!(moved, ["garden"]);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].starts_with("note: ") && notes[0].contains("is already there"),
+        "{notes:?}"
+    );
+    assert!(home.join("agents/house/memory/people/sam").exists());
+    assert!(home.join("agents/garden/files/people/anna").exists());
 }
 
 #[test]
@@ -572,42 +595,58 @@ fn a_temp_folder_recorded_as_someone_elses_stays_and_clear_temp_is_a_verb() {
 // --- a revoke racing a grant -----------------------------------------------------------------------------------------------
 
 #[test]
-fn a_revoke_racing_a_grant_leaves_the_person_cut_off_either_way() {
+fn a_revoke_and_a_grant_in_either_order_leave_the_person_cut_off_and_the_row_there() {
     for suspend_first in [true, false] {
         let mut rig = Rig::new(&world());
-        let c = rig.c.clone();
-        {
-            let core = Mutex::new(&mut rig.core);
-            std::thread::scope(|s| {
-                let grant = s.spawn(|| {
-                    let mut guard = core.lock().unwrap();
-                    let params = json!({"person": "sam", "agent": "sound", "preset": "member"});
-                    call_with(&mut guard, &c, "people.grant", &params)
-                });
-                let suspend = s.spawn(|| {
-                    let mut guard = core.lock().unwrap();
-                    call_with(&mut guard, &c, "people.suspend", &id("sam")).unwrap();
-                });
-                if suspend_first {
-                    suspend.join().unwrap();
-                    grant.join().unwrap().unwrap();
-                } else {
-                    grant.join().unwrap().unwrap();
-                    suspend.join().unwrap();
-                }
-            });
+        let grant = json!({"person": "sam", "agent": "sound", "preset": "member"});
+        if suspend_first {
+            rig.lines("people.suspend", &id("sam")).unwrap();
+            rig.lines("people.grant", &grant).unwrap();
+        } else {
+            rig.lines("people.grant", &grant).unwrap();
+            rig.lines("people.suspend", &id("sam")).unwrap();
         }
-        // whichever won: the row may be there, and they reach nothing
+        // the row is written either way (kith-auth writes it and says it waits), and they reach nothing
+        assert!(rig.tables()["members"]["sound"].get("sam").is_some());
         assert!(
             !may(&rig, "sam", "sound")
                 && !may(&rig, "sam", "house")
                 && !may(&rig, "bot-a", "house")
         );
         rig.lines("people.undo", &id("sam")).unwrap();
-        assert!(may(&rig, "sam", "house"));
-        let has_row = rig.tables()["members"]["sound"].get("sam").is_some();
-        assert_eq!(may(&rig, "sam", "sound"), has_row);
+        assert!(may(&rig, "sam", "house") && may(&rig, "sam", "sound"));
     }
+}
+
+#[test]
+fn a_revoke_racing_a_grant_on_one_core_behind_a_mutex_leaves_the_person_cut_off() {
+    // the daemon holds one Core behind a Mutex; both calls start together and the claim serialises them
+    let mut rig = Rig::new(&world());
+    let c = rig.c.clone();
+    let start = std::sync::Barrier::new(2);
+    {
+        let core = Mutex::new(&mut rig.core);
+        std::thread::scope(|s| {
+            let grant = s.spawn(|| {
+                start.wait();
+                let mut guard = core.lock().unwrap();
+                let params = json!({"person": "sam", "agent": "sound", "preset": "member"});
+                call_with(&mut guard, &c, "people.grant", &params)
+            });
+            let suspend = s.spawn(|| {
+                start.wait();
+                let mut guard = core.lock().unwrap();
+                call_with(&mut guard, &c, "people.suspend", &id("sam"))
+            });
+            grant.join().unwrap().unwrap();
+            suspend.join().unwrap().unwrap();
+        });
+    }
+    assert!(
+        !may(&rig, "sam", "sound") && !may(&rig, "sam", "house") && !may(&rig, "bot-a", "house")
+    );
+    rig.lines("people.undo", &id("sam")).unwrap();
+    assert!(may(&rig, "sam", "house") && may(&rig, "sam", "sound"));
 }
 
 // --- the property --------------------------------------------------------------------------------------------------------
@@ -678,6 +717,16 @@ fn under(auth: &Value, id: &str, top: &str) -> bool {
     false
 }
 
+/// Whether an answer of a reader (its Debug text) reaches nothing: not allowed, not resolved as allowed, cut off.
+fn is_denied(kind: &str, v: &str) -> bool {
+    match kind {
+        "may" => v.contains("Ok((false,") || v.starts_with("Err("),
+        "resolve" | "bot" => !v.contains("\"allowed\": Bool(true)"),
+        "cut_off" => v == "Ok(true)",
+        _ => true,
+    }
+}
+
 fn ids_of(auth: &Value) -> Vec<String> {
     let mut v: Vec<String> = auth["people"]
         .as_object()
@@ -692,6 +741,7 @@ fn ids_of(auth: &Value) -> Vec<String> {
 #[test]
 fn a_suspension_cuts_off_the_person_and_their_bots_and_undo_gives_back_exactly_what_they_had() {
     let rig = std::cell::RefCell::new(Rig::new(&json!({})));
+    let twin = std::cell::RefCell::new(Rig::new(&json!({})));
     let mut config = Config {
         failure_persistence: None,
         ..Config::default()
@@ -702,8 +752,8 @@ fn a_suspension_cuts_off_the_person_and_their_bots_and_undo_gives_back_exactly_w
     let mut runner = TestRunner::new(config);
     runner
         .run(
-            &(auth_strategy(), 0usize..2, any::<bool>()),
-            |(auth, which, twice)| {
+            &(auth_strategy(), 0usize..2, any::<bool>(), 0u8..3),
+            |(auth, which, twice, edit)| {
                 let mut rig = rig.borrow_mut();
                 rig.reset(&auth);
                 // a person who has nothing revoked yet (undo clears the fact, so a person revoked before is a different story)
@@ -732,17 +782,33 @@ fn a_suspension_cuts_off_the_person_and_their_bots_and_undo_gives_back_exactly_w
                         continue;
                     }
                     if under(&auth, who_id, target) && !who_id.is_empty() {
-                        // reaches nothing: not allowed, not resolved as allowed, cut off
-                        let denied = match kind {
-                            "may" => v.contains("Ok((false,") || v.starts_with("Err("),
-                            "resolve" | "bot" => !v.contains("\"allowed\": Bool(true)"),
-                            "cut_off" => v == "Ok(true)",
-                            _ => true,
-                        };
-                        prop_assert!(denied, "{k} after a suspension: {v}");
+                        prop_assert!(is_denied(kind, v), "{k} after a suspension: {v}");
                     } else {
                         // everyone else answers as they did
                         prop_assert_eq!(v, &before[k], "{} (not theirs)", k);
+                    }
+                }
+                // the owner edits the person's rows while they are suspended: taking one away, or giving one
+                let edit_call = match edit {
+                    1 => Some(("people.revoke", json!({"person": target, "agent": "house"}))),
+                    2 => Some((
+                        "people.grant",
+                        json!({"person": target, "agent": "garden", "preset": "member"}),
+                    )),
+                    _ => None,
+                };
+                if let Some((method, params)) = &edit_call {
+                    let _ = rig.call(method, params);
+                    // an edit never lets them through
+                    for (k, v) in &answers(&rig, &ids) {
+                        let mut it = k.split(' ');
+                        let (kind, who_id) = (it.next().unwrap(), it.next().unwrap_or(""));
+                        if kind == "cut_off" && auth["people"].get(who_id).is_none() {
+                            continue;
+                        }
+                        if under(&auth, who_id, target) && !who_id.is_empty() {
+                            prop_assert!(is_denied(kind, v), "{k} after an edit: {v}");
+                        }
                     }
                 }
 
@@ -752,8 +818,17 @@ fn a_suspension_cuts_off_the_person_and_their_bots_and_undo_gives_back_exactly_w
                     rig.call("people.undo", &id(target))
                         .map_err(TestCaseError::fail)?;
                 }
-                prop_assert_eq!(rig.tables(), tables);
-                prop_assert_eq!(answers(&rig, &ids), before);
+                if let Some((method, params)) = &edit_call {
+                    // undo shows the owner's edit and nothing else: the twin world had the edit and no suspension
+                    let mut twin = twin.borrow_mut();
+                    twin.reset(&auth);
+                    let _ = twin.call(method, params);
+                    prop_assert_eq!(rig.tables(), twin.tables());
+                    prop_assert_eq!(answers(&rig, &ids), answers(&twin, &ids));
+                } else {
+                    prop_assert_eq!(rig.tables(), tables);
+                    prop_assert_eq!(answers(&rig, &ids), before);
+                }
                 Ok(())
             },
         )
