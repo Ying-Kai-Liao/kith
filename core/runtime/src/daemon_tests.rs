@@ -357,6 +357,7 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
             kill_wait: Duration::from_secs(5),
             command: None,
             handshake: Duration::from_secs(5),
+            stub: None,
             lease: Duration::from_millis(600),
         },
     }

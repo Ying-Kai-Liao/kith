@@ -212,6 +212,20 @@ impl Core {
         self.folders.as_ref()
     }
 
+    /// `VACUUM INTO` a private copy in the snapshots folder, named for `label` (`kith migrate`'s imports take one before
+    /// their first write). Returns the copy's path.
+    #[cfg(unix)]
+    pub(crate) fn backup(&self, layout: &Layout, label: &str) -> Result<std::path::PathBuf> {
+        perms::ensure_dir(&layout.snapshots)?;
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let path = layout.snapshots.join(format!("core-{label}-{nanos}.db"));
+        vacuum_into(&self.conn, &path)?;
+        perms::make_private(&path)?;
+        Ok(path)
+    }
+
     /// The holder instance and processes the last hello recorded.
     pub(crate) fn holder_record(&self) -> Result<HolderRecord> {
         let instance = get_meta(&self.conn, "holder_instance")?;

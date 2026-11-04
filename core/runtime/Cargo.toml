@@ -28,7 +28,7 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 # The lifetime lock on core.lock: flock on Unix, LockFileEx on Windows.
 fs2 = "0.4.3"
 getrandom = "0.4"
-# Run tokens are kept as their SHA-256 (the holder links the same crate).
+# Run tokens and terminal tickets are kept as their SHA-256 (the holder links the same crate).
 sha2 = "0.10"
 # The secrets envelope (docs/plans/runtime-design.md section 9b): XChaCha20-Poly1305 records under one master key.
 # Pinned exactly; the host links the same version.

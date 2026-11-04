@@ -28,6 +28,9 @@ pub enum Kind {
     Bot,
     /// A `claude -p --resume` one-shot (`kith ask -c`, `kith <agent> -c "task"`, the bridge): keeps the host out like a terminal.
     Oneshot,
+    /// The core is starting a held terminal for the session and the claim still names the core's own pid (`kith serve`),
+    /// not the terminal's: nothing may signal it. `stop_holder` answers it as busy.
+    Starting,
     /// A kind this build does not know (a newer binary wrote it, e.g. M1's holder kind). Read as a live holder judged by
     /// pid + start alone, like `kith-sessions` and the crate do, and never removed as garbage by `take_as`.
     #[serde(other)]
@@ -292,8 +295,15 @@ pub enum Stopped {
     Nobody,
     /// The host's own turn holds it (the claimer is a child of this host): its Stop ends it, not this.
     OwnTurn(Claim),
+    /// The core is still starting a held terminal and the claim names the core's pid: nothing was signalled.
+    Busy(Claim),
     /// The claimer and its children were ended.
     Ended(Claim),
+    /// SIGKILL was sent but something of the tree is still in the process table after the wait: the claim is kept, so a
+    /// take-over is refused until it is really gone (Stop again).
+    StillEnding(Claim),
+    /// This platform cannot signal a process tree: nothing was done and the claim is kept.
+    CantStop(Claim),
 }
 
 /// Ends the live holder of `sid` (the owner's Stop for a session held by an old run): SIGTERM to the claimer and its
@@ -302,12 +312,31 @@ pub enum Stopped {
 ///
 /// This is a small kill helper of its own; it should merge with the claim sweep of the kernel-side lease work (#248).
 pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopped {
+    stop_holder_unless(state, sid, grace, core_pid())
+}
+
+/// The running core daemon's pid, from its status (no database read). None when there is no core.
+fn core_pid() -> Option<u32> {
+    crate::core_front::daemon_pid()
+}
+
+/// [`stop_holder`] with the core's pid given. A claim naming the core's own pid is never signalled, whatever its kind:
+/// that is `kith serve` (or an older kernel's claim of it), and a Stop would end the daemon, not a terminal.
+pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Duration, core: Option<u32>) -> Stopped {
     let Some(claim) = holder(state, sid) else { return Stopped::Nobody };
+    if claim.kind == Kind::Starting || core == Some(claim.pid) {
+        return Stopped::Busy(claim);
+    }
     if parent_of(claim.pid) == Some(std::process::id()) {
         return Stopped::OwnTurn(claim);
     }
+    if cfg!(not(unix)) {
+        return Stopped::CantStop(claim);
+    }
+    // Descendants first, the claimer last (as the revoke `sweep` does): for a one-shot the claimer is kith-stub, which
+    // holds the conversation's lock, and the lock must not be free while claude still runs.
     let mut victims = children_of(claim.pid, 4);
-    victims.insert(0, claim.pid);
+    victims.push(claim.pid);
     // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
     super::intent::write(state, sid, "stopped from the app", claim.pid);
     signal(&victims, libc::SIGTERM);
@@ -318,8 +347,32 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
     // Still the claimer we judged? (The pid can only have gone, but a rest of the tree is signalled by pid alone.)
     let left: Vec<u32> = victims.iter().copied().filter(|p| pid_runs(*p)).collect();
     signal(&left, libc::SIGKILL);
+    // Wait (bounded) for them to be gone before the claim is given back: a take-over started at once would otherwise
+    // find the stub's lock still held and come back busy (75).
+    let reaped = std::time::Instant::now() + STOP_REAP;
+    while std::time::Instant::now() < reaped && victims.iter().any(|p| still_there(*p)) {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // A process that outlived SIGKILL (stuck in the kernel) may still hold the stub's lock: the claim stays with it.
+    if victims.iter().any(|p| still_there(*p)) {
+        return Stopped::StillEnding(claim);
+    }
     release(state, sid, claim.pid, claim.takeover);
     Stopped::Ended(claim)
+}
+
+/// How long [`stop_holder`] waits, after SIGKILL, for the processes to leave the table.
+const STOP_REAP: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether `pid` still holds anything: running, and not a zombie waiting for its parent (a zombie has released its
+/// descriptors, so its flock is gone).
+fn still_there(pid: u32) -> bool {
+    pid_runs(pid)
+        && std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .is_none_or(|o| !String::from_utf8_lossy(&o.stdout).trim_start().starts_with('Z'))
 }
 
 fn ps_pids(args: &[&str]) -> Vec<u32> {

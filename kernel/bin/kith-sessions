@@ -759,7 +759,9 @@ def run(agent, cmd):
             done, st = os.waitpid(child, os.WNOHANG)
             if done:
                 break
-            time.sleep(0.25)
+            # Until the engine is found a short tick: an engine that exits within one long tick would leave no pid to name
+            # in the quit intent (a clean /exit then reads as a crash).
+            time.sleep(0.25 if eng else 0.05)
             eng = eng or engine_pid(child, cmd)   # kept: the stub is gone by the time the notes below are written
             if not stopped and time.time() >= next_check:
                 next_check = time.time() + idle_poll()

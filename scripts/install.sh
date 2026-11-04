@@ -22,7 +22,8 @@
 #   KITH_INSTALL_TARBALL  a local kith-<version>-darwin-<arch>.tar.gz to install instead of downloading (tests,
 #                         offline); verified against KITH_INSTALL_SHA256 or the .sha256 file beside it, if there is one
 #   KITH_INSTALL_DIR      an unpacked release folder (bin/kith, share/kith/kernel) to install instead of a tarball
-#   KITH_INSTALL_CLI_ONLY=1   only the CLI, for the Mac app: install the version folder, flip current, link
+#   KITH_INSTALL_ANY_OS=1 tests only: skip the macOS check when KITH_INSTALL_TARBALL or KITH_INSTALL_DIR is given
+#   KITH_INSTALL_CLI_ONLY=1  only the CLI, for the Mac app: install the version folder, flip current, link
 #                         ~/.local/bin/kith (and hq), exit 0 with no `kith init`, no prompts. Pair it with
 #                         KITH_INSTALL_TARBALL or KITH_INSTALL_DIR to stay offline. On failure: one line on stderr, exit 1.
 set -eu
@@ -47,7 +48,9 @@ machine_dir() {
 }
 PREFIX=${KITH_PREFIX:-${KITH_STATE:-${HQ_STATE:-$(machine_dir)}}}
 
-[ "$(uname -s)" = Darwin ] || die "kith's download is for macOS. A Linux VM that only needs the client: curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install-guest.sh | sh. The full kith on Linux: clone https://github.com/$REPO and run ./install.sh"
+# KITH_INSTALL_ANY_OS=1 lets the install tests run on a Linux runner; it counts only with a local tarball or folder, so a real
+# download never puts a macOS binary on Linux.
+[ "$(uname -s)" = Darwin ] || { [ "${KITH_INSTALL_ANY_OS:-}" = 1 ] && { [ -n "${KITH_INSTALL_TARBALL:-}" ] || [ -n "${KITH_INSTALL_DIR:-}" ]; }; } || die "kith's download is for macOS. A Linux VM that only needs the client: curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install-guest.sh | sh. The full kith on Linux: clone https://github.com/$REPO and run ./install.sh"
 case $(uname -m) in
   arm64|aarch64) ARCH=arm64 ;;
   x86_64) ARCH=x86_64 ;;
