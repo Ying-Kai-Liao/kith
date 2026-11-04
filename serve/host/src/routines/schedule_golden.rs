@@ -1,15 +1,15 @@
 //! The routines' timing, frozen (M4-0). Every row asks `Trigger` when it fires next after a given moment (and, for
 //! intervals, where `advance` lands after missed runs); the answers are stored in
-//! `kernel/tests/difftest/golden/routines-next.json`. The M4 Rust Trigger type has to give these same answers, and
+//! `kernel/tests/difftest/fixtures/routines-next.json`. The M4 Rust Trigger type has to give these same answers, and
 //! this host's code must not drift before then: the test fails when any answer changes.
 //!
-//! Re-record on purpose (and say why in the PR): `KITH_RECORD_ROUTINES_NEXT=1 cargo test -p kith-serve --lib schedule_golden`.
+//! Re-record on purpose (and say why in the PR): `KITH_RECORD_ROUTINES_NEXT=1 cargo test -p kith-serve --bin kith-serve schedule_golden`.
 use super::Trigger;
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use serde_json::{Value, json};
 
-const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../kernel/tests/difftest/golden/routines-next.json");
+const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../kernel/tests/difftest/fixtures/routines-next.json");
 
 fn ms(rfc3339: &str) -> i64 {
     DateTime::parse_from_rfc3339(rfc3339).unwrap().timestamp_millis()
@@ -213,6 +213,9 @@ fn rows() -> Vec<Value> {
     advance(cron("*/15 * * * *", "Asia/Taipei"), "2026-11-03T08:30:00Z", "2026-11-03T08:31:00Z");
     advance(Trigger::Once { at: ms("2026-11-03T08:30:00Z") }, "2026-11-03T08:30:00Z", "2026-11-03T08:30:01Z");
     advance(Trigger::Webhook, "2026-11-03T08:30:00Z", "2026-11-03T08:30:01Z");
+    // A bug, frozen as it is: in the repeated hour `next` answers a time before `after` (the earlier reading of 01:30), so a
+    // missed 05:30Z fire advances to 05:30Z again, already past at 06:10Z. M4 must never return an answer <= after.
+    advance(cron("30 1 * * *", "America/New_York"), "2026-11-01T05:30:00Z", "2026-11-01T06:10:00Z");
     out
 }
 
@@ -224,7 +227,8 @@ fn routines_next_fire_times_are_frozen() {
         return;
     }
     let want: Value =
-        serde_json::from_str(&std::fs::read_to_string(FIXTURE).expect("golden/routines-next.json is missing")).unwrap();
+        serde_json::from_str(&std::fs::read_to_string(FIXTURE).expect("fixtures/routines-next.json is missing"))
+            .unwrap();
     let (got, want) = (got.as_array().unwrap(), want.as_array().expect("an array of rows"));
     for (i, (g, w)) in got.iter().zip(want).enumerate() {
         assert_eq!(g, w, "row {i} changed (the routines' timing is frozen; re-record on purpose)");

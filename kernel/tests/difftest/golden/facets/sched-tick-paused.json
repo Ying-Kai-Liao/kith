@@ -3,11 +3,14 @@
   "state:home/.kith/logs/sched/runs/echo/other-20261103-0830.log": "# 2026-11-03@08:30 echo other (due 08:30)\n",
   "state:home/.kith/outbox/sched-echo-other-n1.json": "{\n  \"agent\": \"echo\",\n  \"at\": 1793694600.0,\n  \"cron\": \"30 8 * * *\",\n  \"job\": \"other\",\n  \"person\": null,\n  \"via\": \"schedule\"\n}\n",
   "state:home/.kith/outbox/sched-echo-other-n1/": "<empty dir>\n",
-  "state:home/.kith/sched/state.json": "{\n  \"last\": {\n    \"echo/other\": {\n      \"at\": \"2026-11-03@08:30\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/other-20261103-0830.log\",\n      \"pid\": \"<EPOCH>\",\n      \"why\": \"due 08:30\"\n    }\n  },\n  \"pruned\": 1793694600.0,\n  \"tick\": \"2026-11-03@08:30\"\n}\n",
+  "state:home/.kith/sched/state.json": "{\n  \"last\": {\n    \"echo/other\": {\n      \"at\": \"2026-11-03@08:30\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/other-20261103-0830.log\",\n      \"pid\": \"<MASKED>\",\n      \"why\": \"due 08:30\"\n    }\n  },\n  \"pruned\": 1793694600.0,\n  \"tick\": \"2026-11-03@08:30\"\n}\n",
   "state:kith/agents/echo/jobs.json": "[\n  {\n    \"cron\": \"30 8 * * *\",\n    \"id\": \"daily\",\n    \"paused\": true,\n    \"task\": \"the task\"\n  },\n  {\n    \"cron\": \"30 8 * * *\",\n    \"id\": \"other\",\n    \"task\": \"runs\"\n  }\n]\n",
   "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
   "state:kith/state/": "<empty dir>\n",
   "step0.exit": "0\n",
   "step0.stderr": "",
-  "step0.stdout": "2026-11-03@08:30 started echo/other → <HOME>/.kith/logs/sched/runs/echo/other-20261103-0830.log\n"
+  "step0.stdout": "2026-11-03@08:30 started echo/other → <HOME>/.kith/logs/sched/runs/echo/other-20261103-0830.log\n",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"agent\": null,\n  \"id\": null,\n  \"runs\": [\n    {\n      \"agent\": \"echo\",\n      \"at\": \"2026-11-03@08:30\",\n      \"id\": \"other\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/other-20261103-0830.log\",\n      \"pid\": \"<MASKED>\",\n      \"running\": false,\n      \"why\": \"due 08:30\"\n    }\n  ]\n}\n",
+  "step1.stderr": ""
 }

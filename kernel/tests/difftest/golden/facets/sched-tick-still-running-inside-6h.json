@@ -6,7 +6,7 @@
   "state:home/.kith/outbox/sched-echo-slow-minutely-n1/": "<empty dir>\n",
   "state:home/.kith/outbox/sched-echo-slow-minutely-n2.json": "{\n  \"agent\": \"echo\",\n  \"at\": 1793721600.0,\n  \"cron\": \"* * * * *\",\n  \"job\": \"slow-minutely\",\n  \"person\": null,\n  \"via\": \"schedule\"\n}\n",
   "state:home/.kith/outbox/sched-echo-slow-minutely-n2/": "<empty dir>\n",
-  "state:home/.kith/sched/state.json": "{\n  \"last\": {\n    \"echo/slow-minutely\": {\n      \"at\": \"2026-11-03@16:00\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/slow-minutely-20261103-1600.log\",\n      \"pid\": \"<EPOCH>\",\n      \"why\": \"due 16:00\"\n    }\n  },\n  \"pruned\": 1793721540.0,\n  \"tick\": \"2026-11-03@16:31\"\n}\n",
+  "state:home/.kith/sched/state.json": "{\n  \"last\": {\n    \"echo/slow-minutely\": {\n      \"at\": \"2026-11-03@16:00\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/slow-minutely-20261103-1600.log\",\n      \"pid\": \"<MASKED>\",\n      \"why\": \"due 16:00\"\n    }\n  },\n  \"pruned\": 1793721540.0,\n  \"tick\": \"2026-11-03@16:31\"\n}\n",
   "state:kith/agents/echo/jobs.json": "[\n  {\n    \"cron\": \"* * * * *\",\n    \"id\": \"slow-minutely\",\n    \"task\": \"stays running\"\n  }\n]\n",
   "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
   "state:kith/state/": "<empty dir>\n",
@@ -29,6 +29,9 @@
   "step5.stderr": "kith-sched: echo/slow-minutely still running (pid N), skipped\n",
   "step5.stdout": "",
   "step6.exit": "0\n",
-  "step6.json": "{\n  \"agent\": null,\n  \"id\": null,\n  \"runs\": [\n    {\n      \"agent\": \"echo\",\n      \"at\": \"2026-11-03@16:00\",\n      \"id\": \"slow-minutely\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/slow-minutely-20261103-1600.log\",\n      \"pid\": \"<EPOCH>\",\n      \"running\": true,\n      \"why\": \"due 16:00\"\n    }\n  ]\n}\n",
-  "step6.stderr": ""
+  "step6.stderr": "",
+  "step6.stdout": "",
+  "step7.exit": "0\n",
+  "step7.json": "{\n  \"agent\": null,\n  \"id\": null,\n  \"runs\": [\n    {\n      \"agent\": \"echo\",\n      \"at\": \"2026-11-03@16:00\",\n      \"id\": \"slow-minutely\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/slow-minutely-20261103-1600.log\",\n      \"pid\": \"<MASKED>\",\n      \"running\": false,\n      \"why\": \"due 16:00\"\n    }\n  ]\n}\n",
+  "step7.stderr": ""
 }

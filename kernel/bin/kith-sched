@@ -291,6 +291,7 @@ def start(agent, job, now, why):
               'KITH_BRIDGE_OUTBOX', 'KITH_RUN_OUTBOX', 'KITH_CALL_CHAT', 'KITH_CALL_KEY'):   # and the HQ_ twins that sync_env made
         env.pop('HQ_' + k[5:], None)
         env.pop(k, None)
+    env.pop('KITH_SCHED_NOW', None)   # the test clock is the tick's, not the run's
     env['KITH_BACKUP_CHAIN'] = 'on'   # no host picks the account: bin/kith walks the account candidates (kith account pick)
     if job.get('person'):   # none: whoever started this (launchd's tick: the owner; a run by hand: that run's person)
         env['KITH_PERSON'] = env['HQ_PERSON'] = job['person']

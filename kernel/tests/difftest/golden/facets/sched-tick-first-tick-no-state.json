@@ -3,7 +3,7 @@
   "state:home/.kith/logs/sched/runs/echo/daily-20261103-0830.log": "# 2026-11-03@08:30 echo daily (due 08:30)\n",
   "state:home/.kith/outbox/sched-echo-daily-n1.json": "{\n  \"agent\": \"echo\",\n  \"at\": 1793694600.0,\n  \"cron\": \"30 8 * * *\",\n  \"job\": \"daily\",\n  \"person\": null,\n  \"via\": \"schedule\"\n}\n",
   "state:home/.kith/outbox/sched-echo-daily-n1/": "<empty dir>\n",
-  "state:home/.kith/sched/state.json": "{\n  \"last\": {\n    \"echo/daily\": {\n      \"at\": \"2026-11-03@08:30\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/daily-20261103-0830.log\",\n      \"pid\": \"<EPOCH>\",\n      \"why\": \"due 08:30\"\n    }\n  },\n  \"pruned\": 1793694600.0,\n  \"tick\": \"2026-11-03@08:31\"\n}\n",
+  "state:home/.kith/sched/state.json": "{\n  \"last\": {\n    \"echo/daily\": {\n      \"at\": \"2026-11-03@08:30\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/daily-20261103-0830.log\",\n      \"pid\": \"<MASKED>\",\n      \"why\": \"due 08:30\"\n    }\n  },\n  \"pruned\": 1793694600.0,\n  \"tick\": \"2026-11-03@08:31\"\n}\n",
   "state:kith/agents/echo/jobs.json": "[\n  {\n    \"cron\": \"30 8 * * *\",\n    \"id\": \"daily\",\n    \"task\": \"say hi\"\n  }\n]\n",
   "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
   "state:kith/state/": "<empty dir>\n",
@@ -12,5 +12,8 @@
   "step0.stdout": "2026-11-03@08:30 started echo/daily → <HOME>/.kith/logs/sched/runs/echo/daily-20261103-0830.log\n",
   "step1.exit": "0\n",
   "step1.stderr": "",
-  "step1.stdout": ""
+  "step1.stdout": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"agent\": null,\n  \"id\": null,\n  \"runs\": [\n    {\n      \"agent\": \"echo\",\n      \"at\": \"2026-11-03@08:30\",\n      \"id\": \"daily\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/daily-20261103-0830.log\",\n      \"pid\": \"<MASKED>\",\n      \"running\": false,\n      \"why\": \"due 08:30\"\n    }\n  ]\n}\n",
+  "step2.stderr": ""
 }

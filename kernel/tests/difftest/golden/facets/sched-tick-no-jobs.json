@@ -11,5 +11,8 @@
   "step1.stdout": "",
   "step2.exit": "0\n",
   "step2.stderr": "",
-  "step2.stdout": ""
+  "step2.stdout": "",
+  "step3.exit": "0\n",
+  "step3.json": "{\n  \"agent\": null,\n  \"id\": null,\n  \"runs\": []\n}\n",
+  "step3.stderr": ""
 }
