@@ -17,6 +17,10 @@ mod fire;
 #[cfg(all(test, unix))]
 mod fire_tests;
 #[cfg(unix)]
+mod hooks;
+#[cfg(all(test, unix))]
+mod hooks_tests;
+#[cfg(unix)]
 mod sync;
 // The import it is tested with is Unix-only for now (like the authority one).
 #[cfg(all(test, unix))]
@@ -35,6 +39,8 @@ pub(crate) use call::call_with;
 pub(crate) use call::{call, serves};
 #[cfg(unix)]
 pub(crate) use fire::{call_write, serves_write};
+#[cfg(unix)]
+pub(crate) use hooks::key_name as hook_key_name;
 
 /// The rule `next` needs: when a job runs after `now_ms`, as the local minute `YYYY-MM-DDTHH:MM` that `kith-sched`
 /// prints, or `None` when it never does. It gets the job's definition, so the zone and the trigger are the job's own.

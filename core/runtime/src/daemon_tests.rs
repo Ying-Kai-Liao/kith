@@ -1668,6 +1668,43 @@ fn a_stalled_key_store_holds_up_its_own_call_and_no_other_row() {
     d.stop();
 }
 
+/// A delivery from the internet reaches the OS key store only once the job's key record exists (M4-4 review).
+#[cfg(unix)]
+#[test]
+fn a_delivery_reads_the_master_key_only_when_the_jobs_key_exists() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let loads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = loads.clone();
+    let cfg = Config {
+        key_load: Some(std::sync::Arc::new(move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Some(zeroize::Zeroizing::new(vec![9u8; 32])))
+        })),
+        ..hosted()
+    };
+    let d = serving(&p, cfg);
+    let fire = json!({"agent": "mel", "id": "h", "headers": {"authorization": "Bearer x"}, "body": "{}", "caller": "cloud"});
+    let v = answered(host(&p, "schedule.fire", &fire));
+    assert_eq!(v["code"], "unauthorized", "{v}");
+    // Bad params are the call's own refusal, and read nothing either.
+    assert!(!matches!(
+        host(&p, "schedule.fire", &json!({"agent": 1})),
+        Reached::Answered(_)
+    ));
+    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 0);
+    // Once the record exists the key is read (by the put itself, then kept).
+    answered(read(
+        &p,
+        "secrets.put",
+        &json!({"name": "routine-webhook/mel/h", "value": "x"}),
+    ));
+    let v = answered(host(&p, "schedule.fire", &fire));
+    assert_eq!(v["code"], "unauthorized", "{v}");
+    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    d.stop();
+}
+
 /// The envelope through a real daemon and the owner socket, with a stand-in for the OS key store (the host's vault is
 /// a client of exactly these calls). Unix only: Windows has no key store to build the envelope on yet.
 #[cfg(unix)]
