@@ -767,6 +767,23 @@ impl<'a> Rules<'a> {
         }
     }
 
+    /// `agent_domains`: the hosts every guest of `agent` may reach, whoever they are: the ones its package declares
+    /// (`guest_domains:` in capabilities.yaml, the owner's consent at install) and the ones the owner kept for everyone
+    /// on a card (`agent_access`). Plain host names only.
+    fn agent_domains(&self, agent: &str) -> Vec<String> {
+        let mut all = jobs::guest_domains(&self.c.package_dir(agent).join("capabilities.yaml"));
+        if let Some(kept) = get(get(get(self.auth, "agent_access"), agent), "domains").as_array() {
+            all.extend(kept.iter().filter_map(Value::as_str).map(str::to_owned));
+        }
+        let mut out: Vec<String> = Vec::new();
+        for d in all {
+            if jobs::valid_domain(&d) && !out.contains(&d) {
+                out.push(d);
+            }
+        }
+        out
+    }
+
     /// `with_jobs`: the run's access with its ticked jobs' domains added, its doors and the names of its ticks, all from
     /// the person's own row of pkg.
     fn with_jobs(
@@ -774,10 +791,12 @@ impl<'a> Rules<'a> {
         pkg: &str,
         person: &str,
         mut access: Map<String, Value>,
+        agent: &str,
     ) -> Map<String, Value> {
         let granted = self.job_grants(pkg, person);
         let mut domains: Vec<Value> = arr(access.get("domains").unwrap_or(&NULL)).to_vec();
         domains.extend(granted[0].iter().cloned());
+        domains.extend(self.agent_domains(agent).into_iter().map(Value::String));
         access.insert("domains".to_owned(), Value::Array(dedupe(domains)));
         let mut names: Vec<String> = Vec::new();
         if let Some(ticks) = ticks(self.auth, pkg, person)
@@ -886,7 +905,7 @@ impl<'a> Rules<'a> {
             "trusted".to_owned(),
             (truthy(get(row, "trusted")) || truthy(get(&p, "trusted"))).into(),
         );
-        out.extend(self.with_jobs(pkg, person, access_of(row)));
+        out.extend(self.with_jobs(pkg, person, access_of(row), agent));
         let asked = if truthy(get(row, "mode")) {
             get(row, "mode")
         } else {
@@ -989,7 +1008,7 @@ impl<'a> Rules<'a> {
         out.insert("budget".to_owned(), budget);
         out.insert("budget_agent".to_owned(), budget_agent);
         out.insert("was".to_owned(), Value::Array(dedupe(was)));
-        let grants = self.with_jobs(pkg, bot, access_of(row));
+        let grants = self.with_jobs(pkg, bot, access_of(row), agent);
         out.extend(self.owner_cut(agent, bot, grants, via, Some(&pr))?);
         Ok(out)
     }

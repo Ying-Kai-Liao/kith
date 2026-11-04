@@ -24,6 +24,8 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.revoke"
             | "people.list"
             | "people.may"
+            | "people.resolve"
+            | "people.bridgeHeld"
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
@@ -109,6 +111,64 @@ fn new_code() -> Result<String> {
 
 /// Answers a `people.*` method over this core, as the caller's view (`kernel`, `home`, `env` in the params) sees the
 /// agent folders.
+/// `kith-auth resolve AGENT [--person P] [--via V] [--take-once]` (M2-1b): what a run gets, and `held`. With `takeOnce`
+/// and `via`, a refused launch is asked again counting a "just this once" grant, and the grant is used up in the SAME
+/// transaction that decided, so two launches cannot both ride one grant, and a removal between the card and the launch
+/// still wins. Not while held: the caller asks again until in sync, and the grant goes to the launch that runs.
+fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
+    let agent = need(params, "agent").map_err(|d| store::refusal(&d))?;
+    let via = word(params, "via").filter(|v| !v.is_empty());
+    let take = switch(params, "takeOnce") && via.is_some();
+    let person_of = |rules: &Rules| {
+        word(params, "person")
+            .filter(|p| !p.is_empty())
+            .map_or_else(|| rules.acting(), str::to_owned)
+    };
+    let asked = |a: &Value| -> std::result::Result<_, Die> {
+        let rules = Rules::new(c, a);
+        let person = person_of(&rules);
+        let res = rules.resolve(agent, &person, via, false)?;
+        let held = rules.bridge_held(&person);
+        let wants = take && res.get("allowed") == Some(&Value::Bool(false)) && !held;
+        Ok((res, held, wants))
+    };
+    let (res, held, wants) = store::read(core, |a| asked(a))?.map_err(|d| store::refusal(&d))?;
+    if !wants {
+        return Ok(answer(res, held));
+    }
+    let (res, held) = store::run(core, c, |a| {
+        let (mut res, held, wants) = asked(a)?;
+        if !wants {
+            return Ok((res, held));
+        }
+        let rules = Rules::new(c, a);
+        let person = person_of(&rules);
+        res = rules.resolve(agent, &person, via, true)?;
+        let (allowed, who) = (
+            res.get("allowed") == Some(&Value::Bool(true)),
+            res.get("person")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        );
+        drop(rules);
+        if allowed && secrets::take_once(a, &who, agent, via) {
+            let why = format!(
+                "{} (just this once)",
+                res.get("why").and_then(Value::as_str).unwrap_or_default()
+            );
+            res.insert("why".to_owned(), why.into());
+        }
+        Ok((res, held))
+    })?;
+    Ok(answer(res, held))
+}
+
+fn answer(mut res: serde_json::Map<String, Value>, held: bool) -> Value {
+    res.insert("held".to_owned(), held.into());
+    Value::Object(res)
+}
+
 pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     let c = ctx_of(core, params)?;
     let life = life_of(core, params)?;
@@ -172,6 +232,15 @@ pub(crate) fn call_in(
         "people.deny" => {
             let id = need(params, "id").map_err(|d| store::refusal(&d))?;
             requests::deny(core, c, id, switch(params, "members"))
+        }
+        "people.resolve" => resolve(core, c, params),
+        // `kith-auth`'s `bridge_held`: the host's channels hold a person other than the owner while this Mac is out of
+        // sync with the cloud. The answer is the cloud-sync file's, not a table of core.db.
+        "people.bridgeHeld" => {
+            let person = need(params, "person").map_err(|d| store::refusal(&d))?;
+            store::read(core, |a| {
+                json!({ "held": Rules::new(c, a).bridge_held(person) })
+            })
         }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         "people.botsCap" if word(params, "amount").is_none() => {

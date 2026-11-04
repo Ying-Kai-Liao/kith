@@ -354,7 +354,9 @@ fn a_malformed_file_is_refused_never_corrupt() {
         r#"{"members": {"house": "x"}}"#,
         r#"{"members": {"house": {"kai": {"trusted": "maybe"}}}}"#,
         r#"{"invites": {"abc": {"expires": 1.0}}}"#,
-        r#"{"agent_access": {"house": {"domains": ["a.example"]}}}"#,
+        r#"{"agent_access": {"house": {"domains": "a.example"}}}"#,
+        r#"{"agent_access": {"house": 5}}"#,
+        r#"{"agent_access": {"house": {"since": []}}}"#,
         r#"{"members": {"house": {"*": {"preset": "x"}, "mia": null}}}"#,
     ];
     for text in bad {

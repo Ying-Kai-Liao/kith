@@ -15,6 +15,7 @@
 //! | `presets.<name>` `mode` `trusted` `deny`    | `presets`                                            |
 //! | `invites.<code>` `person` `expires`         | `invites` (every code, expired ones too: the owner's next write prunes them) |
 //! | `retired.<id>` `at`                         | `retired`                                            |
+//! | `agent_access.<agent>` `domains` `since` `by` | `agent_access` (JSON text columns; a `null` row is skipped, it keeps nothing) |
 //! | `owner_bots_budget`                         | `authority_settings ('owner_bots_budget')` as JSON   |
 //!
 //! A key that is absent stays NULL (the reader leaves the key out, so the rules' default applies); a key that is JSON
@@ -25,9 +26,6 @@
 //!   the envelope (`items.rs`); the profile table, the grants and the plaintext values `env` keeps in auth.json move with
 //!   kith-auth itself (M2-18). The decision reads none of them.
 //! - `once`: one-time secrets that live at most an hour; they are not worth a copy.
-//! - `agent_access`: the rules (`kith_kernel::secrets`) do not add its domains to a run's access yet where `kith-auth`
-//!   does, so importing it would store a different answer. A file that keeps any domain there is REFUSED (Later: the
-//!   rules learn `agent_domains`, then the import learns the table).
 //! - a person's `handles`, `root`, `kith`, `agents`: channel and cloud links the host and `kith-people` keep; the decision
 //!   reads none of them.
 //! - any other key, at any level: not read by the decision, so not copied.
@@ -122,18 +120,21 @@ fn truthy(v: Option<&Value>, what: &str) -> Result<bool> {
 /// A file the import can store faithfully, or the reason it cannot. Run before anything is written.
 pub(super) fn refuse_what_it_cannot_keep(auth: &Value) -> Result<()> {
     object(auth, "the file")?;
-    if let Some(access) = table(auth, "agent_access")? {
-        for (agent, row) in access {
-            let kept = row
-                .get("domains")
-                .and_then(Value::as_array)
-                .is_some_and(|d| !d.is_empty());
-            if kept {
-                return Err(Error::Refused(format!(
-                    "auth.json: agent_access keeps domains for {agent}; the Rust rules do not add them to a run's access yet, so \
-                     importing would store a different answer than kith-auth gives. Nothing was imported. (Later: the rules learn \
-                     agent_domains, then this import takes the table.)"
-                )));
+    // `agent_access` is kept (m0013). A wrong-typed row is refused like any other table; a null row or a null scalar in it
+    // reads as "nothing kept" in `kith-auth`, which is what an absent column gives.
+    for (agent, row) in table(auth, "agent_access")?.into_iter().flatten() {
+        if row.is_null() {
+            continue;
+        }
+        let what = format!("agent_access.{agent}");
+        object(row, &what)?;
+        for (key, want_list) in [("domains", true), ("since", false), ("by", false)] {
+            match (row.get(key), want_list) {
+                (None | Some(Value::Null), _)
+                | (Some(Value::Array(_)), true)
+                | (Some(Value::Object(_)), false) => {}
+                (Some(_), true) => return Err(bad(&format!("{what}.{key}"), "is not a list")),
+                (Some(_), false) => return Err(bad(&format!("{what}.{key}"), "is not an object")),
             }
         }
     }
@@ -247,6 +248,15 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value) -> Result<()> {
             params![id, at],
         )?;
     }
+    for (agent, row) in table(auth, "agent_access")?.into_iter().flatten() {
+        if row.is_null() {
+            continue;
+        }
+        conn.execute(
+            "INSERT INTO agent_access (agent, domains, since, by) VALUES (?1, ?2, ?3, ?4)",
+            params![agent, json(row, "domains"), json(row, "since"), json(row, "by")],
+        )?;
+    }
     if let Some(cap) = auth.get("owner_bots_budget") {
         conn.execute(
             "INSERT INTO authority_settings (key, value) VALUES ('owner_bots_budget', ?1)",
@@ -259,7 +269,7 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value) -> Result<()> {
 /// Empties the tables `insert_all` fills (a forced re-import). `authority_settings` keeps any key it does not own.
 pub(super) fn clear(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "DELETE FROM people; DELETE FROM memberships; DELETE FROM presets; DELETE FROM invites; DELETE FROM retired; \
+        "DELETE FROM people; DELETE FROM memberships; DELETE FROM presets; DELETE FROM invites; DELETE FROM retired; DELETE FROM agent_access; \
          DELETE FROM authority_settings WHERE key = 'owner_bots_budget';",
     )?;
     Ok(())
@@ -351,11 +361,12 @@ pub(super) fn counts(conn: &Connection) -> Result<String> {
         Ok(conn.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0))?)
     };
     Ok(format!(
-        "{} people, {} memberships, {} presets, {} invites, {} retired",
+        "{} people, {} memberships, {} presets, {} invites, {} retired, {} agent_access",
         n("people")?,
         n("memberships")?,
         n("presets")?,
         n("invites")?,
-        n("retired")?
+        n("retired")?,
+        n("agent_access")?
     ))
 }

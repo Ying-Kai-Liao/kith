@@ -6,9 +6,11 @@ use super::Migration;
 mod m0010_authority_read;
 mod m0011_authority_write;
 mod m0012_access_requests;
+mod m0013_agent_access;
 
 pub(super) const STEPS: &[Migration] = &[
     m0010_authority_read::MIGRATION,
     m0011_authority_write::MIGRATION,
     m0012_access_requests::MIGRATION,
+    m0013_agent_access::MIGRATION,
 ];

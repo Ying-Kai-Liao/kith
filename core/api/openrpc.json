@@ -4641,6 +4641,204 @@
       }
     },
     {
+      "name": "people.resolve",
+      "summary": "What a run of an agent gets for a person (the kernel's `resolve`): whether it may run, their settings over the agent's, the domains the agent's package declares for every guest and the ones the owner kept, and `held`. With --take-once and --via, a launch refused only for want of a \"just this once\" grant is allowed by one and the grant is used up in the same transaction.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person (default: the one the caller acts for).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "via",
+          "summary": "The agent whose membership the run rides on (a helper call).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "takeOnce",
+          "summary": "Count a \"just this once\" grant on the caller's row, and use it up when it lets the launch through.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "resolve"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "via": {
+            "kind": "flag",
+            "spellings": [
+              "--via"
+            ]
+          },
+          "takeOnce": {
+            "kind": "switch",
+            "spellings": [
+              "--take-once"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.bridgeHeld",
+      "summary": "Whether the channels hold this person now: kith serve serves anyone but the owner only while this Mac is in sync with the cloud (read from kith serve's cloud-sync file).",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "bridge-held"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "people.addBot",
       "summary": "Add a bot that belongs to a person (it is never more than its owner's).",
       "params": [
