@@ -297,7 +297,7 @@ fn open_ctl(ctl: &Ctl) -> Result<(std::fs::File, std::fs::File), String> {
                 .open(path)
                 .map_err(|e| format!("cannot open {path:?}: {e}"))?;
             // A squatter that created the name first would be served as the holder: its server must be our parent.
-            let (server, parent) = (windows::pipe_server_pid(&file), windows::parent_pid());
+            let (server, parent) = (kith_stub::pipe_server_pid(&file), kith_stub::parent_pid());
             if server.is_none() || server != parent {
                 return Err(format!(
                     "--ctl-pipe {path:?} is served by pid {server:?}, not by the parent {parent:?}"

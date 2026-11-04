@@ -38,6 +38,9 @@ use unix as os;
 mod windows;
 #[cfg(windows)]
 use windows as os;
+/// For the stub binary's `--ctl-pipe` check.
+#[cfg(windows)]
+pub use windows::{parent_pid, pipe_server_pid};
 
 #[derive(Debug)]
 pub enum Error {
