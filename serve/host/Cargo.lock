@@ -2197,11 +2197,11 @@ name = "kith-kernel"
 version = "0.1.0"
 dependencies = [
  "fs2",
+ "kith-procstart",
  "libc",
  "rusqlite",
  "serde_json",
  "sha2 0.11.0",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2212,6 +2212,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "kith-procstart"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2275,6 +2283,7 @@ dependencies = [
 name = "kith-stub"
 version = "0.1.0"
 dependencies = [
+ "kith-procstart",
  "libc",
  "windows-sys 0.61.2",
 ]

@@ -614,12 +614,22 @@ fn leader() -> (u32, String) {
     std::thread::spawn(move || child.wait());
     let mut started = None;
     until("the process to have a start time", || {
-        started = crate::lock::process_start(pid);
+        started = kith_kernel::procstart::start_stamp(pid);
         started.is_some()
     });
     // Let the setsid happen before anything signals the group.
     std::thread::sleep(Duration::from_millis(300));
     (pid, started.expect("start time"))
+}
+
+/// A start stamp in the form this system writes that no live process has: a pid handed to a stranger.
+#[cfg(unix)]
+fn other_start() -> String {
+    if cfg!(target_os = "linux") {
+        "bGONE:1".into()
+    } else {
+        "e1".into()
+    }
 }
 
 #[cfg(unix)]
@@ -679,7 +689,7 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
         Some("one"),
         vec![
             proc(held_pid, &held_start),
-            proc(stranger_pid, "Thu Jan  1 00:00:00 1970"),
+            proc(stranger_pid, &other_start()),
         ],
     );
     crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("takeover");
@@ -691,10 +701,7 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
     assert_eq!(recorded().instance.as_deref(), Some("two"));
 
     // 4. Processes the new instance lists itself are not the old one's, whatever the record says.
-    record(
-        Some("two"),
-        vec![proc(stranger_pid, "Thu Jan  1 00:00:00 1970")],
-    );
+    record(Some("two"), vec![proc(stranger_pid, &other_start())]);
     crate::holder_link::reconcile(&d.shared, "three", &[proc(stranger_pid, "x")], &cfg)
         .expect("listed");
     assert!(alive(stranger_pid));
@@ -758,6 +765,78 @@ fn remote_holder(sock: &std::path::Path, secret_file: std::path::PathBuf) {
             });
         }
     });
+}
+
+/// Records from before procstart carry `ps -o lstart=` text (or nothing): an unknown start. A live pid with one is never
+/// signalled and holds the new instance back (the "still running" path), every hello alike; a gone pid does not.
+#[cfg(unix)]
+#[test]
+fn a_record_with_old_or_empty_starts_ends_nothing_and_waits_for_the_pid_to_go() {
+    use crate::db::{HolderRecord, RecordedProc};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig {
+        kill_wait: Duration::from_secs(2),
+        ..HolderConfig::default()
+    };
+    let (live_pid, live_start) = leader();
+    let gone_pid = {
+        let mut c = std::process::Command::new("true").spawn().expect("true");
+        let pid = c.id();
+        c.wait().expect("wait");
+        pid
+    };
+    let record = |procs: Vec<RecordedProc>| {
+        let rec = HolderRecord {
+            instance: Some("one".into()),
+            procs,
+        };
+        d.shared
+            .with_core(|c| c.save_holder_record(&rec))
+            .expect("record");
+    };
+    let proc = |pid, started: &str| RecordedProc {
+        pid,
+        started: started.to_owned(),
+        conv: "c".into(),
+    };
+    let instance = || {
+        d.shared
+            .with_core(|c| c.holder_record())
+            .expect("record")
+            .instance
+    };
+    // A gone pid is fine whatever it recorded.
+    record(vec![
+        proc(gone_pid, "Thu Jan  1 00:00:00 1970"),
+        proc(gone_pid, ""),
+    ]);
+    crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("gone pids end nothing");
+    assert_eq!(instance().as_deref(), Some("two"));
+    // A live pid with old text, with nothing, or with the other form: not ended, the old record kept, twice over.
+    let foreign = if cfg!(target_os = "linux") {
+        "e1"
+    } else {
+        "bGONE:1"
+    };
+    for old in ["Thu Jan  1 00:00:00 1970", "", foreign] {
+        record(vec![proc(live_pid, old)]);
+        for _ in 0..2 {
+            let err = crate::holder_link::reconcile(&d.shared, "three", &[], &cfg)
+                .expect_err("an unknown start holds the new instance back");
+            assert!(err.contains("still running"), "{err}");
+            assert!(alive(live_pid), "never signalled for {old:?}");
+            assert_eq!(instance().as_deref(), Some("one"));
+        }
+    }
+    // The same process with its own stamp is the one that is ended; with another start in the same form, left alone.
+    record(vec![proc(live_pid, &other_start())]);
+    crate::holder_link::reconcile(&d.shared, "three", &[], &cfg).expect("a stranger's pid");
+    assert!(alive(live_pid));
+    record(vec![proc(live_pid, &live_start)]);
+    crate::holder_link::reconcile(&d.shared, "four", &[], &cfg).expect("its own");
+    assert!(!alive(live_pid));
 }
 
 #[cfg(unix)]

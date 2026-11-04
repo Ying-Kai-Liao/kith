@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use kith_holder::client::{Client, ConnectError};
 use kith_holder::{launch, proto};
+use kith_kernel::procstart;
 
 use crate::attach::Relay;
 use crate::daemon::Shared;
@@ -26,7 +27,7 @@ use crate::db::{HolderRecord, RecordedProc};
 use crate::error::Result;
 use crate::layout::Layout;
 use crate::terminal::{Placed, Req, STUB_BUSY, SpawnReq};
-use crate::{lock, log, perms};
+use crate::{log, perms};
 
 pub(crate) struct HolderConfig {
     /// The holder program. `None`: look for `$KITH_HOLDER_BIN`, then `kith-holder` beside this program.
@@ -585,14 +586,14 @@ fn watch_start(client: &mut Client, held: proto::HeldId, pid: u32, wait: Duratio
     }
 }
 
-/// The listed processes with the start time the system gives their pid now, noted while the holder is alive so a
-/// later kill can tell them from a stranger that was handed the pid.
+/// The listed processes with the start stamp (`kith_kernel::procstart`) the system gives their pid now, noted while the
+/// holder is alive so a later kill can tell them from a stranger that was handed the pid. Empty when it cannot be read.
 fn record_procs(held: &[proto::Held]) -> Vec<RecordedProc> {
     held.iter()
         .filter(|h| h.exit.is_none())
         .map(|h| RecordedProc {
             pid: h.pid,
-            started: lock::process_start(h.pid).unwrap_or_default(),
+            started: procstart::start_stamp(h.pid).unwrap_or_default(),
             conv: h.conv.clone(),
         })
         .collect()
@@ -642,35 +643,48 @@ pub(crate) fn reconcile(
     Ok(())
 }
 
-/// Ends the process group of each recorded process whose pid still has the recorded start time, and waits for the
-/// groups to be empty. A pid with another start time (or none we can read) is not touched. True when nothing it was
-/// asked to end is left.
+/// Ends the process group of each recorded process whose pid still has the recorded start stamp, and waits for the
+/// groups to be empty. A pid that is gone, or has another start in the same form, is not ours: left alone. A start
+/// that cannot be told (the pid's own cannot be read, or the record is empty, old `ps` text, or of another form) is
+/// neither: nothing is signalled for it and the answer is false, as for a group that will not end, so the caller keeps
+/// the old record and the next hello looks again. True when nothing it was asked to end is left.
 #[cfg(unix)]
 fn end_groups(logs: &Path, procs: &[RecordedProc], wait: Duration) -> bool {
     let mut mine = Vec::new();
+    let mut unsure = false;
     for p in procs {
-        if p.started.is_empty() {
-            log::note(
+        match procstart::probe(p.pid) {
+            procstart::Probe::Gone => log::note(
                 logs,
-                &format!(
-                    "holder: pid {} has no recorded start time; left alone",
-                    p.pid
-                ),
-            );
-        } else if lock::process_start(p.pid).as_deref() == Some(p.started.as_str()) {
-            mine.push(p.pid);
-        } else {
-            log::note(
-                logs,
-                &format!(
-                    "holder: pid {} is not the process that was recorded (another start time, or gone); left alone",
-                    p.pid
-                ),
-            );
+                &format!("holder: pid {} is gone; nothing to end", p.pid),
+            ),
+            procstart::Probe::Alive(Some(now)) if procstart::comparable(&p.started, &now) => {
+                if procstart::same_process(&p.started, &now) {
+                    mine.push(p.pid);
+                } else {
+                    log::note(
+                        logs,
+                        &format!(
+                            "holder: pid {} is not the process that was recorded (another start); left alone",
+                            p.pid
+                        ),
+                    );
+                }
+            }
+            procstart::Probe::Alive(_) | procstart::Probe::Unknown => {
+                unsure = true;
+                log::note(
+                    logs,
+                    &format!(
+                        "holder: pid {} is running but its start cannot be told from the record ({:?}); not ended",
+                        p.pid, p.started
+                    ),
+                );
+            }
         }
     }
     if mine.is_empty() {
-        return true;
+        return !unsure;
     }
     for pid in &mine {
         signal_group(*pid, "TERM");
@@ -680,7 +694,7 @@ fn end_groups(logs: &Path, procs: &[RecordedProc], wait: Duration) -> bool {
     loop {
         mine.retain(|pid| group_alive(*pid));
         if mine.is_empty() {
-            return true;
+            return !unsure;
         }
         if begun.elapsed() >= wait {
             return false;

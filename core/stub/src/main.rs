@@ -152,22 +152,6 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
     Err("missing -- before the engine command".into())
 }
 
-/// Same source as core/runtime's `process_start` (this crate links no kith crate): `ps`, squeezed to single spaces.
-/// Empty where there is no `ps` (Windows has no start time there yet either).
-fn process_start(pid: u32) -> String {
-    let out = std::process::Command::new("ps")
-        .env("LC_ALL", "C")
-        .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .output();
-    out.map(|o| {
-        String::from_utf8_lossy(&o.stdout)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    })
-    .unwrap_or_default()
-}
-
 /// Tells the starter, on the status fd, whether the lock is ours; the fd is closed here so the engine never has it.
 fn report(fd: Option<i32>, word: &str) {
     #[cfg(unix)]
@@ -189,14 +173,16 @@ fn redeem_run_token() -> Result<(), String> {
 }
 
 /// The sidecar `w-<key>.holder` next to the lock file: who holds the lock, for doctor and "waiting for your
-/// terminal session". Two lines, `pid=<stub pid>` and `started=<OS start time of that pid>`, in the text the
-/// runtime's own pid checks use (`ps -o lstart=` in the C locale), so a reused pid is told from the stub. It is a hint only: nothing may read
-/// it through the lock, it can be stale after a crash (the next stub overwrites it; it is never deleted), and
-/// a reader must check the pid is alive and the lock actually held before believing it.
+/// terminal session". Two lines, `pid=<stub pid>` and `started=<start stamp of that pid>`: the `kith-procstart` stamp
+/// (`b<boot id>:<ticks>` on Linux, `e<epoch ms>` on macOS and Windows; plain equality, no time zone), so a reused pid
+/// is told from the stub. `started=` is empty when the start cannot be read (read as an unknown start, never as another
+/// process). Before this the line held `ps -o lstart=` text; nothing reads the sidecar yet, and a reader treats that
+/// old text as unknown too. It is a hint only: nothing may read it through the lock, it can be stale after a crash
+/// (the next stub overwrites it; it is never deleted), and a reader must check the pid is alive and the lock actually held before believing it.
 fn write_holder(lock: &Lock) -> std::io::Result<()> {
     let path = lock.path().with_extension("holder");
     let tmp = path.with_extension(format!("holder.tmp{}", std::process::id()));
-    let started = process_start(std::process::id());
+    let started = kith_procstart::start_stamp(std::process::id()).unwrap_or_default();
     let mut open = OpenOptions::new();
     open.write(true).create(true).truncate(true);
     #[cfg(unix)]
