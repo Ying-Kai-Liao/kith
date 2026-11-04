@@ -126,11 +126,34 @@ pub(crate) async fn who(bin: &Path, uid: &str) -> Who {
 }
 
 pub(crate) async fn run(bin: &Path, args: &[&str]) -> Result<String> {
+    let (stdout, stderr) = run_noted(bin, args).await?;
+    if !stderr.is_empty() {
+        tracing::warn!(call = args.join(" "), stderr, "kith-auth succeeded but said something");
+    }
+    Ok(stdout)
+}
+
+/// `run`, keeping what kith-auth said on stderr when it succeeded: a revoke that reached auth.json but not the core says
+/// so there and still exits 0, so a caller that can tell the owner reads it here.
+pub(crate) async fn run_noted(bin: &Path, args: &[&str]) -> Result<(String, String)> {
     let out = hq::output(bin, args).await.ok_or_else(|| anyhow!("kith-auth didn't run"))?;
     if !out.status.success() {
         bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok((String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).trim().to_owned()))
+}
+
+/// Logs what a successful kith-auth call said on stderr, with the person it was for. Never lost: serve used to drop it.
+pub(crate) fn note_stderr(person: &str, stderr: &str) {
+    if !stderr.is_empty() {
+        tracing::warn!(person, stderr, "kith-auth succeeded but said something");
+    }
+}
+
+/// Whether kith-auth's stderr from a revoke, an undo or a removal is its "in auth.json; ... not updated" warning: the core's
+/// copy of people missed the change (it may have applied it, when the answer was lost).
+pub(crate) fn core_missed(stderr: &str) -> bool {
+    stderr.lines().any(|l| l.contains(" in auth.json; "))
 }
 
 /// Which kith-auth person a call is for: the owner person for Local and owner devices, the invited person for a
@@ -200,6 +223,14 @@ pub(crate) static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::co
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
+
+    #[test]
+    fn the_core_warning_is_told_from_other_stderr() {
+        assert!(core_missed("revoked in auth.json; core store not updated (run it again once kith serve is running)"));
+        assert!(core_missed("kith-auth: kith-ask did not finish: x\nunrevoked in auth.json; may not be updated"));
+        assert!(!core_missed(""));
+        assert!(!core_missed("kith-auth: kith-sessions did not finish: boom"));
+    }
 
     /// A throwaway auth.json driven by the repo's own kith-auth.
     struct Rig {

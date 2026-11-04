@@ -240,15 +240,147 @@ fn cancel_turn(tx: &Transaction<'_>, claim_id: i64, now: i64) -> Result<()> {
     Ok(())
 }
 
+/// Why a claim's turn can never be claimed: the refusal is permanent for that turn, so the claimer cancels it (a retry
+/// would only be refused again, for ever) instead of leaving it `queued`. Busy, held, not-reconciled and "not waiting"
+/// refusals are transient or the turn's own state, so those stay queued.
+///
+/// Only [`Fence::Stopped`] cancels. [`Fence::Revoked`] says the claimer's own epoch is stale; the turn is not touched,
+/// because the epoch belongs to the turn and is checked at [`enqueue_turn_in`]: every turn that exists at a revoke is
+/// cancelled by [`revoke_person`]'s sweep, and a turn queued after an undo is valid even if a stale claimer sees a
+/// refusal (Claims4's `Claim` guard on `ms[t]`; the stale claimer is a refused attempt, not a `FenceCancel`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Fence {
+    /// The conversation's ask was stopped or ended: it takes no ask or wake turn (the fence never lifts).
+    Stopped(String),
+    /// The person's revoke epoch moved after the caller's may check. The turn stays as it is for a fresh claim.
+    Revoked,
+}
+
+impl Fence {
+    /// The reason a cancelled turn is logged with.
+    pub(crate) fn reason(&self) -> &'static str {
+        match self {
+            Self::Stopped(_) => "stopped",
+            Self::Revoked => "revoked",
+        }
+    }
+
+    /// Whether the turn is cancelled for this fence (only a stopped ask's).
+    fn cancels(&self) -> bool {
+        matches!(self, Self::Stopped(_))
+    }
+
+    pub(crate) fn refusal(&self, req: &NewClaim<'_>) -> Error {
+        match self {
+            // Its own kind: the fence never lifts. The core has already cancelled the turn (`claim`, `claim_next`), so a
+            // drain must not cancel it again.
+            Self::Stopped(ask) => Error::Stopped(format!(
+                "kith-core: ask {ask} was stopped; conversation {} takes no ask or wake turn",
+                req.conversation
+            )),
+            Self::Revoked => Error::Refused(format!(
+                "kith-core: {} was revoked after the may check",
+                req.person
+            )),
+        }
+    }
+}
+
+/// The stopped-ask fence of a turn: a stopped or ended ask's conversation takes no new automated turn (the durable half
+/// of the stop: a wake given back or left by a crash, a card resume). A person's turn to that thread stays allowed.
+/// Mirrors kith-ask:472, :834 and :430.
+fn stopped_in(tx: &rusqlite::Connection, turn: i64) -> Result<Option<String>> {
+    Ok(tx
+        .query_row(
+            "SELECT a.id FROM turns t JOIN asks a ON a.conversation = t.conversation
+             WHERE t.id = ?1 AND t.source IN ('ask', 'wake') AND (a.state = 'stopped' OR a.ended_ms IS NOT NULL)",
+            [turn],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// [`stopped_in`] for a caller outside a claim (the exhausted path of `claim_next`).
+pub(crate) fn stopped_fence(core: &Core, turn: i64) -> Result<Option<Fence>> {
+    Ok(stopped_in(core.conn(), turn)?.map(Fence::Stopped))
+}
+
+/// The two refusals of [`claim_checked_in`]. The claimer's revoke epoch is checked first, then the stopped ask.
+fn fence_in(tx: &Transaction<'_>, req: &NewClaim<'_>) -> Result<Option<Fence>> {
+    if epoch(tx, req.person)? != req.revoke_seen {
+        return Ok(Some(Fence::Revoked));
+    }
+    let Some(turn) = req.turn else {
+        return Ok(None);
+    };
+    Ok(stopped_in(tx, turn)?.map(Fence::Stopped))
+}
+
+/// After a claim refused by `fence` (its transaction rolled back): if that fence cancels, cancels the request's turn in
+/// its own write, so nothing retries it for ever. Only a `queued` or `parked` turn of this person is touched (a turn
+/// already claimed, running or finished is another path's); repeating it, or two claimers racing on the same turn,
+/// changes nothing the second time. Returns the fence that applied, if any. A failure of the write leaves the turn
+/// queued for the next attempt and is logged with the fence's reason.
+pub(crate) fn cancel_fenced(
+    core: &mut Core,
+    req: &NewClaim<'_>,
+    fence: &Fence,
+    now: i64,
+) -> Option<Fence> {
+    if !fence.cancels() {
+        return None;
+    }
+    let done = (|| {
+        let tx = core.claim_tx()?;
+        // The fence only moves one way, but the write re-checks it: a stale view cancels nothing.
+        let held = match req.turn {
+            Some(turn) => stopped_in(&tx, turn)?.map(Fence::Stopped),
+            None => None,
+        };
+        if let (Some(_), Some(turn)) = (&held, req.turn) {
+            tx.execute(
+                "UPDATE turns SET state = 'cancelled', parked_reason = NULL, parked_at = NULL, finished_at = ?4
+                 WHERE id = ?1 AND conversation = ?2 AND person = ?3 AND state IN ('queued', 'parked')",
+                params![turn, req.conversation, req.person, now],
+            )?;
+        }
+        tx.commit()?;
+        Ok::<_, Error>(held)
+    })();
+    match done {
+        Ok(held) => held,
+        Err(e) => {
+            kith_kernel::log::note(&format!(
+                "claims: could not cancel turn {:?} of {} ({}): {e}",
+                req.turn,
+                req.conversation,
+                fence.reason()
+            ));
+            None
+        }
+    }
+}
+
 /// Step 1: re-check may (the caller's, other lanes' tables), take the claim and mark the turn claimed, in one
 /// transaction. The partial index `claims_one_writer` is the last word on a second writer. Refused until this
 /// generation's reconcile has committed (step 5).
 pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Claimed> {
-    let generation = core.generation();
-    let tx = core.claim_tx()?;
-    let claimed = claim_in(&tx, generation, req, now)?;
-    tx.commit()?;
-    Ok(claimed)
+    let claimed = (|| {
+        let generation = core.generation();
+        let tx = core.claim_tx()?;
+        let claimed = claim_checked_in(&tx, generation, req, now)?;
+        tx.commit()?;
+        Ok::<_, Error>(claimed)
+    })()?;
+    match claimed {
+        Ok(c) => Ok(c),
+        Err(fence) => {
+            // The refusal rolled back; a stopped ask's turn is cancelled in its own write. Busy and held refusals take no
+            // second write.
+            cancel_fenced(core, req, &fence, now);
+            Err(fence.refusal(req))
+        }
+    }
 }
 
 /// [`claim`] inside the caller's open `claim_tx` (the caller commits; `generation` is the core's own). For a caller that
@@ -260,6 +392,17 @@ pub(crate) fn claim_in(
     req: &NewClaim<'_>,
     now: i64,
 ) -> Result<Claimed> {
+    claim_checked_in(tx, generation, req, now)?.map_err(|fence| fence.refusal(req))
+}
+
+/// [`claim_in`] that hands back the [`Fence`] it refused on (`Ok(Err(fence))`) instead of an error, so the caller cancels
+/// the turn only for a fence and takes no second write for a busy or held refusal.
+pub(crate) fn claim_checked_in(
+    tx: &Transaction<'_>,
+    generation: i64,
+    req: &NewClaim<'_>,
+    now: i64,
+) -> Result<std::result::Result<Claimed, Fence>> {
     if req.kind == Kind::External && req.process.is_none() {
         return Err(Error::BadParams(
             "kith-core: an external claim needs its pid and start time".into(),
@@ -268,12 +411,6 @@ pub(crate) fn claim_in(
     if reconciled(tx)? != Some(generation) {
         return Err(Error::Refused(format!(
             "kith-core: claims wait for the reconcile of generation {generation}"
-        )));
-    }
-    if epoch(tx, req.person)? != req.revoke_seen {
-        return Err(Error::Refused(format!(
-            "kith-core: {} was revoked after the may check",
-            req.person
         )));
     }
     let known: Option<i64> = tx
@@ -289,23 +426,8 @@ pub(crate) fn claim_in(
             req.conversation
         )));
     }
-    // A stopped ask's conversation takes no new automated turn (the durable half of the stop: a wake given back or left
-    // by a crash, a card resume). A person's turn to that thread stays allowed. Mirrors kith-ask:472, :834 and :430.
-    if let Some(turn) = req.turn {
-        let fenced: Option<String> = tx
-            .query_row(
-                "SELECT a.id FROM turns t JOIN asks a ON a.conversation = t.conversation
-                 WHERE t.id = ?1 AND t.source IN ('ask', 'wake') AND (a.state = 'stopped' OR a.ended_ms IS NOT NULL)",
-                [turn],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(ask) = fenced {
-            return Err(Error::Refused(format!(
-                "kith-core: ask {ask} was stopped; conversation {} takes no ask or wake turn",
-                req.conversation
-            )));
-        }
+    if let Some(fence) = fence_in(tx, req)? {
+        return Ok(Err(fence));
     }
     let writer: Option<(i64, String)> = tx
         .query_row(
@@ -359,10 +481,10 @@ pub(crate) fn claim_in(
             )));
         }
     }
-    Ok(Claimed {
+    Ok(Ok(Claimed {
         claim_id,
         generation,
-    })
+    }))
 }
 
 /// Step 3, the redeem: CAS `claimed -> running`, only while the claim is still the writer slot (`claims_one_writer`
@@ -952,6 +1074,9 @@ pub(crate) struct NewTurn<'a> {
     pub prompt: &'a str,
     /// A scheduled run expires at this time instead of waiting for ever (q218).
     pub deadline: Option<i64>,
+    /// [`revoke_epoch`] of `person`, read before the enqueuer's may check. The turn is refused if a revoke committed since:
+    /// the epoch belongs to the turn, so [`revoke_person`]'s sweep covers every turn that exists at a revoke.
+    pub revoke_seen: i64,
 }
 
 /// Queues a turn (`queued`), creating the conversation when needed.
@@ -980,6 +1105,14 @@ fn check_turn(t: &NewTurn<'_>) -> Result<()> {
 /// fire row, the turn and the watermark in one.
 pub(crate) fn enqueue_turn_in(tx: &Transaction<'_>, t: &NewTurn<'_>, now: i64) -> Result<i64> {
     check_turn(t)?;
+    // Inside the transaction that inserts the turn, so a revoke either commits first (refused here) or after (its sweep
+    // cancels this turn): no turn is queued past a revoke its enqueuer did not see (Claims4's c4-epochleak).
+    if epoch(tx, t.person)? != t.revoke_seen {
+        return Err(Error::Refused(format!(
+            "kith-core: {} was revoked after the may check",
+            t.person
+        )));
+    }
     tx.execute(
         "INSERT OR IGNORE INTO conversations (id, agent, engine, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
         params![t.conversation, t.agent, t.engine, now],
