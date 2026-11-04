@@ -705,7 +705,9 @@ pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: b
 }
 
 /// After `person`'s access changed: a bot's turn on an agent its owner no longer holds stops now, so a long turn
-/// doesn't outlive the permission. (`may_use` already refuses the bot's next call.)
+/// doesn't outlive the permission. (`may_use` already refuses the bot's next call.) With `KITH_CORE_AUTHORITY=1`
+/// `may_use` asks the core (api/authority.rs, M2-16): a bot is allowed there only while its own row and its owner's both
+/// hold, and a core that can't be asked in time counts as "no", so a turn is stopped, never let run on a hiccup.
 pub(crate) async fn enforce(hub: &Hub, person: &str) {
     for g in hub.store.bot_guests().unwrap_or_default() {
         if !g.state.live() || g.owner_person.as_deref() != Some(person) {

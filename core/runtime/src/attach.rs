@@ -548,6 +548,7 @@ impl Relay {
                         code: None,
                         signal: None,
                         error: None,
+                        lapsed: false,
                     }),
                     tail: tail[tail.len().saturating_sub(ENDED_TAIL)..].to_vec(),
                     cols: term.cols,
