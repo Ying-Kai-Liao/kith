@@ -1681,7 +1681,7 @@ fn a_delivery_reads_the_master_key_only_when_the_jobs_key_exists() {
             seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(Some(zeroize::Zeroizing::new(vec![9u8; 32])))
         })),
-        ..quiet()
+        ..hosted()
     };
     let d = serving(&p, cfg);
     let fire = json!({"agent": "mel", "id": "h", "headers": {"authorization": "Bearer x"}, "body": "{}", "caller": "cloud"});
