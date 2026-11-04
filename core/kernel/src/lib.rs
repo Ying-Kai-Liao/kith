@@ -11,6 +11,9 @@ pub mod engines;
 pub mod launch;
 pub mod log;
 pub mod paths;
+// Unix only: it writes projects.json through `secrets::pyjson`.
+#[cfg(unix)]
+pub mod project;
 pub mod procstart;
 pub mod schedule;
 #[cfg(unix)]

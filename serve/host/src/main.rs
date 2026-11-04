@@ -501,6 +501,16 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
+    /// The kith project of a directory, as `kernel/bin/project-id` answers it (not routed from `kith` yet; a guest run is
+    /// refused here and stays with the Python, which asks the host over the run socket).
+    #[command(name = "project-id")]
+    ProjectId {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// What a launch assembles, one piece at a time (not routed from `kith AGENT` yet).
     Launch {
         #[command(subcommand)]
@@ -825,6 +835,24 @@ fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let ctx = kith_kernel::secrets::Ctx::from_process(&kernel);
     let (verb, rest) = args.split_first().map_or(("", &[][..]), |(v, r)| (v.as_str(), r));
     let out = kith_kernel::secrets::run(&ctx, verb, rest);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
+}
+
+fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let env = |n: &str| kith_kernel::paths::process_env(n).filter(|v| !v.is_empty());
+    let ctx = kith_kernel::project::Ctx {
+        state: kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state,
+        home,
+        cwd: std::env::current_dir().unwrap_or_default(),
+        guest: env("KITH_RUN_TOKEN").is_some() && env("KITH_RUN_SOCKET").is_some(),
+    };
+    let out = kith_kernel::project::run(&ctx, args);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
@@ -1337,6 +1365,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
             }
+            if let KernelCmd::ProjectId { kernel, args } = cmd {
+                std::process::exit(project_id_cmd(kernel, &args));
+            }
             through_core(|| -> Result<()> {
                 match cmd {
                     KernelCmd::Version => println!("{}", kith_kernel::version_json()),
@@ -1408,6 +1439,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Accounts { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
+                    | KernelCmd::ProjectId { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
