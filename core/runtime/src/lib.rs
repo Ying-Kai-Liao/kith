@@ -26,6 +26,9 @@ mod call;
 // claim and close verbs get theirs there and in M2-12.
 #[allow(dead_code, reason = "first callers are lane H")]
 mod cards;
+// The claim code (M3-2): the holder pipes, the warm runner and `terminal.open` call it from M3-4 on.
+#[allow(dead_code, reason = "first callers are M3-4, M3-5 and M3-11")]
+mod conversations;
 mod daemon;
 // Nothing calls the doors but the daemon's `doors.*` rows and the tests: the host's sweep and `kith_door.py` switch later.
 #[cfg(unix)]

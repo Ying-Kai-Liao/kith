@@ -25,27 +25,39 @@ CONSTANTS MaxClaim, MaxInst, MaxPid, MaxGen,
           RecordAtSpawn,       \* the core records a pid when it hears SPAWNED (not only on the poll)
           WriterLock,          \* the M3 stub: holds the conversation's lock for the engine's life; busy = exit
           RedeemChecksClaim,   \* the M3 stub's redeem refuses a claim that is not core.db's current one (with WriterLock)
-          HolderCrash          \* the holder may crash (one restart per instance bound)
+          HolderCrash,         \* the holder may crash (one restart per instance bound)
+          \* M3-2 (core/runtime/src/conversations/claims.rs). RedeemWrite on = the rules of the skill's "Open finding": the
+          \* redeem is a core.db CAS that records the redeemer's pid, a release on a new instance is a CAS, and a running
+          \* claim is never released until the recorded pid is gone. Off = the omniscient core of the architect's model
+          \* (the claim is only "done or not"), which fails DoneTruth after a holder crash.
+          RedeemWrite,
+          RedeemCAS,           \* (with RedeemWrite) the stub starts its engine only if the redeem CAS succeeds
+          HoldRunning          \* (with RedeemWrite) an unlisted running claim goes to ending, not straight to ended
 
 Pids == 1..MaxPid
 Max(a, b) == IF a > b THEN a ELSE b
 
 VARIABLES inst, entries, nextId, hw,
           pState, pClaim, pInst, nextPid,
-          gen, conn, cur, curDone, idmap, heard, rec, recInst, writers
+          gen, conn, cur, cst, cpid, idmap, heard, rec, recInst, writers
 
 vars == <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid,
-          gen, conn, cur, curDone, idmap, heard, rec, recInst, writers>>
+          gen, conn, cur, cst, cpid, idmap, heard, rec, recInst, writers>>
 
 Init ==
   /\ inst = 1 /\ entries = {} /\ nextId = 1 /\ hw = 0
   /\ pState = [p \in Pids |-> "none"] /\ pClaim = [p \in Pids |-> 0] /\ pInst = [p \in Pids |-> 0]
   /\ nextPid = 1
-  /\ gen = 1 /\ conn = FALSE /\ cur = 0 /\ curDone = TRUE
+  /\ gen = 1 /\ conn = FALSE /\ cur = 0 /\ cst = "ended" /\ cpid = 0
   /\ idmap = {} /\ heard = {} /\ rec = {} /\ recInst = 0
   /\ writers = {}
 
 Live(p) == pState[p] \in {"starting", "writer"}
+
+\* core.db's claims.state of the current claim (claim 0 = none yet = over): claimed -> running (redeem) -> ending (a new
+\* instance does not list it) -> ended (the recorded pid is gone); claimed -> ended (release, an exit report).
+\* cpid is claims.pid, the redeemer's process.
+curDone == cst = "ended"
 
 \* What the core takes holder id `id` (heard on instance i) to be.
 MapsTo(i, id, k) == \E m \in idmap : m.id = id /\ m.claim = k /\ (KeyByInstance => m.inst = i)
@@ -57,30 +69,36 @@ Connect ==
   /\ ~conn
   /\ LET newInst == recInst # 0 /\ recInst # inst
          listed  == {e.pid : e \in entries}
-         killed  == IF newInst THEN {p \in rec : pInst[p] = recInst /\ p \notin listed} ELSE {} IN
+         killed  == IF newInst THEN {p \in rec : pInst[p] = recInst /\ p \notin listed} ELSE {}
+         unlisted == newInst /\ ~\E e \in entries : e.claim = cur IN
      /\ conn' = TRUE
      /\ idmap' = idmap \cup {[inst |-> inst, id |-> e.id, claim |-> e.claim] : e \in entries}
-     /\ heard' = heard \cup {[inst |-> inst, id |-> e.id] : e \in {f \in entries : f.exit}}
+     /\ heard' = heard \cup {[inst |-> inst, id |-> e.id, pid |-> e.pid] : e \in {f \in entries : f.exit}}
      /\ pState' = [p \in Pids |-> IF p \in killed /\ Live(p) THEN "ended" ELSE pState[p]]
      /\ rec' = {e.pid : e \in {f \in entries : ~f.exit}}
      /\ recInst' = inst
-     \* design s.4 step 7: a claim the new instance does not list is released once the old groups are ended
-     /\ curDone' = (curDone \/ (newInst /\ ~\E e \in entries : e.claim = cur))
-  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, cur, writers>>
+     \* design s.4 step 7. claims.rs release_unlisted: an unlisted claimed claim is ended by CAS (a late redeem fails); an
+     \* unlisted running one goes to ending and stays the writer until its recorded pid is gone (HoldRunning). Without
+     \* RedeemWrite: the claim is released outright, once the old groups the core knew of are ended.
+     /\ cst' = IF ~RedeemWrite THEN (IF curDone \/ unlisted THEN "ended" ELSE cst)
+              ELSE IF unlisted /\ cst = "claimed" THEN "ended"
+              ELSE IF unlisted /\ cst = "running" THEN (IF HoldRunning THEN "ending" ELSE "ended")
+              ELSE cst
+  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, cur, cpid, writers>>
 
 Disconnect ==
   /\ conn /\ conn' = FALSE
-  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, cur, curDone, idmap, heard, rec, recInst, writers>>
+  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, cur, cst, cpid, idmap, heard, rec, recInst, writers>>
 
-\* The core crashes and restarts: memory gone, core.db (cur, curDone, rec, recInst) kept, generation bumped.
+\* The core crashes and restarts: memory gone, core.db (cur, cst, cpid, rec, recInst) kept, generation bumped.
 CoreRestart ==
   /\ gen < MaxGen
   /\ gen' = gen + 1 /\ conn' = FALSE /\ idmap' = {} /\ heard' = {}
-  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, cur, curDone, rec, recInst, writers>>
+  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, cur, cst, cpid, rec, recInst, writers>>
 
 TakeClaim ==
   /\ curDone /\ cur < MaxClaim
-  /\ cur' = cur + 1 /\ curDone' = FALSE
+  /\ cur' = cur + 1 /\ cst' = "claimed" /\ cpid' = 0
   /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, idmap, heard, rec, recInst, writers>>
 
 \* The holder's spawn decision for claim k (holder.rs spawn plus the switches).
@@ -112,70 +130,92 @@ Spawn(k, lost) ==
             /\ idmap' = IF lost THEN idmap ELSE idmap \cup {[inst |-> inst, id |-> nextId, claim |-> k]}
             /\ rec' = IF RecordAtSpawn /\ ~lost THEN rec \cup {nextPid} ELSE rec
   /\ conn' = ~lost
-  /\ UNCHANGED <<inst, gen, cur, curDone, heard, recInst>>
+  /\ UNCHANGED <<inst, gen, cur, cst, cpid, heard, recInst>>
 
 \* The 5 s poll: LIST, and the record follows the running entries.
 Poll ==
   /\ conn /\ recInst = inst
   /\ rec' = {e.pid : e \in {f \in entries : ~f.exit}}
-  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, curDone, idmap, heard, recInst, writers>>
+  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, cst, cpid, idmap, heard, recInst, writers>>
 
 \* EXITED reaches the core.
 Hear(e) ==
   /\ conn /\ e \in entries /\ e.exit
-  /\ heard' = heard \cup {[inst |-> inst, id |-> e.id]}
-  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, curDone, idmap, rec, recInst, writers>>
+  /\ heard' = heard \cup {[inst |-> inst, id |-> e.id, pid |-> e.pid]}
+  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, cst, cpid, idmap, rec, recInst, writers>>
 
-\* The core takes a heard exit as the end of the claim it maps the id to.
+\* The core takes a heard exit as the end of the claim it maps the id to (claims.rs report, kinds done and exit). With
+\* RedeemWrite an exit that names another process than the recorded redeemer ends nothing (apply: `said != rec`).
 Settle(h) ==
   /\ h \in heard /\ ~curDone /\ MapsTo(h.inst, h.id, cur)
-  /\ curDone' = TRUE
-  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, idmap, heard, rec, recInst, writers>>
+  /\ (RedeemWrite /\ cst \in {"running", "ending"}) => h.pid = cpid
+  /\ cst' = "ended"
+  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, cpid, idmap, heard, rec, recInst, writers>>
+
+\* claims.rs end_gone (after the kill by recorded pid and start time): ending -> ended only once the pid is confirmed gone.
+\* The kill itself needs no holder connection: it is by pid.
+KillRecorded ==
+  /\ RedeemWrite /\ cst = "ending" /\ cpid # 0
+  /\ pState' = [pState EXCEPT ![cpid] = IF Live(cpid) THEN "ended" ELSE pState[cpid]]
+  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, conn, cur, cst, cpid, idmap, heard, rec, recInst, writers>>
+
+ConfirmGone ==
+  /\ RedeemWrite /\ cst = "ending" /\ cpid # 0 /\ ~Live(cpid)
+  /\ cst' = "ended"
+  /\ UNCHANGED <<inst, entries, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, cpid, idmap, heard, rec, recInst, writers>>
 
 \* ACK(id) for an exit the core heard; the holder drops the entry if it has an exit (holder.rs p::ACK).
 Ack(h) ==
   /\ conn /\ h \in heard /\ (KeyByInstance => h.inst = inst)
   /\ entries' = {e \in entries : ~(e.id = h.id /\ e.exit)}
   /\ heard' = heard \ {h}
-  /\ UNCHANGED <<inst, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, curDone, idmap, rec, recInst, writers>>
+  /\ UNCHANGED <<inst, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, cst, cpid, idmap, rec, recInst, writers>>
 
 \* KILL(id) for the id the core maps to its current claim (a revoke or a take-over).
 Kill(m) ==
   /\ conn /\ m \in idmap /\ m.claim = cur /\ ~curDone /\ (KeyByInstance => m.inst = inst)
   /\ pState' = [p \in Pids |-> IF (\E e \in entries : e.id = m.id /\ e.pid = p) /\ Live(p) THEN "ended" ELSE pState[p]]
-  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, conn, cur, curDone, idmap, heard, rec, recInst, writers>>
+  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, conn, cur, cst, cpid, idmap, heard, rec, recInst, writers>>
 
 \* ---- processes and the holder ----
 
 \* The M3 stub takes the conversation's writer lock, or exits busy.
+\* With RedeemWrite, claims.rs redeem: the CAS claimed -> running for the stub's own claim, recording its pid (cpid); a
+\* refused CAS (the claim was released, ended, or is another's) and the stub exits without starting the engine. Lock and
+\* redeem are one step here: a stub that holds the lock between the two writes nothing.
+\* Without RedeemCAS the stub starts its engine whatever the claim says (the record is only written from claimed).
 TakeLock(p) ==
   /\ WriterLock /\ pState[p] = "starting"
-  /\ IF \/ \E q \in Pids : pState[q] = "writer"
-        \* design s.4: the stub redeems its claim in core.db; a claim that is not the current one is refused
-        \/ RedeemChecksClaim /\ (pClaim[p] # cur \/ curDone)
-       THEN pState' = [pState EXCEPT ![p] = "ended"] /\ UNCHANGED writers
-       ELSE pState' = [pState EXCEPT ![p] = "writer"] /\ writers' = writers \cup {[claim |-> pClaim[p], pid |-> p]}
-  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, conn, cur, curDone, idmap, heard, rec, recInst>>
+  /\ LET casOk == pClaim[p] = cur /\ cst = "claimed"
+         refused == IF RedeemWrite
+                      THEN RedeemCAS /\ ~casOk
+                      ELSE RedeemChecksClaim /\ (pClaim[p] # cur \/ curDone) IN
+     IF \/ \E q \in Pids : pState[q] = "writer"
+        \/ refused
+       THEN /\ pState' = [pState EXCEPT ![p] = "ended"] /\ UNCHANGED <<writers, cst, cpid>>
+       ELSE /\ pState' = [pState EXCEPT ![p] = "writer"] /\ writers' = writers \cup {[claim |-> pClaim[p], pid |-> p]}
+            /\ IF RedeemWrite /\ casOk THEN cst' = "running" /\ cpid' = p ELSE UNCHANGED <<cst, cpid>>
+  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, conn, cur, idmap, heard, rec, recInst>>
 
 \* The job ends by itself (orphans too).
 End(p) ==
   /\ pState[p] = "writer"
   /\ pState' = [pState EXCEPT ![p] = "ended"]
-  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, conn, cur, curDone, idmap, heard, rec, recInst, writers>>
+  /\ UNCHANGED <<inst, entries, nextId, hw, pClaim, pInst, nextPid, gen, conn, cur, cst, cpid, idmap, heard, rec, recInst, writers>>
 
 \* reap: the exit is recorded once, after the tree is swept.
 Reap(e) ==
   /\ e \in entries /\ ~e.exit /\ pState[e.pid] = "ended"
   /\ entries' = (entries \ {e}) \cup {[e EXCEPT !.exit = TRUE]}
-  /\ UNCHANGED <<inst, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, curDone, idmap, heard, rec, recInst, writers>>
+  /\ UNCHANGED <<inst, nextId, hw, pState, pClaim, pInst, nextPid, gen, conn, cur, cst, cpid, idmap, heard, rec, recInst, writers>>
 
 Crash ==
   /\ HolderCrash /\ inst < MaxInst
   /\ inst' = inst + 1 /\ entries' = {} /\ nextId' = 1 /\ hw' = 0 /\ conn' = FALSE
-  /\ UNCHANGED <<pState, pClaim, pInst, nextPid, gen, cur, curDone, idmap, heard, rec, recInst, writers>>
+  /\ UNCHANGED <<pState, pClaim, pInst, nextPid, gen, cur, cst, cpid, idmap, heard, rec, recInst, writers>>
 
 Next ==
-  \/ Connect \/ Disconnect \/ CoreRestart \/ TakeClaim \/ Poll \/ Crash
+  \/ Connect \/ Disconnect \/ CoreRestart \/ TakeClaim \/ Poll \/ Crash \/ KillRecorded \/ ConfirmGone
   \/ \E k \in 1..MaxClaim, lost \in BOOLEAN : Spawn(k, lost)
   \/ \E e \in entries : Hear(e) \/ Reap(e)
   \/ \E h \in heard : Settle(h) \/ Ack(h)
