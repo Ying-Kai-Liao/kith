@@ -160,7 +160,7 @@ fn secrets_call_at(folders: &Paths, method: &str, params: &Value, wait: std::tim
         match kith_core::reach(folders, method, params, true) {
             kith_core::Reached::Answered(answer) => return Ok(answer),
             kith_core::Reached::Refused(e) => anyhow::bail!("{e}"),
-            kith_core::Reached::NoDaemon if std::time::Instant::now() < deadline => {
+            kith_core::Reached::NoDaemon if std::time::Instant::now() < deadline && !crate::service::is_exiting() => {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
             kith_core::Reached::NoDaemon => {
@@ -199,7 +199,8 @@ fn secrets_has_at(folders: &Paths, name: &str, wait: std::time::Duration) -> any
                 if state == "no-core" {
                     return Ok(false);
                 }
-                if std::time::Instant::now() >= deadline {
+                // A leaving host stops waiting: the core goes with it, and the runtime waits for this thread.
+                if std::time::Instant::now() >= deadline || crate::service::is_exiting() {
                     anyhow::bail!(
                         "the core is not running ({state}: {}; kith doctor says more; secrets need it)",
                         status["core"]["note"].as_str().unwrap_or("-")

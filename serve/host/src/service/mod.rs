@@ -216,6 +216,15 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(10);
 /// A marker older than this is not a host that is leaving now (it crashed or the exit stalled).
 const EXITING_FRESH: Duration = Duration::from_secs(30);
 
+/// Set by [`mark_exiting`]. Waits for another process (the core) end on it: a host that is leaving must not hold its
+/// shutdown for a core that is leaving too (the runtime waits for blocking threads when it drops).
+static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether this host has begun to exit.
+pub fn is_exiting() -> bool {
+    EXITING.load(std::sync::atomic::Ordering::Acquire)
+}
+
 fn exiting_marker() -> PathBuf {
     data_dir().join("host.exiting")
 }
@@ -223,6 +232,7 @@ fn exiting_marker() -> PathBuf {
 /// Called by a host right before it exits (watchdog or shutdown): tells a starting host that the lock is about
 /// to be freed, so it should wait instead of refusing. Best effort; the OS drops the lock with the process.
 pub fn mark_exiting() {
+    EXITING.store(true, std::sync::atomic::Ordering::Release);
     let _ = std::fs::write(exiting_marker(), std::process::id().to_string());
 }
 
