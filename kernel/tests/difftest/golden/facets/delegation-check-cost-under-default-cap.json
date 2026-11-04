@@ -1,0 +1,10 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "state:home/.kith/live/ask/other.reg": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}",
+  "state:home/.kith/live/ask/p.reg": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}",
+  "state:home/.kith/live/ask/q.reg": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 2.9}",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"ask\": \"p\",\n  \"chain\": \"c\",\n  \"cost_base\": 0.0,\n  \"cross_hops\": 0,\n  \"crossed\": false,\n  \"hop\": 2\n}\n",
+  "step0.stderr": ""
+}

@@ -1,0 +1,12 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{\n  \"account\": \"claude:gone\",\n  \"agents\": {\n    \"cdx\": {\n      \"account\": \"codex:gone\"\n    }\n  }\n}\n",
+  "state:kith/agents/cdx/role/agent.md": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n",
+  "step0.exit": "4\n",
+  "step0.stderr": "kith: echo's main account claude:gone: no account gone (make it ready: kith account add claude gone); or run on the default login: kith account unpin echo\n",
+  "step0.stdout": "",
+  "step1.exit": "4\n",
+  "step1.stderr": "kith: cdx's main account codex:gone: no account gone (make it ready: kith account add codex gone); or run on the default login: kith account unpin cdx\n",
+  "step1.stdout": ""
+}

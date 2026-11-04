@@ -1,0 +1,17 @@
+{
+  "fakes": "",
+  "state:home/.kith/accounts/claude/.hidden/": "<empty dir>\n",
+  "state:home/.kith/accounts/claude/other/": "<empty dir>\n",
+  "state:home/.kith/accounts/claude/work/": "<empty dir>\n",
+  "state:home/.kith/accounts/codex/b/": "<empty dir>\n",
+  "state:home/.kith/accounts/codex/c/": "<empty dir>\n",
+  "state:home/.kith/settings.json": "{\n  \"account\": \"claude:work\",\n  \"agents\": {\n    \"cdx\": {\n      \"account\": \"codex:b\"\n    }\n  }\n}\n",
+  "state:kith/agents/cdx/role/agent.md": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "main_id=claude:work backup_harness=claude backup_account=work backup_cfg_var=CLAUDE_CONFIG_DIR backup_cfg_dir=<HOME>/.kith/accounts/claude/work backup_api_helper='' backup_model=''\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "main_id=codex:b backup_harness=codex backup_account=b backup_cfg_var=CODEX_HOME backup_cfg_dir=<HOME>/.kith/accounts/codex/b backup_api_helper='' backup_model=''\n"
+}

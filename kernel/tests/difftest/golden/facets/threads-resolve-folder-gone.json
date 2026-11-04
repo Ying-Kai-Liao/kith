@@ -1,0 +1,11 @@
+{
+  "fakes": "",
+  "state:home/.claude/projects/-work/abc-1.jsonl": "{\"type\": \"summary\"}\n{\"cwd\": \"<HOME>/gone\", \"type\": \"user\"}\n",
+  "state:home/.kith/live/terminal/abc-1.claim.lock": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: the session's folder <HOME>/gone is gone\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "",
+  "step1.stdout": ""
+}

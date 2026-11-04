@@ -1,0 +1,8 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "state:home/.kith/live/ask/p.reg": "{\"chain\": \"c\", \"hop\": 6, \"cross_hops\": 0, \"cost\": 0.0}",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"ask\": \"p\",\n  \"chain\": \"c\",\n  \"cost_base\": 0.0,\n  \"cross_hops\": 0,\n  \"crossed\": false,\n  \"hop\": 7\n}\n",
+  "step0.stderr": ""
+}

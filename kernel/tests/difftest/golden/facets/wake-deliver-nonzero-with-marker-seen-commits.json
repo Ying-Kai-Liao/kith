@@ -1,0 +1,16 @@
+{
+  "fakes": "",
+  "state:home/.claude/projects/p/s1.jsonl": "",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"turn\", \"session\": \"s1\", \"run\": \"<ID12>\", \"ids\": [\"a\"]}\n{\"at\": \"<TS>\", \"event\": \"back\", \"session\": \"s1\", \"run\": \"<ID12>\", \"held\": false, \"why\": \"exit 3: oops\"}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"run\",\n  \"next\": \"<EPOCH>\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"a\",\n      \"run\": null,\n      \"text\": \"hi\",\n      \"why\": \"\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"s1\",\n  \"tries\": 1,\n  \"turn\": null,\n  \"v\": 1\n}\n",
+  "state:home/bin/kith-fake": "#!/bin/sh\necho oops >&2\nexit 3\n",
+  "state:home/logs/wake/<ID12>.err": "oops\n",
+  "state:home/logs/wake/<ID12>.log": "",
+  "step0.exit": "3\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"id\": \"a\",\n  \"run\": null,\n  \"state\": \"queued\"\n}\n",
+  "step1.stderr": ""
+}

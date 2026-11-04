@@ -1,0 +1,9 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "state:home/.kith/live/ask/p.reg": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2000000.0}",
+  "state:home/.kith/settings.json": "{\n  \"delegation\": {\n    \"chain_cost_cap_usd\": 1234567\n  }\n}\n",
+  "step0.exit": "4\n",
+  "step0.stderr": "kith ask: delegation cost cap: chain c has spent US$2000000.00 of its US$1.23457e+06 cap; ask the user before starting another ask\n",
+  "step0.stdout": ""
+}
