@@ -1,0 +1,110 @@
+//! Version 80: conversations, claims, turns and reports (runtime-design section 4, the start protocol). Nothing writes
+//! these tables in production yet: the claim code is M3-2 on, and terminal.rs keeps the claim files until M3-11.
+//!
+//! Tables:
+//! - `conversations`: one row per conversation. The engine session is a pointer (`engine_session`, `transcript_ptr`:
+//!   a Claude session is a directory, not a file) and the hash the core last read (`transcript_hash`, section 4
+//!   "Transcripts"). `account` is the account the conversation runs on; there is no mid-life move (q216-q219), a failover
+//!   starts a new claim on another account and records it on that claim.
+//! - `claims`: the writer claim. `claim_id` is the id from `counters.claim_id` (`Core::next_claim_id`), so it is never
+//!   reused. `kind`: `terminal` (the holder's TUI), `turn` (a headless prompt) or `external` (a `--direct` run, with
+//!   `pid` and `pid_started` so a reused pid is never mistaken for the writer). `state`: `queued` (asked for, not yet
+//!   held), `claimed` (held, spawn sent), `running` (redeemed), `ended`. At most one claim per conversation is
+//!   `claimed` or `running` (the partial unique index `claims_one_writer`: the row itself refuses a second writer).
+//!   `generation` is the core's at the claim; `holder_instance` is the holder the spawn went to (step 7).
+//! - `turns`: the queue of work. A turn names its current `claim_id` (NULL while queued or parked). `parked` turns wait
+//!   for the writer lock (`parked_reason` = `lock_busy`, `terminal_live`); `deadline` expires a scheduled run (q218).
+//! - `reports`: what the holder or stub told the core about a claim: `spawned`, `busy`, `done`, `exit`. Keyed by
+//!   `(claim_id, kind)` and kept until `acked_at` is set, never overwritten: `INSERT OR IGNORE` makes a retried report
+//!   idempotent, a `busy` cannot replace an unacked `done`, and a report for an old claim id lands under that id, never on
+//!   the current claim's. The core acts only on reports whose claim id is the conversation's current claim.
+//!
+//! How the start protocol (section 4) maps to rows, each step in one `Core::claim_tx`:
+//! 1. Claim: re-check may (other lanes' tables, in code), `next_claim_id`, `INSERT claims (state 'claimed', generation)`;
+//!    `UPDATE turns SET claim_id, state 'claimed'`. The partial index fails the insert when a writer exists.
+//! 2. Spawn: after commit; `claims.holder_instance` is set in the step-1 transaction.
+//! 3. Redeem (the stub, through the core): `claims` 'claimed' -> 'running' with `running_at`, `pid`; `turns` 'running'.
+//!    A busy lock: `claims` -> 'ended' (`end_reason` 'busy'), `turns` -> 'parked' (`lock_busy`, `claim_id` NULL).
+//!    Revoke or stop: `claims` -> 'ended' and the turn dropped or requeued in the same transaction.
+//! 4. Exit: `reports` row kept; the ack sets `reports.acked_at`, ends the claim and marks the turn 'done' or 'queued'.
+//! 5. Reconcile: after the generation bump, one transaction ends the claims the holder does not list and requeues their
+//!    turns; claims are refused until it commits (the check is in code, the generation guard is `claim_tx`).
+//! 6. Revoke: `turns` of the person in 'queued' / 'parked' are cancelled, live claims 'ended'.
+//! 7. A different holder: `claims` with the old `holder_instance` and state 'claimed' / 'running' are the ones to kill
+//!    and end (index `claims_holder`).
+//!
+//! No SQL foreign key to another lane's table (people, agents, cards): those links live in code. The tables here point
+//! at each other, which is the same lane.
+
+use super::Migration;
+
+pub(super) const MIGRATION: Migration = Migration {
+    version: 80,
+    name: "conversations",
+    sql: "
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            agent TEXT NOT NULL,
+            engine TEXT NOT NULL,
+            engine_session TEXT,
+            transcript_ptr TEXT,
+            transcript_hash TEXT,
+            account TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX conversations_agent ON conversations (agent);
+
+        CREATE TABLE claims (
+            claim_id INTEGER PRIMARY KEY,
+            conversation TEXT NOT NULL REFERENCES conversations (id),
+            generation INTEGER NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('terminal', 'turn', 'external')),
+            state TEXT NOT NULL CHECK (state IN ('queued', 'claimed', 'running', 'ended')),
+            holder_instance TEXT,
+            pid INTEGER,
+            pid_started INTEGER,
+            account TEXT,
+            end_reason TEXT,
+            created_at INTEGER NOT NULL,
+            claimed_at INTEGER,
+            running_at INTEGER,
+            ended_at INTEGER,
+            CHECK (kind <> 'external' OR (pid IS NOT NULL AND pid_started IS NOT NULL))
+        );
+        CREATE UNIQUE INDEX claims_one_writer ON claims (conversation) WHERE state IN ('claimed', 'running');
+        CREATE INDEX claims_conversation ON claims (conversation, claim_id);
+        CREATE INDEX claims_holder ON claims (holder_instance) WHERE state IN ('claimed', 'running');
+
+        CREATE TABLE turns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation TEXT NOT NULL REFERENCES conversations (id),
+            claim_id INTEGER REFERENCES claims (claim_id),
+            person TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL CHECK (source IN ('app', 'schedule', 'ask', 'wake', 'terminal', 'child')),
+            prompt TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL CHECK (state IN
+                ('queued', 'claimed', 'running', 'parked', 'done', 'failed', 'cancelled', 'expired')),
+            parked_reason TEXT CHECK (parked_reason IN ('lock_busy', 'terminal_live')),
+            parked_at INTEGER,
+            deadline INTEGER,
+            requeues INTEGER NOT NULL DEFAULT 0,
+            queued_at INTEGER NOT NULL,
+            started_at INTEGER,
+            finished_at INTEGER,
+            CHECK ((state = 'parked') = (parked_reason IS NOT NULL))
+        );
+        CREATE INDEX turns_queue ON turns (conversation, id) WHERE state IN ('queued', 'parked');
+        CREATE INDEX turns_claim ON turns (claim_id) WHERE claim_id IS NOT NULL;
+
+        CREATE TABLE reports (
+            claim_id INTEGER NOT NULL REFERENCES claims (claim_id),
+            kind TEXT NOT NULL CHECK (kind IN ('spawned', 'busy', 'done', 'exit')),
+            body TEXT NOT NULL DEFAULT '{}',
+            received_at INTEGER NOT NULL,
+            acked_at INTEGER,
+            PRIMARY KEY (claim_id, kind)
+        ) WITHOUT ROWID;
+        CREATE INDEX reports_unacked ON reports (claim_id) WHERE acked_at IS NULL;
+    ",
+};
