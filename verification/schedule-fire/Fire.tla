@@ -60,7 +60,7 @@ CONSTANTS NS,            \* timed slots 1..NS, slot k at time P*k
           PauseCancels,  \* TRUE: pausing cancels the job's queued, parked and claimed turns
           PauseLater,    \* TRUE: that cancel is a second transaction after the index write (needs PauseCancels)
           RevokeCancels, \* TRUE: revoke_person cancels the person's unfinished turns (M3-2 rule 6)
-          ClaimMay,      \* TRUE: a claim re-checks may (claims.rs revoke_seen) and refuses a revoked person
+          ClaimMay,      \* TRUE: a claim carries a may check and revoke_seen (claims.rs:32-37); FALSE: no may check at all
           DeadlineCheck, \* TRUE: a claim needs now < deadline
           DlFromSlot,    \* TRUE (broken): the deadline is the next slot after the SLOT time, not after the clock read
           Window,        \* TRUE: the catch-up window applies
@@ -296,12 +296,18 @@ TurnStep(i, new) ==
   /\ UNCHANGED <<now, wm, up, def, revoked, repoch, cut, held, fires, ans, pend, defHist, revHist>>
 
 \* A queued turn tries the conversation: held -> parked (lock_busy); free -> claimed. A parked turn is re-probed.
-\* The claim re-checks may and refuses a revoked person (claims.rs: revoke_seen, the epoch).
+\* The claim's may check is the caller's, taken before the transaction (claims.rs:32-37): it may have read any past
+\* authority snapshot, and the claim is refused only when revoke_epoch moved since (revoke_seen). So a claim whose may
+\* check ran before the authority revoke still commits until revoke_person bumps the epoch; what stops a late claim is
+\* the turn's state (revoke_person cancels the person's pending turns in the epoch's transaction).
+ClaimMayOk(i) ==
+  ~ClaimMay \/ \E a \in AuthChoices : ~a.rv[turn[i].person] /\ a.ep[turn[i].person] = repoch[turn[i].person]
+
 Claim(i) ==
   /\ up /\ turn[i].st \in Pending
   /\ (~DeadlineCheck \/ now < turn[i].dl)
   /\ IF held THEN turn[i].st = "queued" /\ TurnStep(i, "parked")
-     ELSE (~ClaimMay \/ ~revoked[turn[i].person]) /\ TurnStep(i, "claimed")
+     ELSE ClaimMayOk(i) /\ TurnStep(i, "claimed")
 
 Expire(i) == /\ up /\ turn[i].st \in Pending /\ turn[i].dl <= now /\ TurnStep(i, "expired")
 Start(i) == /\ up /\ turn[i].st = "claimed" /\ TurnStep(i, "running")
@@ -387,9 +393,11 @@ DeadlineExpires ==
 \* After a pause commits, no turn starts (claims) until the job is unpaused.
 PausedNeverStarts ==
   [][\A i \in Ids : (turn[i].st # "claimed" /\ turn'[i].st = "claimed") => ~def'.paused]_vars
-\* After the authority revoke commits, no turn of the person is claimed (the claim's may check).
+\* After revoke_person has run for a revoke, no turn of the person is claimed. (Between the authority revoke and
+\* revoke_person a claim with a stale may check can still commit; revoke_person then cancels it, NoRunForRevoked.)
 RevokedNeverStarts ==
-  [][\A i \in Ids : (turn[i].st # "claimed" /\ turn'[i].st = "claimed") => ~revoked'[turn'[i].person]]_vars
+  [][\A i \in Ids : (turn[i].st # "claimed" /\ turn'[i].st = "claimed")
+        => ~(revoked'[turn'[i].person] /\ cut'[turn'[i].person])]_vars
 \* A skip is recorded only when a live turn exists: not a parked turn past its deadline that no sweep has reached.
 SkipIsJustified ==
   [][\A s \in Slots : (fires[s].out # "skip_prev" /\ fires'[s].out = "skip_prev")

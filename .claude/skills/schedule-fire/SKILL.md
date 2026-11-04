@@ -73,7 +73,7 @@ version assumed finitely many crashes; the review showed that hid slots missed w
 | `NoFireForRevokedPerson` | No turn is created for a revoked person once `revoke_person` ran (one created before it is cancelled by it). | A revoked person's job fires. |
 | `PausedNeverFires` | No turn is created for a paused job. | A paused job fires. |
 | `PausedNeverStarts` | After a pause commits, no turn is claimed. | A paused job still starts. |
-| `RevokedNeverStarts` | After the authority revoke commits, no turn of the person is claimed (the claim's may check). | A revoked person starts a run in the window before `revoke_person`. |
+| `RevokedNeverStarts` | After `revoke_person` has run for a revoke, no turn of the person is claimed. (Between the authority revoke and `revoke_person` a claim with a stale may check can still commit; `revoke_person` then cancels it.) | A revoked person starts a run after `revoke_person`. |
 | `EditUsesNewDefinition` | A new turn carries the current definition (person, ver). | An edit is ignored for one run. |
 | `DeadlineExpires` | A turn is claimed only before its deadline (the claim is the start). | A late run (q218). |
 | `FiredIsLive` | A new turn's deadline is after the clock its fire read. | A run-now or catch-up turn dead on arrival. |
@@ -107,9 +107,9 @@ version assumed finitely many crashes; the review showed that hid slots missed w
 5. **Pause and revoke cancel:** every index write with `paused = true` cancels the job's queued and parked turns, on
    every write, in the same transaction as the index write. A claimed turn with no pid gets its claim ended with the
    check-and-set `revoke_person` uses; a running turn is left alone. Revoke is `revoke_person` (`claims.rs:673`), which
-   runs after the authority revoke is visible, and the claim re-checks may. Rows: `pause-keeps` (`PausedNeverStarts`),
+   runs after the authority revoke is visible. What holds is `revoke_person` cancelling the person's pending turns in the same transaction as the epoch bump; the claim's may re-check (`revoke_seen`) is a second guard for scheduled turns, not the thing that holds. Rows: `pause-keeps` (`PausedNeverStarts`),
    `pause-later` (cancel in a second transaction: `PausedNeverStarts`), `revoke-keeps` (`NoRunForRevoked`),
-   `claim-no-may` (`RevokedNeverStarts`).
+   `claim-no-may` (passes: `RevokedNeverStarts` holds without the claim's may check).
 6. **Deadline:** a timed slot gets its next slot; a run-now or webhook fire gets the earlier of the job's next slot
    after now and now + TTL (a job with no timed trigger gets the TTL); the deadline is checked at the claim only
    (`claims.rs:350`). The model has no TTL: its ad hoc deadline is the next slot after the clock. Rows: `dl-from-slot`
@@ -173,24 +173,29 @@ reader checks it row by row.
 | `pause-keeps` | `PauseCancels = FALSE` | `PausedNeverStarts` |
 | `pause-later` | `PauseLater = TRUE` | `PausedNeverStarts` |
 | `revoke-keeps` | `RevokeCancels = FALSE` (on `rev`) | `NoRunForRevoked` |
-| `claim-no-may` | `ClaimMay = FALSE` (on `rev`) | `RevokedNeverStarts` |
+| `claim-no-may` | `ClaimMay = FALSE` (on `rev`) | pass: `RevokedNeverStarts` holds without the claim's may check |
 | `no-deadline` | `DeadlineCheck = FALSE` | `DeadlineExpires` |
 | `dl-from-slot` | `DlFromSlot = TRUE` | `FiredIsLive` |
 | `no-window` | `Window = FALSE` | `CatchUpWindow` |
 | `catch-each` | `CatchMode = "each"` | `CatchUpOnce` |
 | `no-missed`, `no-missed-live` | `MissedRows = FALSE` | `WatermarkRows`; `DueGetsRow` |
 | `no-record` | `RecordSkips = FALSE` (live) | `DueGetsRow` |
-| `wide-window`, `may-in-txn`, `rev`, `live`, `hook` | a wider window; may read in the same database; the revoke size; time guarded; redelivery | pass |
+| `wide-window`, `may-in-txn`, `rev`, `edit-rev`, `live`, `hook` | a wider window; may read in the same database; the revoke size; an edit and a revoke together (NS 1, no Hold); time guarded; redelivery | pass |
 
 The two "cancel in a second transaction" variants, run against every property (not all are in `checks.tsv`):
 - `pause-later` (the pause commits, its cancel is a second transaction): only `PausedNeverStarts` fails (52 states: the
   turn is claimed while the job is paused). All 17 other properties pass.
-- `claim-no-may` (the authority revoke and `revoke_person` are separate transactions, as in code, and the claim does not
-  re-check may): only `RevokedNeverStarts` fails (36 states: a turn is claimed after the authority revoke). `NoRunForRevoked`
-  and `NoFireForRevokedPerson` still pass, because `revoke_person` cancels whatever started in the window and refuses
-  new fires from then on. So the claim's may check (`revoke_seen`) is what keeps a revoked person from starting a run
-  in the window; `revoke_person` alone ends it only afterwards. (The review expected `NoRunForRevoked` to fail here; it
-  is stated as "after `revoke_person`", the strongest form the two transactions can promise.)
+- `claim-no-may` (the authority revoke and `revoke_person` are separate transactions, as in code; the claim's may check
+  is the caller's, taken before the transaction against any past authority snapshot, and refused only when the revoke
+  epoch moved, `claims.rs:32-37`): passes. A claim whose may check ran before the authority revoke still commits until
+  `revoke_person` bumps the epoch; what stops a late claim is the turn's state, because `revoke_person` cancels the
+  person's pending turns in the epoch's transaction. So `RevokedNeverStarts` is stated "after `revoke_person`", like
+  `NoRunForRevoked` and `NoFireForRevokedPerson`. (An earlier version of the model read the live revoke in the claim and
+  so held a stronger property than the code gives; the architect's scratch copy with the claim done the code's way
+  failed it in 4 steps.)
+- `edit-rev` (NS 1, one edit, one revoke per person, MaxTurns 2, no Hold): `NoRunForRevoked` and `NoFireForRevokedPerson`
+  pass (1,184,126 distinct states, under a minute). The full-size shape did not finish in 20 minutes, hence the smaller one;
+  it covers an edit that moves the job to a person being revoked.
 
 ## When you change covered code
 
@@ -202,7 +207,7 @@ The two "cancel in a second transaction" variants, run against every property (n
 4. A pass can have lost the ability to fail: break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `227257a53b10215197ef8e39e20bc854a6526fed` (origin/rust-rebuild when the review was applied; M4-3 does not exist yet). When M4-3
+**Sync commit:** `0bd2c21e87899a07b766d77932e1a4215d3415ec` (origin/rust-rebuild when the review was applied; M4-3 does not exist yet). When M4-3
 merges, the first reader checks the code against the table above and replaces this with the merge commit.
 
 ## Map of the folder

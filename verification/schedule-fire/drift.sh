@@ -12,7 +12,7 @@ set -euo pipefail
 # (M4-3 does not exist yet): SYNC is origin/rust-rebuild when the architect's review was applied (the M3-2 turn API
 # and the M4-2 store are on it; the code table in the skill cites their lines). When M4-3 lands, the first reader replaces this with the M4-3 merge commit after checking the code
 # against the table in the skill.
-SYNC=227257a53b10215197ef8e39e20bc854a6526fed
+SYNC=0bd2c21e87899a07b766d77932e1a4215d3415ec
 
 FILES=(
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)

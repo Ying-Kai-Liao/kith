@@ -21,6 +21,9 @@ fixed	PROPERTY	BusyWritesNoKey	pass
 wide-window	INVARIANT	CatchUpOnce	pass
 may-in-txn	PROPERTY	NoFireForRevokedPerson	pass
 # --- the authority revoke, then revoke_person (variant rev: one revoke per person, no edit) ---------------
+# --- an edit and a revoke together (variant edit-rev: NS 1, one edit, one revoke per person, no Hold) ---------
+edit-rev	INVARIANT	NoRunForRevoked	pass
+edit-rev	PROPERTY	NoFireForRevokedPerson	pass
 # --- liveness, time running while the core is down, any number of crashes (strong fairness) ------------
 live	PROPERTY	DueGetsRow	pass
 live	PROPERTY	TurnsEnd	pass
@@ -47,7 +50,7 @@ pause-keeps	PROPERTY	PausedNeverStarts	fail
 pause-keeps	PROPERTY	PausedNeverFires	pass
 pause-later	PROPERTY	PausedNeverStarts	fail
 revoke-keeps	INVARIANT	NoRunForRevoked	fail
-claim-no-may	PROPERTY	RevokedNeverStarts	fail
+claim-no-may	PROPERTY	RevokedNeverStarts	pass
 # --- the deadline -------------------------------------------------------------------------------
 no-deadline	PROPERTY	DeadlineExpires	fail
 dl-from-slot	PROPERTY	FiredIsLive	fail
