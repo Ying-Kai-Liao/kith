@@ -386,9 +386,9 @@ fn an_observers_resize_and_input_are_ignored_and_the_owners_reach_the_terminal()
     next.read_until("size:30 90");
 }
 
-/// 12 MB of output on a signal from the owner, then a marker.
-const FLOOD: &str =
-    r"echo up; read go; head -c 12000000 /dev/zero | tr '\0' x; echo; echo flood-done; cat";
+/// 12 MB of output on a signal from the owner, a megabyte at a time (a reader that keeps up must never be cut, even on a
+/// slow CI machine), then a marker.
+const FLOOD: &str = r"echo up; read go; i=0; while [ $i -lt 12 ]; do head -c 1000000 /dev/zero | tr '\0' x; i=$((i+1)); sleep 0.1; done; echo; echo flood-done; cat";
 
 #[test]
 fn a_stalled_viewer_is_cut_while_the_engine_and_the_other_viewer_carry_on() {
