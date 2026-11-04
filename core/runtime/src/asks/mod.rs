@@ -495,7 +495,7 @@ pub(crate) fn settle_in(
     if let Some(s) = state
         && a.state == "open"
     {
-        a.state = if tipped { "capped" } else { s }.to_owned();
+        if tipped { "capped" } else { s }.clone_into(&mut a.state);
         a.answered_ms = Some(now);
     }
     a.put(tx)?;
@@ -553,7 +553,7 @@ pub(crate) fn end(
         if !(by_session || by_person) {
             continue;
         }
-        a.state = "stopped".to_owned();
+        "stopped".clone_into(&mut a.state);
         a.ended_ms = Some(now);
         a.done = true;
         a.answered_ms = a.answered_ms.or(Some(now));

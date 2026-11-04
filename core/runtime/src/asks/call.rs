@@ -16,7 +16,7 @@ pub(crate) fn serves(method: &str) -> bool {
             | "ask.settle"
             | "ask.capTold"
             | "ask.end"
-            | "ask.list"
+            | "ask.delegations"
             | "ask.record"
             | "ask.limits"
     )
@@ -113,7 +113,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             )?;
             Ok(json!({ "ended": ended.ids, "sessions": ended.sessions }))
         }
-        "ask.list" => {
+        "ask.delegations" => {
             let (folders, _) = core.folders_for(params)?;
             delegations(core, &folders.machine)
         }

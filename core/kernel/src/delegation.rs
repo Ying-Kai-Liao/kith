@@ -54,7 +54,7 @@ impl Refusal {
 
 // --- the record -------------------------------------------------------------------------------------------------------
 
-/// A delegation record as the code reads it: the JSON object of a `.reg` file, or the same shape built from a core.db row.
+/// A delegation record as the code reads it: the JSON object of a `.reg` file, or the same shape built from a row of the core's store.
 pub type Reg = Map<String, Value>;
 
 /// Python's truthiness of a JSON value.

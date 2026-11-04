@@ -1,7 +1,13 @@
 //! The ask tree (M3-8a): write parity with the golden corpus (`kernel/tests/difftest/golden/delegation.json`), the
 //! `delegations` view against the contract's fixture, and the rules the transaction adds (the cap check and the insert as
 //! one step, crashed children counting, settle, end, the import).
-#![allow(clippy::unwrap_used, clippy::too_many_lines)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::too_many_lines,
+    clippy::many_single_char_names,
+    clippy::similar_names,
+    clippy::cast_precision_loss
+)]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier};
@@ -277,7 +283,7 @@ fn the_delegations_view_is_the_contracts() {
     }
     t.import();
     let mut core = t.core();
-    let got = call(&mut core, "ask.list", &t.params(&json!({}))).unwrap();
+    let got = call(&mut core, "ask.delegations", &t.params(&json!({}))).unwrap();
     assert_eq!(&got, want);
 }
 
@@ -289,7 +295,7 @@ fn the_view_is_newest_first_and_equal_starts_keep_id_order() {
     }
     t.import();
     let mut core = t.core();
-    let got = call(&mut core, "ask.list", &t.params(&json!({}))).unwrap();
+    let got = call(&mut core, "ask.delegations", &t.params(&json!({}))).unwrap();
     let ids: Vec<&str> = got["delegations"]
         .as_array()
         .unwrap()

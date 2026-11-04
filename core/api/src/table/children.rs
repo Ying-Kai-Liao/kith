@@ -108,10 +108,10 @@ pub(super) const ROWS: &[Method] = &[
         &["asks", "end"],
     ),
     ask(
-        "ask.list",
+        "ask.delegations",
         "`kith ask delegations --json`: every ask record, newest first, as `{delegations}` (money in micro-dollars, times in ms).",
         &[KERNEL, HOME, ENV],
-        &["asks", "list"],
+        &["asks", "delegations"],
     ),
     ask(
         "ask.record",
