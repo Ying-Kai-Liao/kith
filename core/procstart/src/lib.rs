@@ -161,10 +161,11 @@ mod imp {
             )
         };
         if got != size {
-            // It was there for kill(2) a moment ago: not readable (EPERM) or gone in between.
+            // It was there for kill(2) a moment ago: gone in between, or not readable this way (proc_pidinfo refuses
+            // another user's process, init's say). The process table answers for any process, from the same record.
             return match std::io::Error::last_os_error().raw_os_error() {
                 Some(libc::ESRCH) => Probe::Gone,
-                _ => Probe::Alive(None),
+                _ => table_start(pid),
             };
         }
         // SZOMB: ended, waiting for its parent; nothing runs.
@@ -177,6 +178,50 @@ mod imp {
             secs.zip(micros)
                 .map(|(s, u)| super::epoch_stamp(s * 1000 + u / 1000)),
         )
+    }
+
+    /// `sysctl(kern.proc.pid)`: a `kinfo_proc` whose first field is the start (`tv_sec` i64 at 0, `tv_usec` i32 at 8, the
+    /// record `proc_pidinfo` copies from) and whose `p_stat` byte is at 36; the same on Intel and Apple silicon. Read as bytes
+    /// because libc has no `kinfo_proc` for macOS.
+    #[cfg(target_os = "macos")]
+    fn table_start(pid: libc::c_int) -> Probe {
+        let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+        let mut buf = [0_u8; 1024];
+        let mut len = buf.len();
+        // SAFETY: `mib` is four ints; `buf` is `len` bytes and outlives the call, which writes at most `len` bytes into it.
+        let rc = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                4,
+                buf.as_mut_ptr().cast::<libc::c_void>(),
+                &raw mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if rc != 0 {
+            return Probe::Alive(None);
+        }
+        // No row: the process is not in the table.
+        if len == 0 {
+            return Probe::Gone;
+        }
+        if len < 40 {
+            return Probe::Alive(None);
+        }
+        let (Some(sec), Some(micros), Some(&stat)) = (
+            buf.get(..8).and_then(|b| <[u8; 8]>::try_from(b).ok()),
+            buf.get(8..12).and_then(|b| <[u8; 4]>::try_from(b).ok()),
+            buf.get(36),
+        ) else {
+            return Probe::Alive(None);
+        };
+        // SZOMB: ended, waiting for its parent; nothing runs.
+        if stat == 5 {
+            return Probe::Gone;
+        }
+        let ms = i64::from_ne_bytes(sec) * 1000 + i64::from(i32::from_ne_bytes(micros)) / 1000;
+        Probe::Alive(Some(super::epoch_stamp(ms)))
     }
 
     #[cfg(target_os = "linux")]

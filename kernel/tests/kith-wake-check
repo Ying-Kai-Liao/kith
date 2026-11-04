@@ -73,10 +73,9 @@ is "the item file is gone" "$(find "$KITH_STATE/sessions/queue" -name '*.json' !
 # --- a writer holds the session: the wake waits (a reply to a terminal's session) ------------------------------------
 python3 "$W" enqueue s2 --id reply:1 --agent designer -- the answer >/dev/null
 sleep 30 & holder=$!
-python3 - "$KITH_STATE/live/terminal/s2.claim" "$holder" <<'PY'
-import json, os, subprocess, sys
-start = ' '.join(subprocess.run(['ps', '-o', 'lstart=', '-p', sys.argv[2]], capture_output=True, text=True,
-                                env={**os.environ, 'LC_ALL': 'C'}).stdout.split())
+python3 - "$KITH_STATE/live/terminal/s2.claim" "$holder" "$(python3 "$KERNEL/lib/kith_procstart.py" $holder)" <<'PY'
+import json, os, sys
+start = sys.argv[3]
 json.dump({'pid': int(sys.argv[2]), 'procStart': start, 'kind': 'terminal'}, open(sys.argv[1], 'w'))
 PY
 is "drain leaves a held session alone" "$(python3 "$W" drain)" ""

@@ -59,6 +59,7 @@ from pathlib import Path
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN.parent / 'lib'))
 from kith_paths import paths  # noqa: E402
+import kith_procstart  # noqa: E402
 
 KEEP_DAYS = 7
 MAX_TRIES = 5                     # a run-door turn that fails this often without reaching the session ends as failed
@@ -177,12 +178,8 @@ def log(event, **kw):
 # --- liveness: the same rule as bin/kith-sessions (a pid that runs, started when its claim says) -----------------------
 
 def proc_start(pid):
-    try:
-        out = subprocess.run(['ps', '-o', 'lstart=', '-p', str(pid)], capture_output=True, text=True, timeout=3,
-                             env={**os.environ, 'LC_ALL': 'C'}).stdout
-    except Exception:  # noqa: BLE001
-        return None
-    return ' '.join(out.split()) or None
+    """The start stamp of pid (kith_procstart, the string core/procstart writes); None when it can't be read."""
+    return kith_procstart.start_stamp(pid)
 
 
 def alive(pid, started=None):
@@ -192,8 +189,7 @@ def alive(pid, started=None):
         pass
     except (OSError, TypeError, ValueError):
         return False
-    actual = proc_start(pid)
-    return not (started and actual) or ' '.join(started.split()) == actual
+    return kith_procstart.claimer(pid, started) is not False   # old lstart text that positively differs: a reused pid
 
 
 def writer_live(sid):
