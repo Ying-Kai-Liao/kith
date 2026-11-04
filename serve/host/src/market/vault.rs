@@ -33,7 +33,10 @@ const SERVICE: &str = "dev.kith.serve.credentials";
 /// (a freshly signed host binary asks again); the host must keep answering other requests meanwhile. Longer than the
 /// core's own wait for the store, so its answer ("keychain refused") arrives before this gives up.
 const KEYCHAIN_WAIT: Duration = Duration::from_secs(45);
-/// How long `unlock` waits for the daemon to be up (it starts beside the host and may still be migrating).
+/// How long `unlock` waits for the daemon to be up (it starts beside the host and may still be migrating). Only the
+/// blocking callers that wait on purpose use it (`unlock`, [`unlock_if_sealed`]): once the vault is open the core has
+/// answered, so `get`/`put`/`delete` run on tokio workers and a core that has since died must fail at once, not park
+/// a worker for this long (many such calls would exhaust the runtime).
 #[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
 const DAEMON_WAIT: Duration = Duration::from_secs(15);
 
@@ -51,9 +54,10 @@ pub trait Link: Send + Sync {
     fn has(&self, name: &str) -> Result<bool>;
     /// Removes `name`; answers whether it was there. Needs no key.
     fn delete(&self, name: &str) -> Result<bool>;
-    /// [`Link::has`] for the paths that must not read "cannot ask" as "no" (a bot deciding whether to unlock): waits while
-    /// the core is starting, answers "no" only when this computer has no core database, and otherwise fails.
-    fn has_waiting(&self, name: &str) -> Result<bool> {
+    /// [`Link::has`] for the paths that must not read "cannot ask" as "no" (a bot deciding whether to unlock): waits up
+    /// to `wait` while the core is starting, answers "no" only when this computer has no core database, and otherwise
+    /// fails.
+    fn has_waiting(&self, name: &str, _wait: Duration) -> Result<bool> {
         self.has(name)
     }
     fn get(&self, name: &str) -> Result<Option<String>>;
@@ -116,8 +120,8 @@ impl Link for CoreLink {
         Ok(Self::call("secrets.has", &json!({"name": name}), Duration::ZERO)?["has"] == true)
     }
 
-    fn has_waiting(&self, name: &str) -> Result<bool> {
-        crate::core_front::secrets_has_waiting(name, DAEMON_WAIT).map_err(|e| {
+    fn has_waiting(&self, name: &str, wait: Duration) -> Result<bool> {
+        crate::core_front::secrets_has_waiting(name, wait).map_err(|e| {
             anyhow!(
                 "Secure credential storage refused: {e:#}. Credentials are never saved as plain text, and nothing was changed."
             )
@@ -125,11 +129,11 @@ impl Link for CoreLink {
     }
 
     fn delete(&self, name: &str) -> Result<bool> {
-        Ok(Self::call("secrets.delete", &json!({"name": name}), DAEMON_WAIT)?["deleted"] == true)
+        Ok(Self::call("secrets.delete", &json!({"name": name}), Duration::ZERO)?["deleted"] == true)
     }
 
     fn get(&self, name: &str) -> Result<Option<String>> {
-        let answer = Self::call("secrets.get", &json!({"name": name}), DAEMON_WAIT)?;
+        let answer = Self::call("secrets.get", &json!({"name": name}), Duration::ZERO)?;
         if answer["found"] != true {
             return Ok(None);
         }
@@ -140,7 +144,7 @@ impl Link for CoreLink {
     }
 
     fn put(&self, name: &str, value: &str) -> Result<()> {
-        Self::call("secrets.put", &json!({"name": name, "value": value}), DAEMON_WAIT).map(drop)
+        Self::call("secrets.put", &json!({"name": name, "value": value}), Duration::ZERO).map(drop)
     }
 
     fn legacy_key(&self, store: &Store) -> Result<Option<Zeroizing<Vec<u8>>>> {
@@ -253,7 +257,8 @@ fn move_old_records(store: &Store) -> Vec<String> {
 }
 
 /// Moves one old record (or a plaintext configuration value from before the vault) into the envelope unless the
-/// envelope already has the slot, and returns the value. Reads it back before answering; deletes nothing.
+/// envelope already has the slot, and returns the value. Reads it back before answering. The one thing it deletes is a
+/// plaintext row, and only after the envelope has answered with the value; an old-format record stays where it is.
 fn move_slot(store: &Store, slot: &str, key: Option<&Zeroizing<Vec<u8>>>) -> Result<String> {
     let _writing = store.vault.writing.locked();
     if let Some(sealed) = store.vault.link.get(slot)? {
@@ -316,7 +321,9 @@ pub fn read(store: &Store, slot: &str) -> Result<Option<String>> {
         // Before `unlock` a slot with nothing behind it is simply empty (callers ask without unlocking to find out
         // whether a feature is set up); one that has a value needs the key store, which only `unlock` may wake. A core
         // that cannot be asked is an error, not "empty": a bot would start on the wrong credentials.
-        if exists_strict(store, slot)? {
+        // No wait: this runs on async workers; a core that is still starting reads as an error here, and the bot start
+        // path asks with a wait on a blocking thread first ([`unlock_if_sealed`]).
+        if exists_checked(store, slot, Duration::ZERO)? {
             return Err(unavailable());
         }
         return Ok(None);
@@ -352,10 +359,14 @@ pub fn exists(store: &Store, slot: &str) -> Result<bool> {
 /// waited for while it starts, and one that is down is an error, never "nothing sealed". Blocks (a socket call that may
 /// wait): off the async workers (see [`unlock_if_sealed`]).
 pub fn exists_strict(store: &Store, slot: &str) -> Result<bool> {
+    exists_checked(store, slot, DAEMON_WAIT)
+}
+
+fn exists_checked(store: &Store, slot: &str, wait: Duration) -> Result<bool> {
     if store.kv_read(slot)?.is_some() {
         return Ok(true);
     }
-    store.vault.link.has_waiting(slot)
+    store.vault.link.has_waiting(slot, wait)
 }
 
 /// Unlocks the vault when `slot` (or anything else the caller names) has a value to use, for a bot about to start. Asks
@@ -664,6 +675,44 @@ mod tests {
         assert!(exists(&store, "old").unwrap());
         assert!(read(&store, "old").is_err());
         assert!(write(&store, "connectors", "[]").is_err());
+    }
+
+    /// Records the wait each `has_waiting` was given.
+    struct Recording(Mutex<Vec<Duration>>);
+
+    impl Link for Recording {
+        fn open(&self) -> Result<()> {
+            Ok(())
+        }
+        fn has(&self, _: &str) -> Result<bool> {
+            Ok(false)
+        }
+        fn delete(&self, _: &str) -> Result<bool> {
+            Ok(false)
+        }
+        fn has_waiting(&self, _: &str, wait: Duration) -> Result<bool> {
+            self.0.locked().push(wait);
+            Ok(false)
+        }
+        fn get(&self, _: &str) -> Result<Option<String>> {
+            Ok(None)
+        }
+        fn put(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn legacy_key(&self, _: &Store) -> Result<Option<Zeroizing<Vec<u8>>>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn a_read_before_unlock_never_waits_for_the_core_but_the_bot_start_check_does() {
+        let link = Arc::new(Recording(Mutex::new(Vec::new())));
+        let store = store_with(Vault::with_link(link.clone(), false));
+        assert_eq!(read(&store, "connectors").unwrap(), None);
+        assert_eq!(*link.0.locked(), vec![Duration::ZERO], "read runs on an async worker");
+        assert!(!exists_strict(&store, "connectors").unwrap());
+        assert_eq!(link.0.locked()[1], DAEMON_WAIT, "the bot start asks on a blocking thread, and may wait");
     }
 
     #[test]

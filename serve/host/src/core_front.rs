@@ -74,6 +74,20 @@ pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
     }
 }
 
+/// One row the daemon takes from the host alone (the sync-lease writes, M2-10b), called on a connection that proves the
+/// host secret. `Some(answer)` only when the daemon answered; any refusal, a missing daemon or a lost connection is `None`.
+/// Only the relay owner's code calls this: the secret is read from the core folder by `kith_core`, never put in an
+/// environment or passed to a child, and a write is never sent twice.
+// No relay code calls the lease rows through the core yet (the host's lease is still its own file until M3), so only
+// the tests use it today.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn call_as_host(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
+    match kith_core::reach_as_host(folders, method, params, false) {
+        kith_core::Reached::Answered(answer) => Some(answer),
+        _ => None,
+    }
+}
+
 /// A daemon started for a test of a caller that asks it (`ask`).
 #[cfg(test)]
 pub struct TestDaemon(kith_core::Daemon);
@@ -433,6 +447,27 @@ mod tests {
 
     fn args(line: &str) -> Vec<OsString> {
         std::iter::once("kith serve").chain(line.split(' ')).map(OsString::from).collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_host_calls_the_lease_writes_on_its_own_proof_and_the_owner_connection_cannot() {
+        let home = std::env::temp_dir().join(format!("kcf-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+        std::fs::create_dir_all(&home).expect("home");
+        let f = kernel::folders(&home);
+        let machine = f.machine.clone();
+        let daemon = serve_for_test(&f);
+        // The ordinary (owner) connection is refused the write; the host's own proof is not.
+        assert_eq!(ask(&f, "syncLease.link", &json!({})), None);
+        assert_eq!(call_as_host(&f, "syncLease.link", &json!({})), Some(json!({"cloud": "linked"})));
+        assert_eq!(ask(&f, "syncLease.status", &json!({})).expect("owner reads")["cloud"], "linked");
+        // And the host's connection reads nothing of the owner's.
+        assert_eq!(call_as_host(&f, "syncLease.status", &json!({})), None);
+        // The secret is a file in the core folder, never an environment variable of this process.
+        let secret = std::fs::read_to_string(machine.join("core/host.token")).expect("host secret");
+        assert!(std::env::vars().all(|(_, v)| !v.contains(secret.trim())));
+        daemon.stop();
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

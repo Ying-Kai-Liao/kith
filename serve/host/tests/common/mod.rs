@@ -46,17 +46,13 @@ fn key_account(home: &Path) -> String {
     format!("test-{}", machine_state(home).display().to_string().replace('/', "-"))
 }
 
-/// The core's key store account each test host was given, by process id: `stop` removes the item, which otherwise stays
-/// in the login keychain of the machine that ran the tests.
-static KEY_ACCOUNTS: std::sync::Mutex<Vec<(u32, String)>> = std::sync::Mutex::new(Vec::new());
-
-fn forget_key_account(pid: u32) {
-    let account = {
-        let mut all = KEY_ACCOUNTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(at) = all.iter().position(|(p, _)| *p == pid) else { return };
-        all.swap_remove(at).1
-    };
+/// Removes the core's key store item a test home's hosts sealed under, once the test's home is going away. Not on every
+/// `stop`: a restarted host (same home, same account) must find the key the first one made, or it cannot open what it
+/// sealed. Without this the item stays in the login keychain of the machine that ran the tests.
+#[allow(dead_code)]
+pub fn forget_home(home: &Path) {
     // Best effort; the service name is the core's (secrets/keystore.rs).
+    let account = key_account(home);
     #[cfg(target_os = "macos")]
     let _ = Command::new("security")
         .args(["delete-generic-password", "-s", "dev.kith.core.secrets", "-a", &account])
@@ -131,10 +127,6 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                     assert_channels_off(&base).await;
                 }
                 let child = child.0.take().unwrap();
-                KEY_ACCOUNTS
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push((child.id(), key_account(home)));
                 return (child, base);
             }
             assert!(Instant::now() < deadline, "host didn't start");
@@ -201,9 +193,7 @@ async fn assert_channels_off(base: &str) {
 /// children: a SIGKILL would orphan whatever it had running, such as a harness
 /// sign-in check (`cursor-agent status` then spins forever). Kills it after 5 s.
 pub fn stop(child: &mut Child) {
-    let pid = child.id();
     stop_process(child);
-    forget_key_account(pid);
 }
 
 fn stop_process(child: &mut Child) {
