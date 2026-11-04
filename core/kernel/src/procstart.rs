@@ -118,8 +118,10 @@ mod imp {
                 .find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())
         });
         // SAFETY: sysconf has no preconditions.
-        let hz = i64::from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).max(0);
-        let hz = if hz == 0 { 100 } else { hz };
+        let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+        // `c_long` is `i32` on 32-bit targets, so the widening is needed there.
+        #[allow(clippy::useless_conversion)]
+        let hz = if hz > 0 { i64::from(hz) } else { 100 };
         Probe::Alive(ticks.zip(btime).map(|(t, b)| b * 1000 + t * 1000 / hz))
     }
 
