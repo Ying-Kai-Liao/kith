@@ -5,6 +5,8 @@ pub mod hooks;
 use hooks::Refused;
 mod runner;
 mod schedule;
+#[cfg(test)]
+mod schedule_golden;
 pub use runner::start;
 pub use schedule::Trigger;
 
