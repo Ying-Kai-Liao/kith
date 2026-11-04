@@ -142,6 +142,8 @@ jobs:
               - '.claude/skills/revoke-access/**'
               - 'kernel/bin/kith-auth'
               - 'core/runtime/src/authority/**'
+              - 'core/runtime/src/doors/**'
+              - 'core/runtime/src/migrations/doors/**'
               - 'serve/host/src/channels/**'
               - 'serve/host/src/api/people.rs'
               - 'serve/host/src/api/botguests.rs'

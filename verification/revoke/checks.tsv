@@ -39,6 +39,20 @@ door	PROPERTY	DoorD1	pass
 broken-door-no-hold	PROPERTY	DoorD2c	fail
 broken-door-split	PROPERTY	DoorD2	fail
 broken-no-door-sweep	PROPERTY	DoorD1	fail
+# --- the core's door table (M2-14): a revoke marks the doors swept in its own step, and a swept door is final --------
+core-door	INVARIANT	TypeOK	pass
+core-door	PROPERTY	DoorD2	pass
+core-door	PROPERTY	DoorD2c	pass
+core-door	PROPERTY	DoorD1	pass
+core-door	PROPERTY	DoorNoResurrect	pass
+core-door	INVARIANT	DoorsCutWithRevoke	pass
+door	INVARIANT	DoorsCutWithRevoke	fail
+door	PROPERTY	DoorNoResurrect	pass
+core-bot-door	INVARIANT	TypeOK	pass
+core-bot-door	PROPERTY	BotDoorCut	pass
+core-bot-door	PROPERTY	DoorNoResurrect	pass
+core-bot-door	INVARIANT	DoorsCutWithRevoke	pass
+bot-door	INVARIANT	DoorsCutWithRevoke	fail
 # --- a bot's door: never one its owner doesn't hold (I6, kith-auth owner_cut) ---
 bot-door	INVARIANT	TypeOK	pass
 bot-door	PROPERTY	BotDoorCut	pass
@@ -87,3 +101,5 @@ broken-handle-store-first	PROPERTY	HandleConverges	fail
 removal	INVARIANT	TypeOK	pass
 removal	INVARIANT	NoOrphan	pass
 broken-removal-orphans	INVARIANT	NoOrphan	fail
+core-door	INVARIANT	NeverDoorKilled	fail
+core-bot-door	INVARIANT	NeverBotDoorKilled	fail

@@ -63,6 +63,9 @@ CONSTANTS
     NoDoorSweep,        \* nothing kills a running door when its person is revoked
     BotDoor,            \* TRUE = B's guest door and P's tick of its job are in the model (FALSE in base.consts)
     BotDoorNoCut,       \* B's door check reads B's own tick only, not cut to what P holds (kith-auth owner_cut)
+    \* ---- the core's door table (M2-14, core/runtime/src/doors) ----
+    CoreDoorHook,       \* TRUE = the revoke that lands on a Mac (people.suspend, kith-auth --local) also marks P's and
+                        \*   B's doors there swept, in the same transaction (FALSE = only the sweep action does)
     \* ---- round 4 ----
     ItemsOn,            \* TRUE = P's devices, memberships and invites are in the model
     DeleteItems,        \* a revoke deletes them instead of parking them (the old people.rs / members.rs end_access)
@@ -226,6 +229,11 @@ AppUndo ==
     /\ cloudVer' = cloudVer + 1
     /\ UNCHANGED <<rows, revoked, ver, outbox, net, revokes, turn, door, gdoor, ext>>
 
+\* The core's revoke hook (authority/revoke.rs follow_in_doors): in the transaction that sets the revoked fact on m, P's and
+\* B's running doors there become swept. Undo calls nothing, and a swept (killed) door is final.
+DoorsSwept(d, m, nowRevoked) ==
+    IF CoreDoorHook /\ nowRevoked /\ d[m] = "running" THEN [d EXCEPT ![m] = "killed"] ELSE d
+
 \* On m's terminal: local flag at once (rows untouched), cloud now or later.
 CliRevoke(m) ==
     /\ OwnerCli
@@ -236,7 +244,9 @@ CliRevoke(m) ==
     /\ rows' = IF RevokeDeletesRows THEN [rows EXCEPT ![m] = {}] ELSE rows
     /\ Publish(m, TRUE)
     /\ ItemsRevoke(m)
-    /\ UNCHANGED <<net, undos, turn, door, gdoor, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ gdoor' = DoorsSwept(gdoor, m, TRUE)
+    /\ bdoor' = DoorsSwept(bdoor, m, TRUE)
+    /\ UNCHANGED <<net, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 CliUndo(m) ==
     /\ OwnerCli
@@ -270,7 +280,9 @@ CloudDeliver(m) ==
     /\ ver' = [ver EXCEPT ![m] = cloudVer]
     /\ rows' = IF RevokeDeletesRows /\ cloudRevoked THEN [rows EXCEPT ![m] = {}] ELSE rows
     /\ ItemsStep(m, cloudRevoked)
-    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ gdoor' = DoorsSwept(gdoor, m, cloudRevoked)
+    /\ bdoor' = DoorsSwept(bdoor, m, cloudRevoked)
+    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 \* Internet lost, Kith cloud lost (or unreachable from m), or back.
 SetNet(m, n) ==
@@ -629,6 +641,11 @@ DoorD2c == [][\A m \in Macs : DoorStartOf(m) => ~cloudRevoked]_vars
 \* DoorD1 (GuestDoor.tla D1): a door running for a revoked P is stopped (or the revoke is undone).
 DoorD1 == \A m \in Macs : (gdoor[m] = "running" /\ revoked[m]) ~> (gdoor[m] # "running" \/ ~revoked[m])
 \* BotDoorCut (I6 for doors): a guest door of B starts only while its owner P holds it.
+\* CoreDoorHook (M2-14): no moment where P is revoked on a Mac and a door of P or B is still running there, with no
+\* fairness needed. Fails without the hook (the sweep is a later action: the window the host's sweep leaves).
+DoorsCutWithRevoke == \A m \in Macs : revoked[m] => (gdoor[m] # "running" /\ bdoor[m] # "running")
+\* A swept door is final: undo (or anything) never brings it back (the core's swept rows stay swept).
+DoorNoResurrect == [][\A m \in Macs : (gdoor[m] = "killed" => gdoor'[m] = "killed") /\ (bdoor[m] = "killed" => bdoor'[m] = "killed")]_vars
 BotDoorCut == [][\A m \in Macs : (bdoor[m] # "running" /\ bdoor'[m] = "running") => ptick]_vars
 
 \* ItemsCut: a revoked P's devices, memberships and open invites grant nothing at once.
