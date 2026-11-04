@@ -2179,6 +2179,9 @@ def retired(auth, pid, left=True):
 
 def need_free(auth, pid, left=True):
     """For a new person or bot: refused when the id is retired."""
+    # Whatever row holds the id (even a stale one canonical() answers for first), an old id of someone is not free.
+    if any(pid in p.get('was', []) for p in auth['people'].values()):
+        die(f"'{pid}' is already a person (or one's old id)")
     why = retired(auth, pid, left)
     if why:
         die(f'{why}: give the new person another id (e.g. {pid}-2)')
@@ -2501,7 +2504,7 @@ def mirror_to_core(pid, action, already_ok=None):
                                    input=json.dumps(params), capture_output=True, text=True, timeout=CORE_CALL_SECS)
             except subprocess.TimeoutExpired:
                 may_have_applied = failed = True
-                continue
+                break   # a hung core: the other ids would each wait their 4 s under auth.json.lock too
             if r.returncode == 0:
                 continue
             ok = already_ok(one) if callable(already_ok) else already_ok

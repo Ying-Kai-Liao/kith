@@ -190,6 +190,28 @@ PY
 A bot bot-pp --rm >"$T/out" 2>"$T/err"; rc=$?
 check "bot rm of an id the core holds as a person: warned, not silent" "[ $rc -eq 0 ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
 
+# 6b. a new bot or person can not take an id that is some row's old id (rename refuses the same)
+A bot bot-was1 --of kai >/dev/null; A person bot-was1 id=bot-was2 >/dev/null 2>&1
+A bot bot-was1 --of kai >"$T/out" 2>"$T/err"; rc=$?
+check "bot add of another row's old id: refused" "[ $rc -ne 0 ] && grep -q \"one's old id\" $T/err && [ \"\$(auth_has bot-was1)\" = False ]"
+A person bot-was1 name=x >"$T/out" 2>"$T/err"; rc=$?
+check "person add of another row's old id: refused" "[ $rc -ne 0 ] && [ \"\$(auth_has bot-was1)\" = False ]"
+# older data: a row that is also some row's was-id; only new adds are refused, nothing on disk changes
+python3 - "$KITH_AUTH" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1])); a['people']['bot-was2']['was'].append('bot-clash'); a['people']['bot-clash'] = {'bot_of': 'kai'}
+json.dump(a, open(sys.argv[1], 'w'))
+PY
+A bot bot-clash --of kai >"$T/out" 2>"$T/err"; rc=$?
+check "re-adding a row that already clashes (older data) is an update: allowed, row kept" "[ $rc -eq 0 ] && [ \"\$(auth_has bot-clash)\" = True ]"
+
+# 6c. a hung core: stop after the first timeout (not 4 s per id), still the loud line
+A bot bot-h1 --of kai >/dev/null; A person bot-h1 id=bot-h2 >/dev/null 2>&1; A person bot-h2 id=bot-h3 >/dev/null 2>&1
+touch "$FAKE_DIR/slow"; t0=$SECONDS
+A bot bot-h3 --rm >"$T/out" 2>"$T/err"; rc=$?
+rm -f "$FAKE_DIR/slow"
+check "bot rm with a hung core: one timeout, not one per id, and the loud line" "[ $rc -eq 0 ] && [ $((SECONDS - t0)) -lt 7 ] && grep -qx 'removed in auth.json; ${CF} may not be updated ${TELL}' $T/err"
+
 # 7. drift: every method kith-auth mirrors is on the core-call allow list (the fake above refuses the rest, exit 2)
 mirror_drift() { python3 -I - "$KERNEL/bin/kith-auth" <<'PY'
 import os, re, sys

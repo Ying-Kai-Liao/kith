@@ -287,6 +287,7 @@ jobs:
               Auth check|kernel/tests/kith-auth-check
               Auth lock check|kernel/tests/kith-auth-lock-check
               Auth revoke check|kernel/tests/kith-auth-revoke-check
+              Auth core mirror check (kith-auth person/bot --rm/--revoke against a fake core)|kernel/tests/kith-auth-core-mirror-check
               Helper MCP grants check|kernel/tests/kith-helper-mcp-check
               Cost bots check|kernel/tests/kith-cost-bots-check
               Call check|kernel/tests/kith-call-check
