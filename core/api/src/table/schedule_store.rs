@@ -33,7 +33,48 @@ pub(super) const ROWS: &[Method] = &[
         &[pos("agent", "string", false, "Only this agent's.")],
         &["schedule", "next"],
     ),
+    act(
+        "schedule.tick",
+        "Fire what is due at `now` (the caller's clock, ms; this machine's by default): one transaction per job that writes its fire row, its turn and the watermark. Catch-up fires only the latest due slot inside a day; older ones are kept as one `skipped:missed` row. Nothing runs this on a clock yet: `kith-sched` owns jobs.json until M4-5.",
+        &[flag(
+            "now",
+            "int",
+            &["--now"],
+            "The clock, ms since the epoch (this machine's by default).",
+        )],
+        &["schedule", "tick"],
+    ),
+    act(
+        "schedule.runNow",
+        "Run a job now through the same fire: it obeys the skip rule. A busy job answers `busy` and writes nothing, so a retry fires once it is free; a `key` that was decided answers what was decided; a paused or revoked job answers final.",
+        &[
+            pos("agent", "string", true, "The agent."),
+            pos("id", "string", true, "The job."),
+            flag(
+                "key",
+                "string",
+                &["--key"],
+                "The run's own key (letters, digits, - _ .); a retry with the same key is the same run.",
+            ),
+            flag(
+                "now",
+                "int",
+                &["--now"],
+                "The clock, ms since the epoch (this machine's by default).",
+            ),
+        ],
+        &["schedule", "run-now"],
+    ),
 ];
+
+const fn act(
+    name: &'static str,
+    summary: &'static str,
+    params: &'static [Param],
+    path: &'static [&'static str],
+) -> Method {
+    read(name, summary, params, path)
+}
 
 const fn read(
     name: &'static str,

@@ -7825,6 +7825,126 @@
       }
     },
     {
+      "name": "schedule.tick",
+      "summary": "Fire what is due at `now` (the caller's clock, ms; this machine's by default): one transaction per job that writes its fire row, its turn and the watermark. Catch-up fires only the latest due slot inside a day; older ones are kept as one `skipped:missed` row. Nothing runs this on a clock yet: `kith-sched` owns jobs.json until M4-5.",
+      "params": [
+        {
+          "name": "now",
+          "summary": "The clock, ms since the epoch (this machine's by default).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "tick"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.runNow",
+      "summary": "Run a job now through the same fire: it obeys the skip rule. A busy job answers `busy` and writes nothing, so a retry fires once it is free; a `key` that was decided answers what was decided; a paused or revoked job answers final.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "key",
+          "summary": "The run's own key (letters, digits, - _ .); a retry with the same key is the same run.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, ms since the epoch (this machine's by default).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "run-now"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "key": {
+            "kind": "flag",
+            "spellings": [
+              "--key"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "conversation.transcript",
       "summary": "The engine sessions a conversation has, one per account: the engine, its session id, the pointer to where the engine keeps it, the hash and size as of the last read, and whether the engine's copy is there now and has changed since. Refuses an id that is no conversation. Only Claude's sessions are held; another engine's row says `held: false`.",
       "params": [
