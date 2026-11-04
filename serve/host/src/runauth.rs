@@ -252,6 +252,9 @@ pub struct RunGrant {
     token: String,
     run_id: String,
     scope: TokenScope,
+    /// Set when the core minted the token (`KITH_RUN_TOKENS_VIA_CORE`): the host's table holds nothing for it, binding
+    /// and ending go to the core, and the run is told the core's socket.
+    core: Option<crate::core_front::CoreRun>,
 }
 
 impl RunGrant {
@@ -259,12 +262,31 @@ impl RunGrant {
     pub fn issue(table: &Arc<TokenTable>, identity: RunIdentity) -> Result<Self> {
         let (run_id, scope) = (identity.run_id.clone(), identity.scope);
         let (token, key) = table.insert(identity)?;
-        Ok(Self { table: table.clone(), key, token, run_id, scope })
+        Ok(Self { table: table.clone(), key, token, run_id, scope, core: None })
+    }
+
+    /// A grant for a token the core minted. The host's table is not involved.
+    pub fn from_core(run: crate::core_front::CoreRun) -> Self {
+        Self {
+            table: table().clone(),
+            key: [0; 32],
+            token: run.token.clone(),
+            run_id: run.run_id.clone(),
+            scope: TokenScope::Guest,
+            core: Some(run),
+        }
     }
 
     /// Binds the token to the process the run was started as. Until then no request resolves.
     pub fn bind_pid(&self, pid: u32) {
-        self.table.bind(&self.key, pid);
+        match &self.core {
+            Some(run) => {
+                if !run.bind(pid) {
+                    tracing::warn!(run = %self.run_id, "the core did not bind this run's token");
+                }
+            }
+            None => self.table.bind(&self.key, pid),
+        }
     }
 
     /// The run's id: what its requests are known by (a once grant reserved for its launch, the cards it parks).
@@ -274,6 +296,9 @@ impl RunGrant {
 
     /// The environment the run gets. The only place the token leaves this module.
     pub fn env(&self, socket: &Path) -> [(String, String); 2] {
+        if let Some(run) = &self.core {
+            return [(TOKEN_ENV.into(), self.token.clone()), (SOCKET_ENV.into(), run.socket.to_string_lossy().into_owned())];
+        }
         let (token, sock) = match self.scope {
             TokenScope::Guest => (TOKEN_ENV, SOCKET_ENV),
             TokenScope::OwnerAsk => (ASK_TOKEN_ENV, ASK_SOCKET_ENV),
@@ -284,7 +309,10 @@ impl RunGrant {
 
 impl Drop for RunGrant {
     fn drop(&mut self) {
-        self.table.revoke(&self.key);
+        match &self.core {
+            Some(run) => run.end(),
+            None => self.table.revoke(&self.key),
+        }
         // The process is gone: what it was waiting on parks (C6).
         if let Some(hub) = hub() {
             crate::cards::run_exited(&hub, &self.run_id);
@@ -323,6 +351,21 @@ pub fn grant_for(
     session: &str,
     project: Option<&str>,
 ) -> Option<(RunGrant, [(String, String); 2])> {
+    if crate::core_front::run_tokens_via_core() {
+        let conversation = session_of(person, session);
+        let who = crate::core_front::RunWho { person, agent, conversation: &conversation, room, project };
+        match crate::core_front::mint_run(&who) {
+            crate::core_front::Minted::Run(run) => {
+                let grant = RunGrant::from_core(run);
+                let env = grant.env(Path::new(""));
+                return Some((grant, env));
+            }
+            // The core said no: no run of this person starts with a token, and the host's table is not asked instead.
+            crate::core_front::Minted::Refused => return None,
+            // No core answers: mint here, as without the switch.
+            crate::core_front::Minted::Unavailable => {}
+        }
+    }
     let socket = SOCKET.get()?;
     let identity = RunIdentity {
         person: person.to_owned(),

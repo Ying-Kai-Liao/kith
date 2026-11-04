@@ -34,7 +34,6 @@ impl Core {
     /// params. Only `run.projectId` is answered here (it needs nothing but the identity); the kernel tools stay with
     /// the host's host.sock until a later step switches them.
     // A method of Core on purpose, though it reads nothing of it yet: no handler runs without the lock and generation.
-    #[allow(clippy::unused_self)]
     pub(crate) fn call_run(
         &self,
         who: &RunIdentity,
@@ -42,6 +41,13 @@ impl Core {
         params: &Value,
     ) -> Result<Value> {
         let row = check(kith_api::Principal::RunToken, method, params)?;
+        // A second door behind the token table: `people.suspend` ends the tokens inside the same locked core call, and
+        // this runs under that lock too, so a request that resolved just before the end is still refused here.
+        if crate::authority::cut_off_in(self.conn(), &who.person)? {
+            return Err(Error::NotAllowed(format!(
+                "kith-core: {method}: the person of this run is revoked"
+            )));
+        }
         let args = params.get("args").and_then(Value::as_array);
         match (row.name, args.map(Vec::as_slice)) {
             ("run.projectId", None | Some([])) => Ok(match &who.project {

@@ -97,6 +97,13 @@ impl<'a> Authority<'a> {
     }
 }
 
+/// Whether `person` (or the owner of the bot `person`) is revoked, read from core.db alone: the run tokens' check
+/// (M2-13), which has no `Ctx` to give. An unknown id is not cut off here; whether a run exists for it is the host's.
+pub(crate) fn cut_off_in(conn: &Connection, person: &str) -> Result<bool> {
+    let auth = snapshot(conn)?;
+    Ok(secrets::cut_off(&auth, person))
+}
+
 /// A rule that stopped with a refusal `kith-auth` would `die` with (a membership naming a preset nobody defined, which
 /// `kith-auth preset X --rm` leaves behind): the rules have no answer, which the caller must read as "no". It is not a
 /// damaged database, so it is never `Corrupt` (whose recovery is `kith restore`).

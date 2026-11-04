@@ -70,6 +70,7 @@ pub(crate) struct Shared {
     attach_server: Mutex<Option<crate::attach::Server>>,
     runs: Arc<RunTokens>,
     socket: PathBuf,
+    run_socket: PathBuf,
     started: Instant,
     pub(crate) terminals: Terminals,
 }
@@ -125,6 +126,31 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        if method == "run.mint" {
+            // Minting is a claim on authority too: refuse a revoked person, inside the lock a revoke commits under,
+            // so a mint cannot slip in beside a suspension.
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let person = params
+                .get("person")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let mut answer = self.with_core(|c| {
+                if crate::authority::cut_off_in(c.conn(), person)? {
+                    return Err(Error::NotAllowed(format!(
+                        "kith-core: run.mint: {person} is revoked, so no run of theirs starts"
+                    )));
+                }
+                self.runs
+                    .owner_call(method, params)
+                    .unwrap_or_else(|| Err(Error::NoSuchMethod("kith-core: no method run.mint".into())))
+            })?;
+            // Where the run asks, for a host that hands the path to the run.
+            if let Some(o) = answer.as_object_mut() {
+                o.insert("socket".into(), json!(self.run_socket.to_string_lossy()));
+            }
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         if let Some(answer) = self.runs.owner_call(method, params) {
             let answer = answer?;
             self.served.fetch_add(1, Ordering::SeqCst);
@@ -143,7 +169,12 @@ impl Shared {
         {
             if crate::authority::call::serves(method) {
                 crate::call::check(kith_api::Principal::Owner, method, params)?;
-                let answer = self.with_core(|c| crate::authority::call::call(c, method, params))?;
+                // The tokens of a revoked or removed person end in the same locked call that committed it.
+                let answer = self.with_core(|c| {
+                    let answer = crate::authority::call::call(c, method, params)?;
+                    self.runs.after_authority_write(method, params, &answer);
+                    Ok(answer)
+                })?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }
@@ -239,6 +270,7 @@ impl Daemon {
             attach_server: Mutex::new(None),
             runs: Arc::new(RunTokens::new()),
             socket: owner::endpoint(&layout),
+            run_socket: runsock::endpoint(&layout),
             started: Instant::now(),
             terminals: Terminals::new(),
         });

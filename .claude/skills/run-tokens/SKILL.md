@@ -99,3 +99,7 @@ Read from the CI `host-test` job of PR #195 (a temporary commit added a thread-l
 ## Keeping it up to date
 
 When the covered code changes on purpose, update the properties with it and re-run the break table's idea on the new code. For the full routine, see `/maintain-formal-verification-skill`.
+
+## The core's table (M0e, M2-13)
+
+`core/runtime/src/runs.rs` + `runsock.rs` hold the same rules for the core's run socket; `core/runtime/src/runs_props.rs` is the port of P1 to P7 (`p1_` .. `p8_`) plus `p9_end_people_kills_exactly_those` (a revoke's hook ends exactly the tokens of the people it names). Run: `cargo test --manifest-path core/runtime/Cargo.toml --lib runs_props runsock authority::tests::runs`. A revoke (`people.suspend`, `people.removePerson`, `people.removeBot`) ends the tokens inside the same locked core call (`RunTokens::after_authority_write` from the daemon's authority branch); `Core::call_run` re-checks `cut_off` under that lock, so a request that resolved just before is still refused; `run.mint` refuses a revoked person. Undo revives nothing. Tokens are memory only (a restart ends them). The host mints through the core only with `KITH_RUN_TOKENS_VIA_CORE=1` (`core_front.rs`, `RunGrant::from_core`); off, the host's own table is what these P1 to P7 properties above cover.
