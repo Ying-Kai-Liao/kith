@@ -778,6 +778,7 @@ fn end_groups(
 
 /// Windows needs no extra step: each spawn's job object ends with the holder (runtime-design section 4, step 7).
 #[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)] // the same shape as the Unix one
 fn end_groups(
     _: &mut Vec<String>,
     _: &[RecordedProc],
