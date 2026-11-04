@@ -615,7 +615,9 @@ fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() 
     let asks = AtomicU32::new(0);
     // One request from a shell the run was bound to; true when the core answered as the run.
     let works = |(token, run_id, _): &(String, String, String)| {
-        let go = _t.path().join(format!("go-{}", asks.fetch_add(1, Ordering::SeqCst)));
+        let go = _t
+            .path()
+            .join(format!("go-{}", asks.fetch_add(1, Ordering::SeqCst)));
         let mut sh = shell(
             &sock,
             &Tree::Child,

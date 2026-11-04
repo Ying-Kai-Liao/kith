@@ -297,7 +297,10 @@ impl RunGrant {
     /// The environment the run gets. The only place the token leaves this module.
     pub fn env(&self, socket: &Path) -> [(String, String); 2] {
         if let Some(run) = &self.core {
-            return [(TOKEN_ENV.into(), self.token.clone()), (SOCKET_ENV.into(), run.socket.to_string_lossy().into_owned())];
+            return [
+                (TOKEN_ENV.into(), self.token.clone()),
+                (SOCKET_ENV.into(), run.socket.to_string_lossy().into_owned()),
+            ];
         }
         let (token, sock) = match self.scope {
             TokenScope::Guest => (TOKEN_ENV, SOCKET_ENV),

@@ -57,7 +57,10 @@ fn a_suspension_ends_the_tokens_of_the_person_and_their_bots_and_no_others() {
     let (t, tok) = table(&["sam", "bot-a", "amy", "sam"]);
     assert!(tok.iter().all(|k| live(&t, k)));
     // sam has two runs, one bot run: three tokens end, amy's stays.
-    assert_eq!(write(&mut rig, &t, "people.suspend", &json!({"id": "sam"})), 3);
+    assert_eq!(
+        write(&mut rig, &t, "people.suspend", &json!({"id": "sam"})),
+        3
+    );
     assert!(!live(&t, &tok[0]) && !live(&t, &tok[1]) && !live(&t, &tok[3]));
     assert!(live(&t, &tok[2]));
     assert_eq!(t.len(), 1);
@@ -79,12 +82,21 @@ fn undo_revives_no_token_and_a_new_run_mints_a_new_one() {
 fn removing_a_person_or_a_bot_ends_their_tokens() {
     let mut rig = Rig::new(&base());
     let (t, tok) = table(&["sam", "bot-a", "amy"]);
-    assert_eq!(write(&mut rig, &t, "people.removeBot", &json!({"id": "bot-a"})), 1);
+    assert_eq!(
+        write(&mut rig, &t, "people.removeBot", &json!({"id": "bot-a"})),
+        1
+    );
     assert!(!live(&t, &tok[1]) && live(&t, &tok[0]));
-    assert_eq!(write(&mut rig, &t, "people.removePerson", &json!({"id": "amy"})), 1);
+    assert_eq!(
+        write(&mut rig, &t, "people.removePerson", &json!({"id": "amy"})),
+        1
+    );
     assert!(!live(&t, &tok[2]) && live(&t, &tok[0]));
     // A write that is not a revoke touches nothing.
-    assert_eq!(write(&mut rig, &t, "people.addPerson", &json!({"id": "zed"})), 0);
+    assert_eq!(
+        write(&mut rig, &t, "people.addPerson", &json!({"id": "zed"})),
+        0
+    );
     assert!(live(&t, &tok[0]));
 }
 
@@ -92,10 +104,19 @@ fn removing_a_person_or_a_bot_ends_their_tokens() {
 fn a_token_that_resolved_before_the_revoke_is_refused_at_the_run_door() {
     let mut rig = Rig::new(&base());
     let me = who("bot-a");
-    let ask = |rig: &Rig| rig.core.call_run(&me, "run.projectId", &json!({"args": []}));
+    let ask = |rig: &Rig| {
+        rig.core
+            .call_run(&me, "run.projectId", &json!({"args": []}))
+    };
     assert_eq!(ask(&rig).unwrap()["stdout"], "alpha\n");
     // The core call that revokes sam; the table is not told here, as if the request had resolved just before.
-    call_with(&mut rig.core, &rig.c, "people.suspend", &json!({"id": "sam"})).unwrap();
+    call_with(
+        &mut rig.core,
+        &rig.c,
+        "people.suspend",
+        &json!({"id": "sam"}),
+    )
+    .unwrap();
     assert!(matches!(ask(&rig), Err(crate::error::Error::NotAllowed(_))));
     call_with(&mut rig.core, &rig.c, "people.undo", &json!({"id": "sam"})).unwrap();
     assert_eq!(ask(&rig).unwrap()["stdout"], "alpha\n");

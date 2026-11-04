@@ -945,7 +945,11 @@ fn p8_reused_pid_and_unreadable_start() {
 /// and no other; the count is exact; the rest still resolve as their own run; ending again ends nothing.
 pub(crate) fn prop_end_people_kills_exactly_those() -> Result<(), String> {
     check(
-        (specs(), prop::collection::vec(0..PEOPLE.len(), 0..4), any::<bool>()),
+        (
+            specs(),
+            prop::collection::vec(0..PEOPLE.len(), 0..4),
+            any::<bool>(),
+        ),
         |(specs, gone, bind)| {
             let (t, runs) = build(&specs, bind);
             let names: Vec<&str> = gone.iter().map(|&p| PEOPLE[p]).collect();

@@ -140,9 +140,9 @@ impl Shared {
                         "kith-core: run.mint: {person} is revoked, so no run of theirs starts"
                     )));
                 }
-                self.runs
-                    .owner_call(method, params)
-                    .unwrap_or_else(|| Err(Error::NoSuchMethod("kith-core: no method run.mint".into())))
+                self.runs.owner_call(method, params).unwrap_or_else(|| {
+                    Err(Error::NoSuchMethod("kith-core: no method run.mint".into()))
+                })
             })?;
             // Where the run asks, for a host that hands the path to the run.
             if let Some(o) = answer.as_object_mut() {
