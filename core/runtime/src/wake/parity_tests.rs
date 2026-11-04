@@ -311,8 +311,8 @@ fn world(case: &Value) -> World {
 
 fn fake(w: &World) -> Fake {
     let f = Fake::new(&w.state);
-    *f.view.borrow_mut() = w.gh.0.clone();
-    *f.checks.borrow_mut() = w.gh.1.clone();
+    f.view.borrow_mut().clone_from(&w.gh.0);
+    f.checks.borrow_mut().clone_from(&w.gh.1);
     f
 }
 

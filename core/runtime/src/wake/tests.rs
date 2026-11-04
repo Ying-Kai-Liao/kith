@@ -399,6 +399,7 @@ fn a_persons_session_needs_the_host_door() {
 
 // --- the import ------------------------------------------------------------------------------------------------------
 
+#[cfg(unix)]
 mod import {
     use super::*;
     use crate::import::wake::{read_files, run_in};

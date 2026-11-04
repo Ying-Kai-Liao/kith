@@ -16,7 +16,7 @@
 mod call;
 mod model;
 mod outside;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod parity_tests;
 mod queue;
 mod store;
