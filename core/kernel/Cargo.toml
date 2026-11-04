@@ -24,6 +24,11 @@ sha2 = "0.11.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 # kill(2) for the claim sweep and "is that pid running" (threads::os); the host links the same version.
 libc = "0.2"
+# Triggers (schedule): the host's routines use the same crates and majors, so one Cargo.lock holds one copy of each.
+chrono = "0.4.45"
+chrono-tz = "0.10.4"
+croner = "3"
+serde = { version = "1.0.229", features = ["derive"] }
 
 [lints.rust]
 # `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).

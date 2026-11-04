@@ -11,6 +11,7 @@ pub mod engines;
 pub mod launch;
 pub mod log;
 pub mod paths;
+pub mod schedule;
 #[cfg(unix)]
 pub mod secrets;
 #[cfg(unix)]

@@ -34,6 +34,7 @@ mod json_forms_more;
 mod people;
 mod run_tokens;
 mod runs;
+mod schedules;
 mod secrets;
 mod switched;
 
@@ -76,6 +77,8 @@ const PARTS: &[&[Method]] = &[
     import::ROWS,
     // M3: conversations and their claims.
     conversations::ROWS,
+    // M4: schedules.
+    schedules::ROWS,
 ];
 
 const LEN: usize = {

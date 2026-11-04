@@ -7194,6 +7194,71 @@
         "requires": [],
         "args": {}
       }
+    },
+    {
+      "name": "schedule.preview",
+      "summary": "The next fires of a trigger, as `{fires: [{at, iso}]}` (`at` in ms since the epoch): `{type: cron, expr, tz}` (tz `local` or an IANA zone), `{type: interval, every}` (seconds), `{type: once, at}`; a webhook or event has none. Refuses a spec `kith-sched` refuses, with its message.",
+      "params": [
+        {
+          "name": "trigger",
+          "summary": "The trigger, as JSON (`{\"type\":\"cron\",\"expr\":\"0 9 * * 1-5\",\"tz\":\"Europe/Paris\"}`).",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "after",
+          "summary": "Fires after this time, ms since the epoch (now by default).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "n",
+          "summary": "How many fires (5 by default, at most 100).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "preview"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "trigger": {
+            "kind": "positional"
+          },
+          "after": {
+            "kind": "flag",
+            "spellings": [
+              "--after"
+            ]
+          },
+          "n": {
+            "kind": "flag",
+            "spellings": [
+              "--n"
+            ]
+          }
+        }
+      }
     }
   ],
   "components": {
