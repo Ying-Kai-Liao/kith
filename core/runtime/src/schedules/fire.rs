@@ -356,6 +356,7 @@ pub(super) fn fire_in(tx: &Transaction<'_>, f: &Fire<'_>) -> Result<Outcome> {
             person: &person,
             prompt: task,
             deadline: Some(deadline_of(kind, trigger.as_ref(), slot_ms, f.now)),
+            revoke_seen: f.revoke_seen,
         },
         f.now,
     )?;
