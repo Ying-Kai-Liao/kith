@@ -157,9 +157,27 @@ DOC=$KITH_HOME/kernel/bin/kith
 D() { "$DOC" doctor "$@" 2>/dev/null; }
 D > "$T/clean.txt"
 check "doctor: a clean auth.json says nothing about a revoked owner" "! grep -q 'owner and also revoked' '$T/clean.txt'"
+# bad.json.src: kai (the owner) revoked, with a bot; me is the real owner's other id (not the owner here).
 python3 -c "
-import json; p='$KITH_AUTH'; d=json.load(open(p)); d['people']['kai']['revoked']={'at':'2026-01-01T00:00:00Z'}; json.dump(d,open(p,'w'))"
+import json; p='$KITH_AUTH'; d=json.load(open(p)); d['people']['kai']['revoked']={'at':'2026-01-01T00:00:00Z'}
+d['people']['bot-b']={'bot_of':'kai'}; d['people']['me']={}; json.dump(d,open('$T/bad.json.src','w'))"
+rm -f "$KITH_SERVE_DIR/cloud-sync.json"   # the linked checks above are over
+BAD() { cp "$T/bad.json.src" "$KITH_AUTH"; }
+BAD
 D > "$T/bad.txt"; D --json > "$T/bad.json"
-check "doctor: names the owner who is also revoked, with the fix" "grep -q 'kai is the owner and also revoked' '$T/bad.txt' && grep -q 'person kai --rm' '$T/bad.txt' && grep -q 'Only if kai is you' '$T/bad.txt' && [ \"\$(grep -o -E -- '--rm|--unrevoke' '$T/bad.txt' | head -1)\" = --rm ]"
+check "doctor: says what is true: kith-auth lets them in as the owner, chat refuses" "grep -q 'kai is the owner and also revoked (old data): kith-auth still lets them and their bots in as the owner, while chat refuses them' '$T/bad.txt' && ! grep -q 'treats them as revoked' '$T/bad.txt'"
+check "doctor: names the bots --rm removes, both --rm steps in order, and --unrevoke" "grep -q 'person kai --rm (removes kai and their bots (bot-b) for good; the id is retired), then kith auth person <you> owner' '$T/bad.txt' && grep -q 'person kai --unrevoke' '$T/bad.txt'"
 check "doctor --json: the same line, not ok" "python3 -c \"import json; d=json.load(open('$T/bad.json')); assert any(not c['ok'] and 'owner and also revoked' in c['name'] for c in d['checks'])\""
+check "owner: revoke is still refused" "! A person kai --revoke"
+check "owner: undo is allowed, and the doctor line is gone" "A person kai --unrevoke && ! D | grep -q 'owner and also revoked'"
+check "and the owner is still kai, with no revoked flag" "[ \"\$(J \"[n for n, p in d['people'].items() if p.get('owner') and not p.get('revoked')]\")\" = \"['kai']\" ]"
+check "undoing an owner who is not revoked changes nothing" "A person kai --unrevoke"
+BAD
+check "--rm then <you> owner: both run on the bad file" "A person kai --rm && A person me owner"
+check "and the doctor line is gone, the bot with it" "! D | grep -q 'owner and also revoked' && [ \"\$(J \"'bot-b' in d['people']\")\" = False ]"
+# an owner who is a bot of someone: the same hole, through cut_off's bot_of walk
+python3 -c "
+import json; d=json.load(open('$T/bad.json.src')); d['people']['kai'].pop('revoked'); d['people']['kai']['bot_of']='me'; json.dump(d,open('$KITH_AUTH','w'))"
+D > "$T/bot.txt"
+check "doctor: an owner who is a bot of someone is flagged too" "grep -q 'kai is the owner and also a bot of me' '$T/bot.txt'"
 exit $fail

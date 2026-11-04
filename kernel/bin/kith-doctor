@@ -248,13 +248,28 @@ def people():
     if len(owners) != 1:
         bad(f'{len(owners)} owners in people ({", ".join(owners) or "none"}): kith auth person <you> owner')
     issues = 0
-    # data from before kith-auth refused it: may() checks owner first, so a revoked owner still gets through
+    # data from before kith-auth refused it: may() checks the owner first, so such an owner (and their bots) still get in
+    # as the owner, while cut_off (chat, run tokens) refuses them. Same walk as kith-auth cut_off.
     for pid in owners:
-        if folks[pid].get('revoked'):
-            issues += 1
-            bad(f'people: {pid} is the owner and also revoked: kith treats them as revoked, not as the owner. '
-                f'If they are not this Mac\'s real owner: kith auth person {pid} --rm. '
-                f'Only if {pid} is you, the Mac\'s owner: kith auth person {pid} --unrevoke')
+        seen, cur, cut = set(), pid, False
+        while cur and cur not in seen and not cut:
+            cut = bool(folks.get(cur, {}).get('revoked'))
+            seen.add(cur)
+            cur = folks.get(cur, {}).get('bot_of')
+        if not cut and not folks[pid].get('bot_of'):
+            continue
+        issues += 1
+        bots = sorted(b for b, v in folks.items() if v.get('bot_of') == pid)
+        bot_txt = f' and their bots ({", ".join(bots)})' if bots else ''
+        if folks[pid].get('bot_of'):
+            bad(f'people: {pid} is the owner and also a bot of {folks[pid]["bot_of"]} (old data): kith-auth lets them in as '
+                f'the owner, while chat refuses them. Remove it, then name the real owner: kith auth person {pid} --rm '
+                f'(removes {pid}{bot_txt} for good; the id is retired), then kith auth person <you> owner')
+            continue
+        bad(f'people: {pid} is the owner and also revoked (old data): kith-auth still lets them and their bots in as the '
+            f'owner, while chat refuses them. If {pid} is you, the Mac\'s owner: kith auth person {pid} --unrevoke. '
+            f'If not, in this order: kith auth person {pid} --rm (removes {pid}{bot_txt} for good; the id is retired), '
+            f'then kith auth person <you> owner')
     for agent, rows in members.items():
         if agent not in known:
             issues += 1
