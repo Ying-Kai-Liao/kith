@@ -849,10 +849,15 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
         "people.may",
         &view(json!({"person": "sam", "agent": "house"})),
     ) {
-        Reached::Answered(v) => assert_eq!(
-            (v["allowed"].clone(), v["why"].clone()),
-            (json!(true), json!("member"))
-        ),
+        Reached::Answered(v) => {
+            assert_eq!(
+                (v["allowed"].clone(), v["why"].clone()),
+                (json!(true), json!("member"))
+            );
+            // M2-16: not the owner, and the preset the grant carries (the host's guard reads both)
+            assert_eq!(v["owner"], false);
+            assert_eq!(v["preset"], "member", "{v}");
+        }
         other => panic!("{other:?}"),
     }
     match read(
