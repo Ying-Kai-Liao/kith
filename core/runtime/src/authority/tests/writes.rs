@@ -1231,6 +1231,25 @@ fn a_bot_given_a_name_then_a_language_lists_its_keys_in_core_db_order() {
 }
 
 #[test]
+fn a_revoked_person_with_a_bot_made_owner_is_checked_the_same_by_both_readers() {
+    let auth = json!({
+        "people": {"kai": {"owner": true}, "sam": {"revoked": {"at": 7}}, "bot-b": {"bot_of": "sam"}},
+        "members": {"house": {"bot-b": {}}, "garden": {}, "scratch": {}, "sound": {}},
+        "presets": {"empty": {}, "pro": {}}
+    });
+    let mut rig = Rig::new(&auth);
+    let mut model = in_core_order(auth);
+    let op = Op {
+        method: "people.addPerson",
+        params: json!({"id": "sam", "owner": true}),
+        code: "",
+    };
+    step(&mut rig, &mut model, &op).unwrap();
+    readers_agree(&rig, &model).unwrap();
+    same(&model, &rig.c).unwrap();
+}
+
+#[test]
 fn sequences_of_writes_leave_core_db_as_the_same_verbs_leave_the_file() {
     let rig = RefCell::new(Rig::new(&json!({})));
     let mut config = Config {
