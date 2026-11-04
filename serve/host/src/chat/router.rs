@@ -220,6 +220,8 @@ pub async fn set_key(hub: &Arc<crate::hub::Hub>, key: &str) -> Result<Value> {
     } else {
         vault::unlock(hub.clone()).await?;
         vault::write(&hub.store, SLOT, key)?;
+        // Cleared again after the write: a read that began before it may have cached the old value meanwhile.
+        *SAVED.locked() = None;
     }
     status(&hub.store)
 }

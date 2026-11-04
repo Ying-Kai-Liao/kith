@@ -107,15 +107,15 @@ impl Link for CoreLink {
     }
 
     fn has(&self, name: &str) -> Result<bool> {
-        Ok(Self::call("secrets.has", &json!({"name": name}), Duration::from_secs(2))?["has"] == true)
+        Ok(Self::call("secrets.has", &json!({"name": name}), DAEMON_WAIT)?["has"] == true)
     }
 
     fn delete(&self, name: &str) -> Result<bool> {
-        Ok(Self::call("secrets.delete", &json!({"name": name}), Duration::from_secs(2))?["deleted"] == true)
+        Ok(Self::call("secrets.delete", &json!({"name": name}), DAEMON_WAIT)?["deleted"] == true)
     }
 
     fn get(&self, name: &str) -> Result<Option<String>> {
-        let answer = Self::call("secrets.get", &json!({"name": name}), Duration::from_secs(2))?;
+        let answer = Self::call("secrets.get", &json!({"name": name}), DAEMON_WAIT)?;
         if answer["found"] != true {
             return Ok(None);
         }
@@ -126,7 +126,7 @@ impl Link for CoreLink {
     }
 
     fn put(&self, name: &str, value: &str) -> Result<()> {
-        Self::call("secrets.put", &json!({"name": name, "value": value}), Duration::from_secs(2)).map(drop)
+        Self::call("secrets.put", &json!({"name": name, "value": value}), DAEMON_WAIT).map(drop)
     }
 
     fn legacy_key(&self, store: &Store) -> Result<Option<Zeroizing<Vec<u8>>>> {
@@ -212,6 +212,9 @@ fn move_old_records(store: &Store) -> Vec<String> {
             return vec!["(listing failed)".into()];
         }
     };
+    // The old rows are never deleted, so most starts find every slot already sealed: ask the core first (`has` needs no key)
+    // and read the old key only for a slot it lacks. A failed `has` keeps the slot in the list.
+    let slots: Vec<String> = slots.into_iter().filter(|slot| !matches!(store.vault.link.has(slot), Ok(true))).collect();
     if slots.is_empty() {
         return Vec::new();
     }
@@ -316,8 +319,10 @@ pub fn exists(store: &Store, slot: &str) -> Result<bool> {
 /// Removes the slot's value. The old row, if any, goes too: this is the owner clearing a credential, not a move.
 pub fn remove(store: &Store, slot: &str) -> Result<()> {
     let _writing = store.vault.writing.locked();
+    // Old row first: a crash between the two must not leave the old row to be moved back in as if it were new.
+    store.kv_delete(slot)?;
     store.vault.link.delete(slot)?;
-    store.kv_delete(slot)
+    Ok(())
 }
 
 pub fn write(store: &Store, slot: &str, value: &str) -> Result<()> {
@@ -341,6 +346,7 @@ pub(crate) mod memory {
         /// The refusal of a missing or locked key store (or no daemon), as the core words it.
         pub refuse: Mutex<Option<String>>,
         pub legacy: Mutex<Option<Vec<u8>>>,
+        pub legacy_reads: std::sync::atomic::AtomicUsize,
     }
 
     impl MemoryLink {
@@ -377,6 +383,7 @@ pub(crate) mod memory {
             Ok(())
         }
         fn legacy_key(&self, _: &Store) -> Result<Option<Zeroizing<Vec<u8>>>> {
+            self.legacy_reads.fetch_add(1, Ordering::SeqCst);
             Ok(self.legacy.locked().clone().map(Zeroizing::new))
         }
     }
@@ -534,6 +541,7 @@ mod tests {
         let puts = link.puts.load(Ordering::SeqCst);
         assert_eq!(move_old_records(&store), Vec::<String>::new());
         assert_eq!(link.puts.load(Ordering::SeqCst), puts, "the second run wrote nothing");
+        assert_eq!(link.legacy_reads.load(Ordering::SeqCst), 1, "the second start did not read the old key");
         assert_eq!(read(&store, "connectors").unwrap().as_deref(), Some("[2]"));
     }
 

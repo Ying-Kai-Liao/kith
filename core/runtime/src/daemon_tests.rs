@@ -16,6 +16,7 @@ use crate::tests::{machine, open, open_all, paths};
 fn quiet() -> Config {
     Config {
         holder_on: false,
+        key_load: None,
         wait_for_embedded: Duration::from_secs(10),
         ..Config::default()
     }
@@ -347,6 +348,7 @@ fn a_socket_file_left_by_a_dead_daemon_is_replaced_by_the_next_one() {
 fn holder_cfg(exe: std::path::PathBuf) -> Config {
     Config {
         holder_on: true,
+        key_load: None,
         wait_for_embedded: Duration::from_secs(10),
         holder: HolderConfig {
             exe: Some(exe),
@@ -905,4 +907,51 @@ fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
         other => panic!("{other:?}"),
     }
     drop(daemon);
+}
+
+#[test]
+fn a_stalled_key_store_holds_up_its_own_call_and_no_other_row() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let wait = std::sync::Mutex::new(wait);
+    let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = started.clone();
+    let cfg = Config {
+        key_load: Some(std::sync::Arc::new(move || {
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = wait.lock().expect("lock").recv();
+            Ok(Some(zeroize::Zeroizing::new(vec![7u8; 32])))
+        })),
+        ..quiet()
+    };
+    let d = serving(&p, cfg);
+    let blocked = {
+        let p = p.clone();
+        std::thread::spawn(move || read(&p, "secrets.get", &json!({"name": "a"})))
+    };
+    until("the key load to begin", || {
+        started.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    // The load is stuck; rows that take the core lock must still answer.
+    let begun = Instant::now();
+    assert!(matches!(
+        read(&p, "secrets.has", &json!({"name": "a"})),
+        Reached::Answered(_)
+    ));
+    assert!(matches!(
+        read(&p, "paths", &json!({})),
+        Reached::Answered(_)
+    ));
+    assert!(
+        begun.elapsed() < Duration::from_secs(5),
+        "a row waited for the key load: {:?}",
+        begun.elapsed()
+    );
+    release.send(()).expect("release");
+    assert!(matches!(
+        blocked.join().expect("thread"),
+        Reached::Answered(_)
+    ));
+    d.stop();
 }

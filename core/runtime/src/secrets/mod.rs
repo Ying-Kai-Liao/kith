@@ -225,15 +225,7 @@ impl Envelope {
     fn key(&mut self, conn: &Connection, create: bool) -> Result<Option<Zeroizing<[u8; KEY_LEN]>>> {
         if self.key.is_none() {
             if let Some(raw) = self.store.get()? {
-                {
-                    let arr: [u8; KEY_LEN] = raw.as_slice().try_into().map_err(|_| {
-                        Error::Io(
-                            "kith-core: the secrets master key in the key store has the wrong length; it was left untouched"
-                                .into(),
-                        )
-                    })?;
-                    self.key = Some(Zeroizing::new(arr));
-                }
+                self.key = Some(key_array(&raw)?);
             } else {
                 {
                     let records: i64 =
@@ -273,6 +265,46 @@ impl Envelope {
         Ok(self.key.clone())
     }
 }
+
+fn key_array(raw: &[u8]) -> Result<Zeroizing<[u8; KEY_LEN]>> {
+    let arr: [u8; KEY_LEN] = raw.try_into().map_err(|_| {
+        Error::Io(
+            "kith-core: the secrets master key in the key store has the wrong length; it was left untouched".into(),
+        )
+    })?;
+    Ok(Zeroizing::new(arr))
+}
+
+/// Reads the master key from the OS key store through `load`, for the daemon to call before it takes the core lock: a
+/// key store that stalls (a locked keychain waits up to 30 s) then holds up only this call, never the owner socket's
+/// other rows. `None` means no key is stored yet (the call that follows decides whether that is empty or an error).
+pub(crate) fn preload(
+    load: &dyn Fn() -> Result<Option<Zeroizing<Vec<u8>>>>,
+) -> Result<Option<Zeroizing<[u8; KEY_LEN]>>> {
+    load()?.map(|raw| key_array(&raw)).transpose()
+}
+
+/// Hands a key read by [`preload`] to the envelope in `slot`, so the call under the core lock finds it loaded.
+pub(crate) fn adopt(slot: &Mutex<Option<Envelope>>, key: Zeroizing<[u8; KEY_LEN]>) -> Result<()> {
+    let mut guard = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if guard.is_none() {
+        *guard = Some(Envelope::os()?);
+    }
+    if let Some(envelope) = guard.as_mut() {
+        envelope.key.get_or_insert(key);
+    }
+    Ok(())
+}
+
+/// The OS key store's read, as the daemon uses it unless a test supplies another.
+pub(crate) fn os_load() -> Result<Option<Zeroizing<Vec<u8>>>> {
+    keystore::os_key_store()?.get()
+}
+
+pub(crate) type KeyLoader =
+    std::sync::Arc<dyn Fn() -> Result<Option<Zeroizing<Vec<u8>>>> + Send + Sync>;
 
 fn unreachable_key() -> Error {
     Error::Io("kith-core: the secrets master key is unavailable".into())
