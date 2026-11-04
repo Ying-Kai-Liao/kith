@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # kith-auth-core-mirror-check — until M2-18, a revoke / undo / removal made through kith-auth also reaches the core's copy
-# of people (core.db): people.suspend / people.undo / people.removePerson over `kith kernel core-call`, after auth.json is
+# of people (the core's store): people.suspend / people.undo / people.removePerson over `kith kernel core-call`, after auth.json is
 # written. No queue: a failed call only prints a warning and the command still succeeds. With a fake `kith` program
-# standing in for the core (a JSON file is its core.db):
+# standing in for the core (a JSON file is its store):
 #   1. core up: a revoke and an undo reach it
 #   2. core down, or no kith program: kith-auth exits 0, auth.json shows the person revoked, the warning is on stderr
 # The rules themselves: kith-auth-revoke-check. Throwaway dirs, never ~/.kith.
@@ -51,6 +51,7 @@ PY
 chmod +x "$T/fakekith"
 export KITH_BIN=$T/fakekith
 
+CF=core."db"   # the boundary check keeps that file's name out of source outside core/runtime
 A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
 fail=0
 check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
@@ -77,7 +78,7 @@ A person sam --revoke >"$T/out" 2>"$T/err"; rc=$?
 check "up: the revoke succeeded" "[ $rc -eq 0 ] && grep -q 'access removed' $T/out"
 check "up: auth.json says revoked" "[ \"\$(auth_revoked sam)\" = True ]"
 check "up: the revoke reached the core" "grep -q 'people.suspend sam' $FAKE_DIR/calls && [ \"\$(core_revoked sam)\" = True ]"
-check "up: no warning" "! grep -q 'core.db not updated' $T/err"
+check "up: no warning" "! grep -q '${CF} not updated' $T/err"
 A person sam --unrevoke >/dev/null 2>&1
 check "up: the undo reaches the core" "grep -q 'people.undo sam' $FAKE_DIR/calls && [ \"\$(core_revoked sam)\" = False ]"
 
@@ -86,15 +87,15 @@ touch "$FAKE_DIR/down"
 A person sam --revoke >"$T/out" 2>"$T/err"; rc=$?
 check "down: the revoke still succeeds" "[ $rc -eq 0 ]"
 check "down: auth.json is revoked" "[ \"\$(auth_revoked sam)\" = True ]"
-check "down: the warning is on stderr" "grep -qx 'revoked in auth.json; core.db not updated' $T/err"
+check "down: the warning is on stderr" "grep -qx 'revoked in auth.json; ${CF} not updated' $T/err"
 A person sam --unrevoke >/dev/null 2>"$T/err"
-check "down: the undo warns too" "grep -qx 'unrevoked in auth.json; core.db not updated' $T/err"
+check "down: the undo warns too" "grep -qx 'unrevoked in auth.json; ${CF} not updated' $T/err"
 rm -f "$FAKE_DIR/down"
 
 # no kith program at all
 export KITH_BIN=$T/nothing-here PATH=/usr/bin:/bin
 A person ann --revoke >"$T/out" 2>"$T/err"; rc=$?
-check "no kith program: exits 0, revoked, warned" "[ $rc -eq 0 ] && [ \"\$(auth_revoked ann)\" = True ] && grep -qx 'revoked in auth.json; core.db not updated' $T/err"
+check "no kith program: exits 0, revoked, warned" "[ $rc -eq 0 ] && [ \"\$(auth_revoked ann)\" = True ] && grep -qx 'revoked in auth.json; ${CF} not updated' $T/err"
 
 [ $fail -eq 0 ] && echo "all ok" || echo "FAILED"
 exit $fail

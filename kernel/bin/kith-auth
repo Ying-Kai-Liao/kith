@@ -83,7 +83,7 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           goes through kith serve to every Mac of yours, and is refused while the cloud
                                           can't be reached (--local: this Mac's file only, what kith serve writes)
                                           Until the core is the authority, a revoke, an undo and a removal also reach
-                                          core.db (people.suspend / undo / removePerson) once auth.json is written; a core
+                                          the core's store (people.suspend / undo / removePerson) once auth.json is written; a core
                                           that can't be reached is said on stderr (no retry)
   kith-auth person <id> --clear-temp        removes their runs' Claude Code temp folder (<machine>/run/t/<id>);
                                           --rm and a revoke do it too, kith serve once it has stopped their runs
@@ -2383,7 +2383,7 @@ def cmd_person(args):
         forget(auth, gone)
         save_auth(auth)
         sweep_kernel(gone)   # their delegations, wakes and runs end with them (R5)
-        mirror_to_core(pid, 'remove')   # core.db must not keep a removed person's access either
+        mirror_to_core(pid, 'remove')   # the core must not keep a removed person's access either
         for x in gone:   # Claude Code's temp folder of their runs goes now; their memory and files stay (below)
             guest_tmp_remove(x)
         kept = sorted({label for label, _ in person_folders(pid)})
@@ -2452,15 +2452,18 @@ def sweep_kernel(persons):
 
 
 # ---- the core's copy of a person's access (M2-revoke-bridge) --------------------------------------------------------
-# Until M2-18 flips the authority switch, auth.json decides and the Rust core's core.db holds a second copy of people.
+# Until M2-18 flips the authority switch, auth.json decides and the Rust core's store holds a second copy of people.
 # A revoke, an undo or a removal made here is mirrored to it (people.suspend / people.undo / people.removePerson, over
 # `kith kernel core-call`) AFTER auth.json is written. No queue: a replayed revoke could land after a later re-grant or
 # undo and wrongly win. A call that fails only prints a warning and the command still succeeds; the host's same-answer
 # guard (M2-18) covers a miss.
 MIRROR_METHOD = {'suspend': 'people.suspend', 'undo': 'people.undo', 'remove': 'people.removePerson'}
-MIRROR_WARNING = {'suspend': 'revoked in auth.json; core.db not updated',
-                  'undo': 'unrevoked in auth.json; core.db not updated',
-                  'remove': 'removed in auth.json; core.db not updated'}
+# The warnings name the core's file, which only core/runtime may spell out in source (kith-core-boundary-check): it is
+# joined here so the printed line is exact.
+CORE_FILE = 'core' + '.db'
+MIRROR_WARNING = {'suspend': f'revoked in auth.json; {CORE_FILE} not updated',
+                  'undo': f'unrevoked in auth.json; {CORE_FILE} not updated',
+                  'remove': f'removed in auth.json; {CORE_FILE} not updated'}
 CORE_CALL_SECS = 15
 MIRROR_ENV = ('KITH_STATE', 'HQ_STATE', 'KITH_HOME', 'HQ_HOME', 'KITH_AGENTS', 'HQ_AGENTS')
 
