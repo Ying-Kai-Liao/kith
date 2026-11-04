@@ -47,7 +47,12 @@ pub(crate) fn serves(method: &str) -> bool {
 
 pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let (folders, kernel) = core.folders_for(params)?;
-    Ok(Ctx {
+    Ok(ctx_from(&folders, kernel))
+}
+
+/// The rules' context over a caller's folders (also the cutover module's, which has no params to read them from).
+pub(crate) fn ctx_from(folders: &kith_kernel::paths::Paths, kernel: std::path::PathBuf) -> Ctx {
+    Ctx {
         auth: folders.secrets.join("auth.json"),
         agents: folders.agents.clone(),
         kernel,
@@ -55,7 +60,7 @@ pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
         now_ms: secrets::now_ms(),
         sandbox: Sandbox::Fixed(false),
         serve: ServeDir::Fixed(folders.machine.join("serve")),
-    })
+    }
 }
 
 fn life_of(core: &Core, params: &Value) -> Result<Life> {

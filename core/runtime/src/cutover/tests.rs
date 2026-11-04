@@ -627,7 +627,12 @@ fn the_cli_words_parse() {
     assert!(run_with(&r, &env, &a(&["status"])).unwrap()[0].contains("switched"));
     assert!(run_with(&r, &env, &a(&["check", "fa"])).unwrap()[0].contains("only store"));
     assert_eq!(
-        run(&env.machine, &a(&["status"])).unwrap(),
-        vec!["no module has a cutover yet"]
+        run(
+            &crate::tests::paths(&env.machine),
+            &env.machine,
+            &a(&["status"])
+        )
+        .unwrap(),
+        vec!["authority: not switched"]
     );
 }

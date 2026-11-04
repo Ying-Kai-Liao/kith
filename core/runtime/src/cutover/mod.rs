@@ -1,6 +1,6 @@
 //! The cutover framework (M3-10a): ONE module-keyed way to move a part of Kith from its Python store to core.db, check it
 //! answers the same, make the move one-way for the old readers, and go back. M3's lanes and M2's `authority` plug into it;
-//! the framework registers no real module yet ([`registry`] is empty), the tests use a fake one.
+//! the registry holds `authority` (M2-18a, `authority.rs`; the switch stays OFF), the tests use a fake one.
 //!
 //! # A module
 //! A [`Module`] is a name plus six hooks: `import` (idempotent; `--dry-run` gets no core; `--force`), `same_answer`
@@ -41,6 +41,9 @@ use crate::db::{Core, MIGRATIONS};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 
+pub(crate) mod authority;
+#[cfg(test)]
+mod authority_tests;
 pub(crate) mod marker;
 pub(crate) mod same_answer;
 pub(crate) mod secrets_back;
@@ -56,6 +59,9 @@ use state::{Phase, Switch};
 pub(crate) struct Env {
     pub machine: PathBuf,
     pub layout: Layout,
+    /// Where the caller's auth.json and agent folders are, for the modules whose sources live there (`authority`). The
+    /// daemon takes it from the request (the `home`, `kernel` and `env` the caller sends, as `people.*` does).
+    pub ctx: Option<kith_kernel::secrets::Ctx>,
 }
 
 impl Env {
@@ -63,7 +69,13 @@ impl Env {
         Self {
             machine: machine.to_path_buf(),
             layout: Layout::new(machine),
+            ctx: None,
         }
+    }
+
+    pub(crate) fn with_ctx(mut self, ctx: kith_kernel::secrets::Ctx) -> Self {
+        self.ctx = Some(ctx);
+        self
     }
 }
 
@@ -111,9 +123,9 @@ pub(crate) trait Module {
     }
 }
 
-/// The registered modules. Empty until a lane switches (M3-10 b..g, M2-23).
+/// The registered modules: `authority` (M2-18a, switch off); the M3 lanes join at their switch (M3-10 b..g).
 pub(crate) fn registry() -> Vec<Box<dyn Module>> {
-    Vec::new()
+    vec![Box::new(authority::AuthorityModule::real())]
 }
 
 fn now_secs() -> i64 {
@@ -400,9 +412,12 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
     let machine = core.folders().map(|p| p.machine.clone()).ok_or_else(|| {
         Error::NotServed("kith-core: this core was opened without its folders".into())
     })?;
+    // The caller's view of the folders (`home`, `kernel`, `env` of the params, as `people.*` reads them): a module whose
+    // sources are the caller's own files (auth.json) is asked about those, not the daemon's.
+    let (folders, kernel) = core.folders_for(params)?;
     serve_json(
         &registry(),
-        &Env::new(&machine),
+        &Env::new(&machine).with_ctx(crate::authority::call::ctx_from(&folders, kernel)),
         core.conn(),
         name,
         opt_in_env(name),
@@ -412,8 +427,16 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
 
 /// `kith kernel cutover ...`: `step MODULE [--dry-run] [--force]`, `rollback MODULE [--force]`, `status`, `check MODULE`,
 /// `modules`.
-pub(crate) fn run(machine: &std::path::Path, args: &[String]) -> Result<Vec<String>> {
-    run_with(&registry(), &Env::new(machine), args)
+pub(crate) fn run(
+    folders: &kith_kernel::paths::Paths,
+    kernel: &std::path::Path,
+    args: &[String],
+) -> Result<Vec<String>> {
+    let env = Env::new(&folders.machine).with_ctx(crate::authority::call::ctx_from(
+        folders,
+        kernel.to_path_buf(),
+    ));
+    run_with(&registry(), &env, args)
 }
 
 pub(crate) fn run_with(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<String>> {

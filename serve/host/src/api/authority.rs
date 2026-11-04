@@ -224,9 +224,118 @@ impl Selected {
     }
 }
 
-/// Whether the opt-in is set.
+/// Whether the opt-in is set AND the core's gate (`cutover.mayServe` for `authority`, asked as the Host) says it may serve.
+/// The variable alone is not enough (M2-18a): while the core has not imported auth.json, or auth.json changed in a way
+/// the core has not, the host stays on kith-auth. Until the first answer (the daemon starts beside the host) it is off.
 pub fn core_selected() -> bool {
+    opted_in() && gate_open(&current_fingerprint())
+}
+
+fn opted_in() -> bool {
     std::env::var(SWITCH).is_ok_and(|v| v == "1")
+}
+
+/// The gate's last answer, and what auth.json looked like when it was given.
+struct Gate {
+    ok: bool,
+    fingerprint: String,
+}
+
+static GATE: Mutex<Option<Gate>> = Mutex::new(None);
+
+/// How often the gate is asked again. A change of auth.json closes it at once (the fingerprint no longer matches) until
+/// the next answer, so this is how long a switched-on host can stay on kith-auth after a harmless write, not how long a
+/// stale core can answer.
+const GATE_EVERY: Duration = Duration::from_secs(2);
+
+fn gate_open(now: &str) -> bool {
+    GATE.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|g| g.ok && g.fingerprint == now)
+}
+
+/// auth.json's inode, size and mtime (the framework's own fingerprint of it), or `none`.
+fn current_fingerprint() -> String {
+    let home = kith_kernel::paths::process_home();
+    let kernel = crate::kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
+    let auth = kith_kernel::secrets::Ctx::from_process(&kernel).auth;
+    match std::fs::metadata(&auth) {
+        Ok(md) => {
+            use std::os::unix::fs::MetadataExt as _;
+            format!("{}:{}:{}:{}", md.ino(), md.len(), md.mtime(), md.mtime_nsec())
+        }
+        Err(_) => "none".into(),
+    }
+}
+
+/// What the gate's answer means for the host: whether to use the core, and the line to log when it is no (or a warning
+/// with a yes). `None` is a core that did not answer.
+pub fn read_gate(answer: Option<&Value>) -> (bool, Option<String>) {
+    let Some(a) = answer else {
+        return (false, Some("the core did not answer the authority gate; staying on kith-auth".into()));
+    };
+    let warning = a["warning"].as_str().map(str::to_owned);
+    if a["ok"] == true {
+        return (true, warning);
+    }
+    let msg = match warning {
+        // "authority: N difference(s) between the core and the old store (...)": the import is behind the file.
+        Some(w) => match w.split_once(" difference(s)").and_then(|(head, _)| head.rsplit(' ').next()?.parse::<usize>().ok()) {
+            Some(n) => format!(
+                "core.db missed {n} changes, run `kith kernel core-migrate --authority --force`; staying on kith-auth ({w})"
+            ),
+            None => format!("{w}; staying on kith-auth"),
+        },
+        None => "authority is not switched to the core (run `kith kernel core-migrate --authority`, then `kith migrate step authority`); staying on kith-auth"
+            .into(),
+    };
+    (false, Some(msg))
+}
+
+/// One ask of the gate: the core's `cutover.mayServe` for `authority` on the Host connection, with this process's view of
+/// the folders (the core reads the caller's own auth.json, not its own).
+fn ask_gate(core: &CoreData) -> (bool, Option<String>) {
+    let (Some(home), Some(kernel)) = (core.home.to_str(), core.kernel.to_str()) else {
+        return (false, Some("home or kernel folder is not UTF-8; staying on kith-auth".into()));
+    };
+    let params = json!({"module": "authority", "home": home, "kernel": kernel, "env": core.env});
+    read_gate(crate::core_front::call_as_host(&core.folders, "cutover.mayServe", &params).as_ref())
+}
+
+/// `KITH_CORE_AUTHORITY=1` at host start: from now on the gate is asked every [`GATE_EVERY`] on a thread of its own and
+/// the answer is kept with auth.json's fingerprint. Without the variable nothing runs and the host is on kith-auth.
+pub fn start_gate() {
+    if !opted_in() {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("authority-gate".into()).spawn(|| {
+        let core = CoreData::from_process();
+        let mut last: Option<(bool, Option<String>)> = None;
+        loop {
+            // Fingerprint first: a write that lands during the ask leaves the answer older than the file, and it is dropped.
+            let fingerprint = current_fingerprint();
+            let (ok, line) = ask_gate(&core);
+            *GATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Gate { ok, fingerprint });
+            if last.as_ref() != Some(&(ok, line.clone())) {
+                match (ok, &line) {
+                    (true, None) => tracing::info!("KITH_CORE_AUTHORITY=1: the core serves authority"),
+                    (true, Some(w)) => tracing::warn!("KITH_CORE_AUTHORITY=1: the core serves authority. {w}"),
+                    (false, w) => tracing::warn!(
+                        "KITH_CORE_AUTHORITY=1 is not honoured: {}",
+                        w.as_deref().unwrap_or("the core does not serve authority")
+                    ),
+                }
+                last = Some((ok, line));
+            }
+            std::thread::sleep(GATE_EVERY);
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!(
+            "KITH_CORE_AUTHORITY=1 is not honoured: the gate thread would not start ({e}); staying on kith-auth"
+        );
+    }
 }
 
 /// [`core_selected`] for the request guard: also on while a test has given it a core (`TEST_CORE`), so a test does not
@@ -237,4 +346,36 @@ pub fn guard_on_core() -> bool {
         return true;
     }
     core_selected()
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    #[test]
+    fn a_denied_gate_names_how_many_changes_the_core_missed() {
+        let a = json!({"ok": false, "warning": "authority: 3 difference(s) between the core and the old store (x); not served from the core"});
+        let (open, line) = read_gate(Some(&a));
+        let line = line.unwrap();
+        assert!(!open);
+        assert!(
+            line.contains("core.db missed 3 changes, run `kith kernel core-migrate --authority --force`"),
+            "{line}"
+        );
+        let (open, line) = read_gate(Some(&json!({"ok": false, "warning": null})));
+        assert!(!open && line.unwrap().contains("not switched"));
+        assert_eq!(read_gate(Some(&json!({"ok": true, "warning": null}))), (true, None));
+        let (open, line) = read_gate(Some(&json!({"ok": true, "warning": "WARNING x"})));
+        assert!(open && line.as_deref() == Some("WARNING x"));
+    }
+
+    #[test]
+    fn the_gate_is_closed_until_asked_and_closes_when_auth_json_changes() {
+        // Not asked yet (or no thread running): closed.
+        assert!(!gate_open("1:2:3:4"));
+        *GATE.lock().unwrap() = Some(Gate { ok: true, fingerprint: "1:2:3:4".into() });
+        assert!(gate_open("1:2:3:4"));
+        assert!(!gate_open("1:2:9:9"), "a changed auth.json closes it at once");
+        *GATE.lock().unwrap() = None;
+    }
 }

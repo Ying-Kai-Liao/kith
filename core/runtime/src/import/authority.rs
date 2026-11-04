@@ -122,6 +122,20 @@ fn truthy(v: Option<&Value>, what: &str) -> Result<bool> {
 /// A file the import can store faithfully, or the reason it cannot. Run before anything is written.
 pub(super) fn refuse_what_it_cannot_keep(auth: &Value) -> Result<()> {
     object(auth, "the file")?;
+    // The owner is the one person a revoke cannot reach (`kith-auth` and the core both refuse to make a revoked person the
+    // owner, #780), so a file that says both has been edited by hand or written by an older version. Which of the two it
+    // means is not for the import to guess.
+    for (id, p) in table(auth, "people")?.into_iter().flatten() {
+        if truthy(p.get("owner"), "owner").unwrap_or(false)
+            && truthy(p.get("revoked"), "revoked").unwrap_or(false)
+        {
+            return Err(Error::Refused(format!(
+                "auth.json: {id} is both the owner and revoked; the file cannot be imported as it is. Remove the person \
+                 (kith-auth person {id} --rm) and add {id} again as the owner, or give the ownership to someone else, and run it \
+                 again (the core's undo cannot clear this for an owner). Nothing was imported."
+            )));
+        }
+    }
     if let Some(access) = table(auth, "agent_access")? {
         for (agent, row) in access {
             let kept = row
