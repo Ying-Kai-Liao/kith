@@ -276,7 +276,7 @@ fn os_store_is_unsupported_here() {
         super::keystore::SecretTool::new("a", "b"),
     );
     let _ = os_tests_enabled();
-    let _: fn(&dyn KeyStore) = exercise;
+    let _: fn(&dyn KeyStore, bool) = exercise;
 }
 
 fn slot(store: &MemoryKeyStore) -> std::sync::Mutex<Option<Envelope>> {
