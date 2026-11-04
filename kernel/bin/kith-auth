@@ -2470,6 +2470,7 @@ CORE_CALL_SECS = 4
 MIRROR_ENV = ('KITH_STATE', 'HQ_STATE', 'KITH_HOME', 'HQ_HOME', 'KITH_AGENTS', 'HQ_AGENTS')
 
 
+# The host detects coreUpdated by the substring " in auth.json; " (serve/host/src/remote/account.rs): keep it if you reword.
 def mirror_warning(action, may_have_applied):
     """The line the owner sees. After a lost answer (exit 5) or a timeout the core may have applied the change."""
     state = 'may not be updated' if may_have_applied else 'not updated'
