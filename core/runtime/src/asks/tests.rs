@@ -1078,7 +1078,8 @@ mod stop {
                 matches!(&err, Error::Stopped(m) if m.contains("was stopped")),
                 "{source}: {err}"
             );
-            assert_eq!(turn_state(&core, w), "queued");
+            // the fence never lifts: the refused turn is cancelled, not left queued for ever
+            assert_eq!(turn_state(&core, w), "cancelled");
         }
         let p = turn_from(&mut core, "conv-r", "app");
         let id = claim_for(&mut core, "conv-r", p).unwrap();

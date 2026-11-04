@@ -210,6 +210,14 @@ fn a_claim_that_passed_its_may_check_before_the_revoke_is_refused_for_the_person
             matches!(&err, Error::Refused(m) if m.contains("was revoked after the may check")),
             "{p}: {err}"
         );
+        // a turn that arrives after the revoke is refused for good: cancelled, so no claimer retries it for ever
+        let t = turn(&mut f.core, &format!("c-{p}"), "app", p);
+        let err = claim(&mut f.core, &new_claim(&format!("c-{p}"), p, t, *e), 6).unwrap_err();
+        assert!(matches!(err, Error::Refused(_)), "{p}: {err}");
+        assert_eq!(state_of(&f.core, "turns", "id", t), "cancelled", "{p}");
+        let again = claim(&mut f.core, &new_claim(&format!("c-{p}"), p, t, *e), 6).unwrap_err();
+        assert!(matches!(again, Error::Refused(_)), "{p}: {again}");
+        assert_eq!(state_of(&f.core, "turns", "id", t), "cancelled", "{p}");
     }
 }
 
@@ -217,10 +225,16 @@ fn a_claim_that_passed_its_may_check_before_the_revoke_is_refused_for_the_person
 fn a_stopped_asks_conversation_refuses_its_ask_turn_with_the_stopped_kind_not_the_busy_one() {
     let mut f = fixture();
     ask(&f.core, "a1", None, "mia", "c-a1");
-    let t = turn(&mut f.core, "c-a1", "wake", "kai");
     revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
+    // arrives after the stop (the stop itself cancels only what was queued by then)
+    let t = turn(&mut f.core, "c-a1", "wake", "kai");
     let err = claim(&mut f.core, &new_claim("c-a1", "kai", t, 0), 5).unwrap_err();
     assert!(matches!(err, Error::Stopped(_)), "{err}");
+    // the fence never lifts: the turn is cancelled, and a second attempt (a racing claimer) changes nothing
+    assert_eq!(state_of(&f.core, "turns", "id", t), "cancelled");
+    let err = claim(&mut f.core, &new_claim("c-a1", "kai", t, 0), 5).unwrap_err();
+    assert!(matches!(err, Error::Stopped(_)), "{err}");
+    assert_eq!(state_of(&f.core, "turns", "id", t), "cancelled");
     // a busy conversation stays a plain refusal
     let live = run(&mut f.core, "c-busy", "kai", "app", 30);
     let t2 = turn(&mut f.core, "c-busy", "app", "kai");
@@ -230,6 +244,8 @@ fn a_stopped_asks_conversation_refuses_its_ask_turn_with_the_stopped_kind_not_th
         "{err}"
     );
     assert_eq!(state_of(&f.core, "claims", "claim_id", live), "running");
+    // and its turn stays queued for the writer to finish
+    assert_eq!(state_of(&f.core, "turns", "id", t2), "queued");
 }
 
 #[test]

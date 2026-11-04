@@ -31,7 +31,7 @@ use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 
 use super::CoreState;
 #[cfg(unix)]
-use crate::conversations::claims::{Claimed, NewClaim, claim_in};
+use crate::conversations::claims::{Claimed, NewClaim, cancel_fenced, claim_in};
 use crate::db::Core;
 #[cfg(unix)]
 use crate::error::Error;
@@ -297,38 +297,45 @@ pub(crate) fn claim_next(
         .unwrap_or_default();
     // The claim and the session row are one transaction: a failing session write rolls the claim back (no `claimed` claim
     // left without a session), and the generation check of `claim_tx` covers both.
-    let generation = core.generation();
-    let tx = core.claim_tx()?;
-    let claimed = claim_in(
-        &tx,
-        generation,
-        &NewClaim {
-            account: Some(&account),
-            conversation: req.conversation,
-            kind: req.kind,
-            person: req.person,
-            turn: req.turn,
-            holder_instance: req.holder_instance,
-            process: req.process,
-            revoke_seen: req.revoke_seen,
-        },
-        now_ms,
-    )?;
-    let fresh = transcripts::rows::get(&tx, req.conversation, &account)?.is_none();
-    let session = transcripts::rows::start(
-        &tx,
-        req.conversation,
-        &account,
-        new.cwd,
-        new.session_id,
-        &pointer,
-        now_ms / 1000,
-    )?;
-    tx.commit()?;
-    Ok(Started::Claimed {
-        claimed,
-        account,
-        fresh,
-        session: Box::new(session),
-    })
+    let started = (|| {
+        let generation = core.generation();
+        let tx = core.claim_tx()?;
+        let claimed = claim_in(
+            &tx,
+            generation,
+            &NewClaim {
+                account: Some(&account),
+                conversation: req.conversation,
+                kind: req.kind,
+                person: req.person,
+                turn: req.turn,
+                holder_instance: req.holder_instance,
+                process: req.process,
+                revoke_seen: req.revoke_seen,
+            },
+            now_ms,
+        )?;
+        let fresh = transcripts::rows::get(&tx, req.conversation, &account)?.is_none();
+        let session = transcripts::rows::start(
+            &tx,
+            req.conversation,
+            &account,
+            new.cwd,
+            new.session_id,
+            &pointer,
+            now_ms / 1000,
+        )?;
+        tx.commit()?;
+        Ok(Started::Claimed {
+            claimed,
+            account: account.clone(),
+            fresh,
+            session: Box::new(session),
+        })
+    })();
+    if started.is_err() {
+        // Rolled back: a turn refused by the stopped-ask fence or the revoke epoch is cancelled in its own write.
+        let _ = cancel_fenced(core, req, now_ms);
+    }
+    started
 }
