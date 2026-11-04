@@ -297,6 +297,20 @@ fn approving_twice_gives_the_same_answer_and_files_nothing_again() {
 }
 
 #[test]
+fn a_repeat_approve_after_the_person_was_suspended_is_refused_and_writes_nothing() {
+    let mut rig = Rig::new(&world());
+    arrive(&mut rig, "r", Some("sam"), true);
+    at_computer(&mut rig, "people.approve", &json!({"id": "r"})).unwrap();
+    at_computer(&mut rig, "people.suspend", &json!({"id": "sam"})).unwrap();
+    let err = at_computer(&mut rig, "people.approve", &json!({"id": "r"})).unwrap_err();
+    assert!(err.contains("no longer a member"), "{err}");
+    assert_eq!(
+        requests::status_of(rig.core.conn(), "r").as_deref(),
+        Some("approved")
+    );
+}
+
+#[test]
 fn filing_has_the_rules_of_the_hosts_sync() {
     let mut rig = Rig::new(&world());
     let mut step =

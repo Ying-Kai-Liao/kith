@@ -830,8 +830,9 @@ async fn end_queued_in_core(hub: &Hub, between: impl Future<Output = ()>) {
     ended.dedup();
     let done = deny_in_core(hub, &ended).await;
     between.await;
-    // A held id is back in the host's list (the cloud re-listed it): it leaves the queue unended, as before.
-    edit_deny_queue(hub, |queue| queue.retain(|id| !done.contains(id) && !held.contains(id)));
+    // Only the ids ended here leave the queue. A held id stays: a path that queues an id before it drops its own copy
+    // (refuse_mismatch, the not-a-member path) must not lose it; the next pass ends it once the host no longer holds it.
+    edit_deny_queue(hub, |queue| queue.retain(|id| !done.contains(id)));
 }
 
 /// The one way to change the queue: load, change and store under one lock.
@@ -1078,7 +1079,9 @@ async fn decide_in_core_until(
     // have been filed by something else first. Refused before the cloud is asked for a grant, and the request ends.
     if approve
         && (said["device"]["key"].as_str() != Some(b64(&held.device_key).as_str())
-            || said["device"]["personId"].as_str() != held.person.as_deref())
+            || said["device"]["personId"].as_str() != held.person.as_deref()
+            || said["device"]["platform"].as_str() != Some(held.platform.as_str())
+            || said["device"]["name"].as_str() != Some(held.device_name.as_str()))
     {
         return refuse_mismatch(hub, &base, id, deadline).await;
     }
@@ -2484,6 +2487,30 @@ mod tests {
         decide_in_core(&hub, "req_b", true, true, true).await.unwrap();
         assert!(hub.store.device(&b64(&[2; 32])).is_some());
         assert!(decide_in_core(&hub, "req_b", true, true, true).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_request_the_core_already_approved_is_stored_once_by_the_hosts_decision() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let _rig = CoreRig::new().await;
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        hub.cloud.requests.locked().push(waiting("req_a", 1, Some("sam"), 0));
+        file_in_core(&hub).await;
+
+        // The core approved it already (a retry after a lost reply): the host's decision gets the same answer, stores
+        // the device once, and the request is then unknown here.
+        crate::api::authority::owner_call("people.approve", json!({"id": "req_a", "local": true}), false)
+            .await
+            .unwrap();
+        decide_in_core(&hub, "req_a", true, true, true).await.unwrap();
+        assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[1; 32])).count(), 1);
+        let again = decide_in_core(&hub, "req_a", true, true, true).await.unwrap_err();
+        assert!(again.to_string().contains("unknown request"), "{again:#}");
+        assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[1; 32])).count(), 1);
     }
 
     #[tokio::test]

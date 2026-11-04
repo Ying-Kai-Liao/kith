@@ -15,8 +15,10 @@
 //!
 //! # Rules, as `settle` has them
 //!
-//! - An unknown request, one already decided, and one that ran out are "unknown request": the host forgets a request
-//!   once decided or when the cloud stops listing it. (The host does not look at the clock itself; the cloud drops an
+//! - An unknown request, one denied, and one that ran out are "unknown request": the host forgets a request when the
+//!   cloud stops listing it. A second approve of an approved request is the exception, and the core's own: it gives the
+//!   same answer and files nothing again (the host, which forgets the request once decided, says "unknown request";
+//!   a known difference, see the parity fixture). (The host does not look at the clock itself; the cloud drops an
 //!   expired request on its next pull. Here a pending request past `expires_at` is expired the same way: not listed,
 //!   not decidable.)
 //! - An approval needs the device's code first ("The device hasn't shown its code yet."). A denial does not.
@@ -28,7 +30,7 @@
 //! - Bots and the owner are never members: a request naming a bot id or the owner's own id is denied on approval and
 //!   refused on filing (the host cannot produce either, because only invited Kith accounts have a membership).
 //! - Two devices answering at once: each answer is a `BEGIN IMMEDIATE` claim transaction, so the second one finds the
-//!   request decided and is refused.
+//!   request decided: the same approve gets the same answer, any other answer is refused.
 //!
 //! # Known gaps (M2-17 MUST)
 //!
@@ -234,6 +236,14 @@ fn approve_in(tx: &Connection, c: &Ctx, id: &str, members: bool) -> Result<Outco
     if let Some(done) = load(tx, id)?.filter(|r| r.status == "approved") {
         if members && done.person.is_none() {
             return Err(only_at_the_computer());
+        }
+        // The same check a first approve makes, but nothing is written: the request already ended as approved.
+        if let Some(person) = &done.person
+            && !is_member(tx, person)?
+        {
+            return Err(refuse(
+                "That account is no longer a member of this computer.",
+            ));
         }
         return Ok(Outcome::Done(approved_json(&done)));
     }
