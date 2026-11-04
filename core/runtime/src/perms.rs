@@ -187,12 +187,12 @@ enum Verdict {
     Unreadable,
 }
 
-/// `SQLite`'s -wal and -shm: the only files allowed to vanish mid-check.
+/// `SQLite`'s `<name>.db-wal` and `<name>.db-shm`: the only files allowed to vanish mid-check.
 #[cfg_attr(unix, allow(dead_code))]
 fn is_sidecar(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .is_some_and(|n| n.ends_with("-wal") || n.ends_with("-shm"))
+        .is_some_and(|n| n.ends_with(".db-wal") || n.ends_with(".db-shm"))
 }
 
 /// Whether `icacls` output holds at least one `principal:(rights)` entry.
@@ -215,9 +215,9 @@ fn judge(
         // processing 1 files") stands where the list should be. That is no list at all, not an open one.
         // When the sidecar is gone by now, that error text is its deletion ("The system cannot find the file
         // specified", exit 0): the CI flake. Only a sidecar that is provably gone is excused; a list with entries is
-        // never reaching this branch, so an open file is still judged by its entries below.
+        // never excused here: entries beside a failure are a partial read of a file that existed, so Unreadable.
         if !has_entries(text) || text.contains("Failed processing 1 ") {
-            if !still_exists && allow_vanish {
+            if !has_entries(text) && !still_exists && allow_vanish {
                 Verdict::Vanished
             } else {
                 Verdict::Unreadable
@@ -373,6 +373,32 @@ mod tests {
         );
     }
 
+    /// The sidecar was deleted and created again (a new connection) before we looked: it exists, so it is judged,
+    /// never excused as vanished.
+    #[test]
+    fn a_recreated_open_sidecar_is_never_vanished() {
+        let msg = "C:\\m\\core.db-wal: The process cannot access the file because it is being used by another process.\nSuccessfully processed 0 files; Failed processing 1 files\n";
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+        assert_eq!(
+            judge(false, "", "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+    }
+
+    #[test]
+    fn entries_beside_a_failure_are_not_vanished() {
+        let text = "C:\\m\\core.db-wal HOST\\me:(F)\n NT AUTHORITY\\SYSTEM:(F)\n\nSuccessfully processed 0 files; Failed processing 1 files\n";
+        for exists in [true, false] {
+            assert_eq!(
+                judge(true, text, "C:\\m\\core.db-wal", "me", exists, true),
+                Verdict::Unreadable
+            );
+        }
+    }
+
     #[test]
     fn only_sidecars_may_vanish() {
         assert_eq!(
@@ -387,6 +413,12 @@ mod tests {
             "core.holder",
             "core.token",
             "snap.db",
+            "core.db-journal",
+            "core.db-wal.bak",
+            "x-wal",
+            "x-shm",
+            "-wal",
+            "core.db-shm.tmp",
         ] {
             assert!(!is_sidecar(Path::new(n)), "{n}");
         }
