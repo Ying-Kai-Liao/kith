@@ -580,6 +580,37 @@ pub(super) fn follow_in_doors(
     Ok(())
 }
 
+/// What a suspension, a removal and a bot's removal take with them in the card store (M2-11b, A7): the open cards and
+/// the unused once-grants (`approved`) of the ids they name, the person and their bots, in the write's own transaction.
+/// So no pre-revoke yes can be picked up by `cards::raise` after an undo: undo restores access, never these cards.
+/// The ids are those of `follow_in_doors` (never the owner, whose cards carry an empty person). The withdrawn card ids
+/// go into the answer under `cards`, for the caller to tell a waiting asker.
+pub(super) fn follow_in_cards(
+    conn: &rusqlite::Connection,
+    method: &str,
+    params: &Value,
+    said: &mut Value,
+) -> crate::error::Result<()> {
+    let ids: Vec<String> = match method {
+        "people.suspend" | "people.removePerson" if said.get("ids").is_some() => said["ids"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str().map(str::to_owned))
+            .collect(),
+        "people.removeBot" => params
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .into_iter()
+            .collect(),
+        _ => return Ok(()),
+    };
+    let gone = crate::cards::withdraw_people(conn, &ids)?;
+    said["cards"] = Value::Array(gone.into_iter().map(Value::String).collect());
+    Ok(())
+}
+
 /// `person <id> --clear-temp`: the ids whose temp folders go (the person and their bots).
 pub(crate) fn temp_ids(auth: &Value, pid: &str) -> R<Vec<String>> {
     check_id(pid)?;

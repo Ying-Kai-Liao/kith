@@ -1,0 +1,2 @@
+\* the code as built with the core's cards: P asks on m1, the owner says yes, a revoke withdraws the card in its own step (M2-11b)
+CardsOn = TRUE

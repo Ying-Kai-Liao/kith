@@ -189,7 +189,10 @@ pub(crate) fn call_in(
                 core,
                 c,
                 |a| write_in(m, params, c, life, a, &fresh),
-                |tx, said| revoke::follow_in_doors(tx, m, params, said, c.now_ms),
+                |tx, said| {
+                    revoke::follow_in_doors(tx, m, params, said, c.now_ms)?;
+                    revoke::follow_in_cards(tx, m, params, said)
+                },
             )?;
             // The folders follow a rename once it is committed. `kith-auth --local` clears no temp folder: the
             // caller stops their runs first and then asks `people.clearTemp` (the `ids` of a suspend or a removal

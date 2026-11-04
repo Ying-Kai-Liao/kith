@@ -311,7 +311,11 @@ fn get(tx: &Transaction<'_>, id: &str) -> Result<Option<Card>> {
         .optional()?)
 }
 
-fn list_where(tx: &Transaction<'_>, tail: &str, args: impl rusqlite::Params) -> Result<Vec<Card>> {
+fn list_where(
+    tx: &rusqlite::Connection,
+    tail: &str,
+    args: impl rusqlite::Params,
+) -> Result<Vec<Card>> {
     let mut st = tx.prepare(&format!("SELECT {COLS} FROM cards {tail}"))?;
     let rows = st.query_map(args, row)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -320,7 +324,7 @@ fn list_where(tx: &Transaction<'_>, tail: &str, args: impl rusqlite::Params) -> 
 /// Moves every card matching `where_` to `to`; returns them as they were before. A move that closes the card drops its
 /// claim; `keep_claim` is for a move that leaves the card open (parking), whose claim holder is still writing.
 fn move_where(
-    tx: &Transaction<'_>,
+    tx: &rusqlite::Connection,
     where_: &str,
     args: impl rusqlite::Params + Copy,
     to: State,
@@ -743,6 +747,26 @@ pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness)
     )?;
     tx.commit()?;
     Ok(n == 1)
+}
+
+/// The people's access ended (A7, M2-11b): every open card and unused once-grant asked by one of `people` (a person
+/// and their bots) is withdrawn, inside the caller's transaction so it commits with the revoke. Like the host's
+/// `cards_withdraw_person` it takes a card whose claim is held too, and drops the claim: after a revoke nothing of
+/// theirs may stay answerable, and the holder's `saved` then finds a closed card. Returns the ids that moved. The owner
+/// (an empty person) is never named here.
+pub(crate) fn withdraw_people(tx: &rusqlite::Connection, people: &[String]) -> Result<Vec<String>> {
+    let mut gone = Vec::new();
+    for p in people.iter().filter(|p| !p.is_empty()) {
+        let moved = move_where(
+            tx,
+            &format!("person = ?1 AND state IN ({OPEN_STATES},'approved')"),
+            params![p],
+            State::Withdrawn,
+            false,
+        )?;
+        gone.extend(moved.into_iter().map(|c| c.id));
+    }
+    Ok(gone)
 }
 
 /// Past its deadline (or its claim's time): open cards and unused grants expire, silence is no. Returns the cards as
