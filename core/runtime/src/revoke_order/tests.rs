@@ -412,7 +412,7 @@ fn a_removed_person_whose_bot_rows_are_gone_is_revoked_through_the_bots_the_call
     let bots = ["mia-b1", "mia-b1-b", "mia-b2", "mia"].map(str::to_owned);
     // the authority removal: the bots are recorded, then the person's and every bot's row is deleted
     let rec: Vec<String> = bots.iter().filter(|b| *b != "mia").cloned().collect();
-    super::record_pending(f.core.conn(), "mia", &rec, 1.0).unwrap();
+    super::record_removal(f.core.conn(), "mia", &rec, 1.0).unwrap();
     f.core
         .conn()
         .execute("DELETE FROM people WHERE id LIKE 'mia%'", [])
@@ -426,17 +426,22 @@ fn a_removed_person_whose_bot_rows_are_gone_is_revoked_through_the_bots_the_call
     for p in &out.principals {
         assert_eq!(revoke_epoch(&f.core, p).unwrap(), 1, "{p}");
     }
-    // kai's side is untouched; the record is spent, so stale `--bots` are refused (rows gone, nothing to vouch for
-    // them), and a repeat without them finds nothing new
+    // kai's side is untouched; the record is spent, so stale `--bots` name nobody (no row, no record) and are
+    // ignored rather than refused, so a retry of a call that finished is not an error
     assert_eq!(revoke_epoch(&f.core, "kai").unwrap(), 0);
-    revoke_everywhere(&mut f.core, "mia", &bots, NOW + 1).unwrap_err();
+    revoke_everywhere(&mut f.core, "mia", &bots, NOW + 1).unwrap();
     let again = revoke_everywhere(&mut f.core, "mia", &[], NOW + 1).unwrap();
     assert!(again.ended.is_empty() && again.cancelled_turns == 0);
 }
 
-#[test]
-fn a_crash_between_the_removal_and_the_order_loses_no_bot() {
-    let mut f = fixture();
+fn open_rows(f: &Fixture) -> i64 {
+    f.core
+        .conn()
+        .query_row("SELECT count(*) FROM open_removals", [], |r| r.get(0))
+        .unwrap()
+}
+
+fn two_deep(f: &mut Fixture) -> i64 {
     f.core
         .conn()
         .execute(
@@ -446,34 +451,146 @@ fn a_crash_between_the_removal_and_the_order_loses_no_bot() {
         .unwrap();
     ask(&f.core, "a1", None, "mia", "c-a1");
     ask(&f.core, "a9", None, "mia-b1-b", "c-a9");
-    let live = run(&mut f.core, "c-b1b", "mia-b1-b", "app", 13);
-    // the real removal write: the rows go, and the bot set is recorded in the same transaction
-    crate::authority::call::call(&mut f.core, "people.removePerson", &json!({"id": "mia"}))
+    run(&mut f.core, "c-b1b", "mia-b1-b", "app", 13)
+}
+
+#[test]
+fn the_removal_runs_the_order_itself_and_clears_its_record() {
+    let mut f = fixture();
+    let live = two_deep(&mut f);
+    let out =
+        crate::authority::call::call(&mut f.core, "people.removePerson", &json!({"id": "mia"}))
+            .unwrap();
+    assert!(
+        !out["kill"].is_null(),
+        "the writers to kill come back: {out}"
+    );
+    assert_eq!(state_of(&f.core, "asks", "id", "a1"), "stopped");
+    assert_eq!(state_of(&f.core, "asks", "id", "a9"), "stopped");
+    assert_eq!(state_of(&f.core, "claims", "claim_id", live), "ending");
+    assert_eq!(open_rows(&f), 0);
+}
+
+#[test]
+fn a_crash_between_the_removal_and_the_order_loses_no_bot_and_the_replay_finishes_it() {
+    let mut f = fixture();
+    let live = two_deep(&mut f);
+    // the removal committed (rows gone, record written in the same transaction) and the core died before the order
+    let bots: Vec<String> = ["mia-b1", "mia-b1-b", "mia-b2"].map(str::to_owned).to_vec();
+    super::record_removal(f.core.conn(), "mia", &bots, 1.0).unwrap();
+    f.core
+        .conn()
+        .execute("DELETE FROM people WHERE id LIKE 'mia%'", [])
         .unwrap();
-    let rows: i64 = f
+    let (kill, failed) = super::replay_open(&mut f.core, NOW).unwrap();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert_ne!(kill.len(), 0);
+    assert_eq!(state_of(&f.core, "asks", "id", "a1"), "stopped");
+    assert_eq!(state_of(&f.core, "asks", "id", "a9"), "stopped");
+    assert_eq!(state_of(&f.core, "claims", "claim_id", live), "ending");
+    for p in ["mia", "mia-b1", "mia-b1-b", "mia-b2"] {
+        assert_eq!(revoke_epoch(&f.core, p).unwrap(), 1, "{p}");
+    }
+    // finished: the record is cleared, and a second pass is a no-op
+    assert_eq!(open_rows(&f), 0);
+    let (kill, failed) = super::replay_open(&mut f.core, NOW + 1).unwrap();
+    assert!(kill.is_empty() && failed.is_empty());
+}
+
+#[test]
+fn a_removal_with_no_bots_is_recorded_and_its_own_claim_is_fenced_by_the_replay() {
+    let mut f = fixture();
+    f.core
+        .conn()
+        .execute("DELETE FROM people WHERE bot_of = 'kai'", [])
+        .unwrap();
+    let live = run(&mut f.core, "c-k1", "kai", "app", 20);
+    super::record_removal(f.core.conn(), "kai", &[], 1.0).unwrap();
+    assert_eq!(open_rows(&f), 1, "a record exists even with no bots");
+    f.core
+        .conn()
+        .execute("DELETE FROM people WHERE id = 'kai'", [])
+        .unwrap();
+    let (_, failed) = super::replay_open(&mut f.core, NOW).unwrap();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert_eq!(state_of(&f.core, "claims", "claim_id", live), "ending");
+    assert_eq!(open_rows(&f), 0);
+}
+
+#[test]
+fn a_name_in_an_open_record_can_not_join_again_until_the_order_has_run() {
+    let mut f = fixture();
+    super::record_removal(f.core.conn(), "zed", &["zed-b".to_owned()], 1.0).unwrap();
+    for (m, params) in [
+        ("people.addPerson", json!({"id": "zed"})),
+        ("people.addBot", json!({"id": "zed-b", "of": "kai"})),
+    ] {
+        let err = crate::authority::call::call(&mut f.core, m, &params).unwrap_err();
+        assert!(
+            matches!(&err, Error::Refused(msg) if msg.contains("finishing the revoke of zed first")),
+            "{m}: {err}"
+        );
+    }
+    let gone: i64 = f
         .core
         .conn()
         .query_row(
-            "SELECT count(*) FROM people WHERE id LIKE 'mia%'",
+            "SELECT count(*) FROM people WHERE id LIKE 'zed%'",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(rows, 0);
-    // the process died here: the retry has no `--bots` to pass, and the record carries them
-    let out = revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
-    assert_eq!(out.principals, ["mia", "mia-b1", "mia-b1-b", "mia-b2"]);
-    assert_eq!(out.ended, ["a1", "a9"]);
-    assert_eq!(state_of(&f.core, "claims", "claim_id", live), "ending");
-    // finished: the record is cleared, and a second run is a no-op
-    let left: i64 = f
-        .core
+    assert_eq!(gone, 0, "the refused add wrote nothing");
+    // after the order the id is free again
+    super::replay_open(&mut f.core, NOW).unwrap();
+    crate::authority::call::call(
+        &mut f.core,
+        "people.addBot",
+        &json!({"id": "zed-b", "of": "kai"}),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_recorded_name_that_joined_again_elsewhere_is_refused_not_skipped() {
+    let mut f = fixture();
+    // a broken invariant: mia's record names kai-b, which is in people under kai
+    super::record_removal(f.core.conn(), "mia", &["kai-b".to_owned()], 1.0).unwrap();
+    f.core
         .conn()
-        .query_row("SELECT count(*) FROM pending_revokes", [], |r| r.get(0))
+        .execute("DELETE FROM people WHERE id LIKE 'mia%'", [])
         .unwrap();
-    assert_eq!(left, 0);
-    let again = revoke_everywhere(&mut f.core, "mia", &[], NOW + 1).unwrap();
-    assert!(again.ended.is_empty() && again.cancelled_turns == 0);
+    ask(&f.core, "k2", None, "kai-b", "c-k2");
+    let err = revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap_err();
+    assert!(
+        matches!(&err, Error::Refused(m) if m.contains("kai-b") && m.contains("mia")),
+        "{err}"
+    );
+    assert_eq!(state_of(&f.core, "asks", "id", "k2"), "open");
+    assert_eq!(open_rows(&f), 1, "the record stays");
+}
+
+#[test]
+fn an_unreadable_record_stops_the_order_and_the_add_check_naming_the_row() {
+    let mut f = fixture();
+    f.core
+        .conn()
+        .execute(
+            "INSERT INTO open_removals (person, bots, at) VALUES ('mia', '', 1)",
+            [],
+        )
+        .unwrap();
+    let err = revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap_err();
+    assert!(
+        matches!(&err, Error::Refused(m) if m.contains("open_removals row of mia")),
+        "{err}"
+    );
+    let err = super::open_removal_naming(f.core.conn(), "anyone").unwrap_err();
+    assert!(
+        matches!(&err, Error::Refused(m) if m.contains("open_removals row of mia")),
+        "{err}"
+    );
+    assert_eq!(open_rows(&f), 1);
 }
 
 #[test]
@@ -485,7 +602,7 @@ fn forged_bots_are_refused_and_nothing_is_ended() {
         .execute("INSERT INTO people (id, owner) VALUES ('boss', 1)", [])
         .unwrap();
     ask(&f.core, "o1", None, "boss", "c-o1");
-    for forged in ["boss", "kai-b", "kai", "nobody-known"] {
+    for forged in ["boss", "kai-b", "kai"] {
         let err = revoke_everywhere(&mut f.core, "mia", &[forged.to_owned()], NOW).unwrap_err();
         assert!(
             matches!(&err, Error::Refused(m) if m.contains(forged)),
@@ -503,6 +620,8 @@ fn forged_bots_are_refused_and_nothing_is_ended() {
     for p in ["mia", "mia-b1", "kai-b", "boss"] {
         assert_eq!(revoke_epoch(&f.core, p).unwrap(), 0, "{p}");
     }
+    // a name with no row and no record is nobody's: ignored, not an error
+    revoke_everywhere(&mut f.core, "mia", &["nobody-known".to_owned()], NOW).unwrap();
     // the true bots are accepted
     let ok = ["mia-b1".to_owned(), "mia-b2".to_owned()];
     revoke_everywhere(&mut f.core, "mia", &ok, NOW).unwrap();

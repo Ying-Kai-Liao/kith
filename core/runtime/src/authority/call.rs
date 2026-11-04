@@ -232,24 +232,53 @@ pub(crate) fn call_in(
                 |tx, said| {
                     revoke::follow_in_doors(tx, m, params, said, c.now_ms)?;
                     revoke::follow_in_cards(tx, m, params, said)?;
-                    // a removal drops the bots' rows: keep their ids for the revoke order, so a crash before it
-                    // does not lose them
+                    // A removal drops the bots' rows: record the person and the bot set (possibly empty) in this
+                    // transaction, so a crash before the order has run loses nothing (it runs again at start).
                     if m == "people.removePerson"
-                        && let (Some(id), Some(ids)) = (word(params, "id"), said.get("ids"))
+                        && let Some(id) = word(params, "id")
                     {
-                        let bots: Vec<String> = ids
-                            .as_array()
+                        let bots: Vec<String> = said
+                            .get("ids")
+                            .and_then(Value::as_array)
                             .into_iter()
                             .flatten()
                             .filter_map(Value::as_str)
                             .filter(|x| *x != id)
                             .map(str::to_owned)
                             .collect();
-                        crate::revoke_order::record_pending(tx, id, &bots, c.now_ms)?;
+                        crate::revoke_order::record_removal(tx, id, &bots, c.now_ms)?;
+                    }
+                    // An id an open removal names can not join again until its order has run.
+                    if matches!(m, "people.addPerson" | "people.addBot")
+                        && let Some(id) = word(params, "id")
+                        && let Some(of) = crate::revoke_order::open_removal_naming(tx, id)?
+                    {
+                        return Err(Error::Refused(format!(
+                            "authority: finishing the revoke of {of} first, retry"
+                        )));
                     }
                     Ok(())
                 },
             )?;
+            // The removal is committed: run the revoke order now. An error leaves the record, and the replay at start
+            // and on the supervisor's pass runs it again, so the removal itself still stands.
+            let mut said = said;
+            if m == "people.removePerson"
+                && let Some(id) = word(params, "id")
+            {
+                #[allow(clippy::cast_possible_truncation)]
+                match crate::revoke_order::revoke_everywhere(core, id, &[], c.now_ms as i64) {
+                    Ok(out) if !out.kill.is_empty() => {
+                        said["kill"] = out
+                            .kill
+                            .iter()
+                            .map(|k| json!({"claimId": k.claim_id, "pid": k.pid, "started": k.started}))
+                            .collect();
+                    }
+                    Ok(_) => {}
+                    Err(e) => said["revokePending"] = json!(e.to_string()),
+                }
+            }
             // The folders follow a rename once it is committed. `kith-auth --local` clears no temp folder: the
             // caller stops their runs first and then asks `people.clearTemp` (the `ids` of a suspend or a removal
             // say whose).

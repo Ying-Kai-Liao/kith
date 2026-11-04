@@ -128,7 +128,7 @@ pub(super) const ROWS: &[Method] = &[
                 "bots",
                 "[string]",
                 &["--bots"],
-                "Bots of the person read before an authority removal deleted their rows; a removal also records them (`pending_revokes`), and the bots still in `people.bot_of` are added. Refused: the owner, and any name whose `bot_of` chain (current or recorded) does not lead to the person.",
+                "Bots of the person read before an authority removal deleted their rows; a removal also records them (`open_removals`), and the bots still in `people.bot_of` are added. Refused: the owner, and a name in `people` whose `bot_of` chain does not lead to the person; a name with no row and no record is ignored.",
             ),
         ],
         &["asks", "revoke-everywhere"],

@@ -442,6 +442,7 @@ fn connected(
             continue;
         }
         next_list = Instant::now() + cfg.poll;
+        shared.replay_open_removals();
         let held = client
             .list()
             .map_err(|e| format!("the holder stopped answering: {e}"))?;
