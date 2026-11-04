@@ -34,6 +34,7 @@ const SERVICE: &str = "dev.kith.serve.credentials";
 /// core's own wait for the store, so its answer ("keychain refused") arrives before this gives up.
 const KEYCHAIN_WAIT: Duration = Duration::from_secs(45);
 /// How long `unlock` waits for the daemon to be up (it starts beside the host and may still be migrating).
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
 const DAEMON_WAIT: Duration = Duration::from_secs(15);
 
 /// One unlock at a time, and none while an earlier one is still stuck in the keychain: each would park another
@@ -66,6 +67,7 @@ pub struct Vault {
 
 impl Vault {
     /// The vault over the core's envelope. Locked until `unlock`.
+    #[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
     pub fn new() -> Self {
         Self::with_link(Arc::new(CoreLink), false)
     }
@@ -85,8 +87,10 @@ impl Vault {
 }
 
 /// The real link: the owner socket's `secrets.*` rows (`core_front` is the host's one door to the core).
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
 struct CoreLink;
 
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
 impl CoreLink {
     fn call(method: &str, params: &Value, wait: Duration) -> Result<Value> {
         crate::core_front::secrets_call(method, params, wait).map_err(|e| {

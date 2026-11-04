@@ -114,6 +114,7 @@ fn folders_from(answer: &Value) -> Option<Paths> {
 /// this is its one door to the envelope. Waits up to `wait` for a daemon that is still starting; every other outcome
 /// (no daemon, a daemon of another version, a lost connection, a refusal such as a locked key store) is an error whose
 /// text says why. The rows are idempotent, so a lost connection is retried once inside `reach`.
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
 pub fn secrets_call(method: &str, params: &Value, wait: std::time::Duration) -> anyhow::Result<Value> {
     let folders = kernel::folders(&kith_kernel::paths::process_home());
     let deadline = std::time::Instant::now() + wait;
