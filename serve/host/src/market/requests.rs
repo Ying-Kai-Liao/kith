@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(first["entry"]["data"]["connectionRequest"]["status"], "ready");
         assert!(!first.to_string().contains("test-private-key"));
         assert!(hub.store.bot("bot").unwrap().unwrap().config.connectors.contains(&"fixture".to_owned()));
-        assert!(!hub.store.kv_read("connectors").unwrap().unwrap().contains("test-private-key"));
+        assert!(hub.store.kv_read("connectors").unwrap().is_none_or(|v| !v.contains("test-private-key")));
         finish(&hub, &submitted).await.unwrap();
         let history = hub.store.history("bot", i64::MAX, 100).unwrap();
         assert_eq!(history.iter().filter(|e| e.id == format!("connection-ack-{id}")).count(), 1);
@@ -416,7 +416,7 @@ mod tests {
         assert_eq!(listed["items"][0]["site"], "github.com");
         assert_eq!(listed["items"][0]["username"], "kevin");
         assert!(!listed.to_string().contains("hunter2-private"));
-        assert!(!hub.store.kv_read("logins").unwrap().unwrap().contains("hunter2-private"));
+        assert!(hub.store.kv_read("logins").unwrap().is_none_or(|v| !v.contains("hunter2-private")));
         let history = hub.store.history("bot", i64::MAX, 100).unwrap();
         let history = serde_json::to_string(&history).unwrap();
         assert!(history.contains("type_login") && !history.contains("hunter2-private"));

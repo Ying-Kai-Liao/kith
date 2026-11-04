@@ -338,6 +338,7 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
     pub(crate) fn config(stub: Option<PathBuf>) -> Config {
         Config {
             holder_on: true,
+            key_load: None,
             wait_for_embedded: Duration::from_secs(10),
             holder: HolderConfig {
                 exe: Some(holder_bin()),
@@ -709,6 +710,7 @@ echo $$ > "$lock/$key.pid"
             &m,
             Config {
                 holder_on: false,
+                key_load: None,
                 ..config(Some(stub.clone()))
             },
         );

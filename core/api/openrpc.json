@@ -6432,6 +6432,199 @@
       }
     },
     {
+      "name": "secrets.open",
+      "summary": "Load the machine's secrets key from the OS key store (making it on a first use), so later calls do not wait for the store.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "open"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "secrets.has",
+      "summary": "Whether a secret of that name is stored. Needs no key, so it never waits on the OS key store.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "has"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "secrets.delete",
+      "summary": "Remove a secret. Needs no key.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "delete"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "secrets.get",
+      "summary": "A secret's value, or that there is none.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "get"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "secrets.put",
+      "summary": "Store a secret sealed under the machine's key, replacing an earlier value of that name.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "value",
+          "summary": "The value, from the caller (never a word of the command line).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "put"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          },
+          "value": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "gate.list",
       "summary": "The gate's slots and the line, in the order the line is kept. Frees holders whose process is gone first.",
       "params": [],

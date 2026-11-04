@@ -87,8 +87,8 @@ mod transcripts;
 // wire them; the rows reach the rest.
 #[allow(dead_code)]
 mod sync_lease;
-// Nothing calls the envelope yet: the host vault and kith-auth move onto it at M2-7 and M2-18.
-#[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
+// The host vault calls `secrets.open|get|put` (M2-7); `delete` and `list` wait for kith-auth and rollback (M2-18).
+#[allow(dead_code, reason = "delete and list are M2-18's")]
 mod secrets;
 
 // The wake queue and waiters (M3-7): nothing calls them but the daemon's `wake.*` rows and the tests until the switch (M3-10).
