@@ -2,7 +2,7 @@
   "fakes": "",
   "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"turn\", \"session\": \"s1\", \"run\": \"<ID12>\", \"ids\": [\"a\", \"b\"]}\n{\"at\": \"<TS>\", \"event\": \"done\", \"session\": \"s1\", \"run\": \"<ID12>\", \"ids\": [\"a\", \"b\"], \"how\": \"answered\"}\n",
   "state:home/.kith/sessions/queue/.lock": "",
-  "state:home/.kith/sessions/queue/answered.json": "{\n  \"a\": {\n    \"how\": \"answered\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<EPOCH>\"\n  },\n  \"b\": {\n    \"how\": \"answered\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<EPOCH>\"\n  }\n}\n",
+  "state:home/.kith/sessions/queue/answered.json": "{\n  \"a\": {\n    \"how\": \"answered\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<MASKED>\"\n  },\n  \"b\": {\n    \"how\": \"answered\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<MASKED>\"\n  }\n}\n",
   "state:home/.kith/sessions/waits/": "<empty dir>\n",
   "state:home/bin/kith-fake": "#!/bin/sh\necho \"args: $*\"\necho \"via=$KITH_VIA wait=$KITH_CLAIM_WAIT person=${KITH_PERSON:-none}\"\nexit 0\n",
   "state:home/logs/wake/<ID12>.err": "",

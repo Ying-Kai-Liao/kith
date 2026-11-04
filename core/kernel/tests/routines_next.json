@@ -884,6 +884,321 @@
     },
     {
       "after": 1767225600000,
+      "next": 1767227400000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1772931600000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774701000123,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790001000000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792801800000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793500200000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804001400999,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767258000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773046800000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774861200123,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790067600000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793005200000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793610000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804064400999,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1769817600000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1774915200000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774915200123,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790726400000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793404800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1795996800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1806451200999,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767916800000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773360000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1775779200123,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1791504000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794528000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794528000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804809600999,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1768435200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773619200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1776211200123,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1792022400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794787200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794787200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1805068800999,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "UTC"
+      }
+    },
+    {
+      "after": 1767225600000,
       "next": 1767225660000,
       "trigger": {
         "expr": "* * * * *",
@@ -1760,6 +2075,321 @@
       "next": null,
       "trigger": {
         "expr": "0 0 31 2 *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767227400000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1772931600000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774701000123,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790001000000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792801800000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793500200000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804001400999,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767229200000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773018000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774832400123,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790038800000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792976400000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793581200000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804035600999,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1769788800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1774886400000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774886400123,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790697600000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793376000000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1795968000000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1806422400999,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767888000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773331200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1775750400123,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1791475200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794499200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794499200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804780800999,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1768406400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773590400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1776182400123,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1791993600000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794758400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794758400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Taipei"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1805040000999,
+      "trigger": {
+        "expr": "0 0 15W * *",
         "type": "cron",
         "tz": "Asia/Taipei"
       }
@@ -2648,6 +3278,321 @@
     },
     {
       "after": 1767225600000,
+      "next": 1767227400000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1772931600000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774701000123,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790001000000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792801800000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793500200000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804001400999,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767276000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773061200000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774875600123,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790082000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793019600000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793628000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804082400999,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1769835600000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1774929600000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774929600123,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790740800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793419200000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1796014800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1806465600999,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767934800000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773374400000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1775793600123,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1791518400000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794546000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794546000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804827600999,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1768453200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773633600000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1776225600123,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1792036800000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794805200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794805200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1805083200999,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "America/New_York"
+      }
+    },
+    {
+      "after": 1767225600000,
       "next": 1767225660000,
       "trigger": {
         "expr": "* * * * *",
@@ -3524,6 +4469,321 @@
       "next": null,
       "trigger": {
         "expr": "0 0 31 2 *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767227400000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1772931600000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774701000123,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790001000000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792801800000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793500200000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804001400999,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767258000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773046800000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774857600123,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790064000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793005200000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793610000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804064400999,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1769817600000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1774911600000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774911600123,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790722800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793404800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1795996800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1806447600999,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767916800000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773360000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1775775600123,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1791500400000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794528000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794528000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804809600999,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1768435200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773619200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1776207600123,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1792018800000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794787200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794787200000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Europe/London"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1805068800999,
+      "trigger": {
+        "expr": "0 0 15W * *",
         "type": "cron",
         "tz": "Europe/London"
       }
@@ -4412,6 +5672,321 @@
     },
     {
       "after": 1767225600000,
+      "next": 1767227400000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1772931600000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774701000123,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790001000000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792801800000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793500200000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804001400999,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767304800000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773007200000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774821600123,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790031600000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792965600000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793570400000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804024800999,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1769778000000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1774875600000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774875600123,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790690400000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793365200000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1795957200000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1806411600999,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767877200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773320400000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1775743200123,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1791464400000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794488400000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794488400000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804770000999,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1768395600000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773579600000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1776175200123,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1791982800000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794747600000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794747600000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1805029200999,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Australia/Sydney"
+      }
+    },
+    {
+      "after": 1767225600000,
       "next": 1767225660000,
       "trigger": {
         "expr": "* * * * *",
@@ -5288,6 +6863,321 @@
       "next": null,
       "trigger": {
         "expr": "0 0 31 2 *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767227400000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1772931600000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774701000123,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790001000000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792801800000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793500200000,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804001400999,
+      "trigger": {
+        "expr": "*/30 * * * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767238200000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773027000000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774841400123,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790047800000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1792985400000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1793590200000,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804044600999,
+      "trigger": {
+        "expr": "0 9 * * MON-FRI",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1769797800000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1774895400000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1774895400123,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1790706600000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1793385000000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1795977000000,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1806431400999,
+      "trigger": {
+        "expr": "0 0 L * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1767897000000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773340200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1775759400123,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1791484200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794508200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794508200000,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1804789800999,
+      "trigger": {
+        "expr": "0 0 * * FRI#2",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1767225600000,
+      "next": 1768415400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1772930000000,
+      "next": 1773599400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1774700000123,
+      "next": 1776191400123,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1790000000000,
+      "next": 1792002600000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1792800000000,
+      "next": 1794767400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1793500000000,
+      "next": 1794767400000,
+      "trigger": {
+        "expr": "0 0 15W * *",
+        "type": "cron",
+        "tz": "Asia/Kolkata"
+      }
+    },
+    {
+      "after": 1804000000999,
+      "next": 1805049000999,
+      "trigger": {
+        "expr": "0 0 15W * *",
         "type": "cron",
         "tz": "Asia/Kolkata"
       }

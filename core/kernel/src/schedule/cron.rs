@@ -54,7 +54,10 @@ impl CronSpec {
             Ok(sets) => Ok(Self::Sets(sets)),
             Err(e) => {
                 let text = cron.trim();
-                if text.parse::<Cron>().is_ok() {
+                // Exactly five fields (or an `@` macro): croner would also take a leading seconds and a trailing year
+                // field, which `kith-sched` and the host's routines never held; those keep `kith-sched`'s message.
+                let fields = text.split_whitespace().count();
+                if (fields == 5 || text.starts_with('@')) && text.parse::<Cron>().is_ok() {
                     Ok(Self::Croner(text.to_owned()))
                 } else {
                     Err(e)

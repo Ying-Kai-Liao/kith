@@ -33,12 +33,16 @@
 //!
 //! # Intended differences
 //!
-//! * Superset: the croner-only spellings above are accepted here and refused by `kith-sched`. (A leading seconds
-//!   and seventh year field are among them; fires are then not on whole minutes.)
+//! * Superset: the croner-only spellings above are accepted here and refused by `kith-sched`, `@yearly` and
+//!   `@annually` on purpose. Only five-field specs (and `@` macros) take that path: a six- or seven-field spec (a
+//!   leading seconds or trailing year field) is refused with `kith-sched`'s "needs 5 fields" message.
 //! * Daylight saving follows croner's rule for the zone; `kith-sched` matches plain local minutes. Two jobs change:
 //!   `30 2 * * *` on the spring-forward day (2026-03-08 in New York) never fires under `kith-sched` and fires at 03:00
 //!   local here; `30 1 * * *` on the fall-back day (2026-11-01) fires twice under `kith-sched` (both 01:30s) and once
-//!   here, at the first 01:30. (Wildcard and stepped hours such as `*/30 * * * *` keep firing on every real half hour.)
+//!   here, at the first 01:30. A stepped
+//!   minute such as `*/30 * * * *` fires at 01:00 and 01:30 EDT on that day, skips the repeated 01:00 and 01:30 EST, and
+//!   resumes at 02:00 EST: it does not fire on every real half hour. The host's routines share this rule; pinned in
+//!   `every_half_hour_across_the_fall_back_day`.)
 //! * No 366-day horizon: `kith-sched`'s `next_time` gives up a year out, so `0 0 29 2 *` asked in March has no next
 //!   there. Here it is the real date; a spec that can never fire (`0 0 31 2 *`, `5-3 * * * *`) validates and has none.
 //! * `Interval` and `Once` are rounded up to the one-minute tick: a due time inside a minute fires at the next whole

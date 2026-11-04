@@ -2698,7 +2698,7 @@
     },
     {
       "name": "run.mint",
-      "summary": "A run token for one run of an agent, for a person in a conversation (and the claim it holds, when it holds one). The token is shown once; it works on the run socket only for a peer that descends from the process bound with run.bind. Tokens live in the daemon's memory and are gone when it restarts.",
+      "summary": "A run token for one run of an agent, for a person in a conversation (and the claim it holds, when it holds one). The token is shown once; it works on the run socket only for a peer that descends from the process bound with run.bind. Tokens live in the daemon's memory and are gone when it restarts, and when the person (or the owner of a bot) is suspended or removed; a mint for a revoked person is refused. The answer also names the run socket (`socket`).",
       "params": [
         {
           "name": "agent",
@@ -7255,6 +7255,115 @@
             "kind": "flag",
             "spellings": [
               "--n"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.state",
+      "summary": "What each account is doing: its out mark, usage reading and last start, as `state.json` keeps them, from the core's database. One entry with `--entry`, else all as `{accounts}`.",
+      "params": [
+        {
+          "name": "entry",
+          "summary": "One account id, such as `claude:work`; answers `{id, state}` (`state` is null when it has no row).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "state"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "entry": {
+            "kind": "flag",
+            "spellings": [
+              "--entry"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.pick",
+      "summary": "The accounts a run of the agent would try, in order, reading the core's database for what is out or used least (`kith account pick AGENT --json`): `{candidates, skipped, all_out, harness, policy, pin}`.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agentMd",
+          "summary": "The agent's agent.md, when it is not in the agents folder (the harness comes from it).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "deep",
+          "summary": "Ask each harness whether its login is good, not only look for the folder or the key.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "pick"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "agentMd": {
+            "kind": "flag",
+            "spellings": [
+              "--agent-md"
+            ]
+          },
+          "deep": {
+            "kind": "switch",
+            "spellings": [
+              "--deep"
             ]
           }
         }

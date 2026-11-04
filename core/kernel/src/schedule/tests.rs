@@ -224,6 +224,37 @@ fn dst_gap_and_overlap_in_new_york() {
 }
 
 #[test]
+fn every_half_hour_across_the_fall_back_day() {
+    // Pinned (the host shares this rule): over 2026-11-01 in New York croner fires 01:00 and 01:30 EDT, then skips the
+    // repeated 01:00 and 01:30 EST (06:00Z, 06:30Z) and resumes at 02:00 EST. Not every real half hour fires.
+    let t = cron("*/30 * * * *", "America/New_York");
+    let got: Vec<String> = t
+        .next_n_in(ms("2026-11-01T04:00:00Z"), 9, &Utc)
+        .into_iter()
+        .map(|m| {
+            DateTime::<Utc>::from_timestamp_millis(m)
+                .unwrap()
+                .format("%Y-%m-%dT%H:%MZ")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            "2026-11-01T04:30Z",
+            "2026-11-01T05:00Z",
+            "2026-11-01T05:30Z",
+            "2026-11-01T07:00Z",
+            "2026-11-01T07:30Z",
+            "2026-11-01T08:00Z",
+            "2026-11-01T08:30Z",
+            "2026-11-01T09:00Z",
+            "2026-11-01T09:30Z",
+        ]
+    );
+}
+
+#[test]
 fn local_on_a_dst_zone_follows_that_zone() {
     // `Local` is whatever zone it is handed; a DST zone behaves as the IANA spelling does.
     let ny: Tz = "America/New_York".parse().unwrap();
@@ -300,6 +331,18 @@ fn the_hosts_cron_superset_still_parses() {
     );
     // A spec both refuse keeps kith-sched's message.
     for (expr, msg) in [
+        (
+            "* * * * * *",
+            "cron needs 5 fields (minute hour day month weekday), got '* * * * * *'",
+        ),
+        (
+            "30 0 9 * * *",
+            "cron needs 5 fields (minute hour day month weekday), got '30 0 9 * * *'",
+        ),
+        (
+            "0 0 9 * * * 2030",
+            "cron needs 5 fields (minute hour day month weekday), got '0 0 9 * * * 2030'",
+        ),
         ("61 9 * * *", "cron field '61' out of range 0-59"),
         (
             "a b c",
