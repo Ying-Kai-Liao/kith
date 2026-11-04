@@ -6643,6 +6643,377 @@
           }
         }
       }
+    },
+    {
+      "name": "doors.list",
+      "summary": "The guest doors that are starting or live, and swept ones whose box is not confirmed gone, as `{doors}`. With `--all` the closed ones kept for a day too.",
+      "params": [
+        {
+          "name": "all",
+          "summary": "Include doors that ended or were confirmed gone.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "all": {
+            "kind": "switch",
+            "spellings": [
+              "--all"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.start",
+      "summary": "Starts a door for a person: the access check and the row in one step. Answers the door (`state` starting, its `version`) and `repeat` (true when this id was already starting or live, nothing written). Refuses, as `kith-auth door` does: the owner (doors are for the people an agent is shared with), a person who is cut off or may not run the agent, a Mac out of sync with the cloud, a door that is not among the doors their ticked jobs grant now (a bot's cut to its owner's); then a supervisor that is not running and an id that is a swept or ended door.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent whose door it is.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "door",
+          "summary": "The door as `name@digest`, the piece a job grants.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person (or bot) it runs for.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "folder",
+          "summary": "The person's folder it runs on (display only).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The door's id, 16 hex digits (a new one when absent). A start retried with it is the same door.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The supervisor's process (2 or more), so a crash is found by its start time.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "start"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "door": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "folder": {
+            "kind": "flag",
+            "spellings": [
+              "--folder"
+            ]
+          },
+          "id": {
+            "kind": "flag",
+            "spellings": [
+              "--id"
+            ]
+          },
+          "pid": {
+            "kind": "flag",
+            "spellings": [
+              "--pid"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.markLive",
+      "summary": "The supervisor says the box is up. Answers `{result: live}`, or `{result: lost, state}` when a sweep (or an end) got to the door first: the box must not run. Only a `starting` door at this `version` goes live.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The door.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "version",
+          "summary": "The version `doors.start` answered.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "live"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "version": {
+            "kind": "flag",
+            "spellings": [
+              "--version"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.end",
+      "summary": "The box is gone. An open door becomes ended; a swept one is confirmed gone (it stays swept). Answers `{result: ended}` or `{result: swept}`. Ending twice changes nothing; refuses an id that is no door.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The door.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "end"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.sweep",
+      "summary": "Marks swept every open door of the named people and their bots, every door whose supervisor is gone, and (unless `--no-recheck`) every door whose person may no longer run its agent. Answers `swept` (this call's) and `pending` (swept before, box not confirmed gone). The owner is never swept by a name, only for a gone supervisor. Kills nothing.",
+      "params": [
+        {
+          "name": "persons",
+          "summary": "People whose doors all end.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "noRecheck",
+          "summary": "Do not ask again whether each person may still run their door (it does by default).",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "sweep"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "persons": {
+            "kind": "rest"
+          },
+          "noRecheck": {
+            "kind": "switch",
+            "spellings": [
+              "--no-recheck"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
     }
   ],
   "components": {
