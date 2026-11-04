@@ -6,6 +6,23 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// The host's machine state for `home`. The core's owner socket lives under it, and a Unix socket path holds about a
+/// hundred bytes, which a macOS temporary home alone exceeds: the vault reaches the secrets envelope through that
+/// socket, so the folder is a short one in /tmp, the same for the same home (a restarted host finds its state).
+fn machine_state(home: &Path) -> std::path::PathBuf {
+    #[cfg(unix)]
+    {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        home.hash(&mut hash);
+        std::path::PathBuf::from("/tmp").join(format!("ks-{:x}", hash.finish()))
+    }
+    #[cfg(not(unix))]
+    {
+        home.join("machine-state")
+    }
+}
+
 /// Runs `kith-serve serve` for `home` until it answers: the process and its base URL. A port
 /// picked here is only free for a moment; when something else takes it before the host binds, the
 /// host exits and this starts it again on another one.
@@ -44,7 +61,7 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 // The test machine's memory and a two-agent limit must not hold a test back (see `gate_e2e`).
                 // Never this computer's state: the fake agents share a session id, and turn claims and terminal
                 // registries live under it. An explicit folder inside the test's home.
-                .env("KITH_STATE", home.join("machine-state"))
+                .env("KITH_STATE", machine_state(home))
                 .env("CLAUDE_CONFIG_DIR", home.join("claude-config"))
                 .env("KITH_SERVE_MAX_RUNNING_AGENTS", "64")
                 .env("KITH_SERVE_MIN_FREE_MEMORY_PERCENT", "0")
