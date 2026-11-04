@@ -8,12 +8,13 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      # mode=check is the cheap by-hand Rust check for workers (the rust-check job at the bottom). Push, PR and
-      # a dispatch with no inputs are all mode=full: exactly the jobs below, as before.
+      # mode=check is the cheap by-hand Rust check for workers (the rust-check job at the bottom). mode=model runs
+      # only the schedule-fire TLA+ job (it needs no packages). Push, PR and a dispatch with no inputs are all
+      # mode=full: exactly the jobs below, as before.
       mode:
-        description: "full = the whole pipeline (batch runs); check = only the rust-check job"
+        description: "full = the whole pipeline (batch runs); check = only the rust-check job; model = only the schedule-fire model"
         type: choice
-        options: [full, check]
+        options: [full, check, model]
         default: full
       packages:
         description: "check mode: cargo package names (-p), space separated"
@@ -49,8 +50,8 @@ jobs:
   # Path filtering happens here, not in `on.paths`, so the `ci` job below always
   # reports and can be the one required check.
   changes:
-    # Check mode skips this job, and with it (needs) every job below that depends on it.
-    if: ${{ inputs.mode != 'check' }}
+    # Check and model mode skip this job, and with it (needs) every job below that depends on it.
+    if: ${{ inputs.mode != 'check' && inputs.mode != 'model' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # dorny/paths-filter lists a pull request's files through the API.
@@ -449,10 +450,11 @@ jobs:
         run: verification/lease/run.sh
 
   # The same for the schedule fire protocol (one transaction per fire, skip rule, deadline): verification/schedule-fire/checks.tsv.
-  # Check mode skips this job (it needs `changes`); the batch run exercises it.
+  # Check mode skips this job (it needs `changes`); mode=model runs just this one:
+  #   gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model
   schedule-fire:
     needs: changes
-    if: needs.changes.outputs.schedule_fire == 'true'
+    if: ${{ !cancelled() && (inputs.mode == 'model' || needs.changes.outputs.schedule_fire == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1037,7 +1039,7 @@ jobs:
   # skipped by the filter, fails on any failure or cancellation.
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
-    if: ${{ !cancelled() && inputs.mode != 'check' }}
+    if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
     needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5

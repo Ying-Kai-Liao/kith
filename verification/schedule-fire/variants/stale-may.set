@@ -1,1 +1,4 @@
-MayInTxn = FALSE
+MaxEdits = 0
+MaxRevs = 1
+EpochCheck = FALSE
+MaxTurns = 2

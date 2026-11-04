@@ -1,0 +1,8 @@
+TickGuard = TRUE
+MaxTurns = 3
+MaxEdits = 0
+MaxRevs = 0
+Holds = FALSE
+AdHocLate = TRUE
+Redeliver = TRUE
+BusyTakesNoKey = FALSE
