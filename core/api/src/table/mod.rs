@@ -11,7 +11,8 @@
 //! 3. `json_forms`, `runs`, `json_forms_more`: the kernel tools' `--json` forms (B6 in docs/plans/one-bot-model.md),
 //!    [`Served::Kernel`], [`Stability::Experimental`], result `json` until their types follow, and the run socket's rows;
 //! 4. the M2 lanes (`people`, `cards`, `secrets`, `gate`, `run_tokens`, `doors`, `import`): experimental stubs, owner
-//!    only, served by nobody in the core yet (`Core::call` answers NotServed, the caller falls back).
+//!    only, served by nobody in the core yet (`Core::call` answers NotServed, the caller falls back);
+//! 5. the M3 areas (`conversations`): the same kind of stub, one file per M3 lane.
 //!
 //! Until M2 only the owner may call anything. Param names are camelCase; result fields keep the kernel's own
 //! snake_case, as the contract does.
@@ -24,6 +25,7 @@ use crate::{Method, TypeDef};
 mod build;
 mod cards;
 mod contract;
+mod conversations;
 mod doors;
 mod gate;
 mod import;
@@ -72,6 +74,8 @@ const PARTS: &[&[Method]] = &[
     run_tokens::ROWS,
     doors::ROWS,
     import::ROWS,
+    // M3: conversations and their claims.
+    conversations::ROWS,
 ];
 
 const LEN: usize = {

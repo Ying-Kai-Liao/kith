@@ -1,0 +1,36 @@
+# module	cfg	expected	fails	speed   (fails: the invariant that is violated, or temporal for a PROPERTY; speed: fast = every run, slow = only with --all)
+# --- WriterLock4: the refined design (results4.md, "Fix"). The two safety rows with 2 direct runs take 15-30 min on 1 worker ---
+WriterLock4	r4-fix-survive-live-revoke	pass	-	fast
+WriterLock4	r4-fix-survive-live-takeover	pass	-	fast
+WriterLock4	r4-fix-die-live-revoke	pass	-	fast
+WriterLock4	r4-fix-die-live-takeover	pass	-	fast
+WriterLock4	r4-fix-survive-safety	pass	-	slow
+WriterLock4	r4-fix-die-safety	pass	-	slow
+# --- WriterLock4: broken variants (results4.md): each fails the named property ---
+WriterLock4	r4-nohash	fail	P5_StaleNeverPrompted	fast
+WriterLock4	r4-readlate	fail	P5_StaleNeverPrompted	fast
+WriterLock4	r4-stubfirst	fail	P1_NoTwoWriters	fast
+WriterLock4	r4-goneearly	fail	P4_GoneMeansEmpty	fast
+WriterLock4	r4-nostub	fail	P1_NoTwoWriters	fast
+WriterLock4	r4-inherit	fail	temporal	fast
+WriterLock4	r4-edge	fail	temporal	fast
+# parkclaim (busy parks the turn but keeps the claim) is NOT a broken variant: no property fails (results4.md); these are the runs that finished
+WriterLock4	r4-parkclaim-small	pass	-	fast
+WriterLock4	r4-parkclaim-revoke	pass	-	fast
+WriterLock4	r4-parkclaim-takeover	pass	-	fast
+# --- WriterLock4: M3-0a, open question s.11 Q2 (an idle warm process when a terminal turn arrives), default: kill it first ---
+WriterLock4	r4-killidle	pass	-	fast
+WriterLock4	r4-keepidle	fail	P7_NoWarmBesideRegisteredTerminal	fast
+# --- Holder: the claim rules of core/holder (what each row says is in the skill) ---
+Holder	holder-code	fail	RunOnce	fast
+Holder	holder-code-stale	fail	RunOnce	fast
+Holder	holder-refuseolder	fail	RunOnce	fast
+Holder	holder-refusewhilerunning	fail	RunOnce	fast
+Holder	holder-highwater	pass	-	fast
+Holder	holder-lock	pass	-	fast
+Holder	holder-crash-all	pass	-	fast
+Holder	holder-crash-minimal	pass	-	fast
+Holder	holder-crash-nolock	fail	RunOnce	fast
+Holder	holder-crash-noredeem	fail	RunOnce	fast
+Holder	holder-crash-nohighwater	fail	RunOnce	fast
+Holder	holder-crash-donetruth	fail	DoneTruth	fast

@@ -755,6 +755,10 @@ fn the_m2_stub_rows_answer_not_served_so_the_caller_falls_back() {
             serde_json::json!({"person": "ann", "agent": "echo"}),
         ),
         ("people.list", serde_json::json!({})),
+        (
+            "people.may",
+            serde_json::json!({"person": "ann", "agent": "echo"}),
+        ),
         ("people.requests", serde_json::json!({})),
         ("people.approve", serde_json::json!({"id": "r1"})),
         ("people.deny", serde_json::json!({"id": "r1"})),

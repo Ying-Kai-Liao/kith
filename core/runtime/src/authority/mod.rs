@@ -149,6 +149,31 @@ pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
     snapshot_with(conn, &mut || {})
 }
 
+/// The tables as the rules read them, inside a transaction the caller holds and writes in (the doors decide in the
+/// transaction that writes the row, so the answer and the write cannot be split by a revoke).
+pub(crate) fn tables_within(tx: &Connection) -> Result<Value> {
+    read_tables(tx, &mut || {})
+}
+
+/// `may` over tables already read (see [`tables_within`]): (allowed, why), a rule with no answer being an error.
+pub(crate) fn may_in(ctx: &Ctx, auth: &Value, person: &str, agent: &str) -> Result<(bool, String)> {
+    Rules::new(ctx, auth)
+        .may(person, agent, None, false)
+        .map_err(|d| refused(&d))
+}
+
+/// `resolve` over tables already read: what a run of `agent` for `person` gets (a bot's already cut to its owner's).
+pub(crate) fn resolve_in(
+    ctx: &Ctx,
+    auth: &Value,
+    agent: &str,
+    person: &str,
+) -> Result<Map<String, Value>> {
+    Rules::new(ctx, auth)
+        .resolve(agent, person, None, false)
+        .map_err(|d| refused(&d))
+}
+
 /// [`snapshot`], calling `between` after each table is read: a test writes there to prove the later tables are read
 /// from the same snapshot.
 fn snapshot_with(conn: &Connection, between: &mut dyn FnMut()) -> Result<Value> {

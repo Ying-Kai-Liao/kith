@@ -12,6 +12,8 @@
 #   kith who <words>               which agent owns this work: skills, tools, "Not yours" lines searched (kith-who)
 #   kith <agent> [-p ID] [-m MODEL] [-e EFFORT] [-H HARNESS] [--permission-mode MODE|--bypass] [task...]  interactive without a task, one-shot with one
 #   kith <agent> --resume|-r THREAD   pick up in this terminal a thread started in the app, or a Claude session id; -r alone: pick from the recent ones; -c: the latest begun here (kith-sessions)
+#   kith <agent> --held [...]        interactive, in a held terminal that outlives this window (the core's holder); kith attach comes back. Not at a terminal: starts it detached and prints how to attach. One line and the default (--direct) when the holder is not reachable; exit 75 when the conversation is busy
+#   kith attach [--observer] [--takeover] [<agent>|<session>]   attach to a held terminal (Ctrl-\ detaches; KITH_DETACH_KEY changes it); no word lists them
 #   kith <agent> --print [...]      show the assembled system prompt, don't run
 #   kith <agent> --inspect          start one run and report what it loads (tools, MCP servers, skills, plugins)
 #   kith <agent> --info-json        for a program (the bot detail page): one JSON object, the agent's role, package, skills, tools,
@@ -114,7 +116,7 @@ set -euo pipefail
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
-[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,75p' "$0" | sed 's/^#   //'; exit 0; }
+[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,77p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
 if [[ $1 == migrate ]]; then
   [[ $# -eq 1 ]] && { echo "usage: kith migrate run [--dry-run|--undo|--force]   move this Mac from ~/.hq to ~/.kith (--dry-run shows the steps first)
@@ -136,6 +138,7 @@ kith_in=(); for v in KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS
 eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
 
 case $1 in
+  attach)             . "$KITH/lib/kith-core.sh"; kith_held_attach_cmd "${@:2}"; exit $? ;;   # held terminals (kith AGENT --held)
   update)             # no agent: kith itself; --all: kith first, then the agents (a failed kith update still lets the agents update, but the exit is non-zero)
                       [[ $# -eq 1 ]] && { echo "usage: kith update self           update kith itself (self --dev pulls a dev checkout)
        kith update <agent>...      pull the agent(s) from upstream
@@ -461,10 +464,12 @@ sys.exit("kith: MCP servers not connected: %s" % bad if bad else 0)'
 fi
 
 chain_args=("$@")   # for the chain walk below
-print=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper="" backup_model=""
+print=0 want_held=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper="" backup_model=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --print)      print=1; shift ;;
+    --held)       want_held=1; shift ;;
+    --direct)     want_held=0; shift ;;
     --launch-json) launch=1; shift ;;
     --hold)       hold=$2; shift 2 ;;
     --resume)     resume_thread=${2:?kith: --resume needs a thread id or a Claude session id}; shift 2 ;;
@@ -807,7 +812,7 @@ learned="$src_pkg/skills/learned"$'\n'"$(cd "$src_pkg" && pwd -P)/skills/learned
 if [[ $harness == claude ]]; then
 # The owner at their own terminal (same test as `terminal` below, which the settings fill needs earlier): their plugins stay on.
 owner_terminal=0
-[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && -t 0 && -t 1 ]] && owner_terminal=1
+[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && ( ( -t 0 && -t 1 ) || $want_held -eq 1 ) ]] && owner_terminal=1
 plugins=$(claude plugin list --json 2>/dev/null || echo '[]')
 # Memory checks: before a Write/Edit/MultiEdit of a memory file the host's `kith memory hook pre` runs kith-mem's
 # checks and blocks a refused write with the reason; after it, `post` records the version. Files that aren't memory
@@ -1276,7 +1281,7 @@ if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi
 # An interactive run of the owner's in their own terminal: no task, a tty on both ends, not started by another run (and not
 # by the host, a schedule or an ask, which set KITH_VIA). That covers `kith AGENT`, -r, -r ID and -c.
 terminal=0
-[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && -t 0 && -t 1 ]] && terminal=1
+[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && ( ( -t 0 && -t 1 ) || $want_held -eq 1 ) ]] && terminal=1
 # Its origin is the agent's own chat with the owner in the app (kith-send leaves messages there, kith-call rings it); the
 # host makes both. No host or no such chat: nothing is set, and kith-send goes to Telegram as before.
 if [[ $terminal -eq 1 && -z ${KITH_RUN_OUTBOX:-} && -z ${KITH_BRIDGE_OUTBOX:-} && -z ${KITH_CALL_KEY:-} ]]; then
@@ -1293,6 +1298,7 @@ fi
 [[ $p_owner == 1 || $launch -eq 1 ]] || python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || true
 # Another harness: the same run, handed to its adapter (prompt in a file, directories and MCP configs as lists).
 if [[ $harness != claude ]]; then
+  [[ $want_held -eq 0 ]] || echo "kith: --held holds claude sessions only; $harness runs here (--direct)" >&2
   printf '%s\n' "$prompt" > "$runs/$$.prompt.md"
   run_dirs=$(for ((i = 1; i < ${#dirs[@]}; i += 2)); do printf '%s\n' "${dirs[i]}"; done)
   [[ $terminal -eq 1 || $(slash_off) == false ]] && gs=1 || gs=0
@@ -1420,6 +1426,7 @@ fi
 # The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.
 claim_person=""; [[ $p_owner == 1 ]] || claim_person=$p_id
 if [[ $# -gt 0 ]]; then
+  [[ $want_held -eq 0 ]] || echo "kith: --held is for an interactive session; this task runs here (--direct)" >&2
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
   [[ -z $csid ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
@@ -1445,6 +1452,19 @@ if [[ $# -gt 0 ]]; then
     fi
   fi
   exec ${stub[@]+"${stub[@]}"} claude "${args[@]}" -p "$*"
+fi
+# --held: the same launch, handed to the core to start in the holder (kith_held_launch exits when it opened or was busy, and
+# returns here to run it directly, saying why). The ask token below is for a run that descends from this shell: a held
+# engine does not, and the core would drop it from the env anyway.
+if [[ $want_held -eq 1 ]]; then
+  if [[ $p_owner == 1 && $nested -eq 0 ]]; then
+    . "$KITH/lib/kith-core.sh"
+    export KITH_TERMINAL_SESSION=1
+    [[ -z $r_sid ]] || export KITH_RESUMED_FROM=$r_from
+    kith_held_launch "$agent" "$csid" "${r_sid:-}" "${args[@]}" || true
+  else
+    echo "kith: --held is for the owner's own terminal; running here (--direct)" >&2
+  fi
 fi
 [[ -t 0 && -t 1 ]] || { echo "kith: no terminal for an interactive session; give a task (kith $agent \"...\") or run it in a terminal" >&2; exit 1; }
 # An interactive owner run gets an ask token too, for the PermissionDenied hook alone (its card in the apps): no prompt tool
