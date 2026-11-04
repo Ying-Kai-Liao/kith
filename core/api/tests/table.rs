@@ -9,11 +9,22 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use kith_api::cli::{ParseError, parse_argv};
+use kith_api::cli::{ParseError, parse_args, parse_argv};
 use kith_api::{
     Arg, METHODS, Principal, Served, Stability, compat, enums, method, named_types, openrpc, schema,
 };
 use serde_json::{Value, json};
+
+/// The rows only the host may call (M2-10b): the principal check in `every_row_is_well_formed` pins Host to exactly
+/// these, so a new row cannot gain Host unnoticed.
+const HOST_ROWS: [&str; 6] = [
+    "syncLease.link",
+    "syncLease.unlink",
+    "syncLease.changed",
+    "syncLease.drop",
+    "syncLease.pulled",
+    "syncLease.renew",
+];
 
 fn repo(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -59,8 +70,13 @@ fn every_row_is_well_formed() {
         // Until M2 only the owner may call anything, except the run socket's three rows (M0e): a run token reaches those
         // and nothing else, and no other principal reaches them.
         let on_the_run_socket = ["run.recall", "run.memorySearch", "run.projectId"];
+        // The sync lease's writes are the host's (M2-10b); the sync-lease test below holds each of those rows.
         let want: &[Principal] = if on_the_run_socket.contains(&m.name) {
             &[Principal::RunToken]
+        } else if HOST_ROWS.contains(&m.name) {
+            &[Principal::Host]
+        } else if m.name == "syncLease.mark" {
+            &[Principal::Owner, Principal::Host]
         } else {
             &[Principal::Owner]
         };
@@ -85,6 +101,10 @@ fn every_row_is_well_formed() {
             }
         }
         for spelling in std::iter::once(m.cli.path).chain(m.cli.aliases.iter().copied()) {
+            // A hidden (host-only) row has no command line, so it cannot collide.
+            if m.cli.hidden {
+                continue;
+            }
             let key = format!("{spelling:?}+{:?}", m.cli.requires);
             assert!(
                 spellings.insert(key),
@@ -562,7 +582,7 @@ fn the_gate_rows_are_experimental_owner_only_unreleased_and_parse() {
 }
 
 #[test]
-fn the_sync_lease_rows_are_experimental_owner_only_unreleased_and_parse() {
+fn the_sync_lease_rows_are_experimental_unreleased_and_parse_and_the_writes_are_the_hosts() {
     let released = read_json(openrpc::RELEASED_PATH);
     let released: BTreeSet<&str> = released["methods"]
         .as_array()
@@ -582,10 +602,25 @@ fn the_sync_lease_rows_are_experimental_owner_only_unreleased_and_parse() {
     ] {
         let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
         assert_eq!(m.stability, Stability::Experimental, "{name}");
-        assert_eq!(m.principals, &[Principal::Owner], "{name}");
+        // The six writes report facts only the relay's process can know, so the owner (a terminal, an agent) must not
+        // be able to forge them. `status` is the owner's read; `mark` reads the counter `status` already shows, and the
+        // host takes it on its own connection.
+        let want: &[Principal] = match name {
+            "syncLease.status" => &[Principal::Owner],
+            "syncLease.mark" => &[Principal::Owner, Principal::Host],
+            _ => &[Principal::Host],
+        };
+        assert_eq!(m.principals, want, "{name}");
         assert!(!released.contains(name), "{name} is in released.json");
     }
-    let pulled = parse_argv(&["sync-lease", "pulled", "3", "--ms", "5000"]).unwrap();
+    // The CLI always connects as the owner, so the host-only rows have no command line; `mark` and `status` keep theirs.
+    for name in HOST_ROWS {
+        let verb = name.trim_start_matches("syncLease.");
+        assert!(method(name).unwrap().cli.hidden, "{name}");
+        assert!(parse_argv(&["sync-lease", verb]).is_err(), "{name}");
+    }
+    assert!(parse_argv(&["sync-lease", "mark"]).is_ok());
+    let pulled = parse_args(method("syncLease.pulled").unwrap(), ["3", "--ms", "5000"]).unwrap();
     assert_eq!(pulled.method.name, "syncLease.pulled");
     // The mark a pull started at is required.
     assert!(

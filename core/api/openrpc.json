@@ -6978,19 +6978,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "link"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -7002,19 +7000,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "unlink"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -7026,7 +7022,8 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "owner",
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
@@ -7050,19 +7047,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "changed"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -7074,19 +7069,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "drop"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -7115,15 +7108,12 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "pulled"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
@@ -7137,7 +7127,8 @@
               "--ms"
             ]
           }
-        }
+        },
+        "hidden": true
       }
     },
     {
@@ -7158,15 +7149,12 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "renew"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
@@ -7177,7 +7165,8 @@
               "--ms"
             ]
           }
-        }
+        },
+        "hidden": true
       }
     },
     {

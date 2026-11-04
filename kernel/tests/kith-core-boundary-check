@@ -32,6 +32,7 @@ PUBLIC = {
     ("lib.rs", "Embedded"), ("lib.rs", "Migrated"), ("lib.rs", "Via"),
     ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "stateless_through_core"),
     ("lib.rs", "reach"), ("lib.rs", "note_once"),
+    ("lib.rs", "reach_as_host"),   # the host proves host.token (M2-10b); a different crate, so not pub(crate)
     ("lib.rs", "route_kernel_notes"),   # the host's main.rs sends every kernel verb's notes to core.log
     # The service layer (via core_front) names the holder's folder and secret file in the opt-in job that makes the
     # holder the supervised root. It is a different crate from kith-core, so it cannot be pub(crate); it returns paths

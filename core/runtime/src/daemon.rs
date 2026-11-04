@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use kith_api::Principal;
 use kith_kernel::paths::Paths;
 use serde_json::{Value, json};
 
@@ -130,7 +131,10 @@ impl Shared {
         self.changed.notify_all();
     }
 
-    fn dispatch(&self, method: &str, params: &Value) -> Result<Value> {
+    fn dispatch(&self, who: Principal, method: &str, params: &Value) -> Result<Value> {
+        // The row's principals decide, once, for every branch below: a connection that proved only the owner token is
+        // refused a host row here, and the host's connection is refused every owner row.
+        crate::call::check(who, method, params)?;
         if method == "kernel.coreStatus" {
             return self.running_status();
         }
@@ -151,13 +155,13 @@ impl Shared {
         }
         // The envelope's rows that need the master key read it first, outside the core lock (see `secrets::preload`).
         if matches!(method, "secrets.open" | "secrets.get" | "secrets.put") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            crate::call::check(Principal::Owner, method, params)?;
             let key = self.master_key()?;
             let answer = self.with_core(|c| {
                 if let Some(key) = key {
                     crate::secrets::adopt(&c.secrets, key)?;
                 }
-                c.call(kith_api::Principal::Owner, method, params)
+                c.call(Principal::Owner, method, params)
             })?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
@@ -165,7 +169,6 @@ impl Shared {
         if method == "run.mint" {
             // Minting is a claim on authority too: refuse a revoked person, inside the lock a revoke commits under,
             // so a mint cannot slip in beside a suspension.
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let person = params
                 .get("person")
                 .and_then(Value::as_str)
@@ -190,7 +193,6 @@ impl Shared {
         }
         // The gate needs `&mut Core` (its state changes are claim transactions), which `Core::call` does not hold.
         if method.starts_with("gate.") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer =
                 self.with_core(|c| crate::gate::call(c, method, params, &crate::gate::System))?;
             self.served.fetch_add(1, Ordering::SeqCst);
@@ -200,7 +202,6 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::authority::call::serves(method) {
-                crate::call::check(kith_api::Principal::Owner, method, params)?;
                 // The tokens of a revoked or removed person end in the same locked call that committed it.
                 let answer = self.with_core(|c| {
                     let answer = crate::authority::call::call(c, method, params)?;
@@ -215,7 +216,6 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::doors::serves(method) {
-                crate::call::check(kith_api::Principal::Owner, method, params)?;
                 let answer = self
                     .with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))?;
                 self.served.fetch_add(1, Ordering::SeqCst);
@@ -224,7 +224,6 @@ impl Shared {
         }
         // The wake queue (M3-7): nothing calls these until kith-wake is switched; the daemon runs no drain and fires no waiter.
         if crate::wake::serves(method) {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer = self.with_core(|c| crate::wake::call(c, method, params))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
@@ -233,7 +232,6 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::asks::serves(method) {
-                crate::call::check(kith_api::Principal::Owner, method, params)?;
                 let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
@@ -241,7 +239,6 @@ impl Shared {
         }
         // Same for the sync lease: a change is a claim transaction.
         if method.starts_with("syncLease.") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer = self.with_core(|c| {
                 crate::sync_lease::call(c, method, params, &crate::sync_lease::System)
             })?;
@@ -250,14 +247,13 @@ impl Shared {
         }
         // So do the cards: raise, claim and close are claim transactions.
         if method.starts_with("cards.") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer =
                 self.with_core(|c| crate::cards::call(c, method, params, &crate::gate::System))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
         // Counts answers only: a refused or failed call was not served.
-        let answer = self.with_core(|c| c.call(kith_api::Principal::Owner, method, params))?;
+        let answer = self.with_core(|c| c.call(who, method, params))?;
         self.served.fetch_add(1, Ordering::SeqCst);
         Ok(answer)
     }
@@ -468,7 +464,8 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         *slot = Some(core);
     }
     let for_calls = shared.clone();
-    let handler: Arc<Handler> = Arc::new(move |method, params| for_calls.dispatch(method, params));
+    let handler: Arc<Handler> =
+        Arc::new(move |who, method, params| for_calls.dispatch(who, method, params));
     match Server::bind(layout, generation, handler) {
         Ok(server) => {
             let mut slot = shared
