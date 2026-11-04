@@ -531,6 +531,10 @@ jobs:
           KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check
           # An installed kith finds its stub through the ~/.local/bin link; kith serve puts one beside the host.
           kernel/tests/kith-stub-install-check
+          # kith --held and kith attach: the real daemon, holder, stub and attach client with a fake engine (M1-7).
+          cargo build --manifest-path serve/host/Cargo.toml -p kith-holder
+          T="$PWD/serve/host/target/debug"
+          KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
       - name: Run-once cost and kernel notes
         run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
       # kith-sessions and the Rust threads module claiming one thread at once: never more than one writer.
