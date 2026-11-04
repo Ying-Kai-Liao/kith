@@ -154,12 +154,7 @@ pub fn secrets_call(method: &str, params: &Value, wait: std::time::Duration) -> 
 }
 
 #[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
-fn secrets_call_at(
-    folders: &Paths,
-    method: &str,
-    params: &Value,
-    wait: std::time::Duration,
-) -> anyhow::Result<Value> {
+fn secrets_call_at(folders: &Paths, method: &str, params: &Value, wait: std::time::Duration) -> anyhow::Result<Value> {
     let deadline = std::time::Instant::now() + wait;
     loop {
         match kith_core::reach(folders, method, params, true) {
@@ -363,8 +358,8 @@ mod tests {
             secrets_call_at(&folders, "secrets.delete", &json!({"name": "a"}), wait).expect("delete")["deleted"],
             false
         );
-        let bad = secrets_call_at(&folders, "secrets.has", &json!({"name": ""}), wait);
-        assert!(bad.is_err(), "a bad name is refused: {bad:?}");
+        let bad = secrets_call_at(&folders, "secrets.has", &json!({}), wait);
+        assert!(bad.is_err(), "missing params are refused: {bad:?}");
         daemon.stop();
         let _ = std::fs::remove_dir_all(&folders.home);
     }

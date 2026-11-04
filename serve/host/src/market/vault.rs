@@ -313,8 +313,15 @@ pub fn read(store: &Store, slot: &str) -> Result<Option<String>> {
 }
 
 /// Whether the slot has a value, sealed or still on an old row. Needs no key, so it never wakes the key store.
+/// A core that cannot be reached reads as "nothing sealed": callers ask this to learn whether a feature is set up
+/// (a bot starting without a connector list, a status line), and none of them may fail because the vault is down.
+/// What they then try to read or write is refused by the vault itself, with the reason.
 pub fn exists(store: &Store, slot: &str) -> Result<bool> {
-    Ok(store.vault.link.has(slot)? || store.kv_read(slot)?.is_some())
+    let sealed = store.vault.link.has(slot).unwrap_or_else(|error| {
+        tracing::debug!(slot, error = format!("{error:#}"), "could not ask the core whether a credential is sealed");
+        false
+    });
+    Ok(sealed || store.kv_read(slot)?.is_some())
 }
 
 /// Removes the slot's value. The old row, if any, goes too: this is the owner clearing a credential, not a move.
@@ -592,6 +599,21 @@ mod tests {
         assert_eq!(store.kv_read("new").unwrap(), None, "no plaintext fallback");
         assert_eq!(store.kv_read("old").unwrap().as_deref(), Some("plain value"));
         assert!(link.open().is_err());
+    }
+
+    #[test]
+    fn a_vault_that_cannot_be_reached_reads_as_empty_before_unlock_and_never_fails_the_asker() {
+        let (vault, link) = open_vault();
+        let store = store_with(vault);
+        store.vault.open.store(false, Ordering::Release);
+        *link.refuse.lock().unwrap() = Some("the core is not running".into());
+        assert!(!exists(&store, "connectors").unwrap());
+        assert_eq!(read(&store, "connectors").unwrap(), None);
+        // A value still on an old row is there to be seen, and needs the key: refused with the reason.
+        store.kv_set("old", "vault:v1:sealed").unwrap();
+        assert!(exists(&store, "old").unwrap());
+        assert!(read(&store, "old").is_err());
+        assert!(write(&store, "connectors", "[]").is_err());
     }
 
     #[test]

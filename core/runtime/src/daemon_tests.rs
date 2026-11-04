@@ -992,19 +992,37 @@ fn the_secrets_rows_round_trip_through_a_real_daemon() {
         other => panic!("{method}: {other:?}"),
     };
     // `has` and `delete` need no key: nothing is read for them.
-    assert_eq!(ask("secrets.has", json!({"name": "a"})), json!({"has": false}));
-    assert_eq!(ask("secrets.delete", json!({"name": "a"})), json!({"deleted": false}));
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": false})
+    );
+    assert_eq!(
+        ask("secrets.delete", json!({"name": "a"})),
+        json!({"deleted": false})
+    );
     assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 0);
 
     ask("secrets.put", json!({"name": "a", "value": "one"}));
-    assert_eq!(ask("secrets.has", json!({"name": "a"})), json!({"has": true}));
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": true})
+    );
     assert_eq!(
         ask("secrets.get", json!({"name": "a"})),
         json!({"found": true, "value": "one"})
     );
-    assert_eq!(ask("secrets.get", json!({"name": "zz"})), json!({"found": false}));
-    assert_eq!(ask("secrets.delete", json!({"name": "a"})), json!({"deleted": true}));
-    assert_eq!(ask("secrets.has", json!({"name": "a"})), json!({"has": false}));
+    assert_eq!(
+        ask("secrets.get", json!({"name": "zz"})),
+        json!({"found": false})
+    );
+    assert_eq!(
+        ask("secrets.delete", json!({"name": "a"})),
+        json!({"deleted": true})
+    );
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": false})
+    );
     // The key was read until it was found, then kept.
     assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
     // A bad name is the caller's mistake, said as a refusal.

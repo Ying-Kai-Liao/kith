@@ -118,7 +118,8 @@ impl Jev {
             }
             // `exists` is a socket call to the core: never on an async worker. Down core or nothing saved: no key.
             let asked = hub.clone();
-            let saved = tokio::task::spawn_blocking(move || vault::exists(&asked.store, SLOT)).await.ok()?.unwrap_or(false);
+            let saved =
+                tokio::task::spawn_blocking(move || vault::exists(&asked.store, SLOT)).await.ok()?.unwrap_or(false);
             if !saved {
                 *NONE_UNTIL.locked() = Some(std::time::Instant::now() + NONE_FOR);
                 return None;
@@ -260,7 +261,7 @@ mod tests {
     use super::*;
     use crate::store::Store;
 
-    /// SAVED and NONE_UNTIL are process-wide: the tests that touch them take turns.
+    /// `SAVED` and `NONE_UNTIL` are process-wide: the tests that touch them take turns.
     static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn s(stop: f64, change: f64, add: f64, other: f64) -> Scores {
@@ -309,12 +310,12 @@ mod tests {
         *NONE_UNTIL.locked() = None;
         *SAVED.locked() = None;
         // Env keys are not set in tests; a refusing link stands for a core that is not running.
-        let (vault, link) = crate::market::vault::memory::open_vault();
+        let (opened, link) = vault::memory::open_vault();
         *link.refuse.locked() = Some("the core is not running".into());
         let dir = std::env::temp_dir().join(format!("kith-router-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut store = Store::open(std::path::Path::new(":memory:")).unwrap();
-        store.vault = vault;
+        store.vault = opened;
         let identity = crate::remote::identity::Identity::load_or_create(&dir).unwrap();
         let hub = crate::hub::Hub::new(store, "router-down".into(), identity, "test".into(), 0);
 
