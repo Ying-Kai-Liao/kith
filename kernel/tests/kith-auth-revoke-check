@@ -166,7 +166,7 @@ BAD() { cp "$T/bad.json.src" "$KITH_AUTH"; }
 BAD
 D > "$T/bad.txt"; D --json > "$T/bad.json"
 check "doctor: says what is true: kith-auth lets them in as the owner, chat refuses" "grep -q 'kai is the owner and also revoked (old data): kith-auth still lets them and their bots in as the owner, while chat refuses them' '$T/bad.txt' && ! grep -q 'treats them as revoked' '$T/bad.txt'"
-check "doctor: names the bots --rm removes, both --rm steps in order, and --unrevoke" "grep -q 'person kai --rm (removes kai and their bots (bot-b) for good; the id is retired), then kith auth person <you> owner' '$T/bad.txt' && grep -q 'person kai --unrevoke' '$T/bad.txt'"
+check "doctor: names the bots --rm removes, both --rm steps in order, and --unrevoke" "grep -q 'person kai --rm (removes kai and their bots (bot-b) for good; the id is retired), then kith auth person <you> owner' '$T/bad.txt' && grep -q 'person kai --unrevoke' '$T/bad.txt' && grep -q 'on each Mac where kith doctor shows this' '$T/bad.txt'"
 check "doctor --json: the same line, not ok" "python3 -c \"import json; d=json.load(open('$T/bad.json')); assert any(not c['ok'] and 'owner and also revoked' in c['name'] for c in d['checks'])\""
 check "owner: revoke is still refused" "! A person kai --revoke"
 check "owner: undo is allowed, and the doctor line is gone" "A person kai --unrevoke && ! D | grep -q 'owner and also revoked'"
@@ -179,5 +179,9 @@ check "and the doctor line is gone, the bot with it" "! D | grep -q 'owner and a
 python3 -c "
 import json; d=json.load(open('$T/bad.json.src')); d['people']['kai'].pop('revoked'); d['people']['kai']['bot_of']='me'; json.dump(d,open('$KITH_AUTH','w'))"
 D > "$T/bot.txt"
-check "doctor: an owner who is a bot of someone is flagged too" "grep -q 'kai is the owner and also a bot of me' '$T/bot.txt'"
+check "doctor: an owner who is a bot of someone is flagged too, and says the split is latent (nobody revoked)" "grep -q \"kai is the owner and also a bot of me (old data; a bot can't be made the owner now): kith-auth lets them in as the owner, and if me is ever revoked, chat would refuse them. Fix: kith auth person kai --rm (removes kai and their bots (bot-b)), then kith auth person <you> owner\" '$T/bot.txt' && ! grep -q 'is retired\\|the id is retired' '$T/bot.txt'"
+python3 -c "
+import json; d=json.load(open('$KITH_AUTH')); d['people']['me']['revoked']=True; json.dump(d,open('$KITH_AUTH','w'))"
+D > "$T/bot2.txt"
+check "doctor: when the chain reaches a revoked person, chat refuses them" "grep -q 'kith-auth lets them in as the owner, and chat refuses them' '$T/bot2.txt' && ! grep -q 'is retired' '$T/bot2.txt'"
 exit $fail

@@ -145,6 +145,32 @@ async fn the_owner_a_bot_and_a_stranger_cannot_be_revoked() {
 }
 
 #[tokio::test]
+async fn an_owner_who_is_also_revoked_old_data_is_undone_here_without_the_cloud() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let path = r.dir.join("auth.json");
+    let flag = |on: bool| {
+        let mut d: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        d["people"]["kai"]["revoked"] = json!(on);
+        std::fs::write(&path, d.to_string()).unwrap();
+    };
+    let revoked = || {
+        let d: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        d["people"]["kai"]["revoked"].as_bool().unwrap_or(false)
+    };
+    flag(true);
+    assert!(call(&r, "revokePerson", json!({"personId": "kai"})).await.is_err(), "a revoke on the owner stays refused");
+    // Linked Mac (the rig has a cloud), and still nothing is posted: the cloud never holds the owner.
+    for _ in 0..2 {
+        let out = call(&r, "unrevokePerson", json!({"personId": "kai"})).await.unwrap();
+        assert_eq!(out["revoked"], false);
+        assert_eq!(out["everywhere"], false);
+    }
+    assert!(!revoked(), "the old revoked flag is gone");
+    assert!(r.posts().is_empty(), "{:?}", r.posts());
+}
+
+#[tokio::test]
 async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
     let r = Rig::new().await;
     joined(&r).await;
