@@ -642,6 +642,15 @@ fn revoke_ungranted(hub: &Hub, grants: &[HostGrant]) -> Result<()> {
     Ok(())
 }
 
+impl Next {
+    fn id(&self) -> &str {
+        match self {
+            Next::Offer(r) => &r.id,
+            Next::Deny(id) => id,
+        }
+    }
+}
+
 enum Next {
     /// Seen for the first time without a host nonce: send ours.
     Offer(Box<Request>),
@@ -753,6 +762,11 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<HostAccessRequest>, owne
         set_nonce_budget(&hub.store, SAS_NONCES, &budget);
         set_nonce_budget(&hub.store, MEMBER_SAS_NONCES, &member_budget);
     }
+    // Written before the first await: the host no longer holds these and the cloud no longer lists them, so a pull cut
+    // off below (the relay's wait, a closed connection, a restart) would lose them for good.
+    let denying: Vec<String> =
+        next.iter().filter(|n| matches!(n, Next::Deny(_))).map(|n| n.id().to_owned()).collect();
+    queue_for_core(hub, ended.iter().chain(&denying));
     if throttled {
         tracing::warn!("accessRequests throttled: too many account access requests this hour");
         update_status(hub, |s| {
@@ -787,7 +801,7 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<HostAccessRequest>, owne
     }
     // "Unknown request" in the core (never filed there, or already ended) is fine. One the core could not be told about
     // stays queued (kept across a restart) and is ended on the next sync; the switch off ends them all at once.
-    ended.extend(take_deny_queue(hub));
+    let mut ended = take_deny_queue(hub);
     let held: Vec<String> = hub.cloud.requests.locked().iter().map(|r| r.id.clone()).collect();
     ended.retain(|id| !held.contains(id));
     ended.sort();
@@ -812,6 +826,28 @@ const DENY_QUEUE_KEY: &str = "core_deny_queue";
 
 fn take_deny_queue(hub: &Hub) -> Vec<String> {
     hub.store.kv_get(DENY_QUEUE_KEY).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
+}
+
+/// Adds `ids` to the queue (kept across a restart) before anything that can wait or fail is tried.
+fn queue_for_core<'a>(hub: &Hub, ids: impl IntoIterator<Item = &'a String>) {
+    let mut queue = take_deny_queue(hub);
+    queue.extend(ids.into_iter().cloned());
+    queue.sort();
+    queue.dedup();
+    set_deny_queue(hub, &queue);
+}
+
+/// Ends `id` in the core; one the core could not be told about is queued for the next sync, which the host's own copy
+/// of the request no longer leads to once it is dropped. "Unknown request" is fine.
+async fn deny_or_queue(hub: &Hub, id: &str, deadline: Option<tokio::time::Instant>) {
+    match core_call_until(deadline, "people.deny", json!({"id": id, "local": true}), false).await {
+        Ok(_) => {}
+        Err(e) if e.downcast_ref::<crate::api::authority::CoreRefused>().is_some() => {}
+        Err(e) => {
+            tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't deny an access request in the core");
+            queue_for_core(hub, [&id.to_owned()]);
+        }
+    }
 }
 
 fn set_deny_queue(hub: &Hub, ids: &[String]) {
@@ -921,7 +957,7 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
 /// row that is already approved there answers "unknown request", which is fine), and this host's copy goes.
 async fn refuse_mismatch(hub: &Hub, base: &str, id: &str, deadline: Option<tokio::time::Instant>) -> Result<()> {
     tracing::warn!(request_id = id, "the core's device differs from this host's request; denying it");
-    drop(core_call_until(deadline, "people.deny", json!({"id": id, "local": true}), false).await);
+    deny_or_queue(hub, id, deadline).await;
     drop(decision(hub, base, id, false).await);
     hub.cloud.requests.locked().retain(|x| x.id != id);
     emit_requests(hub).await;
@@ -965,6 +1001,9 @@ async fn decide_in_core_until(
     const WEB_OWNER: &str = "A web browser can't be the owner's device.";
     const NOT_MEMBER: &str = "That account is no longer a member of this computer.";
     const ONLY_HERE: &str = "This can only be done at the computer itself.";
+    if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
+        bail!("the core's budget for this pull is spent");
+    }
     let base = base(hub)?;
     // The host's own checks come first, as in `settle`: the core's rows can be filed by any process of the owner's user
     // and its membership view is the core's own tables, which a host-side suspension does not reach until M2-8/M2-18.
@@ -978,7 +1017,7 @@ async fn decide_in_core_until(
         && !hub.store.memberships()?.iter().any(|m| &m.person_id == person)
     {
         // Their membership ended while the request waited: ended in the core too, so it stops showing there.
-        drop(core_call_until(deadline, "people.deny", json!({"id": id, "local": true}), false).await);
+        deny_or_queue(hub, id, deadline).await;
         drop(decision(hub, &base, id, false).await);
         hub.cloud.requests.locked().retain(|x| x.id != id);
         emit_requests(hub).await;
@@ -993,12 +1032,15 @@ async fn decide_in_core_until(
         if row.is_some_and(|r| {
             r["deviceKey"].as_str() != Some(b64(&held.device_key).as_str())
                 || r["personId"].as_str() != held.person.as_deref()
+                || r["platform"].as_str() != Some(held.platform.as_str())
+                || r["deviceName"].as_str() != Some(held.device_name.as_str())
         }) {
             return refuse_mismatch(hub, &base, id, deadline).await;
         }
     }
     let method = if approve { "people.approve" } else { "people.deny" };
-    let said = match core_call_until(deadline, method, json!({"id": id, "local": local}), false).await {
+    // A decision is never cut off by the budget (the core may have committed it); it runs on the client's own timeout.
+    let said = match core_call_until(None, method, json!({"id": id, "local": local}), false).await {
         Ok(said) => said,
         Err(e) => {
             let Some(crate::api::authority::CoreRefused(why)) = e.downcast_ref() else { return Err(e) };
@@ -2364,7 +2406,7 @@ mod tests {
         // The budget is already spent: the core call is given up on, nothing is decided, and the request is as it was.
         let spent = Some(tokio::time::Instant::now());
         let err = decide_in_core_until(&hub, "req_sam", true, true, false, spent).await.unwrap_err();
-        assert!(err.to_string().contains("didn't answer in time"), "{err:#}");
+        assert!(err.to_string().contains("budget"), "{err:#}");
         assert!(fake.posts.lock().unwrap().is_empty());
         assert_eq!(ids_in_core(true).await, ["req_sam"], "still pending in the core");
         assert_eq!(hub.cloud.requests_json().len(), 1);
