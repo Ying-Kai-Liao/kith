@@ -1,0 +1,13 @@
+{
+  "fakes": "\nkith echo person=owner via=schedule job=inside model= effort= harness= task=a minute inside\nkith-ask --sweep\nkith-wake drain",
+  "state:home/.kith/logs/sched/runs/echo/inside-20261103-0830.log": "# 2026-11-03@08:30 echo inside (due 08:31, caught up after sleep)\n",
+  "state:home/.kith/outbox/sched-echo-inside-n1.json": "{\n  \"agent\": \"echo\",\n  \"at\": 1793694600.0,\n  \"cron\": \"31 8 2 11 *\",\n  \"job\": \"inside\",\n  \"person\": null,\n  \"via\": \"schedule\"\n}\n",
+  "state:home/.kith/outbox/sched-echo-inside-n1/": "<empty dir>\n",
+  "state:home/.kith/sched/state.json": "{\n  \"last\": {\n    \"echo/inside\": {\n      \"at\": \"2026-11-03@08:30\",\n      \"log\": \"<HOME>/.kith/logs/sched/runs/echo/inside-20261103-0830.log\",\n      \"pid\": \"<EPOCH>\",\n      \"why\": \"due 08:31, caught up after sleep\"\n    }\n  },\n  \"pruned\": 1793694600.0,\n  \"tick\": \"2026-11-03@08:30\"\n}\n",
+  "state:kith/agents/echo/jobs.json": "[\n  {\n    \"cron\": \"30 8 2 11 *\",\n    \"id\": \"edge\",\n    \"task\": \"exactly a day ago\"\n  },\n  {\n    \"cron\": \"31 8 2 11 *\",\n    \"id\": \"inside\",\n    \"task\": \"a minute inside\"\n  },\n  {\n    \"cron\": \"29 8 2 11 *\",\n    \"id\": \"outside\",\n    \"task\": \"a minute outside\"\n  }\n]\n",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
+  "state:kith/state/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "2026-11-03@08:30 started echo/inside → <HOME>/.kith/logs/sched/runs/echo/inside-20261103-0830.log\n"
+}
