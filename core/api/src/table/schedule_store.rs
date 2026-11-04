@@ -69,13 +69,13 @@ pub(super) const ROWS: &[Method] = &[
     // event and the job, and fires. Not switched: the host's own routines keep deciding until M4-5.
     act(
         "schedule.fire",
-        "A webhook or event delivery for one job: checks the job's key (`Authorization: Bearer` or a GitHub-style `X-Hub-Signature-256` HMAC of the exact body, the key read from the secrets lane), the event against the job's trigger and filters, then fires through the same transaction as `schedule.runNow` with the slot `event:<hash of the delivery id>`, so a redelivery fires at most once. Answers `fired`, `busy` (retry), `ignored`, `ping`, `refused` (`unauthorized`, `paused`, `invalid`) or what an earlier delivery of the same id decided. The host calls it as itself with the real sender in `caller`.",
+        "A webhook or event delivery for one job: checks the job's key (`Authorization: Bearer` or a GitHub-style `X-Hub-Signature-256` HMAC of the exact body, the key read from the secrets lane), the event against the job's trigger and filters, then fires through the same transaction as `schedule.runNow` with the slot `event:<hash of the delivery id>`, so a redelivery fires at most once. Answers `fired`, `busy` (retry), `ignored`, `ping`, `refused` (`unauthorized`, `paused`, `gone`, `invalid`) or what an earlier delivery of the same id decided. The body is UTF-8 text: the listener refuses a body that is not as `invalid` and never converts it lossily (a replaced byte would make a correct signature fail). The host calls it as itself with the real sender in `caller`; `caller` is only echoed in the answer, never used to decide anything, and M4-5 stores it with the fire row.",
         &[
             pos("agent", "string", true, "The agent."),
             pos("id", "string", true, "The job."),
             pos("headers", "{string}", true, "The request headers, name to value."),
             pos("body", "string", true, "The exact request body (text)."),
-            pos("caller", "string", true, "Who sent it, as the host knows (the real principal)."),
+            pos("caller", "string", true, "Who sent it, as the host knows (the real principal). Echoed, never used to decide."),
         ],
         &["schedule", "fire"],
     )

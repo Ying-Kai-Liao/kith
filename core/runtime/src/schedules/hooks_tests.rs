@@ -15,12 +15,13 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::hooks::{
-    Headers, MAX_BODY, authorized, deliver, delivery_id, event, hmac_sha256, key_name, slot_of,
+    Headers, MAX_BODY, authorized, deliver, deliver_between, delivery_id, event, key_name, slot_of,
     wants,
 };
 use crate::authority::call::call_with;
 use crate::conversations::claims;
 use crate::db::Core;
+use crate::error::Result;
 use crate::layout::Layout;
 use crate::secrets::Envelope;
 use crate::secrets::keystore::MemoryKeyStore;
@@ -42,6 +43,13 @@ fn hex(bytes: &[u8]) -> String {
         let _ = write!(s, "{b:02x}");
         s
     })
+}
+
+fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    use hmac::{Hmac, Mac as _};
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
+    mac.update(msg);
+    mac.finalize().into_bytes().into()
 }
 
 fn signature(key: &str, body: &[u8]) -> String {
@@ -316,6 +324,23 @@ impl Rig {
         .unwrap()
     }
 
+    /// A good delivery whose jobs file is changed by `between` after the pre-checks, before the fire reads it again.
+    fn good_between(&mut self, job: &str, id: &str, between: &dyn Fn()) -> Result<Value> {
+        let auth = bearer(KEY);
+        deliver_between(
+            &mut self.core,
+            &self.p,
+            &self.ctx,
+            "mel",
+            job,
+            &headers(&[("authorization", &auth), ("x-delivery-id", id)]),
+            b"{}",
+            "cloud",
+            NOW,
+            between,
+        )
+    }
+
     fn good(&mut self, job: &str, id: &str, body: &str, now: i64) -> Value {
         let auth = bearer(KEY);
         self.send(
@@ -480,6 +505,60 @@ fn a_paused_job_refuses_and_writes_nothing() {
     );
     assert_eq!(r.n("SELECT count(*) FROM sched_fires"), 0);
     // Resumed: the same delivery id fires.
+    r.jobs(&json!([hook("h")]));
+    assert_eq!(r.good("h", "d-1", "{}", NOW + 1)["outcome"], "fired");
+}
+
+#[test]
+fn a_job_paused_after_the_pre_check_writes_nothing_and_a_redelivery_fires() {
+    let mut r = rig_with(&json!([hook("h")]), &["h"]);
+    let file = r.p.agents.join("mel").join("jobs.json");
+    let mut paused = hook("h");
+    paused["paused"] = json!(true);
+    let text = json!([paused]).to_string();
+    let v = r
+        .good_between("h", "d-1", &|| std::fs::write(&file, &text).unwrap())
+        .unwrap();
+    assert_eq!(
+        (v["outcome"].as_str(), v["code"].as_str()),
+        (Some("refused"), Some("paused")),
+        "{v}"
+    );
+    // No final row: the id is free, so after the resume the same delivery fires.
+    assert_eq!(r.n("SELECT count(*) FROM sched_fires"), 0);
+    r.jobs(&json!([hook("h")]));
+    assert_eq!(r.good("h", "d-1", "{}", NOW + 1)["outcome"], "fired");
+}
+
+#[test]
+fn a_job_removed_after_the_proof_is_gone_not_unauthorized() {
+    let mut r = rig_with(&json!([hook("h")]), &["h"]);
+    let file = r.p.agents.join("mel").join("jobs.json");
+    let v = r
+        .good_between("h", "d-1", &|| std::fs::write(&file, "[]").unwrap())
+        .unwrap();
+    assert_eq!(
+        (
+            v["outcome"].as_str(),
+            v["code"].as_str(),
+            v["final"].as_bool()
+        ),
+        (Some("refused"), Some("gone"), Some(true)),
+        "{v}"
+    );
+    assert_eq!(r.n("SELECT count(*) FROM sched_fires"), 0);
+}
+
+#[test]
+fn a_jobs_file_unreadable_after_the_proof_is_a_retryable_error() {
+    let mut r = rig_with(&json!([hook("h")]), &["h"]);
+    let file = r.p.agents.join("mel").join("jobs.json");
+    let e = r
+        .good_between("h", "d-1", &|| std::fs::write(&file, "{not json").unwrap())
+        .unwrap_err();
+    assert!(e.to_string().contains("deliver to"), "{e}");
+    assert_eq!(r.n("SELECT count(*) FROM sched_fires"), 0);
+    // Readable again: the same delivery fires.
     r.jobs(&json!([hook("h")]));
     assert_eq!(r.good("h", "d-1", "{}", NOW + 1)["outcome"], "fired");
 }

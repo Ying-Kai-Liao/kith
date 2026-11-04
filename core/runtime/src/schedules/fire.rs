@@ -128,6 +128,8 @@ pub(super) enum Outcome {
     Skipped(String),
     /// A run-now or webhook found the job busy: no key was written, the caller may retry.
     Busy,
+    /// A webhook found the job paused after the caller's read: no key was written, so a redelivery after a resume fires.
+    Paused,
     /// The slot had a row already: its outcome and turn.
     Decided {
         outcome: String,
@@ -307,6 +309,15 @@ fn fire_with(tx: &Transaction<'_>, f: &Fire<'_>, event: Option<&Value>) -> Resul
         return Ok(o);
     };
     if job.paused {
+        if kind == Kind::Event {
+            // The listener's pre-check reads the file; this reads the index. A pause between the two must not write a
+            // final row, or a redelivery after the resume would answer "decided" and never fire. Like busy: no key.
+            tx.execute(
+                "DELETE FROM sched_fires WHERE agent = ?1 AND job = ?2 AND slot = ?3",
+                params![agent, f.job, slot],
+            )?;
+            return Ok(Outcome::Paused);
+        }
         let o = skip(tx, f, slot, "paused")?;
         finish(tx, f, seen)?;
         return Ok(o);
@@ -718,6 +729,10 @@ pub(super) fn outcome_json(agent: &str, job: &str, slot: Option<&str>, out: &Out
         }
         Outcome::Busy => {
             o["outcome"] = json!("busy");
+            o["retry"] = json!(true);
+        }
+        Outcome::Paused => {
+            o["outcome"] = json!("paused");
             o["retry"] = json!(true);
         }
         Outcome::Decided { outcome, turn } => {

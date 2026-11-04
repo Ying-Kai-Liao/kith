@@ -16,11 +16,16 @@
 //!    to tell a retry from a second delivery. A busy job answers `busy` and writes nothing, so the retry fires once the
 //!    job is free.
 //!
-//! The caller is the host, as itself (`Principal::Host`); `caller` is who the host says sent it (the real principal,
-//! I17) and the answer repeats it. It decides nothing: the proof above does.
+//! The caller is the host, as itself (`Principal::Host`). `caller` is who the host says sent it (the real principal,
+//! I17) and the answer repeats it. It is never used to decide anything (the proof above does), and M4-5 stores it with
+//! the fire row so the real caller stays visible.
+//!
+//! The body is UTF-8 text: the listener refuses a body that is not as `invalid` and never converts it lossily (a
+//! replaced byte would turn a correct signature into `unauthorized`).
 
 use std::collections::BTreeMap;
 
+use hmac::{Hmac, Mac as _};
 use kith_kernel::paths::Paths;
 use kith_kernel::schedule::Trigger;
 use kith_kernel::secrets::Ctx;
@@ -45,9 +50,12 @@ pub(super) type Headers = BTreeMap<String, String>;
 /// Why a delivery did not fire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Refused {
-    /// Unknown job, a job without a webhook, no key, or the wrong proof: told apart nowhere.
+    /// Unknown job, a job without a webhook, no key, or the wrong proof: told apart nowhere. Only before the proof has
+    /// passed: after it, a failure is `Gone` or a retryable error, never a permanent auth failure for a valid key.
     Unauthorized,
     Paused,
+    /// The job was removed after the proof passed. Not `Unauthorized`: the sender's key was good.
+    Gone,
     Invalid(String),
 }
 
@@ -56,6 +64,7 @@ impl Refused {
         match self {
             Self::Unauthorized => "unauthorized",
             Self::Paused => "paused",
+            Self::Gone => "gone",
             Self::Invalid(_) => "invalid",
         }
     }
@@ -64,33 +73,15 @@ impl Refused {
         match self {
             Self::Unauthorized => "invalid webhook key or signature".into(),
             Self::Paused => "routine is paused".into(),
+            Self::Gone => "routine no longer exists".into(),
             Self::Invalid(why) => why.clone(),
         }
     }
 }
 
 /// The secret record that holds a job's webhook key.
-pub(super) fn key_name(agent: &str, job: &str) -> String {
+pub(crate) fn key_name(agent: &str, job: &str) -> String {
     format!("routine-webhook/{agent}/{job}")
-}
-
-/// `HMAC-SHA256(key, msg)` (RFC 2104), over the SHA-256 the core already links.
-pub(super) fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
-    const BLOCK: usize = 64;
-    let mut k = [0u8; BLOCK];
-    if key.len() > BLOCK {
-        k[..32].copy_from_slice(&Sha256::digest(key));
-    } else {
-        k[..key.len()].copy_from_slice(key);
-    }
-    let pad = |byte: u8| k.map(|b| b ^ byte);
-    let mut inner = Sha256::new();
-    inner.update(pad(0x36));
-    inner.update(msg);
-    let mut outer = Sha256::new();
-    outer.update(pad(0x5c));
-    outer.update(inner.finalize());
-    outer.finalize().into()
 }
 
 /// Equal bytes, in time that depends only on the lengths.
@@ -130,7 +121,11 @@ pub(super) fn authorized(key: &str, headers: &Headers, body: &[u8]) -> bool {
     else {
         return false;
     };
-    ct_eq(&sig, &hmac_sha256(key.as_bytes(), body))
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(key.as_bytes()).expect("hmac takes any key length");
+    mac.update(body);
+    // `verify_slice` compares in constant time.
+    mac.verify_slice(&sig).is_ok()
 }
 
 /// The sender's id for this delivery, so a retry never runs twice.
@@ -348,6 +343,35 @@ pub(super) fn deliver(
     caller: &str,
     now: i64,
 ) -> Result<Value> {
+    deliver_between(
+        core,
+        paths,
+        ctx,
+        agent,
+        job,
+        headers,
+        body,
+        caller,
+        now,
+        &|| {},
+    )
+}
+
+/// [`deliver`], calling `between` after the pre-checks and before the fire reads the jobs file again: the window in
+/// which the file can change under the delivery. Tests change it there.
+#[allow(clippy::too_many_arguments, reason = "one delivery is these things")]
+pub(super) fn deliver_between(
+    core: &mut Core,
+    paths: &Paths,
+    ctx: &Ctx,
+    agent: &str,
+    job: &str,
+    headers: &Headers,
+    body: &[u8],
+    caller: &str,
+    now: i64,
+    between: &dyn Fn(),
+) -> Result<Value> {
     let no = |r: Refused| Ok(refused(&r, caller));
     // 1. Who. Whatever is wrong with the job is the same answer as a wrong key.
     let idx = index(paths, Some(agent));
@@ -395,17 +419,21 @@ pub(super) fn deliver(
     // 4. The fire.
     let slot = slot_of(delivery.as_deref(), body, now);
     let mac = mac_id(&paths.machine)?;
+    between();
     for _ in 0..READS {
         // A file that changed between the read and the transaction is read again; the slot is the same, so this is one fire.
         let idx = index(paths, Some(agent));
-        let Some(a) = idx.agents.first() else {
-            return no(Refused::Unauthorized);
+        // The proof passed, so a failure here is not the sender's: the job went away, or the file is unreadable now.
+        let Some(a) = idx.agents.first().filter(|a| a.agent == agent) else {
+            return no(Refused::Gone);
         };
-        if a.problem.is_some() {
-            return no(Refused::Unauthorized);
+        if let Some(why) = &a.problem {
+            return Err(Error::Refused(format!(
+                "kith-core: schedule: {agent}'s jobs file cannot be read ({why}); deliver to {job:?} again"
+            )));
         }
         let Some(def) = a.jobs.iter().find(|j| sync::job_id(j) == job) else {
-            return no(Refused::Unauthorized);
+            return no(Refused::Gone);
         };
         let auth = authority::tables_within(core.conn())?;
         let person = fire::person_of(
@@ -438,6 +466,10 @@ pub(super) fn deliver(
             },
             &event,
         )?;
+        if out == Outcome::Paused {
+            // Paused after the pre-check: the same answer as the pre-check, and nothing was written.
+            return no(Refused::Paused);
+        }
         if out != Outcome::Stale {
             let mut v = outcome_json(agent, job, Some(&slot), &out);
             v["caller"] = json!(caller);
