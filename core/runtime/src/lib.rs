@@ -36,6 +36,9 @@ mod call;
 // claim and close verbs get theirs there and in M2-12.
 #[allow(dead_code, reason = "first callers are lane H")]
 mod cards;
+// The claim code (M3-2): the holder pipes, the warm runner and `terminal.open` call it from M3-4 on.
+#[allow(dead_code, reason = "first callers are M3-4, M3-5 and M3-11")]
+mod conversations;
 mod daemon;
 // Nothing calls the doors but the daemon's `doors.*` rows and the tests: the host's sweep and `kith_door.py` switch later.
 #[cfg(unix)]
@@ -63,6 +66,10 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+// The revoke order (M3-10d): claims of the person and their bots, then their ask tree. First caller is the kith-auth bridge (M2-18).
+#[cfg(unix)]
+#[allow(dead_code, reason = "first caller is the kith-auth bridge after M2-18")]
+mod revoke_order;
 // The agents' jobs.json indexed with the run state in core.db (M4-2); the host switches to it at M4-5.
 #[allow(
     dead_code,
@@ -84,8 +91,8 @@ mod transcripts;
 // wire them; the rows reach the rest.
 #[allow(dead_code)]
 mod sync_lease;
-// Nothing calls the envelope yet: the host vault and kith-auth move onto it at M2-7 and M2-18.
-#[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
+// The host vault calls `secrets.open|get|put` (M2-7); `delete` and `list` wait for kith-auth and rollback (M2-18).
+#[allow(dead_code, reason = "delete and list are M2-18's")]
 mod secrets;
 
 // The wake queue and waiters (M3-7): nothing calls them but the daemon's `wake.*` rows and the tests until the switch (M3-10).
@@ -259,6 +266,25 @@ pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T,
 /// [`Reached::Mismatch`] with a note, and nothing has run.
 pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable: bool) -> Reached {
     owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
+}
+
+/// [`reach`] as the host: proves the host secret (`<machine>/core/host.token`) instead of the owner token, so the daemon
+/// labels the connection `Host` and answers the rows only the host may call (the `syncLease` writes). Only `kith serve`
+/// calls this; the secret is never given to a run or child process, and the guest deny list covers the folder it is in.
+/// A write is never sent twice (pass `repeatable: false`).
+pub fn reach_as_host(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+    repeatable: bool,
+) -> Reached {
+    owner::reach_as_principal(
+        &Layout::new(&paths.machine),
+        kith_api::Principal::Host,
+        method,
+        params,
+        repeatable,
+    )
 }
 
 /// A line in the core log for the CLI's side of the front (a daemon that disagrees about the version or the method

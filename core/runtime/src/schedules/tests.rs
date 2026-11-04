@@ -19,8 +19,8 @@ use crate::tests::{machine, open_all, paths};
 struct Fixed;
 
 impl Rule for Fixed {
-    fn next(&self, cron: &str, _now: i64) -> Result<Option<String>, RuleError> {
-        match cron {
+    fn next(&self, job: &Value, _now: i64) -> Result<Option<String>, RuleError> {
+        match job.get("cron").and_then(Value::as_str).unwrap_or("") {
             "0 8 * * *" => Ok(Some("2026-11-05T08:00".into())),
             "*/5 * * * *" => Ok(Some("2026-11-04T12:05".into())),
             other => Err(RuleError::Bad(format!(
@@ -172,13 +172,13 @@ fn list_joins_definitions_with_run_state_and_names_what_is_off() {
     assert_eq!(problems[0]["agent"], "ola");
     assert_eq!(out["ticks"][0]["tick"], "2026-11-04T11:59");
     assert_eq!(out["mounted"], true);
-    // The stub rule: next is unknown and the job says why.
-    assert_eq!(digest["next"], Value::Null);
-    assert_eq!(digest["note"], "trigger not wired");
+    // The kernel's trigger is wired (M4-3): `0 8 * * *` is next at 08:00 local, by the clock this call reads.
     assert!(
-        digest.get("error").is_none(),
-        "an unwired rule is not a bad cron"
+        digest["next"]
+            .as_str()
+            .is_some_and(|n| n.ends_with("T08:00"))
     );
+    assert!(digest.get("note").is_none() && digest.get("error").is_none());
     // One agent only: the other agents' runs are not orphans of this listing.
     let one = core
         .call(owner(), "schedule.jobs", &json!({"agent": "kit"}))
@@ -249,7 +249,10 @@ fn next_and_show_use_the_rule_and_the_run_history() {
         .is_err()
     );
     // NoRule is what the core wires until M4-1 merges.
-    assert_eq!(NoRule.next("0 8 * * *", 0), Err(RuleError::NotWired));
+    assert_eq!(
+        NoRule.next(&json!({"cron": "0 8 * * *"}), 0),
+        Err(RuleError::NotWired)
+    );
 }
 
 #[test]

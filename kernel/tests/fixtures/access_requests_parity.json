@@ -1,5 +1,5 @@
 {
-  "about": "M2-3 parity script for the device-pairing access requests. The same steps run against the host's real code (serve/host/src/remote/cloud.rs, test `access_request_parity_script`) and against the core's rows (core/runtime/src/authority/tests/requests.rs). Steps: file (a request arrives: id, device number, platform, person = a member or null for the owner, code = the device has shown its code), end_member (the person's membership ends: removed there, suspended in the core), expire (the cloud stops listing it: the host drops it on its next pull, the core's clock passes expires_at), approve / deny (with the answer both must give), list (the ids the owner sees, oldest first). An error is the text both give.",
+  "about": "M2-3 parity script for the device-pairing access requests. The same steps run against the host's real code (serve/host/src/remote/cloud.rs, test `access_request_parity_script`) and against the core's rows (core/runtime/src/authority/tests/requests.rs). Steps: file (a request arrives: id, device number, platform, person = a member or null for the owner, code = the device has shown its code), suspend (the owner suspends the person: the host moves their memberships to suspended_*, the core runs people.suspend), membership_gone (the cloud reports the membership gone while the person stays in kith-auth: the host removes the membership row; the core cannot see this, so a scenario using it is a known difference and carries core_expect, what the core answers today), expire (the cloud stops listing it: the host drops it on its next pull, the core's clock passes expires_at), approve / deny (with the answer both must give), list (the ids the owner sees, oldest first). An error is the text both give.",
   "scenarios": [
     {
       "name": "approve once, then every repeat is an unknown request",
@@ -63,12 +63,26 @@
       ]
     },
     {
-      "name": "a member whose membership ended while the request waited",
+      "name": "a member suspended while the request waited",
       "steps": [
         {"file": {"id": "r1", "device": 1, "platform": "ios", "person": "sam", "code": true}},
         {"file": {"id": "r2", "device": 2, "platform": "ios", "person": "sam", "code": true}},
-        {"end_member": "sam"},
+        {"suspend": "sam"},
         {"approve": "r1", "expect": {"err": "That account is no longer a member of this computer."}},
+        {"list": ["r2"]},
+        {"approve": "r1", "expect": {"err": "unknown request"}},
+        {"deny": "r2", "expect": {"ok": true}},
+        {"list": []}
+      ]
+    },
+    {
+      "name": "membership_gone: the cloud reports the membership gone while the person stays in kith-auth",
+      "known_difference": "NOT PARITY. The host removes the membership row and refuses; the core cannot see that event yet, so it still approves (the step's core_expect). M2-17 must close this (see the module doc of core/runtime/src/authority/requests.rs); then core_expect goes away.",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": "sam", "code": true}},
+        {"file": {"id": "r2", "device": 2, "platform": "ios", "person": "sam", "code": true}},
+        {"membership_gone": "sam"},
+        {"approve": "r1", "expect": {"err": "That account is no longer a member of this computer."}, "core_expect": {"ok": true, "scopes": ["control"]}},
         {"list": ["r2"]},
         {"approve": "r1", "expect": {"err": "unknown request"}},
         {"deny": "r2", "expect": {"ok": true}},

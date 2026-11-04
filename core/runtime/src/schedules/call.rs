@@ -17,7 +17,7 @@ pub(crate) fn serves(method: &str) -> bool {
 
 /// Answers a `schedule.*` read for the caller's view of the folders (`params`), with the cron rule that is wired.
 pub(crate) fn call(core: &Core, method: &str, params: &Value) -> Result<Value> {
-    call_with(core, method, params, &super::NoRule, now_ms())
+    call_with(core, method, params, &super::TriggerRule, now_ms())
 }
 
 /// [`call`] with the rule and the clock given (a test fixes both).
@@ -141,11 +141,12 @@ impl Ctx<'_> {
         }
         let mut next = Value::Null;
         if !paused {
+            let has_trigger = job.get("trigger").is_some();
             match job.get("cron").and_then(Value::as_str) {
-                None => {
+                None if !has_trigger => {
                     row.insert("error".into(), json!("bad cron: no cron"));
                 }
-                Some(c) => match self.rule.next(c, self.now) {
+                _ => match self.rule.next(job, self.now) {
                     Ok(Some(n)) => next = json!(n),
                     Ok(None) => {}
                     Err(RuleError::NotWired) => {
@@ -171,9 +172,12 @@ impl Ctx<'_> {
         let running = state == "started"
             && finished.is_none()
             && self.local == Some(mac.as_str())
-            && pid
-                .and_then(|p| u32::try_from(p).ok())
-                .is_some_and(|p| crate::lock::process_start(p).is_some());
+            && pid.and_then(|p| u32::try_from(p).ok()).is_some_and(|p| {
+                !matches!(
+                    kith_kernel::procstart::probe(p),
+                    kith_kernel::procstart::Probe::Gone
+                )
+            });
         Ok(Run {
             json: json!({
                 "at": r.get::<_, String>("at")?,

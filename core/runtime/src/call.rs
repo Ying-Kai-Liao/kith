@@ -24,6 +24,19 @@ impl Core {
         match row.name {
             "paths" => self.paths(params),
             "kernel.version" => parse(&kith_kernel::version_json()),
+            "secrets.open" | "secrets.has" | "secrets.get" | "secrets.put" | "secrets.delete" => {
+                crate::secrets::call(self.conn(), &self.secrets, row.name, params)
+            }
+            // Pure rules, no state: the clock is the only thing read.
+            "schedule.preview" => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .and_then(|d| i64::try_from(d.as_millis()).ok())
+                    .unwrap_or_default();
+                kith_kernel::schedule::preview(params, now)
+                    .map_err(|e| Error::BadParams(format!("kith-core: schedule.preview: {e}")))
+            }
             m if crate::schedules::serves(m) => crate::schedules::call(self, m, params),
             #[cfg(unix)]
             "conversation.transcript" => self.transcript(params),

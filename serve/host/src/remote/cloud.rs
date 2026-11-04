@@ -1330,7 +1330,9 @@ mod tests {
                         created_at: i64::try_from(n).unwrap(),
                         expires_at: i64::MAX,
                     });
-                } else if step.get("end_member").is_some() {
+                } else if step.get("suspend").is_some() {
+                    hub.store.suspend_person("sam").unwrap();
+                } else if step.get("membership_gone").is_some() {
                     hub.store.remove_membership("mem_m").unwrap();
                 } else if let Some(id) = step["expire"].as_str() {
                     hub.cloud.requests.locked().retain(|r| r.id != id);

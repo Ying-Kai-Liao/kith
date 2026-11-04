@@ -388,7 +388,7 @@ fn a_run_whose_process_is_gone_has_a_dead_token() {
     fn yes(_: u32, _: u32) -> bool {
         true
     }
-    let t = RunTokens::with(yes, crate::lock::process_start);
+    let t = RunTokens::with(yes, kith_kernel::procstart::start_stamp);
     let (token, who) = t.mint(id("sam", None)).unwrap();
     let mut child = Command::new("sleep").arg("60").spawn().unwrap();
     assert!(t.bind(&who.run_id, child.id()));
@@ -463,6 +463,7 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
         &p,
         Config {
             holder_on: false,
+            key_load: None,
             ..Config::default()
         },
     );

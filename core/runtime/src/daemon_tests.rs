@@ -16,6 +16,7 @@ use crate::tests::{machine, open, open_all, paths};
 fn quiet() -> Config {
     Config {
         holder_on: false,
+        key_load: None,
         wait_for_embedded: Duration::from_secs(10),
         ..Config::default()
     }
@@ -118,6 +119,7 @@ fn the_socket_the_token_and_the_folder_are_owner_only() {
     assert_eq!(mode(&l.dir), 0o700);
     assert_eq!(mode(&crate::owner::endpoint(&l)), 0o600);
     assert_eq!(mode(&l.token), 0o600);
+    assert_eq!(mode(&l.host_token), 0o600);
     // And the daemon refuses to run on a folder that is open to others (the same rule as core.db).
     drop(d);
     std::fs::set_permissions(&l.dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
@@ -212,6 +214,43 @@ fn a_client_that_skips_the_handshake_or_gets_the_token_wrong_is_refused_and_runs
         1,
         "only the call that went through the handshake ran"
     );
+}
+
+/// The same two refusals as `the_owner_token_does_not_prove_the_host`, but from the daemon's side: a hand-written hello
+/// reaches the daemon's own checks, which the client library (it reads the host secret first) never tests.
+#[cfg(unix)]
+#[test]
+fn a_hello_naming_the_host_but_proving_the_owner_token_is_unauthorized_and_an_unknown_principal_is_a_protocol_error()
+ {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let schema = kith_api::schema_hash();
+    let owner_token = std::fs::read_to_string(Layout::new(&m).token).expect("token");
+
+    let mut c = Raw::connect(&m);
+    c.send(1, "hello", &json!({"protocol": crate::owner::PROTOCOL, "version": "x", "schema": schema, "nonce": "cc", "principal": "host"}));
+    let hello = c.recv().expect("hello");
+    let server_nonce = hello["result"]["nonce"].as_str().expect("nonce").to_owned();
+    let mine =
+        kith_holder::auth::proof(owner_token.trim().as_bytes(), "cli", "cc", &server_nonce, 0);
+    c.send(2, "auth", &json!({"proof": mine}));
+    let refusal = c.recv().expect("refusal");
+    assert_eq!(refusal["error"]["code"], -32003, "{refusal}");
+    assert_eq!(refusal["error"]["data"]["kind"], "unauthorized");
+    assert!(c.recv().is_none(), "and the connection is closed");
+
+    for who in ["root", "Host", ""] {
+        let mut c = Raw::connect(&m);
+        c.send(1, "hello", &json!({"protocol": crate::owner::PROTOCOL, "version": "x", "schema": schema, "nonce": "dd", "principal": who}));
+        let refusal = c.recv().expect("refusal");
+        assert_eq!(
+            refusal["error"]["data"]["kind"], "protocol",
+            "{who:?}: {refusal}"
+        );
+        assert!(c.recv().is_none(), "{who:?}: the connection is closed");
+    }
+    assert_eq!(d.served(), 0, "nothing ran");
 }
 
 #[test]
@@ -347,6 +386,7 @@ fn a_socket_file_left_by_a_dead_daemon_is_replaced_by_the_next_one() {
 fn holder_cfg(exe: std::path::PathBuf) -> Config {
     Config {
         holder_on: true,
+        key_load: None,
         wait_for_embedded: Duration::from_secs(10),
         holder: HolderConfig {
             exe: Some(exe),
@@ -614,12 +654,22 @@ fn leader() -> (u32, String) {
     std::thread::spawn(move || child.wait());
     let mut started = None;
     until("the process to have a start time", || {
-        started = crate::lock::process_start(pid);
+        started = kith_kernel::procstart::start_stamp(pid);
         started.is_some()
     });
     // Let the setsid happen before anything signals the group.
     std::thread::sleep(Duration::from_millis(300));
     (pid, started.expect("start time"))
+}
+
+/// A start stamp in the form this system writes that no live process has: a pid handed to a stranger.
+#[cfg(unix)]
+fn other_start() -> String {
+    if cfg!(target_os = "linux") {
+        "bGONE:1".into()
+    } else {
+        "e1".into()
+    }
 }
 
 #[cfg(unix)]
@@ -679,7 +729,7 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
         Some("one"),
         vec![
             proc(held_pid, &held_start),
-            proc(stranger_pid, "Thu Jan  1 00:00:00 1970"),
+            proc(stranger_pid, &other_start()),
         ],
     );
     crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("takeover");
@@ -691,10 +741,7 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
     assert_eq!(recorded().instance.as_deref(), Some("two"));
 
     // 4. Processes the new instance lists itself are not the old one's, whatever the record says.
-    record(
-        Some("two"),
-        vec![proc(stranger_pid, "Thu Jan  1 00:00:00 1970")],
-    );
+    record(Some("two"), vec![proc(stranger_pid, &other_start())]);
     crate::holder_link::reconcile(&d.shared, "three", &[proc(stranger_pid, "x")], &cfg)
         .expect("listed");
     assert!(alive(stranger_pid));
@@ -758,6 +805,271 @@ fn remote_holder(sock: &std::path::Path, secret_file: std::path::PathBuf) {
             });
         }
     });
+}
+
+/// Records from before procstart carry `ps -o lstart=` text (or nothing): an unknown start. A live pid with one is never
+/// signalled and holds the new instance back (the "still running" path), every hello alike; a gone pid does not.
+#[cfg(unix)]
+#[test]
+fn a_record_with_old_or_empty_starts_ends_nothing_and_waits_for_the_pid_to_go() {
+    use crate::db::{HolderRecord, RecordedProc};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig {
+        kill_wait: Duration::from_secs(2),
+        ..HolderConfig::default()
+    };
+    let (live_pid, live_start) = leader();
+    let gone_pid = {
+        let mut c = std::process::Command::new("true").spawn().expect("true");
+        let pid = c.id();
+        c.wait().expect("wait");
+        pid
+    };
+    let record = |procs: Vec<RecordedProc>| {
+        let rec = HolderRecord {
+            instance: Some("one".into()),
+            procs,
+        };
+        d.shared
+            .with_core(|c| c.save_holder_record(&rec))
+            .expect("record");
+    };
+    let proc = |pid, started: &str| RecordedProc {
+        pid,
+        started: started.to_owned(),
+        conv: "c".into(),
+    };
+    let instance = || {
+        d.shared
+            .with_core(|c| c.holder_record())
+            .expect("record")
+            .instance
+    };
+    // A gone pid is fine whatever it recorded.
+    record(vec![
+        proc(gone_pid, "Thu Jan  1 00:00:00 1970"),
+        proc(gone_pid, ""),
+    ]);
+    crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("gone pids end nothing");
+    assert_eq!(instance().as_deref(), Some("two"));
+    // A live pid with old text, with nothing, or with the other form: not ended, the old record kept, twice over.
+    let foreign = if cfg!(target_os = "linux") {
+        "e1"
+    } else {
+        "bGONE:1"
+    };
+    for old in ["Thu Jan  1 00:00:00 1970", "", foreign] {
+        record(vec![proc(live_pid, old)]);
+        for _ in 0..2 {
+            let err = crate::holder_link::reconcile(&d.shared, "three", &[], &cfg)
+                .expect_err("an unknown start holds the new instance back");
+            assert!(err.to_string().contains("still running"), "{err}");
+            assert!(alive(live_pid), "never signalled for {old:?}");
+            assert_eq!(instance().as_deref(), Some("one"));
+        }
+    }
+    // The same process with its own stamp is the one that is ended; with another start in the same form, left alone.
+    record(vec![proc(live_pid, &other_start())]);
+    crate::holder_link::reconcile(&d.shared, "three", &[], &cfg).expect("a stranger's pid");
+    assert!(alive(live_pid));
+    record(vec![proc(live_pid, &live_start)]);
+    crate::holder_link::reconcile(&d.shared, "four", &[], &cfg).expect("its own");
+    assert!(!alive(live_pid));
+    // Every holder spawn is its own session leader. A live pid that is not one, with a start nobody can compare, is
+    // provably not the recorded process: left alone, and it does not hold the new instance back.
+    let mut stranger = std::process::Command::new("sleep")
+        .arg("120")
+        .spawn()
+        .expect("sleep");
+    let stranger_pid = stranger.id();
+    for old in ["Thu Jan  1 00:00:00 1970", "", foreign] {
+        record(vec![proc(stranger_pid, old)]);
+        crate::holder_link::reconcile(&d.shared, "five", &[], &cfg)
+            .expect("not a session leader: a stranger");
+        assert!(alive(stranger_pid));
+        assert_eq!(instance().as_deref(), Some("five"));
+        record(vec![]);
+    }
+    let _ = stranger.kill();
+    let _ = stranger.wait();
+}
+
+/// A pid the holder listed that has exited before the start is read is not recorded: with no start it could be a
+/// stranger's by the time the instance changes. One that is there is recorded with the stamp it has now.
+#[cfg(unix)]
+#[test]
+fn a_listed_process_that_has_gone_is_not_recorded() {
+    let (live_pid, live_start) = leader();
+    let gone_pid = {
+        let mut c = std::process::Command::new("true").spawn().expect("true");
+        let pid = c.id();
+        c.wait().expect("wait");
+        pid
+    };
+    let held = |pid: u32| -> kith_holder::proto::Held {
+        serde_json::from_value(json!({
+            "instance": "i", "id": 1, "conv": "c", "claim": 1, "generation": 1, "pid": pid,
+            "mode": "pty", "cols": 80, "rows": 24, "exit": null
+        }))
+        .expect("held")
+    };
+    let got = crate::holder_link::record_procs(&[held(gone_pid), held(live_pid)]);
+    signal(live_pid, "KILL");
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(
+        (got[0].pid, got[0].started.as_str()),
+        (live_pid, live_start.as_str())
+    );
+}
+
+#[cfg(unix)]
+static WEDGE_SECRET: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+#[cfg(unix)]
+static WEDGE_INSTANCE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+#[cfg(unix)]
+static WEDGE_DROP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(unix)]
+static WEDGE_CONNECTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A holder instance that never lists anything and, once told to, hangs up on the connection it has.
+#[cfg(unix)]
+fn wedging(mut s: kith_holder::platform::Stream) {
+    use kith_holder::{auth, proto, wire};
+    use std::sync::atomic::Ordering::SeqCst;
+    WEDGE_CONNECTS.fetch_add(1, SeqCst);
+    let file = WEDGE_SECRET
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("secret file");
+    let secret = std::fs::read_to_string(file)
+        .expect("secret")
+        .trim()
+        .to_owned();
+    let Ok(Some((proto::HELLO, _, payload))) = wire::read(&mut s) else {
+        return;
+    };
+    let hello: proto::Hello = wire::parse(&payload).expect("hello");
+    let nonce = "ab".repeat(16);
+    let proof = auth::proof(
+        secret.as_bytes(),
+        auth::HOLDER,
+        &hello.nonce,
+        &nonce,
+        hello.generation,
+    );
+    wire::write_json(
+        &mut s,
+        proto::CHALLENGE,
+        0,
+        &proto::Challenge { nonce, proof },
+    )
+    .expect("challenge");
+    let Ok(Some((proto::AUTH, _, _))) = wire::read(&mut s) else {
+        return;
+    };
+    let welcome = proto::Welcome {
+        version: proto::VERSION,
+        instance: WEDGE_INSTANCE.lock().expect("lock").clone(),
+        pid: std::process::id(),
+        tied_to_starter: false,
+        generation: hello.generation,
+        lease_lost: false,
+        procs: Vec::new(),
+    };
+    wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
+    while let Ok(Some((kind, _, payload))) = wire::read(&mut s) {
+        if WEDGE_DROP.swap(false, SeqCst) {
+            return;
+        }
+        match kind {
+            proto::PING => {
+                let ping: proto::Ping = wire::parse(&payload).expect("ping");
+                let _ = wire::write_json(&mut s, proto::PONG, 0, &proto::Pong { seq: ping.seq });
+            }
+            proto::LIST => {
+                let _ = wire::write_json(
+                    &mut s,
+                    proto::LISTING,
+                    0,
+                    &proto::Listing { procs: Vec::new() },
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A new holder instance that finds a live session leader with an unreadable start in the old one's record is blocked:
+/// the supervisor says so (naming the pid and what was recorded), backs off at the slow rate instead of reconnecting
+/// every `retry_min`, logs it once, signals nothing, and records the new instance as soon as the pid is gone.
+#[cfg(unix)]
+#[test]
+fn a_blocked_reconcile_backs_off_and_says_so_once() {
+    use crate::db::{HolderRecord, RecordedProc};
+    use std::sync::atomic::Ordering::SeqCst;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    *WEDGE_SECRET.lock().expect("lock") = Some(Layout::new(&m).holder_secret);
+    "a".clone_into(&mut WEDGE_INSTANCE.lock().expect("lock"));
+    let exe = fake_holder(&m, wedging);
+    let mut cfg = holder_cfg(exe);
+    cfg.holder.retry_min = Duration::from_millis(20);
+    cfg.holder.retry_max = Duration::from_millis(400);
+    let d = serving(&p, cfg);
+    until("the first instance to be connected", || {
+        holder_state(&p) == "connected"
+    });
+    let (pid, _) = leader();
+    let old_text = "Thu Jan  1 00:00:00 1970";
+    let rec = HolderRecord {
+        instance: Some("old".into()),
+        procs: vec![RecordedProc {
+            pid,
+            started: old_text.into(),
+            conv: "c".into(),
+        }],
+    };
+    d.shared
+        .with_core(|c| c.save_holder_record(&rec))
+        .expect("record");
+    // The instance changes with the connection: the next hello meets the record above.
+    "b".clone_into(&mut WEDGE_INSTANCE.lock().expect("lock"));
+    WEDGE_DROP.store(true, SeqCst);
+    until("the link to be blocked", || holder_state(&p) == "blocked");
+    let before = WEDGE_CONNECTS.load(SeqCst);
+    std::thread::sleep(Duration::from_millis(1500));
+    let tries = WEDGE_CONNECTS.load(SeqCst) - before;
+    assert_eq!(holder_state(&p), "blocked");
+    assert!(
+        tries >= 2,
+        "it keeps looking ({tries} tries), so the record heals when the pid goes"
+    );
+    assert!(
+        tries <= 6,
+        "retry_min would be ~75 tries in that time; it backs off ({tries})"
+    );
+    let shown = crate::status(&p)["holder"]["error"].to_string();
+    assert!(shown.contains(&format!("pid {pid}")), "{shown}");
+    assert!(shown.contains(old_text), "{shown}");
+    assert!(alive(pid), "nothing was signalled");
+    let after = d.shared.with_core(|c| c.holder_record()).expect("record");
+    assert_eq!(after.instance.as_deref(), Some("old"));
+    let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
+    assert_eq!(
+        log.lines()
+            .filter(|l| l.contains("are still running and not ended"))
+            .count(),
+        1,
+        "{log}"
+    );
+    // The pid goes: the next try records the new instance and the link is up.
+    signal(pid, "KILL");
+    until("the link to heal", || holder_state(&p) == "connected");
+    let healed = d.shared.with_core(|c| c.holder_record()).expect("record");
+    assert_eq!(healed.instance.as_deref(), Some("b"));
 }
 
 #[cfg(unix)]
@@ -921,4 +1233,335 @@ fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
         other => panic!("{other:?}"),
     }
     drop(daemon);
+}
+
+const HOST_ROWS: [&str; 6] = [
+    "syncLease.link",
+    "syncLease.unlink",
+    "syncLease.changed",
+    "syncLease.drop",
+    "syncLease.pulled",
+    "syncLease.renew",
+];
+
+fn host(p: &Paths, method: &str, params: &Value) -> Reached {
+    crate::reach_as_host(p, method, params, false)
+}
+
+fn answered(r: Reached) -> Value {
+    match r {
+        Reached::Answered(v) => v,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_owner_token_alone_is_refused_every_host_row_and_the_host_secret_is_accepted() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    for name in HOST_ROWS {
+        let params = if name == "syncLease.pulled" {
+            json!({"mark": 0})
+        } else {
+            json!({})
+        };
+        match read(&p, name, &params) {
+            Reached::Refused(Error::NotAllowed(note)) => assert!(note.contains("owner"), "{note}"),
+            other => panic!("{name}: the owner got {other:?}"),
+        }
+    }
+    // Nothing ran: the owner could not make the lease held, nor switch the cloud on or off.
+    let s = answered(read(&p, "syncLease.status", &json!({})));
+    assert_eq!(
+        (s["cloud"].as_str(), s["held"].clone()),
+        (Some("unknown"), json!(false))
+    );
+    // The host runs the whole flow, and the owner reads the result.
+    assert_eq!(
+        answered(host(&p, "syncLease.link", &json!({})))["cloud"],
+        "linked"
+    );
+    let mark = answered(host(&p, "syncLease.mark", &json!({})))["mark"].clone();
+    assert_eq!(
+        answered(host(&p, "syncLease.renew", &json!({})))["renewed"],
+        false
+    );
+    let held = answered(host(&p, "syncLease.pulled", &json!({"mark": mark})));
+    assert_eq!(held["held"], true);
+    assert_eq!(
+        answered(host(&p, "syncLease.renew", &json!({})))["renewed"],
+        true
+    );
+    let s = answered(read(&p, "syncLease.status", &json!({})));
+    assert_eq!(
+        (s["cloud"].as_str(), s["held"].clone()),
+        (Some("linked"), json!(true))
+    );
+    answered(host(&p, "syncLease.changed", &json!({})));
+    assert_eq!(
+        answered(read(&p, "syncLease.status", &json!({})))["held"],
+        false
+    );
+    answered(host(&p, "syncLease.drop", &json!({})));
+    assert_eq!(
+        answered(host(&p, "syncLease.unlink", &json!({})))["cloud"],
+        "off"
+    );
+    // The owner can read the mark too (it is in the status already); it changes nothing.
+    assert!(matches!(
+        read(&p, "syncLease.mark", &json!({})),
+        Reached::Answered(_)
+    ));
+    drop(d);
+}
+
+#[test]
+fn the_host_connection_reaches_no_owner_row() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    for (name, params) in [
+        ("syncLease.status", json!({})),
+        ("kernel.coreStatus", json!({})),
+        ("paths", json!({})),
+        ("terminal.list", json!({})),
+    ] {
+        match host(&p, name, &params) {
+            Reached::Refused(Error::NotAllowed(note)) => {
+                assert!(note.contains("host"), "{name}: {note}");
+            }
+            other => panic!("{name}: the host got {other:?}"),
+        }
+    }
+    drop(d);
+}
+
+#[test]
+fn the_owner_token_does_not_prove_the_host() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let d = serving(&p, quiet());
+    // Something that holds the owner token but not the host secret: here, the host's own file overwritten with it.
+    std::fs::copy(&l.token, &l.host_token).expect("copy");
+    assert!(matches!(
+        host(&p, "syncLease.link", &json!({})),
+        Reached::NoDaemon
+    ));
+    drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_host_secret_is_owner_only_and_in_no_environment() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let d = serving(&p, quiet());
+    let mode = std::fs::metadata(&l.host_token)
+        .expect("exists")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+    assert_eq!(l.host_token.parent(), Some(l.dir.as_path()));
+    let (owner, host_secret) = (
+        std::fs::read_to_string(&l.token).expect("owner token"),
+        std::fs::read_to_string(&l.host_token).expect("host secret"),
+    );
+    assert_ne!(owner.trim(), host_secret.trim());
+    // Neither the secret nor its path is in any variable this process (and so every child it starts from its own
+    // environment) has.
+    for (k, v) in std::env::vars() {
+        assert!(
+            !v.contains(host_secret.trim()),
+            "{k} carries the host secret"
+        );
+        assert!(!v.contains("host.token"), "{k} names the host secret file");
+    }
+    assert!(l.files().contains(&l.host_token));
+    drop(d);
+}
+
+#[test]
+fn a_stalled_key_store_holds_up_its_own_call_and_no_other_row() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let wait = std::sync::Mutex::new(wait);
+    let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = started.clone();
+    let cfg = Config {
+        key_load: Some(std::sync::Arc::new(move || {
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = wait.lock().expect("lock").recv();
+            Ok(Some(zeroize::Zeroizing::new(vec![7u8; 32])))
+        })),
+        ..quiet()
+    };
+    let d = serving(&p, cfg);
+    let blocked = {
+        let p = p.clone();
+        std::thread::spawn(move || read(&p, "secrets.get", &json!({"name": "a"})))
+    };
+    until("the key load to begin", || {
+        started.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    // The load is stuck; rows that take the core lock must still answer.
+    let begun = Instant::now();
+    assert!(matches!(
+        read(&p, "secrets.has", &json!({"name": "a"})),
+        Reached::Answered(_)
+    ));
+    assert!(matches!(
+        read(&p, "paths", &json!({})),
+        Reached::Answered(_)
+    ));
+    assert!(
+        begun.elapsed() < Duration::from_secs(5),
+        "a row waited for the key load: {:?}",
+        begun.elapsed()
+    );
+    release.send(()).expect("release");
+    // Answered, or refused where this OS has no key store to build the envelope on (Windows): either way it came back.
+    let late = blocked.join().expect("thread");
+    assert!(
+        !matches!(late, Reached::NoDaemon | Reached::Mismatch(_)),
+        "{late:?}"
+    );
+    d.stop();
+}
+
+/// The envelope through a real daemon and the owner socket, with a stand-in for the OS key store (the host's vault is
+/// a client of exactly these calls). Unix only: Windows has no key store to build the envelope on yet.
+#[cfg(unix)]
+#[test]
+fn the_secrets_rows_round_trip_through_a_real_daemon() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let loads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = loads.clone();
+    let cfg = Config {
+        key_load: Some(std::sync::Arc::new(move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Some(zeroize::Zeroizing::new(vec![9u8; 32])))
+        })),
+        ..quiet()
+    };
+    let d = serving(&p, cfg);
+    let ask = |method: &str, params: Value| match read(&p, method, &params) {
+        Reached::Answered(v) => v,
+        other => panic!("{method}: {other:?}"),
+    };
+    // `has` and `delete` need no key: nothing is read for them.
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": false})
+    );
+    assert_eq!(
+        ask("secrets.delete", json!({"name": "a"})),
+        json!({"deleted": false})
+    );
+    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    ask("secrets.put", json!({"name": "a", "value": "one"}));
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": true})
+    );
+    assert_eq!(
+        ask("secrets.get", json!({"name": "a"})),
+        json!({"found": true, "value": "one"})
+    );
+    assert_eq!(
+        ask("secrets.get", json!({"name": "zz"})),
+        json!({"found": false})
+    );
+    assert_eq!(
+        ask("secrets.delete", json!({"name": "a"})),
+        json!({"deleted": true})
+    );
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": false})
+    );
+    // The key was read until it was found, then kept.
+    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // A bad name is the caller's mistake, said as a refusal.
+    assert!(matches!(
+        read(&p, "secrets.put", &json!({"name": "", "value": "x"})),
+        Reached::Refused(_)
+    ));
+    d.stop();
+}
+
+#[test]
+fn the_gate_answers_over_the_owner_socket_and_frees_a_holder_whose_process_is_gone() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let _d = serving(&p, quiet());
+    let call = |method: &str, params: Value| match read(&p, method, &params) {
+        Reached::Answered(v) => v,
+        other => panic!("{method}: {other:?}"),
+    };
+    let me = std::process::id();
+    assert_eq!(
+        call("gate.take", json!({"holder": "a", "max": 1, "pid": me}))["state"],
+        "granted"
+    );
+    // A process that ended and was reaped: its pid is gone for the system.
+    let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+        .args(if cfg!(windows) {
+            vec!["/C", "exit"]
+        } else {
+            vec![]
+        })
+        .spawn()
+        .expect("child");
+    let dead = child.id();
+    child.wait().expect("child");
+    assert_eq!(
+        call("gate.take", json!({"holder": "b", "pid": dead}))["state"],
+        "waiting"
+    );
+    assert_eq!(
+        call("gate.release", json!({"holder": "a"}))["released"],
+        true
+    );
+    // b's process is gone: its place is freed by the next call, so c is first in line and granted.
+    assert_eq!(
+        call("gate.take", json!({"holder": "c", "pid": me}))["state"],
+        "granted"
+    );
+    let listed = call("gate.list", json!({}));
+    assert_eq!(listed["running"], 1);
+    assert_eq!(listed["slots"][0]["holder"], "c");
+    assert_eq!(listed["waiting"], json!([]));
+    assert!(matches!(
+        read(&p, "gate.take", &json!({"holder": "d", "max": 1})),
+        Reached::Refused(Error::BadParams(_))
+    ));
+}
+
+#[test]
+fn a_missing_or_empty_host_secret_reaches_no_daemon_and_never_falls_back_to_the_owner() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let d = serving(&p, quiet());
+    std::fs::remove_file(&l.host_token).expect("remove");
+    assert!(matches!(
+        host(&p, "syncLease.link", &json!({})),
+        Reached::NoDaemon
+    ));
+    std::fs::write(&l.host_token, "").expect("empty");
+    assert!(matches!(
+        host(&p, "syncLease.link", &json!({})),
+        Reached::NoDaemon
+    ));
+    // The owner's own reads still work: the failure did not change who anyone is.
+    answered(read(&p, "syncLease.status", &json!({})));
+    drop(d);
 }

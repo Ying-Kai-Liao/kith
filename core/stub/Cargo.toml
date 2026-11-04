@@ -9,8 +9,9 @@ publish = false
 # An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like core/holder.
 workspace = "../../serve/host"
 
-# Links no other kith crate, on purpose: the holder may spawn the stub, and a lock that cannot see policy cannot grow
-# any. Enforced by scripts/check-holder-deps.sh in CI. Keep this list short.
+# Links no other kith crate but kith-procstart (libc and windows-sys only, so the sidecar carries the same start stamp
+# the runtime compares), on purpose: the holder may spawn the stub, and a lock that cannot see policy cannot grow any.
+# Enforced by scripts/check-holder-deps.sh in CI. Keep this list short.
 [lib]
 name = "kith_stub"
 path = "src/lib.rs"
@@ -18,6 +19,9 @@ path = "src/lib.rs"
 [[bin]]
 name = "kith-stub"
 path = "src/main.rs"
+
+[dependencies]
+kith-procstart = { path = "../procstart" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

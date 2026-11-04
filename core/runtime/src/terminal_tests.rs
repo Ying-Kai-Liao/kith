@@ -338,6 +338,7 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
     pub(crate) fn config(stub: Option<PathBuf>) -> Config {
         Config {
             holder_on: true,
+            key_load: None,
             wait_for_embedded: Duration::from_secs(10),
             holder: HolderConfig {
                 exe: Some(holder_bin()),
@@ -577,6 +578,8 @@ echo $$ > "$lock/$key.pid"
                     cols: 80,
                     rows: 24,
                     kill_on_lease_loss: false,
+                    stub: None,
+                    lock_dir: None,
                 },
                 agent: "kai".into(),
                 deadline: Instant::now() + Duration::from_secs(5),
@@ -707,6 +710,7 @@ echo $$ > "$lock/$key.pid"
             &m,
             Config {
                 holder_on: false,
+                key_load: None,
                 ..config(Some(stub.clone()))
             },
         );

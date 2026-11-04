@@ -72,6 +72,10 @@ CONSTANTS
     DeleteItems,        \* a revoke deletes them instead of parking them (the old people.rs / members.rs end_access)
     Asks,               \* TRUE = P's delegations and the wakes their answers make are in the model
     NoAskSweep,         \* a revoke leaves P's open delegations running
+    CoreSweep,          \* TRUE = the core's claim sweep (conversations::claims::revoke_person for P and B, M3-10d) is in
+                        \*   the model, and the asks are ended only after it (revoke_order.rs); FALSE = no claim sweep
+    AsksFirst,          \* the asks are ended before the claims are swept (the wrong order)
+    SkipBots,           \* the claim sweep covers P's own claims only, not B's (the bot principal holds its own)
     NoWakeWithdraw,     \* a revoke leaves the wake owed to P's session
     AnswerIgnoresEnd,   \* an answer to an ended (stopped) ask is still kept and wakes its caller
     HandleSync,         \* TRUE = a handle-only person Q, revoked on one Mac, and the second Mac starts off
@@ -491,11 +495,23 @@ WakeStart(m) ==
     /\ turn' = [turn EXCEPT ![m]["P"] = "running"]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
     /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick>>
+\* The core's claim sweep (revoke_person, M3-10d): once the revoked fact is on m, P's live turns there, and B's unless
+\* SkipBots, are stopped. A later step than the revoke itself, as in the code (two transactions): the starts are already
+\* refused by the fence, this stops the ones that began before it.
+SweptWho == IF SkipBots THEN {"P"} ELSE Who
+ClaimSweep(m) ==
+    /\ CoreSweep
+    /\ revoked[m]
+    /\ \E w \in SweptWho : turn[m][w] \in Live
+    /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF w \in SweptWho /\ turn[m][w] \in Live THEN "aborted" ELSE turn[m][w]]]
+    /\ UNCHANGED <<auth, door, gdoor, ext>>
 \* A revoke on m (cut_off -> sweep_asks): P's open delegation ends (kith ask --end) ...
+\* With the core's order (revoke_order.rs) only after the claims are swept; AsksFirst drops that wait.
 AskSweep(m) ==
     /\ Asks
     /\ ~NoAskSweep
     /\ revoked[m]
+    /\ ~CoreSweep \/ AsksFirst \/ (\A w \in Who : turn[m][w] \notin Live)
     /\ ask[m] = "open"
     /\ ask' = [ask EXCEPT ![m] = "stopped"]
     /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
@@ -623,6 +639,7 @@ Next ==
           \/ AskAnswer(m)
           \/ WakeStart(m)
           \/ AskSweep(m)
+          \/ ClaimSweep(m)
           \/ WakeWithdraw(m)
           \/ HChange(m)
           \/ HForge(m)
@@ -636,7 +653,7 @@ Next ==
 \* The sweep loop runs every 60 s: weak fairness (only DoorD1, a liveness property, depends on it).
 Spec == Init /\ [][Next]_vars
         /\ (\A m \in Macs : WF_vars(DoorSweep(m)))
-        /\ (\A m \in Macs : WF_vars(AskSweep(m)) /\ WF_vars(WakeWithdraw(m)))
+        /\ (\A m \in Macs : WF_vars(AskSweep(m)) /\ WF_vars(WakeWithdraw(m)) /\ WF_vars(ClaimSweep(m)))
         /\ WF_vars(SetNet("m2", "online")) /\ WF_vars(\E a, b \in Macs : HExchange(a, b))
 
 (* ---- properties ---- *)
@@ -721,6 +738,11 @@ ItemsExact == \A m \in Macs : ~revoked[m] => items[m] = Items0
 StoppedNeverWakes == [][\A m \in Macs : (ask[m] = "stopped" /\ ~wakeOwed[m]) => ~wakeOwed'[m]]_vars
 \* AsksEnded: a delegation of a revoked P is ended (or the revoke is undone).
 AsksEnded == \A m \in Macs : (revoked[m] /\ ask[m] = "open") ~> (ask[m] # "open" \/ ~revoked[m])
+\* OrderKept (M3-10d): a delegation of a revoked P is ended only once P's and B's live turns on m are stopped. Fails when
+\* the asks go first.
+OrderKept == \A m \in Macs : (revoked[m] /\ ask[m] = "stopped") => (\A w \in Who : turn[m][w] \notin Live)
+\* Swept (M3-10d): a live turn of a revoked P or B is stopped (or the revoke is undone). Fails when the sweep skips B.
+Swept == \A m \in Macs, w \in Who : (revoked[m] /\ turn[m][w] \in Live) ~> (turn[m][w] \notin Live \/ ~revoked[m])
 \* WakesWithdrawn: the wake owed to a revoked P is dropped (or the revoke is undone).
 WakesWithdrawn == \A m \in Macs : (revoked[m] /\ wakeOwed[m]) ~> (~wakeOwed[m] \/ ~revoked[m])
 \* HandleConverges: the Macs end up agreeing on Q, the Mac that was off included.

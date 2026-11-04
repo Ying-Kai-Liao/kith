@@ -21,6 +21,8 @@ struct Fixture {
 
 impl Fixture {
     fn new(name: &str) -> Fixture {
+        // Built before any clock runs: a lease or a sleep in a test must not wait on cargo.
+        stub_and_locks();
         // Short: a Unix socket path holds about a hundred bytes.
         let dir = std::env::temp_dir().join(format!("kh-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -62,8 +64,39 @@ fn env() -> BTreeMap<String, String> {
         .collect()
 }
 
+/// The built `kith-stub` (the holder runs every pipes engine under it) and a lock folder for this test process.
+fn stub_and_locks() -> (String, String) {
+    static BUILT: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+            let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../stub/Cargo.toml");
+            let built = Command::new(cargo)
+                .args(["build", "--manifest-path"])
+                .arg(&manifest)
+                .status()
+                .unwrap();
+            assert!(built.success(), "kith-stub did not build");
+            // The test binary is in target/<profile>/deps; the stub is in target/<profile>.
+            let exe = std::env::current_exe().unwrap();
+            let name = if cfg!(windows) {
+                "kith-stub.exe"
+            } else {
+                "kith-stub"
+            };
+            let stub = exe.parent().unwrap().parent().unwrap().join(name);
+            assert!(stub.is_file(), "no {}", stub.display());
+            let locks = std::env::temp_dir().join(format!("kh-locks-{}", std::process::id()));
+            (stub.display().to_string(), locks.display().to_string())
+        })
+        .clone()
+}
+
 fn spec(conv: &str, claim: u64, generation: u64, mode: Mode, script: &[&str]) -> p::Spawn {
+    let (stub, locks) = stub_and_locks();
     p::Spawn {
+        stub: (mode == Mode::Pipes).then_some(stub),
+        lock_dir: (mode == Mode::Pipes).then_some(locks),
         conv: conv.into(),
         claim,
         generation,
@@ -754,8 +787,9 @@ fn a_spawn_at_or_below_the_highest_claim_is_refused() {
     let stale: p::StaleClaim = wire::parse(&payload).unwrap();
     assert_eq!((stale.claim, stale.highest), (5, 5));
     // A start that failed did not run the job: the same claim may try again.
-    c.spawn(&spec("conv-r", 2, 1, Mode::Pipes, &["/no/such/program"]))
-        .unwrap();
+    let mut no_stub = spec("conv-r", 2, 1, Mode::Pipes, &shell(sleep_line()));
+    no_stub.stub = Some("/no/such/kith-stub".into());
+    c.spawn(&no_stub).unwrap();
     c.expect(p::SPAWN_FAILED, 0, WAIT).expect("spawn failed");
     let r = spawn(
         &mut c,
@@ -965,4 +999,471 @@ fn an_older_cores_renewals_do_not_keep_the_lease() {
         ended(&mut new, guest),
         "an old core's renewal kept the lease"
     );
+}
+
+// --- The warm engine's writer lock, through its resident stub (M3-4) ---------------------------------------------
+
+/// Whether another writer holds conversation `key` now, asked the way a `--direct` run asks: a one-shot stub. Exit 75
+/// is busy; a free lock is taken and given back as the probe ends.
+fn lock_busy(key: &str) -> bool {
+    let (stub, locks) = stub_and_locks();
+    let status = Command::new(stub)
+        .args(["--lock-dir", &locks, "--key", key, "--"])
+        .args(shell("exit 0"))
+        .status()
+        .unwrap();
+    status.code() == Some(75)
+}
+
+fn wait_for(what: &str, mut f: impl FnMut() -> bool) {
+    let end = Instant::now() + WAIT;
+    while !f() {
+        assert!(Instant::now() < end, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn warm(c: &mut Client, conv: &str, claim: u64) -> p::HeldId {
+    let id = spawn(c, &spec(conv, claim, 1, Mode::Pipes, &shell(sleep_line())));
+    h(c, id)
+}
+
+fn word(a: &p::LockAnswer) -> (p::LockOp, u64, p::LockWord) {
+    (a.op, a.claim, a.word)
+}
+
+fn kill_pid(pid: u32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .output();
+    }
+}
+
+#[test]
+fn a_turns_lock_is_taken_and_released_through_the_stub() {
+    use p::LockOp::{Release, Take};
+    use p::LockWord::{Busy, Error, Locked, NotHeld, Released};
+    let fx = Fixture::new("lk1");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-a", 1);
+    // An idle warm engine holds nothing: the lock is per turn.
+    assert!(!lock_busy("lock-a"));
+    assert_eq!(
+        word(&c.take_lock(&held, "lock-a", 1).unwrap()),
+        (Take, 1, Locked)
+    );
+    assert!(lock_busy("lock-a"));
+    // A take retried after a lost answer is the same answer.
+    assert_eq!(
+        word(&c.take_lock(&held, "lock-a", 1).unwrap()),
+        (Take, 1, Locked)
+    );
+    // Another claim while claim 1 holds it: busy, and claim 1's lock is still there to release.
+    assert_eq!(
+        word(&c.take_lock(&held, "lock-a", 2).unwrap()),
+        (Take, 2, Busy)
+    );
+    assert_eq!(
+        word(&c.release_lock(&held, "lock-a", 2).unwrap()),
+        (Release, 2, NotHeld)
+    );
+    assert_eq!(
+        word(&c.release_lock(&held, "lock-a", 3).unwrap()),
+        (Release, 3, NotHeld)
+    );
+    assert!(lock_busy("lock-a"), "a wrong claim released nothing");
+    assert_eq!(
+        word(&c.release_lock(&held, "lock-a", 1).unwrap()),
+        (Release, 1, Released)
+    );
+    assert!(!lock_busy("lock-a"));
+    // A release retried is not-held, and a claim that was released is never taken again.
+    assert_eq!(
+        word(&c.release_lock(&held, "lock-a", 1).unwrap()),
+        (Release, 1, NotHeld)
+    );
+    let again = c.take_lock(&held, "lock-a", 1).unwrap();
+    assert_eq!(
+        (word(&again), again.reason.as_deref()),
+        ((Take, 1, Error), Some("claim-released"))
+    );
+    assert!(!lock_busy("lock-a"));
+    // The next claim takes it, and releases it.
+    assert_eq!(
+        word(&c.take_lock(&held, "lock-a", 2).unwrap()),
+        (Take, 2, Locked)
+    );
+    assert!(lock_busy("lock-a"));
+    assert_eq!(
+        word(&c.release_lock(&held, "lock-a", 2).unwrap()),
+        (Release, 2, Released)
+    );
+    assert!(!lock_busy("lock-a"));
+    kill_until_gone(&mut c, held.id);
+}
+
+#[test]
+fn a_claim_older_than_the_current_one_is_refused_and_a_key_cannot_carry_a_second_command() {
+    use p::LockWord::{Error, Locked};
+    let fx = Fixture::new("lk2");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-b", 5);
+    let old = c.take_lock(&held, "lock-b", 4).unwrap();
+    assert_eq!(
+        (old.word, old.claim, old.reason.as_deref()),
+        (Error, 4, Some("stale-claim"))
+    );
+    assert!(!lock_busy("lock-b"));
+    // A line break or a space in the key would be a second command on the stub's channel.
+    let bad = c.take_lock(&held, "lock-b\ntake lock-evil 5", 5).unwrap();
+    assert_eq!((bad.word, bad.reason.as_deref()), (Error, Some("bad-key")));
+    let bad = c.take_lock(&held, "lock-b lock-evil", 5).unwrap();
+    assert_eq!((bad.word, bad.reason.as_deref()), (Error, Some("bad-key")));
+    assert!(!lock_busy("lock-evil") && !lock_busy("lock-b"));
+    assert_eq!(c.take_lock(&held, "lock-b", 5).unwrap().word, Locked);
+    // A process of another holder instance is not ours to lock for.
+    let foreign = p::HeldId {
+        instance: "f".repeat(32),
+        id: held.id,
+    };
+    let a = c.take_lock(&foreign, "lock-b", 6).unwrap();
+    assert_eq!((a.word, a.reason.as_deref()), (Error, Some("not-here")));
+    kill_until_gone(&mut c, held.id);
+}
+
+#[test]
+fn answers_are_kept_per_claim_until_acked() {
+    use p::LockOp::{Release, Take};
+    use p::LockWord::{Busy, Locked, Released};
+    let fx = Fixture::new("lk3");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-c", 1);
+    c.take_lock(&held, "lock-c", 1).unwrap();
+    c.take_lock(&held, "lock-c", 2).unwrap();
+    c.release_lock(&held, "lock-c", 1).unwrap();
+    let kept = |c: &mut Client| -> Vec<(u64, p::LockOp, p::LockWord)> {
+        let mut locks = c.list().unwrap()[0].locks.clone();
+        locks.sort_by_key(|a| (a.claim, a.op));
+        locks.iter().map(|a| (a.claim, a.op, a.word)).collect()
+    };
+    // The busy for claim 2 did not replace claim 1's answers, and the release sits beside the take.
+    assert_eq!(
+        kept(&mut c),
+        vec![(1, Take, Locked), (1, Release, Released), (2, Take, Busy)]
+    );
+    c.ack_lock(&held, 1).unwrap();
+    wait_for("the ack", || kept(&mut c) == vec![(2, Take, Busy)]);
+    kill_until_gone(&mut c, held.id);
+}
+
+#[test]
+fn a_stub_killed_mid_turn_frees_the_lock_and_later_asks_fail() {
+    use p::LockWord::{Error, Locked, NotHeld};
+    let fx = Fixture::new("lk4");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-d", 1);
+    assert_eq!(c.take_lock(&held, "lock-d", 1).unwrap().word, Locked);
+    assert!(lock_busy("lock-d"));
+    let pid = c.list().unwrap()[0].pid;
+    kill_pid(pid);
+    // The OS released the lock with the stub, whatever the engine does.
+    wait_for("the lock to free", || !lock_busy("lock-d"));
+    let (_, _, payload) = c
+        .expect(p::EXITED, held.id, WAIT)
+        .expect("the exit is reported");
+    let _: p::Exit = wire::parse(&payload).unwrap();
+    assert_eq!(c.take_lock(&held, "lock-d", 2).unwrap().word, Error);
+    assert_eq!(c.release_lock(&held, "lock-d", 1).unwrap().word, NotHeld);
+    assert_eq!(c.ack(&held).unwrap(), AckState::Acked);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_holder_killed_mid_turn_does_not_free_the_lock_while_the_stub_lives() {
+    let fx = Fixture::new("lk5");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-e", 1);
+    assert_eq!(
+        c.take_lock(&held, "lock-e", 1).unwrap().word,
+        p::LockWord::Locked
+    );
+    let (holder, stub) = (c.welcome.pid as i32, c.list().unwrap()[0].pid as i32);
+    unsafe { libc::kill(holder, libc::SIGKILL) };
+    wait_for(
+        "the holder to die",
+        || unsafe { libc::kill(holder, 0) } != 0,
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        lock_busy("lock-e"),
+        "the stub keeps the lock without its holder"
+    );
+    // Ending the stub's group (what the next holder instance's core does) frees it.
+    unsafe { libc::killpg(stub, libc::SIGKILL) };
+    wait_for("the lock to free", || !lock_busy("lock-e"));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_engine_does_not_inherit_the_control_channel() {
+    let fx = Fixture::new("lk6");
+    fx.start();
+    let mut c = fx.client(1);
+    // fd 9 is a control: the check can see an open descriptor at all. Nothing else from 3 up may be open.
+    let line = "exec 9</dev/null; for n in 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do \
+                [ -e /dev/fd/$n ] && echo open-$n; done; echo checked; exec sleep 300";
+    let id = spawn(&mut c, &spec("lock-f", 1, 1, Mode::Pipes, &shell(line)));
+    let seen = read_until(&mut c, id, "checked");
+    let open: Vec<&str> = seen.lines().filter(|l| l.starts_with("open-")).collect();
+    assert_eq!(open, vec!["open-9"], "{seen}");
+    // The stub does hold a channel, though: a take works.
+    assert_eq!(
+        c.take_lock(&h(&c, id), "lock-f", 1).unwrap().word,
+        p::LockWord::Locked
+    );
+    kill_until_gone(&mut c, id);
+}
+
+#[cfg(unix)]
+#[test]
+fn closing_the_engines_stdin_ends_a_warm_engine_through_the_stub() {
+    let fx = Fixture::new("lk7");
+    fx.start();
+    let mut c = fx.client(1);
+    let id = spawn(&mut c, &spec("lock-g", 1, 1, Mode::Pipes, &shell("cat")));
+    let held = h(&c, id);
+    assert_eq!(
+        c.take_lock(&held, "lock-g", 1).unwrap().word,
+        p::LockWord::Locked
+    );
+    c.send_for(p::INPUT, &held.instance, id, &[]).unwrap();
+    let exit = exit_of(&mut c, id);
+    assert_eq!(exit.code, Some(0));
+    assert!(!lock_busy("lock-g"), "the lock went with the stub");
+}
+
+#[test]
+fn a_missing_or_absent_stub_fails_the_spawn_with_an_install_hint() {
+    let fx = Fixture::new("lk8");
+    fx.start();
+    let mut c = fx.client(1);
+    let mut missing = spec("lock-h", 1, 1, Mode::Pipes, &shell(sleep_line()));
+    missing.stub = Some(if cfg!(windows) {
+        r"C:\no\such\kith-stub.exe".into()
+    } else {
+        "/no/such/kith-stub".into()
+    });
+    let mut none = spec("lock-h", 1, 1, Mode::Pipes, &shell(sleep_line()));
+    none.stub = None;
+    for bad in [missing, none] {
+        c.spawn(&bad).unwrap();
+        let (_, _, payload) = c.expect(p::SPAWN_FAILED, 0, WAIT).expect("spawn failed");
+        let failed: p::SpawnFailed = wire::parse(&payload).unwrap();
+        assert_eq!((failed.conv.as_str(), failed.claim), ("lock-h", 1));
+        assert!(
+            failed.error.contains("kith-stub") && failed.error.contains("Install"),
+            "{}",
+            failed.error
+        );
+    }
+    assert!(
+        c.list().unwrap().is_empty(),
+        "no engine ran without its stub"
+    );
+    // The claim was not used up: the same one starts with a stub.
+    let held = warm(&mut c, "lock-h", 1);
+    kill_until_gone(&mut c, held.id);
+}
+
+#[test]
+fn a_core_of_the_older_protocol_is_refused_at_hello() {
+    let fx = Fixture::new("lk9");
+    fx.start();
+    let ep = kith_holder::platform::endpoint(&fx.dir);
+    let mut raw = kith_holder::platform::connect(&ep).unwrap();
+    let hello = p::Hello {
+        version: p::VERSION - 1,
+        generation: 1,
+        nonce: "aa".repeat(16),
+    };
+    wire::write_json(&mut raw, p::HELLO, 0, &hello).unwrap();
+    let (kind, _, payload) = wire::read(&mut raw).unwrap().unwrap();
+    assert_eq!(kind, p::REFUSED);
+    let refused: p::Refused = wire::parse(&payload).unwrap();
+    assert_eq!(refused.why, Why::BadVersion);
+}
+
+/// Sends a take or release without waiting for its answer (a core whose `lock_call` timed out, or two requests in a row).
+fn send_lock(c: &mut Client, held: &p::HeldId, op: p::LockOp, key: &str, claim: u64) {
+    let body = serde_json::to_vec(&p::LockReq {
+        key: key.to_owned(),
+        claim,
+    })
+    .unwrap();
+    let kind = if op == p::LockOp::Take {
+        p::TAKE
+    } else {
+        p::RELEASE
+    };
+    c.send_for(kind, &held.instance, held.id, &body).unwrap();
+}
+
+/// The answer to one request, waited for on its own.
+fn answer_of(c: &mut Client, held: &p::HeldId, op: p::LockOp, claim: u64) -> p::LockAnswer {
+    let (_, _, payload) = c
+        .take(WAIT, |f| {
+            f.0 == p::LOCK_ANSWER
+                && f.1 == held.id
+                && wire::parse::<p::LockAnswer>(&f.2).is_ok_and(|a| a.op == op && a.claim == claim)
+        })
+        .expect("an answer");
+    wire::parse(&payload).unwrap()
+}
+
+#[test]
+fn a_release_sent_right_behind_its_take_is_relayed_and_the_claim_stays_released() {
+    use p::LockOp::{Release, Take};
+    use p::LockWord::{Error, Locked, Released};
+    let fx = Fixture::new("lk7b");
+    fx.start();
+    let mut c = fx.client(1);
+    // The current claim: take then release, no wait between them.
+    let held = warm(&mut c, "lock-g", 1);
+    send_lock(&mut c, &held, Take, "lock-g", 1);
+    send_lock(&mut c, &held, Release, "lock-g", 1);
+    assert_eq!(word(&answer_of(&mut c, &held, Take, 1)), (Take, 1, Locked));
+    assert_eq!(
+        word(&answer_of(&mut c, &held, Release, 1)),
+        (Release, 1, Released)
+    );
+    assert!(!lock_busy("lock-g"), "the stub ended up released");
+    let again = c.take_lock(&held, "lock-g", 1).unwrap();
+    assert_eq!(
+        (again.word, again.reason.as_deref()),
+        (Error, Some("claim-released"))
+    );
+    // A newer claim whose take is still in flight when its release arrives: the release is not dropped as
+    // "not current", and the late `locked` does not make the claim takeable again.
+    send_lock(&mut c, &held, Take, "lock-g", 2);
+    send_lock(&mut c, &held, Release, "lock-g", 2);
+    assert_eq!(word(&answer_of(&mut c, &held, Take, 2)), (Take, 2, Locked));
+    assert_eq!(
+        word(&answer_of(&mut c, &held, Release, 2)),
+        (Release, 2, Released)
+    );
+    assert!(!lock_busy("lock-g"), "a lock the core released is not held");
+    let again = c.take_lock(&held, "lock-g", 2).unwrap();
+    assert_eq!(
+        (again.word, again.reason.as_deref()),
+        (Error, Some("claim-released"))
+    );
+    assert!(!lock_busy("lock-g"));
+    // The next claim is a new turn.
+    assert_eq!(c.take_lock(&held, "lock-g", 3).unwrap().word, Locked);
+    assert_eq!(c.release_lock(&held, "lock-g", 3).unwrap().word, Released);
+    kill_until_gone(&mut c, held.id);
+}
+
+#[test]
+fn a_busy_for_a_higher_claim_still_makes_older_takes_stale_and_the_held_lock_releasable() {
+    use p::LockWord::{Busy, Error, Locked, Released};
+    let fx = Fixture::new("lk8b");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-hh", 1);
+    assert_eq!(c.take_lock(&held, "lock-hh", 1).unwrap().word, Locked);
+    assert_eq!(c.take_lock(&held, "lock-hh", 3).unwrap().word, Busy);
+    // A delayed take for claim 2 must not reach the stub, whatever happened to claim 3.
+    let late = c.take_lock(&held, "lock-hh", 2).unwrap();
+    assert_eq!(
+        (late.word, late.reason.as_deref()),
+        (Error, Some("stale-claim"))
+    );
+    let late = c.release_lock(&held, "lock-hh", 2).unwrap();
+    assert_eq!(late.reason.as_deref(), Some("stale-claim"));
+    // Claim 1 is still the one that holds, and still releasable.
+    assert!(lock_busy("lock-hh"));
+    assert_eq!(c.release_lock(&held, "lock-hh", 1).unwrap().word, Released);
+    // The same key as the process's conversation only.
+    let other = c.take_lock(&held, "lock-other", 4).unwrap();
+    assert_eq!(
+        (other.word, other.reason.as_deref()),
+        (Error, Some("wrong-key"))
+    );
+    assert!(!lock_busy("lock-other"));
+    kill_until_gone(&mut c, held.id);
+}
+
+#[test]
+fn the_holders_own_refusals_are_not_kept_and_a_full_report_store_refuses_new_takes() {
+    use p::LockWord::{Busy, Error, Locked};
+    let fx = Fixture::new("lk9b");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-i", 5);
+    // The holder's own refusal answers the frame and is not a report.
+    assert_eq!(c.take_lock(&held, "lock-i", 4).unwrap().word, Error);
+    assert!(c.list().unwrap()[0].locks.is_empty());
+    assert_eq!(c.take_lock(&held, "lock-i", 5).unwrap().word, Locked);
+    // Claims 6 and up are busy (5 holds it), one kept answer each, until the store is full.
+    for claim in 6..6 + 255 {
+        assert_eq!(c.take_lock(&held, "lock-i", claim).unwrap().word, Busy);
+    }
+    assert_eq!(c.list().unwrap()[0].locks.len(), 256);
+    let full = c.take_lock(&held, "lock-i", 400).unwrap();
+    assert_eq!(
+        (full.word, full.reason.as_deref()),
+        (Error, Some("too-many-unacked"))
+    );
+    // Nothing was evicted: the oldest answer is still there, and an ack makes room.
+    assert_eq!(c.list().unwrap()[0].locks.len(), 256);
+    c.ack_lock(&held, 6).unwrap();
+    wait_for("the ack", || c.list().unwrap()[0].locks.len() == 255);
+    assert_eq!(c.take_lock(&held, "lock-i", 400).unwrap().word, Busy);
+    kill_until_gone(&mut c, held.id);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stub_that_dies_takes_its_engine_with_it() {
+    let fx = Fixture::new("lk10");
+    fx.start();
+    let mut c = fx.client(1);
+    let pidfile = std::env::temp_dir().join(format!("kh-{}-engine-pid", std::process::id()));
+    let _ = std::fs::remove_file(&pidfile);
+    let line = format!("echo $$ > {}; exec sleep 300", pidfile.display());
+    let id = spawn(&mut c, &spec("lock-j", 1, 1, Mode::Pipes, &shell(&line)));
+    let held = h(&c, id);
+    assert_eq!(
+        c.take_lock(&held, "lock-j", 1).unwrap().word,
+        p::LockWord::Locked
+    );
+    let engine = {
+        let mut pid = None;
+        wait_for("the engine's pid", || {
+            pid = std::fs::read_to_string(&pidfile)
+                .ok()
+                .and_then(|s| s.trim().parse::<i32>().ok());
+            pid.is_some()
+        });
+        pid.unwrap()
+    };
+    // Only the stub dies, not its group: the engine would run on with nobody holding its lock.
+    kill_pid(c.list().unwrap()[0].pid);
+    exit_of(&mut c, id);
+    wait_for("the engine to end", || unsafe {
+        libc::kill(engine, 0) != 0
+    });
+    let _ = std::fs::remove_file(&pidfile);
 }

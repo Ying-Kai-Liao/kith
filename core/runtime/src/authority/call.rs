@@ -224,6 +224,9 @@ pub(crate) fn call_in(
             })
         }
         // The device-pairing access requests (M2-3): a table of their own, not `store::run`'s auth.json-shaped write.
+        // `members` is the caller's say, and leaving it out means full owner power (the owner's own request too, with
+        // `screen`). Today the host refuses remote devices itself (`api/remote.rs`) before it asks. M2-17 must derive
+        // "at the computer" from the caller's connection, or default to the narrow answer (`members` on).
         "people.requests" => requests::list(core, c, switch(params, "members")),
         "people.approve" => {
             let id = need(params, "id").map_err(|d| store::refusal(&d))?;
@@ -351,7 +354,13 @@ pub(super) fn write_in(
                 &kv,
             )?))
         }
-        "people.removeBot" => Ok(lines(write::bot_remove(a, need(params, "id")?)?)),
+        "people.removeBot" => {
+            // read before the row goes: a renamed bot's cards may still sit under its old ids
+            let was = revoke::was_ids(a, need(params, "id")?);
+            let mut out = lines(write::bot_remove(a, need(params, "id")?)?);
+            out["was"] = json!(was);
+            Ok(out)
+        }
         "people.botsCap" => Ok(lines(write::bots_cap(a, need(params, "amount")?)?)),
         "people.invite" => {
             let said = write::invite_create(

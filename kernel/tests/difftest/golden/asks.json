@@ -1,0 +1,695 @@
+[
+ {
+  "name": "asks-answer-and-progress",
+  "command": "ask",
+  "unswitched": "kith-ask has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-ask"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "ask"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/a1.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-caller\", \"ask\": null}, \"chain\": \"a1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   }
+  ],
+  "run": [
+   [
+    "--answer",
+    "a1",
+    "--",
+    "the answer"
+   ],
+   [
+    "--answer",
+    "a1",
+    "--",
+    "the answer"
+   ],
+   [
+    "--answer",
+    "a1",
+    "--progress",
+    "--",
+    "a note"
+   ],
+   [
+    "--answer",
+    "nope",
+    "--",
+    "x"
+   ],
+   [
+    "delegations",
+    "--json"
+   ],
+   [
+    "--wait",
+    "a1",
+    "--timeout",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ],
+   [
+    "\\b\\d{10}\\.\\d{3,}\\b",
+    "1700000000.0"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ]
+ },
+ {
+  "name": "asks-to-queued-and-duplicate",
+  "command": "ask",
+  "unswitched": "kith-ask has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-ask"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "ask"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/b1.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-caller\", \"ask\": null}, \"chain\": \"b1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   },
+   {
+    "write": "home/.kith/ask-bg/b1.cmd",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/ask-bg/b1.json",
+    "text": "{\"agent\": \"echo\", \"key\": \"k\", \"dir\": \"/\", \"person\": \"kai\", \"at\": 1.0}"
+   },
+   {
+    "write": "home/.kith/ask-bg/b1.sid",
+    "text": "sess-b1"
+   }
+  ],
+  "run": [
+   [
+    "--to",
+    "b1",
+    "more please"
+   ],
+   [
+    "--to",
+    "b1",
+    "more please"
+   ],
+   [
+    "--to",
+    "b1",
+    "another"
+   ],
+   [
+    "--to",
+    "nope",
+    "x"
+   ],
+   [
+    "--to",
+    "b1"
+   ]
+  ],
+  "normalize": [
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ],
+   [
+    "\\b\\d{10}\\.\\d{3,}\\b",
+    "1700000000.0"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ]
+ },
+ {
+  "name": "asks-to-after-end-python-sends",
+  "command": "ask",
+  "unswitched": "kith-ask has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-ask"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "ask"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/b1.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-caller\", \"ask\": null}, \"chain\": \"b1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   },
+   {
+    "write": "home/.kith/ask-bg/b1.cmd",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/ask-bg/b1.json",
+    "text": "{\"agent\": \"echo\", \"key\": \"k\", \"dir\": \"/\", \"person\": \"kai\", \"at\": 1.0}"
+   },
+   {
+    "write": "home/.kith/ask-bg/b1.sid",
+    "text": "sess-b1"
+   }
+  ],
+  "run": [
+   [
+    "--end",
+    "--session",
+    "s-caller"
+   ],
+   [
+    "--to",
+    "b1",
+    "after the stop"
+   ],
+   [
+    "delegations",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ],
+   [
+    "\\b\\d{10}\\.\\d{3,}\\b",
+    "1700000000.0"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ]
+ },
+ {
+  "name": "asks-end-by-person-tree",
+  "command": "ask",
+  "unswitched": "kith-ask has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-ask"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "ask"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/t1.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"mia\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-mia\", \"ask\": null}, \"chain\": \"t1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/t2.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"mia\", \"via\": \"terminal\", \"reply_to\": {\"session\": null, \"ask\": \"t1\"}, \"chain\": \"t1\", \"hop\": 1, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/t3.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"mia\", \"via\": \"terminal\", \"reply_to\": {\"session\": null, \"ask\": \"t2\"}, \"chain\": \"t1\", \"hop\": 2, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/k1.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-kai\", \"ask\": null}, \"chain\": \"k1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   },
+   {
+    "write": "home/.kith/ask-bg/t1.cmd",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/ask-bg/t1.json",
+    "text": "{\"agent\": \"echo\", \"key\": \"k\", \"dir\": \"/\", \"person\": \"mia\", \"at\": 1.0}"
+   },
+   {
+    "write": "home/.kith/ask-bg/t1.sid",
+    "text": "sess-t1"
+   },
+   {
+    "write": "home/.kith/ask-bg/t3.cmd",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/ask-bg/t3.json",
+    "text": "{\"agent\": \"echo\", \"key\": \"k\", \"dir\": \"/\", \"person\": \"mia\", \"at\": 1.0}"
+   },
+   {
+    "write": "home/.kith/ask-bg/t3.sid",
+    "text": "sess-t3"
+   },
+   {
+    "write": "home/.kith/ask-bg/k1.cmd",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/ask-bg/k1.json",
+    "text": "{\"agent\": \"echo\", \"key\": \"k\", \"dir\": \"/\", \"person\": \"kai\", \"at\": 1.0}"
+   },
+   {
+    "write": "home/.kith/ask-bg/k1.sid",
+    "text": "sess-k1"
+   }
+  ],
+  "run": [
+   [
+    "--end",
+    "--person",
+    "mia"
+   ],
+   [
+    "--end",
+    "--person",
+    "mia"
+   ],
+   [
+    "delegations",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ],
+   [
+    "\\b\\d{10}\\.\\d{3,}\\b",
+    "1700000000.0"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ]
+ },
+ {
+  "name": "asks-end-keeps-history",
+  "command": "ask",
+  "unswitched": "kith-ask has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-ask"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "ask"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/h1.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-caller\", \"ask\": null}, \"chain\": \"h1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"answered\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0, \"delivered\": true}"
+   },
+   {
+    "write": "home/.kith/live/ask/h2.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-caller\", \"ask\": null}, \"chain\": \"h2\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"answered\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0, \"woke_answer\": true}"
+   },
+   {
+    "write": "home/.kith/live/ask/h3.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-caller\", \"ask\": null}, \"chain\": \"h3\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   }
+  ],
+  "run": [
+   [
+    "--end",
+    "--session",
+    "s-caller"
+   ],
+   [
+    "delegations",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ],
+   [
+    "\\b\\d{10}\\.\\d{3,}\\b",
+    "1700000000.0"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ]
+ },
+ {
+  "name": "asks-end-usage",
+  "command": "ask",
+  "unswitched": "kith-ask has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-ask"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "ask"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/r1.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-x\", \"ask\": null}, \"chain\": \"r1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/r2.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": null, \"ask\": \"r1\"}, \"chain\": \"r1\", \"hop\": 1, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   }
+  ],
+  "run": [
+   [
+    "--end",
+    "--session",
+    "s-x"
+   ],
+   [
+    "delegations",
+    "--json"
+   ],
+   [
+    "--end"
+   ],
+   [
+    "--end",
+    "--bogus"
+   ]
+  ],
+  "normalize": [
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ],
+   [
+    "\\b\\d{10}\\.\\d{3,}\\b",
+    "1700000000.0"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ]
+ },
+ {
+  "name": "asks-cap",
+  "command": "ask",
+  "unswitched": "kith-ask has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-ask"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "ask"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "--cap"
+   ],
+   [
+    "--cap",
+    "2.5"
+   ],
+   [
+    "--cap"
+   ],
+   [
+    "--cap",
+    "none"
+   ],
+   [
+    "--cap"
+   ],
+   [
+    "--cap",
+    "abc"
+   ],
+   [
+    "--cap",
+    "1",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ],
+   [
+    "\\b\\d{10}\\.\\d{3,}\\b",
+    "1700000000.0"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ]
+ },
+ {
+  "name": "asks-delegations-capped-chain",
+  "command": "ask",
+  "unswitched": "kith-ask has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-ask"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "ask"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 1.0}}"
+   },
+   {
+    "write": "home/.kith/live/ask/c1.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": \"s-caller\", \"ask\": null}, \"chain\": \"c1\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.6, \"cost_base\": 0.0, \"state\": \"capped\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0, \"capped_at\": 1700000100.0, \"cap_usd\": 1.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/c2.reg",
+    "text": "{\"asked\": \"echo\", \"agent\": \"coder\", \"person\": \"kai\", \"via\": \"terminal\", \"reply_to\": {\"session\": null, \"ask\": \"c1\"}, \"chain\": \"c1\", \"hop\": 1, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.5, \"cost_base\": 0.0, \"state\": \"open\", \"at\": 1700000000.0, \"pid\": 1, \"pid_at\": 1700000000.0}"
+   }
+  ],
+  "run": [
+   [
+    "delegations",
+    "--json"
+   ],
+   [
+    "--cap-told",
+    "c1"
+   ],
+   [
+    "delegations",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ],
+   [
+    "\\b\\d{10}\\.\\d{3,}\\b",
+    "1700000000.0"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ]
+ }
+]

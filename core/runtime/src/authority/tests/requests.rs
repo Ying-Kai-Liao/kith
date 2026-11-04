@@ -75,8 +75,15 @@ fn the_parity_script_gives_the_answers_the_host_gives() {
             if let Some(f) = step.get("file") {
                 file(&mut rig, f, i64::try_from(n).unwrap())
                     .unwrap_or_else(|e| panic!("{at}: {e}"));
-            } else if let Some(p) = step["end_member"].as_str() {
+            } else if let Some(p) = step["suspend"].as_str() {
                 rig.call("people.suspend", &json!({ "id": p })).unwrap();
+            } else if step.get("membership_gone").is_some() {
+                // The core cannot see this event yet (M2-17 must, see the module doc of `requests.rs`): nothing
+                // happens here, and the steps after it carry `core_expect`, what the core answers today.
+                assert!(
+                    scenario.get("known_difference").is_some(),
+                    "{at}: a gap must be marked"
+                );
             } else if let Some(id) = step["expire"].as_str() {
                 // the cloud stops listing it; here the clock passes its time
                 rig.core
@@ -95,10 +102,11 @@ fn the_parity_script_gives_the_answers_the_host_gives() {
                     ("people.deny", step["deny"].as_str().unwrap())
                 };
                 let got = rig.call(method, &json!({ "id": id }));
-                match (&step["expect"]["err"], got) {
+                let expect = step.get("core_expect").unwrap_or(&step["expect"]);
+                match (&expect["err"], got) {
                     (Value::String(want), Err(e)) => assert_eq!(&e, want, "{at}"),
                     (Value::Null, Ok(v)) => {
-                        if let Some(scopes) = step["expect"].get("scopes") {
+                        if let Some(scopes) = expect.get("scopes") {
                             assert_eq!(&v["device"]["scopes"], scopes, "{at}");
                         }
                     }
@@ -336,4 +344,64 @@ fn the_rows_are_owner_only_experimental_and_read_the_clock() {
         Some("pending"),
         "expired is read from the clock, not stored"
     );
+}
+
+/// Puts a request naming `person` straight into the table, past `create`'s refusal (a row a bug or an older core left).
+fn plant(rig: &mut Rig, id: &str, person: &str) {
+    let t = now(rig);
+    rig.core
+        .conn()
+        .execute(
+            "INSERT INTO access_requests(id, device_key, device_name, platform, person, code, status, created_at, expires_at) \
+             VALUES (?1, ?1, 'Phone', 'ios', ?2, '123456', 'pending', ?3, ?4)",
+            rusqlite::params![id, person, t, t + HOUR],
+        )
+        .unwrap();
+}
+
+const NOT_A_MEMBER: &str = "That account is no longer a member of this computer.";
+
+#[test]
+fn a_bot_is_never_a_member_device() {
+    let mut rig = Rig::new(&world());
+    let step = json!({"id": "b", "device": 1, "platform": "ios", "person": "bot-a", "code": true});
+    assert!(
+        file(&mut rig, &step, 0)
+            .unwrap_err()
+            .contains("not a member")
+    );
+    plant(&mut rig, "b", "bot-a");
+    assert_eq!(
+        rig.call("people.approve", &json!({"id": "b"})).unwrap_err(),
+        NOT_A_MEMBER
+    );
+    assert_eq!(
+        requests::status_of(rig.core.conn(), "b").as_deref(),
+        Some("denied")
+    );
+}
+
+#[test]
+fn the_owners_own_id_is_never_a_member_device() {
+    let mut rig = Rig::new(&world());
+    let step = json!({"id": "o", "device": 1, "platform": "ios", "person": "kai", "code": true});
+    assert!(
+        file(&mut rig, &step, 0)
+            .unwrap_err()
+            .contains("not a member")
+    );
+    // a row that names the owner, answered from the computer and from another of the owner's devices
+    for (id, members) in [("o1", false), ("o2", true)] {
+        plant(&mut rig, id, "kai");
+        assert_eq!(
+            rig.call("people.approve", &json!({"id": id, "members": members}))
+                .unwrap_err(),
+            NOT_A_MEMBER,
+            "members: {members}"
+        );
+        assert_eq!(
+            requests::status_of(rig.core.conn(), id).as_deref(),
+            Some("denied")
+        );
+    }
 }

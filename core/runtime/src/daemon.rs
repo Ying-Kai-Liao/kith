@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use kith_api::Principal;
 use kith_kernel::paths::Paths;
 use serde_json::{Value, json};
 
@@ -36,6 +37,8 @@ pub(crate) struct Config {
     pub wait_for_embedded: Duration,
     /// Off for tests that are not about the holder.
     pub holder_on: bool,
+    /// Reads the secrets master key before the core lock is taken; the OS key store when `None`.
+    pub key_load: Option<crate::secrets::KeyLoader>,
 }
 
 impl Default for Config {
@@ -44,6 +47,7 @@ impl Default for Config {
             holder: HolderConfig::default(),
             wait_for_embedded: Duration::from_secs(30),
             holder_on: true,
+            key_load: None,
         }
     }
 }
@@ -73,6 +77,9 @@ pub(crate) struct Shared {
     run_socket: PathBuf,
     started: Instant,
     pub(crate) terminals: Terminals,
+    key_load: crate::secrets::KeyLoader,
+    /// The master key once read, kept here so the read never happens under the core lock.
+    loaded_key: Mutex<Option<zeroize::Zeroizing<[u8; 32]>>>,
 }
 
 impl Shared {
@@ -92,6 +99,23 @@ impl Shared {
         }
     }
 
+    /// The secrets master key if the key store holds one, read at most until found and never under the core lock.
+    fn master_key(&self) -> Result<Option<zeroize::Zeroizing<[u8; 32]>>> {
+        let slot = || {
+            self.loaded_key
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
+        if let Some(key) = slot().clone() {
+            return Ok(Some(key));
+        }
+        let read = crate::secrets::preload(&*self.key_load)?;
+        if let Some(key) = &read {
+            *slot() = Some(key.clone());
+        }
+        Ok(read)
+    }
+
     pub(crate) fn set_holder(&self, f: impl FnOnce(&mut HolderState)) {
         f(&mut self
             .holder
@@ -107,7 +131,10 @@ impl Shared {
         self.changed.notify_all();
     }
 
-    fn dispatch(&self, method: &str, params: &Value) -> Result<Value> {
+    fn dispatch(&self, who: Principal, method: &str, params: &Value) -> Result<Value> {
+        // The row's principals decide, once, for every branch below: a connection that proved only the owner token is
+        // refused a host row here, and the host's connection is refused every owner row.
+        crate::call::check(who, method, params)?;
         if method == "kernel.coreStatus" {
             return self.running_status();
         }
@@ -126,10 +153,22 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        // The envelope's rows that need the master key read it first, outside the core lock (see `secrets::preload`).
+        if matches!(method, "secrets.open" | "secrets.get" | "secrets.put") {
+            crate::call::check(Principal::Owner, method, params)?;
+            let key = self.master_key()?;
+            let answer = self.with_core(|c| {
+                if let Some(key) = key {
+                    crate::secrets::adopt(&c.secrets, key)?;
+                }
+                c.call(Principal::Owner, method, params)
+            })?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         if method == "run.mint" {
             // Minting is a claim on authority too: refuse a revoked person, inside the lock a revoke commits under,
             // so a mint cannot slip in beside a suspension.
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let person = params
                 .get("person")
                 .and_then(Value::as_str)
@@ -154,7 +193,6 @@ impl Shared {
         }
         // The gate needs `&mut Core` (its state changes are claim transactions), which `Core::call` does not hold.
         if method.starts_with("gate.") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer =
                 self.with_core(|c| crate::gate::call(c, method, params, &crate::gate::System))?;
             self.served.fetch_add(1, Ordering::SeqCst);
@@ -164,7 +202,6 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::authority::call::serves(method) {
-                crate::call::check(kith_api::Principal::Owner, method, params)?;
                 // The tokens of a revoked or removed person end in the same locked call that committed it.
                 let answer = self.with_core(|c| {
                     let answer = crate::authority::call::call(c, method, params)?;
@@ -179,7 +216,6 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::doors::serves(method) {
-                crate::call::check(kith_api::Principal::Owner, method, params)?;
                 let answer = self
                     .with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))?;
                 self.served.fetch_add(1, Ordering::SeqCst);
@@ -188,7 +224,6 @@ impl Shared {
         }
         // The wake queue (M3-7): nothing calls these until kith-wake is switched; the daemon runs no drain and fires no waiter.
         if crate::wake::serves(method) {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer = self.with_core(|c| crate::wake::call(c, method, params))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
@@ -197,7 +232,6 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::asks::serves(method) {
-                crate::call::check(kith_api::Principal::Owner, method, params)?;
                 let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
@@ -205,23 +239,31 @@ impl Shared {
         }
         // Same for the sync lease: a change is a claim transaction.
         if method.starts_with("syncLease.") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer = self.with_core(|c| {
                 crate::sync_lease::call(c, method, params, &crate::sync_lease::System)
             })?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        // The schedule fire is a claim transaction too (M4-3). Nothing in the daemon calls it on a clock: only this row.
+        #[cfg(unix)]
+        {
+            if crate::schedules::serves_write(method) {
+                crate::call::check(Principal::Owner, method, params)?;
+                let answer = self.with_core(|c| crate::schedules::call_write(c, method, params))?;
+                self.served.fetch_add(1, Ordering::SeqCst);
+                return Ok(answer);
+            }
+        }
         // So do the cards: raise, claim and close are claim transactions.
         if method.starts_with("cards.") {
-            crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer =
                 self.with_core(|c| crate::cards::call(c, method, params, &crate::gate::System))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
         // Counts answers only: a refused or failed call was not served.
-        let answer = self.with_core(|c| c.call(kith_api::Principal::Owner, method, params))?;
+        let answer = self.with_core(|c| c.call(who, method, params))?;
         self.served.fetch_add(1, Ordering::SeqCst);
         Ok(answer)
     }
@@ -297,6 +339,11 @@ impl Daemon {
             run_socket: runsock::endpoint(&layout),
             started: Instant::now(),
             terminals: Terminals::new(),
+            key_load: cfg
+                .key_load
+                .clone()
+                .unwrap_or_else(|| Arc::new(crate::secrets::os_load)),
+            loaded_key: Mutex::new(None),
         });
         let (s, p) = (shared.clone(), paths.clone());
         let spawned = std::thread::Builder::new()
@@ -427,7 +474,8 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         *slot = Some(core);
     }
     let for_calls = shared.clone();
-    let handler: Arc<Handler> = Arc::new(move |method, params| for_calls.dispatch(method, params));
+    let handler: Arc<Handler> =
+        Arc::new(move |who, method, params| for_calls.dispatch(who, method, params));
     match Server::bind(layout, generation, handler) {
         Ok(server) => {
             let mut slot = shared

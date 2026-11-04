@@ -629,6 +629,32 @@ fn calls_go_through_the_table() {
 }
 
 #[test]
+fn schedule_preview_is_answered_by_the_core() {
+    use kith_api::Principal;
+    use serde_json::json;
+    let (_t, m) = machine();
+    let core = open(&Layout::new(&m)).with_folders(&paths(&m));
+    let v = core
+        .call(
+            Principal::Owner,
+            "schedule.preview",
+            &json!({"trigger": {"type": "cron", "expr": "@daily", "tz": "UTC"}, "after": 0, "n": 2}),
+        )
+        .expect("preview");
+    assert_eq!(v["fires"][0]["at"], 86_400_000);
+    assert_eq!(v["fires"][1]["at"], 2 * 86_400_000);
+    // a spec kith-sched refuses is refused with its message
+    let err = core
+        .call(
+            Principal::Owner,
+            "schedule.preview",
+            &json!({"trigger": {"type": "cron", "expr": "* * * *", "tz": "UTC"}}),
+        )
+        .expect_err("four fields");
+    assert!(err.to_string().contains("cron needs 5 fields"), "{err}");
+}
+
+#[test]
 fn a_front_note_that_stays_the_same_is_one_line_in_the_core_log() {
     let (_t, m) = machine();
     let p = paths(&m);
@@ -738,6 +764,42 @@ fn a_fresh_database_and_a_migrated_one_end_with_the_same_schema() {
 
     assert_eq!(schema_of(&lf), schema_of(&lo));
     assert!(schema_of(&lf).iter().any(|(_, name, _)| name == "counters"));
+}
+
+#[test]
+fn only_the_host_principal_calls_the_sync_lease_writes() {
+    let (_t, m) = machine();
+    let c = open(&Layout::new(&m));
+    for name in [
+        "syncLease.link",
+        "syncLease.unlink",
+        "syncLease.changed",
+        "syncLease.drop",
+        "syncLease.renew",
+    ] {
+        for other in [
+            kith_api::Principal::Owner,
+            kith_api::Principal::Member,
+            kith_api::Principal::Bot,
+            kith_api::Principal::RunToken,
+        ] {
+            assert!(
+                matches!(
+                    c.call(other, name, &serde_json::json!({})),
+                    Err(Error::NotAllowed(_))
+                ),
+                "{name} for {}",
+                other.name()
+            );
+        }
+        assert!(
+            !matches!(
+                c.call(kith_api::Principal::Host, name, &serde_json::json!({})),
+                Err(Error::NotAllowed(_))
+            ),
+            "{name} for host"
+        );
+    }
 }
 
 #[test]

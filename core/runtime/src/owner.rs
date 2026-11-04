@@ -16,7 +16,10 @@
 //!    rows still serves, one missing a row (or with another shape of it, listed in `unfit`) does not. Otherwise this
 //!    is where it ends: the client falls back and says so, nothing is run;
 //! 3. client: `auth` with HMAC(token, "cli", both nonces); the token itself never crosses the socket;
-//! 4. any number of calls: a method of the table with params. The caller is the owner, always.
+//! 4. any number of calls: a method of the table with params. The caller is the owner, or the host if the connection
+//!    said so in its hello (`principal: "host"`) and proved the host secret (`host.token`, a file of its own) instead of
+//!    the owner token. The socket only says who a connection is; which rows that principal may call is the table's
+//!    (`call::check`), so there is no second permission list here.
 //!
 //! The token is rewritten at each daemon start, so a client that read it just before a restart fails the proof and
 //! retries once with the new one.
@@ -29,6 +32,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use kith_api::Principal;
 use kith_holder::auth;
 use kith_holder::platform::{self, Stream};
 use serde_json::{Value, json};
@@ -79,24 +83,43 @@ pub(crate) fn random_secret() -> Result<String> {
     }))
 }
 
-/// A new token, owner-only, in place through a rename (a reader sees the old one or the new one, never half of it).
-fn write_token(layout: &Layout) -> Result<String> {
+/// A new secret at `path`, owner-only, in place through a rename (a reader sees the old one or the new one, never half
+/// of it).
+fn write_secret(path: &std::path::Path) -> Result<String> {
     let token = random_secret()?;
-    let tmp = layout.token.with_extension("token.tmp");
+    let tmp = path.with_extension("token.tmp");
     perms::create_private_file(&tmp)?;
     std::fs::write(&tmp, &token)?;
-    std::fs::rename(&tmp, &layout.token)?;
-    perms::make_private(&layout.token)?;
+    std::fs::rename(&tmp, path)?;
+    perms::make_private(path)?;
     Ok(token)
 }
 
-fn read_token(layout: &Layout) -> std::io::Result<String> {
-    let text = std::fs::read_to_string(&layout.token)?;
+/// The secret a client of `who` proves with: the owner token, or the host secret.
+fn secret_path(layout: &Layout, who: Principal) -> &std::path::Path {
+    if who == Principal::Host {
+        &layout.host_token
+    } else {
+        &layout.token
+    }
+}
+
+fn read_token(layout: &Layout, who: Principal) -> std::io::Result<String> {
+    let text = std::fs::read_to_string(secret_path(layout, who))?;
     let t = text.trim();
     if t.is_empty() {
-        return Err(std::io::Error::other("the owner token is empty"));
+        return Err(std::io::Error::other("the token is empty"));
     }
     Ok(t.to_owned())
+}
+
+/// The name a connection gives in its hello for the principal it will prove to be; the owner is the default.
+fn claimed(params: &Value) -> Option<Principal> {
+    match params.get("principal").and_then(Value::as_str) {
+        None | Some("owner") => Some(Principal::Owner),
+        Some("host") => Some(Principal::Host),
+        Some(_) => None,
+    }
 }
 
 fn proof(token: &str, role: &str, client_nonce: &str, server_nonce: &str) -> String {
@@ -106,7 +129,8 @@ fn proof(token: &str, role: &str, client_nonce: &str, server_nonce: &str) -> Str
 // --- the daemon's side ------------------------------------------------------------------------------------------
 
 /// What the daemon answers a call with: the method and its params in, a result or an error out.
-pub(crate) type Handler = dyn Fn(&str, &Value) -> Result<Value> + Send + Sync;
+/// The principal is the one the connection proved, never one a call names.
+pub(crate) type Handler = dyn Fn(Principal, &str, &Value) -> Result<Value> + Send + Sync;
 
 pub(crate) struct Server {
     stop: Arc<AtomicBool>,
@@ -121,6 +145,7 @@ const STOP_WAIT: Duration = Duration::from_secs(2);
 
 struct Ctx {
     token: String,
+    host_token: String,
     generation: i64,
     handler: Arc<Handler>,
     stop: Arc<AtomicBool>,
@@ -131,7 +156,8 @@ impl Server {
     /// Writes a fresh token, binds the socket (this daemon holds the lock, so a socket file left by a dead one is
     /// not in use and is replaced) and starts accepting.
     pub(crate) fn bind(layout: &Layout, generation: i64, handler: Arc<Handler>) -> Result<Server> {
-        let token = write_token(layout)?;
+        let token = write_secret(&layout.token)?;
+        let host_token = write_secret(&layout.host_token)?;
         let ep = endpoint(layout);
         platform::remove_endpoint(&ep);
         let listener = platform::listen(&ep).map_err(|e| {
@@ -149,6 +175,7 @@ impl Server {
         let stop = Arc::new(AtomicBool::new(false));
         let ctx = Arc::new(Ctx {
             token,
+            host_token,
             generation,
             handler,
             stop: stop.clone(),
@@ -243,8 +270,12 @@ fn accept_loop(listener: &platform::Listener, ctx: &Arc<Ctx>) {
 
 enum Phase {
     Hello,
-    Auth { client_nonce: String, nonce: String },
-    Ready,
+    Auth {
+        who: Principal,
+        client_nonce: String,
+        nonce: String,
+    },
+    Ready(Principal),
 }
 
 fn serve_connection(stream: Stream, ctx: &Ctx) {
@@ -285,29 +316,27 @@ fn serve_connection(stream: Stream, ctx: &Ctx) {
                 }
             }
             Phase::Auth {
+                who,
                 client_nonce,
                 nonce,
             } if method == "auth" => {
-                let expect = proof(&ctx.token, "cli", &client_nonce, &nonce);
+                // Only the secret of the principal this connection claimed in its hello is tried: the owner token
+                // never proves the host, and the host secret never proves the owner.
+                let expect = proof(ctx.secret(who), "cli", &client_nonce, &nonce);
                 let given = params.get("proof").and_then(Value::as_str).unwrap_or("");
                 if auth::same(expect.as_bytes(), given.as_bytes()) {
-                    phase = Phase::Ready;
+                    phase = Phase::Ready(who);
                     (success(&id, &json!({"ok": true})), true)
                 } else {
                     (
-                        failure(
-                            &id,
-                            -32003,
-                            "unauthorized",
-                            "the owner token does not match",
-                        ),
+                        failure(&id, -32003, "unauthorized", "the token does not match"),
                         false,
                     )
                 }
             }
-            Phase::Ready if method != "hello" && method != "auth" => {
-                phase = Phase::Ready;
-                let reply = match (ctx.handler)(method, &params) {
+            Phase::Ready(who) if method != "hello" && method != "auth" => {
+                phase = Phase::Ready(who);
+                let reply = match (ctx.handler)(who, method, &params) {
                     Ok(v) => success(&id, &v),
                     Err(e) => error_reply(&id, &e),
                 };
@@ -365,7 +394,23 @@ fn unfit(wanted: &serde_json::Map<String, Value>) -> Vec<String> {
         .collect()
 }
 
+impl Ctx {
+    fn secret(&self, who: Principal) -> &str {
+        if who == Principal::Host {
+            &self.host_token
+        } else {
+            &self.token
+        }
+    }
+}
+
 fn hello(ctx: &Ctx, id: &Value, params: &Value) -> (Value, Option<Phase>) {
+    let Some(who) = claimed(params) else {
+        return (
+            failure(id, -32002, "protocol", "an unknown principal in the hello"),
+            None,
+        );
+    };
     let client_nonce = params.get("nonce").and_then(Value::as_str).unwrap_or("");
     let nonce = platform::random_hex();
     let protocol = params.get("protocol").and_then(Value::as_u64);
@@ -390,12 +435,13 @@ fn hello(ctx: &Ctx, id: &Value, params: &Value) -> (Value, Option<Phase>) {
             "generation": ctx.generation,
             "pid": std::process::id(),
             "nonce": nonce,
-            "proof": proof(&ctx.token, "daemon", client_nonce, &nonce),
+            "proof": proof(ctx.secret(who), "daemon", client_nonce, &nonce),
             "compatible": compatible,
             "unfit": unfit,
         }),
     );
     let next = (compatible && !client_nonce.is_empty()).then(|| Phase::Auth {
+        who,
         client_nonce: client_nonce.to_owned(),
         nonce,
     });
@@ -416,6 +462,7 @@ fn error_reply(id: &Value, e: &Error) -> Value {
         Error::BadParams(_) => (-32602, "bad_params"),
         Error::NotAllowed(_) => (-32001, "not_allowed"),
         Error::NotServed(_) => (-32004, "not_served"),
+        Error::Stopped(_) => (-32005, "stopped"),
         _ => (-32000, "failed"),
     };
     failure(id, code, kind, &e.to_string())
@@ -428,6 +475,7 @@ fn from_error(message: &str, kind: &str) -> Error {
         "bad_params" => Error::BadParams(m),
         "not_allowed" => Error::NotAllowed(m),
         "not_served" => Error::NotServed(m),
+        "stopped" => Error::Stopped(m),
         _ => Error::Io(m),
     }
 }
@@ -471,6 +519,18 @@ enum Attempt {
 /// Calls `method` on the daemon of `layout`. `repeatable` says the call may run twice without harm (a read): it is
 /// then retried once when the connection breaks (the daemon restarting). A write is never sent a second time.
 pub(crate) fn reach(layout: &Layout, method: &str, params: &Value, repeatable: bool) -> Reached {
+    reach_as_principal(layout, Principal::Owner, method, params, repeatable)
+}
+
+/// [`reach`] as `who`: the owner proves the owner token, the host proves the host secret. A client that cannot read
+/// the secret of its principal (no daemon yet, or not the host's OS user) finds no daemon.
+pub(crate) fn reach_as_principal(
+    layout: &Layout,
+    who: Principal,
+    method: &str,
+    params: &Value,
+    repeatable: bool,
+) -> Reached {
     reach_with(
         layout,
         method,
@@ -478,6 +538,7 @@ pub(crate) fn reach(layout: &Layout, method: &str, params: &Value, repeatable: b
         repeatable,
         (PROTOCOL, kith_api::schema_hash()),
         Some(&rows_for(method)),
+        who,
     )
 }
 
@@ -490,7 +551,15 @@ pub(crate) fn reach_as(
     repeatable: bool,
     identity: (u32, &str),
 ) -> Reached {
-    reach_with(layout, method, params, repeatable, identity, None)
+    reach_with(
+        layout,
+        method,
+        params,
+        repeatable,
+        identity,
+        None,
+        Principal::Owner,
+    )
 }
 
 /// [`reach_as`] naming the rows the client may call (`None`: an older client that names none and is held to the whole
@@ -502,10 +571,11 @@ pub(crate) fn reach_with(
     repeatable: bool,
     identity: (u32, &str),
     rows: Option<&serde_json::Map<String, Value>>,
+    who: Principal,
 ) -> Reached {
     let mut tried = 0;
     loop {
-        match attempt(layout, method, params, identity, rows) {
+        match attempt(layout, method, params, identity, rows, who) {
             Attempt::Done(r) => return r,
             Attempt::Failed { sent, why } => {
                 tried += 1;
@@ -589,6 +659,7 @@ fn attempt(
     params: &Value,
     (protocol, schema): (u32, &str),
     rows: Option<&serde_json::Map<String, Value>>,
+    who: Principal,
 ) -> Attempt {
     let before = |why: &str| Attempt::Failed {
         sent: false,
@@ -597,7 +668,7 @@ fn attempt(
     let Ok(stream) = platform::connect(&endpoint(layout)) else {
         return Attempt::Done(Reached::NoDaemon);
     };
-    let Ok(token) = read_token(layout) else {
+    let Ok(token) = read_token(layout, who) else {
         return Attempt::Done(Reached::NoDaemon);
     };
     let Ok(mut conn) = Conn::open(stream) else {
@@ -606,6 +677,9 @@ fn attempt(
     let nonce = platform::random_hex();
     let mut hello =
         json!({"protocol": protocol, "version": VERSION, "schema": schema, "nonce": nonce});
+    if who == Principal::Host {
+        hello["principal"] = json!("host");
+    }
     if let Some(rows) = rows {
         hello["rows"] = json!(rows);
     }
@@ -625,7 +699,7 @@ fn attempt(
         given.as_bytes(),
     ) {
         // Not the daemon that wrote this token: a restart in between, or something else on the socket.
-        return before("the daemon did not prove it knows the owner token");
+        return before("the daemon did not prove it knows the token");
     }
     if r["compatible"] != true {
         let unfit = r["unfit"]
@@ -656,7 +730,7 @@ fn attempt(
     }
     match conn.recv(STEP_TIMEOUT) {
         Ok(v) if v["result"]["ok"] == true => {}
-        Ok(_) => return before("the daemon refused the owner token"),
+        Ok(_) => return before("the daemon refused the token"),
         Err(why) => return before(&why),
     }
     if let Err(e) = conn.send(3, method, params) {

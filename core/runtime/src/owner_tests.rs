@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use kith_api::Principal;
 use serde_json::{Map, Value, json};
 
 use super::{Handler, Reached, Server, reach_with, row_hash};
@@ -18,7 +19,7 @@ fn serving(m: &std::path::Path, handler: Arc<Handler>) -> (Layout, Server) {
 }
 
 fn echo() -> Arc<Handler> {
-    Arc::new(|method, _| Ok(json!({"ran": method})))
+    Arc::new(|_, method, _| Ok(json!({"ran": method})))
 }
 
 fn rows(pairs: &[(&str, &str)]) -> Map<String, Value> {
@@ -42,6 +43,7 @@ fn a_daemon_with_extra_rows_still_serves_and_one_missing_a_row_or_shaped_differe
         true,
         (super::PROTOCOL, "0000000000000000"),
         Some(&rows(&[("paths", paths_row)])),
+        Principal::Owner,
     ) {
         Reached::Answered(v) => assert_eq!(v["ran"], "paths"),
         other => panic!("{other:?}"),
@@ -54,6 +56,7 @@ fn a_daemon_with_extra_rows_still_serves_and_one_missing_a_row_or_shaped_differe
         true,
         (super::PROTOCOL, kith_api::schema_hash()),
         Some(&rows(&[("frobnicate", "1234567812345678")])),
+        Principal::Owner,
     ) {
         Reached::Mismatch(note) => assert!(note.contains("frobnicate"), "{note}"),
         other => panic!("{other:?}"),
@@ -66,6 +69,7 @@ fn a_daemon_with_extra_rows_still_serves_and_one_missing_a_row_or_shaped_differe
         true,
         (super::PROTOCOL, kith_api::schema_hash()),
         Some(&rows(&[("paths", "1234567812345678")])),
+        Principal::Owner,
     ) {
         Reached::Mismatch(note) => assert!(note.contains("paths"), "{note}"),
         other => panic!("{other:?}"),
@@ -102,7 +106,7 @@ fn stop_does_not_wait_for_a_client_in_the_middle_of_a_call() {
     let (release, released) = mpsc::channel::<()>();
     let entered_tx = std::sync::Mutex::new(entered_tx);
     let released = std::sync::Mutex::new(released);
-    let handler: Arc<Handler> = Arc::new(move |method, _| {
+    let handler: Arc<Handler> = Arc::new(move |_, method, _| {
         let _ = entered_tx.lock().expect("lock").send(());
         let _ = released
             .lock()

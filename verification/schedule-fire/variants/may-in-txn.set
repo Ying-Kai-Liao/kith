@@ -1,0 +1,4 @@
+MaxEdits = 0
+MaxRevs = 1
+MayInTxn = TRUE
+MaxTurns = 2

@@ -396,9 +396,8 @@ impl Actor {
                 _ => Vec::new(),
             };
             if prepared.is_none() {
-                if self.hub.store.kv_read(&format!("agent-env:{}", self.cfg.backend))?.is_some() {
-                    crate::market::vault::unlock(self.hub.clone()).await?;
-                }
+                crate::market::vault::unlock_if_sealed(&self.hub, crate::agent::auth::env_slot(&self.cfg.backend))
+                    .await?;
                 self.hub.set_runtime(&self.rt, |r| r.activity = "Starting agent…".into());
                 let Some(bin) = tokio::task::spawn_blocking(hq::bin).await? else {
                     bail!("{}", hq::missing());

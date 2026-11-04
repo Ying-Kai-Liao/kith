@@ -358,13 +358,33 @@ fn a_pid_is_matched_by_pid_and_start_time_on_the_real_system() {
     let start = sys.proc_start(pid).expect("the system gives a start time");
     assert!(sys.alive(pid, Some(&start)), "alive with its true start");
     assert!(sys.alive(pid, None), "no start recorded: the pid alone");
-    assert!(
-        !sys.alive(pid, Some("Mon Jan 1 00:00:00 1990")),
-        "the pid was reused: another start time"
-    );
+    // Same form, another start: the pid was reused. Anything else cannot be told apart: alive, never dead.
+    let (other, foreign) = if cfg!(target_os = "linux") {
+        ("bGONE:1", "e1")
+    } else {
+        ("e1", "bGONE:1")
+    };
+    for (recorded, want) in [
+        (start.as_str(), true),
+        (other, false),
+        (foreign, true),
+        ("Mon Jan 1 00:00:00 1990", true),
+        ("", true),
+        ("  ", true),
+    ] {
+        assert_eq!(
+            sys.alive(pid, Some(recorded)),
+            want,
+            "recorded {recorded:?}"
+        );
+    }
     child.kill().unwrap();
     child.wait().unwrap();
     assert!(!sys.alive(pid, Some(&start)), "exited");
+    assert!(
+        !sys.alive(pid, Some("Mon Jan 1 00:00:00 1990")),
+        "exited, old-form record: gone is gone"
+    );
     assert!(!sys.alive(pid, None), "exited, no start");
     // A terminal's claim file names a pid and the start it had; a stale start is not a live writer.
     let live = t.path().join("live/terminal");
@@ -379,10 +399,19 @@ fn a_pid_is_matched_by_pid_and_start_time_on_the_real_system() {
     assert!(sys.writer_live("s1"));
     std::fs::write(
         live.join("s1.claim"),
-        format!(r#"{{"pid": {me}, "procStart": "Mon Jan 1 00:00:00 1990"}}"#),
+        format!(r#"{{"pid": {me}, "procStart": "{other}"}}"#),
     )
     .unwrap();
     assert!(!sys.writer_live("s1"), "a stale procStart is a reused pid");
+    std::fs::write(
+        live.join("s1.claim"),
+        format!(r#"{{"pid": {me}, "procStart": "Mon Jan 1 00:00:00 1990"}}"#),
+    )
+    .unwrap();
+    assert!(
+        sys.writer_live("s1"),
+        "a Python claim's lstart text is an unknown start: alive"
+    );
 }
 
 #[test]

@@ -13,10 +13,15 @@ written by the architect and run green in his own folder; M3-0a committed them h
 drift shows. Their origin (path, date) is in each file's header. `results4.md` is the architect's result table plus
 what M3-0a added. This skill is the only other documentation.
 
-State today: the stub's lock primitive exists (`core/stub/src/lib.rs`); what is missing is holding it across the
-engine's life, claim ids on the wire, and the core's claim transaction with the redeem (M3-2, M3-4, M3-5). A green run
-says the design holds; it does not say the code follows it. `drift.sh` lists the code that exists and tells you when
-it moves. `Holder.tla` was derived from the holder at 73a03656; `WriterLock4.tla` models the design only.
+State today: the stub's lock primitive exists (`core/stub/src/lib.rs`) and the core's claim transaction with the redeem
+exists (`core/runtime/src/conversations/claims.rs`, M3-2). Since M3-4 the holder runs every Pipes engine under
+`kith-stub --resident` and relays the core's `take`/`release` for a turn to it (claim id on every frame; the holder acts
+only on the current claim or a take in flight; unacked answers are kept per claim and kind, a weaker answer never
+replacing a stronger; a dead stub ends its engine). What is still missing is the core side of the wire (M3-5). The
+holder's relay rules (in-flight take, report keeping) are bookkeeping on top of the modelled safety properties and are
+not in `Holder.tla`; model them at M3-5. A green run says the design holds; it does not say the code follows it.
+`drift.sh` lists the code that exists and tells you when it moves. `Holder.tla` was derived from the holder at 73a03656
+and, for the core's claim record (switch `RedeemWrite`), from `claims.rs` (M3-2); `WriterLock4.tla` models the design only.
 
 ## Run it
 
@@ -105,13 +110,25 @@ in the cfg). `RefuseOlder`, `HighWater`, `RefuseWhileRunning`, `KeyByInstance`, 
 | `holder-highwater` | StaleSends, HighWater | pass | `core/holder/src/holder.rs` already keeps "the highest claim seen per conversation, kept after the process is acked". |
 | `holder-lock` | + WriterLock | pass | The stub's lock on top. |
 | `holder-crash-all` | all guards + HolderCrash | pass (`OneWriter`, `RunOnce`) | A holder restart does not break them. |
-| `holder-crash-minimal` | HighWater, WriterLock, RedeemChecksClaim, HolderCrash, StaleSends | pass | `OneWriter` and `RunOnce` hold without `RefuseOlder`, `KeyByInstance`, `RecordAtSpawn`. Whether those three matter for `DoneTruth` cannot be judged yet: `DoneTruth` fails for every combination (masked by the open finding below), so there is no row for them. |
+| `holder-crash-minimal` | HighWater, WriterLock, RedeemChecksClaim, HolderCrash, StaleSends | pass | `OneWriter` and `RunOnce` hold without `RefuseOlder`, `KeyByInstance`, `RecordAtSpawn`. For `DoneTruth` see the `holder-crash-donetruth-*` rows. |
 | `holder-crash-nolock` | crash-all minus WriterLock | `RunOnce` fails | The lock is what keeps a respawned stale claim out after a holder restart (the high-water mark resets with the holder). |
 | `holder-crash-noredeem` | crash-all minus RedeemChecksClaim | `RunOnce` fails | The stub's redeem must refuse a claim that is not core.db's current one. |
 | `holder-crash-nohighwater` | crash-all minus HighWater | `RunOnce` fails | |
-| `holder-crash-donetruth` | crash-all, `DoneTruth` too | `DoneTruth` fails | **Open finding, see below.** |
+| `holder-crash-all-write` | crash-all + `RedeemWrite` | pass (`OneWriter`, `RunOnce`) | The redeem write does not break them. |
+| `holder-crash-donetruth` | crash-all + `RedeemWrite`, `DoneTruth` too | pass | **Was the open finding (below), fixed by the redeem write of M3-2**: the redeem CAS records the pid, a release on a new instance is a CAS, a running claim goes to `ending` until the recorded pid is gone. |
+| `holder-crash-donetruth-nowrite` | the same, `RedeemWrite` off | `DoneTruth` fails | The original finding: the omniscient core releases the claim under the orphan's engine. |
+| `holder-crash-donetruth-nocas` | `RedeemWrite`, `RedeemCAS` off | `DoneTruth` fails | Broken variant: the stub starts its engine even when the claim was released (a late redeem succeeds). |
+| `holder-crash-donetruth-release` | `RedeemWrite`, `HoldRunning` off | `DoneTruth` fails | Broken variant: an unlisted running claim goes straight to `ended`. |
+| `holder-crash-donetruth-nokey` | `RedeemWrite`, no `KeyByInstance` | pass | With the record, `DoneTruth` does not need the instance-keyed ids. |
+| `holder-crash-donetruth-norecord` | `RedeemWrite`, no `RecordAtSpawn` | pass | Nor the pid recorded at spawn: the redeem's record is what counts. |
+| `holder-crash-donetruth-minimal` | `RedeemWrite`, only HighWater, WriterLock, RedeemChecksClaim | pass | None of `RefuseOlder`, `KeyByInstance`, `RecordAtSpawn` is needed for `DoneTruth` (the code keeps `spawned` pid recording anyway as a cheap extra). |
 
-### Open finding: `DoneTruth` fails with a holder crash (every combination of switches)
+Code for the `RedeemWrite` actions: `core/runtime/src/conversations/claims.rs` (`redeem` = `TakeLock`'s CAS,
+`release_unlisted` = `Connect`'s release, `report` = `Settle` with the pid check (a report without the recorded pid applies nothing), `end_gone` = `KillRecorded` +
+`ConfirmGone`). Not modelled: revoke and stop (`stop`, `revoke_person` also go to `ending`), the stub's lock and redeem as
+two steps, a queued take-over claim.
+
+### Finding (closed by M3-2): `DoneTruth` fails with a holder crash (every combination of switches)
 
 Steps (`run.sh --show Holder holder-crash-donetruth`): the core takes claim 1 and sends SPAWN; the holder starts the
 stub and answers, the reply is lost with the connection; the holder crashes (its entries are memory); the stub, an
@@ -127,9 +144,11 @@ spawn), and releases the claim (`curDone`) while that engine writes. Every combi
   confirmed gone (or the core can take the writer lock non-blockingly).
 - `WriterLock4.tla`'s omniscient `Orphan` (the core knowing a surviving group) should be replaced by the same record.
 
-Not done in M3-0a: adding the redeem write to `Holder.tla`, a broken variant that fails `DoneTruth` without it, and
-`DoneTruth` rows for `KeyByInstance` and `RecordAtSpawn`. Until then `holder-crash-donetruth` stays `fail` on purpose.
-If you make it pass, move the row and say what rule you added; do not drop the invariant.
+M3-2 added the redeem write to `Holder.tla` (switches `RedeemWrite`, `RedeemCAS`, `HoldRunning`), the broken variants and the
+`DoneTruth` rows above; the first three rules are in `claims.rs` with tests (`holder_crash_donetruth_*`) and a proptest of
+random step sequences. Still open: the fourth rule. `WriterLock4.tla` keeps its omniscient `Orphan`; replacing it needs a
+recorded "redeemed under instance" bit in a model whose slow rows take 15-30 min each and were not re-run here.
+A `done` or `exit` that names another pid ends a running or ending claim in neither the code nor the model (`Settle`'s `h.pid = cpid`). One that names no pid ends nothing either: in the code a claim with a recorded pid moves to `ending` (still the writer, `apply` in claims.rs) and `end_gone` ends it once the pid is gone, which the model leaves out as a stutter (`ending` is already the writer there, and `ConfirmGone` is the end); reports are keyed by `(claim_id, kind, pid)` so the writer's own is never shadowed. A `--direct` claim (kind `external`) is outside the model: reconcile and a holder change skip it and only `end_gone` ends it.
 
 ## When you change covered code
 
@@ -153,7 +172,7 @@ If you make it pass, move the row and say what rule you added; do not drop the i
 - Trace checking (design "The oracle after Python"): `Runtime.tla` and the event replay are M3.
 - The TLA+ lease model is M3-0b (`Threads.tla` is retired or resynced in M3-15).
 - The slow rows in the PR job, if a runner with more cores is used.
-- The redeem write in `Holder.tla` and the rows above (the open finding).
+- `WriterLock4.tla`: replace `Orphan` with the redeem record, then run `--all`.
 - `killidle` liveness, with a bounded wait for the kill (a terminal that waits for a kill while the holder is down).
 - An ack-after-settle switch in `Holder.tla` (the ACK only after the core has settled the exit).
 - `r4-fix-1d-safety` (no recorded result) and the cfgs that ran out of heap, if a bigger heap is ever used.

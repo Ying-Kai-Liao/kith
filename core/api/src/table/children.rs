@@ -3,8 +3,8 @@
 //! claim transaction, so it runs on `&mut Core`; `Core::call` itself answers NotServed). Nothing calls them yet:
 //! `kernel/bin/kith-ask` stays the writer of `live/ask/*.reg` until the switch (M3-10), and the daemon runs no sweep.
 //!
-//! "Children" are rows of the ask tree, not processes: `ask.end` settles rows `stopped` and says which ids and sessions it
-//! did; stopping the runs and withdrawing the wakes are the callers' (part b, the wake lane). The caller's view (`home`,
+//! "Children" are rows of the ask tree, not processes: `ask.end` settles a tree of rows `stopped`, stops each child's
+//! conversation through the claims API (M3-8b), withdraws the wakes the callers are owed and returns the kills to send. The caller's view (`home`,
 //! `env`, `kernel`) says where settings.json is (the chain cap) and carries the `KITH_ASK_*` and `KITH_AGENT` variables the
 //! lineage reads.
 
@@ -90,8 +90,14 @@ pub(super) const ROWS: &[Method] = &[
     ),
     ask(
         "ask.end",
-        "Settles `stopped` the asks whose caller is one of the sessions or persons (Stop, a revoke, a removal): an ask already delivered, answered to its caller or ended stays. Stops no process and withdraws no wake; answers `{ended, sessions}` (the ids, and the sessions owed a withdrawal) for the callers that do.",
+        "Stop, revoke, removal (`kith ask --end`): settles `stopped` the asks whose caller is one of the sessions or persons, or that are one of the roots, and every ask below them; stops what each one's conversation runs (queued and parked turns cancelled, the live claim to `ending`, an unspawned one ended); withdraws the wakes and waiters those callers are owed. An ask already delivered or answered to its caller stays. Repeating it is safe. Kills no process: answers `{ended, sessions, kill}` (the ids, the sessions withdrawn, and the writers `{claimId, pid, started}` to kill until gone).",
         &[
+            flag(
+                "roots",
+                "[string]",
+                &["--roots"],
+                "Asks whose whole subtree ends.",
+            ),
             flag(
                 "sessions",
                 "[string]",
@@ -106,6 +112,26 @@ pub(super) const ROWS: &[Method] = &[
             ),
         ],
         &["asks", "end"],
+    ),
+    ask(
+        "ask.to",
+        "`kith ask --to ID`, the check before anything is queued: whether the ask still takes a follow-up. An ask that was stopped or ended refuses with `was stopped; ask anew` (the stopped fence never lifts; the Python `--to` queued the message and the wake fence dropped it). Answers `{id, ok}`; refuses an id that is no ask.",
+        &[pos("id", "string", true, "The ask.")],
+        &["asks", "to"],
+    ),
+    ask(
+        "ask.revokeEverywhere",
+        "The revoke order for conversations, once the authority revoke is visible to the may check: the person's claims and each of their bots' (queued and parked turns cancelled, live claims to `ending`, the revoke epoch bumped so a claim that passed its may check before is refused), THEN the asks of the person and their bots with every ask below them (`ask.end --persons`). `ask.end` alone is not a revoke. One claim transaction per principal, then one for the asks. Safe to repeat; a retry (with the same bots) finishes a crash between the steps, and a crash after the person's step leaves the bots' in-flight claims unfenced until it. On a removal pass `--bots`, read before the write: the rows are gone after. Kills no process: answers `{principals, cancelledTurns, ended, sessions, kill}`.",
+        &[
+            pos("person", "string", true, "The person revoked."),
+            flag(
+                "bots",
+                "[string]",
+                &["--bots"],
+                "Bots of the person (the whole transitive set) read before an authority removal deleted their rows; the bots still in `people.bot_of` are added.",
+            ),
+        ],
+        &["asks", "revoke-everywhere"],
     ),
     ask(
         "ask.delegations",

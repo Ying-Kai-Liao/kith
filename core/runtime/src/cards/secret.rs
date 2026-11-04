@@ -35,8 +35,8 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use super::{
-    CLEAR_CLAIM, Card, Claim, OPEN_STATES, State, bad, card, claim, get, new_id, now_ms, release,
-    saved_in, text, void_dead_claims,
+    CLEAR_CLAIM, Card, Claim, OPEN_STATES, State, bad, card, claim, dead_claims, get, new_id,
+    now_ms, release, saved_in, text, void_dead_claims,
 };
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -247,8 +247,9 @@ fn commit(
                 .into(),
         )
     };
+    let dead = dead_claims(core, live)?;
     let tx = core.claim_tx()?;
-    void_dead_claims(&tx, live)?;
+    void_dead_claims(&tx, &dead)?;
     let still = get(&tx, &held.id)?
         .filter(|k| k.state.open() && k.claim_by.as_deref() == Some(held.holder.as_str()))
         .ok_or_else(lost)?;
