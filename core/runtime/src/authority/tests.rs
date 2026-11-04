@@ -17,10 +17,7 @@ use super::{Authority, snapshot};
 use crate::authority::load::{empty, load};
 
 mod cards;
-<<<<<<< HEAD
 mod guest;
-=======
->>>>>>> origin/rust-rebuild
 mod requests;
 mod revoke;
 mod runs;
