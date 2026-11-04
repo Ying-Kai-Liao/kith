@@ -40,6 +40,7 @@ pub(crate) mod accounts;
 mod authority;
 mod check;
 pub(crate) mod items;
+pub(crate) mod schedules;
 // The wake queue's files (M3-7): nothing runs it until the switch (M3-10); the tests do.
 #[cfg(test)]
 mod tests;
