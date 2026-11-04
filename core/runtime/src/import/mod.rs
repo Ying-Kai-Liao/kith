@@ -30,6 +30,10 @@
 //! unavailable"; the check's cost on very large files; `\r` handling differs from Python's text mode; the dry run opens
 //! a WAL database read-only and needs its `-shm` to exist or be creatable.
 
+// M3-9a. Not wired into `kith migrate` yet (M3-10 does that), so only the tests call it.
+#[cfg(unix)]
+#[allow(dead_code, reason = "M3-10 wires it into kith migrate")]
+pub(crate) mod accounts;
 mod authority;
 mod check;
 pub(crate) mod items;

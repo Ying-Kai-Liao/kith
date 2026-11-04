@@ -940,3 +940,40 @@ pub(crate) fn prop_reused_pid_and_unreadable_start() -> Result<(), String> {
 fn p8_reused_pid_and_unreadable_start() {
     assert_eq!(prop_reused_pid_and_unreadable_start(), Ok(()));
 }
+
+/// P9 (M2-13): ending a set of people (what a revoke does) kills every token whose person is in the set, bound or not,
+/// and no other; the count is exact; the rest still resolve as their own run; ending again ends nothing.
+pub(crate) fn prop_end_people_kills_exactly_those() -> Result<(), String> {
+    check(
+        (
+            specs(),
+            prop::collection::vec(0..PEOPLE.len(), 0..4),
+            any::<bool>(),
+        ),
+        |(specs, gone, bind)| {
+            let (t, runs) = build(&specs, bind);
+            let names: Vec<&str> = gone.iter().map(|&p| PEOPLE[p]).collect();
+            let doomed = runs
+                .iter()
+                .filter(|r| names.contains(&r.identity.person.as_str()))
+                .count();
+            prop_assert_eq!(t.end_people(&names), doomed);
+            prop_assert_eq!(t.end_people(&names), 0);
+            prop_assert_eq!(t.len(), runs.len() - doomed);
+            for r in &runs {
+                let got = t.resolve(&r.token, Some(r.pid));
+                if names.contains(&r.identity.person.as_str()) || !bind {
+                    prop_assert_eq!(got, None);
+                } else {
+                    prop_assert_eq!(got, Some(r.identity.clone()));
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn p9_end_people_kills_exactly_those() {
+    assert_eq!(prop_end_people_kills_exactly_those(), Ok(()));
+}

@@ -5,7 +5,8 @@
 //! process or one below it (the ancestry check `serve/host/src/runauth.rs` keeps for host.sock: on macOS a process of
 //! the same user can read another's environment, so a token alone could be lifted from a neighbouring run).
 //!
-//! Dies when: the run is ended (`run.end`), the daemon restarts (the table is memory; runs are minted again later), or
+//! Dies when: the run is ended (`run.end`), its person is suspended or removed (`after_authority_write`, inside the core
+//! call that commits it; undo revives nothing), the daemon restarts (the table is memory; runs are minted again later), or
 //! the run's process is gone or its pid belongs to another process now (the start time taken at bind no longer matches).
 //!
 //! Also here: the allow-lists for the arguments a run may pass to the three tools it can reach, ported from
@@ -179,6 +180,56 @@ impl RunTokens {
             }
             _ => Ok(serde_json::json!({"ended": self.end(&need("runId")?)})),
         }
+    }
+
+    /// Whether the run still has a token (not ended, not revoked).
+    pub(crate) fn is_live(&self, run_id: &str) -> bool {
+        self.locked().values().any(|e| e.identity.run_id == run_id)
+    }
+
+    /// Ends every token of these people (a person and their bots), bound or not. The count of tokens ended. This is
+    /// the revoke hook: the daemon calls it inside the core call that committed the suspension or removal.
+    // Called from the authority writes, which are Unix only for now.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub(crate) fn end_people(&self, people: &[&str]) -> usize {
+        let mut entries = self.locked();
+        let before = entries.len();
+        entries.retain(|_, e| !people.contains(&e.identity.person.as_str()));
+        before - entries.len()
+    }
+
+    /// What a committed authority write does to the tokens: a suspension or a removal of a person ends the tokens of
+    /// every id the answer names (the person and their bots); removing a bot ends its own. Undo ends nothing and
+    /// revives nothing (the tokens are already gone; a new run mints a new one). Kept separate from the dispatch so a
+    /// change to the doors' hook (M2-14) does not touch it.
+    // Called from the authority writes, which are Unix only for now.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub(crate) fn after_authority_write(
+        &self,
+        method: &str,
+        params: &Value,
+        answer: &Value,
+    ) -> usize {
+        // The id the caller named always ends (`removePerson --unused` answers no ids); the answer's ids add the
+        // canonical id and the person's bots.
+        let mut ids: Vec<&str> = params
+            .get("id")
+            .and_then(Value::as_str)
+            .into_iter()
+            .collect();
+        match method {
+            "people.suspend" | "people.removePerson" => ids.extend(
+                answer
+                    .get("ids")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str),
+            ),
+            "people.removeBot" => {}
+            _ => return 0,
+        }
+        self.end_people(&ids)
     }
 
     #[cfg(test)]
@@ -367,5 +418,34 @@ pub(crate) fn project_args(
             Ok(vec!["--info".to_owned(), (*id).to_owned()])
         }
         Some(_) => Err("only this run's own project is available here"),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_table_holds_the_hash_of_a_token_and_never_the_token() {
+        let t = RunTokens::with(|_, _| true, |_| Some("s".into()));
+        let (token, _) = t
+            .mint(RunIdentity {
+                run_id: String::new(),
+                agent: "echo".into(),
+                person: "sam".into(),
+                conversation: "c".into(),
+                claim: None,
+                room: None,
+                project: None,
+            })
+            .unwrap();
+        let held = t.locked();
+        assert_eq!(held.len(), 1);
+        for (key, entry) in held.iter() {
+            assert_eq!(*key, digest(&token));
+            assert_ne!(key.as_slice(), token.as_bytes());
+            assert!(!format!("{:?}", entry.identity).contains(&token));
+        }
     }
 }
