@@ -40,10 +40,13 @@ pub(crate) mod accounts;
 mod authority;
 mod check;
 pub(crate) mod items;
+// The wake queue's files (M3-7): nothing runs it until the switch (M3-10); the tests do.
 #[cfg(test)]
 mod tests;
 #[allow(dead_code, reason = "wired into kith migrate by M3-10")]
 pub(crate) mod transcripts;
+#[allow(dead_code, reason = "first caller is the switch of kith-wake, M3-10")]
+pub(crate) mod wake;
 
 use std::path::Path;
 

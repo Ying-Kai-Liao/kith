@@ -186,6 +186,13 @@ impl Shared {
                 return Ok(answer);
             }
         }
+        // The wake queue (M3-7): nothing calls these until kith-wake is switched; the daemon runs no drain and fires no waiter.
+        if crate::wake::serves(method) {
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let answer = self.with_core(|c| crate::wake::call(c, method, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         // The ask tree: open, settle and end are claim transactions (M3-8a).
         #[cfg(unix)]
         {

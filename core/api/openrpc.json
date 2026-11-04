@@ -7249,6 +7249,613 @@
       }
     },
     {
+      "name": "wake.enqueue",
+      "summary": "Asks for a turn of a session. Answers `result`: `queued`, `merged` (the session was already owed something: one turn carries both) or `duplicate` (the id is queued, answered or withdrawn: dropped). Refuses a person's session on the run door, and a session that is another person's or agent's.",
+      "params": [
+        {
+          "name": "session",
+          "summary": "The session to wake.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The request's id; one already queued, answered or withdrawn is dropped.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent whose session it is.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person the session serves (needs `--door host`).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "room",
+          "summary": "The room it was asked in.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "door",
+          "summary": "`run` (the kernel resumes the session; the default) or `host` (the host runs the turn).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "why",
+          "summary": "A few words on what happened.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "text",
+          "summary": "What the session is told.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "enqueue"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "session": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "flag",
+            "spellings": [
+              "--id"
+            ]
+          },
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "room": {
+            "kind": "flag",
+            "spellings": [
+              "--room"
+            ]
+          },
+          "door": {
+            "kind": "flag",
+            "spellings": [
+              "--door"
+            ]
+          },
+          "why": {
+            "kind": "flag",
+            "spellings": [
+              "--why"
+            ]
+          },
+          "text": {
+            "kind": "after"
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.withdraw",
+      "summary": "Stop: drops what a session is still owed (not what a running turn already holds), keeping the ids so a late copy is dropped; without `--id` its waiters go too. Answers `count`.",
+      "params": [
+        {
+          "name": "session",
+          "summary": "The session.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "Only this request.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "withdraw"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "session": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "flag",
+            "spellings": [
+              "--id"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.withdrawPerson",
+      "summary": "Revoke or removal: drops what every session of these people is owed, and those sessions' waiters. Answers `count`.",
+      "params": [
+        {
+          "name": "persons",
+          "summary": "The people.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "withdraw-person"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "persons": {
+            "kind": "rest"
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.take",
+      "summary": "The host starts a host-door turn: marks what a session is owed as carried by this holder and answers `turn` (the turn as `kith-wake take` prints it), or null when nothing is owed. Recovers turns whose holder died first (a turn whose marker is in its transcript is answered, one that is not is owed again). A session a live writer holds is still offered, as in the Python: the host answers `back --held`. Creates no turn in the conversations lane yet.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The holder's process id.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "session",
+          "summary": "Only this session.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "sid",
+          "summary": "The Claude session the turn runs in (default: the session itself, when it is one).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "take"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "flag",
+            "spellings": [
+              "--holder"
+            ]
+          },
+          "session": {
+            "kind": "flag",
+            "spellings": [
+              "--session"
+            ]
+          },
+          "sid": {
+            "kind": "flag",
+            "spellings": [
+              "--sid"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.done",
+      "summary": "The turn ended: what it carried is answered (`--how withdrawn`: dropped, not delivered). Answers `done`: false when no turn has that run id.",
+      "params": [
+        {
+          "name": "run",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "how",
+          "summary": "How it ended (default answered).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "done"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "run": {
+            "kind": "positional"
+          },
+          "how": {
+            "kind": "flag",
+            "spellings": [
+              "--how"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.back",
+      "summary": "The turn did not start: what it carried is owed again, after a pause that doubles (5 s to 10 min), and after five failed tries it ends as failed. `--held` (a writer had the session) is not a failed try. Answers `done`: false when no turn has that run id.",
+      "params": [
+        {
+          "name": "run",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "held",
+          "summary": "A writer held the session: owed again soon, not a failed try.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "back"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "run": {
+            "kind": "positional"
+          },
+          "held": {
+            "kind": "switch",
+            "spellings": [
+              "--held"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.queueList",
+      "summary": "What is owed and what is waited for, as `items` (a queue file each), `waiters` and `lines` (what `kith-wake ls` prints).",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "queue-list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "wake.queueStatus",
+      "summary": "Where a request is: `queued`, `running`, how it was answered (`answered`, `failed`, `withdrawn`, ...) or `unknown`, and the turn that carried it, as `{id, state, run}`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request's id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "queue-status"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.wait",
+      "summary": "Wakes a session once something happened: `ci:OWNER/REPO#PR` (its checks finished, or it was merged or closed), `pid:N` (the process exited) or `at:TIME` (`+30m`, or a local `2026-10-27T15:00`). A waiter always has a timeout. Waiting twice on the same thing keeps the first waiter. Answers the waiter as `waiter`.",
+      "params": [
+        {
+          "name": "on",
+          "summary": "What to wait for.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "session",
+          "summary": "The session to wake.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent whose session it is.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "why",
+          "summary": "A few words, told to the session when it wakes.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "timeout",
+          "summary": "Give up after this long (default 6h).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "note",
+          "summary": "A note for the session, told when it wakes.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The caller's KITH_PERSON (a guest may not set waiters).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "via",
+          "summary": "The caller's KITH_VIA (default terminal).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "wait"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "on": {
+            "kind": "flag",
+            "spellings": [
+              "--on"
+            ]
+          },
+          "session": {
+            "kind": "flag",
+            "spellings": [
+              "--session"
+            ]
+          },
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "why": {
+            "kind": "flag",
+            "spellings": [
+              "--why"
+            ]
+          },
+          "timeout": {
+            "kind": "flag",
+            "spellings": [
+              "--timeout"
+            ]
+          },
+          "note": {
+            "kind": "words"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "via": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "ask.open",
       "summary": "Opens an ask: the hop and cost-cap check and the insert of its record in ONE transaction, so no second ask passes the cap between them. Answers `{decision, record}` (the chain, hop and cross hops the record got). A cap that refuses it is an error with the words `kith ask` prints. With `--check-only` nothing is written (`record` is null).",
       "params": [
