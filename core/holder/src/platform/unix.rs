@@ -230,6 +230,7 @@ impl Proc {
                         code: status.code(),
                         signal: status.signal(),
                         error: None,
+                        lapsed: false,
                     });
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
