@@ -27,6 +27,13 @@ mod call;
 #[allow(dead_code, reason = "first callers are lane H")]
 mod cards;
 mod daemon;
+// Nothing calls the doors but the daemon's `doors.*` rows and the tests: the host's sweep and `kith_door.py` switch later.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "first callers are the host's door code after the switch"
+)]
+mod doors;
 // Held terminals start on Unix only for now; elsewhere the relay has nothing to relay.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod attach;

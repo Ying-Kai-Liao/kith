@@ -141,7 +141,7 @@ def check_api(root):
 def check_names(root):
     bad = []
     for rel in files(root):
-        if rel.startswith("core/runtime/") or rel in EXEMPT_NAME or rel.startswith("docs/") or rel.endswith(".md"):
+        if rel.startswith("core/runtime/") or rel in EXEMPT_NAME or rel.startswith(("docs/", "verification/")) or rel.endswith(".md"):
             continue
         path = os.path.join(root, rel)
         try:
@@ -203,6 +203,13 @@ def selftest():
         violate("kith-api names kith_core", append("core/api/src/lib.rs", "\nuse kith_core::Core;\n"), "core/api/src/lib.rs names kith_core")
         violate("core.db in rust", append("serve/host/src/hub.rs", "\n// opens core.db directly\n"), "hub.rs mentions core.db")
         violate("core.db in python", append("kernel/lib/kith_paths.py", "\nDB = 'core.db'\n"), "kith_paths.py mentions core.db")
+        # a TLA+ spec under verification/ is documentation of the model, not code that opens the database
+        spec = os.path.join(tmp, "spec")
+        shutil.copytree(copy, spec)
+        append("verification/x/X.tla", "\\* core.db is the file the lock guards\n")(spec)
+        spec_bad = check(spec)
+        print("%s  a verification/ spec naming core.db passes: %s" % ("ok  " if not spec_bad else "FAIL", spec_bad[:1]))
+        ok &= not spec_bad
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return ok

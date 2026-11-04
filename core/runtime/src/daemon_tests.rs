@@ -850,6 +850,26 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
         }
         other => panic!("{other:?}"),
     }
+    // `may` itself (M2-15): a grant is a yes with its reason, a stranger a no, and the `*` row grants to everyone
+    match read(
+        &p,
+        "people.may",
+        &view(json!({"person": "sam", "agent": "house"})),
+    ) {
+        Reached::Answered(v) => assert_eq!(
+            (v["allowed"].clone(), v["why"].clone()),
+            (json!(true), json!("member"))
+        ),
+        other => panic!("{other:?}"),
+    }
+    match read(
+        &p,
+        "people.may",
+        &view(json!({"person": "nobody", "agent": "house"})),
+    ) {
+        Reached::Answered(v) => assert_eq!(v["allowed"], false),
+        other => panic!("{other:?}"),
+    }
     // a refusal of the rules is an answer about the call, and nothing was written for it
     assert!(matches!(
         read(

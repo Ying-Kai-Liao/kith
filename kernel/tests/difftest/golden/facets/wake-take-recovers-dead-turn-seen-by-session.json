@@ -1,0 +1,16 @@
+{
+  "fakes": "",
+  "state:home/.claude/projects/p/sid-seen.jsonl": "{\"type\": \"user\", \"message\": {\"content\": \"[kith wake <ID12>] hi\"}}\n",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"done\", \"session\": \"sid-seen\", \"run\": \"<ID12>\", \"ids\": [\"a\"], \"how\": \"recovered\"}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/answered.json": "{\n  \"a\": {\n    \"how\": \"recovered\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<EPOCH>\"\n  }\n}\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.json": "[]\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"id\": \"a\",\n  \"run\": \"<ID12>\",\n  \"state\": \"recovered\"\n}\n",
+  "step2.stderr": ""
+}

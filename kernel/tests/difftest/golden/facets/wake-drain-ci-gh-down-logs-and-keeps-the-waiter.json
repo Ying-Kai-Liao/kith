@@ -1,0 +1,14 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/s1.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/waits/.lock": "",
+  "state:home/.kith/sessions/waits/wwwwwwwwwwww.json": "{\n  \"agent\": \"coder\",\n  \"checked\": \"<EPOCH>\",\n  \"created\": \"<EPOCH>\",\n  \"id\": \"wwwwwwwwwwww\",\n  \"kind\": \"ci\",\n  \"note\": \"\",\n  \"on\": \"ci:o/r#5\",\n  \"pr\": 5,\n  \"repo\": \"o/r\",\n  \"seen\": null,\n  \"session\": \"s1\",\n  \"until\": \"<EPOCH>\",\n  \"v\": 1,\n  \"why\": \"\"\n}\n",
+  "state:home/bin/gh-fake": "#!/bin/sh\necho not json\nexit 1\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "s1  coder  waiting wwwwwwwwwwww on ci:o/r#5 until <TS>\n"
+}

@@ -404,6 +404,7 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people undo ann", "people.undo"),
         ("people person clear-temp ann", "people.clearTemp"),
         ("people retired ann", "people.retired"),
+        ("people may ann echo", "people.may"),
     ] {
         let argv: Vec<&str> = line.split(' ').collect();
         let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));

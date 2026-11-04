@@ -70,6 +70,7 @@ jobs:
       cloud: ${{ steps.h.outputs.cloud }}
       licenses: ${{ steps.f.outputs.licenses }}
       threads: ${{ steps.f.outputs.threads }}
+      writer_lock: ${{ steps.f.outputs.writer_lock }}
       revoke: ${{ steps.f.outputs.revoke }}
       secrets: ${{ steps.f.outputs.secrets }}
       lease: ${{ steps.f.outputs.lease }}
@@ -136,6 +137,18 @@ jobs:
               - 'core/kernel/src/threads/**'
               - 'kernel/tests/kith-threads-race'
               - '.github/workflows/ci.yml'
+            # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill).
+            writer_lock:
+              - 'verification/writer-lock/**'
+              - 'verification/threads/run.sh'
+              - '.claude/skills/writer-lock/**'
+              - 'core/stub/**'
+              - 'core/holder/src/holder.rs'
+              - 'core/holder/src/proto.rs'
+              - 'core/runtime/src/holder_link.rs'
+              - 'core/runtime/src/terminal.rs'
+              - 'core/runtime/src/conversations/**'
+              - '.github/workflows/ci.yml'
             # The TLA+ model of revoking a person and the code it covers (the list in the revoke-access skill).
             revoke:
               - 'verification/revoke/**'
@@ -143,6 +156,8 @@ jobs:
               - '.claude/skills/revoke-access/**'
               - 'kernel/bin/kith-auth'
               - 'core/runtime/src/authority/**'
+              - 'core/runtime/src/doors/**'
+              - 'core/runtime/src/migrations/doors/**'
               - 'serve/host/src/channels/**'
               - 'serve/host/src/api/people.rs'
               - 'serve/host/src/api/botguests.rs'
@@ -344,6 +359,26 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/threads/run.sh
+
+  # The same for the writer lock (WriterLock4.tla) and the holder's claim rules (Holder.tla): the fast rows of
+  # verification/writer-lock/checks.tsv. The two slow rows (15-30 min each) run only with `run.sh --all`.
+  writer-lock:
+    needs: changes
+    if: needs.changes.outputs.writer_lock == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check
+        run: verification/writer-lock/run.sh
 
   # The same for revoking a person: verification/revoke/checks.tsv, every row as expected.
   revoke-access:
@@ -972,7 +1007,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, holder-lease, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, writer-lock, holder-lease, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
