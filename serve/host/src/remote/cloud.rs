@@ -2104,8 +2104,9 @@ mod tests {
         assert!(err.downcast_ref::<crate::api::devices::Forbidden>().is_some(), "{err:#}");
         assert_eq!(ids_in_core(true).await, ["req_own", "req_sam"]);
 
-        // The device stored is the one the core answered, not this host's copy of the request.
-        hub.cloud.requests.locked().iter_mut().for_each(|r| r.device_name = "Changed in memory".into());
+        // The device stored is the one the core answered, not this host's copy of the request (a different name or
+        // platform in the copy would be refused first, see `refuse_mismatch`).
+        hub.cloud.requests.locked().iter_mut().for_each(|r| r.email = Some("copy@example.com".into()));
         decide_in_core(&hub, "req_sam", true, false, true).await.unwrap();
         let d = hub.store.device(&b64(&[2; 32])).unwrap();
         assert_eq!(
