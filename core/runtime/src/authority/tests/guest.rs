@@ -275,3 +275,45 @@ fn the_kept_domains_survive_a_write_beside_them() {
         "kept.example"
     );
 }
+
+/// The sync file is where kith serve writes it for the CALLER (its `KITH_SERVE_DIR`, else `<its home>/.kith/serve`),
+/// not under the machine folder, which is not `~/.kith` for a `KITH_STATE` elsewhere or an old `~/.hq`.
+#[test]
+fn bridge_held_reads_the_callers_serve_folder_not_the_machine_folder() {
+    let mut rig = rig();
+    let home = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let kernel = home.path().join("kernel");
+    std::fs::create_dir_all(&kernel).unwrap();
+    let held = |rig: &mut Rig, env: Value| {
+        super::super::call::call(
+            &mut rig.core,
+            "people.bridgeHeld",
+            &json!({"person": "sam", "home": home.path(), "kernel": kernel, "env": env}),
+        )
+        .unwrap()["held"]
+            .as_bool()
+            .unwrap()
+    };
+    let old = r#"{"linked": true, "until": 1}"#;
+    let env = json!({"KITH_STATE": elsewhere.path()});
+    assert!(!held(&mut rig, env.clone()), "no file: never linked");
+    let default = home.path().join(".kith/serve");
+    std::fs::create_dir_all(&default).unwrap();
+    std::fs::write(default.join("cloud-sync.json"), old).unwrap();
+    assert!(
+        held(&mut rig, env),
+        "the home's .kith/serve, though the machine is elsewhere"
+    );
+    let given = elsewhere.path().join("data");
+    std::fs::create_dir_all(&given).unwrap();
+    std::fs::write(
+        given.join("cloud-sync.json"),
+        r#"{"linked": true, "until": 4102444800000}"#,
+    )
+    .unwrap();
+    assert!(
+        !held(&mut rig, json!({"KITH_SERVE_DIR": given})),
+        "KITH_SERVE_DIR wins"
+    );
+}

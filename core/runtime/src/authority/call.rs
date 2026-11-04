@@ -5,6 +5,7 @@
 //! `people.list` and `people.invites` answer `{"rows": [...]}` instead, and `people.invite` also names the `code`.
 
 use std::io::Read as _;
+use std::path::{Path, PathBuf};
 
 use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
 use serde_json::{Value, json};
@@ -47,8 +48,33 @@ pub(crate) fn serves(method: &str) -> bool {
     )
 }
 
+/// Where kith serve keeps `cloud-sync.json` for this caller: its `KITH_SERVE_DIR`, else `<its home>/.kith/serve`
+/// (what `kernel/bin/kith-serve` does). Not `<machine>/serve`: the machine folder is not always `~/.kith`, and a wrong
+/// guess reads "never linked", which stops an out-of-sync Mac holding guests. Worked out before the transaction, so no
+/// `kith-serve` process runs under the write lock.
+fn serve_dir_of(params: &Value, home: &Path) -> PathBuf {
+    let caller_env = params.get("home").is_some() || params.get("env").is_some();
+    let given = if caller_env {
+        params
+            .get("env")
+            .and_then(Value::as_object)
+            .and_then(|e| e.get("KITH_SERVE_DIR"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    } else {
+        std::env::var("KITH_SERVE_DIR").ok()
+    };
+    given
+        .filter(|d| !d.is_empty())
+        .map_or_else(|| home.join(".kith/serve"), PathBuf::from)
+}
+
 pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let (folders, kernel) = core.folders_for(params)?;
+    let home = params
+        .get("home")
+        .and_then(Value::as_str)
+        .map_or_else(|| folders.home.clone(), PathBuf::from);
     Ok(Ctx {
         auth: folders.secrets.join("auth.json"),
         agents: folders.agents.clone(),
@@ -56,7 +82,7 @@ pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
         person: None,
         now_ms: secrets::now_ms(),
         sandbox: Sandbox::Fixed(false),
-        serve: ServeDir::Fixed(folders.machine.join("serve")),
+        serve: ServeDir::Fixed(serve_dir_of(params, &home)),
     })
 }
 
@@ -109,8 +135,6 @@ fn new_code() -> Result<String> {
         .collect())
 }
 
-/// Answers a `people.*` method over this core, as the caller's view (`kernel`, `home`, `env` in the params) sees the
-/// agent folders.
 /// `kith-auth resolve AGENT [--person P] [--via V] [--take-once]` (M2-1b): what a run gets, and `held`. With `takeOnce`
 /// and `via`, a refused launch is asked again counting a "just this once" grant, and the grant is used up in the SAME
 /// transaction that decided, so two launches cannot both ride one grant, and a removal between the card and the launch
@@ -141,24 +165,9 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
         if !wants {
             return Ok((res, held));
         }
-        let rules = Rules::new(c, a);
-        let person = person_of(&rules);
-        res = rules.resolve(agent, &person, via, true)?;
-        let (allowed, who) = (
-            res.get("allowed") == Some(&Value::Bool(true)),
-            res.get("person")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-        );
-        drop(rules);
-        if allowed && secrets::take_once(a, &who, agent, via) {
-            let why = format!(
-                "{} (just this once)",
-                res.get("why").and_then(Value::as_str).unwrap_or_default()
-            );
-            res.insert("why".to_owned(), why.into());
-        }
+        let person = person_of(&Rules::new(c, a));
+        let via = via.unwrap_or_default();
+        (res, _) = secrets::resolve_taking_once(c, a, agent, &person, via)?;
         Ok((res, held))
     })?;
     Ok(answer(res, held))
@@ -169,6 +178,8 @@ fn answer(mut res: serde_json::Map<String, Value>, held: bool) -> Value {
     Value::Object(res)
 }
 
+/// Answers a `people.*` method over this core, as the caller's view (`kernel`, `home`, `env` in the params) sees the
+/// agent folders.
 pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     let c = ctx_of(core, params)?;
     let life = life_of(core, params)?;

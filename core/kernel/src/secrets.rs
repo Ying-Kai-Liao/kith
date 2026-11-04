@@ -1109,6 +1109,37 @@ pub fn take_once(auth: &mut Value, person: &str, agent: &str, via: Option<&str>)
     left.shift_remove(agent).is_some()
 }
 
+/// `resolve --take-once` in one place for the CLI and the core: ask again counting a "just this once" grant, and use the
+/// grant up in this same step when it let the launch through. The caller holds the auth lock and saves when the second
+/// part is true.
+pub fn resolve_taking_once(
+    c: &Ctx,
+    auth: &mut Value,
+    agent: &str,
+    person: &str,
+    via: &str,
+) -> Result<(Map<String, Value>, bool), Die> {
+    let rules = Rules::new(c, auth);
+    let mut res = rules.resolve(agent, person, Some(via), true)?;
+    let (allowed, who) = (
+        res.get("allowed") == Some(&Value::Bool(true)),
+        res.get("person")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    );
+    drop(rules);
+    if allowed && take_once(auth, &who, agent, Some(via)) {
+        let why = format!(
+            "{} (just this once)",
+            res.get("why").and_then(Value::as_str).unwrap_or_default()
+        );
+        res.insert("why".to_owned(), why.into());
+        return Ok((res, true));
+    }
+    Ok((res, false))
+}
+
 // --- the command line ---------------------------------------------------------------------------------------------------
 
 /// What a `kith-auth` command prints and exits with.
@@ -1223,20 +1254,11 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
             // the check of revoke and access, so a removal between the card and the launch still wins
             drop(rules);
             let mut locked = load_auth_locked(c)?;
-            let rules = Rules::new(c, &locked.auth);
-            res = rules.resolve(agent, &person, via, true)?;
-            let (allowed, who) = (
-                res["allowed"] == Value::Bool(true),
-                res["person"].as_str().unwrap_or_default().to_owned(),
-            );
-            drop(rules);
-            if allowed && take_once(&mut locked.auth, &who, agent, via) {
+            let (r, spent) =
+                resolve_taking_once(c, &mut locked.auth, agent, &person, via.unwrap_or_default())?;
+            res = r;
+            if spent {
                 save_auth(c, &locked)?;
-                let why = format!(
-                    "{} (just this once)",
-                    res["why"].as_str().unwrap_or_default()
-                );
-                res.insert("why".to_owned(), why.into());
             }
         }
         // held: as in `who`, this Mac is out of sync with the Kith cloud and person isn't the owner
