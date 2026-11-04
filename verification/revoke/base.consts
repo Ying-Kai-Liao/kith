@@ -32,3 +32,6 @@ HandleStoreFirst = FALSE
 HandleApplyFails = FALSE
 Removal = FALSE
 RemoveKeeps = FALSE
+CardsOn = FALSE
+CardNoWithdraw = FALSE
+CardUndoRevives = FALSE

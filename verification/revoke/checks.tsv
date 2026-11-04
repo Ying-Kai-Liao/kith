@@ -104,3 +104,12 @@ removal	INVARIANT	NoOrphan	pass
 broken-removal-orphans	INVARIANT	NoOrphan	fail
 core-door	INVARIANT	NeverDoorKilled	fail
 core-bot-door	INVARIANT	NeverBotDoorKilled	fail
+# --- the core's cards (M2-11b): a revoke withdraws P's and B's open cards and unused once-grants in its own step; undo revives none -----
+cards	INVARIANT	TypeOK	pass
+cards	PROPERTY	CardsCut	pass
+cards	PROPERTY	CardNoResurrect	pass
+broken-card-no-withdraw	PROPERTY	CardsCut	fail
+broken-card-undo-revives	PROPERTY	CardsCut	fail
+broken-card-undo-revives	PROPERTY	CardNoResurrect	fail
+cards	INVARIANT	NeverCardUsed	fail
+cards	INVARIANT	NeverCardWithdrawn	fail
