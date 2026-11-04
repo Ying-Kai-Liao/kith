@@ -111,6 +111,7 @@ pub(super) const fn row(
             aliases: &[],
             formats: &[],
             requires: &[],
+            hidden: false,
         },
         stability,
         served,
@@ -131,9 +132,10 @@ impl Method {
         self
     }
     /// A row no command line reaches: the CLI always connects as the owner, so a host-only row's verb could only be
-    /// refused. An empty path is how the table says so (`cli::find` skips it).
+    /// refused.
     pub(super) const fn no_cli(mut self) -> Self {
         self.cli.path = &[];
+        self.cli.hidden = true;
         self
     }
     pub(super) const fn principals(mut self, p: &'static [Principal]) -> Self {

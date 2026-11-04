@@ -101,8 +101,8 @@ fn every_row_is_well_formed() {
             }
         }
         for spelling in std::iter::once(m.cli.path).chain(m.cli.aliases.iter().copied()) {
-            // A host-only row has no command line (an empty path); only the rows that have one can collide.
-            if spelling.is_empty() {
+            // A hidden (host-only) row has no command line, so it cannot collide.
+            if m.cli.hidden {
                 continue;
             }
             let key = format!("{spelling:?}+{:?}", m.cli.requires);
@@ -598,7 +598,7 @@ fn the_sync_lease_rows_are_experimental_unreleased_and_parse_and_the_writes_are_
     // The CLI always connects as the owner, so the host-only rows have no command line; `mark` and `status` keep theirs.
     for name in HOST_ROWS {
         let verb = name.trim_start_matches("syncLease.");
-        assert!(method(name).unwrap().cli.path.is_empty(), "{name}");
+        assert!(method(name).unwrap().cli.hidden, "{name}");
         assert!(parse_argv(&["sync-lease", verb]).is_err(), "{name}");
     }
     assert!(parse_argv(&["sync-lease", "mark"]).is_ok());

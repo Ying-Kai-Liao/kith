@@ -144,6 +144,9 @@ pub struct Cli {
     pub formats: &'static [&'static str],
     /// Literal switches that must be there, and mean nothing else (`kith ls --json`, `kith AGENT --launch-json`).
     pub requires: &'static [&'static str],
+    /// No command line reaches this row: the CLI always connects as the owner, so a row only another principal may call
+    /// (the host's sync-lease writes) could only be refused there. `path` is empty, as for `kith AGENT --launch-json`.
+    pub hidden: bool,
 }
 
 /// One row of the table.

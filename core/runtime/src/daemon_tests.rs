@@ -219,7 +219,8 @@ fn a_client_that_skips_the_handshake_or_gets_the_token_wrong_is_refused_and_runs
 /// reaches the daemon's own checks, which the client library (it reads the host secret first) never tests.
 #[cfg(unix)]
 #[test]
-fn a_hello_naming_the_host_but_proving_the_owner_token_is_unauthorized_and_an_unknown_principal_is_a_protocol_error() {
+fn a_hello_naming_the_host_but_proving_the_owner_token_is_unauthorized_and_an_unknown_principal_is_a_protocol_error()
+ {
     let (_t, m) = machine();
     let p = paths(&m);
     let d = serving(&p, quiet());
@@ -230,7 +231,8 @@ fn a_hello_naming_the_host_but_proving_the_owner_token_is_unauthorized_and_an_un
     c.send(1, "hello", &json!({"protocol": crate::owner::PROTOCOL, "version": "x", "schema": schema, "nonce": "cc", "principal": "host"}));
     let hello = c.recv().expect("hello");
     let server_nonce = hello["result"]["nonce"].as_str().expect("nonce").to_owned();
-    let mine = kith_holder::auth::proof(owner_token.trim().as_bytes(), "cli", "cc", &server_nonce, 0);
+    let mine =
+        kith_holder::auth::proof(owner_token.trim().as_bytes(), "cli", "cc", &server_nonce, 0);
     c.send(2, "auth", &json!({"proof": mine}));
     let refusal = c.recv().expect("refusal");
     assert_eq!(refusal["error"]["code"], -32003, "{refusal}");
@@ -241,7 +243,10 @@ fn a_hello_naming_the_host_but_proving_the_owner_token_is_unauthorized_and_an_un
         let mut c = Raw::connect(&m);
         c.send(1, "hello", &json!({"protocol": crate::owner::PROTOCOL, "version": "x", "schema": schema, "nonce": "dd", "principal": who}));
         let refusal = c.recv().expect("refusal");
-        assert_eq!(refusal["error"]["data"]["kind"], "protocol", "{who:?}: {refusal}");
+        assert_eq!(
+            refusal["error"]["data"]["kind"], "protocol",
+            "{who:?}: {refusal}"
+        );
         assert!(c.recv().is_none(), "{who:?}: the connection is closed");
     }
     assert_eq!(d.served(), 0, "nothing ran");
