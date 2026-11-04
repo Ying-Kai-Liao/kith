@@ -1,7 +1,7 @@
 //! Track Registry package releases without interrupting running connectors.
 
 use super::{Connector, connectors, install::package_reference, registry::registry_server, update_connectors};
-use crate::{LockExt, hub::Hub, store::Store};
+use crate::{hub::Hub, store::Store};
 use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -16,7 +16,7 @@ pub async fn automatic_loop(hub: Arc<Hub>) {
     loop {
         // Clients and bot sessions unlock the vault when needed. Background
         // updates must not cause an unsolicited keychain prompt at login.
-        if hub.store.secret_key.locked().is_some()
+        if hub.store.vault.is_open()
             && let Err(error) = tracker.refresh_due(&hub.store, Instant::now(), registry_server).await
         {
             tracing::warn!(error = format!("{error:#}"), "connector update check failed");

@@ -74,9 +74,7 @@ async fn run(hub: &Arc<Hub>, cfg: &BotConfig, system: &str, user: &str, plain: b
     let cwd = crate::service::data_dir().join("background");
     tokio::fs::create_dir_all(&cwd).await?;
     let cwd = cwd.to_string_lossy().into_owned();
-    if hub.store.kv_read(&format!("agent-env:{}", cfg.backend))?.is_some() {
-        crate::market::vault::unlock(hub.clone()).await?;
-    }
+    crate::market::vault::unlock_if_sealed(hub, crate::agent::auth::env_slot(&cfg.backend)).await?;
     let mut env = crate::agent::auth::env(&hub.store, &cfg.backend)?;
     let mut commands = match std::env::var(crate::agent::hq::ACP_COMMAND_ENV) {
         Ok(command) if plain && !command.is_empty() => vec![command],

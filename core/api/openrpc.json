@@ -6664,6 +6664,199 @@
       }
     },
     {
+      "name": "secrets.open",
+      "summary": "Load the machine's secrets key from the OS key store (making it on a first use), so later calls do not wait for the store.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "open"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "secrets.has",
+      "summary": "Whether a secret of that name is stored. Needs no key, so it never waits on the OS key store.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "has"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "secrets.delete",
+      "summary": "Remove a secret. Needs no key.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "delete"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "secrets.get",
+      "summary": "A secret's value, or that there is none.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "get"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "secrets.put",
+      "summary": "Store a secret sealed under the machine's key, replacing an earlier value of that name.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The secret's name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "value",
+          "summary": "The value, from the caller (never a word of the command line).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "secrets",
+          "put"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          },
+          "value": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "gate.list",
       "summary": "The gate's slots and the line, in the order the line is kept. Frees holders whose process is gone first.",
       "params": [],
@@ -6924,19 +7117,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "link"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -6948,19 +7139,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "unlink"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -6972,7 +7161,8 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "owner",
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
@@ -6996,19 +7186,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "changed"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -7020,19 +7208,17 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "drop"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {}
+        "args": {},
+        "hidden": true
       }
     },
     {
@@ -7061,15 +7247,12 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "pulled"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
@@ -7083,7 +7266,8 @@
               "--ms"
             ]
           }
-        }
+        },
+        "hidden": true
       }
     },
     {
@@ -7104,15 +7288,12 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
       "x-kith-cli": {
-        "path": [
-          "sync-lease",
-          "renew"
-        ],
+        "path": [],
         "aliases": [],
         "formats": [],
         "requires": [],
@@ -7123,7 +7304,8 @@
               "--ms"
             ]
           }
-        }
+        },
+        "hidden": true
       }
     },
     {
@@ -7777,6 +7959,126 @@
         "args": {
           "agent": {
             "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.tick",
+      "summary": "Fire what is due at `now` (the caller's clock, ms; this machine's by default): one transaction per job that writes its fire row, its turn and the watermark. Catch-up fires only the latest due slot inside a day; older ones are kept as one `skipped:missed` row. Nothing runs this on a clock yet: `kith-sched` owns jobs.json until M4-5.",
+      "params": [
+        {
+          "name": "now",
+          "summary": "The clock, ms since the epoch (this machine's by default).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "tick"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.runNow",
+      "summary": "Run a job now through the same fire: it obeys the skip rule. A busy job answers `busy` and writes nothing, so a retry fires once it is free; a `key` that was decided answers what was decided; a paused or revoked job answers final.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "key",
+          "summary": "The run's own key (letters, digits, - _ .); a retry with the same key is the same run.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, ms since the epoch (this machine's by default).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "run-now"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "key": {
+            "kind": "flag",
+            "spellings": [
+              "--key"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
           }
         }
       }

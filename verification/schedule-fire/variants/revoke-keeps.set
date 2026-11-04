@@ -1,0 +1,4 @@
+MaxEdits = 0
+MaxRevs = 1
+RevokeCancels = FALSE
+MaxTurns = 2

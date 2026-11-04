@@ -13,8 +13,9 @@
 //! Record names are stored in plaintext (they are the associated data and `list` needs them); only values are secret.
 //! Zeroizing is best effort: stack copies and formatted buffers are not tracked.
 //!
-//! Secret cards write through it (`cards/secret.rs`, M2-12). Nothing else calls this yet: the host vault and kith-auth's Keychain writes move onto it at M2-7 / M2-18, and the
-//! signed daemon reads the key through Security.framework at M2-6.
+//! Secret cards write through it (`cards/secret.rs`, M2-12). The host vault calls it through the owner socket's
+//! `secrets.open|get|put` rows ([`call`], M2-7); kith-auth's Keychain writes move onto it at M2-18, and the signed
+//! daemon reads the key through Security.framework at M2-6.
 
 pub(crate) mod keystore;
 #[cfg(test)]
@@ -25,11 +26,74 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
 };
 use rusqlite::{Connection, OptionalExtension as _, params};
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
+use std::sync::Mutex;
 use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 use keystore::{KEY_LEN, KeyStore};
+
+/// The `secrets.*` rows of the method table, on the core's connection. The envelope is made on the first call and kept
+/// (it holds the master key once read); where the OS has no key store the call refuses, every time, and nothing is
+/// stored. Values cross as text: the host's vault only keeps text.
+pub(crate) fn call(
+    conn: &Connection,
+    slot: &Mutex<Option<Envelope>>,
+    method: &str,
+    params: &Value,
+) -> Result<Value> {
+    let text = |field: &str| {
+        params
+            .get(field)
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::BadParams(format!("kith-core: {method} needs {field}")))
+    };
+    // Whether a record exists needs no key and no key store, so a caller that has not opened the vault can still tell
+    // "nothing there" from "locked" without a prompt.
+    if method == "secrets.has" {
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM secret_records WHERE name = ?1",
+                [text("name")?],
+                |r| r.get(0),
+            )
+            .optional()?;
+        return Ok(json!({"has": found.is_some()}));
+    }
+    // Removing a record needs no key either.
+    if method == "secrets.delete" {
+        return Ok(json!({"deleted": Envelope::delete(conn, text("name")?)?}));
+    }
+    let mut guard = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if guard.is_none() {
+        *guard = Some(Envelope::os()?);
+    }
+    let envelope = guard.as_mut().ok_or_else(unreachable_key)?;
+    match method {
+        "secrets.open" => {
+            envelope.key(conn, true)?;
+            Ok(json!({"open": true}))
+        }
+        "secrets.get" => Ok(match envelope.get(conn, text("name")?)? {
+            None => json!({"found": false}),
+            Some(bytes) => {
+                let value = std::str::from_utf8(&bytes)
+                    .map_err(|_| Error::Corrupt("kith-core: the secret is not text".into()))?;
+                json!({"found": true, "value": value})
+            }
+        }),
+        "secrets.put" => {
+            envelope.put(conn, text("name")?, text("value")?.as_bytes())?;
+            Ok(json!({}))
+        }
+        _ => Err(Error::NotServed(format!(
+            "kith-core: {method} is not answered in the core yet"
+        ))),
+    }
+}
 
 /// Longest record name, in bytes. Names are the associated data, so they stay short and printable-ish.
 const MAX_NAME: usize = 256;
@@ -161,15 +225,7 @@ impl Envelope {
     fn key(&mut self, conn: &Connection, create: bool) -> Result<Option<Zeroizing<[u8; KEY_LEN]>>> {
         if self.key.is_none() {
             if let Some(raw) = self.store.get()? {
-                {
-                    let arr: [u8; KEY_LEN] = raw.as_slice().try_into().map_err(|_| {
-                        Error::Io(
-                            "kith-core: the secrets master key in the key store has the wrong length; it was left untouched"
-                                .into(),
-                        )
-                    })?;
-                    self.key = Some(Zeroizing::new(arr));
-                }
+                self.key = Some(key_array(&raw)?);
             } else {
                 {
                     let records: i64 =
@@ -209,6 +265,46 @@ impl Envelope {
         Ok(self.key.clone())
     }
 }
+
+fn key_array(raw: &[u8]) -> Result<Zeroizing<[u8; KEY_LEN]>> {
+    let arr: [u8; KEY_LEN] = raw.try_into().map_err(|_| {
+        Error::Io(
+            "kith-core: the secrets master key in the key store has the wrong length; it was left untouched".into(),
+        )
+    })?;
+    Ok(Zeroizing::new(arr))
+}
+
+/// Reads the master key from the OS key store through `load`, for the daemon to call before it takes the core lock: a
+/// key store that stalls (a locked keychain waits up to 30 s) then holds up only this call, never the owner socket's
+/// other rows. `None` means no key is stored yet (the call that follows decides whether that is empty or an error).
+pub(crate) fn preload(
+    load: &dyn Fn() -> Result<Option<Zeroizing<Vec<u8>>>>,
+) -> Result<Option<Zeroizing<[u8; KEY_LEN]>>> {
+    load()?.map(|raw| key_array(&raw)).transpose()
+}
+
+/// Hands a key read by [`preload`] to the envelope in `slot`, so the call under the core lock finds it loaded.
+pub(crate) fn adopt(slot: &Mutex<Option<Envelope>>, key: Zeroizing<[u8; KEY_LEN]>) -> Result<()> {
+    let mut guard = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if guard.is_none() {
+        *guard = Some(Envelope::os()?);
+    }
+    if let Some(envelope) = guard.as_mut() {
+        envelope.key.get_or_insert(key);
+    }
+    Ok(())
+}
+
+/// The OS key store's read, as the daemon uses it unless a test supplies another.
+pub(crate) fn os_load() -> Result<Option<Zeroizing<Vec<u8>>>> {
+    keystore::os_key_store()?.get()
+}
+
+pub(crate) type KeyLoader =
+    std::sync::Arc<dyn Fn() -> Result<Option<Zeroizing<Vec<u8>>>> + Send + Sync>;
 
 fn unreachable_key() -> Error {
     Error::Io("kith-core: the secrets master key is unavailable".into())

@@ -395,14 +395,13 @@ impl Store {
         )?;
         migrate(&c)?;
         kith_mem::schema::migrate(&c)?;
-        let secret_key = if path == Path::new(":memory:") {
-            let mut key = vec![0; 32];
-            getrandom::fill(&mut key).map_err(|_| anyhow::anyhow!("random key unavailable"))?;
-            Some(zeroize::Zeroizing::new(key))
-        } else {
-            None
-        };
-        Ok(Self { db: Mutex::new(c), connector_lock: Mutex::new(()), secret_key: Mutex::new(secret_key) })
+        // A test never talks to a daemon: its vault is an in-memory stand-in for the core's envelope, open for a memory
+        // store and locked until `unlock` for a file one, as the real one is.
+        #[cfg(test)]
+        let vault = crate::market::vault::memory::vault(path == Path::new(":memory:"));
+        #[cfg(not(test))]
+        let vault = crate::market::vault::Vault::new();
+        Ok(Self { db: Mutex::new(c), connector_lock: Mutex::new(()), vault })
     }
 }
 

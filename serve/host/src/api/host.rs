@@ -29,7 +29,7 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             tokio::task::spawn_blocking(move || crate::update::spawn_worker(port, force, skip_app_check)).await??;
             json!({"scheduled": true})
         }
-        "routerStatus" => crate::chat::router::status(&hub.store)?,
+        "routerStatus" => crate::chat::router::status(hub).await?,
         "setRouterKey" => crate::chat::router::set_key(hub, b["key"].as_str().unwrap_or_default()).await?,
         // Jev sorting a finished reply into a Result card: the owner's switch, off until turned on.
         "jevCardsStatus" => crate::rich_card::jev::status(&hub.store),
