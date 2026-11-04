@@ -59,7 +59,7 @@ impl Module for Accounts {
             match have.get(id) {
                 None => diffs.push(format!("{id}: in state.json, not in the core")),
                 Some(got) if got != want => {
-                    diffs.push(format!("{id}: state.json says {want}, the core says {got}"))
+                    diffs.push(format!("{id}: state.json says {want}, the core says {got}"));
                 }
                 Some(_) => {}
             }

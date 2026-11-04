@@ -10,6 +10,10 @@ use crate::cutover::{Env, Module, marker, rollback, state, step, tombstone};
 use crate::cutover::{Opts, check, registry};
 use crate::tests::machine;
 
+fn no_diffs() -> Vec<String> {
+    Vec::new()
+}
+
 fn opts() -> Opts {
     Opts::default()
 }
@@ -259,7 +263,7 @@ fn accounts_same_answer_catches_a_seeded_difference() {
     let mut core = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
     let m = super::accounts::Accounts;
     m.import(&env, Some(&mut core), opts()).unwrap();
-    assert!(m.same_answer(&env, core.conn()).unwrap().is_empty());
+    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
     core.conn()
         .execute(
             "UPDATE account_state SET out_until = 5 WHERE id = 'claude:work'",
@@ -297,9 +301,9 @@ fn accounts_a_file_that_says_nothing_has_nothing_to_compare() {
     let m = super::accounts::Accounts;
     let core = crate::tests::open_all(&env.layout);
     std::fs::write(&file, "{not json").unwrap();
-    assert!(m.same_answer(&env, core.conn()).unwrap().is_empty());
+    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
     std::fs::remove_file(&file).unwrap();
-    assert!(m.same_answer(&env, core.conn()).unwrap().is_empty());
+    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
 }
 
 #[test]
@@ -309,7 +313,7 @@ fn accounts_two_steps_at_once_one_refuses() {
     let held = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
     let err = step(&registry(), &env, "accounts", opts()).unwrap_err();
     drop(held);
-    assert!(!err.to_string().is_empty());
+    assert_ne!(err.to_string(), "");
     assert!(!kith_kernel::accounts::tombstoned(&env.machine));
     step(&registry(), &env, "accounts", opts()).unwrap();
 }
@@ -337,7 +341,7 @@ fn transcripts_have_no_python_writer_to_tombstone_and_the_step_switches() {
     register(&env, "s-one", "/work");
     register(&env, "s-two", "/other");
     let m = super::transcripts::Transcripts;
-    assert!(m.tombstones(&env).is_empty());
+    assert_eq!(m.tombstones(&env), Vec::<std::path::PathBuf>::new());
     let out = step(&reg, &env, "transcripts", opts()).unwrap();
     assert!(out.iter().any(|l| l.contains("same answer")), "{out:?}");
     assert!(serves(&env, &m));
@@ -362,7 +366,7 @@ fn transcripts_same_answer_catches_a_missing_and_a_changed_session() {
     let mut core = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
     assert_eq!(m.same_answer(&env, core.conn()).unwrap().len(), 1);
     m.import(&env, Some(&mut core), opts()).unwrap();
-    assert!(m.same_answer(&env, core.conn()).unwrap().is_empty());
+    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
     // A session registered after the import, and one whose working folder moved.
     register(&env, "s-new", "/w2");
     register(&env, "s-one", "/elsewhere");
@@ -377,9 +381,9 @@ fn transcripts_same_answer_catches_a_missing_and_a_changed_session() {
     // The core holding a session the registry does not have is not a difference.
     std::fs::remove_file(registry_dir(&env).join("s-new.json")).unwrap();
     register(&env, "s-one", "/work");
-    assert!(m.same_answer(&env, core.conn()).unwrap().is_empty());
+    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
     std::fs::remove_file(registry_dir(&env).join("s-one.json")).unwrap();
-    assert!(m.same_answer(&env, core.conn()).unwrap().is_empty());
+    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
 }
 
 #[test]
