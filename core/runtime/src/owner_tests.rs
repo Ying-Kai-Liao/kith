@@ -14,7 +14,7 @@ use crate::tests::machine;
 fn serving(m: &std::path::Path, handler: Arc<Handler>) -> (Layout, Server) {
     let l = Layout::new(m);
     crate::perms::ensure_dir(&l.dir).expect("dir");
-    let server = Server::bind(&l, 1, handler).expect("bind");
+    let server = Server::bind(&l, 1, handler, false).expect("bind");
     (l, server)
 }
 
