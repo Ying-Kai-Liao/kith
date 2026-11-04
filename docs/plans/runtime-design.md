@@ -170,7 +170,7 @@ live turn:
    takes the conversation's writer lock (fd CLOEXEC; busy = the claim ends and the turn parks, see the writer lock),
    then redeems the run token: a transaction that re-checks may and the lease again and moves the claim `claimed ->
    running`. Only then the stub starts the engine as its child (never exec) and stays as its parent, holding the
-   lock, until the engine exits. A revoke, stop or narrowing moves the same row to `ended` and asks the holder to
+   lock, until the engine exits. A revoke, stop or narrowing moves the same row to `ending` (then `ended` once confirmed gone) and asks the holder to
    kill the whole group, stub included.
 4. Exits stay in the holder until a core acks them; the ack releases the claim and marks the turn done or requeues
    it in one transaction.
@@ -187,7 +187,7 @@ live turn:
 7. **A holder that is not the one the core last knew.** When a core's hello meets a holder whose `instance` (random per
    holder start, in the welcome) differs from the one it last recorded, the old holder is gone, and on Unix nothing
    killed its processes (a pty hangup or end of input usually ends them, not always). The core kills every process
-   group the old instance reported, matching by pid and start time so a reused pid is never hit, and confirms they are
+   group the old instance reported, matching by pid and start time (or the redeem's recorded pid) so a reused pid is never hit, and confirms they are
    gone before it releases their claims. Windows needs no extra step: each spawn's job kills on close. This belongs to
    M0c (the core's side of hello) and M3 (claims); the model gains "holder crash" at M3.
 

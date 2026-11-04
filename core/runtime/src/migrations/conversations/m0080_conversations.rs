@@ -14,7 +14,8 @@
 //!   gone: still the writer, persists across restarts, the kill is re-sent until the holder reports it gone, step 6),
 //!   `ended` (gone). At most one claim per conversation is `claimed`, `running` or `ending` (the partial unique index
 //!   `claims_one_writer`: the row itself refuses a second writer). `pid` and `pid_started` (text, as `lock::process_start`
-//!   and the holder's process list give it) are for `external` writers only; `person` and `turn` say whose work it is.
+//!   gives it) are the writer's process: an external run's own (required, CHECK), or for terminal and turn claims the
+//!   stub's, recorded by the redeem (M3-2); `person` and `turn` say whose work it is.
 //!   `generation` is the core's at the claim; `holder_instance` is the holder the spawn went to (step 7).
 //! - `turns`: the queue of work. A turn names its current `claim_id` (NULL while queued or parked). `parked` turns wait
 //!   for the writer lock (`parked_reason` = `lock_busy`, `terminal_live`); `deadline` expires a scheduled run (q218).
@@ -35,7 +36,8 @@
 //! 1. Claim: re-check may (other lanes' tables, in code), `next_claim_id`, `INSERT claims (state 'claimed', generation)`;
 //!    `UPDATE turns SET claim_id, state 'claimed'`. The partial index fails the insert when a writer exists.
 //! 2. Spawn: after commit; `claims.holder_instance` is set in the step-1 transaction.
-//! 3. Redeem (the stub, through the core): `claims` 'claimed' -> 'running' with `running_at`; `turns` 'running'.
+//! 3. Redeem (the stub, through the core): CAS `claims` 'claimed' -> 'running' (only if still current), recording
+//!    `running_at`, `pid`, `pid_started` (and the holder instance); `turns` 'running'.
 //!    A busy lock: `claims` -> 'ended' (`end_reason` 'busy'), `turns` -> 'parked' (`lock_busy`, `claim_id` NULL).
 //!    Revoke or stop: `claims` -> 'ending' (the kill is re-sent until gone, then 'ended') and the turn dropped or requeued
 //!    in the same transaction.
@@ -44,9 +46,10 @@
 //!    turns; claims are refused until it commits (the check is in code, the generation guard is `claim_tx`).
 //! 6. Revoke: `turns` of the person in 'queued' / 'parked' are cancelled, live claims 'ending' (`claims.person`).
 //! 7. A different holder: `claims` with the old `holder_instance` and state 'claimed' / 'running' / 'ending' are the ones
-//!    to end (index `claims_holder`); the pids and start times to kill are the old instance's process list in
-//!    `meta.holder_procs`, matched by pid and start time. `claims.pid` is for
-//!    external writers only.
+//!    to end (index `claims_holder`); the pids to kill are the claim's recorded `pid`/`pid_started` (the redeem's), plus
+//!    `meta.holder_procs` for processes with no redeem, matched by pid and start time. A running claim the new instance
+//!    does not list goes to 'ending', never to 'ended', until that pid is confirmed gone; a 'claimed' one is ended by
+//!    CAS so a late redeem fails.
 //!
 //! No SQL foreign key to another lane's table (people, agents, cards): those links live in code. The tables here point
 //! at each other, which is the same lane.
