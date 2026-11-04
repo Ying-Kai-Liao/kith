@@ -268,7 +268,7 @@ mod claims {
 // --- through a real daemon and a real holder -------------------------------------------------------------------------
 
 #[cfg(unix)]
-mod daemon {
+pub(crate) mod daemon {
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
@@ -284,14 +284,14 @@ mod daemon {
     use crate::{Reached, reach};
 
     /// A short folder: a Unix socket path holds about a hundred bytes.
-    fn sandbox() -> tempfile::TempDir {
+    pub(crate) fn sandbox() -> tempfile::TempDir {
         tempfile::Builder::new()
             .prefix("kto")
             .tempdir_in("/tmp")
             .unwrap()
     }
 
-    fn holder_bin() -> PathBuf {
+    pub(crate) fn holder_bin() -> PathBuf {
         let exe = std::env::current_exe().unwrap();
         let profile = exe.parent().and_then(Path::parent).unwrap().to_owned();
         let beside = profile.join("kith-holder");
@@ -310,8 +310,19 @@ mod daemon {
         beside
     }
 
+    /// Held while a test writes its stub script and while a holder is started. A fork while another thread has the
+    /// script open for writing lets the forked process keep that write handle for a moment, and the script cannot be
+    /// executed (ETXTBSY) until it lets go: the holder's spawn of the stub then fails, and the test with it.
+    static FORKING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub(crate) fn forking() -> std::sync::MutexGuard<'static, ()> {
+        FORKING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// A script that behaves like the start stub for these tests: `--lock-dir D --key K -- engine...`.
-    fn fake_stub(dir: &Path, body: &str) -> PathBuf {
+    pub(crate) fn fake_stub(dir: &Path, body: &str) -> PathBuf {
         let path = dir.join("kith-stub");
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -319,11 +330,11 @@ mod daemon {
     }
 
     /// Records its own arguments in the lock dir, then runs the engine as the real stub does.
-    const RUNNING: &str = r#"lock="$2"; key="$4"; shift 5
+    pub(crate) const RUNNING: &str = r#"lock="$2"; key="$4"; shift 5
 printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
 "$@""#;
 
-    fn config(stub: Option<PathBuf>) -> Config {
+    pub(crate) fn config(stub: Option<PathBuf>) -> Config {
         Config {
             holder_on: true,
             wait_for_embedded: Duration::from_secs(10),
@@ -342,7 +353,7 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
         }
     }
 
-    fn until(what: &str, mut f: impl FnMut() -> bool) {
+    pub(crate) fn until(what: &str, mut f: impl FnMut() -> bool) {
         let end = Instant::now() + Duration::from_secs(15);
         while Instant::now() < end {
             if f() {
@@ -353,39 +364,40 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
         panic!("gave up waiting for {what}");
     }
 
-    fn serving(m: &Path, cfg: Config) -> Daemon {
+    pub(crate) fn serving(m: &Path, cfg: Config) -> Daemon {
         let p = crate::tests::paths(m);
         let d = Daemon::spawn_with(&p, cfg);
         d.ready(Duration::from_secs(10)).unwrap();
         d
     }
 
-    fn open(m: &Path, session: &str, argv: &[&str], env: &Value) -> Reached {
+    pub(crate) fn open(m: &Path, session: &str, argv: &[&str], env: &Value) -> Reached {
         let params =
             json!({"agent": "kai", "session": session, "argv": argv, "cwd": "/tmp", "env": env});
         reach(&crate::tests::paths(m), "terminal.open", &params, false)
     }
 
-    fn answered(r: Reached) -> Value {
+    pub(crate) fn answered(r: Reached) -> Value {
         match r {
             Reached::Answered(v) => v,
             other => panic!("{other:?}"),
         }
     }
 
-    fn plain() -> Value {
+    pub(crate) fn plain() -> Value {
         json!({"PATH": "/usr/bin:/bin"})
     }
 
     /// The daemon, its holder, and the folder everything is in; the holder is ended when the test is.
-    struct Rig {
-        t: tempfile::TempDir,
-        m: PathBuf,
-        d: Daemon,
+    pub(crate) struct Rig {
+        pub(crate) t: tempfile::TempDir,
+        pub(crate) m: PathBuf,
+        pub(crate) d: Daemon,
     }
 
     impl Rig {
-        fn new(stub_body: &str) -> Rig {
+        pub(crate) fn new(stub_body: &str) -> Rig {
+            let _forking = forking();
             let t = sandbox();
             let m = t.path().join("m");
             let stub = fake_stub(t.path(), stub_body);
@@ -565,6 +577,7 @@ echo $$ > "$lock/$key.pid"
                     rows: 24,
                     kill_on_lease_loss: false,
                 },
+                agent: "kai".into(),
                 deadline: Instant::now() + Duration::from_secs(5),
                 busy_wait: Duration::ZERO,
                 reply,

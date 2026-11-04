@@ -274,6 +274,28 @@ pub(super) const ROWS: &[Method] = &[
         Served::Core,
         Stability::Experimental,
     ),
+    row(
+        "terminal.attach",
+        "A new single-use attach ticket for a held terminal that is running (or ended a moment ago and is still kept): how a client comes back after a detach, a cut or a lost link. `gone` when the core no longer knows it.",
+        &[
+            held_param("heldId", "json", false, "The held terminal: {instance, id}, as `terminal.open` and `terminal.list` give it."),
+            held_param("session", "string", false, "The session id, instead of heldId."),
+            held_param("role", "string", false, "`owner` (default) or `observer`."),
+        ],
+        "json",
+        &["kernel", "terminal-attach"],
+        Served::Core,
+        Stability::Experimental,
+    ),
+    row(
+        "terminal.list",
+        "The held terminals the core knows (held id, session, agent if known, pid, when it started, how many owners and observers are attached, size). An ended terminal is not listed.",
+        &[],
+        "json",
+        &["kernel", "terminal-list"],
+        Served::Core,
+        Stability::Experimental,
+    ),
 ];
 
 /// A param only a client that knows the launch can fill (never typed): like `caller`, but it may be required.

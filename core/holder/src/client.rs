@@ -82,6 +82,38 @@ impl Renewer {
     }
 }
 
+/// Sends commands for held processes on a client's connection from other threads: the core's attach relay forwards a
+/// viewer's keystrokes and size, and asks for tails, without going through the thread that owns the [`Client`]. A frame
+/// is written whole under the connection's lock, so it never interleaves with another thread's.
+#[derive(Clone)]
+pub struct Sender(Arc<Mutex<Box<dyn Write + Send>>>);
+
+impl Sender {
+    fn send_for(&self, kind: u8, h: &p::HeldId, body: &[u8]) -> io::Result<()> {
+        let mut payload = h.instance.as_bytes().to_vec();
+        payload.extend_from_slice(body);
+        send_on(&self.0, kind, h.id, &payload)
+    }
+
+    /// Raw bytes to a process. Empty bytes are not sent: to a holder an empty INPUT closes a pipes process's stdin.
+    pub fn input(&self, h: &p::HeldId, bytes: &[u8]) -> io::Result<()> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        self.send_for(p::INPUT, h, bytes)
+    }
+
+    pub fn resize(&self, h: &p::HeldId, cols: u16, rows: u16) -> io::Result<()> {
+        let body = serde_json::to_vec(&p::Size { cols, rows }).expect("serializable");
+        self.send_for(p::RESIZE, h, &body)
+    }
+
+    /// Asks for the process's tail. The answer (TAILED) arrives on the client's frames, in order with its OUTPUT.
+    pub fn request_tail(&self, h: &p::HeldId) -> io::Result<()> {
+        self.send_for(p::TAIL, h, &[])
+    }
+}
+
 pub struct Client {
     /// Shared with a [`Renewer`]: a frame is written whole under the lock.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -310,6 +342,11 @@ impl Client {
 
     pub fn send(&mut self, kind: u8, id: u32, payload: &[u8]) -> io::Result<()> {
         send_on(&self.writer, kind, id, payload)
+    }
+
+    /// A handle that sends commands for held processes from other threads.
+    pub fn sender(&self) -> Sender {
+        Sender(self.writer.clone())
     }
 
     /// A handle that renews the lease from another thread, so renewals never wait behind a listing.

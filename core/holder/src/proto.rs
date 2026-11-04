@@ -179,7 +179,7 @@ pub struct Exit {
 }
 
 /// A process as the core must remember it: the holder instance that owns it, and its id there.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HeldId {
     pub instance: String,
     pub id: u32,

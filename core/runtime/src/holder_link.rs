@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use kith_holder::client::{Client, ConnectError};
 use kith_holder::{launch, proto};
 
+use crate::attach::Relay;
 use crate::daemon::Shared;
 use crate::db::{HolderRecord, RecordedProc};
 use crate::error::Result;
@@ -157,7 +158,9 @@ pub(crate) fn supervise(shared: &Arc<Shared>, layout: &Layout, cfg: &HolderConfi
                 delay = cfg.retry_min;
                 last_error.clear();
                 let ended = connected(shared, client, cfg);
-                // Terminals asked for while the link was down are answered, not left to run late.
+                // Attached clients are told the link is gone; terminals asked for while it was down are answered, not
+                // left to run late.
+                shared.terminals.relay.link_lost();
                 shared.terminals.set_link(false);
                 match ended {
                     Ok(()) => continue,
@@ -175,6 +178,7 @@ pub(crate) fn supervise(shared: &Arc<Shared>, layout: &Layout, cfg: &HolderConfi
         }
         sleep_unless_stopped(shared, delay);
     }
+    shared.terminals.relay.link_lost();
     shared.terminals.set_link(false);
     shared.set_holder(|h| h.state = "stopped");
 }
@@ -345,6 +349,10 @@ fn connected(
         reconcile(shared, &instance, &procs, cfg)?;
     }
     // Before the state says connected: whoever waits for that state may call terminal.open at once.
+    shared
+        .terminals
+        .relay
+        .link_up(client.sender(), &client.welcome.procs);
     shared.terminals.set_link(true);
     shared.set_holder(|h| {
         h.state = "connected";
@@ -361,16 +369,22 @@ fn connected(
     let mut known = procs;
     let mut next_list = Instant::now() + cfg.poll;
     while !shared.stopping() {
-        // A terminal to start is served at once; the listing keeps its own pace.
-        match shared
-            .terminals
-            .next(cfg.poll.min(Duration::from_millis(100)))
-        {
-            Some(Req::Spawn(req)) => serve_spawn(&mut client, &req)?,
-            Some(Req::End(held)) => end_held(&mut client, &held),
+        // A terminal to start is served at once; the listing keeps its own pace. With viewers attached the wait is
+        // short: it is also how long their output waits.
+        let relay = &shared.terminals.relay;
+        let busy = relay.busy();
+        let wait = if busy {
+            Duration::ZERO
+        } else {
+            cfg.poll.min(Duration::from_millis(100))
+        };
+        match shared.terminals.next(wait) {
+            Some(Req::Spawn(req)) => serve_spawn(&mut client, relay, &req)?,
+            Some(Req::End(held)) => end_held(&mut client, relay, &held),
             None => {}
         }
-        discard_output(&mut client);
+        let pause = if busy { PUMP_WAIT } else { Duration::ZERO };
+        pump(&mut client, relay, &instance, &shared.logs, pause)?;
         if shared.stopping() {
             break;
         }
@@ -396,15 +410,67 @@ fn connected(
     Ok(())
 }
 
-/// The engine's output is not read by anyone until the attach relay (M1-5): read and dropped here so it does not pile up
-/// in this process. The holder keeps its own tail for the first replay.
-fn discard_output(client: &mut Client) {
-    while client
-        .take(Duration::ZERO, |f| {
-            f.0 == proto::OUTPUT || f.0 == proto::STDERR
-        })
-        .is_some()
-    {}
+/// How long the supervisor waits for the holder's next frame while viewers are attached.
+const PUMP_WAIT: Duration = Duration::from_millis(5);
+/// The most frames one turn of the supervisor reads before it looks at its other work.
+const PUMP_BATCH: usize = 512;
+
+/// Reads the holder's output, exits and tails in the order they came and hands them to the attach relay (which only
+/// copies them into the viewers' buffers, so this never waits on a viewer). A tail that answers the end of a terminal
+/// is acked here, once the relay has sent EXIT to the viewers and kept the tail.
+fn pump(
+    client: &mut Client,
+    relay: &Relay,
+    instance: &str,
+    logs: &Path,
+    first_wait: Duration,
+) -> std::result::Result<(), String> {
+    let mut wait = first_wait;
+    for _ in 0..PUMP_BATCH {
+        let Some((kind, id, payload)) = client.take(wait, |f| {
+            matches!(
+                f.0,
+                proto::OUTPUT | proto::STDERR | proto::EXITED | proto::TAILED
+            )
+        }) else {
+            return Ok(());
+        };
+        wait = Duration::ZERO;
+        match kind {
+            proto::OUTPUT => relay.output(id, &payload),
+            proto::EXITED => {
+                // An exit the relay does not know (or cannot read) is acked all the same, so the holder forgets it.
+                let known = match serde_json::from_slice::<proto::Exit>(&payload) {
+                    Ok(exit) => relay.exited(id, &exit),
+                    Err(e) => {
+                        log::note(
+                            logs,
+                            &format!("holder: unreadable exit of process {id} ({e}); acked"),
+                        );
+                        false
+                    }
+                };
+                if !known {
+                    let held = proto::HeldId {
+                        instance: instance.to_owned(),
+                        id,
+                    };
+                    client
+                        .ack(&held)
+                        .map_err(|e| format!("the holder stopped answering: {e}"))?;
+                }
+            }
+            proto::TAILED => {
+                if let Some(held) = relay.tailed(id, &payload) {
+                    client
+                        .ack(&held)
+                        .map_err(|e| format!("the holder stopped answering: {e}"))?;
+                }
+            }
+            _ => {} // a pipes process's stderr: nobody attaches to those
+        }
+    }
+    Ok(())
 }
 
 /// How many started terminals were ended because their caller had given up (a test reads it to see the late path).
@@ -413,7 +479,8 @@ pub(crate) static LATE_ENDS: std::sync::atomic::AtomicU64 = std::sync::atomic::A
 
 /// Ends a held process the core no longer wants (kill until the holder says its group is gone, then ack so it forgets
 /// it). A broken link is the supervisor's to find on its next turn.
-fn end_held(client: &mut Client, held: &proto::HeldId) {
+fn end_held(client: &mut Client, relay: &Relay, held: &proto::HeldId) {
+    relay.forget(held);
     for _ in 0..40 {
         match client.kill(held) {
             Ok(proto::KillState::Killing) => std::thread::sleep(Duration::from_millis(50)),
@@ -425,7 +492,11 @@ fn end_held(client: &mut Client, held: &proto::HeldId) {
 }
 
 /// Puts one spawn to the holder and tells the caller what came of it. `Err` is a broken link (the caller was told).
-fn serve_spawn(client: &mut Client, req: &SpawnReq) -> std::result::Result<(), String> {
+fn serve_spawn(
+    client: &mut Client,
+    relay: &Relay,
+    req: &SpawnReq,
+) -> std::result::Result<(), String> {
     if Instant::now() >= req.deadline {
         let _ = req
             .reply
@@ -455,7 +526,14 @@ fn serve_spawn(client: &mut Client, req: &SpawnReq) -> std::result::Result<(), S
     };
     let placed = match kind {
         proto::SPAWNED => match serde_json::from_slice::<proto::Spawned>(&payload) {
-            Ok(s) => watch_start(client, s.held_id(), s.pid, req.busy_wait),
+            Ok(s) => {
+                let placed = watch_start(client, s.held_id(), s.pid, req.busy_wait);
+                if let Placed::Started { held, pid } = &placed {
+                    // Listed before the caller hears of it, so its ticket never meets an unknown terminal.
+                    relay.register(held, &spec.conv, &req.agent, *pid, (spec.cols, spec.rows));
+                }
+                placed
+            }
             Err(e) => Placed::Failed(format!("unreadable answer: {e}")),
         },
         proto::SPAWN_FAILED => Placed::Failed(
@@ -469,7 +547,7 @@ fn serve_spawn(client: &mut Client, req: &SpawnReq) -> std::result::Result<(), S
     if let Err(mpsc::SendError(Placed::Started { held, .. })) = req.reply.send(placed) {
         #[cfg(test)]
         LATE_ENDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        end_held(client, &held);
+        end_held(client, relay, &held);
     }
     Ok(())
 }

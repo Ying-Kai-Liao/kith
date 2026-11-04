@@ -1931,6 +1931,87 @@
       }
     },
     {
+      "name": "terminal.attach",
+      "summary": "A new single-use attach ticket for a held terminal that is running (or ended a moment ago and is still kept): how a client comes back after a detach, a cut or a lost link. `gone` when the core no longer knows it.",
+      "params": [
+        {
+          "name": "heldId",
+          "summary": "The held terminal: {instance, id}, as `terminal.open` and `terminal.list` give it.",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "session",
+          "summary": "The session id, instead of heldId.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "role",
+          "summary": "`owner` (default) or `observer`.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "terminal-attach"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "heldId": {
+            "kind": "caller"
+          },
+          "session": {
+            "kind": "caller"
+          },
+          "role": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "terminal.list",
+      "summary": "The held terminals the core knows (held id, session, agent if known, pid, when it started, how many owners and observers are attached, size). An ended terminal is not listed.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "terminal-list"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
       "name": "agents.list",
       "summary": "The agents on this Mac.",
       "params": [],
