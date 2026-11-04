@@ -22,14 +22,19 @@
 //! - A `running` claim the holder does not list is never `ended` straight away: it goes to `ending` and stays the writer
 //!   (the partial unique index `claims_one_writer` blocks a second claim) until its recorded pid is confirmed gone
 //!   ([`end_gone`]) or the holder reports the exit of that same pid ([`report`]).
-//! - A `done` or `exit` report ends a `running` or `ending` claim only when it names the recorded pid (a report of
-//!   another process of the same claim, such as a respawn that lost the lock, or one that names no pid, is acked and
-//!   changes nothing). Reports are keyed by `(claim_id, kind, pid)` (migration 81), so the real writer's own report is
+//! - A `done` or `exit` report ends a `running` or `ending` claim only when it names the recorded pid. One that names
+//!   another pid (a respawn that lost the lock) changes nothing. One that names no pid on a claim with a recorded pid
+//!   moves it to `ending` (still the writer): [`end_gone`] then ends it once that pid is gone. `busy` follows the same
+//!   pid rule. Reports are keyed by `(claim_id, kind, pid)` (migration 81), so the real writer's own report is
 //!   never shadowed by another process's.
 //! - A `--direct` (`external`) claim has no stub and no holder entry: reconcile and a holder change leave it alone, and
 //!   only its recorded pid being gone ends it ([`end_gone`]).
 //! - The may check is the caller's, but the revoke it saw is carried in: [`revoke_epoch`] before the check, passed in
-//!   [`NewClaim::revoke_seen`] and [`redeem`], refused in the transaction if [`revoke_person`] bumped it since.
+//!   [`NewClaim::revoke_seen`], refused in the transaction if [`revoke_person`] bumped it since. [`redeem`] needs no
+//!   epoch: [`revoke_person`] moves live claims off `claimed`, so a later redeem fails its CAS.
+//! - **Ordering rule:** the authority revoke must be visible to the may check before [`revoke_person`] commits (or in
+//!   the same transaction). If the sweep ran first, a caller could read the new epoch, still pass the may check, commit
+//!   its claim after the sweep, and the revoked person would keep the run.
 //!
 //! Process probes (`ps`, `kill -0`) happen outside the transaction ([`end_gone`] reads, probes, then CASes): the CAS
 //! decides. Times are milliseconds, passed in so tests set the clock. Not here: promoting a queued take-over claim
@@ -71,6 +76,8 @@ impl Kind {
 pub(crate) struct NewClaim<'a> {
     pub conversation: &'a str,
     pub kind: Kind,
+    /// The principal [`revoke_person`] sweeps by. For a bot guest's run that is the bot's own principal, not its
+    /// owner: revoking a person must also call [`revoke_person`] for each of their bots.
     pub person: &'a str,
     /// The queued or parked turn this claim runs, when it runs one.
     pub turn: Option<i64>,
@@ -168,8 +175,9 @@ fn is_newest(tx: &Transaction<'_>, claim_id: i64, conversation: &str) -> Result<
     Ok(newest == Some(claim_id))
 }
 
-/// How many times `person` has been revoked. Read it before the may check and pass it to [`claim`] and [`redeem`]: a
-/// revoke that commits between the check and the claim moves it, and the claim is refused.
+/// How many times `person` has been revoked. Read it before the may check and pass it to [`claim`]: a revoke that
+/// commits between the check and the claim moves it, and the claim is refused. Only sound when [`revoke_person`] runs
+/// after the authority revoke is visible to the may check (see the module doc).
 pub(crate) fn revoke_epoch(core: &Core, person: &str) -> Result<i64> {
     epoch(core.conn(), person)
 }
@@ -328,29 +336,17 @@ pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Cla
 /// Step 3, the redeem: CAS `claimed -> running`, only while the claim is still the writer slot (`claims_one_writer`
 /// lets no other live claim exist, so a `claimed` row is the current one), recording the redeemer's pid, start time and
 /// holder instance, and the turn `running`. Anything else changes nothing; a retried redeem by the same process is
-/// answered `again`.
+/// answered `again`. No epoch check here: `revoke_person` already moves the person's live claims off `claimed`, so a
+/// redeem after a revoke fails this CAS (and a refused epoch would only leave the claim stuck `claimed`).
 pub(crate) fn redeem(
     core: &mut Core,
     claim_id: i64,
     pid: u32,
     started: &str,
     holder_instance: &str,
-    revoke_seen: i64,
     now: i64,
 ) -> Result<Redeemed> {
     let tx = core.claim_tx()?;
-    let person: Option<String> = tx
-        .query_row(
-            "SELECT person FROM claims WHERE claim_id = ?1",
-            [claim_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if let Some(person) = person
-        && epoch(&tx, &person)? != revoke_seen
-    {
-        return Ok(Redeemed::Refused("revoked".into()));
-    }
     // An `external` claim has its own process and no stub: a stray redeem must not overwrite the run's pid.
     let n = tx.execute(
         "UPDATE claims SET state = 'running', running_at = ?2, pid = ?3, pid_started = ?4, holder_instance = ?5
@@ -448,17 +444,28 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
             let Some(r) = row(tx, claim_id)? else {
                 return Ok(false);
             };
-            if r.pid.is_some() && said_pid != r.pid {
+            if r.pid.is_some() && said_pid.is_some() && said_pid != r.pid {
                 return Ok(false);
             }
             if r.pid.is_none() && r.state != "claimed" {
                 return Ok(false);
             }
-            let n = tx.execute(
-                "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = COALESCE(end_reason, ?3)
-                 WHERE claim_id = ?1 AND state IN ('claimed', 'running', 'ending')",
-                params![claim_id, now, kind],
-            )?;
+            // A report that names no process cannot be matched to the writer's: the claim stays the writer (`ending`)
+            // and `end_gone` ends it once the recorded process is gone.
+            let nameless = r.pid.is_some() && said_pid.is_none();
+            let n = if nameless {
+                tx.execute(
+                    "UPDATE claims SET state = 'ending', end_reason = COALESCE(end_reason, ?2)
+                     WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
+                    params![claim_id, kind],
+                )?
+            } else {
+                tx.execute(
+                    "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = COALESCE(end_reason, ?3)
+                     WHERE claim_id = ?1 AND state IN ('claimed', 'running', 'ending')",
+                    params![claim_id, now, kind],
+                )?
+            };
             if n == 1 {
                 if kind == "done" {
                     tx.execute(
@@ -473,10 +480,10 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
             Ok(n == 1)
         }
         "busy" => {
-            // A busy names the stub that found the lock taken; with a recorded stub, only that one's counts.
+            // A busy names the stub that found the lock taken; with a recorded stub, only that one's counts (same rule as
+            // done and exit: a nameless busy is ignored).
             if let Some(r) = row(tx, claim_id)?
                 && r.pid.is_some()
-                && said_pid.is_some()
                 && said_pid != r.pid
             {
                 return Ok(false);
@@ -562,6 +569,10 @@ pub(crate) fn stop(
 
 /// Step 6: the person's queued and parked turns are cancelled, their queued take-overs ended, and their live claims go
 /// to `ending` (kills returned, to be re-sent until gone).
+///
+/// Call it only after the authority revoke is visible to the may check, or in the same transaction: run first, a claim
+/// could read the new epoch, pass the stale may check and commit after this sweep. `person` is the principal
+/// `claims.person` holds, so a person's bots (whose runs hold the bot principal) each need their own call.
 pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<Revoked> {
     let tx = core.claim_tx()?;
     // A claim that checked may before this commit sees the bump and is refused.

@@ -124,7 +124,7 @@ fn take(c: &mut Core, conv: &str) -> (i64, i64) {
 
 fn running(c: &mut Core, conv: &str, pid: u32) -> (i64, i64) {
     let (id, t) = take(c, conv);
-    let r = redeem(c, id, pid, &format!("s{pid}"), "h1", 0, 20).expect("redeem");
+    let r = redeem(c, id, pid, &format!("s{pid}"), "h1", 20).expect("redeem");
     assert_eq!(r, Redeemed::Running { again: false });
     (id, t)
 }
@@ -163,7 +163,7 @@ fn a_second_claim_is_refused_while_the_first_is_claimed_running_or_ending() {
     let (id, _) = take(&mut c, "c1");
     let again = |c: &mut Core| claim(c, &new_claim("c1", None), 11);
     assert!(matches!(again(&mut c), Err(Error::Refused(m)) if m.contains("claimed")));
-    redeem(&mut c, id, 100, "s100", "h1", 0, 12).expect("redeem");
+    redeem(&mut c, id, 100, "s100", "h1", 12).expect("redeem");
     assert!(matches!(again(&mut c), Err(Error::Refused(m)) if m.contains("running")));
     stop(&mut c, id, "stop", false, 13).expect("stop");
     assert_eq!(state(&c, id), "ending");
@@ -250,7 +250,7 @@ fn a_stale_generation_is_refused_by_every_step() {
         Err(Error::StaleGeneration(_))
     ));
     assert!(matches!(
-        redeem(&mut c, id, 1, "s", "h1", 0, 1),
+        redeem(&mut c, id, 1, "s", "h1", 1),
         Err(Error::StaleGeneration(_))
     ));
     assert!(matches!(
@@ -282,7 +282,7 @@ fn a_stale_generation_is_refused_by_every_step() {
 fn redeem_moves_claimed_to_running_and_records_the_process() {
     let (_t, mut c) = open();
     let (id, t) = take(&mut c, "c1");
-    let r = redeem(&mut c, id, 321, "Tue Nov 4 10:00:00 2026", "h9", 0, 20).expect("redeem");
+    let r = redeem(&mut c, id, 321, "Tue Nov 4 10:00:00 2026", "h9", 20).expect("redeem");
     assert_eq!(r, Redeemed::Running { again: false });
     assert_eq!(state(&c, id), "running");
     assert_eq!(turn_state(&c, t), "running");
@@ -305,16 +305,16 @@ fn a_retried_redeem_is_idempotent_and_another_process_is_refused() {
     let (_t, mut c) = open();
     let (id, _) = running(&mut c, "c1", 100);
     assert_eq!(
-        redeem(&mut c, id, 100, "s100", "h1", 0, 21).expect("again"),
+        redeem(&mut c, id, 100, "s100", "h1", 21).expect("again"),
         Redeemed::Running { again: true }
     );
     assert_eq!(
-        redeem(&mut c, id, 101, "s101", "h1", 0, 22).expect("other pid"),
+        redeem(&mut c, id, 101, "s101", "h1", 22).expect("other pid"),
         Redeemed::Refused("running".into())
     );
     // The same pid with another start time is another process.
     assert_eq!(
-        redeem(&mut c, id, 100, "s-other", "h1", 0, 23).expect("reused pid"),
+        redeem(&mut c, id, 100, "s-other", "h1", 23).expect("reused pid"),
         Redeemed::Refused("running".into())
     );
     let (pid, at): (i64, i64) = c
@@ -332,14 +332,14 @@ fn a_retried_redeem_is_idempotent_and_another_process_is_refused() {
 fn a_redeem_of_an_unknown_or_ended_claim_changes_nothing() {
     let (_t, mut c) = open();
     assert_eq!(
-        redeem(&mut c, 77, 1, "s", "h1", 0, 1).expect("unknown"),
+        redeem(&mut c, 77, 1, "s", "h1", 1).expect("unknown"),
         Redeemed::Refused("unknown".into())
     );
     let (id, _) = take(&mut c, "c1");
     report(&mut c, id, "exit", "{}", 30).expect("exit");
     assert_eq!(state(&c, id), "ended");
     assert_eq!(
-        redeem(&mut c, id, 5, "s5", "h1", 0, 31).expect("late"),
+        redeem(&mut c, id, 5, "s5", "h1", 31).expect("late"),
         Redeemed::Refused("ended".into())
     );
     assert_eq!(
@@ -357,7 +357,7 @@ fn a_redeem_after_a_release_on_a_new_holder_instance_fails() {
     assert_eq!(state(&c, id), "ended");
     assert_eq!(turn_state(&c, t), "queued", "the turn is given back");
     assert_eq!(
-        redeem(&mut c, id, 100, "s100", "h1", 0, 31).expect("late redeem"),
+        redeem(&mut c, id, 100, "s100", "h1", 31).expect("late redeem"),
         Redeemed::Refused("ended".into())
     );
     assert_eq!(state(&c, id), "ended");
@@ -801,7 +801,7 @@ fn holder_crash_donetruth_the_orphan_redeems_and_the_claim_goes_to_ending_not_en
     procs.spawn(500, "s500");
     // The holder crashed; the orphan stub (pid 500) takes the lock and redeems claim 1, which is still current.
     assert_eq!(
-        redeem(&mut c, id, 500, "s500", "h1", 0, 20).expect("orphan redeem"),
+        redeem(&mut c, id, 500, "s500", "h1", 20).expect("orphan redeem"),
         Redeemed::Running { again: false }
     );
     // The core meets holder instance h2, which lists nothing.
@@ -830,7 +830,7 @@ fn holder_crash_donetruth_other_order_the_release_wins_the_race() {
     different_holder(&mut c, "h2", &[], &[], i64::MAX, 30).expect("new instance");
     assert_eq!(state(&c, id), "ended");
     assert_eq!(
-        redeem(&mut c, id, 500, "s500", "h1", 0, 31).expect("orphan"),
+        redeem(&mut c, id, 500, "s500", "h1", 31).expect("orphan"),
         Redeemed::Refused("ended".into())
     );
 }
@@ -853,7 +853,7 @@ fn a_second_connection_that_releases_between_claim_and_redeem_wins_the_cas() {
         .expect("release");
     assert_eq!(n, 1);
     assert_eq!(
-        redeem(&mut c, id, 7, "s7", "h1", 0, 40).expect("redeem"),
+        redeem(&mut c, id, 7, "s7", "h1", 40).expect("redeem"),
         Redeemed::Refused("ended".into())
     );
 }
@@ -1031,7 +1031,7 @@ fn a_revoke_between_the_may_check_and_the_claim_or_redeem_refuses_it() {
     let got = claim(&mut c, &req, 7).expect("claim");
     // And a redeem that carries a stale epoch is refused.
     assert_eq!(
-        redeem(&mut c, got.claim_id, 100, "s100", "h1", seen, 8).expect("redeem"),
+        redeem(&mut c, got.claim_id, 100, "s100", "h1", 8).expect("redeem"),
         Redeemed::Refused("revoked".into())
     );
     assert_eq!(state(&c, got.claim_id), "claimed");
@@ -1059,7 +1059,7 @@ fn a_direct_claim_survives_reconcile_and_a_holder_change_and_ends_when_its_pid_i
     assert_eq!(state(&c, id), "claimed");
     // A stray stub cannot take its pid over.
     assert_eq!(
-        redeem(&mut c, id, 701, "s701", "h1", 0, 22).expect("stray"),
+        redeem(&mut c, id, 701, "s701", "h1", 22).expect("stray"),
         Redeemed::Refused("claimed".into())
     );
     let alive = procs_with(&[(700, "s700")]);
@@ -1147,7 +1147,7 @@ fn a_claimed_claim_with_no_process_stopped_is_ended_and_its_late_redeem_fails() 
     assert_eq!(state(&c, id), "ended", "no pid for end_gone to wait on");
     assert_eq!(turn_state(&c, t), "cancelled");
     assert_eq!(
-        redeem(&mut c, id, 100, "s100", "h1", 0, 31).expect("late"),
+        redeem(&mut c, id, 100, "s100", "h1", 31).expect("late"),
         Redeemed::Refused("ended".into())
     );
     claim(&mut c, &new_claim("c1", None), 32).expect("claim again");
