@@ -286,7 +286,7 @@ fn open_ctl(ctl: &Ctl) -> Result<(std::fs::File, std::fs::File), String> {
         #[cfg(windows)]
         Ctl::Pipe(path) => {
             // Only a local named pipe: a regular file or a remote \\host\pipe\x path is not the holder's channel.
-            if !path.starts_with(r"\\.\pipe\") {
+            if !path.to_string_lossy().starts_with(r"\\.\pipe\") {
                 return Err(format!(
                     "--ctl-pipe {path:?} is not a local named pipe (\\\\.\\pipe\\...)"
                 ));
