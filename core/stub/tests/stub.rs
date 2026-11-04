@@ -323,8 +323,14 @@ fn with_status_fd(dir: &Path, engine: &[&str]) -> (Option<i32>, String, String) 
     cmd.stdout(Stdio::piped());
     unsafe {
         cmd.pre_exec(move || {
-            // dup2 clears close-on-exec on the new fd 9, as a starter that passes the fd would.
-            libc::dup2(w, 9);
+            // dup2 clears close-on-exec on the new fd 9, as a starter that passes the fd would; when w is already 9
+            // dup2 does nothing and the flag stays set, so clear it by hand.
+            if w == 9 {
+                let f = libc::fcntl(9, libc::F_GETFD);
+                libc::fcntl(9, libc::F_SETFD, f & !libc::FD_CLOEXEC);
+            } else {
+                libc::dup2(w, 9);
+            }
             Ok(())
         });
     }
@@ -371,6 +377,13 @@ fn status_fd_that_is_not_open_is_refused_and_leaves_the_lock_free() {
     cmd.arg("--lock-dir")
         .arg(&dir)
         .args(["--key", "k", "--status-fd", "9", "--", "true"]);
+    // Whatever the harness or a sibling test thread left at fd 9 is not ours: close it in the child.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::close(9);
+            Ok(())
+        });
+    }
     let out = cmd.output().unwrap();
     assert_eq!(out.status.code(), Some(64));
     assert!(String::from_utf8_lossy(&out.stderr).contains("not an open descriptor"));
