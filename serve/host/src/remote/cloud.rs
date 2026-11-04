@@ -764,8 +764,7 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<HostAccessRequest>, owne
     }
     // Written before the first await: the host no longer holds these and the cloud no longer lists them, so a pull cut
     // off below (the relay's wait, a closed connection, a restart) would lose them for good.
-    let denying: Vec<String> =
-        next.iter().filter(|n| matches!(n, Next::Deny(_))).map(|n| n.id().to_owned()).collect();
+    let denying: Vec<String> = next.iter().filter(|n| matches!(n, Next::Deny(_))).map(|n| n.id().to_owned()).collect();
     queue_for_core(hub, ended.iter().chain(&denying));
     if throttled {
         tracing::warn!("accessRequests throttled: too many account access requests this hour");
@@ -2267,21 +2266,27 @@ mod tests {
         // A process of the owner's user files the ids first: one with another device key, one as the owner's own
         // request (no person) for the member's phone.
         let t = now_ms();
-        for (id, key, person) in [("req_key", [9u8; 32], Some("sam")), ("req_person", [3; 32], None)] {
+        // And one with the host's key and person but another platform: a web device must not be stored as a phone.
+        for (id, key, person, platform) in [
+            ("req_key", [9u8; 32], Some("sam"), "ios"),
+            ("req_person", [3; 32], None, "ios"),
+            ("req_plat", [4; 32], Some("sam"), "android"),
+        ] {
             let filed = json!({
-                "id": id, "deviceKey": b64(&key), "deviceName": "Phone", "platform": "ios", "person": person,
+                "id": id, "deviceKey": b64(&key), "deviceName": "Phone", "platform": platform, "person": person,
                 "createdAt": t, "expiresAt": t + HOUR_MS, "code": "123456",
             });
             crate::api::authority::owner_call("people.fileRequest", filed, false).await.unwrap();
         }
-        hub.cloud
-            .requests
-            .locked()
-            .extend([waiting("req_key", 2, Some("sam"), 0), waiting("req_person", 3, Some("sam"), 1)]);
+        hub.cloud.requests.locked().extend([
+            waiting("req_key", 2, Some("sam"), 0),
+            waiting("req_person", 3, Some("sam"), 1),
+            waiting("req_plat", 4, Some("sam"), 2),
+        ]);
         // The host's own filing is refused by the core (and logged), not merged into the other row.
         assert!(!file_in_core(&hub).await);
 
-        for id in ["req_key", "req_person"] {
+        for id in ["req_key", "req_person", "req_plat"] {
             let err = decide_in_core(&hub, id, true, true, true).await.unwrap_err();
             assert!(err.to_string().contains("doesn't match what this computer was asked"), "{id}: {err:#}");
             assert!(
@@ -2410,5 +2415,27 @@ mod tests {
         assert!(fake.posts.lock().unwrap().is_empty());
         assert_eq!(ids_in_core(true).await, ["req_sam"], "still pending in the core");
         assert_eq!(hub.cloud.requests_json().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn with_the_core_a_pull_cut_off_after_it_dropped_a_request_has_already_queued_it() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        let _rig = CoreRig::new().await;
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        hub.cloud.requests.locked().push(waiting("req_own", 1, None, 0));
+        file_in_core(&hub).await;
+
+        // The relay drops a pull that waits too long: here it is dropped at its first wait, after the host forgot the
+        // request and before the core was told.
+        let cut = tokio::time::timeout(Duration::ZERO, sync_requests(&hub, &base, vec![], None)).await;
+        assert!(cut.is_err(), "the pull was cut off");
+        assert_eq!(take_deny_queue(&hub), ["req_own"]);
+        // The next sync ends it.
+        sync_requests(&hub, &base, vec![], None).await;
+        assert_eq!(ids_in_core(true).await, Vec::<String>::new());
+        assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
     }
 }

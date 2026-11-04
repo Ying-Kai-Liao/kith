@@ -34,4 +34,3 @@ src/api/room_secrets_props.rs	api::room_secrets_props::
 src/chat/team/tests.rs	chat::team::tests::
 src/cards/session_tests.rs	cards::session_tests::
 src/routines/schedule_golden.rs	routines::schedule_golden::
-src/api/access_core_tests.rs	api::access_core_tests::
