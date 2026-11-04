@@ -319,6 +319,10 @@ pub(crate) enum Placed {
 }
 
 /// What the supervisor is asked to do with its holder connection.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one short-lived request per terminal start"
+)]
 pub(crate) enum Req {
     Spawn(SpawnReq),
     /// End a held process and forget it (a terminal whose claim could not be handed over).
@@ -647,6 +651,9 @@ impl Terminals {
             rows: req.rows,
             // A terminal outlives its core by design; the lease would end it.
             kill_on_lease_loss: false,
+            // A terminal's argv already begins with its own start stub (`--held`); the resident stub is for pipes.
+            stub: None,
+            lock_dir: None,
         };
         // A rendezvous: a send succeeds only if this call actually received it, so a `Started` that arrives after the caller
         // gave up fails in the supervisor, which then ends the terminal.

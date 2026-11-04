@@ -26,6 +26,22 @@ pub struct Spec<'a> {
     pub mode: Mode,
     pub cols: u16,
     pub rows: u16,
+    /// Pipes only: run `argv` under `kith-stub --resident` with a control channel (see `Ctl`). `None` runs it bare;
+    /// only the platform tests do that, the holder itself refuses a pipes spawn without it.
+    pub resident: Option<Resident<'a>>,
+}
+
+/// The resident stub a warm engine runs under.
+pub struct Resident<'a> {
+    pub stub: &'a str,
+    pub lock_dir: &'a str,
+}
+
+/// The holder's end of a resident stub's control channel: lines out, lines back (core/stub/src/resident.rs). The
+/// stub's end is not in the holder any more once the process is started.
+pub struct Ctl {
+    pub write: Box<dyn Write + Send>,
+    pub read: Box<dyn Read + Send>,
 }
 
 /// A started process and its pipes. `err` is only there for `Mode::Pipes`.
@@ -34,6 +50,8 @@ pub struct Started {
     pub input: Box<dyn Write + Send>,
     pub out: Box<dyn Read + Send>,
     pub err: Option<Box<dyn Read + Send>>,
+    /// Set for a pipes process started under a resident stub.
+    pub ctl: Option<Ctl>,
 }
 
 /// 32 random hex digits (instance ids, socket and pipe names).

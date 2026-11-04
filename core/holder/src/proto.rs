@@ -13,6 +13,15 @@
 //! An error exit (`Exit::error`) says the holder could not read how the process ended. It does not say the group is
 //! empty: the core still waits for KILL `Gone` before it releases the claim.
 //!
+//! A warm engine (`Mode::Pipes`) always runs under `kith-stub --resident` (docs/plans/runtime-design.md section 4): the
+//! core names the stub and the lock folder in the spawn, and without them the spawn is `SPAWN_FAILED` with an install
+//! hint (no fallback to a bare engine). The holder keeps the control channel to that stub; `TAKE` and `RELEASE` relay a
+//! turn's writer lock through it and are answered with `LOCK_ANSWER`, always naming the claim. The holder acts only for
+//! the process's current claim (a take below it, or for a claim it already released, is an `Error`; a release of
+//! another claim is `NotHeld` and relays nothing), and keeps its answers per claim and kind until the core says
+//! `LOCK_ACK`, so a busy for one claim never replaces an unacked answer of another. The lock itself belongs to the stub
+//! and the OS: a holder crash frees nothing, a stub crash frees it.
+//!
 //! The lease (docs/plans/runtime-design.md section 10, modelled in verification/lease). A hand that cannot reach its
 //! core for a lease period kills its guest and bot runs itself, so a revoke is never stranded on a cut-off hand. The
 //! core says which processes those are when it spawns them (`Spawn::kill_on_lease_loss`; the default, false, is an
@@ -53,7 +62,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Checked in hello and welcome. Bumped for a change an older peer cannot read.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 // core to holder
 pub const HELLO: u8 = 1;
@@ -73,6 +82,13 @@ pub const AUTH: u8 = 10;
 pub const RENEW: u8 = 11;
 /// The core's ping (payload `Ping`): the holder answers `PONG` with the same seq and remembers its own clock for it.
 pub const PING: u8 = 12;
+/// Take a conversation's writer lock for a warm process's turn (payload: the instance, then `LockReq`). The holder
+/// relays it to that process's resident stub and answers `LOCK_ANSWER`. The frame id is the process.
+pub const TAKE: u8 = 13;
+/// Release it again at turn end (payload: the instance, then `LockReq`).
+pub const RELEASE: u8 = 14;
+/// The core has the answer for a claim (payload: the instance, then `LockAcked`): the holder forgets that report.
+pub const LOCK_ACK: u8 = 15;
 
 // holder to core
 pub const WELCOME: u8 = 101;
@@ -98,6 +114,8 @@ pub const STALE_CLAIM: u8 = 113;
 pub const LEASE_LOST: u8 = 114;
 /// The answer to `PING`. Payload `Pong`.
 pub const PONG: u8 = 115;
+/// The answer to `TAKE` or `RELEASE`. Payload `LockAnswer`; the frame id is the process.
+pub const LOCK_ANSWER: u8 = 116;
 
 /// The first frame on every connection. The secret is an opaque key the holder was started with; it will be the
 /// local hand's pairing key (docs/plans/runtime-design.md section 10), and it never crosses the wire: the holder
@@ -151,6 +169,14 @@ pub struct Spawn {
     /// Kill this process's tree if the lease lapses (a guest's or a bot's run). Default false: an owner run.
     #[serde(default)]
     pub kill_on_lease_loss: bool,
+    /// Pipes only: the `kith-stub` program every warm engine runs under (`kith-stub --resident`). A pipes spawn
+    /// without it is `SPAWN_FAILED`: the holder never starts an engine that nothing guards (docs/plans/runtime-design.md
+    /// section 4). Ignored for a terminal, whose argv already begins with its own start stub.
+    #[serde(default)]
+    pub stub: Option<String>,
+    /// Pipes only: the folder of the conversation lock files (the stub's `--lock-dir`).
+    #[serde(default)]
+    pub lock_dir: Option<String>,
 }
 
 /// A question to the hand: "what is your clock now?". The answer is `Pong` with the same seq.
@@ -237,6 +263,10 @@ pub struct Held {
     pub rows: u16,
     /// Set once it has ended; it stays until acked.
     pub exit: Option<Exit>,
+    /// The writer-lock answers not yet acked (`LOCK_ACK`), one entry per claim and kind, so a core that missed an
+    /// answer finds it here after a reconnect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locks: Vec<LockAnswer>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -360,4 +390,52 @@ pub struct Acked {
 #[derive(Serialize, Deserialize)]
 pub struct Listing {
     pub procs: Vec<Held>,
+}
+
+/// What a core asks of a warm process's resident stub: the lock of one conversation for one turn.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct LockReq {
+    /// The lock key (`a-z 0-9 . _ -`, as the stub checks it). Opaque to the holder apart from that.
+    pub key: String,
+    /// The turn's claim id. The holder acts only for the process's current claim: a take for an older one is an
+    /// `Error`, and so is a take for a claim that was already released (the stub cannot know a claim is finished).
+    pub claim: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum LockOp {
+    Take,
+    Release,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LockWord {
+    Locked,
+    /// Another writer holds the conversation (a terminal's stub, a `--direct` run), or this stub serves another turn.
+    Busy,
+    Released,
+    /// The stub did not hold that claim's lock (never taken, already released, or another claim's).
+    NotHeld,
+    /// Nothing was done: the stub could not say (`reason`), the process or its stub is gone, or the claim is stale.
+    Error,
+}
+
+/// The holder's answer to a `TAKE` or `RELEASE`. Always names the claim it is for.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct LockAnswer {
+    #[serde(default)]
+    pub instance: String,
+    pub id: u32,
+    pub op: LockOp,
+    pub claim: u64,
+    pub word: LockWord,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct LockAcked {
+    pub claim: u64,
 }
