@@ -735,9 +735,9 @@ fn the_writer_is_the_claimer_and_does_not_outlive_it() {
     assert_eq!(until, Some(T0 + 1 + CLAIM_MS));
     if let Some(now_started) = Liveness::start(&crate::gate::System, std::process::id()) {
         assert!(
-            started.starts_with('e')
+            started.starts_with(['e', 'b'])
                 && crate::gate::holder_alive(&crate::gate::System, std::process::id(), &started),
-            "the epoch start time is recorded for the pid-reuse check: {started} vs {now_started}"
+            "the start stamp is recorded for the pid-reuse check: {started} vs {now_started}"
         );
     }
     // The claim outlasts the key store's tool bound (30 s a tool, at most three tools) twice over.
