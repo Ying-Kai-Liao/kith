@@ -1,6 +1,11 @@
 //! The schedule fire (M4-3), one test per requirement of the architect's list (see the PR body's table), the crash
 //! cases, and the daylight-saving days. Real core.db, real authority tables, no mocks of `SQLite`.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    unknown_lints,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::assert_is_empty
+)]
 
 use std::cell::Cell;
 
