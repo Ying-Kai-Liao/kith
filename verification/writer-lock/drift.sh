@@ -22,6 +22,8 @@ FILES=(
   core/runtime/src/holder_link.rs     # the core's side: hello, the recorded pids, step 7 (end the old instance's groups), the poll
   core/runtime/src/terminal.rs        # the terminal entrance: open, claim, spawn through the holder, attach
   core/runtime/src/conversations      # (M3-2) claims.rs: the claim transaction, claim ids, redeem CAS, reports, reconcile, revoke, new holder instance (park and wake, take-over: later)
+  core/runtime/src/asks/mod.rs        # (M3-10b1, Claims4.tla) end_tree: the stopped-ask stop; its fence is in claims.rs claim_in
+  core/runtime/src/wake/queue.rs      # (M3-10b1, Claims4.tla) give_back / release: a wake given back after a stop
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

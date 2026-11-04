@@ -32,7 +32,8 @@ PUBLIC = {
     ("lib.rs", "Embedded"), ("lib.rs", "Migrated"), ("lib.rs", "Via"),
     ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "stateless_through_core"),
     ("lib.rs", "reach"), ("lib.rs", "note_once"),
-    ("lib.rs", "reach_as_host"),   # the host proves host.token (M2-10b); a different crate, so not pub(crate)
+    ("lib.rs", "reach_as_host"),   # the host proves its in-memory secret (M2-10b/c); a different crate, so not pub(crate)
+    ("daemon.rs", "spawn_as_host"),   # the serve's own daemon makes that secret (M2-10c); a standalone daemon has none
     ("lib.rs", "route_kernel_notes"),   # the host's main.rs sends every kernel verb's notes to core.log
     # The service layer (via core_front) names the holder's folder and secret file in the opt-in job that makes the
     # holder the supervised root. It is a different crate from kith-core, so it cannot be pub(crate); it returns paths
@@ -46,6 +47,7 @@ PUBLIC = {
     ("lib.rs", "migrate_authority"), ("lib.rs", "AuthorityOptions"), ("lib.rs", "AuthorityReport"),
     ("lib.rs", "field:dry_run"), ("lib.rs", "field:force"), ("lib.rs", "field:changed"), ("lib.rs", "field:backup"),
     ("lib.rs", "field:lines"),
+    ("lib.rs", "cutover"),   # `kith kernel cutover ...` (M3-10a): argv in, lines out
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
     ("call.rs", "call"),
     ("daemon.rs", "Daemon"), ("daemon.rs", "spawn"), ("daemon.rs", "ready"), ("daemon.rs", "served"), ("daemon.rs", "stop"),

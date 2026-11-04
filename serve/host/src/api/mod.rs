@@ -2,10 +2,12 @@
 //! apps and helpers (loopback + `Authorization: Bearer <token>`), and `GET /channel`, the
 //! direct end-to-end encrypted channel phones use (see `channel`).
 
+#[cfg(test)]
+mod access_core_tests;
 mod accounts;
 pub mod authority;
 #[cfg(test)]
-mod authority_props;
+pub(crate) mod authority_props;
 mod backups;
 #[cfg(test)]
 mod bot_guests_tests;
