@@ -158,15 +158,21 @@ fn copy_out(src: &Connection) -> Result<Connection> {
 }
 
 fn is_empty(snapshot: &Value) -> bool {
-    ["people", "members", "presets", "invites", "retired", "agent_access"]
-        .iter()
-        .all(|t| {
-            snapshot
-                .get(t)
-                .and_then(Value::as_object)
-                .is_none_or(serde_json::Map::is_empty)
-        })
-        && snapshot.get("owner_bots_budget").is_none()
+    [
+        "people",
+        "members",
+        "presets",
+        "invites",
+        "retired",
+        "agent_access",
+    ]
+    .iter()
+    .all(|t| {
+        snapshot
+            .get(t)
+            .and_then(Value::as_object)
+            .is_none_or(serde_json::Map::is_empty)
+    }) && snapshot.get("owner_bots_budget").is_none()
 }
 
 #[derive(PartialEq, Eq, Debug)]

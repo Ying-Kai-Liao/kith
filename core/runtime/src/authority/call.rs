@@ -241,9 +241,10 @@ pub(crate) fn call_in(
         // sync with the cloud. The answer is the cloud-sync file's, not a table of core.db.
         "people.bridgeHeld" => {
             let person = need(params, "person").map_err(|d| store::refusal(&d))?;
-            store::read(core, |a| {
-                json!({ "held": Rules::new(c, a).bridge_held(person) })
-            })
+            store::read(
+                core,
+                |a| json!({ "held": Rules::new(c, a).bridge_held(person) }),
+            )
         }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         "people.botsCap" if word(params, "amount").is_none() => {

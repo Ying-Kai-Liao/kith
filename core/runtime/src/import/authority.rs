@@ -254,7 +254,12 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value) -> Result<()> {
         }
         conn.execute(
             "INSERT INTO agent_access (agent, domains, since, by) VALUES (?1, ?2, ?3, ?4)",
-            params![agent, json(row, "domains"), json(row, "since"), json(row, "by")],
+            params![
+                agent,
+                json(row, "domains"),
+                json(row, "since"),
+                json(row, "by")
+            ],
         )?;
     }
     if let Some(cap) = auth.get("owner_bots_budget") {

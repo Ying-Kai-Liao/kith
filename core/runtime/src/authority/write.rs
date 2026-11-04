@@ -40,7 +40,14 @@ pub(super) fn tables(auth: &mut Value) {
         *auth = Value::Object(Map::new());
     }
     if let Some(o) = auth.as_object_mut() {
-        for t in ["people", "presets", "members", "invites", "retired", "agent_access"] {
+        for t in [
+            "people",
+            "presets",
+            "members",
+            "invites",
+            "retired",
+            "agent_access",
+        ] {
             if !o.get(t).is_some_and(Value::is_object) {
                 o.insert(t.to_owned(), Value::Object(Map::new()));
             }
