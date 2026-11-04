@@ -8,6 +8,9 @@
 //! the cap between the check and the open. Chain cost counts every record of the chain, a crashed child's too (a child that
 //! died keeps its `cost` and its row until it is forgotten), as `chain_costs` does.
 //!
+//! An open adds no cost, so two opens can never take a chain over its cap between them; what the transaction excludes is a
+//! second open of the same id, and an open racing a settle that tips the cap.
+//!
 //! The seams for part b and the wake lane: [`end`] settles rows `stopped` and RETURNS the ids and the sessions that are owed
 //! a withdrawal of their wakes; it stops no process and withdraws nothing.
 
@@ -182,6 +185,8 @@ impl Ask {
         let mut put = |k: &str, v: Value| {
             r.insert(k.to_owned(), v);
         };
+        // `open_record` always writes agent, person and via (null when unset); a record without a via is an old one.
+        let opened = self.caller_via.is_some();
         for (k, v) in [
             ("asked", &self.asked),
             ("agent", &self.caller_agent),
@@ -191,6 +196,8 @@ impl Ask {
         ] {
             if let Some(v) = v {
                 put(k, json!(v));
+            } else if opened && matches!(k, "agent" | "person") {
+                put(k, Value::Null);
             }
         }
         put(
@@ -529,6 +536,9 @@ pub(crate) struct Ended {
 /// `persons` (the person it was asked for) is settled `stopped` and marked ended. One that was already delivered, answered
 /// to its caller or ended is history and stays. A record with no session belongs to no lane, unless its person is named.
 /// Stops no process and withdraws no wake: the answer says which.
+///
+/// Persons match the record's own `person` only: the `--bg` job's person (`ask-bg/ID.json`) is always the same value, since
+/// the child inherits `KITH_PERSON` from the run that opened the record, so nothing is lost by not storing it.
 pub(crate) fn end(
     core: &mut Core,
     sessions: &[String],

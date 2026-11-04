@@ -16,7 +16,7 @@ use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{Value, json};
 
 use super::call::call_at;
-use super::{Open, open_in, settle_in};
+use super::{Open, open_in};
 use crate::db::Core;
 use crate::error::Error;
 use crate::import::asks as import;
@@ -571,105 +571,43 @@ fn two_opens_of_one_id_on_two_connections_let_exactly_one_through() {
     drop(core);
 }
 
-/// An open adds no cost, so two opens cannot take a chain over its cap between them; what races an open is a settle that
-/// tips the cap. Whichever commits first, the other sees it: an ask admitted has a row, a refused one says why and has none,
-/// and the chain is marked capped exactly once.
+/// `open` begins its transaction with `Core::claim_tx` (`BEGIN IMMEDIATE`): while another connection holds the write lock
+/// the call waits, and it goes on when the lock is let go. (A deferred transaction would read at once.) An open adds no cost,
+/// so two opens cannot take a chain over its cap between them; the same-id test above is what the transaction excludes.
 #[test]
-fn an_open_and_a_settle_at_the_cap_are_one_after_the_other() {
+fn open_waits_for_the_write_lock_as_claim_tx_does() {
     let t = Tree::new();
+    let mut core = t.core();
     let machine = t.home().join(".kith");
-    let core = t.core();
-    for round in 0..20 {
-        let (chain, parent) = (format!("c{round}"), format!("p{round}"));
-        core.conn()
-            .execute(
-                "INSERT INTO asks (id, chain, state, cost, at_ms) VALUES (?1, ?2, 'open', 4.9, 1)",
-                rusqlite::params![parent, chain],
-            )
-            .unwrap();
-        let barrier = Arc::new(Barrier::new(2));
-        let opener = {
-            let (l, m, b, parent, round) = (
-                t.layout.clone(),
-                machine.clone(),
-                barrier.clone(),
-                parent.clone(),
-                round,
-            );
-            std::thread::spawn(move || {
-                let mut c = second_connection(&l);
-                b.wait();
-                let tx = c
-                    .transaction_with_behavior(TransactionBehavior::Immediate)
-                    .unwrap();
-                let e = {
-                    let parent = parent.clone();
-                    move |k: &str| (k == "KITH_ASK_ID").then(|| parent.clone())
-                };
-                let id = format!("kid{round}");
-                let o = Open {
-                    id: &id,
-                    asked: "x",
-                    crossing: false,
-                    brief: None,
-                    pid: None,
-                    conversation: None,
-                };
-                let r = open_in(&tx, &m, &e, &o, false, NOW);
-                if r.is_ok() {
-                    tx.commit().unwrap();
-                }
-                r.map(|_| ()).map_err(|e| why(&e))
-            })
+    let mut other = second_connection(&t.layout);
+    let held = other
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
+    let (done, finished) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let o = Open {
+            id: "waits",
+            asked: "x",
+            crossing: false,
+            brief: None,
+            pid: None,
+            conversation: None,
         };
-        let settler = {
-            let (l, m, b, parent) = (
-                t.layout.clone(),
-                machine.clone(),
-                barrier.clone(),
-                parent.clone(),
-            );
-            std::thread::spawn(move || {
-                let mut c = second_connection(&l);
-                b.wait();
-                let tx = c
-                    .transaction_with_behavior(TransactionBehavior::Immediate)
-                    .unwrap();
-                let r = settle_in(&tx, &m, &parent, 0.2, Some("answered"), NOW)
-                    .unwrap()
-                    .unwrap();
-                tx.commit().unwrap();
-                r
-            })
-        };
-        let opened = opener.join().unwrap();
-        let settled = settler.join().unwrap();
-        assert_eq!(settled["tipped"], true, "round {round}");
-        let kids: i64 = core
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM asks WHERE id = ?1",
-                [format!("kid{round}")],
-                |r| r.get(0),
-            )
-            .unwrap();
-        match opened {
-            Ok(()) => assert_eq!(kids, 1, "round {round}: admitted before the settle"),
-            Err(w) => {
-                assert!(w.contains("delegation cost cap"), "{w}");
-                assert_eq!(kids, 0, "round {round}");
-            }
-        }
-        let capped: i64 = core
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM asks WHERE chain = ?1 AND capped_ms IS NOT NULL",
-                [&chain],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(capped, 1, "round {round}");
-    }
+        let r = super::open(&mut core, &machine, &|_| None, &o, false, NOW);
+        done.send(()).unwrap();
+        r.map(|_| ())
+    });
+    assert!(
+        finished
+            .recv_timeout(std::time::Duration::from_millis(400))
+            .is_err(),
+        "open went on while another connection held the write lock"
+    );
+    held.commit().unwrap();
+    finished
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    worker.join().unwrap().unwrap();
 }
 
 // --- the import --------------------------------------------------------------------------------------------------------
