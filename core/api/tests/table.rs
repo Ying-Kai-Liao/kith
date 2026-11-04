@@ -339,7 +339,7 @@ fn lookup_by_name() {
 }
 
 /// The M2 rows (M2-0b): experimental, owner only, and not in `released.json` until M2 cuts them. Answered by the Python
-/// kernel unless the core serves them (the people rows of M2-2, which the daemon answers).
+/// kernel unless the core serves them (the people rows of M2-2 and the access requests of M2-3, which the daemon answers).
 const M2_STUBS: &[&str] = &[
     "people.grant",
     "people.revoke",
@@ -361,7 +361,15 @@ fn the_m2_stubs_are_experimental_owner_only_and_unreleased() {
     for name in M2_STUBS {
         let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
         assert_eq!(m.stability, Stability::Experimental, "{name}");
-        let core = ["people.grant", "people.revoke", "people.list"].contains(name);
+        let core = [
+            "people.grant",
+            "people.revoke",
+            "people.list",
+            "people.requests",
+            "people.approve",
+            "people.deny",
+        ]
+        .contains(name);
         assert_eq!(
             m.served,
             if core { Served::Core } else { Served::Kernel },

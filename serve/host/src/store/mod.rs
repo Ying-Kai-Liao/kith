@@ -48,7 +48,8 @@ use std::sync::Mutex;
 pub struct Store {
     db: Mutex<Connection>,
     pub(crate) connector_lock: Mutex<()>,
-    pub(crate) secret_key: Mutex<Option<zeroize::Zeroizing<Vec<u8>>>>,
+    /// The vault (market/vault.rs): sealed values live in the core's secrets envelope, not in this database.
+    pub(crate) vault: crate::market::vault::Vault,
 }
 
 pub fn now_ms() -> i64 {
@@ -91,6 +92,14 @@ impl Store {
     pub fn kv_delete(&self, k: &str) -> Result<()> {
         self.db.locked().execute("DELETE FROM kv WHERE k = ?1", [k])?;
         Ok(())
+    }
+
+    /// Keys whose value starts with `prefix` (the old vault's records). A failed read is an error, not "none": the caller
+    /// reports what it could not see.
+    pub fn kv_with_value_prefix(&self, prefix: &str) -> Result<Vec<String>> {
+        let c = self.db.locked();
+        let mut st = c.prepare("SELECT k FROM kv WHERE substr(v, 1, length(?1)) = ?1 ORDER BY k")?;
+        Ok(st.query_map([prefix], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?)
     }
 
     /// Keys starting with `prefix`.

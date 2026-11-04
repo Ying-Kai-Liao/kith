@@ -16,6 +16,7 @@ use crate::tests::{machine, open, open_all, paths};
 fn quiet() -> Config {
     Config {
         holder_on: false,
+        key_load: None,
         wait_for_embedded: Duration::from_secs(10),
         ..Config::default()
     }
@@ -347,6 +348,7 @@ fn a_socket_file_left_by_a_dead_daemon_is_replaced_by_the_next_one() {
 fn holder_cfg(exe: std::path::PathBuf) -> Config {
     Config {
         holder_on: true,
+        key_load: None,
         wait_for_embedded: Duration::from_secs(10),
         holder: HolderConfig {
             exe: Some(exe),
@@ -1156,11 +1158,15 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
         ),
         Reached::Refused(_)
     ));
-    // the access requests are M2-3's: still not answered here
-    assert!(matches!(
-        read(&p, "people.approve", &json!({"id": "r1"})),
-        Reached::Refused(Error::NotServed(_))
-    ));
+    // the access requests (M2-3) are answered here too: no such request is a refusal of the rules, not "not served"
+    match read(&p, "people.approve", &view(json!({"id": "r1"}))) {
+        Reached::Refused(e) => assert!(e.to_string().contains("unknown request"), "{e}"),
+        other => panic!("{other:?}"),
+    }
+    match read(&p, "people.requests", &view(json!({}))) {
+        Reached::Answered(v) => assert_eq!(v["requests"], json!([])),
+        other => panic!("{other:?}"),
+    }
     let rows: i64 = conn
         .query_row("SELECT count(*) FROM memberships", [], |r| r.get(0))
         .expect("count");
@@ -1189,6 +1195,118 @@ fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
         other => panic!("{other:?}"),
     }
     drop(daemon);
+}
+
+#[test]
+fn a_stalled_key_store_holds_up_its_own_call_and_no_other_row() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let wait = std::sync::Mutex::new(wait);
+    let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = started.clone();
+    let cfg = Config {
+        key_load: Some(std::sync::Arc::new(move || {
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = wait.lock().expect("lock").recv();
+            Ok(Some(zeroize::Zeroizing::new(vec![7u8; 32])))
+        })),
+        ..quiet()
+    };
+    let d = serving(&p, cfg);
+    let blocked = {
+        let p = p.clone();
+        std::thread::spawn(move || read(&p, "secrets.get", &json!({"name": "a"})))
+    };
+    until("the key load to begin", || {
+        started.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    // The load is stuck; rows that take the core lock must still answer.
+    let begun = Instant::now();
+    assert!(matches!(
+        read(&p, "secrets.has", &json!({"name": "a"})),
+        Reached::Answered(_)
+    ));
+    assert!(matches!(
+        read(&p, "paths", &json!({})),
+        Reached::Answered(_)
+    ));
+    assert!(
+        begun.elapsed() < Duration::from_secs(5),
+        "a row waited for the key load: {:?}",
+        begun.elapsed()
+    );
+    release.send(()).expect("release");
+    // Answered, or refused where this OS has no key store to build the envelope on (Windows): either way it came back.
+    let late = blocked.join().expect("thread");
+    assert!(
+        !matches!(late, Reached::NoDaemon | Reached::Mismatch(_)),
+        "{late:?}"
+    );
+    d.stop();
+}
+
+/// The envelope through a real daemon and the owner socket, with a stand-in for the OS key store (the host's vault is
+/// a client of exactly these calls). Unix only: Windows has no key store to build the envelope on yet.
+#[cfg(unix)]
+#[test]
+fn the_secrets_rows_round_trip_through_a_real_daemon() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let loads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = loads.clone();
+    let cfg = Config {
+        key_load: Some(std::sync::Arc::new(move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Some(zeroize::Zeroizing::new(vec![9u8; 32])))
+        })),
+        ..quiet()
+    };
+    let d = serving(&p, cfg);
+    let ask = |method: &str, params: Value| match read(&p, method, &params) {
+        Reached::Answered(v) => v,
+        other => panic!("{method}: {other:?}"),
+    };
+    // `has` and `delete` need no key: nothing is read for them.
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": false})
+    );
+    assert_eq!(
+        ask("secrets.delete", json!({"name": "a"})),
+        json!({"deleted": false})
+    );
+    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    ask("secrets.put", json!({"name": "a", "value": "one"}));
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": true})
+    );
+    assert_eq!(
+        ask("secrets.get", json!({"name": "a"})),
+        json!({"found": true, "value": "one"})
+    );
+    assert_eq!(
+        ask("secrets.get", json!({"name": "zz"})),
+        json!({"found": false})
+    );
+    assert_eq!(
+        ask("secrets.delete", json!({"name": "a"})),
+        json!({"deleted": true})
+    );
+    assert_eq!(
+        ask("secrets.has", json!({"name": "a"})),
+        json!({"has": false})
+    );
+    // The key was read until it was found, then kept.
+    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // A bad name is the caller's mistake, said as a refusal.
+    assert!(matches!(
+        read(&p, "secrets.put", &json!({"name": "", "value": "x"})),
+        Reached::Refused(_)
+    ));
+    d.stop();
 }
 
 #[test]

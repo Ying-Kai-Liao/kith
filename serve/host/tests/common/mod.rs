@@ -6,6 +6,73 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// The host's machine state for `home`. The core's owner socket lives under it, and a Unix socket path holds about a
+/// hundred bytes, which a macOS temporary home alone exceeds: the vault reaches the secrets envelope through that
+/// socket, so the folder is a short one in /tmp, the same for the same home (a restarted host finds its state).
+fn machine_state(home: &Path) -> std::path::PathBuf {
+    #[cfg(unix)]
+    {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        home.hash(&mut hash);
+        std::path::PathBuf::from("/tmp").join(format!("ks-{:x}", hash.finish()))
+    }
+    #[cfg(not(unix))]
+    {
+        home.join("machine-state")
+    }
+}
+
+/// A test that picks its own `KITH_STATE` gets it through a short path in /tmp (a link to it), for the reason
+/// `machine_state` is short: the core binds its owner socket under it, and a socket path of a macOS temporary folder is
+/// too long to bind. Without the core the vault refuses (secrets need it), and a bot that reads a saved key cannot start.
+fn short_link(state: &str) -> String {
+    #[cfg(unix)]
+    {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        state.hash(&mut hash);
+        let link = std::path::PathBuf::from("/tmp").join(format!("ks-{:x}", hash.finish()));
+        let _ = std::fs::create_dir_all(state);
+        let _ = std::fs::remove_file(&link);
+        if std::os::unix::fs::symlink(state, &link).is_ok() {
+            return link.to_string_lossy().into_owned();
+        }
+    }
+    state.to_owned()
+}
+
+fn key_account(home: &Path) -> String {
+    format!("test-{}", machine_state(home).display().to_string().replace('/', "-"))
+}
+
+/// The core's key store account each test host was given, by process id: `stop` removes the item, which otherwise stays
+/// in the login keychain of the machine that ran the tests.
+static KEY_ACCOUNTS: std::sync::Mutex<Vec<(u32, String)>> = std::sync::Mutex::new(Vec::new());
+
+fn forget_key_account(pid: u32) {
+    let account = {
+        let mut all = KEY_ACCOUNTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(at) = all.iter().position(|(p, _)| *p == pid) else { return };
+        all.swap_remove(at).1
+    };
+    // Best effort; the service name is the core's (secrets/keystore.rs).
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("security")
+        .args(["delete-generic-password", "-s", "dev.kith.core.secrets", "-a", &account])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(target_os = "linux")]
+    let _ = Command::new("secret-tool")
+        .args(["clear", "service", "dev.kith.core.secrets", "account", &account])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let _ = account;
+}
+
 /// Runs `kith-serve serve` for `home` until it answers: the process and its base URL. A port
 /// picked here is only free for a moment; when something else takes it before the host binds, the
 /// host exits and this starts it again on another one.
@@ -44,12 +111,14 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 // The test machine's memory and a two-agent limit must not hold a test back (see `gate_e2e`).
                 // Never this computer's state: the fake agents share a session id, and turn claims and terminal
                 // registries live under it. An explicit folder inside the test's home.
-                .env("KITH_STATE", home.join("machine-state"))
+                .env("KITH_STATE", machine_state(home))
+                // Never Kai's real master key item: a debug core reads this account name instead (see core keystore.rs).
+                .env("KITH_SECRETS_KEYSTORE_ACCOUNT", key_account(home))
                 .env("CLAUDE_CONFIG_DIR", home.join("claude-config"))
                 .env("KITH_SERVE_MAX_RUNNING_AGENTS", "64")
                 .env("KITH_SERVE_MIN_FREE_MEMORY_PERCENT", "0")
                 .env("KITH_SERVE_MAX_SWAP_USED_GB", "0")
-                .envs(env.iter().copied())
+                .envs(env.iter().map(|(k, v)| (*k, if *k == "KITH_STATE" { short_link(v) } else { (*v).to_owned() })))
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -61,7 +130,12 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 if !env.iter().any(|(k, _)| *k == "KITH_SERVE_CHANNELS") {
                     assert_channels_off(&base).await;
                 }
-                return (child.0.take().unwrap(), base);
+                let child = child.0.take().unwrap();
+                KEY_ACCOUNTS
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push((child.id(), key_account(home)));
+                return (child, base);
             }
             assert!(Instant::now() < deadline, "host didn't start");
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -127,6 +201,12 @@ async fn assert_channels_off(base: &str) {
 /// children: a SIGKILL would orphan whatever it had running, such as a harness
 /// sign-in check (`cursor-agent status` then spins forever). Kills it after 5 s.
 pub fn stop(child: &mut Child) {
+    let pid = child.id();
+    stop_process(child);
+    forget_key_account(pid);
+}
+
+fn stop_process(child: &mut Child) {
     let _ = Command::new("kill").arg(child.id().to_string()).status();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {

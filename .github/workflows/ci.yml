@@ -723,6 +723,37 @@ jobs:
           --workspace-remap .
           -E 'kind(test)' --partition count:${{ matrix.shard }}/3
 
+  # The secrets envelope against the real OS key stores (the unit tests use an in-memory one): a throwaway keychain on
+  # macOS, gnome-keyring in its own D-Bus session on Linux.
+  core-keystore:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    name: core-keystore (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    defaults:
+      run:
+        shell: bash
+        working-directory: serve/host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config gnome-keyring libsecret-tools dbus
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: core-keystore-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Real key store tests
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/real-keystore-tests.sh"
+
   # guest and tts do not feed the host, so a change to only them skips the build above. Also the doctests, which
   # nextest does not run.
   host-crates:
@@ -1040,7 +1071,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1114,6 +1145,14 @@ jobs:
         run: cargo clippy $SEL --all-targets --locked -- -D warnings
       - name: test
         run: cargo test $SEL --locked --no-fail-fast
+      # The envelope's real key store (macOS Keychain, Linux Secret Service), on a throwaway store made in the job.
+      - name: Real key store (kith-core)
+        if: ${{ contains(inputs.packages, 'kith-core') && runner.os != 'Windows' }}
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get install -y --no-install-recommends gnome-keyring libsecret-tools dbus
+          fi
+          bash "$GITHUB_WORKSPACE/.github/scripts/real-keystore-tests.sh"
       # The host program is Unix-only (the windows job builds just the holder and core crates), so no Windows binary.
       - name: Build kith
         if: inputs.artifact && runner.os != 'Windows'

@@ -36,6 +36,8 @@ pub(crate) struct Config {
     pub wait_for_embedded: Duration,
     /// Off for tests that are not about the holder.
     pub holder_on: bool,
+    /// Reads the secrets master key before the core lock is taken; the OS key store when `None`.
+    pub key_load: Option<crate::secrets::KeyLoader>,
 }
 
 impl Default for Config {
@@ -44,6 +46,7 @@ impl Default for Config {
             holder: HolderConfig::default(),
             wait_for_embedded: Duration::from_secs(30),
             holder_on: true,
+            key_load: None,
         }
     }
 }
@@ -73,6 +76,9 @@ pub(crate) struct Shared {
     run_socket: PathBuf,
     started: Instant,
     pub(crate) terminals: Terminals,
+    key_load: crate::secrets::KeyLoader,
+    /// The master key once read, kept here so the read never happens under the core lock.
+    loaded_key: Mutex<Option<zeroize::Zeroizing<[u8; 32]>>>,
 }
 
 impl Shared {
@@ -90,6 +96,23 @@ impl Shared {
             Some(core) => f(core),
             None => Err(Error::Io("kith-core: the daemon is not running".into())),
         }
+    }
+
+    /// The secrets master key if the key store holds one, read at most until found and never under the core lock.
+    fn master_key(&self) -> Result<Option<zeroize::Zeroizing<[u8; 32]>>> {
+        let slot = || {
+            self.loaded_key
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
+        if let Some(key) = slot().clone() {
+            return Ok(Some(key));
+        }
+        let read = crate::secrets::preload(&*self.key_load)?;
+        if let Some(key) = &read {
+            *slot() = Some(key.clone());
+        }
+        Ok(read)
     }
 
     pub(crate) fn set_holder(&self, f: impl FnOnce(&mut HolderState)) {
@@ -123,6 +146,19 @@ impl Shared {
         }
         if method == "terminal.list" {
             let answer = self.terminals.list(params)?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
+        // The envelope's rows that need the master key read it first, outside the core lock (see `secrets::preload`).
+        if matches!(method, "secrets.open" | "secrets.get" | "secrets.put") {
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let key = self.master_key()?;
+            let answer = self.with_core(|c| {
+                if let Some(key) = key {
+                    crate::secrets::adopt(&c.secrets, key)?;
+                }
+                c.call(kith_api::Principal::Owner, method, params)
+            })?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
@@ -297,6 +333,11 @@ impl Daemon {
             run_socket: runsock::endpoint(&layout),
             started: Instant::now(),
             terminals: Terminals::new(),
+            key_load: cfg
+                .key_load
+                .clone()
+                .unwrap_or_else(|| Arc::new(crate::secrets::os_load)),
+            loaded_key: Mutex::new(None),
         });
         let (s, p) = (shared.clone(), paths.clone());
         let spawned = std::thread::Builder::new()
