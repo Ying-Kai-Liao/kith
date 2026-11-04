@@ -427,8 +427,19 @@ enum KernelCmd {
     },
     /// Makes (or migrates) this Mac's core database, as the daemon's first start would, and releases it. The difftest uses it
     /// to run the same corpus through an embedded core.
+    ///
+    /// `--authority` also imports auth.json's access tables and the Keychain items its profiles name into the core database and the
+    /// secrets envelope (M2-8): idempotent, a backup first, refuses rather than store a different answer. `--dry-run`
+    /// prints what it would do and writes nothing; `--force` replaces authority rows the core already holds.
     #[command(hide = true)]
-    CoreMigrate,
+    CoreMigrate {
+        #[arg(long)]
+        authority: bool,
+        #[arg(long, requires = "authority")]
+        dry_run: bool,
+        #[arg(long, requires = "authority")]
+        force: bool,
+    },
     /// Runs the daemon front alone, in the foreground (what `kith serve` starts inside itself); ends when stdin closes.
     #[command(hide = true)]
     CoreDaemon,
@@ -739,6 +750,32 @@ fn print_delegation(kernel: Option<std::path::PathBuf>, action: DelegationAction
 }
 
 /// `kith kernel secrets <verb> ...`: the answers of `kith-auth may` and `kith-auth resolve`, with its exit codes.
+/// `kith kernel core-migrate --authority`: the import of auth.json and the Keychain items into the core (exit code).
+#[cfg(unix)]
+fn core_migrate_authority(p: &kith_kernel::paths::Paths, dry_run: bool, force: bool) -> i32 {
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
+    let ctx = kith_kernel::secrets::Ctx::from_process(&kernel);
+    match kith_core::migrate_authority(p, &ctx, kith_core::AuthorityOptions { dry_run, force }) {
+        Ok(report) => {
+            for line in &report.lines {
+                println!("{line}");
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn core_migrate_authority(_: &kith_kernel::paths::Paths, _: bool, _: bool) -> i32 {
+    eprintln!("the authority import is not available on this operating system yet");
+    1
+}
+
 fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
@@ -1216,14 +1253,20 @@ async fn main() -> Result<()> {
             // Every kernel verb's notes (the accounts state, the settings migration) reach core.log, also the ones that
             // exit before `through_core`.
             kith_core::route_kernel_notes(&kernel::folders(&kith_kernel::paths::process_home()));
-            if matches!(cmd, KernelCmd::CoreMigrate) {
+            if let KernelCmd::CoreMigrate { authority, dry_run, force } = cmd {
                 let p = kernel::folders(&kith_kernel::paths::process_home());
-                match kith_core::migrate(&p) {
-                    Ok(m) => println!("the core is at schema {}", m.to),
-                    Err(e) => {
-                        eprintln!("{e}");
-                        std::process::exit(1);
+                // A dry run writes nothing, so it does not migrate the schema either.
+                if !dry_run {
+                    match kith_core::migrate(&p) {
+                        Ok(m) => println!("the core is at schema {}", m.to),
+                        Err(e) => {
+                            eprintln!("{e}");
+                            std::process::exit(1);
+                        }
                     }
+                }
+                if authority {
+                    std::process::exit(core_migrate_authority(&p, dry_run, force));
                 }
                 return Ok(());
             }
@@ -1317,7 +1360,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Secrets { .. }
-                    | KernelCmd::CoreMigrate
+                    | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::CoreDaemon
                     | KernelCmd::CoreStatus { .. } => {
                         unreachable!("handled above")
