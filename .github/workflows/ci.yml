@@ -199,6 +199,8 @@ jobs:
               - 'verification/lease/run.sh'
               - '.claude/skills/schedule-fire/**'
               - 'core/runtime/src/schedules/**'
+              - 'core/runtime/src/migrations/schedules/**'
+              - 'core/runtime/src/conversations/claims.rs'
               - 'kernel/bin/kith-sched'
               - '.github/workflows/ci.yml'
       # 'every': a file must match the whole list, so each filter is one brace pattern plus a markdown
