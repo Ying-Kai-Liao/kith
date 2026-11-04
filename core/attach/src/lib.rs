@@ -2,8 +2,8 @@
 //! `core/runtime/src/terminal.rs` ("Attach frames") to the relay (M1-5) over the owner socket's attach endpoint, puts the
 //! user's terminal in raw mode while it is attached, and gives it back on every way out.
 //!
-//! Reached as `kith kernel attach --endpoint <socket|pipe> --ticket-stdin [--observer] [--takeover] [--detach-key K]
-//! [--tty]` (main.rs), the low-level command M1-7's `kith attach` / `kith AGENT --held` call. The ticket is one line on
+//! Reached through `kith kernel attach --endpoint <socket|pipe> --ticket-stdin [--observer] [--takeover] [--detach-key K]
+//! [--tty]` (serve/host's main.rs, a thin call into this crate), the low-level command M1-7's `kith attach` / `kith AGENT --held` call. The ticket is one line on
 //! stdin, never argv. With `--tty` the keys are read from the controlling terminal (`/dev/tty`, `CONIN$`) instead of
 //! stdin, for a caller whose stdin is the pipe the ticket came on.
 //!

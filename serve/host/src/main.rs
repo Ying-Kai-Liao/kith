@@ -4,7 +4,6 @@ mod access;
 mod agent;
 mod analytics;
 mod api;
-mod attach_client;
 mod background;
 mod calls;
 mod cards;
@@ -551,7 +550,7 @@ enum KernelCmd {
     },
 }
 
-/// `kith kernel attach ...`; the exit code is the client's (see `attach_client`).
+/// `kith kernel attach ...`; the exit code is the client's (see `kith-attach`).
 // The flags are the command line's own switches.
 #[allow(clippy::fn_params_excessive_bools)]
 fn run_attach(
@@ -563,7 +562,7 @@ fn run_attach(
     tty: bool,
 ) -> i32 {
     use std::io::BufRead;
-    let key = match attach_client::parse_detach_key(detach_key) {
+    let key = match kith_attach::parse_detach_key(detach_key) {
         Ok(k) => k,
         Err(e) => {
             eprintln!("{e}");
@@ -580,14 +579,14 @@ fn run_attach(
         eprintln!("no ticket on stdin");
         return 2;
     }
-    let opts = attach_client::Opts {
+    let opts = kith_attach::Opts {
         ticket: ticket.trim().to_string(),
-        role: if observer { attach_client::Role::Observer } else { attach_client::Role::Owner },
+        role: if observer { kith_attach::Role::Observer } else { kith_attach::Role::Owner },
         takeover,
         detach_key: key,
         tty_input: tty,
     };
-    attach_client::run(endpoint, &opts)
+    kith_attach::run(endpoint, &opts)
 }
 
 /// What `kith kernel delegation ...` can be asked.

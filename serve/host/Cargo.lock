@@ -2127,6 +2127,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-attach"
+version = "0.1.0"
+dependencies = [
+ "kith-holder",
+ "libc",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "kith-core"
 version = "0.1.0"
 dependencies = [
@@ -2228,9 +2238,9 @@ dependencies = [
  "keyring",
  "kith-acp",
  "kith-api",
+ "kith-attach",
  "kith-core",
  "kith-guest",
- "kith-holder",
  "kith-kernel",
  "kith-mem",
  "kith-wire",
@@ -2255,7 +2265,6 @@ dependencies = [
  "tracing-subscriber",
  "unicode-width",
  "uuid",
- "windows-sys 0.61.2",
  "x25519-dalek",
  "zeroize",
 ]
