@@ -6,7 +6,8 @@
   kith_paths.py --json   the same as JSON (the Claude Code adapter)
   kith_paths.py --kernel the kernel path for plists and hooks (KITH_KERNEL, else <machine>/cli/current/share/kith/kernel)
   kith_paths.py --bin    the kith program (Rust), or nothing when this Mac has none
-  kith_paths.py --guest-sandbox   exit 0 inside the sandbox of a run for anyone but the owner, else 1
+  kith_paths.py --machine  this Mac's own folder (KITH_MACHINE)
+  kith_paths.py --guest-sandbox  exit 0 inside the sandbox of a run for anyone but the owner, else 1
   kith_paths.py --guest-tmp ID    makes that guest's Claude Code temp folder and prints it (nothing: no short one fits)
 Two places, like ~/.claude for Claude Code:
 
@@ -325,6 +326,8 @@ if __name__ == '__main__':
         print(stable_kernel())
     elif arg == '--bin':
         print(kith_bin())
+    elif arg == '--machine':
+        print(p['KITH_MACHINE'])
     elif arg == '--guest-sandbox':
         sys.exit(0 if guest_sandbox() else 1)
     elif arg == '--guest-tmp':

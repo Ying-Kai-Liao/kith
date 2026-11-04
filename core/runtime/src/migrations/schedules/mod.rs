@@ -7,9 +7,11 @@ use super::Migration;
 mod m0120_schedules;
 mod m0121_watermark;
 mod m0122_index;
+mod m0123_first_seen;
 
 pub(super) const STEPS: &[Migration] = &[
     m0120_schedules::MIGRATION,
     m0121_watermark::MIGRATION,
     m0122_index::MIGRATION,
+    m0123_first_seen::MIGRATION,
 ];

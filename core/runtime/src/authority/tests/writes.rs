@@ -1235,6 +1235,68 @@ fn a_bot_given_a_name_then_a_language_lists_its_keys_in_core_db_order() {
     name_then_language_for_a_bot().unwrap();
 }
 
+/// The proptest's minimal case from #778's CI: a revoked person's bot got in through the owner row. A revoked person
+/// can not be made the owner until undo; both the model and core refuse, in kith-auth's words, and change nothing.
+#[test]
+fn a_revoked_person_with_a_bot_made_owner_is_checked_the_same_by_both_readers() {
+    let auth = json!({
+        "people": {"kai": {"owner": true}, "sam": {"revoked": {"at": 7}}, "bot-b": {"bot_of": "sam"}},
+        "members": {"house": {"bot-b": {}}, "garden": {}, "scratch": {}, "sound": {}},
+        "presets": {"empty": {}, "pro": {}}
+    });
+    let mut rig = Rig::new(&auth);
+    let mut model = in_core_order(auth);
+    let before = model.clone();
+    let op = Op {
+        method: "people.addPerson",
+        params: json!({"id": "sam", "owner": true}),
+        code: "",
+    };
+    step(&mut rig, &mut model, &op).unwrap();
+    assert_eq!(model, before);
+    let msg = write_op(op.method, &op.params, &rig.c, &mut model.clone(), "")
+        .unwrap_err()
+        .msg;
+    assert_eq!(
+        msg,
+        "sam's access was removed: kith-auth person sam --unrevoke first"
+    );
+    readers_agree(&rig, &model).unwrap();
+    same(&model, &rig.c).unwrap();
+}
+
+/// With an owner already there the promotion is refused the same way, and the owner flag stays where it was.
+#[test]
+fn a_second_revoked_person_is_not_promoted_over_the_owner_until_undo() {
+    let auth = json!({
+        "people": {"kai": {"owner": true}, "sam": {"revoked": {"at": 7}}},
+        "members": {"house": {}, "garden": {}, "scratch": {}, "sound": {}},
+        "presets": {"empty": {}, "pro": {}}
+    });
+    let mut rig = Rig::new(&auth);
+    let mut model = in_core_order(auth);
+    let promote = Op {
+        method: "people.addPerson",
+        params: json!({"id": "sam", "owner": true}),
+        code: "",
+    };
+    step(&mut rig, &mut model, &promote).unwrap();
+    assert!(
+        model["people"]["kai"]["owner"] == true && model["people"]["sam"].get("owner").is_none()
+    );
+    let undo = Op {
+        method: "people.undo",
+        params: json!({"id": "sam"}),
+        code: "",
+    };
+    step(&mut rig, &mut model, &undo).unwrap();
+    step(&mut rig, &mut model, &promote).unwrap();
+    assert!(
+        model["people"]["sam"]["owner"] == true && model["people"]["kai"].get("owner").is_none()
+    );
+    same(&model, &rig.c).unwrap();
+}
+
 #[test]
 fn sequences_of_writes_leave_core_db_as_the_same_verbs_leave_the_file() {
     let rig = RefCell::new(Rig::new(&json!({})));
