@@ -80,14 +80,18 @@ sha256_of() {
 
 # The local voice helper goes beside the host (the host looks for it there), replaced by rename like the host.
 # Without a built one the install goes on; an older copy is kept until a newer build exists.
-install_tts() {
-  local src=$1 dest; dest=$(dirname "$BIN")/kith-tts
+# The conversation lock's launcher (kith-stub) goes the same way: runs the host starts (a resume card, a wake) find it beside
+# the host, since nothing there points at the version folder it came from. Without it those runs go unlocked.
+install_helper() {
+  local src=$1 name=$2 lost=$3 dest; dest=$(dirname "$BIN")/$name
   [ -x "$src" ] || return 0
   if [ -x "$dest" ] && cmp -s "$src" "$dest"; then return 0; fi
   mkdir -p "$(dirname "$BIN")"
   if cp "$src" "$dest.tmp.$$" && chmod 755 "$dest.tmp.$$" && mv -f "$dest.tmp.$$" "$dest"; then echo "installed $dest"
-  else rm -f "$dest.tmp.$$"; echo "kith serve: couldn't install kith-tts; local voice stays unavailable" >&2; fi
+  else rm -f "$dest.tmp.$$"; echo "kith serve: couldn't install $name; $lost" >&2; fi
 }
+install_tts() { install_helper "$1" kith-tts "local voice stays unavailable"; }
+install_stub() { install_helper "$1" kith-stub "runs the host starts go unlocked"; }
 
 cmd_start() {
   local build=1 dev=0 a
@@ -129,6 +133,10 @@ cmd_start() {
       tail -n 30 "$log" >&2
       echo "kith serve: kith-tts didn't build; local voice stays unavailable" >&2
     fi
+    if ! (cd "$HOST" && PATH="$(dirname "$cargo"):$PATH" exec ${lowprio[@]+"${lowprio[@]}"} "$cargo" build --profile dev-app --manifest-path "$HOST/Cargo.toml" -p kith-stub) >"$log" 2>&1; then
+      tail -n 30 "$log" >&2
+      echo "kith serve: kith-stub didn't build; runs the host starts go unlocked" >&2
+    fi
     rm -f "$log"
   fi
   if [ -x "$built" ]; then
@@ -147,6 +155,7 @@ cmd_start() {
     fi
   fi
   install_tts "$(dirname "$built")/kith-tts"
+  install_stub "$(dirname "$built")/kith-stub"
   [ -x "$BIN" ] || { echo "kith serve: no host binary at $built or $BIN: run kith serve start without --no-build" >&2; exit 1; }
   # The job runs this checkout's kith, not whichever one the login shell finds first. A launcher (config.json
   # `launcher` or KITH_SERVE_LAUNCHER) is opt-in per machine, e.g. when the agents live on an external volume.

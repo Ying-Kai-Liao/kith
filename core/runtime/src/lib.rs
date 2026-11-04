@@ -40,6 +40,9 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+// Held terminals start on Unix only for now; elsewhere `terminal.open` answers `direct` and most of it is unused.
+#[cfg_attr(not(unix), allow(dead_code))]
+mod terminal;
 // The claim path's read (`lease_held_for_non_owner`, `held_in`) and `restart` have no caller until M3 and the daemon start
 // wire them; the rows reach the rest.
 #[allow(dead_code)]

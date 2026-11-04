@@ -1386,15 +1386,22 @@ fi
 # takes <machine>/core/locks/<id> and keeps it until claude exits, whether or not a core answers. It runs claude as its child
 # (exec keeps this shell's pid, so the claim file and the run token's pid binding still name it, and claude descends from it).
 # Busy (75): another run holds the lock, and this one ends with the stub's one line. A run with no id (-c) or another harness
-# starts as before, unlocked. No kith-stub program (KITH_STUB_BIN, else beside the kith program) is not yet a refusal: no
-# release bundles it before M1 ships, and an install without it must keep launching; one stderr line, and KITH_REQUIRE_STUB=1
-# turns it into a refusal for installs that do bundle it (an unlocked run breaks I11).
+# starts as before, unlocked. No kith-stub program (KITH_STUB_BIN, else beside the kith program, symlinks resolved) is not
+# yet a refusal: an owner's run must just work, and a dev checkout or an older install may have none. One stderr line and
+# the run goes on; KITH_REQUIRE_STUB=1 turns it into a refusal (an unlocked run breaks I11). Refusing becomes the default
+# in M3, before warm turns, once every install path is proved to ship the stub.
 stub=()
 if [[ -n $csid ]]; then
   stub_bin=${KITH_STUB_BIN:-}
   if [[ -z $stub_bin ]]; then
     kbin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || kbin=""
-    [[ -z $kbin || ! -x $(dirname "$kbin")/kith-stub ]] || stub_bin=$(dirname "$kbin")/kith-stub
+    # Beside the program where it really lives first: install.sh links only `kith` into ~/.local/bin, so the stub sits next to
+    # the link's target (cli/<version>/bin); then beside the path as given.
+    if [[ -n $kbin ]]; then
+      for d in "$(python3 -I -c 'import os, sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "$kbin" 2>/dev/null)" "$(dirname "$kbin")"; do
+        [[ -n $d && -x $d/kith-stub ]] && { stub_bin=$d/kith-stub; break; }
+      done
+    fi
   fi
   # The stub takes keys of a-z 0-9 . _ - only (exit 70 otherwise, which after exec could not be told from a lock error):
   # an id outside that starts unlocked with the same one line as a missing stub.

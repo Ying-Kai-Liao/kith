@@ -102,6 +102,31 @@ fn on_disk(t: &Tmp, sid: &str) -> Claim {
     read_claim(&claim_path(&t.reg(), sid, false)).unwrap()
 }
 
+#[test]
+fn a_retarget_moves_the_claim_to_another_pid_only_while_it_is_the_givers() {
+    let t = Tmp::new();
+    let c = ctx(&t, &no_env);
+    let a = Sleeper::new();
+    assert!(
+        take_claim(&c, "r1", me(), &Take::new("starting"))
+            .unwrap()
+            .is_ok()
+    );
+    // Not the giver's: nothing changes.
+    assert!(!retarget(&c, "r1", a.pid(), 1, "terminal").unwrap());
+    assert_eq!(on_disk(&t, "r1").kind, "starting");
+    assert!(retarget(&c, "r1", me(), a.pid(), "terminal").unwrap());
+    let got = on_disk(&t, "r1");
+    assert_eq!((got.pid, got.kind.as_str()), (Some(a.pid()), "terminal"));
+    assert_eq!(got.proc_start, os::proc_start(a.pid()));
+    // The new holder keeps the session; the old pid has nothing left to give back.
+    assert!(take(&c, "r1", me()).is_err());
+    release_one(&c, "r1", me(), false);
+    assert!(claim_path(&t.reg(), "r1", false).is_file());
+    release_one(&c, "r1", a.pid(), false);
+    assert!(!claim_path(&t.reg(), "r1", false).exists());
+}
+
 /// The native start time is the text `ps` prints, for the processes this user owns: this one and its parent. (Another
 /// user's, init's say, is refused by the OS: None, and the caller asks `ps`.)
 #[cfg(target_os = "macos")]

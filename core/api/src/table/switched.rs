@@ -1,7 +1,7 @@
 //! Family 1: the verbs the CLI already switched to Rust (`kith paths`, `kith kernel ...`): `Served::Core`.
 
 use super::build::*;
-use crate::Method;
+use crate::{Arg, Method};
 
 pub(super) const ROWS: &[Method] = &[
     core(
@@ -257,4 +257,37 @@ pub(super) const ROWS: &[Method] = &[
         Served::Core,
         Stability::Experimental,
     ),
+    row(
+        "terminal.open",
+        "Starts an agent's engine in a held terminal (the holder runs it under the start stub, so it outlives the window) and returns a single-use attach ticket; `direct` when the holder is not reachable, `busy` when another writer has the session.",
+        &[
+            held_param("agent", "string", true, "The agent."),
+            held_param("session", "string", true, "The session id: the writer claim and the stub's lock key."),
+            held_param("argv", "[string]", true, "The assembled engine launch (program first)."),
+            held_param("cwd", "string", true, "The folder the engine works in."),
+            held_param("env", "{string}", false, "The launch's environment; run tokens and their sockets are dropped."),
+            held_param("cols", "int", false, "Terminal width (default 80)."),
+            held_param("rows", "int", false, "Terminal height (default 24)."),
+        ],
+        "json",
+        &["kernel", "terminal-open"],
+        Served::Core,
+        Stability::Experimental,
+    ),
 ];
+
+/// A param only a client that knows the launch can fill (never typed): like `caller`, but it may be required.
+const fn held_param(
+    name: &'static str,
+    ty: &'static str,
+    required: bool,
+    summary: &'static str,
+) -> Param {
+    Param {
+        name,
+        ty,
+        required,
+        arg: Arg::Caller,
+        summary,
+    }
+}
