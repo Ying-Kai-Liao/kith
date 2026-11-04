@@ -1,0 +1,1471 @@
+[
+ {
+  "name": "pid-empty",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   }
+  ],
+  "run": [
+   [],
+   [
+    "--list"
+   ],
+   [
+    "--root"
+   ],
+   [
+    "--info",
+    "x"
+   ],
+   [
+    "--info"
+   ],
+   [
+    "--children",
+    "x"
+   ],
+   [
+    "--where",
+    "x"
+   ],
+   [
+    "-x"
+   ],
+   [
+    "--register"
+   ],
+   [
+    "--register",
+    "Bad_ID"
+   ],
+   [
+    "--register",
+    "ok",
+    "--home",
+    "",
+    "--in",
+    "ghost"
+   ],
+   [
+    "--root",
+    "{HOME}/nope"
+   ],
+   [
+    "{HOME}/nope"
+   ]
+  ]
+ },
+ {
+  "name": "pid-path-alias-nongit",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/work dir/inner/deep"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/work dir-two"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "alpha",
+    "{HOME}/work dir",
+    "--home",
+    ""
+   ],
+   [
+    "{HOME}/work dir"
+   ],
+   [
+    "{HOME}/work dir/inner"
+   ],
+   [
+    "{HOME}/work dir/inner/deep"
+   ],
+   [
+    "{HOME}/other"
+   ],
+   [
+    "{HOME}/work dir-two"
+   ],
+   [
+    "--list"
+   ],
+   [
+    "--where",
+    "alpha"
+   ],
+   [
+    "--info",
+    "alpha"
+   ],
+   [
+    "--children",
+    "alpha"
+   ]
+  ]
+ },
+ {
+  "name": "pid-bare-cwd-nongit",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/plain/sub"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "alpha",
+    "--home",
+    ""
+   ],
+   [],
+   [
+    "--where",
+    "alpha"
+   ]
+  ],
+  "cwd": "home/plain/sub"
+ },
+ {
+  "name": "pid-git-remote-forms",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "my repo"
+    ],
+    "cwd": "home"
+   },
+   {
+    "mkdir": "home/my repo/sub dir"
+   },
+   {
+    "run": [
+     "git",
+     "remote",
+     "add",
+     "origin",
+     "git@github.com:Owner/Repo.git"
+    ],
+    "cwd": "home/my repo"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "clone-https"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "remote",
+     "add",
+     "origin",
+     "https://github.com/owner/repo.git"
+    ],
+    "cwd": "home/clone-https"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "clone-ssh"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "remote",
+     "add",
+     "origin",
+     "ssh://git@github.com/OWNER/REPO"
+    ],
+    "cwd": "home/clone-ssh"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "clone-scp-port"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "remote",
+     "add",
+     "origin",
+     "ssh://git@github.com:22/owner/repo/"
+    ],
+    "cwd": "home/clone-scp-port"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "clone-none"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "clone-other"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "remote",
+     "add",
+     "origin",
+     "https://github.com/owner/other.git"
+    ],
+    "cwd": "home/clone-other"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "beta",
+    "{HOME}/my repo",
+    "--home",
+    ""
+   ],
+   [
+    "{HOME}/my repo"
+   ],
+   [
+    "{HOME}/my repo/sub dir"
+   ],
+   [
+    "{HOME}/clone-https"
+   ],
+   [
+    "{HOME}/clone-ssh"
+   ],
+   [
+    "{HOME}/clone-scp-port"
+   ],
+   [
+    "{HOME}/clone-none"
+   ],
+   [
+    "{HOME}/clone-other"
+   ],
+   [
+    "--list"
+   ],
+   [
+    "--where",
+    "beta"
+   ]
+  ]
+ },
+ {
+  "name": "pid-git-no-remote",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "repo-a"
+    ],
+    "cwd": "home"
+   },
+   {
+    "mkdir": "home/repo-a/sub/deeper"
+   },
+   {
+    "mkdir": "home/repo-a/elsewhere"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "repo-b"
+    ],
+    "cwd": "home"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "gamma",
+    "{HOME}/repo-a/sub",
+    "--home",
+    ""
+   ],
+   [
+    "{HOME}/repo-a"
+   ],
+   [
+    "{HOME}/repo-a/sub"
+   ],
+   [
+    "{HOME}/repo-a/sub/deeper"
+   ],
+   [
+    "{HOME}/repo-a/elsewhere"
+   ],
+   [
+    "{HOME}/repo-b"
+   ],
+   [
+    "--list"
+   ]
+  ]
+ },
+ {
+  "name": "pid-git-bare-cwd",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "repo-c"
+    ],
+    "cwd": "home"
+   },
+   {
+    "mkdir": "home/repo-c/sub"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "gamma",
+    "--home",
+    ""
+   ],
+   [],
+   [
+    "--list"
+   ]
+  ],
+  "cwd": "home/repo-c/sub"
+ },
+ {
+  "name": "pid-worktree-detached",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "main repo"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@t",
+     "-C",
+     "{HOME}/main repo",
+     "commit",
+     "-q",
+     "--allow-empty",
+     "-m",
+     "m"
+    ]
+   },
+   {
+    "run": [
+     "git",
+     "remote",
+     "add",
+     "origin",
+     "https://example.com/team/main-repo.git"
+    ],
+    "cwd": "home/main repo"
+   },
+   {
+    "run": [
+     "git",
+     "worktree",
+     "add",
+     "-q",
+     "-b",
+     "feature",
+     "{HOME}/wt one"
+    ],
+    "cwd": "home/main repo"
+   },
+   {
+    "mkdir": "home/wt one/sub"
+   },
+   {
+    "run": [
+     "git",
+     "worktree",
+     "add",
+     "-q",
+     "--detach",
+     "{HOME}/detached"
+    ],
+    "cwd": "home/main repo"
+   },
+   {
+    "mkdir": "home/detached/sub"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "delta",
+    "{HOME}/main repo",
+    "--home",
+    ""
+   ],
+   [
+    "{HOME}/main repo"
+   ],
+   [
+    "{HOME}/wt one"
+   ],
+   [
+    "{HOME}/wt one/sub"
+   ],
+   [
+    "{HOME}/detached"
+   ],
+   [
+    "{HOME}/detached/sub"
+   ],
+   [
+    "--list"
+   ]
+  ]
+ },
+ {
+  "name": "pid-worktree-no-remote",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "main repo"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@t",
+     "-C",
+     "{HOME}/main repo",
+     "commit",
+     "-q",
+     "--allow-empty",
+     "-m",
+     "m"
+    ]
+   },
+   {
+    "mkdir": "home/main repo/inner"
+   },
+   {
+    "run": [
+     "git",
+     "worktree",
+     "add",
+     "-q",
+     "-b",
+     "feature",
+     "{HOME}/wt one"
+    ],
+    "cwd": "home/main repo"
+   },
+   {
+    "mkdir": "home/wt one/sub"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "delta",
+    "{HOME}/main repo",
+    "--home",
+    ""
+   ],
+   [
+    "{HOME}/wt one"
+   ],
+   [
+    "{HOME}/wt one/sub"
+   ],
+   [
+    "{HOME}/main repo/inner"
+   ]
+  ]
+ },
+ {
+  "name": "pid-symlinks",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/real/sub"
+   },
+   {
+    "link": "home/via-link",
+    "to": "{HOME}/real"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "repo-real"
+    ],
+    "cwd": "home"
+   },
+   {
+    "mkdir": "home/repo-real/sub"
+   },
+   {
+    "link": "home/repo-link",
+    "to": "{HOME}/repo-real"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "linked",
+    "{HOME}/via-link",
+    "--home",
+    ""
+   ],
+   [
+    "{HOME}/via-link"
+   ],
+   [
+    "{HOME}/real/sub"
+   ],
+   [
+    "{HOME}/via-link/sub"
+   ],
+   [
+    "{HOME}/repo-link"
+   ],
+   [
+    "{HOME}/repo-link/sub"
+   ],
+   [
+    "--register",
+    "repoalias",
+    "{HOME}/repo-link",
+    "--home",
+    ""
+   ],
+   [
+    "{HOME}/repo-link/sub"
+   ],
+   [
+    "{HOME}/repo-real/sub"
+   ],
+   [
+    "--list"
+   ],
+   [
+    "--where",
+    "repoalias"
+   ]
+  ]
+ },
+ {
+  "name": "pid-nested-longest",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/a/b/c"
+   },
+   {
+    "mkdir": "home/a/x"
+   },
+   {
+    "mkdir": "home/a/bb"
+   },
+   {
+    "mkdir": "home/tie/z"
+   },
+   {
+    "mkdir": "home/elsewhere"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{\n  \"projects\": {\n    \"outer\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/a\"\n      ]\n    },\n    \"inner\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/a/b/\"\n      ]\n    },\n    \"bb\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/a/bb\"\n      ]\n    },\n    \"first\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/tie\"\n      ]\n    },\n    \"second\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/tie\"\n      ]\n    }\n  }\n}\n"
+   }
+  ],
+  "run": [
+   [
+    "{HOME}/a/b/c"
+   ],
+   [
+    "{HOME}/a/x"
+   ],
+   [
+    "{HOME}/a/b"
+   ],
+   [
+    "{HOME}/a/bb"
+   ],
+   [
+    "{HOME}/tie/z"
+   ],
+   [
+    "{HOME}/elsewhere"
+   ]
+  ]
+ },
+ {
+  "name": "pid-remote-beats-path",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "repo"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "remote",
+     "add",
+     "origin",
+     "git@github.com:o/r.git"
+    ],
+    "cwd": "home/repo"
+   },
+   {
+    "mkdir": "home/plain"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{\n  \"projects\": {\n    \"bypath\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/repo\"\n      ]\n    },\n    \"byremote\": {\n      \"remotes\": [\n        \"github.com/o/r\"\n      ],\n      \"paths\": []\n    }\n  }\n}\n"
+   }
+  ],
+  "run": [
+   [
+    "{HOME}/repo"
+   ],
+   [
+    "{HOME}/plain"
+   ]
+  ]
+ },
+ {
+  "name": "pid-tree-reads",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/Clients/acme/web"
+   },
+   {
+    "mkdir": "home/code/web"
+   },
+   {
+    "mkdir": "home/code/api"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{\n  \"projects\": {\n    \"acme\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/Clients/acme\"\n      ],\n      \"home\": \"~/Clients/acme\"\n    },\n    \"acme-web\": {\n      \"remotes\": [\n        \"github.com/acme/web\"\n      ],\n      \"paths\": [\n        \"~/code/web\"\n      ],\n      \"parent\": \"acme\",\n      \"home\": \"~/Clients/acme/web\",\n      \"formerly\": \"old-web\"\n    },\n    \"acme-api\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/code/api\",\n        \"~/Clients/acme/api\"\n      ],\n      \"parent\": \"acme\"\n    },\n    \"acme-api-v2\": {\n      \"remotes\": [],\n      \"paths\": [],\n      \"parent\": \"acme-api\"\n    },\n    \"loopa\": {\n      \"remotes\": [],\n      \"paths\": [],\n      \"parent\": \"loopb\"\n    },\n    \"loopb\": {\n      \"remotes\": [],\n      \"paths\": [],\n      \"parent\": \"loopa\"\n    },\n    \"orphan\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/gone\"\n      ],\n      \"parent\": \"missing\"\n    }\n  }\n}\n"
+   }
+  ],
+  "run": [
+   [
+    "--list"
+   ],
+   [
+    "--info",
+    "acme-api-v2"
+   ],
+   [
+    "--info",
+    "loopa"
+   ],
+   [
+    "--info",
+    "orphan"
+   ],
+   [
+    "--info",
+    "it's"
+   ],
+   [
+    "--info",
+    "a\"b"
+   ],
+   [
+    "--info",
+    "x\ny"
+   ],
+   [
+    "--children",
+    "acme"
+   ],
+   [
+    "--children",
+    "acme",
+    "--all"
+   ],
+   [
+    "--children",
+    "loopa",
+    "--all"
+   ],
+   [
+    "--children",
+    "acme-api-v2"
+   ],
+   [
+    "--children",
+    "nope"
+   ],
+   [
+    "--where",
+    "acme"
+   ],
+   [
+    "--where",
+    "acme-web"
+   ],
+   [
+    "--where",
+    "acme-api"
+   ],
+   [
+    "--where",
+    "acme-api-v2"
+   ],
+   [
+    "--where",
+    "orphan"
+   ],
+   [
+    "{HOME}/code/web"
+   ],
+   [
+    "{HOME}/code/api"
+   ],
+   [
+    "{HOME}/Clients/acme/web"
+   ],
+   [
+    "{HOME}/Clients/acme"
+   ]
+  ]
+ },
+ {
+  "name": "pid-register-tree",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/Clients/acme/web"
+   },
+   {
+    "mkdir": "home/code/web"
+   },
+   {
+    "mkdir": "home/code/mobile"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{\n  \"projects\": {\n    \"acme\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/Clients/acme\"\n      ],\n      \"home\": \"~/Clients/acme\"\n    },\n    \"acme-mobile\": {\n      \"remotes\": [],\n      \"paths\": []\n    }\n  }\n}\n"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "acme-mobile",
+    "{HOME}/code/mobile",
+    "--in",
+    "acme",
+    "--home"
+   ],
+   [
+    "--register",
+    "acme-web",
+    "{HOME}/code/web",
+    "--in",
+    "acme",
+    "--home"
+   ],
+   [
+    "--register",
+    "acme",
+    "--home",
+    "{HOME}/Clients/acme"
+   ],
+   [
+    "--register",
+    "solo",
+    "--home"
+   ],
+   [
+    "--register",
+    "solo2",
+    "--home",
+    "--in",
+    "acme"
+   ],
+   [
+    "--register",
+    "acme",
+    "--in",
+    "acme-mobile"
+   ],
+   [
+    "--register",
+    "acme",
+    "--in",
+    "acme"
+   ],
+   [
+    "--register",
+    "acme",
+    "--in",
+    "ghost"
+   ],
+   [
+    "--register",
+    "x",
+    "--in"
+   ],
+   [
+    "--register",
+    "x",
+    "--home",
+    "{HOME}/no/such"
+   ],
+   [
+    "--register",
+    "x",
+    "{HOME}/no/such",
+    "--home",
+    ""
+   ],
+   [
+    "--register",
+    "x",
+    "--home",
+    "",
+    "--in",
+    ""
+   ],
+   [
+    "--list"
+   ],
+   [
+    "--children",
+    "acme",
+    "--all"
+   ],
+   [
+    "--where",
+    "acme-mobile"
+   ],
+   [
+    "--where",
+    "solo"
+   ],
+   [
+    "--info",
+    "solo2"
+   ]
+  ]
+ },
+ {
+  "name": "pid-root",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/Projects"
+   }
+  ],
+  "run": [
+   [
+    "--root"
+   ],
+   [
+    "--root",
+    "{HOME}/Projects"
+   ],
+   [
+    "--root"
+   ],
+   [
+    "--register",
+    "p1",
+    "--home"
+   ],
+   [
+    "--register",
+    "p2",
+    "--home"
+   ],
+   [
+    "--list"
+   ],
+   [
+    "--root",
+    "~/Projects"
+   ],
+   [
+    "--root",
+    "{HOME}/Projects/p1/"
+   ]
+  ]
+ },
+ {
+  "name": "pid-register-existing-keeps-fields",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q",
+     "repo"
+    ],
+    "cwd": "home"
+   },
+   {
+    "run": [
+     "git",
+     "remote",
+     "add",
+     "origin",
+     "https://github.com/k/k"
+    ],
+    "cwd": "home/repo"
+   },
+   {
+    "mkdir": "home/h"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{\n  \"projects\": {\n    \"keep\": {\n      \"home\": \"~/old\",\n      \"formerly\": \"was\",\n      \"extra\": [\n        1,\n        2,\n        {\n          \"a\": null\n        }\n      ]\n    },\n    \"nosets\": {}\n  },\n  \"homes\": \"~/elsewhere\",\n  \"note\": \"\\u00e9\"\n}\n"
+   }
+  ],
+  "run": [
+   [
+    "--register",
+    "keep",
+    "{HOME}/repo"
+   ],
+   [
+    "--register",
+    "keep",
+    "{HOME}/repo",
+    "--home",
+    "{HOME}/h"
+   ],
+   [
+    "--register",
+    "nosets",
+    "{HOME}/repo",
+    "--home",
+    ""
+   ],
+   [
+    "--list"
+   ]
+  ]
+ },
+ {
+  "name": "pid-unicode-and-spaces",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/Café dir/été"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{\n  \"projects\": {\n    \"caf\\u00e9\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/Caf\\u00e9 dir\"\n      ]\n    }\n  },\n  \"note\": \"\\u00e9\"\n}\n"
+   }
+  ],
+  "run": [
+   [
+    "{HOME}/Café dir/été"
+   ],
+   [
+    "--list"
+   ],
+   [
+    "--where",
+    "café"
+   ],
+   [
+    "--register",
+    "plain",
+    "{HOME}/Café dir",
+    "--home",
+    ""
+   ],
+   [
+    "{HOME}/Café dir/été"
+   ]
+  ]
+ },
+ {
+  "name": "pid-file-and-odd-args",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/afile",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{\n  \"projects\": {\n    \"acme\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/Clients/acme\"\n      ],\n      \"home\": \"~/Clients/acme\"\n    },\n    \"acme-web\": {\n      \"remotes\": [\n        \"github.com/acme/web\"\n      ],\n      \"paths\": [\n        \"~/code/web\"\n      ],\n      \"parent\": \"acme\",\n      \"home\": \"~/Clients/acme/web\",\n      \"formerly\": \"old-web\"\n    },\n    \"acme-api\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/code/api\",\n        \"~/Clients/acme/api\"\n      ],\n      \"parent\": \"acme\"\n    },\n    \"acme-api-v2\": {\n      \"remotes\": [],\n      \"paths\": [],\n      \"parent\": \"acme-api\"\n    },\n    \"loopa\": {\n      \"remotes\": [],\n      \"paths\": [],\n      \"parent\": \"loopb\"\n    },\n    \"loopb\": {\n      \"remotes\": [],\n      \"paths\": [],\n      \"parent\": \"loopa\"\n    },\n    \"orphan\": {\n      \"remotes\": [],\n      \"paths\": [\n        \"~/gone\"\n      ],\n      \"parent\": \"missing\"\n    }\n  }\n}\n"
+   }
+  ],
+  "run": [
+   [
+    "{HOME}/afile"
+   ],
+   [
+    "{HOME}/afile/x"
+   ],
+   [
+    "--list",
+    "extra"
+   ],
+   [
+    "--children",
+    "acme",
+    "--all",
+    "--all"
+   ],
+   [
+    "--bogus"
+   ],
+   [
+    ""
+   ],
+   [
+    "--register",
+    "okid",
+    "{HOME}/afile"
+   ]
+  ]
+ },
+ {
+  "name": "pid-guest-branch-stays-python",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_RUN_TOKEN": "t",
+   "KITH_RUN_SOCKET": "{HOME}/no.sock"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{\n  \"projects\": {\n    \"alpha\": {\n      \"remotes\": [],\n      \"paths\": []\n    }\n  }\n}\n"
+   }
+  ],
+  "run": [
+   [],
+   [
+    "--info",
+    "alpha"
+   ]
+  ],
+  "unswitched": "a guest run asks the host over the run socket (kernel/lib/kith_runsocket.py); the core refuses there, so the guest branch stays on Python"
+ }
+]
