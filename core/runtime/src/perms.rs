@@ -177,7 +177,7 @@ fn user() -> String {
 enum Verdict {
     Private,
     Open,
-    /// `icacls` failed and the file is gone (a real NotFound), and it is one of `SQLite`'s sidecars: they are deleted
+    /// `icacls` failed and the file is gone (a real `NotFound`), and it is one of `SQLite`'s sidecars: they are deleted
     /// when the last connection closes, which can happen between the existence check and the read. Nothing to protect.
     Vanished,
     /// `icacls` failed and the file is not provably gone: still there, a handle opening, access denied, a dangling
