@@ -34,4 +34,4 @@ windows-sys = { version = "0.61", features = [
 
 # Tests only: the named-pipe server that plays the holder in tests/resident_windows.rs.
 [target.'cfg(windows)'.dev-dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Pipes"] }
+windows-sys = { version = "0.61", features = ["Win32_System_IO", "Win32_System_Pipes"] }

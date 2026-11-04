@@ -58,6 +58,7 @@ const LOCK_ERROR: u8 = 70;
 const BUSY: u8 = 75;
 
 enum Ctl {
+    #[cfg_attr(windows, allow(dead_code))] // Unix only; parse refuses it on Windows
     Fd(i32),
     #[cfg_attr(unix, allow(dead_code))] // Windows only; parse refuses it on Unix
     Pipe(OsString),
