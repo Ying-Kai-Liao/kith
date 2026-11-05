@@ -1,0 +1,21 @@
+{
+  "fakes": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: permission_mode is not a setting kith can set per agent\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "kith: at_limit is not a setting kith can set per agent\n",
+  "step1.stdout": "",
+  "step2.exit": "1\n",
+  "step2.stderr": "kith: plugins is not a setting kith can set per agent\n",
+  "step2.stdout": "",
+  "step3.exit": "1\n",
+  "step3.stderr": "kith: accounts is not a setting kith can set per agent\n",
+  "step3.stdout": "",
+  "step4.exit": "1\n",
+  "step4.stderr": "kith: limit is not a setting kith can set per agent\n",
+  "step4.stdout": "",
+  "step5.exit": "1\n",
+  "step5.stderr": "kith: bogus is not a setting kith can set per agent\n",
+  "step5.stdout": ""
+}

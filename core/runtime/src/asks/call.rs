@@ -83,6 +83,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                 brief: word(params, "brief"),
                 pid: params.get("pid").and_then(Value::as_i64),
                 conversation: word(params, "conversation"),
+                claim_id: params.get("claimId").and_then(Value::as_i64),
             };
             open(
                 core,

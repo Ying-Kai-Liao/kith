@@ -161,6 +161,7 @@ pub(crate) fn registry() -> Vec<Box<dyn Module>> {
     vec![
         Box::new(modules::accounts::Accounts),
         Box::new(modules::transcripts::Transcripts),
+        Box::new(modules::claims::Claims),
         Box::new(modules::schedules::Schedules::new()),
     ]
 }

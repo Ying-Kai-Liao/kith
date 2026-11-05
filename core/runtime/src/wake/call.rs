@@ -10,7 +10,7 @@ use super::model::Waiter;
 use super::outside::{Files, Outside, System, Transcripts};
 use super::queue::{self, New, refused};
 use super::waiters::{self, Ask, WAIT_TIMEOUT};
-use super::{read, write, write_after};
+use super::{read, turns, write, write_after, write_tx};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -114,8 +114,13 @@ pub(crate) fn call_with(
                 .and_then(Value::as_i64)
                 .ok_or_else(|| Error::BadParams("wake: holder is required".into()))?;
             let (session, sid) = (word(params, "session"), word(params, "sid"));
-            let turn = write(core, now, |st| {
-                Ok(queue::take(st, out, tr, now, holder, session, sid))
+            // The run's turn in the conversations lane is written in the same transaction as the queue rows.
+            let turn = write_tx(core, now, |tx, st| {
+                let turn = queue::take(st, out, tr, now, holder, session, sid);
+                if let Some(t) = &turn {
+                    turns::start_in(tx, out, t, sid, now)?;
+                }
+                Ok(turn)
             })?;
             let lines: Vec<String> = turn.iter().map(Value::to_string).collect();
             Ok(json!({"turn": turn, "lines": lines}))
