@@ -1062,3 +1062,303 @@ fn a_database_imported_before_the_tables_were_filled_cannot_say_an_id_is_free_or
     rig.lines("people.removePerson", &json!({"id": "zed", "unused": true}))
         .unwrap();
 }
+
+// --- a rename and the owner's change carry the secrets tables (lane B) ---------------------------------------------------
+
+/// Fills `secret_grants` and `secret_profiles` from auth.json's `grants` and `profiles` (person and `with` only), the
+/// way the import does.
+fn seed_secrets(rig: &Rig, auth: &Value) {
+    let conn = rig.core.conn();
+    for (agent, by) in auth["grants"].as_object().into_iter().flatten() {
+        for (service, p) in by.as_object().unwrap() {
+            let list = p.as_array().cloned().unwrap_or_else(|| vec![p.clone()]);
+            for (seq, profile) in list.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO secret_grants (agent, service, profile, seq) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![agent, service, profile.as_str().unwrap(), i64::try_from(seq).unwrap()],
+                )
+                .unwrap();
+            }
+        }
+    }
+    for (name, p) in auth["profiles"].as_object().into_iter().flatten() {
+        conn.execute(
+            "INSERT INTO secret_profiles (profile, person, lent) VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                name,
+                p.get("person").and_then(Value::as_str),
+                p.get("with").map(Value::to_string)
+            ],
+        )
+        .unwrap();
+    }
+}
+
+fn secrets_world() -> Value {
+    let mut a = world();
+    a["grants"] = json!({
+        "house": {"github": "github/kai"},
+        "house@amy": {"github": "github/amy"},
+        "house@sam": {"github": ["github/sam", "github/kai"]},
+        "bot@sam": {"web": "web/sam"},
+        "garden@sam": {"github": "github/sam"},
+        "zed@samuel": {"github": "github/sam"},
+    });
+    a["profiles"] = json!({
+        "github/amy": {"person": "amy", "with": ["sam"]},
+        "github/kai": {"person": "kai", "with": ["amy", "sam", "bot-a"]},
+        "github/sam": {"person": "sam"},
+        "web/sam": {"person": "sam", "with": ["sam"]},
+    });
+    a
+}
+
+/// The grants (with their key order) and profiles as the core reads them back.
+fn secrets_of(rig: &mut Rig) -> (Vec<String>, Value, Value) {
+    let t = rig.tables();
+    let keys = t["grants"]
+        .as_object()
+        .map(|g| g.keys().cloned().collect())
+        .unwrap_or_default();
+    (keys, t["grants"].clone(), t["profiles"].clone())
+}
+
+#[test]
+fn a_rename_moves_the_grants_and_profiles_of_the_person() {
+    let a = secrets_world();
+    let mut rig = Rig::new(&a);
+    seed_secrets(&rig, &a);
+    let said = rig
+        .lines("people.renamePerson", &json!({"id": "sam", "to": "anna"}))
+        .unwrap();
+    assert_eq!(
+        said,
+        [
+            "sam is now anna; owns github/sam, web/sam (profile names stay as they are: they name accounts, not people)"
+        ]
+    );
+    let (keys, grants, profiles) = secrets_of(&mut rig);
+    assert_eq!(keys.len(), 6, "{grants}");
+    assert_eq!(
+        grants["house@anna"]["github"],
+        json!(["github/sam", "github/kai"])
+    );
+    assert_eq!(grants["bot@anna"], json!({"web": "web/sam"}));
+    assert_eq!(grants["garden@anna"], json!({"github": "github/sam"}));
+    assert!(grants.get("house@sam").is_none() && grants.get("garden@sam").is_none());
+    // another person's, the agent's own and an older id's stay
+    assert_eq!(grants["house@amy"], json!({"github": "github/amy"}));
+    assert_eq!(grants["house"], json!({"github": "github/kai"}));
+    assert_eq!(grants["zed@samuel"], json!({"github": "github/sam"}));
+    assert_eq!(profiles["github/sam"]["person"], "anna");
+    assert_eq!(
+        profiles["web/sam"],
+        json!({"person": "anna", "with": ["anna"]})
+    );
+    assert_eq!(profiles["github/amy"]["with"], json!(["anna"]));
+    assert_eq!(
+        profiles["github/kai"]["with"],
+        json!(["amy", "anna", "bot-a"])
+    );
+    assert_eq!(profiles["github/kai"]["person"], "kai");
+    // the rows, not only the read-back
+    let rows = |rig: &Rig, agent: &str| -> i64 {
+        rig.core
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM secret_grants WHERE agent = ?1",
+                [agent],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!((rows(&rig, "house@sam"), rows(&rig, "house@anna")), (0, 2));
+}
+
+#[test]
+fn renaming_twice_carries_the_secrets_on_and_the_first_id_cannot_come_back() {
+    let a = secrets_world();
+    let mut rig = Rig::new(&a);
+    seed_secrets(&rig, &a);
+    rig.lines("people.renamePerson", &json!({"id": "sam", "to": "anna"}))
+        .unwrap();
+    let after_first = secrets_of(&mut rig);
+    rig.lines("people.renamePerson", &json!({"id": "anna", "to": "zoe"}))
+        .unwrap();
+    let (_, grants, profiles) = secrets_of(&mut rig);
+    assert_eq!(grants["house@zoe"], after_first.1["house@anna"]);
+    assert!(grants.get("house@anna").is_none());
+    assert_eq!(profiles["github/sam"]["person"], "zoe");
+    assert_eq!(
+        profiles["github/kai"]["with"],
+        json!(["amy", "zoe", "bot-a"])
+    );
+    // an old id is not free again, and the refusal leaves the tables as they were
+    let before = secrets_of(&mut rig);
+    assert_eq!(
+        refused(
+            &mut rig,
+            "people.renamePerson",
+            &json!({"id": "zoe", "to": "sam"})
+        ),
+        "'sam' is already a person (or one's old id)"
+    );
+    assert_eq!(secrets_of(&mut rig), before);
+}
+
+#[test]
+fn a_rename_without_secrets_and_with_the_new_id_already_lent_changes_nothing_else() {
+    // lane B empty (a database imported before it, or a Mac with no logins): the rename is the same as ever
+    let mut rig = Rig::new(&world());
+    assert_eq!(
+        rig.lines("people.renamePerson", &json!({"id": "amy", "to": "bea"}))
+            .unwrap(),
+        ["amy is now bea (profile names stay as they are: they name accounts, not people)"]
+    );
+    let t = rig.tables();
+    assert!(
+        t.get("grants").is_none() && t.get("profiles").is_none(),
+        "{t}"
+    );
+    // an id lent a login by a removed person is not lent it again under a rename to that id: `forget` ran first
+    let mut a = secrets_world();
+    a["profiles"]["github/kai"]["with"] = json!(["bea", "amy", "sam", "bot-a"]);
+    rig.reset(&a);
+    seed_secrets(&rig, &a);
+    rig.lines("people.renamePerson", &json!({"id": "sam", "to": "bea"}))
+        .unwrap();
+    let (_, _, profiles) = secrets_of(&mut rig);
+    assert_eq!(
+        profiles["github/kai"]["with"],
+        json!(["amy", "bea", "bot-a"])
+    );
+}
+
+#[test]
+fn a_renamed_owner_or_bot_takes_its_grants_and_logins_along() {
+    let mut a = secrets_world();
+    a["grants"]["house@bot-a"] = json!({"github": "github/kai"});
+    a["profiles"]["github/kai"]["with"] = json!(["bot-a"]);
+    let mut rig = Rig::new(&a);
+    seed_secrets(&rig, &a);
+    rig.lines("people.renamePerson", &json!({"id": "kai", "to": "ken"}))
+        .unwrap();
+    rig.lines(
+        "people.renamePerson",
+        &json!({"id": "bot-a", "to": "bot-z"}),
+    )
+    .unwrap();
+    let (_, grants, profiles) = secrets_of(&mut rig);
+    assert!(grants.get("house@bot-a").is_none());
+    assert_eq!(grants["house@bot-z"], json!({"github": "github/kai"}));
+    assert_eq!(profiles["github/kai"]["person"], "ken");
+    assert_eq!(profiles["github/kai"]["with"], json!(["bot-z"]));
+}
+
+#[test]
+fn a_new_owner_keeps_the_old_owners_default_logins() {
+    // The import stores a default login as its owner's id; one stored while no owner was named is `the owner`.
+    let mut a = world();
+    a["profiles"] = json!({
+        "chrome-agent/kai": {"person": "kai"},
+        "chrome-agent/default": {"person": "the owner"},
+        "github/shared": {},
+    });
+    let mut rig = Rig::new(&a);
+    seed_secrets(&rig, &a);
+    rig.lines("people.addPerson", &json!({"id": "amy", "owner": true}))
+        .unwrap();
+    let t = rig.tables();
+    assert_eq!(t["profiles"]["chrome-agent/kai"]["person"], "kai");
+    assert_eq!(t["profiles"]["chrome-agent/default"]["person"], "kai");
+    assert!(t["profiles"]["github/shared"].get("person").is_none());
+    // with no owner named yet, "the owner" is whoever is named
+    let mut b = world();
+    b["people"]["kai"] = json!({});
+    b["profiles"] = json!({"chrome-agent/default": {"person": "the owner"}});
+    rig.reset(&b);
+    seed_secrets(&rig, &b);
+    rig.lines("people.addPerson", &json!({"id": "amy", "owner": true}))
+        .unwrap();
+    assert_eq!(
+        rig.tables()["profiles"]["chrome-agent/default"]["person"],
+        "amy"
+    );
+}
+
+/// `kith-auth person <old> id=<new>` over a file holding `auth`, or `None` where there is no python3.
+fn python_rename(auth: &Value, old: &str, new: &str) -> Option<Value> {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("auth.json");
+    let mut auth = auth.clone();
+    for t in [
+        "people", "members", "presets", "invites", "grants", "profiles",
+    ] {
+        if auth.get(t).is_none() {
+            auth[t] = json!({});
+        }
+    }
+    std::fs::write(&file, auth.to_string()).unwrap();
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith-auth");
+    let out = std::process::Command::new("python3")
+        .arg(&script)
+        .args(["person", old, &format!("id={new}")])
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH")?)
+        .env("HOME", dir.path())
+        .env("KITH_AUTH", &file)
+        .env("KITH_HOME", dir.path().join("kith"))
+        .env("KITH_AGENTS", dir.path().join("agents"))
+        .output()
+        .ok()?;
+    assert!(
+        out.status.success(),
+        "kith-auth person failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Some(serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap())
+}
+
+#[test]
+fn the_secrets_after_a_rename_are_what_kith_auth_leaves() {
+    let mut a = secrets_world();
+    // a name listed twice, a name only in `with`, an owner-less profile and a trailing `@` look-alike
+    a["profiles"]["github/kai"]["with"] = json!(["sam", "amy", "sam"]);
+    a["grants"]["a@b@sam"] = json!({"github": "github/sam"});
+    a["grants"]["sam@x"] = json!({"github": "github/sam"});
+    a["profiles"]["github/none"] = json!({});
+    let Some(py) = python_rename(&a, "sam", "anna") else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "no python3 in CI: the rename was not compared with kith-auth"
+        );
+        eprintln!("no python3: rename not compared with kith-auth");
+        return;
+    };
+    let mut rig = Rig::new(&a);
+    seed_secrets(&rig, &a);
+    rig.lines("people.renamePerson", &json!({"id": "sam", "to": "anna"}))
+        .unwrap();
+    let (keys, grants, profiles) = secrets_of(&mut rig);
+    let py_keys: Vec<String> = py["grants"].as_object().unwrap().keys().cloned().collect();
+    // the core reads grants back sorted by agent, so compare the keys as sets and the contents as values
+    let mut sorted = py_keys.clone();
+    sorted.sort();
+    assert_eq!(keys, sorted);
+    assert_eq!(grants, py["grants"]);
+    let narrow = |p: &Value| -> Value {
+        let mut o = serde_json::Map::new();
+        for (n, prof) in p.as_object().unwrap() {
+            let mut q = serde_json::Map::new();
+            for k in ["person", "with"] {
+                if let Some(v) = prof.get(k) {
+                    q.insert(k.to_owned(), v.clone());
+                }
+            }
+            o.insert(n.clone(), Value::Object(q));
+        }
+        Value::Object(o)
+    };
+    assert_eq!(narrow(&profiles), narrow(&py["profiles"]));
+}

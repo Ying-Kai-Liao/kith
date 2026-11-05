@@ -235,9 +235,14 @@ pub(crate) fn person_set(
     let mut out = Vec::new();
     if owner {
         let was = secrets::owner(auth);
-        if let Some(was) = was.filter(|w| w != pid) {
-            // TODO(lane B): kith-auth also pins the profiles that were the old owner's by default to them
-            // (`kept <was>'s: ...`); profiles are not in core.db yet.
+        if let Some(was) = was.clone().filter(|w| w != pid) {
+            let pinned = pin_owner_profiles(auth, &was);
+            if !pinned.is_empty() {
+                out.push(format!(
+                    "kept {was}'s: {} (kith-auth owner <profile> {pid} to hand one over)",
+                    pinned.join(", ")
+                ));
+            }
             out.push(format!(
                 "note: anyone using this Mac account, and {was}'s KITH_DISCORD_OWNER_ID, still run as the owner"
             ));
@@ -248,6 +253,10 @@ pub(crate) fn person_set(
             }
         }
         entry(table(auth, "people"), pid).insert("owner".to_owned(), true.into());
+        if was.is_none() {
+            // with no owner named yet "the owner" owned them; the one now named does
+            repoint_profiles(auth, NO_OWNER, pid);
+        }
     }
     let shown: Vec<String> = people(auth)
         .get(pid)
@@ -268,6 +277,32 @@ pub(crate) fn person_set(
         }
     ));
     Ok(out)
+}
+
+/// What the import stores as the owner of a profile while no owner is named (`owner_of` answers it the same).
+const NO_OWNER: &str = "the owner";
+
+/// Every profile owned by `from` is owned by `to`; the profiles' names, sorted.
+fn repoint_profiles(auth: &mut Value, from: &str, to: &str) -> Vec<String> {
+    let mut moved = Vec::new();
+    let profiles = auth.get_mut("profiles").and_then(Value::as_object_mut);
+    for (name, prof) in profiles.into_iter().flatten() {
+        if str_of(prof, "person") == Some(from)
+            && let Some(o) = prof.as_object_mut()
+        {
+            o.insert("person".to_owned(), to.into());
+            moved.push(name.clone());
+        }
+    }
+    moved.sort_unstable();
+    moved
+}
+
+/// The owner changes: kith-auth pins the profiles that were the old owner's by default to them. The core stores that
+/// default as a person (the import works `owner_of` out once, `m0021`), so only a profile still held for "the owner"
+/// is left to pin.
+fn pin_owner_profiles(auth: &mut Value, was: &str) -> Vec<String> {
+    repoint_profiles(auth, NO_OWNER, was)
 }
 
 /// `rename`: a person's new id, carried through every table that names them. The old id stays in `was`, so what
@@ -326,6 +361,26 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
             }
         }
     }
+    // `agent@old` grants are `agent@new`, in the same place; a profile they own or are lent follows
+    if let Some(grants) = auth.get_mut("grants").and_then(Value::as_object_mut) {
+        let suffix = format!("@{old}");
+        *grants = std::mem::take(grants)
+            .into_iter()
+            .map(|(k, g)| match k.strip_suffix(&suffix) {
+                Some(agent) => (format!("{agent}@{new}"), g),
+                None => (k, g),
+            })
+            .collect();
+    }
+    let owned = repoint_profiles(auth, old, new);
+    let profiles = auth.get_mut("profiles").and_then(Value::as_object_mut);
+    for prof in profiles.into_iter().flat_map(|p| p.values_mut()) {
+        if let Some(with) = prof.get_mut("with").and_then(Value::as_array_mut) {
+            for w in with.iter_mut().filter(|w| w.as_str() == Some(old)) {
+                *w = new.into();
+            }
+        }
+    }
     for inv in table(auth, "invites").values_mut() {
         if str_of(inv, "person") == Some(old)
             && let Some(o) = inv.as_object_mut()
@@ -333,7 +388,12 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
             o.insert("person".to_owned(), new.into());
         }
     }
-    Ok(vec![format!("{old} is now {new}{RENAMED_TAIL}")])
+    let owns = if owned.is_empty() {
+        String::new()
+    } else {
+        format!("; owns {}", owned.join(", "))
+    };
+    Ok(vec![format!("{old} is now {new}{owns}{RENAMED_TAIL}")])
 }
 
 /// What a rename's line ends with; the folders that really moved are said before it (`renamed` in `call.rs`).
