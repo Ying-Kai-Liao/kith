@@ -227,12 +227,17 @@ fn restart_runs_launchctl_in_the_apps_order_and_waits_for_the_port() {
         &l.local_addr().unwrap().port().to_string(),
     );
     env.home = root.clone();
-    assert!(restart_host(
-        &env,
-        Path::new("/k"),
-        true,
-        Duration::from_secs(3)
-    ));
+    // a script written a moment ago can be "text file busy" when another test forks at that instant: try again
+    let mut up = false;
+    for _ in 0..10 {
+        let _ = std::fs::remove_file(&log);
+        up = restart_host(&env, Path::new("/k"), true, Duration::from_secs(3));
+        if up {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(up);
     let calls: Vec<String> = std::fs::read_to_string(&log)
         .unwrap()
         .lines()
