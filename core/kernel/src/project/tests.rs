@@ -164,9 +164,13 @@ fn two_registers_at_once_both_land() {
         h.join().unwrap();
     }
     let reg: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(c.state.join("projects.json")).unwrap()).unwrap();
+        serde_json::from_str(&std::fs::read_to_string(c.state.join("projects.json")).unwrap())
+            .unwrap();
     for i in 0..8 {
-        assert!(reg["projects"].get(format!("proj{i}")).is_some(), "proj{i} lost: {reg}");
+        assert!(
+            reg["projects"].get(format!("proj{i}")).is_some(),
+            "proj{i} lost: {reg}"
+        );
     }
 }
 
@@ -183,7 +187,7 @@ fn a_crash_before_the_rename_leaves_the_old_file_whole() {
     let strays: Vec<_> = std::fs::read_dir(&c.state)
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
-        .filter(|n| n.ends_with(".tmp"))
+        .filter(|n| n.contains(".tmp"))
         .collect();
     assert!(strays.is_empty(), "temp left behind: {strays:?}");
 }
@@ -196,7 +200,10 @@ fn a_held_lock_makes_a_register_wait_until_it_is_released() {
     let c2 = c.clone();
     let t = std::thread::spawn(move || go(&c2, &["--register", "late", "--home", ""]));
     std::thread::sleep(std::time::Duration::from_millis(300));
-    assert!(!c.state.join("projects.json").exists(), "register ran under a held lock");
+    assert!(
+        !c.state.join("projects.json").exists(),
+        "register ran under a held lock"
+    );
     drop(held);
     assert_eq!(t.join().unwrap().code, 0);
     assert!(c.state.join("projects.json").exists());

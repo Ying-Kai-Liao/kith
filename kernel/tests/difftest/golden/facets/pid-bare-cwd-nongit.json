@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"alpha\": {\n      \"paths\": [\n        \"~/plain/sub\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/plain/sub/": "<empty dir>\n",
   "step0.exit": "0\n",
   "step0.stderr": "",

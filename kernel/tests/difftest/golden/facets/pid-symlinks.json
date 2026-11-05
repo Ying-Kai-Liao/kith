@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"linked\": {\n      \"paths\": [\n        \"~/real\"\n      ],\n      \"remotes\": []\n    },\n    \"repoalias\": {\n      \"paths\": [\n        \"~/repo-real\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/real/sub/": "<empty dir>\n",
   "state:home/repo-real/.git/HEAD": "ref: refs/heads/master\n",
   "state:home/repo-real/.git/description": "Unnamed repository; edit this file 'description' to name the repository.\n",

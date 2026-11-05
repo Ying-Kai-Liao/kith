@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"homes\": \"~/elsewhere\",\n  \"note\": \"é\",\n  \"projects\": {\n    \"keep\": {\n      \"extra\": [\n        1,\n        2,\n        {\n          \"a\": null\n        }\n      ],\n      \"formerly\": \"was\",\n      \"home\": \"~/h\",\n      \"paths\": [\n        \"~/repo\"\n      ],\n      \"remotes\": [\n        \"github.com/k/k\"\n      ]\n    },\n    \"nosets\": {\n      \"paths\": [\n        \"~/repo\"\n      ],\n      \"remotes\": [\n        \"github.com/k/k\"\n      ]\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/h/": "<empty dir>\n",
   "state:home/repo/.git/HEAD": "ref: refs/heads/master\n",
   "state:home/repo/.git/description": "Unnamed repository; edit this file 'description' to name the repository.\n",

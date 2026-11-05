@@ -62,7 +62,10 @@ fn write_atomic(file: &Path, data: &[u8], crash_before_rename: bool) -> std::io:
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     let result = (|| {
-        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         if let Ok(m) = std::fs::metadata(file) {
             f.set_permissions(m.permissions())?;
         }
@@ -85,7 +88,7 @@ fn write_atomic(file: &Path, data: &[u8], crash_before_rename: bool) -> std::io:
 }
 
 /// The writers' lock (`projects.json.lock` in the state folder), held from reading the registry to writing it back so two
-/// registers at once both land. `kernel/bin/project-id` takes no lock, so this excludes other Rust writers only.
+/// registers at once both land. `kernel/bin/project-id` takes the same flock, so Python and Rust writers exclude each other.
 fn lock(state: &Path) -> std::io::Result<std::fs::File> {
     use fs2::FileExt as _;
     let l = std::fs::OpenOptions::new()
@@ -285,8 +288,12 @@ impl Run<'_> {
 
     fn save(&self) -> Result<(), String> {
         let text = pyjson::dumps_indent(&Value::Object(self.reg.clone())) + "\n";
-        write_atomic(&self.ctx.state.join("projects.json"), text.as_bytes(), false)
-            .map_err(|e| format!("project-id: cannot write projects.json: {e}"))
+        write_atomic(
+            &self.ctx.state.join("projects.json"),
+            text.as_bytes(),
+            false,
+        )
+        .map_err(|e| format!("project-id: cannot write projects.json: {e}"))
     }
 
     /// `pid` and its parents, closest first; stops at a missing parent or a loop.

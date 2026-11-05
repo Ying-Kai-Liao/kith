@@ -1,6 +1,6 @@
 {
   "fakes": "",
-  "state:home/.kith/": "<empty dir>\n",
+  "state:home/.kith/projects.json.lock": "",
   "step0.exit": "1\n",
   "step0.stderr": "",
   "step0.stdout": "",

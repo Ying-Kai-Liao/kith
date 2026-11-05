@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"gamma\": {\n      \"paths\": [\n        \"~/repo-a\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/repo-a/.git/HEAD": "ref: refs/heads/master\n",
   "state:home/repo-a/.git/description": "Unnamed repository; edit this file 'description' to name the repository.\n",
   "state:home/repo-a/.git/info/exclude": "# git ls-files --others --exclude-from=.git/info/exclude\n# Lines that start with '#' are comments.\n# For a project mostly in C, the following would be a good set of\n# exclude patterns (uncomment them if you want to use them):\n# *.[oa]\n# *~\n",
