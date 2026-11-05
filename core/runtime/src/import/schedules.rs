@@ -21,7 +21,7 @@ use rusqlite::{Connection, OpenFlags, params};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use crate::db::MIGRATIONS;
+use crate::db::{Core, MIGRATIONS};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 
@@ -172,6 +172,42 @@ fn describe(tick: bool, runs: usize) -> String {
 
 /// The step. `machine` is the machine folder (state.json is in its `sched/`).
 pub(crate) fn run(layout: &Layout, machine: &Path, dry_run: bool) -> Result<Report> {
+    run_in(layout, machine, dry_run, None)
+}
+
+/// What state.json says that core.db does not (the cutover module's same-answer check): one line per run `kith-sched`
+/// last started that has no `sched_runs` row for this Mac. The tick is not compared: `kith-sched` moves it every minute
+/// while it ticks, and the core's own watermark is what the fire counts from. A missing file says nothing.
+pub(crate) fn run_diffs(c: &Connection, machine: &Path) -> Result<Vec<String>> {
+    let Some((src, _)) = read_source(&machine.join("sched").join("state.json"))? else {
+        return Ok(Vec::new());
+    };
+    let mac = std::fs::read_to_string(machine.join(crate::schedules::MAC_ID_FILE))
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default();
+    if !has_table(c, "sched_runs") {
+        return Ok(vec!["core.db has no schedule tables yet".into()]);
+    }
+    let (_, missing) = plan(c, &src, &mac);
+    Ok(missing
+        .into_iter()
+        .map(|i| {
+            format!(
+                "{}/{}: run at {} is in state.json, not in the core",
+                src.runs[i].agent, src.runs[i].job, src.runs[i].at
+            )
+        })
+        .collect())
+}
+
+/// [`run`] for the cutover module (`cutover/modules/schedules.rs`), which already holds the core's lifetime lock and has
+/// taken its own snapshot: a real run writes through that core, and takes no second lock or backup.
+pub(crate) fn run_in(
+    layout: &Layout,
+    machine: &Path,
+    dry_run: bool,
+    held: Option<&mut Core>,
+) -> Result<Report> {
     let mut rep = Report {
         dry_run,
         ..Report::default()
@@ -218,7 +254,13 @@ pub(crate) fn run(layout: &Layout, machine: &Path, dry_run: bool) -> Result<Repo
     );
     let mac = crate::schedules::mac_id(machine)?;
     // The lifetime lock for the whole step; this also brings the schema up to date, as `kith migrate` does.
-    let mut core = crate::start_with(layout, MIGRATIONS)?;
+    let mut owned;
+    let (core, own_lock) = if let Some(c) = held {
+        (c, false)
+    } else {
+        owned = crate::start_with(layout, MIGRATIONS)?;
+        (&mut owned, true)
+    };
     let (tick, new) = {
         let tx = core.claim_tx()?;
         plan(&tx, &src, &mac)
@@ -228,11 +270,16 @@ pub(crate) fn run(layout: &Layout, machine: &Path, dry_run: bool) -> Result<Repo
             .push("nothing to change: core.db already holds the sched state".into());
         return Ok(rep);
     }
-    // Before the first write.
-    let backup = core.backup(layout, "pre-import")?;
-    rep.lines
-        .push(format!("backup of core.db: {}", backup.display()));
-    rep.backup = Some(backup.clone());
+    // Before the first write. Under the cutover the framework took its snapshot already (`own_lock` is false).
+    let backup = if own_lock {
+        let b = core.backup(layout, "pre-import")?;
+        rep.lines
+            .push(format!("backup of core.db: {}", b.display()));
+        rep.backup = Some(b.clone());
+        b
+    } else {
+        std::path::PathBuf::new()
+    };
     let tx = core.claim_tx()?;
     let now = now_secs();
     if tick && let Some(t) = &src.tick {

@@ -294,6 +294,7 @@ jobs:
               People check (kith people, kith invite, kith bot ls/invite/revoke/decide/auto-allow --json, against a stub host)|kernel/tests/kith-people-check
               Account check (kith account add/remove/list --json, the login command returned and not run)|kernel/tests/kith-account-check
               Accounts tombstone check (a tombstoned state.json refuses writes; kith-account exits 4)|kernel/tests/kith-accounts-tombstone-check
+              Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
               Grants check (connectors and skills as grants on an agent)|kernel/tests/kith-grants-check
           - shard: 3
             bun: true
