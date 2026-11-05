@@ -518,10 +518,6 @@
     "env": {
       "KITH_STATE": "{KITH_HOME}/state"
     },
-    "ignore": [
-      "/\\.git/hooks/",
-      "/\\.git/config$"
-    ],
     "mask_keys": [
       "made"
     ],
@@ -676,6 +672,8 @@
       ]
     ],
     "ignore": [
+      "/\\.git/hooks/",
+      "/\\.git/config$",
       "/store/[^/]*@[0-9a-f]{10}/"
     ]
   },
