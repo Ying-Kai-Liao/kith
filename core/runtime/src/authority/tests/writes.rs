@@ -62,6 +62,7 @@ impl Rig {
             "agent_access",
             "secret_grants",
             "secret_profiles",
+            "secret_vars",
         ] {
             self.core
                 .conn()
@@ -1405,6 +1406,7 @@ fn forget_also_clears_grants_and_profiles() {
         "INSERT INTO secret_grants VALUES ('house@bot-a', 'gh', 'p1', 0), ('house@bot-a', 'gh', 'p2', 1), \
         ('house@amy', 'gh', 'p1', 0), ('house', 'gh', 'p1', 0), ('house', 'web', 'p3', 0), ('house', 'web', 'p4', 1)",
     );
+    db("INSERT INTO secret_vars VALUES ('p1', 'TOKEN', 'keychain'), ('p2', 'TOKEN', 'keychain')");
     db(
         "INSERT INTO secret_profiles VALUES ('p1', 'kai', '[\"bot-a\",\"amy\"]', NULL), \
         ('p2', 'kai', '[\"bot-a\"]', NULL), ('p3', 'bot-a', NULL, 'br'), ('p4', 'kai', '[\"amy\"]', NULL)",
@@ -1434,13 +1436,59 @@ fn forget_also_clears_grants_and_profiles() {
         )
         .unwrap();
     assert_eq!(browser.as_deref(), Some("br"));
-    // forgetting again changes nothing
-    let before = t.clone();
-    assert!(
-        rig.lines("people.removeBot", &json!({"id": "bot-a"}))
-            .is_err()
+    let vars: i64 = rig
+        .core
+        .conn()
+        .query_row("SELECT count(*) FROM secret_vars", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(vars, 2, "variables survive the rewrite of `with`");
+    // the same id taken again gets none of it back, and removing it again changes nothing
+    rig.lines("people.addBot", &json!({"id": "bot-a", "of": "sam"}))
+        .unwrap();
+    let t2 = rig.tables();
+    assert_eq!(t2["grants"], t["grants"]);
+    assert_eq!(t2["profiles"], t["profiles"]);
+    rig.lines("people.removeBot", &json!({"id": "bot-a"}))
+        .unwrap();
+    let t3 = rig.tables();
+    assert_eq!(t3["grants"], t["grants"]);
+    assert_eq!(t3["profiles"], t["profiles"]);
+}
+
+#[test]
+fn store_rewrites_a_changed_grant_list_in_order_and_refuses_to_drop_a_profile() {
+    let rig = Rig::new(&base());
+    let conn = rig.core.conn();
+    let one = json!({"grants": {"a@x": {"gh": ["p2", "p1"], "web": "p3"}}, "profiles": {"p1": {"person": "kai"}}});
+    store::store(conn, &json!({}), &one).unwrap();
+    let rows = |conn: &rusqlite::Connection| -> Vec<(String, String, i64)> {
+        let mut q = conn
+            .prepare("SELECT service, profile, seq FROM secret_grants WHERE agent = 'a@x' ORDER BY service, seq")
+            .unwrap();
+        q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(
+        rows(conn),
+        [
+            ("gh".into(), "p2".into(), 0),
+            ("gh".into(), "p1".into(), 1),
+            ("web".into(), "p3".into(), 0)
+        ]
     );
-    assert_eq!(rig.tables(), before);
+    let two = json!({"grants": {"a@x": {"gh": ["p1", "p2", "p4"]}}, "profiles": {"p1": {"person": "kai"}}});
+    store::store(conn, &one, &two).unwrap();
+    assert_eq!(
+        rows(conn),
+        [
+            ("gh".into(), "p1".into(), 0),
+            ("gh".into(), "p2".into(), 1),
+            ("gh".into(), "p4".into(), 2)
+        ]
+    );
+    assert!(store::store(conn, &two, &json!({"grants": {"a@x": {"gh": ["p1"]}}})).is_err());
 }
 
 #[test]

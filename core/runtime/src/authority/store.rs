@@ -103,7 +103,7 @@ fn truthy(v: Option<&Value>) -> bool {
 
 /// Stores what differs between the two values. Rows are matched by their key, so a changed person keeps its `seq` (the
 /// order `canonical` and `owner` read), and a new one goes last, where `kith-auth` appends it.
-fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
+pub(super) fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
     let (old, new) = (table(before, "people"), table(after, "people"));
     for id in old.keys().filter(|k| !new.contains_key(*k)) {
         conn.execute("DELETE FROM people WHERE id = ?1", [id])?;
@@ -263,9 +263,12 @@ fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
         }
     }
     let (old, new) = (table(before, "profiles"), table(after, "profiles"));
-    for name in old.keys().filter(|k| !new.contains_key(*k)) {
-        conn.execute("DELETE FROM secret_vars WHERE profile = ?1", [name])?;
-        conn.execute("DELETE FROM secret_profiles WHERE profile = ?1", [name])?;
+    // no verb removes a profile, and its variables were never read into the snapshot: refuse, don't half-delete
+    if let Some(name) = old.keys().find(|k| !new.contains_key(*k)) {
+        return Err(bad(
+            "profiles",
+            format!("a profile cannot be removed through the core yet ('{name}')"),
+        ));
     }
     for (name, p) in new {
         let same = |o: &Value| o.get("person") == p.get("person") && o.get("with") == p.get("with");
