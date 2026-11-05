@@ -909,19 +909,6 @@ fn print_cost(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     out.code
 }
 
-/// `kith kernel people people|invite ARGS...`: what `kith-people` prints, with its exit codes.
-fn print_people(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
-    use std::io::Write as _;
-    let home = kith_kernel::paths::process_home();
-    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
-    let system = kith_kernel::people::System { kernel, home, env: kith_kernel::people::Env::from_process() };
-    let out = kith_kernel::people::run(&system, args);
-    print!("{}", out.stdout);
-    eprint!("{}", out.stderr);
-    let _ = std::io::stdout().flush();
-    out.code
-}
-
 fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
@@ -933,6 +920,19 @@ fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
         guest: kith_kernel::project::is_guest(|n| std::env::var_os(n)),
     };
     let out = kith_kernel::project::run(&ctx, args);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
+}
+
+/// `kith kernel people people|invite ARGS...`: what `kith-people` prints, with its exit codes.
+fn print_people(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let system = kith_kernel::people::System { kernel, home, env: kith_kernel::people::Env::from_process() };
+    let out = kith_kernel::people::run(&system, args);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
