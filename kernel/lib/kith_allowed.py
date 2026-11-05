@@ -63,9 +63,9 @@ PKG_ALWAYS = {'npx', 'pnpx', 'bunx', 'uvx'}
 # a command's working folder or every way it writes (a script's --out, git checkout -- <file>), nor every checkout's paths.
 TRUST_NAMES = ('allowed.json', 'settings.json', 'settings.local.json', 'capabilities.yaml', 'mcp.json', '.mcp.json') \
     + kith_guard.HOME_FILES
-TRUST_PARTS = ('run/once',)
+TRUST_PARTS = (r'run/+(?:\./+)*once',)  # run/once, also as run//once or run/./once
 TRUST_NAMED = re.compile(r'(?i)(?:^|[^A-Za-z0-9._-])(?:%s)(?![A-Za-z0-9_-])|%s' % (
-    '|'.join(map(re.escape, TRUST_NAMES)), '|'.join(map(re.escape, TRUST_PARTS))))
+    '|'.join(map(re.escape, TRUST_NAMES)), '|'.join(TRUST_PARTS)))
 # `claude auto-mode defaults` hard_deny labels. A sentence in autoMode.allow only overrides soft_deny, so a block under one of
 # these is never lifted by a remembered sentence (an exact permission rule still resolves before the classifier).
 HARD_DENY = ('Data Exfiltration',)
@@ -181,7 +181,7 @@ def _globs_trust(words):
         if not re.search(r'[*?\[{]', w):
             continue
         w = re.sub(r'\{[^}]*\}', '*', w.lower())
-        parts = [p for p in re.split(r'[/=<>|;&(),:]', w) if p]
+        parts = [p for p in re.split(r'[/=<>|;&(),:]', w) if p and p != '.']
         if any(fnmatch.fnmatchcase(n.lower(), p) for p in parts for n in TRUST_NAMES):
             return True
         if any(fnmatch.fnmatchcase('run', a) and fnmatch.fnmatchcase('once', b) for a, b in zip(parts, parts[1:])):
@@ -202,7 +202,8 @@ def derive(agent, tool, tool_input, reason=''):
     exact input) for what a permission rule cannot hold. Refused: anything in a must-ask class (kith_guard.must_ask: a
     secret, a trust file, a delete, something outward, code with no name), any delete (a remembered rule has no roots to
     keep it inside), a command or file that names a trust file anywhere (TRUST_NAMED, also unquoted or through a glob or
-    brace; not through a variable, nor a folder copy such as `cp -R tmpl/. role/`), a bare or code-running shell, a
+    brace; not through a variable, nor a folder copy such as `cp -R tmpl/. role/`), $'…' or $"…" quoting (bash decodes
+    it, shlex does not), a bare or code-running shell, a
     folder, a rule that would be a wildcard. A path that is not a file yet is a sentence, never an Edit rule. A sentence
     is not offered when `reason` (the classifier's) names a hard_deny rule: it would never take effect."""
     d = _derive(agent, tool, tool_input)
@@ -257,6 +258,9 @@ def _derive_bash(agent, tool_input):
     if words is None or not words:
         return no('not a command that can be remembered exactly')
     first = os.path.basename(words[0])
+    if "$'" in command or '$"' in command:
+        # bash decodes these ($'\x2e' is a dot) and shlex does not, so the words above may not be what runs.
+        return no("a command with $'…' or $\"…\" quoting is asked each time")
     if TRUST_NAMED.search(command) or TRUST_NAMED.search(' '.join(words)) or _globs_trust(words):
         return no(WHY['trust'])
     if re.search(r'(?:^|[\s;&|(`/])(?:rm|rmdir|unlink|trash|truncate)\s', command):
