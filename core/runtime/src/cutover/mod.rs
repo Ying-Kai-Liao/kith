@@ -307,6 +307,8 @@ pub(crate) fn step(
             )));
         }
         lines.push(format!("{name}: same answer as the old store"));
+        // Before the marker and the switched record: a refusal here leaves the module stepping, so a rerun imports again.
+        m.before_tombstone(env)?;
         let digest = m.digest(env, core.conn())?;
         marker::write(&mut core, name, at, &digest)?;
         state::write(
@@ -321,7 +323,6 @@ pub(crate) fn step(
     } else {
         lines.push(format!("{name} is already switched"));
     }
-    m.before_tombstone(env)?;
     for p in m.tombstones(env) {
         lines.push(tombstone::ensure(&p, name, now_secs())?);
     }

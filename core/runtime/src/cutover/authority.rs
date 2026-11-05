@@ -208,16 +208,15 @@ fn hold_auth_lock(auth: &Path, wait: Duration) -> Result<AuthLock> {
     }
 }
 
-/// The SHA-256 of the file's bytes; `None` when it does not exist.
-fn sha_of(path: &Path) -> Result<Option<String>> {
+/// The SHA-256 of the file's bytes; "missing" when it does not exist.
+fn sha_of(path: &Path) -> Result<String> {
+    use std::fmt::Write as _;
     match std::fs::read(path) {
-        Ok(b) => Ok(Some(
-            Sha256::digest(&b)
-                .iter()
-                .map(|x| format!("{x:02x}"))
-                .collect(),
-        )),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Ok(b) => Ok(Sha256::digest(&b).iter().fold(String::new(), |mut s, x| {
+            let _ = write!(s, "{x:02x}");
+            s
+        })),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("missing".to_owned()),
         Err(e) => Err(Error::Io(format!("authority: {}: {e}", path.display()))),
     }
 }
@@ -238,21 +237,20 @@ fn unmoved_vault_rows(ctx: &Ctx, core: &Connection) -> Result<Option<Vec<String>
             "authority: serve.db cannot be read to look for credential records that have not moved: {e}"
         ))
     };
-    let serve = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(io)?;
+    let serve =
+        Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(io)?;
     serve.busy_timeout(Duration::from_secs(2)).map_err(io)?;
-    let slots: Vec<String> = match serve
-        .prepare("SELECT k FROM kv WHERE substr(v, 1, length(?1)) = ?1 ORDER BY k")
-    {
-        Ok(mut st) => st
-            .query_map([OLD_VAULT_PREFIX], |r| r.get(0))
-            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<String>>>())
-            .map_err(io)?,
-        Err(rusqlite::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => {
-            return Ok(None);
-        }
-        Err(e) => return Err(io(e)),
-    };
+    let slots: Vec<String> =
+        match serve.prepare("SELECT k FROM kv WHERE substr(v, 1, length(?1)) = ?1 ORDER BY k") {
+            Ok(mut st) => st
+                .query_map([OLD_VAULT_PREFIX], |r| r.get(0))
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<String>>>())
+                .map_err(io)?,
+            Err(rusqlite::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => {
+                return Ok(None);
+            }
+            Err(e) => return Err(io(e)),
+        };
     let sealed: BTreeSet<String> = Envelope::list(core)?.into_iter().collect();
     Ok(Some(
         slots.into_iter().filter(|s| !sealed.contains(s)).collect(),
@@ -277,7 +275,7 @@ pub(crate) struct AuthorityModule {
     /// How long to wait for `auth.json.lock`.
     lock_wait: Duration,
     /// What the import read: auth.json's sha, checked again just before the tombstone. (`None` outside a step.)
-    imported: RefCell<Option<Option<String>>>,
+    imported: RefCell<Option<String>>,
     /// Where `import` reads the Keychain items the profiles name.
     source: Box<dyn ItemSource>,
     /// Where `import` seals them.
