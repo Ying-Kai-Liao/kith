@@ -367,7 +367,7 @@ async fn end_in_core(hub: &Hub, id: &str, approved: bool) {
         Ok(_) => {}
         Err(e) if e.downcast_ref::<crate::api::authority::CoreRefused>().is_some() => {}
         Err(e) => {
-            tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't end an access request in the core")
+            tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't end an access request in the core");
         }
     }
 }

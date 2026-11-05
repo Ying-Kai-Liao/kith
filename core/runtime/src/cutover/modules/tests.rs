@@ -474,7 +474,7 @@ fn both_s1_modules_are_listed_and_checkable() {
     let a = |s: &[&str]| s.iter().map(|x| (*x).to_owned()).collect::<Vec<_>>();
     assert_eq!(
         crate::cutover::run_with(&reg, &env, &a(&["modules"])).unwrap(),
-        vec!["accounts", "transcripts", "schedules"]
+        vec!["accounts", "transcripts", "schedules", "authority"]
     );
     crate::tests::open_all(&env.layout);
     for m in ["accounts", "transcripts"] {

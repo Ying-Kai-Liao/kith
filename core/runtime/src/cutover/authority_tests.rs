@@ -202,7 +202,7 @@ fn the_module_is_registered_and_names_auth_json_as_its_tombstone() {
     let reg = registry();
     assert_eq!(
         reg.iter().map(|m| m.name()).collect::<Vec<_>>(),
-        ["authority"]
+        ["accounts", "transcripts", "schedules", "authority"]
     );
     let (r, reg) = rig();
     assert_eq!(reg[0].tombstones(&r.env), [r.auth()]);
