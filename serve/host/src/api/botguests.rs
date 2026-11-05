@@ -996,7 +996,7 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
         if b["conversation"].as_str().is_some_and(|c| !c.is_empty()) || external.is_some() {
             return Err(bad("A room ask has no conversation or ref: it is one turn of an agent in the room."));
         }
-        return ask_room(hub, caller, bot, room, text, nonce, speaker).await;
+        return ask_room(hub, caller, bot, room, b["gen"].as_i64(), text, nonce, speaker).await;
     }
 
     // Which conversation. Another bot's id is a 404, never a 403: no existence leak.
@@ -1107,18 +1107,25 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
 
 /// `botAsk` with a `room` (C5): the bot's question becomes one turn of the agent it @-mentions in a room it is a member
 /// of. No conversation opens, and the agent's reply wakes nobody. When the room has an open conversation the turn is
-/// taken from its budget (C2); with none it costs the bot its ask rate only.
+/// taken from its budget (C2); with none it costs the bot its ask rate only. A `generation` (the `gen` of a read or
+/// wake) other than the bot's current one is a 404, like no membership: it was taken out of the room since.
+#[allow(clippy::too_many_arguments)]
 async fn ask_room(
     hub: &Arc<Hub>,
     caller: &Caller,
     bot: &BotGuest,
     room: &str,
+    generation: Option<i64>,
     text: &str,
     nonce: &str,
     speaker: Option<String>,
 ) -> Result<Value> {
     let missing = || BotError::err(404, Code::NotFound, "No such room.");
-    if !crate::chat::group::is_room_member(&hub.store, room, &bot.bot_id) {
+    let member = || {
+        let now = crate::chat::group::membership_gen(&hub.store, room, &bot.bot_id);
+        now.is_some_and(|now| generation.is_none_or(|g| g == now))
+    };
+    if !member() {
         return Err(missing());
     }
     let group = hub.store.bot(room)?.filter(|r| !r.deleted).map(|r| r.config).ok_or_else(missing)?;
@@ -1159,6 +1166,11 @@ async fn ask_room(
     {
         return Err(BotError::err(403, Code::NotGranted, format!("This bot may not use {}.", agent.name)));
     }
+    // Checked again, with the rest in one step against a room edit: the bot may have been taken out meanwhile.
+    let _members = crate::chat::group::membership_lock();
+    if !member() {
+        return Err(missing());
+    }
     let lane = Lane::main(room);
     if let Some(open) = hub.store.open_conversation_of(&lane) {
         if hub.store.charge_lane(&lane)?.is_none() {
@@ -1182,12 +1194,13 @@ async fn ask_room(
     }))
 }
 
-/// `botPost {room, conversation, epoch, turnKey?, text, clientNonce}`: the bot says something in a room it is a member
+/// `botPost {room, conversation, epoch, turnKey?, gen?, text, clientNonce}`: the bot says something in a room it is a member
 /// of. It is stored once per nonce (the same text again replays, other text is `nonceReused`, C4). With the turnKey of
 /// the turn the room waits on it for, it is the member's reply and completes that turn. With none it is an unprompted
 /// post: charged one turn, and it wakes only the members it @-mentions, only while its conversation is open with budget
 /// left. Anything else (a conversation that ended or moved on, a turnKey nobody waits on any more) is kept and marked
-/// late, wakes nobody, and costs nothing (C3). A post never opens or tops up a budget (C1).
+/// late, wakes nobody, and costs nothing (C3). A post never opens or tops up a budget (C1). A `gen` other than the bot's
+/// current membership generation is a 404, like no membership: the bot was taken out of the room since (N3).
 async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Result<Value> {
     let bad = |m: &str| BotError::err(400, Code::BadRequest, m);
     let text = b["text"].as_str().map(str::trim).filter(|t| !t.is_empty()).ok_or_else(|| bad("`text` is required"))?;
@@ -1209,9 +1222,12 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
         ));
     }
     let _one = ASK_LOCK.lock().await;
-    // Not a member, or no such conversation in that room: a 404, never a hint that the room exists.
+    // From the membership check to the last effect, in one step against a room edit (no await from here on).
+    let _members = crate::chat::group::membership_lock();
+    // Not a member (in this generation), or no such conversation in that room: a 404, never a hint that the room exists.
     let missing = || BotError::err(404, Code::NotFound, "No such room.");
-    if !crate::chat::group::is_room_member(&hub.store, room, &bot.bot_id) {
+    let generation = crate::chat::group::membership_gen(&hub.store, room, &bot.bot_id).ok_or_else(missing)?;
+    if b["gen"].as_i64().is_some_and(|g| g != generation) {
         return Err(missing());
     }
     let conv = hub.store.conversation(conversation).filter(|c| c.lane.chat == room).ok_or_else(missing)?;
@@ -1232,11 +1248,16 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
             format!("This bot has posted {} times in the last hour. Try again in a few minutes.", bot.rate_per_hour),
         ));
     }
+    // The turn this key belongs to was queued in another generation (or none was recorded): a reply from before the bot
+    // was taken out, even from a client that names no `gen`.
+    if turn_key.is_some_and(|k| conv.queue.turn_key.as_deref() == Some(k)) && conv.queue.turn_gen != Some(generation) {
+        return Err(missing());
+    }
     let lane = conv.lane.clone();
     let current = epoch == conv.epoch && crate::chat::group::current(&hub.store, &lane, conv.epoch);
     let live = current && hub.store.conversation(&conv.id).is_some_and(|c| c.state == crate::store::ConvState::Open);
-    let replies =
-        live && turn_key.is_some_and(|k| crate::chat::group::bot_turn_waits(k, &bot.bot_id, &conv.id, conv.epoch));
+    let waits = |k: &str| crate::chat::group::bot_turn_waits(k, &bot.bot_id, &conv.id, conv.epoch, generation);
+    let replies = live && turn_key.is_some_and(waits);
     let mut charged = false;
     let mut late_why: Option<&str> = None;
     let mut unprompted = false;
@@ -1287,7 +1308,8 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
     hub.store.audit_add(&bot.person_id, caller.device_key(), "botPost", Some(&conv.id), true);
     if replies {
         // The room turn that waits reads the text from here; it @-mentions on from there.
-        crate::chat::group::complete_bot_turn(turn_key.unwrap_or_default(), &bot.bot_id, &conv.id, conv.epoch, text);
+        let key = turn_key.unwrap_or_default();
+        crate::chat::group::complete_bot_turn(key, &bot.bot_id, &conv.id, conv.epoch, generation, text);
     } else if charged && let Some(group) = hub.store.bot(room)?.map(|r| r.config) {
         let woken = crate::chat::group::mentioned_members(hub, &group, text);
         crate::chat::group::queue_mentions(&conv.id, woken.into_iter().filter(|m| *m != bot.bot_id).collect());
@@ -1311,11 +1333,17 @@ fn posted(e: &Entry, duplicate: bool) -> Value {
 
 /// `botRoomRead {room, since?, limit?}`: what a member bot may read of a room, after the cursor `since` (the `rev` of
 /// the last entry it saw; its first read gets the newest few). Each entry is shaped as for a bot (no thoughts, tool
-/// calls, plans or attachments), with the room, the lane's conversation and epoch, and who spoke.
+/// calls, plans or attachments), with the room, the lane's conversation and epoch, who spoke, and the bot's membership
+/// generation (`gen`) to post and ask under.
 async fn room_read(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
     let room = b["room"].as_str().filter(|r| !r.is_empty());
     let missing = || BotError::err(404, Code::NotFound, "No such room.");
-    let room = room.filter(|r| crate::chat::group::is_room_member(&hub.store, r, &bot.bot_id)).ok_or_else(missing)?;
+    // Membership and its generation in one step against a room edit: the generation named is the one it was read in.
+    let (room, generation) = {
+        let _members = crate::chat::group::membership_lock();
+        room.and_then(|r| crate::chat::group::membership_gen(&hub.store, r, &bot.bot_id).map(|g| (r, g)))
+    }
+    .ok_or_else(missing)?;
     // Like reading a thread: only in sync with the cloud, so a bot revoked there reads nothing more.
     if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
         return Err(BotError::err(
@@ -1342,7 +1370,7 @@ async fn room_read(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
     let secrets: Vec<Value> = waiting.iter().map(|s| crate::cards::room_secret::bot_view(s, &from)).collect();
     Ok(json!({
         "room": room, "conversation": newest.as_ref().map(|c| c.id.clone()), "epoch": newest.as_ref().map(|c| c.epoch),
-        "entries": entries, "cursor": cursor, "secrets": secrets,
+        "gen": generation, "entries": entries, "cursor": cursor, "secrets": secrets,
     }))
 }
 
