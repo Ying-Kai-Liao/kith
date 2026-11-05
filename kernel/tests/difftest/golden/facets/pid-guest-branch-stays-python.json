@@ -1,0 +1,10 @@
+{
+  "fakes": "",
+  "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"alpha\": {\n      \"paths\": [],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "project-id: the Kith host could not be reached from this run\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "project-id: the Kith host could not be reached from this run\n",
+  "step1.stdout": ""
+}

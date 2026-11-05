@@ -47,6 +47,12 @@ pub(super) const ROWS: &[Method] = &[
                 &["--conversation"],
                 "The asked agent's session of a `--bg` run, when it has one.",
             ),
+            flag(
+                "claimId",
+                "int",
+                &["--claim-id"],
+                "The claim of the ask's own run, so a stop of the ask finds that claim exactly.",
+            ),
             sw("checkOnly", &["--check-only"], "Decide, write nothing."),
             KERNEL,
             HOME,

@@ -8,3 +8,4 @@ c4-fix-doubletake
 c4-nofence
 c4-stopall
 c4-fenceleak
+c4-stuckdrop

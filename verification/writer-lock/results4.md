@@ -99,3 +99,28 @@ Copied from `/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-03-wri
 | r4-keepidle | fix (keep the idle process) | invariants + P7 | P7 fails (13,090 states) | |
 
 `keepidle` failing P7 is not a bug in the "fix" design: P1 to P6 hold with the idle process kept (the lock refuses a prompt while the terminal holds it, the hash check refuses a stale process). It shows P7 is not vacuous. Not checked: liveness of `killidle` (a terminal waiting for the kill while the holder is down never registers; P3 says nothing about direct runs).
+
+---
+
+# Added by M3-8 (writer-lock drift, Claims4)
+
+`Claims4.tla` gains the warm turn's lock step and `LockStuck` (holder_link.rs `begin_turn` / `serve_turn` / `end_stuck_claim`) and the park for a terminal (wake/turns.rs `start_in`). TLC v1.7.4, 4 workers, 3 GB heap, 2026-11-05. The old Claims4 rows are unchanged (the new actions are off unless `Variant` is one of the warm ones; their verdicts are re-checked by `run.sh`).
+
+What is modelled (process states `locked`, `stuck`, `stuckx`):
+- `StubLock`: the stub takes the conversation's lock for the claim before the core is asked; `RedeemOK` is the redeem CAS; `GiveBack` is a refused redeem (the claim is not `claimed`), the lock goes back and the stub exits.
+- `Stuck` (LockStuck: redeem failed or refused, and the give-back failed too). The code records the stub's pid on the claim first (a `spawned` report) and then stops it: the claim goes `ending` with a kill to send, and the holder is asked to kill the process by id (`requeue_end`, resent). `stuckx` is the corner where the claim was over already (ended unspawned): only the by-id kill is left, and a new instance's `Meet` owes it again.
+- `parkterm`: a turn is parked only while a take-over (terminal) claim is `claimed`, `running` or `ending`, the q217 rule as `person_writer_live_in` counts it (a queued take-over is not a live writer, so it does not park a turn); nothing types into the terminal.
+
+| Config | Variant | Checks | Result | Distinct states |
+|---|---|---|---|---|
+| c4-lockstuck-small | lockstuck, no holder crash, revoke or take-over | invariants (+ `StuckHasClaim`) + P3, EndingEnds, StuckEnds | pass | 137,697 |
+| c4-lockstuck-revto | lockstuck, a revoke and a take-over, 3 claims | same | pass | 239,555 |
+| c4-lockstuck-die | lockstuck, one holder crash that kills its group, 3 claims | same | pass | 246,228 |
+| c4-lockstuck-survive | lockstuck, one holder crash the group survives, 3 claims | same | pass | 247,758 |
+| c4-parkterm | terminal_live park | invariants + P3 | pass | 5,144 |
+| c4-stuckdrop | the old `end_stuck_claim`: a claim with no pid ends at once while the stub holds the lock | `StuckHasClaim` | fails (71 states at the violation) | |
+| c4-stucklog | the Err path only logs (no stop, no kill) | `StuckEnds` | fails (temporal; 818 states) | |
+
+`c4-stuckdrop` is the expected violation of `StuckHasClaim`, the rule "the claim row is the lock's writer": the claim row ends while the stub still holds the lock, so the conversation's slot is free while the lock is not, and the turn goes through a new claim, a Busy and a `lock_busy` park instead of being requeued. It is a design rule, not a lock property: the old code did kill the process by id, and the same config with `OneHolder` (at most one stub holds the lock) and every other invariant and property passes. The `stuckx` path, which is accepted, has the same shape (the lock held while the claim is over). Not covered: a redeem write that fails while the claim is still `claimed` and the give-back works (the stub goes back to `stub` and the take is retried; modelling it loops under weak fairness without adding a state the other rows lack). Rows with 4 claims and a revoke, a take-over or a holder crash together ran past 4.7 GB of TLC state files after 25 minutes and were stopped; the 3-claim rows above are the ones recorded.
+
+All rows carry `OneHolder` since the architect's review of #841 (the lockstuck, parkterm, stuckdrop and stucklog cfgs); re-run on 2026-11-05 with `run.sh` (57 rows, every row as expected): the lockstuck rows have the same counts (OneHolder adds no states), `c4-parkterm` is 5,015 states (a queued take-over no longer parks a turn), `c4-stuckdrop` still fails `StuckHasClaim` (71) and `OneHolder` holds on it.

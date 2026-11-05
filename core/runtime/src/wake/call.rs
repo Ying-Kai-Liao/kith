@@ -89,7 +89,17 @@ pub(crate) fn call_with(
                 door: word(params, "door").unwrap_or("run"),
                 why: word(params, "why").unwrap_or_default(),
             };
-            let said = write(core, now, |st| queue::enqueue(st, now, &n))?.word();
+            // core.db's conversation names its one agent: a wake for another agent's session is refused where it starts.
+            let said = write_tx(core, now, |tx, st| {
+                if turns::agent_of_in(tx, n.session)?.is_some_and(|a| a != n.agent) {
+                    return Err(refused(format!(
+                        "{} belongs to another agent than {}",
+                        n.session, n.agent
+                    )));
+                }
+                queue::enqueue(st, now, &n)
+            })?
+            .word();
             Ok(json!({"result": said, "lines": [said]}))
         }
         "wake.withdraw" => {
@@ -116,6 +126,7 @@ pub(crate) fn call_with(
             let (session, sid) = (word(params, "session"), word(params, "sid"));
             // The run's turn in the conversations lane is written in the same transaction as the queue rows.
             let turn = write_tx(core, now, |tx, st| {
+                turns::fail_foreign_in(tx, st, now)?;
                 let turn = queue::take(st, out, tr, now, holder, session, sid);
                 if let Some(t) = &turn {
                     turns::start_in(tx, out, t, sid, now)?;

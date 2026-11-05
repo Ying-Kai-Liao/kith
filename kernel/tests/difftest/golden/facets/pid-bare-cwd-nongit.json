@@ -1,0 +1,14 @@
+{
+  "fakes": "",
+  "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"alpha\": {\n      \"paths\": [\n        \"~/plain/sub\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/plain/sub/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "alpha\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "alpha\n",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "<HOME>/plain/sub\n"
+}
