@@ -5,6 +5,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use super::access_core_tests::Core;
 use super::devices::NotAllowed;
 use super::roles::{self, MEMBER_METHODS, UNPROVEN_METHODS};
 use crate::agent::folder::{Change, Pick};
@@ -265,6 +266,9 @@ struct World {
     hub: Arc<Hub>,
     dir: PathBuf,
     case: Cell<u64>,
+    /// A switched host (P6): auth.json is a tombstone and this core holds the grants. Declared before the lock, so
+    /// the process-wide switch is cleared before the next test may start.
+    core: Option<Core>,
     _one_at_a_time: tokio::sync::MutexGuard<'static, ()>,
 }
 
@@ -305,10 +309,64 @@ impl World {
             let store = Store::open(&dir.join("t.db")).unwrap();
             Hub::new(store, "host".into(), Identity::load_or_create(&dir).unwrap(), "token".into(), 0)
         });
-        Self { rt, hub, dir, case: Cell::new(0), _one_at_a_time: guard }
+        Self { rt, hub, dir, case: Cell::new(0), core: None, _one_at_a_time: guard }
+    }
+
+    /// A world whose host is switched: a core daemon with the owner and both people, the agents on disk, and a
+    /// tombstone for auth.json. The stand-in kith-auth stays in `TEST_BIN` but a switched host never runs it.
+    fn switched() -> Self {
+        let mut w = Self::new();
+        for a in AGENTS {
+            let role = w.dir.join("home/agents").join(a).join("role");
+            std::fs::create_dir_all(&role).unwrap();
+            std::fs::write(role.join("agent.md"), format!("---\nname: {a}\n---\n")).unwrap();
+        }
+        let core = Core::start_at(&w.dir);
+        for p in PEOPLE {
+            core.ask("people.addPerson", json!({"id": p})).expect("person");
+        }
+        core.on();
+        // The tombstone is the file kith-auth would read, and kith-auth is a stand-in that logs every call and fails.
+        core.switched_over(&w.dir.join("auth.json"));
+        let bin = w.dir.join("kith-auth-logging");
+        std::fs::write(
+            &bin,
+            format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", w.dir.join("kith-auth-calls").display()),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        *TEST_BIN.lock().unwrap() = Some(bin);
+        assert!(super::authority::switched(), "the world is not switched");
+        w.core = Some(core);
+        w
+    }
+
+    /// What a switched host asked kith-auth: nothing.
+    fn assert_kith_auth_untouched(&self) {
+        let calls = std::fs::read_to_string(self.dir.join("kith-auth-calls")).unwrap_or_default();
+        assert!(calls.is_empty(), "a switched host ran kith-auth: {calls}");
+        assert!(super::authority::switched(), "the host is not switched");
     }
 
     fn write_grants(&self, grants: &[[Ans; 2]; 2]) {
+        if let Some(core) = &self.core {
+            // The core's rows are the grants: a member or a guest row, else none (the core prints nothing else).
+            for (p, row) in PEOPLE.iter().zip(grants) {
+                for (a, ans) in AGENTS.iter().zip(row) {
+                    core.ask("people.revoke", json!({"person": p, "agent": a}));
+                    let preset = match ans {
+                        Ans::Member => "member",
+                        Ans::Guest => "guest",
+                        _ => continue,
+                    };
+                    core.ask("people.grant", json!({"person": p, "agent": a, "preset": preset})).expect("grant");
+                }
+            }
+            return;
+        }
         let d = self.dir.join("grants");
         std::fs::remove_dir_all(&d).unwrap();
         std::fs::create_dir_all(&d).unwrap();
@@ -735,11 +793,36 @@ fn reads_bot_guest_chat(w: &World, me: &str, method: &str, b: &Value) -> bool {
 
 #[test]
 fn guard_never_lets_a_person_past_their_grant() {
-    let w = World::new();
+    never_past_their_grant(false);
+}
+
+/// P6: the same property with the host switched. The grants come from the core, and the grant is taken away through
+/// the host's own switched path (`setPersonAccess` -> `people.revoke`), not by editing the world behind its back.
+#[test]
+fn guard_never_lets_a_person_past_their_grant_on_a_switched_host() {
+    never_past_their_grant(true);
+}
+
+/// What a core can be told: a member row, a guest row, or none. The rest of `Ans` are things kith-auth can print.
+fn core_grants(sc: &Scenario) -> Scenario {
+    let mut sc = sc.clone();
+    for row in &mut sc.grants {
+        for a in row {
+            if !matches!(a, Ans::Member | Ans::Guest) {
+                *a = Ans::Denied(false);
+            }
+        }
+    }
+    sc
+}
+
+fn never_past_their_grant(switched: bool) {
+    let w = if switched { World::switched() } else { World::new() };
     let routed = router_methods();
     assert!(routed.len() > 100, "router walk found {} methods", routed.len());
     runner()
         .run(&(scenario(), call_spec(routed)), |(sc, c)| {
+            let sc = if switched { core_grants(&sc) } else { sc };
             let ids = w.load(&sc);
             let b = c.body(&ids);
             let me = PEOPLE[c.person];
@@ -768,9 +851,20 @@ fn guard_never_lets_a_person_past_their_grant() {
                     check_guard_ok(&w, &sc, &c, &ids, &b)?;
                     // The same call after the grant is taken away must be refused (kith-auth is asked every call).
                     if !nothing_to_check(&c.method) && !reads_bot_guest_chat(&w, me, &c.method, &b) {
-                        let mut gone = sc.clone();
-                        gone.grants[c.person] = [Ans::Denied(false), Ans::Denied(false)];
-                        w.write_grants(&gone.grants);
+                        if switched {
+                            let body = json!({"personId": me, "agents": {}});
+                            w.rt.block_on(super::dispatch(
+                                &w.hub,
+                                &super::devices::Caller::Local,
+                                "setPersonAccess",
+                                body,
+                            ))
+                            .map_err(|e| fail(format!("setPersonAccess (revoke) failed: {e:#}")))?;
+                        } else {
+                            let mut gone = sc.clone();
+                            gone.grants[c.person] = [Ans::Denied(false), Ans::Denied(false)];
+                            w.write_grants(&gone.grants);
+                        }
                         let again = w.rt.block_on(roles::guard(&w.hub, me, true, &c.method, &b));
                         prop_assert!(again.is_err(), "{} still passes after the grant was removed", c.method);
                     }
@@ -784,6 +878,9 @@ fn guard_never_lets_a_person_past_their_grant() {
             Ok(())
         })
         .unwrap();
+    if switched {
+        w.assert_kith_auth_untouched();
+    }
 }
 
 /// A plain card (no tool named, kind fetch, no approver stored, no card-store row) for the hand-written cases.
@@ -794,7 +891,17 @@ fn entry(bot: usize, permission: bool, author: usize, secret: usize) -> EntrySpe
 /// Soundness alone passes a guard that refuses everything: these calls must get through.
 #[test]
 fn guard_lets_a_granted_member_use_their_own_chat() {
-    let w = World::new();
+    a_granted_member_uses_their_own_chat(false);
+}
+
+/// P6: the same calls with the host switched: the grants (p1: a1 member, a2 guest) are core rows.
+#[test]
+fn guard_lets_a_granted_member_use_their_own_chat_on_a_switched_host() {
+    a_granted_member_uses_their_own_chat(true);
+}
+
+fn a_granted_member_uses_their_own_chat(switched: bool) {
+    let w = if switched { World::switched() } else { World::new() };
     let card = |run: bool, person: usize, answerer: Option<usize>, agent: usize| {
         Some(CardSpec { run, person, answerer, agent })
     };
@@ -883,6 +990,9 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
     assert!(go("send", json!({"botId": ids.bots[0]})).is_err(), "a revoked grant still sends");
     assert!(go("history", json!({"botId": ids.bots[1]})).is_err(), "a revoked grant still reads");
     assert!(answer(6).is_err(), "a revoked member still answers the card naming them");
+    if switched {
+        w.assert_kith_auth_untouched();
+    }
 }
 
 /// (21) What a card names is judged once, when it opens (`access::tool_in_grants`): a person can answer it only when it
@@ -954,6 +1064,89 @@ fn kith_auth_answers_fail_closed() {
         );
         assert_eq!(listed.len(), usize::from(a.allowed()), "{a:?}");
     }
+}
+
+/// (8, P6) The core's answer, every kind it can give: a member row and a guest row count, no row is a no, the owner is
+/// never a member, a member alone approves, and a core that cannot be asked (down, or never started) is a no for every
+/// question, with the tombstone left as it was.
+#[test]
+fn the_core_answers_fail_closed_on_a_switched_host() {
+    let mut w = World::switched();
+    let tomb = || std::fs::read_to_string(super::authority::TEST_AUTH_FILE.lock().unwrap().clone().unwrap()).unwrap();
+    let before = tomb();
+    let ask = |in_grants| crate::access::Request {
+        person: "p1",
+        agent: "a1",
+        owner_run: false,
+        ask: crate::access::Ask::Tool { in_grants },
+    };
+    for a in [Ans::Denied(false), Ans::Member, Ans::Guest] {
+        w.write_grants(&[[a.clone(), Ans::Denied(false)], [Ans::Denied(false), Ans::Denied(false)]]);
+        let (may, checked, approves, outside) = w.rt.block_on(async {
+            (
+                roles::may_use("p1", "a1").await,
+                roles::may_use_checked("p1", "a1").await,
+                crate::access::approver(&w.hub.store, &ask(true)).await,
+                crate::access::approver(&w.hub.store, &ask(false)).await,
+            )
+        });
+        assert_eq!(may, a.allowed(), "may_use for {a:?}");
+        assert_eq!(checked == Some(true), a.allowed(), "may_use_checked for {a:?}: {checked:?}");
+        assert_eq!(approves.is_some(), a.member(), "approver for {a:?}");
+        assert_eq!(outside, None, "a member answered what is not within their grants for {a:?}");
+        assert!(!w.rt.block_on(roles::may_use("p1", "a2")));
+        assert!(!w.rt.block_on(roles::may_use("nobody", "a1")), "a person the core does not know");
+        let case = Scenario {
+            bot_owner: 0,
+            grants: [[a.clone(), Ans::Denied(false)], [Ans::Denied(false), Ans::Denied(false)]],
+            people: [None, None],
+            bots: vec![BotSpec { owner: 0, deleted: false, agent: 1 }, BotSpec { owner: 0, deleted: false, agent: 2 }],
+            entries: vec![],
+        };
+        w.load(&case);
+        let listed = w.rt.block_on(roles::granted_agents(&w.hub, "p1"));
+        assert!(
+            listed.iter().all(|r| r["agent"] == "a1" && a.allowed() && ((r["role"] == "member") == a.member())),
+            "{a:?}: {listed:?}"
+        );
+        assert_eq!(listed.len(), usize::from(a.allowed()), "{a:?}");
+    }
+    // The owner is never a member, whatever rows say.
+    assert!(!w.rt.block_on(roles::may_use("kai", "a1")), "the owner is not a guest");
+    assert_eq!(w.rt.block_on(roles::may_use_checked("kai", "a1")), None, "the owner is no answer, never a yes");
+
+    // The core goes away: p1 held a member row a moment ago. Every question is a no, and every guest call is refused.
+    w.write_grants(&[[Ans::Member, Ans::Guest], [Ans::Member, Ans::Member]]);
+    let ids = w.load(&Scenario {
+        bot_owner: 0,
+        grants: [[Ans::Member, Ans::Guest], [Ans::Member, Ans::Member]],
+        people: [Some(PersonSpec { agents: [1, 2], projects: [true, true] }), None],
+        bots: vec![BotSpec { owner: 1, deleted: false, agent: 1 }],
+        entries: vec![],
+    });
+    let go = |m: &str, b: Value| w.rt.block_on(roles::guard(&w.hub, "p1", true, m, &b));
+    assert!(go("send", json!({"botId": ids.bots[0]})).is_ok(), "the core is up: a member's own chat");
+    w.core.as_mut().unwrap().stop();
+    assert!(!w.rt.block_on(roles::may_use("p1", "a1")), "a core that is down grants nothing");
+    assert_eq!(w.rt.block_on(roles::may_use_checked("p1", "a1")), None, "down is no answer");
+    assert_eq!(w.rt.block_on(roles::granted_agents(&w.hub, "p1")), Vec::<Value>::new());
+    // A method that names a chat asks for the grant. The rest (`hello`, `projects`...) ask nothing, so the core cannot
+    // matter to them: they are the member's own, as with kith-auth.
+    for m in MEMBER_METHODS.iter().filter(|m| !by_entry(m) && !nothing_to_check(m)) {
+        assert!(go(m, json!({"botId": ids.bots[0]})).is_err(), "{m} passes with the core down");
+    }
+    let rolled = w.rt.block_on(super::dispatch(
+        &w.hub,
+        &super::devices::Caller::Local,
+        "setPersonAccess",
+        json!({"personId": "p1", "agents": {"a1": "member"}}),
+    ));
+    assert!(
+        rolled.err().is_some_and(|e| e.is::<super::authority::CoreDown>()),
+        "a grant with the core down must fail with CoreDown, not fall back to kith-auth"
+    );
+    assert_eq!(tomb(), before, "nothing is written to the tombstone");
+    w.assert_kith_auth_untouched();
 }
 
 // ---- events ----
