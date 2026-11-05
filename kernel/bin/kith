@@ -867,7 +867,8 @@ for rules in (allow, s["permissions"]["deny"]):
 # backslash-escaped space). The must-ask classes still win: ask beats allow, so python3 -c still asks.
 if os.environ["P_OWNER"] == "1":
     own = []
-    for root in (os.environ["KITH_AGENT_DIR"] + "/tools", os.environ["PKG"] + "/skills/learned"):
+    learned = os.environ["PKG"] + "/skills/learned"
+    for root in dict.fromkeys((os.environ["KITH_AGENT_DIR"] + "/tools", learned, os.path.realpath(learned))):
         for spell in (root, "\"" + root):
             own += ["Bash(%s/*)" % spell, "Bash(python3 %s/*)" % spell]
     kb = os.environ["KITH_ROOT"] + "/bin/"

@@ -247,7 +247,7 @@ def must_ask_problems(home):
             if isinstance(rule, str) and re.match(r'Bash\(.*\*.*:\*\)$', rule):
                 out.append(f'settings.json: {rule}: a * before the trailing :* makes Claude Code read it as a literal '
                            'prefix, so it never matches; end it in * instead')
-    auto =s.get('autoMode') if isinstance(s.get('autoMode'), dict) else {}
+    auto = s.get('autoMode') if isinstance(s.get('autoMode'), dict) else {}
     for line in auto.get('allow') or []:
         c = isinstance(line, str) and line != '$defaults' and kith_guard.sentence_class(line)
         if c:
