@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# kith-auth-embedded-check — the revoke stopgap before M2-23: with no core daemon running, `kith-auth person --rm / --revoke`
+# and `bot --rm` still reach the core, because `kith kernel core-call` runs the write in an embedded core (the same lock, so never
+# alongside a daemon). The real kith program, the real kith-auth, a throwaway core:
+#   1. no core file at all (fresh install): the mirror is silent and makes none;
+#   2. person --revoke, its undo and --rm land in the core with no daemon;
+#   3. bot --rm lands in the core with no daemon;
+#   4. a daemon running: the same call goes through it (the embedded run never races the daemon's lock).
+#
+#   kernel/tests/kith-auth-embedded-check     a few seconds; skips without a built kith (KITH_BIN, or under $CARGO_TARGET_DIR)
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+find_bin() {
+  local t k
+  for t in "${CARGO_TARGET_DIR:-}" "$KERNEL/../serve/host/target" "$KERNEL/../target"; do
+    for k in debug release; do [[ -n $t && -x $t/$k/$1 ]] && { echo "$t/$k/$1"; return 0; }; done
+  done
+  return 1
+}
+BIN=${KITH_BIN:-$(find_bin kith)}
+[[ -n $BIN && -x $BIN ]] || { echo "skip: needs the kith program (KITH_BIN)"; exit 0; }
+command -v sqlite3 >/dev/null || { echo "skip: needs sqlite3"; exit 0; }
+[[ $(uname) == Darwin || $(uname) == Linux ]] || { echo "skip: Unix only"; exit 0; }
+
+# A short path: the daemon's sockets live under it and a Unix socket path is at most ~100 bytes.
+T=$(mktemp -d /tmp/kae.XXXXXX)
+T=$(cd "$T" && pwd -P)
+DPID=
+cleanup() {
+  [[ -n $DPID ]] && kill "$DPID" 2>/dev/null
+  exec 7>&- 2>/dev/null
+  sleep 0.3
+  rm -rf "$T"
+}
+trap cleanup EXIT
+export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith KITH_AGENTS=$T/kith/agents KITH_STATE=$T/state KITH_MACHINE=$T/state \
+  KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1 KITH_WAKE_NO_KICK=1 KITH_BIN=$BIN
+unset KITH_PERSON KITH_AGENT HQ_HOME HQ_STATE KITH_CORE CARGO_TARGET_DIR KITH_DEV_BIN
+mkdir -p "$HOME" "$KITH_SERVE_DIR" "$KITH_STATE" "$KITH_HOME/agents/house/role"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
+CF=$KITH_STATE/core/core."db"   # the boundary check keeps that file's name out of source outside core/runtime
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+n() { sqlite3 "$CF" "SELECT count(*) FROM people WHERE id = '$1'"; }
+revoked() { sqlite3 "$CF" "SELECT count(*) FROM people WHERE id = '$1' AND revoked = 1" 2>&1; }
+
+A person kai owner >/dev/null
+A person sam name=Sam >/dev/null
+A person tim name=Tim >/dev/null
+A person amy name=Amy >/dev/null
+A member house sam preset=member >/dev/null
+A bot sambot --of sam >/dev/null
+
+# 1. a fresh install: no core file, no daemon: no warning, and no core file made behind the owner's back
+out=$(A person tim --rm 2>&1)
+[[ $out != *"not updated"* && $out != *"may not be"* ]] && ok "(1) no core file: silent" || bad "(1) silent" "$out"
+[[ ! -e $CF ]] && ok "(1) no core file was made" || bad "(1) core file made"
+
+# the core, as `kith migrate --authority` makes it
+mig=$("$BIN" kernel core-migrate --authority 2>&1) || bad "setup: core-migrate --authority" "$mig"
+[[ $(n sam) == 1 && $(n sambot) == 1 ]] && ok "setup: sam and sambot are in the core" || bad "setup" "sam=$(n sam) sambot=$(n sambot): $mig"
+
+# 2. revoke, undo, remove with no daemon
+out=$(A person sam --revoke 2>&1)
+[[ $out != *"not updated"* ]] && ok "(2) revoke: no warning" || bad "(2) revoke warning" "$out"
+[[ $(revoked sam) == 1 ]] && ok "(2) revoke landed in the core with no daemon" || bad "(2) revoke in core" "$(revoked sam)"
+out=$(A person sam --unrevoke 2>&1)
+[[ $(revoked sam) == 0 ]] && ok "(2) undo landed" || bad "(2) undo landed" "$out"
+
+# 3. the bot
+out=$(A bot sambot --rm 2>&1)
+[[ $out != *"not updated"* ]] && ok "(3) bot --rm: no warning" || bad "(3) bot warning" "$out"
+[[ $(n sambot) == 0 ]] && ok "(3) bot --rm landed in the core" || bad "(3) bot in core"
+
+out=$(A person sam --rm 2>&1)
+[[ $out != *"not updated"* ]] && ok "(2) person --rm: no warning" || bad "(2) rm warning" "$out"
+[[ $(n sam) == 0 ]] && ok "(2) person --rm landed in the core with no daemon" || bad "(2) rm in core"
+
+# 4. a daemon running: the call goes to it (it holds the lock, so the embedded run could not have written)
+mkfifo "$T/stdin"
+"$BIN" kernel core-daemon < "$T/stdin" > "$T/daemon.out" 2>&1 &
+DPID=$!
+exec 7> "$T/stdin"
+for _ in $(seq 100); do grep -q '^ready' "$T/daemon.out" 2>/dev/null && break; sleep 0.1; done
+if grep -q '^ready' "$T/daemon.out"; then
+  out=$(A person amy --rm 2>&1)
+  [[ $out != *"not updated"* ]] && ok "(4) daemon up: no warning" || bad "(4) daemon warning" "$out"
+  [[ $(n amy) == 0 ]] && ok "(4) person --rm landed through the daemon" || bad "(4) rm through the daemon"
+else
+  bad "(4) the daemon did not start" "$(cat "$T/daemon.out")"
+fi
+
+[[ $fail == 0 ]] && echo "all ok" || echo "FAILED"
+exit $fail

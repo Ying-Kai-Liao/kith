@@ -2462,7 +2462,8 @@ def sweep_kernel(persons):
 # A revoke, an undo or a removal made here is mirrored to it (people.suspend / people.undo / people.removePerson, over
 # `kith kernel core-call`) AFTER auth.json is written. No queue: a replayed revoke could land after a later re-grant or
 # undo and wrongly win. A call that fails only prints a warning and the command still succeeds; the host's same-answer
-# guard (M2-18) covers a miss.
+# guard (M2-18) covers a miss. With no daemon running `kith kernel core-call` runs the same write in an embedded core (the
+# stopgap before M2-23: a revoke made here always reaches a core that exists); exit 3 now means nothing could run it.
 MIRROR_METHOD = {'suspend': 'people.suspend', 'undo': 'people.undo', 'remove': 'people.removePerson',
                  'remove-bot': 'people.removeBot'}
 # The warnings name the core's file, which only core/runtime may spell out in source (kith-core-boundary-check): it is
