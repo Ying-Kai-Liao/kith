@@ -306,10 +306,11 @@ pub(crate) fn run_in(
 
 /// Runs the revoke order for the removals the import just recorded. Best effort: a row that fails stays in
 /// `open_removals` and the core's replay (at start, and on the supervisor's pass) runs it again. The writers it would
-/// kill are ended by the holder's reconcile, as for any replay.
+/// kill are not sent here: no daemon runs while the import holds the lock, and the holder's reconcile ends those
+/// writers (their claims are already `ending`).
 fn replay_removals(core: &mut Core, removed: &[String], rep: &mut AuthorityReport) {
     rep.lines.push(format!(
-        "authority: recorded the removal of {} (gone from the file); running the revoke order",
+        "authority: recorded the removal of {} (gone from the file); running the revoke order (its kills are dropped: no daemon runs while the import holds the lock, and the holder's reconcile ends those writers)",
         removed.join(", ")
     ));
     match crate::revoke_order::replay_open(core, now_secs().saturating_mul(1000)) {
@@ -455,6 +456,10 @@ fn real(
         .push(format!("backup of core.db: {}", backup.display()));
     rep.backup = Some(backup.clone());
 
+    if state == Rows::Differs {
+        // A row left by an earlier removal gets one try now: it would otherwise refuse the file that names its id.
+        let _ = crate::revoke_order::replay_open(core, now_secs().saturating_mul(1000));
+    }
     let mut removed: Vec<String> = Vec::new();
     let tx = core.claim_tx()?;
     if state == Rows::Same {

@@ -1314,6 +1314,11 @@ fn a_person_gone_from_the_file_has_their_and_their_bots_asks_ended_by_the_reimpo
         "the replay ran and cleared its rows"
     );
     assert_eq!(f.count("people"), 4);
+    // the claims side ran too: the principals' revoke epochs were bumped, a staying person's was not
+    let core = open_all(&f.layout);
+    let epoch = |p: &str| crate::conversations::claims::revoke_epoch(&core, p).unwrap();
+    assert!(epoch("mia") >= 1 && epoch("mia-bot") >= 1);
+    assert_eq!(epoch("sam"), 0);
 }
 
 #[test]
@@ -1459,5 +1464,74 @@ fn a_core_never_imported_has_nothing_to_remove() {
     f.auth(&crew(&json!({})));
     let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
     assert!(!rep.lines.iter().any(|l| l.contains("recorded the removal")));
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_bot_of_cycle_among_the_gone_ids_is_refused_never_skipped() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    {
+        let core = open_all(&f.layout);
+        for (id, of) in [("loop-a", "loop-b"), ("loop-b", "loop-a"), ("self", "self")] {
+            core.conn()
+                .execute(
+                    "INSERT INTO people (id, bot_of) VALUES (?1, ?2)",
+                    rusqlite::params![id, of],
+                )
+                .unwrap();
+        }
+    }
+    let e = f
+        .run(force(), &FakeKeychain::default(), &mut sink)
+        .unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("loop-a") && m.contains("self") && m.contains("cycle")),
+        "{e:?}"
+    );
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_gone_bot_whose_owner_row_is_missing_is_a_removal_of_its_own() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-orphan", "orphan");
+    open_all(&f.layout)
+        .conn()
+        .execute(
+            "INSERT INTO people (id, bot_of) VALUES ('orphan', 'ghost')",
+            [],
+        )
+        .unwrap();
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(ask_state(&f, "a-orphan"), "stopped");
+}
+
+#[test]
+fn a_renamed_person_is_not_revoked_as_if_removed() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-sam", "sam");
+    // kith-auth rename sam -> samuel: the old id stays in `was`, the bots follow the new id
+    f.auth(&crew(&json!({
+        "sam": null,
+        "samuel": {"name": "Sam", "was": ["sam"]},
+        "sam-bot": {"bot_of": "samuel"},
+        "sam-bot2": {"bot_of": "samuel"}
+    })));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        !rep.lines.iter().any(|l| l.contains("recorded the removal")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(ask_state(&f, "a-sam"), "open");
     assert_eq!(f.count("open_removals"), 0);
 }

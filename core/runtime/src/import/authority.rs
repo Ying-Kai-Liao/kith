@@ -527,9 +527,18 @@ pub(super) fn removals(conn: &Connection, auth: &Value) -> Result<Vec<(String, V
     let rows: Vec<(String, Option<String>, i64)> = st
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<std::result::Result<_, _>>()?;
+    // An id in a kept person's `was` is a rename (`kith-auth rename`), not a removal: the person lives on under the new id.
+    // Moving its claims and asks to the new id is a follow-up; revoking a live person's work is the wrong failure.
+    let renamed: std::collections::BTreeSet<&str> = table(auth, "people")?
+        .into_iter()
+        .flatten()
+        .filter_map(|(_, p)| p.get("was").and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
     let gone: std::collections::BTreeMap<&str, Option<&str>> = rows
         .iter()
-        .filter(|(id, ..)| !keep.contains(id.as_str()))
+        .filter(|(id, ..)| !keep.contains(id.as_str()) && !renamed.contains(id.as_str()))
         .map(|(id, bot_of, _)| (id.as_str(), bot_of.as_deref()))
         .collect();
     if let Some((id, ..)) = rows
@@ -545,8 +554,8 @@ pub(super) fn removals(conn: &Connection, auth: &Value) -> Result<Vec<(String, V
     for id in &keep {
         if let Some(who) = crate::revoke_order::open_removal_naming(conn, id)? {
             return Err(Error::Refused(format!(
-                "auth.json: {id} is in the file but the removal of {who} (which names {id}) has not finished in core.db; nothing \
-                 was imported. Let the core run it (it does at start), or take {id} out of the file, and run it again."
+                "auth.json: {id} is in the file but the removal of {who} (which names {id}) has not finished in core.db (the import just tried the order and it did not complete); nothing \
+                 was imported. Start the core so it runs the order again (it does at start), or take {id} out of the file, and run it again."
             )));
         }
     }
@@ -567,6 +576,24 @@ pub(super) fn removals(conn: &Connection, auth: &Value) -> Result<Vec<(String, V
         }
         bots.sort();
         out.push((id.to_owned(), bots));
+    }
+    // A `bot_of` cycle among the gone ids (A and B each the other's bot, or a bot of itself) has no root, so no row would
+    // name it and nothing would be revoked. Never skip: refuse.
+    let covered: std::collections::BTreeSet<&str> = out
+        .iter()
+        .flat_map(|(id, bots)| std::iter::once(id.as_str()).chain(bots.iter().map(String::as_str)))
+        .collect();
+    let lost: Vec<&str> = gone
+        .keys()
+        .copied()
+        .filter(|id| !covered.contains(id))
+        .collect();
+    if !lost.is_empty() {
+        return Err(Error::Refused(format!(
+            "auth.json: core.db's people {} are gone from the file and form a bot_of cycle, so no removal can name them; \
+             nothing was imported. Break the cycle in core.db or keep them in the file, and run it again.",
+            lost.join(", ")
+        )));
     }
     Ok(out)
 }
