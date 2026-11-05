@@ -370,3 +370,34 @@ fn a_ctl_fd_that_is_not_a_socket_is_refused() {
     assert_eq!(out.status.code(), Some(64));
     assert!(String::from_utf8_lossy(&out.stderr).contains("not a socket"));
 }
+
+/// The redeem hook runs after the lock is taken and before `locked` is answered, in this process and with the lock held:
+/// a second take of the key from inside it is busy (so the redeem sees the lock it is redeeming under), and the hook is
+/// not run in a child (it sees this process's pid). A hook that fails frees the lock again.
+#[test]
+fn the_redeem_hook_runs_in_process_under_the_lock() {
+    use std::cell::Cell;
+    let dir = scratch("hook");
+    let (ran, busy_inside, same_process) = (Cell::new(0), Cell::new(false), Cell::new(false));
+    let me = std::process::id();
+    let input = b"take convh c1\nrelease convh c1\ntake convh c2\n".as_slice();
+    let mut out = Vec::new();
+    kith_stub::resident::serve(&dir, input, &mut out, |lock| {
+        ran.set(ran.get() + 1);
+        busy_inside.set(matches!(take(&dir, "convh"), Ok(Taken::Busy)));
+        same_process.set(std::process::id() == me && lock.path().exists());
+        // The second take's redeem fails.
+        if ran.get() == 2 {
+            return Err("redeem refused".into());
+        }
+        Ok(())
+    });
+    let said = String::from_utf8(out).unwrap();
+    assert_eq!(
+        said.lines().collect::<Vec<_>>(),
+        ["locked c1", "released c1", "error c2 redeem refused"]
+    );
+    assert_eq!(ran.get(), 2);
+    assert!(busy_inside.get() && same_process.get());
+    assert!(!is_busy(&dir, "convh"), "a failed redeem leaves no lock");
+}

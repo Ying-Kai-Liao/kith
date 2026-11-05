@@ -83,26 +83,36 @@
 //! - Busy. An EXIT with code 75 right after ATTACHED means busy: another writer has this session (the start stub's own
 //!   lock, held by a `--direct` run). The client says so in those words and does not retry.
 //!
-//! Later (listed in the PR): a durable claim-id counter from core.db instead of the epoch; person and agent on the claim
-//! before guests; a timeout on the `ps` fallback of `process_start`; `prune_stale` of dead claims; an e2e run against
+//! The spawn's claim id is core.db's (M3-10b3): `claims::claim` for the session when it is a core conversation (and the
+//! claims are open), so the claim row is the terminal's writer in core.db and its exit is reported to it; otherwise the
+//! next id of the same counter (`wire_claim`), which still rises across restarts. The claim files stay the authority
+//! until they are deleted: a refused core.db claim never refuses the terminal.
+//!
+//! Later (listed in the PR): person and agent on the claim before guests; a timeout on the `ps` fallback of `process_start`; `prune_stale` of dead claims; an e2e run against
 //! the real kith-stub.
 
 use std::collections::{BTreeMap, HashMap};
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use kith_holder::proto::{self, HeldId};
 use serde_json::{Value, json};
 
 use crate::attach::Relay;
+#[cfg(unix)]
+use crate::conversations::claims::{self, Kind, NewClaim};
 use crate::daemon::Shared;
+#[cfg(unix)]
+use crate::db::Core;
 use crate::error::{Error, Result};
-use crate::holder_link::HolderConfig;
+use crate::holder_link::{HolderConfig, TurnStep};
+#[cfg(unix)]
+use crate::holder_link::{exit_body, now_ms, start_of};
 #[cfg(unix)]
 use crate::layout::Layout;
 
@@ -119,6 +129,11 @@ const SPAWN_WAIT: Duration = Duration::from_secs(20);
 const ANSWER_WAIT: Duration = Duration::from_secs(SPAWN_WAIT.as_secs() + 15);
 /// How long the core watches a new process for the stub's "busy" exit (code 75) before it calls the terminal open.
 const BUSY_WAIT: Duration = Duration::from_millis(600);
+/// The wait before the first re-send of a kill that did not finish, and its most.
+const END_BACKOFF: Duration = Duration::from_millis(500);
+const END_BACKOFF_MAX: Duration = Duration::from_secs(10);
+/// The round at which an end that will not finish is written to the core log and shown by `kith doctor`.
+pub(crate) const END_STUCK_ROUNDS: u32 = 6;
 /// The stub's exit code for "a writer already holds this key" (core/stub).
 pub(crate) const STUB_BUSY: i32 = 75;
 
@@ -327,7 +342,34 @@ pub(crate) enum Req {
     Spawn(SpawnReq),
     /// End a held process and forget it (a terminal whose claim could not be handed over).
     End(HeldId),
+    /// A warm turn's lock step: take it and redeem at `claimed -> running`, or release it at the turn's end.
+    Turn(TurnReq),
 }
+
+/// Which step of a warm turn the supervisor is asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "built by `turn_step`, whose first caller is the warm turn driver of M3-10c"
+)]
+pub(crate) enum TurnOp {
+    Begin,
+    Finish,
+}
+
+/// A turn step waiting for the supervisor, which owns the holder connection.
+pub(crate) struct TurnReq {
+    pub op: TurnOp,
+    pub held: HeldId,
+    /// The conversation's lock key (the process's conversation).
+    pub key: String,
+    pub claim: i64,
+    pub reply: SyncSender<TurnDone>,
+}
+
+/// The supervisor's answer to a [`TurnReq`].
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct TurnDone(pub TurnStep);
 
 /// A spawn waiting for the supervisor, which owns the holder connection. `deadline` is when the caller stops waiting:
 /// a request that sat in the queue past it (the link was down) is dropped, never run after its caller gave up.
@@ -348,7 +390,8 @@ pub(crate) struct Terminals {
     queue: Sender<Req>,
     inbox: Mutex<Receiver<Req>>,
     stub: Mutex<Option<PathBuf>>,
-    last_claim: AtomicU64,
+    /// Ends that did not finish, with their rounds so far and when to send the kill again.
+    retries: Mutex<Vec<(HeldId, u32, Instant)>>,
     pub(crate) tickets: Arc<Tickets>,
     /// The attach relay: which held terminals there are and who is attached to them.
     pub(crate) relay: Arc<Relay>,
@@ -369,7 +412,7 @@ impl Terminals {
             queue,
             inbox: Mutex::new(inbox),
             stub: Mutex::new(None),
-            last_claim: AtomicU64::new(0),
+            retries: Mutex::new(Vec::new()),
             tickets: Arc::default(),
             relay: Arc::new(Relay::new()),
             #[cfg(test)]
@@ -394,6 +437,11 @@ impl Terminals {
                             .send(Placed::Failed("the holder link went down".into()));
                     }
                     end @ Req::End(_) => keep.push(end),
+                    Req::Turn(req) => {
+                        let _ = req
+                            .reply
+                            .send(TurnDone(TurnStep::Lost("the holder link went down".into())));
+                    }
                 }
             }
             for end in keep {
@@ -428,26 +476,70 @@ impl Terminals {
         self.tickets.redeem(ticket)
     }
 
-    /// A claim id that rises with every spawn, across daemon restarts: the holder refuses a claim at or below the
-    /// highest it has seen for a conversation. Milliseconds since the epoch, pushed past the last one given.
-    fn next_claim(&self) -> u64 {
-        let now = u64::try_from(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |d| d.as_millis()),
-        )
-        .unwrap_or(u64::MAX);
-        let mut last = self.last_claim.load(Ordering::SeqCst);
-        loop {
-            let next = now.max(last + 1);
-            match self
-                .last_claim
-                .compare_exchange(last, next, Ordering::SeqCst, Ordering::SeqCst)
-            {
-                Ok(_) => return next,
-                Err(seen) => last = seen,
-            }
+    /// An end that is not finished: the kill goes again until the holder says the tree is gone, but after a wait that
+    /// grows with every round (half a second a round, ten at most), so a tree that will not die cannot keep the
+    /// supervisor out of its pump and its other requests. `rounds` is how many rounds it has had; the new count comes
+    /// back.
+    pub(crate) fn requeue_end(&self, held: HeldId, rounds: u32) -> u32 {
+        let mut list = self
+            .retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // One entry per process: a second request for the same end keeps the larger round count.
+        let mut rounds = rounds.saturating_add(1);
+        if let Some(i) = list.iter().position(|(h, _, _)| *h == held) {
+            rounds = rounds.max(list.remove(i).1);
         }
+        let wait = END_BACKOFF.saturating_mul(rounds).min(END_BACKOFF_MAX);
+        list.push((held, rounds, Instant::now() + wait));
+        rounds
+    }
+
+    /// The ends whose wait is over, taken out of the list (a supervisor that finds one still unfinished puts it back).
+    pub(crate) fn due_ends(&self) -> Vec<(HeldId, u32)> {
+        let mut list = self
+            .retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        let (due, wait): (Vec<_>, Vec<_>) = list.drain(..).partition(|(_, _, at)| *at <= now);
+        *list = wait;
+        due.into_iter().map(|(h, r, _)| (h, r)).collect()
+    }
+
+    /// How many ends are waiting for another round (kept for `kith doctor`).
+    pub(crate) fn ending(&self) -> usize {
+        self.retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+    }
+
+    /// Runs a warm turn's lock step in the supervisor and waits for its answer. A link that is down answers `Lost` (the
+    /// step is safe to ask again).
+    #[allow(
+        dead_code,
+        reason = "the first caller is the warm turn driver of M3-10c"
+    )]
+    pub(crate) fn turn_step(&self, op: TurnOp, held: HeldId, key: &str, claim: i64) -> TurnStep {
+        let (reply, answer) = mpsc::sync_channel(0);
+        let lost = |why: &str| TurnStep::Lost(why.to_owned());
+        if !self.link_up.load(Ordering::SeqCst) {
+            return lost("the holder is not reachable");
+        }
+        let sent = self.queue.send(Req::Turn(TurnReq {
+            op,
+            held,
+            key: key.to_owned(),
+            claim,
+            reply,
+        }));
+        if sent.is_err() {
+            return lost("the supervisor is gone");
+        }
+        answer
+            .recv_timeout(self.answer_wait())
+            .map_or_else(|_| lost("the holder did not answer in time"), |d| d.0)
     }
 
     #[cfg_attr(not(test), allow(clippy::unused_self))]
@@ -630,6 +722,31 @@ impl Terminals {
                 return Err(e);
             }
         };
+        let wire = match wire_claim(shared, &req.session) {
+            Ok(w) => w,
+            Err(e) => {
+                give_back(me);
+                return Err(e);
+            }
+        };
+        // The core.db claim of this terminal, ended with an exit report on every way out but the open one. A report
+        // that names no process ends a claim that has none yet; the stub's pid is named once it is known.
+        let end_claim = |pid: Option<u32>, kind: &str, why: &str| {
+            if !wire.row {
+                return;
+            }
+            let body = exit_body(pid, None, false, Some(why));
+            if let Err(e) = shared.with_core(|c| claims::report(c, wire.id, kind, &body, now_ms()))
+            {
+                crate::log::note(
+                    &shared.logs,
+                    &format!(
+                        "terminal: could not end claim {} of {}: {e}",
+                        wire.id, req.session
+                    ),
+                );
+            }
+        };
         let mut argv = vec![
             stub.to_string_lossy().into_owned(),
             "--lock-dir".into(),
@@ -641,7 +758,7 @@ impl Terminals {
         argv.extend(req.argv.iter().cloned());
         let spec = proto::Spawn {
             conv: req.session.clone(),
-            claim: self.next_claim(),
+            claim: u64::try_from(wire.id).unwrap_or(0),
             generation,
             argv,
             env: filter_env(&req.env),
@@ -689,6 +806,11 @@ impl Terminals {
                         |e| e.to_string(),
                     );
                     let _ = self.queue.send(Req::End(held));
+                    end_claim(
+                        Some(pid),
+                        "exit",
+                        "the claim could not be handed to the stub",
+                    );
                     give_back(me);
                     crate::log::note(
                         &shared.logs,
@@ -700,6 +822,22 @@ impl Terminals {
                     return Err(Error::Io(format!(
                         "kith-core: could not give the session's claim to the terminal ({why}); it was ended"
                     )));
+                }
+                // The stub is the process that holds the lock for the terminal's life, so it is the claim's process.
+                if wire.row {
+                    let started = start_of(pid);
+                    let redeemed = shared.with_core(|c| {
+                        claims::redeem(c, wire.id, pid, &started, &held.instance, now_ms())
+                    });
+                    if !matches!(redeemed, Ok(claims::Redeemed::Running { .. })) {
+                        crate::log::note(
+                            &shared.logs,
+                            &format!(
+                                "terminal: claim {} of {} was not redeemed ({redeemed:?}); the claim file still holds the session",
+                                wire.id, req.session
+                            ),
+                        );
+                    }
                 }
                 let ticket =
                     self.tickets
@@ -717,6 +855,7 @@ impl Terminals {
                 }))
             }
             Some(Placed::Busy) => {
+                end_claim(None, "busy", "a --direct run holds the lock");
                 give_back(me);
                 Ok(json!({
                     "status": "busy",
@@ -724,6 +863,7 @@ impl Terminals {
                 }))
             }
             Some(Placed::Stale) => {
+                end_claim(None, "exit", "stale claim");
                 give_back(me);
                 Err(Error::StaleGeneration(
                     "kith-core: the holder has seen a newer claim for this session; try again"
@@ -731,12 +871,14 @@ impl Terminals {
                 ))
             }
             Some(Placed::Failed(why)) => {
+                end_claim(None, "exit", &why);
                 give_back(me);
                 Err(Error::Io(format!(
                     "kith-core: the holder could not start the terminal: {why}"
                 )))
             }
             None => {
+                end_claim(None, "exit", "the holder did not answer in time");
                 give_back(me);
                 Ok(json!({
                     "status": "direct",
@@ -745,6 +887,63 @@ impl Terminals {
             }
         }
     }
+}
+
+/// The principal of a terminal's claim: `terminal.open` is the owner's method.
+#[cfg(unix)]
+const OWNER: &str = "owner";
+
+/// The claim id a terminal's spawn carries.
+#[cfg(unix)]
+struct Wire {
+    id: i64,
+    /// A `claims` row stands behind it (the session is a core conversation and the claims are open).
+    row: bool,
+}
+
+/// The spawn's claim id from core.db (M3-10b3): `claims::claim` when the session is a core conversation and this
+/// generation's claims are open, so the id is the claim row's and the holder's exit for it is reported to the row. The
+/// claim files are still the writer authority, so a conversation core.db does not know, claims not open yet, or a
+/// writer row left in core.db is no reason to refuse the terminal: the id then comes from the same counter without a row.
+/// Either way it rises across restarts, which the holder's refusal of an older claim relies on.
+#[cfg(unix)]
+fn wire_claim(shared: &Shared, session: &str) -> Result<Wire> {
+    let now = now_ms();
+    shared.with_core(|core| {
+        let seen = claims::revoke_epoch(core, OWNER)?;
+        let req = NewClaim {
+            conversation: session,
+            kind: Kind::Terminal,
+            person: OWNER,
+            turn: None,
+            holder_instance: None,
+            account: None,
+            process: None,
+            revoke_seen: seen,
+        };
+        match claims::claim(core, &req, now) {
+            Ok(c) => Ok(Wire {
+                id: c.claim_id,
+                row: true,
+            }),
+            Err(Error::Refused(_)) => {
+                let tx = core.claim_tx()?;
+                let id = Core::next_claim_id(&tx)?;
+                tx.commit()?;
+                Ok(Wire { id, row: false })
+            }
+            Err(e) => Err(e),
+        }
+    })
+}
+
+/// Tests: the id the spawn would carry for a session that is no conversation (the fallback).
+#[cfg(all(test, unix))]
+pub(crate) fn wire_claim_for_test(core: &mut Core) -> Result<i64> {
+    let tx = core.claim_tx()?;
+    let id = Core::next_claim_id(&tx)?;
+    tx.commit()?;
+    Ok(id)
 }
 
 struct OpenParams {
