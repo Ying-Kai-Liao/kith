@@ -910,6 +910,24 @@ fn a_switched_host_never_runs_kith_auth() {
     state.check_kith_auth_untouched().unwrap();
 }
 
+/// (P6) `createInvite` for the owner's own id is refused on a switched host too (the owner check used to ask kith-auth,
+/// found nothing on the tombstone and let it through), and no kith-auth call is made.
+#[test]
+fn a_switched_host_refuses_an_invite_for_the_owner() {
+    let (rt, pool) = sim();
+    let state = rt.block_on(State::build(pool, true));
+    rt.block_on(async {
+        assert!(crate::api::authority::switched());
+        let body = json!({"personId": "kai", "agents": {"house": "member"}});
+        let res = state.call(&Caller::Local, "createInvite", body).await;
+        let said = res.err().map(|e| format!("{e:#}")).unwrap_or_default();
+        assert!(said.contains("the owner doesn't need an invite"), "got: {said:?}");
+        let rows = state.core.as_ref().unwrap().ask("people.list", json!({"person": "kai"})).unwrap();
+        assert!(rows["rows"].as_array().is_some_and(Vec::is_empty), "the owner was given grants: {rows}");
+    });
+    state.check_kith_auth_untouched().unwrap();
+}
+
 /// The core is down (`CoreDown`) or the rules say no.
 fn down_or_refused(e: &anyhow::Error) -> bool {
     e.is::<crate::api::authority::CoreDown>() || refused(e)

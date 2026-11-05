@@ -182,6 +182,7 @@ async fn who_owner(bin: &Path) -> Result<String> {
             .iter()
             .find(|p| p["owner"] == true)
             .and_then(|p| p["id"].as_str())
+            .filter(|s| !s.is_empty())
             .map(str::to_owned)
             .ok_or_else(|| anyhow!("the core has no owner person yet"));
     }
