@@ -208,6 +208,32 @@ fn a_line_the_core_does_not_know_is_usage_or_not_ported() {
 }
 
 #[test]
+fn the_same_message_in_two_files_ends_as_the_later_path() {
+    // Python's glob order is the file system's, so no golden pins this; the core reads in path order.
+    let (p, root) = world("dup");
+    let line = |session: &str, i: u64| {
+        json!({"type": "assistant", "sessionId": session, "timestamp": "2026-11-04T05:00:00.000Z",
+               "message": {"id": "dup", "model": "claude-sonnet-5", "usage": {"input_tokens": i}}})
+        .to_string()
+    };
+    for (dir, session) in [("-w1", "first"), ("-w2", "second")] {
+        std::fs::create_dir_all(p.home.join(".claude/projects").join(dir)).unwrap();
+        std::fs::write(
+            p.home.join(".claude/projects").join(dir).join("s.jsonl"),
+            line(session, 1),
+        )
+        .unwrap();
+    }
+    run(&p, &fixed_clock(), &args(&["sync"]));
+    let c = super::ledger::open(&p).unwrap();
+    let who: String = c
+        .query_row("select session from req where id = 'dup'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(who, "second");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn a_tiny_pace_never_reaches_the_limit() {
     // The Python raises OverflowError here (days out of range); the core answers "stays under".
     let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T10:30:00+00:00").unwrap();

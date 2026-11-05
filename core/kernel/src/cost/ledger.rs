@@ -135,12 +135,20 @@ type Row = Vec<Sql>;
 
 /// The requests one transcript holds, by message id (a streamed message is logged once per content block; the last copy
 /// has the final usage), in the order the ids first appeared.
-fn requests(text: &str, sub: bool, agent: &str) -> Vec<Row> {
+fn requests(file: impl std::io::BufRead, sub: bool, agent: &str) -> Vec<Row> {
     let mut turn: Option<String> = None;
     let mut order: Vec<String> = Vec::new();
     let mut rows: HashMap<String, Row> = HashMap::new();
-    for line in text.split('\n') {
-        let Ok(Value::Object(d)) = serde_json::from_str::<Value>(line) else {
+    // One line at a time, decoded as it is read: a transcript can be hundreds of megabytes.
+    let mut file = file;
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        if !matches!(file.read_until(b'\n', &mut buf), Ok(n) if n > 0) {
+            break;
+        }
+        let line = String::from_utf8_lossy(&buf);
+        let Ok(Value::Object(d)) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
         let empty = Value::Object(serde_json::Map::new());
@@ -299,10 +307,10 @@ pub fn sync(c: &mut Connection, p: &Paths, quiet: bool) -> rusqlite::Result<Opti
         } else {
             "main".to_owned()
         };
-        let Ok(bytes) = std::fs::read(f) else {
+        let Ok(file) = std::fs::File::open(f) else {
             continue;
         };
-        let rows = requests(&String::from_utf8_lossy(&bytes), sub, &agent);
+        let rows = requests(std::io::BufReader::new(file), sub, &agent);
         for row in &rows {
             tx.execute(
                 "insert or replace into req values (?,?,?,?,?,?,?,?,?,?,?,?)",

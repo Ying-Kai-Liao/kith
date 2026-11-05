@@ -909,6 +909,464 @@
   ]
  },
  {
+  "name": "cost-limit-string-and-bool",
+  "command": "cost",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-cost"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_COST_NOW": "2026-11-05T12:00:00",
+   "TZ": "UTC",
+   "KITH_PERSON_WAS": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"alpha\": {\"limit\": \"50\"}, \"beta\": {\"limit\": true}, \"gamma\": {\"limit\": 20}}}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-01T00:00:01.000Z\", \"message\": {\"content\": \"  build   the thing\\n please \"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000, \"output_tokens\": 100, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 500000, \"cache_read_input_tokens\": 2000000, \"cache_creation_input_tokens\": 300000, \"cache_creation\": {\"ephemeral_1h_input_tokens\": 100000, \"ephemeral_5m_input_tokens\": 200000}}}}\n{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:05:00.000Z\", \"message\": {\"content\": \"<command-name>/clear</command-name>\"}}\n{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T02:00:00.000Z\", \"message\": {\"content\": [{\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"second   turn\"}]}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-03T09:30:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m2\", \"model\": \"claude-opus-5-5\", \"usage\": {\"input_tokens\": 400000, \"output_tokens\": 80000, \"cache_read_input_tokens\": 5000000, \"cache_creation_input_tokens\": 100000}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-01T00:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m3\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-10-31T23:59:59.999Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m4\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 5000000, \"output_tokens\": 1000000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-10-20T10:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m5\", \"model\": \"claude-haiku-4\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T10:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m6\", \"model\": \"gpt-9\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T11:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m7\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 50000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0, \"speed\": \"fast\"}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m8\", \"model\": \"<synthetic>\", \"usage\": {\"input_tokens\": 9, \"output_tokens\": 9, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"message\": {\"id\": \"m9\", \"model\": \"claude-sonnet-5\"}}\n{\"type\": \"system\", \"sessionId\": \"s-a1\"}\n{not json\n\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-05T08:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m10\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 200000, \"cache_read_input_tokens\": 1000000, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-b/s-a2.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-02T00:00:00.000Z\", \"message\": {\"content\": \"hello from sam\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-02T00:10:00.000Z\", \"cwd\": \"/work/b\", \"message\": {\"id\": \"n1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 500000, \"output_tokens\": 300000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-05T01:00:00.000Z\", \"cwd\": \"/work/b\", \"message\": {\"id\": \"n2\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-c/s-bot.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-bot\", \"timestamp\": \"2026-11-03T00:00:00.000Z\", \"cwd\": \"/work/c\", \"message\": {\"id\": \"b1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-c/s-old.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-old\", \"timestamp\": \"2026-11-03T00:00:00.000Z\", \"cwd\": \"/work/c\", \"message\": {\"id\": \"o1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 200000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-d/s-b1.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-11-04T00:00:00.000Z\", \"message\": {\"content\": \"beta job\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-11-04T00:10:00.000Z\", \"cwd\": \"/work/d\", \"message\": {\"id\": \"c1\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 1000000, \"cache_creation_input_tokens\": 50000}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-10-15T00:10:00.000Z\", \"cwd\": \"/work/d\", \"message\": {\"id\": \"c2\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-e/s-g1.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-g1\", \"timestamp\": \"2026-11-05T09:00:00.000Z\", \"cwd\": \"/work/e\", \"message\": {\"id\": \"g1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 2000000, \"output_tokens\": 1000000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-f/s-own.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-own\", \"timestamp\": \"2026-11-04T00:00:00.000Z\", \"message\": {\"content\": \"my own session\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-own\", \"timestamp\": \"2026-11-04T00:10:00.000Z\", \"cwd\": \"/work/f\", \"message\": {\"id\": \"w1\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 3000000, \"output_tokens\": 500000, \"cache_read_input_tokens\": 9000000, \"cache_creation_input_tokens\": 100000}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-1.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-03T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 200000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-1.meta.json",
+    "text": "{\"agentType\": \"kith:beta\", \"description\": \"review it\"}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-2.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb2\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-2.meta.json",
+    "text": "{\"agentType\": \"Explore\", \"description\": \"look around\"}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-3.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T13:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb3\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 50000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-3.meta.json",
+    "text": "{\"agentType\": \"hq:beta\", \"description\": \"old name\"}"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "\ncreate table req (id text primary key, session text, ts text, project text, model text, agent text, turn text, input int,\n  output int, cache_read int, cache_write int, cost real);\ncreate table seen (path text primary key, size int);\ncreate table runs (session text primary key, agent text, version text, model text, effort text, via text, project text,\n  started text, person text, provider text, account text, account_id text);\n\ninsert into runs values ('s-a1','alpha','1.0','sonnet','high','terminal','/work/a','2026-11-01T00:00:00',null,null,null,null);\ninsert into runs values ('s-a2','alpha','1.1','opus','max','discord','/work/b','2026-11-02T00:00:00','sam','claude','work','claude:work');\ninsert into runs values ('s-bot','alpha','1.1',null,null,'discord','/work/c','2026-11-03T00:00:00','bot-s',null,null,null);\ninsert into runs values ('s-old','alpha','1.0',null,null,'terminal','/work/c','2026-11-03T00:00:00','old-sam',null,null,null);\ninsert into runs values ('s-b1','beta','2.0','opus','low','terminal','/work/d','2026-11-04T00:00:00',null,null,null,null);\ninsert into runs values ('s-g1','gamma','1.0','sonnet','high','discord','/work/e','2026-11-05T09:00:00','sam',null,null,null);\n"
+   }
+  ],
+  "run": [
+   [
+    "limit",
+    "alpha",
+    "--json"
+   ],
+   [
+    "limit",
+    "beta",
+    "--json"
+   ],
+   [
+    "limit",
+    "gamma",
+    "--sh"
+   ],
+   [
+    "usage",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(\\d{4}-\\d\\d-\\d\\d)[T ](\\d\\d:\\d\\d)(?::\\d\\d)?(?:\\.\\d+)?(?:Z|[+-]\\d\\d:?\\d\\d)?",
+    "\\1@\\2"
+   ]
+  ],
+  "ignore": [
+   "/\\.claude/",
+   "/accounts/claude/"
+  ]
+ },
+ {
+  "name": "cost-limit-string-alone",
+  "command": "cost",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-cost"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_COST_NOW": "2026-11-05T12:00:00",
+   "TZ": "UTC",
+   "KITH_PERSON_WAS": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"alpha\": {\"limit\": \"50\"}}}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-01T00:00:01.000Z\", \"message\": {\"content\": \"  build   the thing\\n please \"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000, \"output_tokens\": 100, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 500000, \"cache_read_input_tokens\": 2000000, \"cache_creation_input_tokens\": 300000, \"cache_creation\": {\"ephemeral_1h_input_tokens\": 100000, \"ephemeral_5m_input_tokens\": 200000}}}}\n{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:05:00.000Z\", \"message\": {\"content\": \"<command-name>/clear</command-name>\"}}\n{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T02:00:00.000Z\", \"message\": {\"content\": [{\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"second   turn\"}]}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-03T09:30:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m2\", \"model\": \"claude-opus-5-5\", \"usage\": {\"input_tokens\": 400000, \"output_tokens\": 80000, \"cache_read_input_tokens\": 5000000, \"cache_creation_input_tokens\": 100000}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-01T00:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m3\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-10-31T23:59:59.999Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m4\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 5000000, \"output_tokens\": 1000000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-10-20T10:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m5\", \"model\": \"claude-haiku-4\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T10:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m6\", \"model\": \"gpt-9\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T11:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m7\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 50000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0, \"speed\": \"fast\"}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m8\", \"model\": \"<synthetic>\", \"usage\": {\"input_tokens\": 9, \"output_tokens\": 9, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"message\": {\"id\": \"m9\", \"model\": \"claude-sonnet-5\"}}\n{\"type\": \"system\", \"sessionId\": \"s-a1\"}\n{not json\n\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-05T08:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m10\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 200000, \"cache_read_input_tokens\": 1000000, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-b/s-a2.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-02T00:00:00.000Z\", \"message\": {\"content\": \"hello from sam\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-02T00:10:00.000Z\", \"cwd\": \"/work/b\", \"message\": {\"id\": \"n1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 500000, \"output_tokens\": 300000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-05T01:00:00.000Z\", \"cwd\": \"/work/b\", \"message\": {\"id\": \"n2\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-c/s-bot.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-bot\", \"timestamp\": \"2026-11-03T00:00:00.000Z\", \"cwd\": \"/work/c\", \"message\": {\"id\": \"b1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-c/s-old.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-old\", \"timestamp\": \"2026-11-03T00:00:00.000Z\", \"cwd\": \"/work/c\", \"message\": {\"id\": \"o1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 200000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-d/s-b1.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-11-04T00:00:00.000Z\", \"message\": {\"content\": \"beta job\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-11-04T00:10:00.000Z\", \"cwd\": \"/work/d\", \"message\": {\"id\": \"c1\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 1000000, \"cache_creation_input_tokens\": 50000}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-10-15T00:10:00.000Z\", \"cwd\": \"/work/d\", \"message\": {\"id\": \"c2\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-e/s-g1.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-g1\", \"timestamp\": \"2026-11-05T09:00:00.000Z\", \"cwd\": \"/work/e\", \"message\": {\"id\": \"g1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 2000000, \"output_tokens\": 1000000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-f/s-own.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-own\", \"timestamp\": \"2026-11-04T00:00:00.000Z\", \"message\": {\"content\": \"my own session\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-own\", \"timestamp\": \"2026-11-04T00:10:00.000Z\", \"cwd\": \"/work/f\", \"message\": {\"id\": \"w1\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 3000000, \"output_tokens\": 500000, \"cache_read_input_tokens\": 9000000, \"cache_creation_input_tokens\": 100000}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-1.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-03T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 200000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-1.meta.json",
+    "text": "{\"agentType\": \"kith:beta\", \"description\": \"review it\"}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-2.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb2\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-2.meta.json",
+    "text": "{\"agentType\": \"Explore\", \"description\": \"look around\"}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-3.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T13:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb3\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 50000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-3.meta.json",
+    "text": "{\"agentType\": \"hq:beta\", \"description\": \"old name\"}"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "\ncreate table req (id text primary key, session text, ts text, project text, model text, agent text, turn text, input int,\n  output int, cache_read int, cache_write int, cost real);\ncreate table seen (path text primary key, size int);\ncreate table runs (session text primary key, agent text, version text, model text, effort text, via text, project text,\n  started text, person text, provider text, account text, account_id text);\n\ninsert into runs values ('s-a1','alpha','1.0','sonnet','high','terminal','/work/a','2026-11-01T00:00:00',null,null,null,null);\ninsert into runs values ('s-a2','alpha','1.1','opus','max','discord','/work/b','2026-11-02T00:00:00','sam','claude','work','claude:work');\ninsert into runs values ('s-bot','alpha','1.1',null,null,'discord','/work/c','2026-11-03T00:00:00','bot-s',null,null,null);\ninsert into runs values ('s-old','alpha','1.0',null,null,'terminal','/work/c','2026-11-03T00:00:00','old-sam',null,null,null);\ninsert into runs values ('s-b1','beta','2.0','opus','low','terminal','/work/d','2026-11-04T00:00:00',null,null,null,null);\ninsert into runs values ('s-g1','gamma','1.0','sonnet','high','discord','/work/e','2026-11-05T09:00:00','sam',null,null,null);\n"
+   }
+  ],
+  "run": [
+   [
+    "limit",
+    "alpha",
+    "--json"
+   ],
+   [
+    "limit",
+    "alpha",
+    "--sh"
+   ],
+   [
+    "usage",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(\\d{4}-\\d\\d-\\d\\d)[T ](\\d\\d:\\d\\d)(?::\\d\\d)?(?:\\.\\d+)?(?:Z|[+-]\\d\\d:?\\d\\d)?",
+    "\\1@\\2"
+   ]
+  ],
+  "ignore": [
+   "/\\.claude/",
+   "/accounts/claude/"
+  ]
+ },
+ {
+  "name": "cost-limit-zero-and-null",
+  "command": "cost",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-cost"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_COST_NOW": "2026-11-05T12:00:00",
+   "TZ": "UTC",
+   "KITH_PERSON_WAS": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"alpha\": {\"limit\": 0}, \"beta\": {\"limit\": null}}}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-01T00:00:01.000Z\", \"message\": {\"content\": \"  build   the thing\\n please \"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000, \"output_tokens\": 100, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 500000, \"cache_read_input_tokens\": 2000000, \"cache_creation_input_tokens\": 300000, \"cache_creation\": {\"ephemeral_1h_input_tokens\": 100000, \"ephemeral_5m_input_tokens\": 200000}}}}\n{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:05:00.000Z\", \"message\": {\"content\": \"<command-name>/clear</command-name>\"}}\n{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T02:00:00.000Z\", \"message\": {\"content\": [{\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"second   turn\"}]}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-03T09:30:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m2\", \"model\": \"claude-opus-5-5\", \"usage\": {\"input_tokens\": 400000, \"output_tokens\": 80000, \"cache_read_input_tokens\": 5000000, \"cache_creation_input_tokens\": 100000}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-01T00:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m3\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-10-31T23:59:59.999Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m4\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 5000000, \"output_tokens\": 1000000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-10-20T10:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m5\", \"model\": \"claude-haiku-4\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T10:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m6\", \"model\": \"gpt-9\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T11:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m7\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 50000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0, \"speed\": \"fast\"}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m8\", \"model\": \"<synthetic>\", \"usage\": {\"input_tokens\": 9, \"output_tokens\": 9, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"message\": {\"id\": \"m9\", \"model\": \"claude-sonnet-5\"}}\n{\"type\": \"system\", \"sessionId\": \"s-a1\"}\n{not json\n\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-05T08:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m10\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 200000, \"cache_read_input_tokens\": 1000000, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-b/s-a2.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-02T00:00:00.000Z\", \"message\": {\"content\": \"hello from sam\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-02T00:10:00.000Z\", \"cwd\": \"/work/b\", \"message\": {\"id\": \"n1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 500000, \"output_tokens\": 300000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-05T01:00:00.000Z\", \"cwd\": \"/work/b\", \"message\": {\"id\": \"n2\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-c/s-bot.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-bot\", \"timestamp\": \"2026-11-03T00:00:00.000Z\", \"cwd\": \"/work/c\", \"message\": {\"id\": \"b1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-c/s-old.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-old\", \"timestamp\": \"2026-11-03T00:00:00.000Z\", \"cwd\": \"/work/c\", \"message\": {\"id\": \"o1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 200000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-d/s-b1.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-11-04T00:00:00.000Z\", \"message\": {\"content\": \"beta job\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-11-04T00:10:00.000Z\", \"cwd\": \"/work/d\", \"message\": {\"id\": \"c1\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 1000000, \"cache_creation_input_tokens\": 50000}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-10-15T00:10:00.000Z\", \"cwd\": \"/work/d\", \"message\": {\"id\": \"c2\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-e/s-g1.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-g1\", \"timestamp\": \"2026-11-05T09:00:00.000Z\", \"cwd\": \"/work/e\", \"message\": {\"id\": \"g1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 2000000, \"output_tokens\": 1000000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-f/s-own.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-own\", \"timestamp\": \"2026-11-04T00:00:00.000Z\", \"message\": {\"content\": \"my own session\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-own\", \"timestamp\": \"2026-11-04T00:10:00.000Z\", \"cwd\": \"/work/f\", \"message\": {\"id\": \"w1\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 3000000, \"output_tokens\": 500000, \"cache_read_input_tokens\": 9000000, \"cache_creation_input_tokens\": 100000}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-1.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-03T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 200000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-1.meta.json",
+    "text": "{\"agentType\": \"kith:beta\", \"description\": \"review it\"}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-2.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb2\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-2.meta.json",
+    "text": "{\"agentType\": \"Explore\", \"description\": \"look around\"}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-3.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T13:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb3\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 50000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-3.meta.json",
+    "text": "{\"agentType\": \"hq:beta\", \"description\": \"old name\"}"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "\ncreate table req (id text primary key, session text, ts text, project text, model text, agent text, turn text, input int,\n  output int, cache_read int, cache_write int, cost real);\ncreate table seen (path text primary key, size int);\ncreate table runs (session text primary key, agent text, version text, model text, effort text, via text, project text,\n  started text, person text, provider text, account text, account_id text);\n\ninsert into runs values ('s-a1','alpha','1.0','sonnet','high','terminal','/work/a','2026-11-01T00:00:00',null,null,null,null);\ninsert into runs values ('s-a2','alpha','1.1','opus','max','discord','/work/b','2026-11-02T00:00:00','sam','claude','work','claude:work');\ninsert into runs values ('s-bot','alpha','1.1',null,null,'discord','/work/c','2026-11-03T00:00:00','bot-s',null,null,null);\ninsert into runs values ('s-old','alpha','1.0',null,null,'terminal','/work/c','2026-11-03T00:00:00','old-sam',null,null,null);\ninsert into runs values ('s-b1','beta','2.0','opus','low','terminal','/work/d','2026-11-04T00:00:00',null,null,null,null);\ninsert into runs values ('s-g1','gamma','1.0','sonnet','high','discord','/work/e','2026-11-05T09:00:00','sam',null,null,null);\n"
+   }
+  ],
+  "run": [
+   [
+    "limit",
+    "alpha",
+    "--json"
+   ],
+   [
+    "limit",
+    "beta",
+    "--json"
+   ],
+   [
+    "usage",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(\\d{4}-\\d\\d-\\d\\d)[T ](\\d\\d:\\d\\d)(?::\\d\\d)?(?:\\.\\d+)?(?:Z|[+-]\\d\\d:?\\d\\d)?",
+    "\\1@\\2"
+   ]
+  ],
+  "ignore": [
+   "/\\.claude/",
+   "/accounts/claude/"
+  ]
+ },
+ {
+  "name": "cost-limit-sh-quoting",
+  "command": "cost",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-cost"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_COST_NOW": "2026-11-05T12:00:00",
+   "TZ": "UTC",
+   "KITH_PERSON_WAS": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"it's a $b\": {\"limit\": 12.5, \"at_limit\": \"tell\"}, \"\\u00fcn\\u00ef\": {\"limit\": 3}}}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-01T00:00:01.000Z\", \"message\": {\"content\": \"  build   the thing\\n please \"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000, \"output_tokens\": 100, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 500000, \"cache_read_input_tokens\": 2000000, \"cache_creation_input_tokens\": 300000, \"cache_creation\": {\"ephemeral_1h_input_tokens\": 100000, \"ephemeral_5m_input_tokens\": 200000}}}}\n{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T01:05:00.000Z\", \"message\": {\"content\": \"<command-name>/clear</command-name>\"}}\n{\"type\": \"user\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T02:00:00.000Z\", \"message\": {\"content\": [{\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"second   turn\"}]}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-03T09:30:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m2\", \"model\": \"claude-opus-5-5\", \"usage\": {\"input_tokens\": 400000, \"output_tokens\": 80000, \"cache_read_input_tokens\": 5000000, \"cache_creation_input_tokens\": 100000}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-01T00:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m3\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-10-31T23:59:59.999Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m4\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 5000000, \"output_tokens\": 1000000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-10-20T10:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m5\", \"model\": \"claude-haiku-4\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T10:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m6\", \"model\": \"gpt-9\", \"usage\": {\"input_tokens\": 1000000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T11:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m7\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 50000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0, \"speed\": \"fast\"}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-02T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m8\", \"model\": \"<synthetic>\", \"usage\": {\"input_tokens\": 9, \"output_tokens\": 9, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"message\": {\"id\": \"m9\", \"model\": \"claude-sonnet-5\"}}\n{\"type\": \"system\", \"sessionId\": \"s-a1\"}\n{not json\n\n{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-05T08:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"m10\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 200000, \"cache_read_input_tokens\": 1000000, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-b/s-a2.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-02T00:00:00.000Z\", \"message\": {\"content\": \"hello from sam\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-02T00:10:00.000Z\", \"cwd\": \"/work/b\", \"message\": {\"id\": \"n1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 500000, \"output_tokens\": 300000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-a2\", \"timestamp\": \"2026-11-05T01:00:00.000Z\", \"cwd\": \"/work/b\", \"message\": {\"id\": \"n2\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-c/s-bot.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-bot\", \"timestamp\": \"2026-11-03T00:00:00.000Z\", \"cwd\": \"/work/c\", \"message\": {\"id\": \"b1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-c/s-old.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-old\", \"timestamp\": \"2026-11-03T00:00:00.000Z\", \"cwd\": \"/work/c\", \"message\": {\"id\": \"o1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 200000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-d/s-b1.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-11-04T00:00:00.000Z\", \"message\": {\"content\": \"beta job\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-11-04T00:10:00.000Z\", \"cwd\": \"/work/d\", \"message\": {\"id\": \"c1\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 1000000, \"cache_creation_input_tokens\": 50000}}}\n{\"type\": \"assistant\", \"sessionId\": \"s-b1\", \"timestamp\": \"2026-10-15T00:10:00.000Z\", \"cwd\": \"/work/d\", \"message\": {\"id\": \"c2\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 300000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-e/s-g1.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-g1\", \"timestamp\": \"2026-11-05T09:00:00.000Z\", \"cwd\": \"/work/e\", \"message\": {\"id\": \"g1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 2000000, \"output_tokens\": 1000000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-f/s-own.jsonl",
+    "text": "{\"type\": \"user\", \"sessionId\": \"s-own\", \"timestamp\": \"2026-11-04T00:00:00.000Z\", \"message\": {\"content\": \"my own session\"}}\n{\"type\": \"assistant\", \"sessionId\": \"s-own\", \"timestamp\": \"2026-11-04T00:10:00.000Z\", \"cwd\": \"/work/f\", \"message\": {\"id\": \"w1\", \"model\": \"claude-opus-4-1\", \"usage\": {\"input_tokens\": 3000000, \"output_tokens\": 500000, \"cache_read_input_tokens\": 9000000, \"cache_creation_input_tokens\": 100000}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-1.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-03T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb1\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 200000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-1.meta.json",
+    "text": "{\"agentType\": \"kith:beta\", \"description\": \"review it\"}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-2.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T12:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb2\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 100000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-2.meta.json",
+    "text": "{\"agentType\": \"Explore\", \"description\": \"look around\"}"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-3.jsonl",
+    "text": "{\"type\": \"assistant\", \"sessionId\": \"s-a1\", \"timestamp\": \"2026-11-04T13:00:00.000Z\", \"cwd\": \"/work/a\", \"message\": {\"id\": \"sb3\", \"model\": \"claude-sonnet-5\", \"usage\": {\"input_tokens\": 100000, \"output_tokens\": 50000, \"cache_read_input_tokens\": 0, \"cache_creation_input_tokens\": 0}}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-work-a/s-a1/subagents/agent-3.meta.json",
+    "text": "{\"agentType\": \"hq:beta\", \"description\": \"old name\"}"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "\ncreate table req (id text primary key, session text, ts text, project text, model text, agent text, turn text, input int,\n  output int, cache_read int, cache_write int, cost real);\ncreate table seen (path text primary key, size int);\ncreate table runs (session text primary key, agent text, version text, model text, effort text, via text, project text,\n  started text, person text, provider text, account text, account_id text);\n\ninsert into runs values ('s-a1','alpha','1.0','sonnet','high','terminal','/work/a','2026-11-01T00:00:00',null,null,null,null);\ninsert into runs values ('s-a2','alpha','1.1','opus','max','discord','/work/b','2026-11-02T00:00:00','sam','claude','work','claude:work');\ninsert into runs values ('s-bot','alpha','1.1',null,null,'discord','/work/c','2026-11-03T00:00:00','bot-s',null,null,null);\ninsert into runs values ('s-old','alpha','1.0',null,null,'terminal','/work/c','2026-11-03T00:00:00','old-sam',null,null,null);\ninsert into runs values ('s-b1','beta','2.0','opus','low','terminal','/work/d','2026-11-04T00:00:00',null,null,null,null);\ninsert into runs values ('s-g1','gamma','1.0','sonnet','high','discord','/work/e','2026-11-05T09:00:00','sam',null,null,null);\n"
+   }
+  ],
+  "run": [
+   [
+    "limit",
+    "it's a $b",
+    "--sh"
+   ],
+   [
+    "limit",
+    "it's a $b",
+    "--json"
+   ],
+   [
+    "limit",
+    "\u00fcn\u00ef",
+    "--sh"
+   ]
+  ],
+  "normalize": [
+   [
+    "(\\d{4}-\\d\\d-\\d\\d)[T ](\\d\\d:\\d\\d)(?::\\d\\d)?(?:\\.\\d+)?(?:Z|[+-]\\d\\d:?\\d\\d)?",
+    "\\1@\\2"
+   ]
+  ],
+  "ignore": [
+   "/\\.claude/",
+   "/accounts/claude/"
+  ]
+ },
+ {
   "name": "cost-limit-clock-first-instant",
   "command": "cost",
   "needs": "rust",
