@@ -6,7 +6,7 @@ use crate::terminal::claim::{self, Kind};
 use crate::terminal::core_claims::tests::FakeCore;
 
 #[tokio::test]
-async fn a_turn_claim_is_made_by_claim_next_and_redeemed_and_no_claim_file_is_written() {
+async fn a_turn_claim_is_the_claim_file_with_the_core_claim_as_its_shadow() {
     let r = Rig::new();
     let core = FakeCore::start(&r.state());
     let pid = r.sleeper();
@@ -16,7 +16,8 @@ async fn a_turn_claim_is_made_by_claim_next_and_redeemed_and_no_claim_file_is_wr
         ["hostclaim.ensure", "hostclaim.epoch", "hostclaim.enqueue", "hostclaim.turn", "hostclaim.redeem"],
         "enqueue, then claim_next's row, then the redeem on the agent's pid; never a direct claim"
     );
-    assert!(!claim::path(&r.state(), "s1", false).exists(), "the claim file is not the writer with the flag on");
+    // The kernel's takers (kith-sessions, lifecycle, wake) only look at the file: it is the gate, the core claim its shadow.
+    assert_eq!(claim::read(&claim::path(&r.state(), "s1", false)).map(|c| c.pid), Some(pid));
     // The owner's own turn only keeps a terminal out, as a Kind::App file claim does.
     assert!(claim::holder(&r.state(), "s1").is_none());
     // Another claimer is refused as held by the first, and its turn is cancelled, not left queued.
@@ -25,12 +26,14 @@ async fn a_turn_claim_is_made_by_claim_next_and_redeemed_and_no_claim_file_is_wr
     assert_eq!(held.0.pid, pid);
     let held = claim::take_as(&r.state(), "s1", Kind::Bot, other, false, Some("bot-sam"), Some("builder"));
     assert_eq!(held.unwrap().unwrap_err().0.pid, pid);
-    assert_eq!(core.turn_states(), ["claimed", "cancelled"], "the refused turn is cancelled by the caller");
-    // Release is the claimer's exit report; another pid's release changes nothing.
+    assert_eq!(core.turn_states(), ["claimed"], "the file refused them before the core was asked");
+    // Release is the claimer's end report; another pid's release changes nothing.
     claim::release(&r.state(), "s1", other, false);
     assert_eq!(core.claim_state(1), "running");
     claim::release(&r.state(), "s1", pid, false);
     assert_eq!(core.claim_state(1), "ended");
+    assert_eq!(core.turn_states(), ["done"], "a host turn's end is `done`: the core must not requeue it");
+    assert!(!claim::path(&r.state(), "s1", false).exists(), "the file goes after the core claim");
     assert!(claim::take_as(&r.state(), "s1", Kind::Bot, other, false, Some("bot-sam"), None).unwrap().is_ok());
     assert_eq!(claim::holder(&r.state(), "s1").map(|c| (c.kind, c.pid)), Some((Kind::Bot, other)));
 }
@@ -43,8 +46,95 @@ async fn a_revoked_person_is_refused_and_nothing_is_left_queued() {
     let pid = r.sleeper();
     let e = claim::take_as(&r.state(), "s1", Kind::Bot, pid, false, Some("bot-sam"), None).unwrap_err();
     assert!(e.to_string().contains("revoked"), "{e}");
+    assert!(crate::terminal::core_claims::is_revoked(&e), "the turn path refuses on this error");
     assert!(core.turn_states().is_empty(), "refused at enqueue: nothing was queued");
+    assert!(!claim::path(&r.state(), "s1", false).exists(), "no claim is left behind for a refused turn");
     assert!(claim::holder(&r.state(), "s1").is_none());
+}
+
+/// The decision `claim_for_turn` makes on what `take_for_turn` returned (the turn path calls exactly these two).
+#[tokio::test]
+async fn the_turn_path_refuses_a_revoked_person_and_runs_under_the_file_for_other_core_failures() {
+    use crate::terminal::claim::{TurnClaim, judge_turn_claim, take_for_turn};
+    let r = Rig::new();
+    let core = FakeCore::start(&r.state());
+    let pid = r.sleeper();
+    let judge = |sid: &str, main: bool| {
+        let taken =
+            take_for_turn(&r.state(), sid, Kind::Bot, pid, false, Some("bot-sam"), Some("builder"), Some("/work"));
+        judge_turn_claim(&taken, pid, main, true)
+    };
+    core.world.lock().unwrap().revoked = true;
+    assert_eq!(judge("s1", false), TurnClaim::Revoked, "a thread lane refuses");
+    assert_eq!(judge("s1", true), TurnClaim::Revoked, "so does the main lane: it is not a held claim");
+    assert!(!claim::path(&r.state(), "s1", false).exists());
+    core.world.lock().unwrap().revoked = false;
+    core.world.lock().unwrap().down = true;
+    assert_eq!(judge("s2", false), TurnClaim::Held, "core down: the file claim is the writer");
+    core.world.lock().unwrap().down = false;
+    // Another writer in the core (not in a file): refused on a thread lane, run unclaimed on the main lane.
+    core.hold("s3", "external", std::process::id());
+    assert_eq!(judge("s3", false), TurnClaim::Refused("heldByOtherWriter"));
+    assert_eq!(judge("s3", true), TurnClaim::Unclaimed);
+}
+
+#[tokio::test]
+async fn a_core_that_holds_another_writer_gives_the_file_back_and_cancels_the_turn() {
+    let r = Rig::new();
+    let core = FakeCore::start(&r.state());
+    core.hold("s1", "external", std::process::id());
+    let pid = r.sleeper();
+    let held = claim::take_as(&r.state(), "s1", Kind::Bot, pid, false, Some("bot-sam"), None).unwrap().unwrap_err();
+    assert_eq!(held.0.pid, std::process::id());
+    assert!(!claim::path(&r.state(), "s1", false).exists(), "the file claim was given back");
+    assert_eq!(core.turn_states(), ["cancelled"]);
+}
+
+#[tokio::test]
+async fn any_other_core_failure_leaves_the_file_claim_as_the_writer() {
+    for case in ["down", "exhausted", "redeem_fails"] {
+        let r = Rig::new();
+        let core = FakeCore::start(&r.state());
+        {
+            let mut w = core.world.lock().unwrap();
+            match case {
+                "down" => w.down = true,
+                "exhausted" => w.exhausted = true,
+                _ => w.redeem_fails = true,
+            }
+        }
+        let pid = r.sleeper();
+        let got = claim::take_as(&r.state(), "s1", Kind::Bot, pid, false, Some("bot-sam"), None);
+        assert!(got.unwrap().is_ok(), "{case}: the turn goes on under its claim file");
+        assert_eq!(claim::holder(&r.state(), "s1").map(|c| c.pid), Some(pid), "{case}: and the file keeps others out");
+        assert!(core.turn_states().iter().all(|s| s != "queued" && s != "claimed"), "{case}: {:?}", core.turn_states());
+        claim::release(&r.state(), "s1", pid, false);
+        assert!(claim::holder(&r.state(), "s1").is_none(), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn a_redeem_whose_reply_was_lost_stands_when_the_core_shows_it_running() {
+    let r = Rig::new();
+    let core = FakeCore::start(&r.state());
+    core.world.lock().unwrap().redeem_lost = true;
+    let pid = r.sleeper();
+    assert!(claim::take_as(&r.state(), "s1", Kind::Bot, pid, false, Some("bot-sam"), None).unwrap().is_ok());
+    assert_eq!(core.claim_state(1), "running");
+    assert_eq!(core.turn_states(), ["claimed"], "not cancelled: the redeem did happen");
+    claim::release(&r.state(), "s1", pid, false);
+    assert_eq!(core.turn_states(), ["done"]);
+}
+
+#[tokio::test]
+async fn a_kernel_claim_file_taken_during_the_flag_off_window_is_the_same_gate() {
+    // The kernel's taker links the file exclusively; the host's turn takes it the same way and loses or wins, never both.
+    let r = Rig::new();
+    let core = FakeCore::start(&r.state());
+    let (a, b) = (r.sleeper(), r.sleeper());
+    assert!(claim::take_as(&r.state(), "s1", Kind::App, a, false, None, Some("builder")).unwrap().is_ok());
+    assert!(claim::take(&r.state(), "s1", Kind::Terminal, b, false).unwrap().is_err());
+    assert_eq!(core.log().iter().filter(|m| *m == "hostclaim.turn").count(), 1);
 }
 
 #[tokio::test]

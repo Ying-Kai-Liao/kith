@@ -968,6 +968,13 @@ async fn take_over_inner(hub: &Arc<Hub>, t: &Thread) -> Result<Value> {
     // Held from here to the end: nobody resumes or sends into the session while it is being ended and imported. The
     // terminal's own claim stays its own; this one is the host's, named for the take-over.
     let sid = reg.session_id.clone();
+    // Taken before the core is asked, so the window between the terminal's `ended` and the host's `set_writer` is held on
+    // both paths (the `holder()` checks of `cards/resume.rs` and a second take-over see it).
+    if claim::take(&env.state, &sid, claim::Kind::App, std::process::id(), true)?.is_err() {
+        // A second take-over of the same session is already running.
+        return Ok(json!({"liveWriter": null, "tookOver": false}));
+    }
+    let _claim = ReleaseOnDrop { state: env.state.clone(), sid: sid.clone() };
     // With the core flag on and a claim of the terminal in the core, the take-over is the core's: the claim stays the writer
     // until it is `ended`, and the host goes on only then (a terminal started before the flag has only a claim file and takes
     // the path below).
@@ -978,11 +985,6 @@ async fn take_over_inner(hub: &Arc<Hub>, t: &Thread) -> Result<Value> {
             return take_over_core(hub, t, reg, &env, f, id).await;
         }
     }
-    if claim::take(&env.state, &sid, claim::Kind::App, std::process::id(), true)?.is_err() {
-        // A second take-over of the same session is already running.
-        return Ok(json!({"liveWriter": null, "tookOver": false}));
-    }
-    let _claim = ReleaseOnDrop { state: env.state.clone(), sid };
     // The terminal reads this to tell its user where the conversation went.
     let taken = registry::dir(&env.state).join(format!("{}.taken", reg.session_id));
     write_private(&taken, &chrono::Utc::now().to_rfc3339())?;

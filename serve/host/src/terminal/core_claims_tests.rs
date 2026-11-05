@@ -30,11 +30,11 @@ pub(in crate::terminal) struct FakeClaim {
     pub person: String,
     pub pid: Option<u64>,
     pub started: Option<String>,
-    #[allow(dead_code, reason = "kept for reading a failing test")]
     pub turn: Option<i64>,
 }
 
 #[derive(Default)]
+#[allow(clippy::struct_excessive_bools, reason = "one switch per scripted failure")]
 pub(in crate::terminal) struct World {
     pub claims: Vec<FakeClaim>,
     /// (turn id, state)
@@ -45,6 +45,14 @@ pub(in crate::terminal) struct World {
     pub revoked: bool,
     /// `settle` never ends anything (a holder that will not go).
     pub stuck: bool,
+    /// Every row is unreachable (the core is down).
+    pub down: bool,
+    /// `hostclaim.turn` finds no account left.
+    pub exhausted: bool,
+    /// `hostclaim.redeem` fails before the core sees it.
+    pub redeem_fails: bool,
+    /// `hostclaim.redeem` is applied but its reply is lost.
+    pub redeem_lost: bool,
 }
 
 #[derive(Clone)]
@@ -126,7 +134,17 @@ fn answer(w: &mut World, method: &str, p: &Value) -> Answer {
     let conv = p["conversation"].as_str().unwrap_or_default().to_owned();
     let live = |w: &World| w.claims.iter().position(|c| c.conversation == conv && LIVE.contains(&c.state.as_str()));
     let id = p["claimId"].as_i64().unwrap_or_default();
-    Answer::Done(match method {
+    if w.down {
+        return Answer::Down { why: "the core is down".into(), lost: false };
+    }
+    if method == "hostclaim.redeem" && w.redeem_fails {
+        return Answer::Down { why: "the redeem never arrived".into(), lost: false };
+    }
+    if method == "hostclaim.turn" && w.exhausted {
+        return Answer::Done(json!({"status": "exhausted", "text": "no account left"}));
+    }
+    let lost = method == "hostclaim.redeem" && w.redeem_lost;
+    let answered = Answer::Done(match method {
         "hostclaim.ensure" => json!({"conversation": conv}),
         "hostclaim.epoch" => json!({"epoch": i64::from(w.revoked)}),
         "hostclaim.claim" => {
@@ -187,10 +205,16 @@ fn answer(w: &mut World, method: &str, p: &Value) -> Answer {
         },
         "hostclaim.report" => {
             let pid = serde_json::from_str::<Value>(p["body"].as_str().unwrap()).unwrap()["pid"].as_u64();
-            match w.claims.iter_mut().find(|c| c.id == id && LIVE.contains(&c.state.as_str()) && c.pid == pid) {
+            let kind = p["kind"].as_str().unwrap().to_owned();
+            let hit = w.claims.iter_mut().find(|c| c.id == id && LIVE.contains(&c.state.as_str()) && c.pid == pid);
+            match hit {
                 Some(c) => {
                     c.state = "ended".into();
-                    json!({"stored": true, "applied": "exit"})
+                    let turn = c.turn;
+                    // As the real core: `done` finishes the turn, `exit` puts it back in the queue.
+                    let to = if kind == "done" { "done" } else { "queued" };
+                    w.turns.iter_mut().filter(|t| Some(t.0) == turn).for_each(|t| t.1 = to.into());
+                    json!({"stored": true, "applied": kind})
                 }
                 None => json!({"stored": true, "applied": null}),
             }
@@ -225,12 +249,22 @@ fn answer(w: &mut World, method: &str, p: &Value) -> Answer {
         "hostclaim.cancel" => {
             let t = p["turn"].as_i64().unwrap();
             let mut done = false;
-            for x in w.turns.iter_mut().filter(|x| x.0 == t && (x.1 == "queued" || x.1 == "parked")) {
+            for x in w.turns.iter_mut().filter(|x| x.0 == t && ["queued", "parked", "claimed"].contains(&x.1.as_str()))
+            {
                 x.1 = "cancelled".into();
                 done = true;
             }
+            // As the real core: a claim that was never redeemed goes with its turn.
+            w.claims
+                .iter_mut()
+                .filter(|c| c.turn == Some(t) && c.state == "claimed")
+                .for_each(|c| c.state = "ended".into());
             json!({"cancelled": done})
         }
         other => return Answer::Refused(format!("the fake core has no {other}")),
-    })
+    });
+    if lost {
+        return Answer::Down { why: "the reply was lost".into(), lost: true };
+    }
+    answered
 }

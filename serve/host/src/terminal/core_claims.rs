@@ -2,9 +2,16 @@
 //! claim files of `claim.rs` stay the writer authority until the S2 switch).
 //!
 //! With the flag on, for a state folder that [`enable`] registered, `claim::take_as`, `claim::holder` and `claim::release`,
-//! the terminal take-over (`sync::take_over`) and the bot turn claim (`agent/bot/turn.rs`) go through the core's `hostclaim.*`
-//! rows (`core/runtime/src/hostclaim.rs`, host principal only) instead of writing `<sid>.claim`. The core's `conversation`
-//! is the Claude session id the claim files are named by.
+//! the terminal take-over (`sync::take_over`) and the bot turn claim (`agent/bot/turn.rs`) also write the core's `hostclaim.*`
+//! rows (`core/runtime/src/hostclaim.rs`, host principal only). The core's `conversation` is the Claude session id the claim
+//! files are named by.
+//!
+//! **The core claim is a shadow of the claim file.** `claim::take_for_turn` takes `<sid>.claim` first, under its lock (the
+//! one writer the kernel's takers see: `kith-sessions take_claim`, kith-lifecycle's compact claim and kith-wake never ask the
+//! core), and only then makes the core claim. A core claim that is refused as held gives the file back and reports `Held`.
+//! `claim::release` gives the core claim back first, then the file. So flipping the flag with a live claim, or a
+//! `kith --resume` during a host turn, never gives two writers: the file is the gate for both, and the core's claim only
+//! makes the turn visible to the core (for its own claims, wake and the M3 import).
 //!
 //! | host kind | core claim |
 //! |---|---|
@@ -14,18 +21,42 @@
 //! A turn the host holds for a person other than the owner reads back as a `Bot` holder; the owner's reads back as nothing
 //! (it only keeps a terminal out, as `Kind::App` does), so `holder` answers what it answers with the files.
 //!
+//! When the core claim cannot be made, the file claim is still the writer, so the turn is not left without one:
+//! - **`revoked`** (the person's revoke epoch moved): the file claim is given back and the turn is refused ([`Revoked`]).
+//! - **Every other failure** (core down or lost, `waiting`, `notWaiting`, `other`, `exhausted`, a failed redeem): the turn
+//!   goes on under the file claim alone, as it does with the flag off, and the failure is logged. Its turn row is cancelled.
+//!
 //! Rules this keeps (the writer-lock models `Claims4.tla`, `results4.md`):
-//! - **One writer.** A live claim file for the session (a claim written while the flag was off, or by the kernel) refuses the
-//!   core claim as `Held`, and a core claim that holds refuses a claim file's taker the same way: flipping the flag with a
-//!   live claim never gives two writers. Nothing is imported; the run finishes under the claim it began with.
-//! - **A take-over waits for `ended`** before the host writes: the core claim is stopped (`ending`, still the writer), the
-//!   terminal is signalled, and only a claim the core shows `ended` (the process confirmed gone) lets the host go on.
+//! - **One writer.** The file claim is taken first, so a live claim (written while the flag was off, or by the kernel)
+//!   refuses the turn as `Held` before the core is asked, and a core claim that holds refuses it the same way. Nothing is
+//!   imported; the run finishes under the claim it began with.
+//! - **A take-over waits for `ended`** before the host writes: the take-over file claim is taken first (so the
+//!   `holder()` checks of `cards/resume.rs` and a second take-over see it), the core claim is stopped (`ending`, still the
+//!   writer), the terminal is signalled, and only a claim the core shows `ended` (the process confirmed gone) lets the host
+//!   go on.
 //! - **A refused turn is cancelled by the caller.** The turn row is the claim's vehicle; whatever refuses its claim
-//!   (held, revoked, a stale epoch), the adapter cancels it with `hostclaim.cancel` instead of leaving it queued. (A stopped
-//!   ask's turn the core cancels itself.)
-//! - **Every turn claim is `claim_next`'s**: `hostclaim.turn` is the only way, and it picks the account.
-//! - **Release is the holder's exit report** for the claim that names its pid; a claim whose process is gone is ended by
-//!   `hostclaim.settle` (a crashed holder), never by the host guessing.
+//!   (held, revoked, a stale epoch, a failed redeem, no account left), the adapter cancels it with `hostclaim.cancel`
+//!   instead of leaving it queued. (A stopped ask's turn the core cancels itself.) A redeem whose reply was lost is checked
+//!   with `show` first: a claim that is `running` on the agent's pid stands.
+//! - **Every turn claim is `claim_next`'s**: `hostclaim.turn` is the only way, and it picks the account (the host ignores it).
+//! - **Release reports what the claim is**: `done` for a turn claim (a host turn's normal end; it never requeues, the host
+//!   retries on its own), `exit` for an external claim. A claim whose process is gone is ended by `hostclaim.settle`
+//!   (a crashed holder), never by the host guessing.
+//!
+//! Open, and not new in this module (the models and the code differ here today):
+//! - **Revoke epoch order (Claims4 MayCheck/TurnArrive).** The epoch is read in [`take_as`], after the host's own gate, not at
+//!   the gate and carried through. Until S2 the host's gate (and `revoke_person`'s sweep of the holders) is the fence.
+//! - **K2.** "Gone" means the ACP adapter's pid is dead (`settle` calls `end_gone`), but the transcript is written by its
+//!   `claude` child; gone should mean the process group is empty. Open: fix before M3-5.
+//! - **The holder's hello.** The turn claim names [`HOST_INSTANCE`], which is never the holder's. `different_holder` ends the
+//!   claims of every other instance it does not list (and kills their pids), so a holder hello during a host turn would kill the
+//!   warm agent process. Not fixable here (`conversations/claims.rs` is not this module's); open before the holder runs with
+//!   the flag on.
+//! - **Writer lock.** Host turns take no writer lock, but `WriterLock4`'s P1 rests on the stub holding one.
+//! - **Park.** The host never calls `park`/`unpark`.
+//! - **Kill idle.** The warm agent process is kept after a turn, though P7/killidle decided to kill it first.
+//! - **The session row.** `claim_next` writes the turn's session row with the cwd and agent the host passes; a non-hq
+//!   bot has no agent name and the conversation's agent stays `"kith"` (`INSERT OR IGNORE` keeps the first).
 
 use super::claim::{Claim, Held, Kind};
 use super::registry::{pid_runs, proc_start};
@@ -38,6 +69,26 @@ use std::sync::{Mutex, OnceLock};
 
 /// The env switch. Anything but `1` is off.
 pub const FLAG: &str = "KITH_HOST_CORE_CLAIMS";
+
+/// The holder instance every host turn claim is redeemed under: one name for the host, not one per process.
+pub const HOST_INSTANCE: &str = "kith-serve-host";
+
+/// The core refused a claim because the person was revoked after the caller's check: the turn must not run.
+#[derive(Debug)]
+pub struct Revoked(pub String);
+
+impl std::fmt::Display for Revoked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "core claims: revoked: {}", self.0)
+    }
+}
+
+impl std::error::Error for Revoked {}
+
+/// Whether `e` is a [`Revoked`] refusal.
+pub fn is_revoked(e: &std::io::Error) -> bool {
+    e.get_ref().is_some_and(<dyn std::error::Error + Send + Sync>::is::<Revoked>)
+}
 
 fn registry() -> &'static Mutex<HashMap<PathBuf, Paths>> {
     static R: OnceLock<Mutex<HashMap<PathBuf, Paths>>> = OnceLock::new();
@@ -124,25 +175,16 @@ fn live_settled(f: &Paths, sid: &str) -> std::io::Result<Option<Value>> {
     live(f, sid)
 }
 
-/// A live claim file for `sid` (either name, any kind): what refuses a core claim while the flag was off when it was taken.
-pub(super) fn legacy_holder(state: &Path, sid: &str) -> Option<Claim> {
-    [false, true]
-        .into_iter()
-        .filter_map(|t| super::claim::read(&super::claim::path(state, sid, t)))
-        .find(Claim::is_live)
-}
-
 /// What the core's claim means for [`super::claim::holder`]: a terminal's or another writer's claim, not the owner's own turn.
 pub(super) fn holder(f: &Paths, sid: &str) -> Option<Claim> {
     let c = live_settled(f, sid).ok().flatten()?;
     Some(claim_of(&c)).filter(|c| c.kind != Kind::App)
 }
 
-/// `claim::take_as` through the core. `cwd` is the run's folder for a turn's session row.
+/// The core claim that shadows the file claim `claim::take_for_turn` holds. `cwd` is the run's folder for a turn's session row.
 #[allow(clippy::too_many_arguments, reason = "take_as's inputs and the folder")]
 pub(super) fn take_as(
     f: &Paths,
-    state: &Path,
     sid: &str,
     kind: Kind,
     pid: u32,
@@ -152,10 +194,6 @@ pub(super) fn take_as(
 ) -> std::io::Result<Result<(), Held>> {
     if !super::claim::safe_session(sid) {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a session id"));
-    }
-    if let Some(old) = legacy_holder(state, sid) {
-        // Taken before the flag was on: it holds until its holder is done. No import, no second writer.
-        return Ok(Err(Held(old)));
     }
     let started = proc_start(pid).ok_or_else(|| failed("the claimer's start time can't be read"))?;
     let person = owner_or(person);
@@ -201,7 +239,11 @@ pub(super) fn take_as(
             );
             return Ok(Err(Held(c)));
         }
-        return Err(failed(refused["why"].as_str().unwrap_or("refused")));
+        let why = refused["why"].as_str().unwrap_or("refused");
+        if refused["refused"] == "revoked" {
+            return Err(std::io::Error::other(Revoked(why.to_owned())));
+        }
+        return Err(failed(why));
     }
     Err(failed("held and not settled"))
 }
@@ -228,7 +270,7 @@ fn turn_claim(
                 "prompt": "", "revokeSeen": seen}),
     )?;
     let Some(turn) = q["turn"].as_i64() else { return Ok(Err(q)) };
-    let holder_instance = format!("host-{}", std::process::id());
+    let holder_instance = HOST_INSTANCE;
     let cancel = |why: &str| {
         // A refused turn is not left queued for a drain to retry for ever.
         let _ = row(f, "hostclaim.cancel", &json!({"turn": turn, "reason": why}));
@@ -246,17 +288,32 @@ fn turn_claim(
         }
     };
     if got["status"] == "exhausted" {
+        cancel("no account left");
         return Err(failed(got["text"].as_str().unwrap_or("no account left")));
     }
     let Some(id) = got["claimId"].as_i64() else {
         cancel(got["refused"].as_str().unwrap_or("refused"));
         return Ok(Err(got));
     };
-    let red = row(
+    let red = match row(
         f,
         "hostclaim.redeem",
         &json!({"claimId": id, "pid": pid, "started": started, "holderInstance": holder_instance}),
-    )?;
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            // The reply may have been lost after the core redeemed: a claim that is running on this pid stands.
+            let shown = row(f, "hostclaim.show", &json!({"claimId": id})).ok();
+            if shown
+                .is_some_and(|s| s["claim"]["state"] == "running" && s["claim"]["pid"].as_u64() == Some(u64::from(pid)))
+            {
+                return Ok(Ok(()));
+            }
+            // A claimed claim with no pid is never settled (gone needs a pid): cancelling the turn ends it.
+            cancel("redeem failed");
+            return Err(e);
+        }
+    };
     if red["running"] == true {
         return Ok(Ok(()));
     }
@@ -266,15 +323,17 @@ fn turn_claim(
     Err(failed(format!("the claim could not be redeemed: {red}")))
 }
 
-/// `claim::release` through the core: the exit report of the claim that names `pid`. A claim of another pid is left alone.
+/// `claim::release` through the core: the end report of the claim that names `pid`. A claim of another pid is left alone.
 pub(super) fn release(f: &Paths, sid: &str, pid: u32) {
     let Ok(Some(c)) = live(f, sid) else { return };
     if c["pid"].as_u64() != Some(u64::from(pid)) {
         return;
     }
     let Some(id) = c["claimId"].as_i64() else { return };
+    // A host turn ends `done` (the core never requeues it: the host retries on its own); `exit` is an external claim's end.
+    let kind = if c["kind"] == "turn" { "done" } else { "exit" };
     if let Err(error) =
-        row(f, "hostclaim.report", &json!({"claimId": id, "kind": "exit", "body": json!({"pid": pid}).to_string()}))
+        row(f, "hostclaim.report", &json!({"claimId": id, "kind": kind, "body": json!({"pid": pid}).to_string()}))
     {
         tracing::warn!(%error, sid, "couldn't report a claim's exit to the core");
     }

@@ -243,3 +243,75 @@ fn a_turn_claim_goes_through_claim_next() {
         );
     }
 }
+
+/// A queued turn claimed (as `claim_next` does, through the claims API) and redeemed on this process; its claim id and turn.
+fn running_turn(core: &mut Core, sid: &str) -> (i64, i64) {
+    use crate::conversations::claims::{Kind, NewClaim, claim};
+    let q = row(
+        core,
+        "hostclaim.enqueue",
+        &json!({"conversation": sid, "agent": "echo", "engine": "claude", "source": "app", "person": "",
+                "prompt": "", "revokeSeen": 0}),
+    );
+    let turn = q["turn"].as_i64().unwrap();
+    let id = claim(
+        core,
+        &NewClaim {
+            conversation: sid,
+            kind: Kind::Turn,
+            person: "owner",
+            turn: Some(turn),
+            holder_instance: Some("kith-serve-host"),
+            account: None,
+            process: None,
+            revoke_seen: 0,
+        },
+        MS,
+    )
+    .expect("claim")
+    .claim_id;
+    let started = kith_kernel::procstart::start_stamp(std::process::id()).expect("own start");
+    let red = row(
+        core,
+        "hostclaim.redeem",
+        &json!({"claimId": id, "pid": i64::from(std::process::id()), "started": started,
+                "holderInstance": "kith-serve-host"}),
+    );
+    assert_eq!(red["running"], true, "{red}");
+    (id, turn)
+}
+
+fn turn_state(core: &Core, turn: i64) -> String {
+    core.conn()
+        .query_row("SELECT state FROM turns WHERE id = ?1", [turn], |r| {
+            r.get(0)
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_host_turn_that_ends_done_is_not_requeued_but_an_exit_requeues_it() {
+    let (_t, mut core, _m) = world();
+    let pid = i64::from(std::process::id());
+    // The host's release of a finished turn reports `done`: the turn is done and nothing is queued again.
+    let (id, turn) = running_turn(&mut core, "s1");
+    let rep = row(
+        &mut core,
+        "hostclaim.report",
+        &json!({"claimId": id, "kind": "done", "body": json!({"pid": pid}).to_string()}),
+    );
+    assert_eq!(rep["applied"], "done", "{rep}");
+    assert_eq!(turn_state(&core, turn), "done");
+    assert_eq!(
+        row(&mut core, "hostclaim.show", &json!({"claimId": id}))["claim"]["state"],
+        "ended"
+    );
+    // `exit` is the holder's report of a process that died mid-run: the core requeues the turn (not a host turn's end).
+    let (id, turn) = running_turn(&mut core, "s2");
+    row(
+        &mut core,
+        "hostclaim.report",
+        &json!({"claimId": id, "kind": "exit", "body": json!({"pid": pid}).to_string()}),
+    );
+    assert_eq!(turn_state(&core, turn), "queued");
+}

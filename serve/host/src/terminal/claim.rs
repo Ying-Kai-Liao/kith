@@ -154,14 +154,76 @@ pub fn take_for_turn(
     agent: Option<&str>,
     cwd: Option<&str>,
 ) -> std::io::Result<Result<(), Held>> {
-    // Flag on: a session's claim is the core's. A proc claim names no session and a take-over claim is the host's step towards
-    // a stop (`sync::take_over` goes through the core itself), so both stay files.
-    if !takeover
-        && !sid.starts_with("proc-")
-        && let Some(f) = super::core_claims::folders_for(state)
-    {
-        return super::core_claims::take_as(&f, state, sid, kind, pid, person, agent, cwd);
+    // Flag on: the file claim is the writer (the kernel's takers only see it) and the core's claim shadows it. A proc claim
+    // names no session and a take-over claim is the host's step towards a stop (`sync::take_over` goes through the core
+    // itself), so both stay files.
+    let shadow = if takeover || sid.starts_with("proc-") { None } else { super::core_claims::folders_for(state) };
+    let taken = take_file(state, sid, kind, pid, takeover, person, agent)?;
+    let Some(f) = shadow else {
+        if matches!(taken, Ok(())) && !takeover {
+            super::intent::taken(state, sid);
+        }
+        return Ok(taken);
+    };
+    if let Err(held) = taken {
+        return Ok(Err(held));
     }
+    match super::core_claims::take_as(&f, sid, kind, pid, person, agent, cwd) {
+        Ok(Ok(())) => {}
+        // The core has another writer (a claim only it knows): the file is given back, and so is the intent we have not touched.
+        Ok(Err(held)) => {
+            release_file(state, sid, pid, false);
+            return Ok(Err(held));
+        }
+        // The person was revoked after the caller's check: no turn.
+        Err(error) if super::core_claims::is_revoked(&error) => {
+            release_file(state, sid, pid, false);
+            return Err(error);
+        }
+        // Core down or refusing: the file claim is the writer, as with the flag off. The turn is not left without one.
+        Err(error) => tracing::warn!(%error, sid, "no core claim for a turn: it runs under its claim file"),
+    }
+    super::intent::taken(state, sid);
+    Ok(Ok(()))
+}
+
+/// What a host turn does with the result of its claim attempt: the one decision `claim_for_turn` (agent/bot/turn.rs) makes.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TurnClaim {
+    /// The turn holds the session (or a terminal that is this very process does).
+    Held,
+    /// The turn runs without a claim: a main-lane claim only keeps a terminal out, and a claim that failed to be written
+    /// (an io error) never stopped a turn.
+    Unclaimed,
+    /// Another writer holds the session: the turn is refused with this code.
+    Refused(&'static str),
+    /// The person was revoked (the core refused the claim, flag on): the turn is refused.
+    Revoked,
+}
+
+/// See [`TurnClaim`].
+pub fn judge_turn_claim(taken: &std::io::Result<Result<(), Held>>, pid: u32, main_lane: bool, bot: bool) -> TurnClaim {
+    match taken {
+        Ok(Ok(())) => TurnClaim::Held,
+        // A terminal got in between the start check and here: it keeps the session.
+        Ok(Err(held)) if held.0.pid == pid => TurnClaim::Held,
+        Ok(Err(_)) if main_lane => TurnClaim::Unclaimed,
+        Ok(Err(_)) => TurnClaim::Refused(if bot { "heldByOtherWriter" } else { "liveInTerminal" }),
+        Err(error) if super::core_claims::is_revoked(error) => TurnClaim::Revoked,
+        Err(_) => TurnClaim::Unclaimed,
+    }
+}
+
+/// The claim file of [`take_for_turn`]. `Err(Held)`: a live claim is there.
+fn take_file(
+    state: &Path,
+    sid: &str,
+    kind: Kind,
+    pid: u32,
+    takeover: bool,
+    person: Option<&str>,
+    agent: Option<&str>,
+) -> std::io::Result<Result<(), Held>> {
     if !safe_id(sid) {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a session id"));
     }
@@ -198,10 +260,8 @@ pub fn take_for_turn(
     })();
     let _ = std::fs::remove_file(&tmp);
     // A process that took the session ends the intent of the one before it and the decision of its idle period (F12 rules
-    // 12, 14), as the kernel's take_claim does; a take-over claim is the host's step towards a stop, not a new writer.
-    if matches!(result, Ok(Ok(()))) && !takeover {
-        super::intent::taken(state, sid);
-    }
+    // 12, 14), as the kernel's take_claim does (the caller, once the claim is whole); a take-over claim is the host's step
+    // towards a stop, not a new writer.
     result
 }
 
@@ -502,9 +562,14 @@ impl Lock {
 
 /// Gives the claim back; only the claimer's own file is removed.
 pub fn release(state: &Path, sid: &str, pid: u32, takeover: bool) {
+    // The core's claim first, then the file: the file is the gate, so it goes last.
     if !takeover && let Some(f) = super::core_claims::folders_for(state) {
         super::core_claims::release(&f, sid, pid);
     }
+    release_file(state, sid, pid, takeover);
+}
+
+fn release_file(state: &Path, sid: &str, pid: u32, takeover: bool) {
     let p = path(state, sid, takeover);
     // Under the claim lock: a taker may have replaced our (stale) claim with its own between the read and the remove.
     let Some(parent) = p.parent() else { return };
