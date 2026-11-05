@@ -113,11 +113,12 @@ pub(crate) fn ctx_from(folders: &kith_kernel::paths::Paths, kernel: PathBuf) -> 
 }
 
 fn life_of(core: &Core, params: &Value) -> Result<Life> {
-    let (folders, _) = core.folders_for(params)?;
+    let (folders, kernel) = core.folders_for(params)?;
     Ok(Life {
         agents: folders.agents.clone(),
         state: folders.state.clone(),
         machine: folders.machine.clone(),
+        kernel,
     })
 }
 
