@@ -37,13 +37,7 @@ fn text(reply: &Map<String, Value>, key: &str) -> Option<String> {
 
 /// The permission decision for one ask.
 pub fn decide(env: &Env, kernel: &Path, tool: &str, tool_input: &Value) -> Value {
-    decide_within(
-        env,
-        kernel,
-        tool,
-        tool_input,
-        Duration::from_secs(WAIT_S),
-    )
+    decide_within(env, kernel, tool, tool_input, Duration::from_secs(WAIT_S))
 }
 
 /// `decide` with the socket timeout given (the host waits its live window; tests wait less).

@@ -538,8 +538,8 @@ enum KernelCmd {
         args: Vec<String>,
     },
     /// `kernel/bin/kith-permit`'s command-line verbs: `issue AGENT SESSION PID`, `denied --dir DIR`, `once --dir DIR` and
-    /// `apply SETTINGS_FILE`; any other line is the stdio MCP server (approve, request_access, request_secret, report_bug,
-    /// ask_helper, run_door). Prints what `kith-permit` prints, with its exit codes. Not routed from `kith` yet.
+    /// `apply SETTINGS_FILE`; any other line is the stdio MCP server (`approve`, `request_access`, `request_secret`, `report_bug`,
+    /// `ask_helper`, `run_door`). Prints what `kith-permit` prints, with its exit codes. Not routed from `kith` yet.
     #[command(disable_help_flag = true)]
     Permit {
         /// The kernel folder (default: the one this program finds).

@@ -2,6 +2,7 @@
 //! permission prompt tool of every `claude -p` run kith starts, and offers `approve`, `request_access`, `report_bug` and, to a run
 //! with a host to ask, `request_secret`; to a guest's run, `ask_helper` and `run_door`.
 
+use super::Env;
 use super::access::{request_access, request_secret};
 use super::bug::report_bug;
 use super::decide::{decide, deny};
@@ -9,7 +10,6 @@ use super::door::run_door;
 use super::helper::ask_helper;
 use super::host::credentials;
 use super::pyval::{truthy, type_name};
-use super::Env;
 use crate::secrets::pyjson::dumps;
 use serde_json::{Map, Value, json};
 use std::io::{BufRead, Write};
@@ -197,7 +197,13 @@ fn call(msg: &Map<String, Value>, env: &Env, kernel: &Path) -> Result<Value, Cra
 }
 
 /// Reads lines until the end of `stdin`, answering each on `out` (flushed). The exit code: 0, or 1 where Python would have died.
-pub fn serve(env: &Env, kernel: &Path, stdin: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+pub fn serve(
+    env: &Env,
+    kernel: &Path,
+    stdin: &mut dyn BufRead,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
     let mut raw = Vec::new();
     loop {
         raw.clear();

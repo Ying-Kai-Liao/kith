@@ -60,7 +60,12 @@ pub fn ask_helper_within(
     if agent == caller {
         return format!("You are {agent}; ask another agent.");
     }
-    let child = env.without(&["KITH_ASK_TOKEN", "KITH_ASK_SOCKET", "HQ_ASK_TOKEN", "HQ_ASK_SOCKET"]);
+    let child = env.without(&[
+        "KITH_ASK_TOKEN",
+        "KITH_ASK_SOCKET",
+        "HQ_ASK_TOKEN",
+        "HQ_ASK_SOCKET",
+    ]);
     if let Some(refused) = helper_card(&child, kernel, person, caller, agent, task) {
         return refused;
     }

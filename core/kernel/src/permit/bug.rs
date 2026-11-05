@@ -76,10 +76,7 @@ pub fn report_bug(a: &Map<String, Value>, env: &Env, kernel: &Path) -> String {
         Some(Value::String(t)) if !strip(t).is_empty() => t.clone(),
         _ => return "Give a title.".to_owned(),
     };
-    let details = a
-        .get("details")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let details = a.get("details").and_then(Value::as_str).unwrap_or_default();
     let req = json!({"title": title, "details": details}).to_string();
     let Some(Value::Object(first)) = python(env, kernel, DRAFT, &req, LIMIT) else {
         return failed("RuntimeError");
@@ -87,8 +84,10 @@ pub fn report_bug(a: &Map<String, Value>, env: &Env, kernel: &Path) -> String {
     if let Some(Value::String(kind)) = first.get("err") {
         return failed(kind);
     }
-    let (Some(draft), Some(shown)) = (first.get("draft"), first.get("text").and_then(Value::as_str))
-    else {
+    let (Some(draft), Some(shown)) = (
+        first.get("draft"),
+        first.get("text").and_then(Value::as_str),
+    ) else {
         return failed("KeyError");
     };
     let final_text = if let Some(Value::String(url)) = first.get("done") {

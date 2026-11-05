@@ -25,7 +25,10 @@ fn said(reply: &Map<String, Value>, fallback: &str) -> String {
 /// The text the agent is told for one `request_access` call.
 pub fn request_access(a: &Map<String, Value>, env: &Env) -> String {
     let null = Value::Null;
-    let (path, domain) = (a.get("path").unwrap_or(&null), a.get("domain").unwrap_or(&null));
+    let (path, domain) = (
+        a.get("path").unwrap_or(&null),
+        a.get("domain").unwrap_or(&null),
+    );
     let chosen = if truthy(path) { path } else { domain };
     let reason = a.get("reason").unwrap_or(&null);
     if truthy(path) == truthy(domain) || !chosen.is_string() || !reason.is_string() {

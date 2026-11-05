@@ -119,7 +119,12 @@ pub fn run_door(a: &serde_json::Map<String, Value>, env: &Env, kernel: &Path) ->
     }
     let real = first.get("real").and_then(Value::as_str).unwrap_or(path);
     if first.get("card") == Some(&Value::Bool(true)) {
-        let d = decide(env, kernel, "mcp__kithpermit__run_door", &json!({"door": name, "path": real}));
+        let d = decide(
+            env,
+            kernel,
+            "mcp__kithpermit__run_door",
+            &json!({"door": name, "path": real}),
+        );
         if !allowed(&d) {
             return message_of(&d);
         }

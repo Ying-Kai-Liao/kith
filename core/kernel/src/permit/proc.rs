@@ -82,7 +82,13 @@ pub fn run(mut cmd: Command, env: &Env, limit: Duration) -> Result<Ran, Failed> 
 }
 
 /// Runs `python3 -I -c SCRIPT KERNEL/lib ARG` in this environment and reads the JSON it printed. `None` when it fails.
-pub fn python(env: &Env, kernel: &Path, script: &str, arg: &str, limit: Duration) -> Option<serde_json::Value> {
+pub fn python(
+    env: &Env,
+    kernel: &Path,
+    script: &str,
+    arg: &str,
+    limit: Duration,
+) -> Option<serde_json::Value> {
     let mut cmd = Command::new(env.python());
     cmd.arg("-I")
         .arg("-c")

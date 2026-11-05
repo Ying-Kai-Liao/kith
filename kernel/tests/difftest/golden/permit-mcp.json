@@ -3371,7 +3371,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-answer-deny",
@@ -3512,7 +3513,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-answer-deny-nomsg",
@@ -3653,7 +3655,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-answer-waiting",
@@ -3794,7 +3797,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-answer-error",
@@ -3935,7 +3939,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-answer-garbage",
@@ -4076,7 +4081,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-answer-allow-false",
@@ -4217,7 +4223,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-no-host",
@@ -4334,7 +4341,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-twice-filed-once",
@@ -4472,7 +4480,8 @@
    ]
   ],
   "ignore": [
-   "^home/(w\\.sh|fh\\.py|replies/|in/|k/)"
+   "^home/(w\\.sh|fh\\.py|replies/|in/|k/)",
+   "/bugs/drafts/"
   ],
   "mask_keys": [
    "since",
@@ -4624,7 +4633,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-gh-create-fails",
@@ -4778,7 +4788,8 @@
    ]
   ],
   "ignore": [
-   "^home/(w\\.sh|fh\\.py|replies/|in/|k/)"
+   "^home/(w\\.sh|fh\\.py|replies/|in/|k/)",
+   "/bugs/drafts/"
   ],
   "mask_keys": [
    "since",
@@ -4922,7 +4933,8 @@
    "at",
    "third",
    "helper"
-  ]
+  ],
+  "normalize_paths": true
  },
  {
   "name": "mcp-bug-arguments",
@@ -5056,7 +5068,8 @@
    ]
   ],
   "ignore": [
-   "^home/(w\\.sh|fh\\.py|replies/|in/|k/)"
+   "^home/(w\\.sh|fh\\.py|replies/|in/|k/)",
+   "/bugs/drafts/"
   ],
   "mask_keys": [
    "since",

@@ -27,10 +27,10 @@ mod hooks;
 mod host;
 mod issue;
 mod mcp;
-mod proc;
-mod pyval;
 #[cfg(test)]
 mod mcp_tests;
+mod proc;
+mod pyval;
 #[cfg(test)]
 mod tests;
 
