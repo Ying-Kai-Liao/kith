@@ -1,0 +1,11 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{\n  \"account_cross_harness\": true,\n  \"accounts\": [\n    \"codex\",\n    \"claude\",\n    \"claude:work\"\n  ],\n  \"agents\": {\n    \"a\": {\n      \"accounts\": [\n        \"claude:x\"\n      ],\n      \"permission_mode\": \"auto\",\n      \"pin\": {\n        \"id\": \"claude:x\",\n        \"only\": false\n      }\n    },\n    \"b\": {\n      \"accounts\": [\n        \"claude\",\n        \"codex\"\n      ],\n      \"permission_mode\": \"plan\"\n    },\n    \"c\": {\n      \"accounts\": [\n        \"claude\",\n        \"claude:work\"\n      ],\n      \"pin\": {\n        \"id\": \"codex\",\n        \"only\": false\n      }\n    }\n  },\n  \"permission_mode\": \"default\"\n}\n",
+  "state:home/.kith/settings.json.lock": "",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "claude\ncodex\n"
+}

@@ -165,6 +165,20 @@ Not covered (no Rust side yet, `kith kernel cost` exits 2): `today|week|month|al
 and the hooks `tag` / `record`. A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
 that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`).
 
+### Settings (M5-4)
+
+`golden/settings.json` (also in `corpus/`) freezes the command line of `kernel/lib/kith_settings.py`: the reads (`KEY`, `KEY AGENT`,
+`call_model`, `accounts`, `pin`, `limit AGENT`, `delegation.chain_cost_cap_usd`, `cap`, `reads-others`) against no file, an empty or
+malformed one, old-format keys, retired modes, explicit `[]` accounts and invalid values, and the writes (`set permission_mode|call_model|at_limit`,
+`set limit`, `set delegation.chain_cost_cap_usd`, with and without `--json`, on files that can and cannot be used). A case's last
+snapshot is the settings file itself, so every write is compared as parsed JSON, not byte for byte (keys in file order are not compared; the unit test `write_bytes_are_pythons` holds the exact bytes, and the
+unit tests and `write-keeps-key-order` hold the order). The cases are `needs: rust` with `program` set (`lib/kith_settings.py` against
+`{BIN} kernel settings --kernel {KERNEL}`), not `unswitched`: the Rust side exists, only the switch (a `settings` line in `lib/core-switched.txt`) is not
+made. Case names differ by more than case (the facet files are named after them and macOS folds case).
+
+Not covered: a settings value the Python crashes on (`KEY AGENT` of a list that holds a non-string prints a traceback there, a short line
+and exit 1 here), a caps file that is not UTF-8, a JSON text only Python reads (`NaN`, `Infinity`: the Rust reader treats the file as unusable).
+
 ## Per-command summary
 
 `--summary FILE` (`-` for stdout) writes `{"commands": {"<command>": {"green": bool, "cases": {"<case>": "same" |

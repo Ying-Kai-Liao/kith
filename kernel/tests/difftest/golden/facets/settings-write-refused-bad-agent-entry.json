@@ -1,0 +1,17 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{\n  \"agents\": {\n    \"a\": 1\n  }\n}\n",
+  "state:home/.kith/settings.json.lock": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: <HOME>/.kith/settings.json: agents is not {\"<agent>\": {...}}\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.json": "{\n  \"error\": \"kith: <HOME>/.kith/settings.json: agents is not {\\\"<agent>\\\": {...}}\",\n  \"ok\": false\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "1\n",
+  "step2.stderr": "kith: <HOME>/.kith/settings.json: agents is not {\"<agent>\": {...}}\n",
+  "step2.stdout": "",
+  "step3.exit": "1\n",
+  "step3.stderr": "kith: <HOME>/.kith/settings.json: agents is not {\"<agent>\": {...}}\n",
+  "step3.stdout": ""
+}
