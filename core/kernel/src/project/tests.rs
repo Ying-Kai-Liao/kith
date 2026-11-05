@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 //! The unit rules of `project-id`; the whole verb is compared with the Python by `kernel/tests/difftest` (golden/project-id.json).
 
 use std::path::Path;

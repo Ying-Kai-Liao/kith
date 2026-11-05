@@ -12,6 +12,7 @@
 //! decides what that run may see: `serve/host/src/runauth.rs` `project_args`) is not ported: this program refuses there,
 //! so a guest run can only be answered by `kernel/bin/project-id`. Whoever switches the verb keeps that branch on Python.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -42,11 +43,11 @@ const ROOT: &str = "~/Documents";
 
 impl Out {
     fn say(&mut self, line: impl std::fmt::Display) {
-        self.stdout.push_str(&format!("{line}\n"));
+        let _ = writeln!(self.stdout, "{line}");
     }
 
     fn err(&mut self, line: impl std::fmt::Display) {
-        self.stderr.push_str(&format!("{line}\n"));
+        let _ = writeln!(self.stderr, "{line}");
     }
 
     fn with_code(mut self, code: i32) -> Self {
@@ -81,10 +82,11 @@ pub fn normalize(url: &str) -> String {
     if scheme > 0 && url[scheme..].starts_with("://") {
         url = &url[scheme + 3..];
     }
-    if let Some(at) = url.find(['@', '/']) {
-        if at > 0 && url[at..].starts_with('@') {
-            url = &url[at + 1..];
-        }
+    if let Some(at) = url.find(['@', '/'])
+        && at > 0
+        && url[at..].starts_with('@')
+    {
+        url = &url[at + 1..];
     }
     let mut url = url.to_owned();
     // re.match(r"^[^/]+:[^/]", url): a colon after the first character, before any slash, with a non-slash behind it.
@@ -147,9 +149,9 @@ fn repr(s: &str) -> String {
             c if c.is_control() => {
                 let n = c as u32;
                 if n < 0x100 {
-                    out.push_str(&format!("\\x{n:02x}"));
+                    let _ = write!(out, "\\x{n:02x}");
                 } else {
-                    out.push_str(&format!("\\u{n:04x}"));
+                    let _ = write!(out, "\\u{n:04x}");
                 }
             }
             c => out.push(c),
@@ -311,7 +313,7 @@ impl Run<'_> {
 
     fn register(&mut self, argv: &[String]) -> Out {
         let mut out = Out::default();
-        let mut args: Vec<&str> = Vec::new();
+        let mut ids: Vec<&str> = Vec::new();
         let mut parent: Option<String> = None;
         // None: no --home given; Some(None): a bare --home; Some(Some(dir)).
         let mut home_opt: Option<Option<String>> = None;
@@ -331,10 +333,10 @@ impl Run<'_> {
                     }
                     _ => home_opt = Some(None),
                 },
-                _ => args.push(a),
+                _ => ids.push(a),
             }
         }
-        let valid = args.first().is_some_and(|id| {
+        let valid = ids.first().is_some_and(|id| {
             let mut cs = id.chars();
             cs.next()
                 .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
@@ -346,7 +348,7 @@ impl Run<'_> {
             out.err("project-id: --register needs an ID of lowercase letters, digits, . _ -");
             return out.with_code(2);
         }
-        let pid = args[0].to_owned();
+        let pid = ids[0].to_owned();
         // opts.get("--home", ""): absent is "", a bare --home is None.
         let mut home: Option<String> = home_opt.unwrap_or_else(|| Some(String::new()));
         let mut made = false;
@@ -390,17 +392,18 @@ impl Run<'_> {
                 return out.with_code(2);
             }
         }
-        if let Some(h) = &home {
-            if !made && !self.is_dir(h) {
-                out.err(format!("project-id: no folder {h}"));
-                return out.with_code(2);
-            }
+        if let Some(h) = &home
+            && !made
+            && !self.is_dir(h)
+        {
+            out.err(format!("project-id: no folder {h}"));
+            return out.with_code(2);
         }
-        if let Some(d) = args.get(1) {
-            if !self.is_dir(d) {
-                out.err(format!("project-id: no folder {d}"));
-                return out.with_code(2);
-            }
+        if let Some(d) = ids.get(1)
+            && !self.is_dir(d)
+        {
+            out.err(format!("project-id: no folder {d}"));
+            return out.with_code(2);
         }
         if made {
             let h = home.as_deref().unwrap_or_default();
@@ -410,8 +413,8 @@ impl Run<'_> {
             }
             out.err(format!("made {}", self.tilde(h)));
         }
-        let (remote, root) = if args.len() > 1 || home.is_none() {
-            let d = args.get(1).map_or_else(
+        let (remote, root) = if ids.len() > 1 || home.is_none() {
+            let d = ids.get(1).map_or_else(
                 || self.ctx.cwd.to_string_lossy().into_owned(),
                 |d| (*d).to_owned(),
             );
@@ -443,10 +446,10 @@ impl Run<'_> {
             }
             // setdefault(key, []) then append when missing; the remotes one only runs for a remote that is not empty.
             let add = |p: &mut Map<String, Value>, key: &str, v: &str| {
-                if let Value::Array(a) = p.entry(key).or_insert_with(|| Value::Array(Vec::new())) {
-                    if !a.iter().any(|x| x.as_str() == Some(v)) {
-                        a.push(Value::String(v.to_owned()));
-                    }
+                if let Value::Array(a) = p.entry(key).or_insert_with(|| Value::Array(Vec::new()))
+                    && !a.iter().any(|x| x.as_str() == Some(v))
+                {
+                    a.push(Value::String(v.to_owned()));
                 }
             };
             if !remote.is_empty() {
