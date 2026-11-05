@@ -411,6 +411,8 @@ def prune(force=False):
 def tick():
     try:
         prune()
+    except kith_tombstone.Tombstoned:
+        pass   # said once, below, where the tick stops
     except Exception as e:   # housekeeping must never stop jobs from starting
         print('kith-sched: prune: %s' % e, file=sys.stderr)
     # The wake queue (kith-wake): owed turns of ended sessions start here once their writer lets go, and turns whose
@@ -725,4 +727,9 @@ if __name__ == '__main__':
     try:
         main(sys.argv[1:])
     except kith_tombstone.Tombstoned as e:   # the schedule state moved to the core (kith migrate step schedules)
+        if sys.argv[1:] == ['tick']:
+            # launchd runs this every minute: after the switch it fires nothing (the core does), and a non-zero exit
+            # would show the job as broken forever. One quiet line, exit 0; every other verb still fails closed.
+            print('kith-sched: tick skipped, the schedules moved to the Kith core (%s)' % e.module)
+            sys.exit(0)
         sys.exit('kith-sched: %s' % e)

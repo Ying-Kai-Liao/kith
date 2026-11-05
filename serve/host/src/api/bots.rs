@@ -28,14 +28,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             b["enabled"].as_bool().context("enabled is required")?,
         )?,
         "deleteRoutine" => hub.routines.remove(&hub.store, str_arg(&b, "botId")?, str_arg(&b, "id")?)?,
-        "runRoutine" => hub.routines.enqueue(
-            &hub.store,
-            str_arg(&b, "botId")?,
-            str_arg(&b, "id")?,
-            json!({"source":"test"}),
-            None,
-            true,
-        )?,
+        "runRoutine" => hub.routines.run_now(hub, str_arg(&b, "botId")?, str_arg(&b, "id")?)?,
         "routineWebhook" => hub.routines.credentials(
             hub,
             str_arg(&b, "botId")?,

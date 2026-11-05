@@ -21,8 +21,7 @@ fn opts() -> Opts {
     Opts::default()
 }
 
-/// The module with its step refusal lifted: the tests below exercise the import, the check, the switch and the rollback,
-/// which the refusal (`the_step_is_refused_...`) keeps nobody from reaching in production until M4-5b.
+/// The module with a key store of the test's own (the real one is the OS keychain); every hook is the module's.
 struct Lifted(Schedules);
 
 impl Module for Lifted {
@@ -57,6 +56,18 @@ impl Module for Lifted {
     }
     fn guards_claims(&self) -> bool {
         self.0.guards_claims()
+    }
+    fn step_refusal(&self, env: &Env) -> Option<String> {
+        self.0.step_refusal(env)
+    }
+    fn rollback_refusal(&self, env: &Env) -> Option<String> {
+        self.0.rollback_refusal(env)
+    }
+    fn dry_run_despite_refusal(&self) -> bool {
+        self.0.dry_run_despite_refusal()
+    }
+    fn check_notes(&self, env: &Env) -> Vec<String> {
+        self.0.check_notes(env)
     }
 }
 
@@ -172,7 +183,7 @@ fn world(extra: bool) -> World {
         )
         .unwrap();
     };
-    bot("b1", &json!({"id": "b1", "hq_agent": "mel"}));
+    bot("b1", &json!({"id": "b1", "hqAgent": "mel"}));
     bot("b2", &json!({"id": "b2"}));
     let mut routines = vec![
         routine("r1", "b1", true, &json!([cron()]), ""),
@@ -220,15 +231,33 @@ fn write_state(w: &World, v: &Value) {
 
 // --- the refusal, the dry run and the check ------------------------------------------------------------------------------
 
+/// A running host: `host.lock` in serve.db's folder, held with the same advisory lock the host takes.
+fn host_runs(w: &World) -> std::fs::File {
+    use fs2::FileExt as _;
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(w.serve.parent().unwrap().join("host.lock"))
+        .unwrap();
+    f.try_lock_exclusive().unwrap();
+    f
+}
+
 #[test]
-fn the_step_is_refused_until_the_host_runner_switches_but_the_dry_run_and_check_work() {
+fn the_step_refuses_while_the_host_runs_but_the_dry_run_and_check_work() {
     let w = world(false);
     let before = std::fs::read(w.mel_jobs()).unwrap();
+    let host = host_runs(&w);
     // A real step: refused, one line, and nothing was made.
     let e = step(&registry(), &w.env, "schedules", opts())
         .unwrap_err()
         .to_string();
-    assert!(e.contains("M4-5b") && e.contains("--dry-run"), "{e}");
+    assert!(
+        e.contains("stop the host") && e.contains("--dry-run"),
+        "{e}"
+    );
     assert_eq!(e.lines().count(), 1, "{e}");
     assert!(state::read(&w.env.layout, "schedules").unwrap().is_none());
     assert!(!w.env.layout.db.exists(), "no core.db was opened or made");
@@ -263,6 +292,107 @@ fn the_step_is_refused_until_the_host_runner_switches_but_the_dry_run_and_check_
     );
     assert_eq!(std::fs::read(w.mel_jobs()).unwrap(), before);
     assert!(!w.env.machine.join("mac-id").exists());
+    // The host stops (its lock goes with the process; the file stays): the step is allowed, and needs no `--force`.
+    drop(host);
+    step(&w.reg(), &w.env, "schedules", opts()).unwrap();
+    assert!(state::read(&w.env.layout, "schedules").unwrap().is_some());
+}
+
+#[test]
+fn a_rollback_refuses_while_the_host_runs_and_goes_through_once_it_stops() {
+    let w = world(false);
+    let reg = w.reg();
+    step(&reg, &w.env, "schedules", opts()).unwrap();
+    let host = host_runs(&w);
+    let before = w.serve_routines();
+    let err = rollback(&reg, &w.env, "schedules", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("stop the host first"), "{err}");
+    assert_eq!(w.serve_routines(), before, "serve.db was not touched");
+    assert!(state::read(&w.env.layout, "schedules").unwrap().is_some());
+    assert!(tombstone::is_tombstone(&w.state_file()));
+    // `--force` does not get past a running host: it would overwrite what the rollback puts back.
+    let err = rollback(
+        &reg,
+        &w.env,
+        "schedules",
+        Opts {
+            force: true,
+            ..opts()
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("stop the host first"), "{err}");
+    assert_eq!(w.serve_routines(), before, "serve.db was not touched");
+    assert!(state::read(&w.env.layout, "schedules").unwrap().is_some());
+    drop(host);
+    let out = rollback(&reg, &w.env, "schedules", opts())
+        .unwrap()
+        .join("\n");
+    assert!(
+        out.contains("start the host") && !out.contains("restart"),
+        "{out}"
+    );
+    assert!(state::read(&w.env.layout, "schedules").unwrap().is_none());
+}
+
+#[test]
+fn a_stale_lock_file_without_a_host_does_not_count_as_running() {
+    let w = world(false);
+    std::fs::write(w.serve.parent().unwrap().join("host.lock"), "").unwrap();
+    step(&w.reg(), &w.env, "schedules", opts()).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lock_file_that_cannot_be_opened_refuses_without_saying_stop_the_host() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let w = world(false);
+    let lock = w.serve.parent().unwrap().join("host.lock");
+    std::fs::write(&lock, "").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // A superuser can still open it: nothing to test then.
+    if std::fs::File::open(&lock).is_ok() {
+        return;
+    }
+    let e = step(&registry(), &w.env, "schedules", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("host.lock cannot be checked") && !e.contains("stop the host"),
+        "{e}"
+    );
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o644)).unwrap();
+}
+
+#[test]
+fn check_names_routine_jobs_another_mac_made_and_never_counts_them_as_a_difference() {
+    let w = world(false);
+    let reg = w.reg();
+    step(&reg, &w.env, "schedules", opts()).unwrap();
+    rollback(&reg, &w.env, "schedules", opts()).unwrap();
+    // The Mac keeps its id; one job from a Mac with another id, and a hand-made job without `mac`.
+    let mut jobs = w.jobs();
+    jobs.push(json!({"id": "old-1", "task": "t", "mac": "ffffffffffffffffffffffffffffffff", "routine": {"id": "old-1"},
+                      "trigger": {"type": "interval", "seconds": 3600}}));
+    jobs.push(json!({"id": "hand", "task": "t", "routine": {"id": "hand"}, "cron": "0 8 * * *"}));
+    std::fs::write(w.mel_jobs(), serde_json::to_string_pretty(&jobs).unwrap()).unwrap();
+    crate::tests::open_all(&w.env.layout);
+    let out = check(&reg, &w.env, "schedules").unwrap();
+    let text = out.join("\n");
+    assert!(
+        text.contains("mel/old-1: made on another Mac (ffffffffffffffffffffffffffffffff)"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("mel/hand") && !text.contains("mel/digest"),
+        "{text}"
+    );
+    let db = Connection::open(&w.env.layout.db).unwrap();
+    let diffs = reg[0].same_answer(&w.env, &db).unwrap().join("\n");
+    assert!(!diffs.contains("another Mac"), "{diffs}");
 }
 
 // --- the import ----------------------------------------------------------------------------------------------------------
@@ -585,7 +715,7 @@ fn a_rollback_puts_keys_and_flags_back_removes_the_jobs_and_writes_the_state_aga
     let out = rollback(&reg, &w.env, "schedules", opts()).unwrap();
     let text = out.join("\n");
     assert!(text.contains("rolled back"), "{text}");
-    assert!(text.contains("restart the host"), "{text}");
+    assert!(text.contains("start the host"), "{text}");
     assert!(!text.contains(SECRET));
     assert!(state::read(&w.env.layout, "schedules").unwrap().is_none());
     // The routines on the host: its key and its flags are the core's; what the host owns is left alone.
@@ -731,7 +861,7 @@ fn a_routine_that_changes_its_trigger_count_or_agent_leaves_no_stale_job() {
         .unwrap()
         .execute(
             "INSERT INTO bots (id, rev, config) VALUES ('b3', 1, ?1)",
-            [json!({"id": "b3", "hq_agent": "ola"}).to_string()],
+            [json!({"id": "b3", "hqAgent": "ola"}).to_string()],
         )
         .unwrap();
     let mut v = w.serve_routines();
