@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'lib'))
 from kith_paths import kith_bin, paths  # noqa: E402  the one place that knows where kith's folders are
 import kith_settings  # noqa: E402
 import kith_migrate  # noqa: E402
+import kith_tombstone  # noqa: E402
 
 P = paths()
 HOME = Path.home()
@@ -232,7 +233,10 @@ def people():
     shared with everyone, free shells, and the Discord settings from before people."""
     section('people')
     try:
-        auth = json.loads(Path(os.environ.get('KITH_AUTH') or P['KITH_SECRETS'] / 'auth.json').read_text())
+        auth = kith_tombstone.load_json(Path(os.environ.get('KITH_AUTH') or P['KITH_SECRETS'] / 'auth.json'))
+    except kith_tombstone.Tombstoned:
+        note('authority is switched to the core (auth.json is a tombstone); `kith kernel cutover rollback authority` undoes it')
+        return
     except FileNotFoundError:
         note('no auth.json yet')
         return

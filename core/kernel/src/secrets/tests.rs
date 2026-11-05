@@ -1366,3 +1366,60 @@ fn help_is_kith_auth_own_usage_on_stdout() {
     }
     assert!(!t.0.join("secrets").exists(), "nothing was created or read");
 }
+
+// What core/runtime/src/cutover/tombstone.rs `note()` writes.
+const NOTE: &str = r#"{"kith_tombstone":1,"module":"authority","message":"this data moved to the Kith core (module authority); the old reader must not use this file","rollback":"kith rollback authority"}"#;
+const NOTE_NO_ROLLBACK: &str = r#"{"kith_tombstone":1,"module":"authority"}"#;
+
+#[test]
+fn a_tombstone_is_refused_by_every_read_and_never_written_over() {
+    let t = Tmp::new("tombstone");
+    let c = ctx(&t);
+    std::fs::create_dir_all(c.auth.parent().unwrap()).unwrap();
+    std::fs::write(&c.auth, NOTE).unwrap();
+    let want = Die {
+        msg: format!(
+            "{} moved to the Kith core (module authority); this reader must not use it (kith rollback authority)",
+            c.auth.display()
+        ),
+        code: 3,
+    };
+    assert_eq!(load_auth(&c).unwrap_err(), want);
+    let out = run(&c, "may", &args(&["kai", "house"]));
+    assert_eq!(out.code, 3);
+    assert_eq!(out.stdout, "");
+    // the note appears after a locked load: the save under the lock still refuses and leaves the bytes
+    std::fs::write(&c.auth, "{}").unwrap();
+    let locked = load_auth_locked(&c).unwrap();
+    std::fs::write(&c.auth, NOTE).unwrap();
+    assert_eq!(save_auth(&c, &locked).unwrap_err(), want);
+    assert_eq!(std::fs::read_to_string(&c.auth).unwrap(), NOTE);
+    let left: Vec<_> = std::fs::read_dir(c.auth.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| {
+            n.rsplit('.')
+                .next()
+                .is_some_and(|e| e.eq_ignore_ascii_case("tmp"))
+        })
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+#[test]
+fn a_tombstone_without_a_rollback_field_names_the_default() {
+    let t = Tmp::new("tombstone-bare");
+    let c = ctx(&t);
+    std::fs::create_dir_all(c.auth.parent().unwrap()).unwrap();
+    std::fs::write(&c.auth, NOTE_NO_ROLLBACK).unwrap();
+    assert_eq!(
+        load_auth(&c).unwrap_err(),
+        Die {
+            msg: format!(
+                "{} moved to the Kith core (module authority); this reader must not use it (kith rollback authority)",
+                c.auth.display()
+            ),
+            code: 3,
+        }
+    );
+}
