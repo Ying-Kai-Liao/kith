@@ -507,6 +507,19 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
+    /// The people you invited and the app invites that bring them in, the command line of `kernel/bin/kith-people`:
+    /// `people [ls|show ID] [--json]` (read from `kith-auth`) and `invite add|ls|revoke` (through the running host). One verb
+    /// for both, as the script is: the first word says which (`people` or `invite`). Prints what `kith-people` prints,
+    /// with its exit codes. Not routed from `kith` yet.
+    // -h/--help belong to kith-people's own usage text, so clap must not answer them.
+    #[command(disable_help_flag = true)]
+    People {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
     /// The writer claim of a Claude session and the session registry: `record`, `resolve`, `claim`, `terminal`, `proc`,
     /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release` and `holder` (not routed from `kith` yet).
     // -h/--help belong to kith-sessions' own usage text, so clap must not answer them.
@@ -931,6 +944,19 @@ fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
         guest: kith_kernel::project::is_guest(|n| std::env::var_os(n)),
     };
     let out = kith_kernel::project::run(&ctx, args);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
+}
+
+/// `kith kernel people people|invite ARGS...`: what `kith-people` prints, with its exit codes.
+fn print_people(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let system = kith_kernel::people::System { kernel, home, env: kith_kernel::people::Env::from_process() };
+    let out = kith_kernel::people::run(&system, args);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
@@ -1460,6 +1486,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Cost { kernel, args } = cmd {
                 std::process::exit(print_cost(kernel, &args));
             }
+            if let KernelCmd::People { kernel, args } = cmd {
+                std::process::exit(print_people(kernel, &args));
+            }
             if let KernelCmd::Accounts { kernel, action } = cmd {
                 std::process::exit(print_accounts(kernel, action));
             }
@@ -1549,6 +1578,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::CoreCall { .. }
                     | KernelCmd::Accounts { .. }
                     | KernelCmd::Cost { .. }
+                    | KernelCmd::People { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::ProjectId { .. }
