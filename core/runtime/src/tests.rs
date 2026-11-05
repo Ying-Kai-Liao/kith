@@ -938,3 +938,86 @@ fn a_known_version_under_another_name_is_refused() {
         assert!(matches!(&e, Error::Corrupt(t) if t.contains("20")), "{e}");
     }
 }
+
+/// The revoke stopgap (before M2-23): kith-auth's mirror of a revoke with no daemon runs the write embedded.
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+mod embedded_authority {
+    use serde_json::json;
+
+    use super::{machine, open_all, paths};
+    use crate::layout::Layout;
+    use crate::{EmbeddedCall, call_authority_embedded};
+
+    #[test]
+    fn no_core_db_is_nothing_to_do_and_creates_none() {
+        let (_t, m) = machine();
+        let p = paths(&m);
+        let out = call_authority_embedded(&p, "people.suspend", &json!({"id": "sam"})).unwrap();
+        assert!(matches!(out, EmbeddedCall::NoCore(_)), "{out:?}");
+        assert!(
+            !Layout::new(&m).db.exists(),
+            "a read-only fallback never makes the core"
+        );
+    }
+
+    #[test]
+    fn a_marker_with_no_core_db_is_not_nothing_to_do() {
+        let (_t, m) = machine();
+        let p = paths(&m);
+        let l = Layout::new(&m);
+        drop(open_all(&l));
+        std::fs::remove_file(&l.db).unwrap();
+        let out = call_authority_embedded(&p, "people.suspend", &json!({"id": "sam"}));
+        assert!(
+            !matches!(out, Ok(EmbeddedCall::NoCore(_) | EmbeddedCall::Answered(_))),
+            "a lost core must refuse, not pass silently: {out:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_core_db_with_no_marker_is_nothing_to_do() {
+        let (_t, m) = machine();
+        let l = Layout::new(&m);
+        std::fs::create_dir_all(&l.dir).unwrap();
+        std::fs::write(&l.db, b"").unwrap();
+        let out =
+            call_authority_embedded(&paths(&m), "people.suspend", &json!({"id": "sam"})).unwrap();
+        assert!(matches!(out, EmbeddedCall::NoCore(_)), "{out:?}");
+    }
+
+    #[test]
+    fn a_held_lock_is_busy_and_the_write_runs_once_it_is_free() {
+        let (_t, m) = machine();
+        let p = paths(&m);
+        let l = Layout::new(&m);
+        let core = open_all(&l);
+        core.conn()
+            .execute("INSERT INTO people (id) VALUES ('sam')", [])
+            .unwrap();
+        let params = json!({"id": "sam", "kernel": m.join("kernel"), "home": m, "env": {}});
+        let busy = call_authority_embedded(&p, "people.removePerson", &params).unwrap();
+        assert!(
+            matches!(busy, EmbeddedCall::Busy),
+            "never alongside the lock holder: {busy:?}"
+        );
+        drop(core);
+        let done = call_authority_embedded(&p, "people.removePerson", &params).unwrap();
+        assert!(matches!(done, EmbeddedCall::Answered(_)), "{done:?}");
+        let core = open_all(&l);
+        let n: i64 = core
+            .conn()
+            .query_row("SELECT count(*) FROM people WHERE id = 'sam'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(n, 0, "the removal landed in the core");
+    }
+
+    #[test]
+    fn only_authority_writes_run_embedded() {
+        let (_t, m) = machine();
+        let e = call_authority_embedded(&paths(&m), "terminal.open", &json!({})).unwrap_err();
+        assert!(matches!(e, crate::Error::NoSuchMethod(_)), "{e}");
+    }
+}
