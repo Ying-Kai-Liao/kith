@@ -392,9 +392,9 @@ impl CoreRun {
     }
 }
 
-/// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7), and the four
+/// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7), and the
 /// writes `kith-auth` mirrors into the core until M2-18 makes the core the authority (a revoke, its undo, a person's
-/// removal and a bot's; each is idempotent there, so a replay after a lost answer is harmless). `MIRROR_METHOD` in
+/// removal, a bot's and a membership's; each is idempotent there, so a replay after a lost answer is harmless). `MIRROR_METHOD` in
 /// kernel/bin/kith-auth must stay inside this list: kernel/tests/kith-auth-core-mirror-check fails when it does not.
 const CORE_CALL_METHODS: &[&str] = &[
     "terminal.open",
@@ -404,12 +404,14 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.undo",
     "people.removePerson",
     "people.removeBot",
+    "people.revoke",
 ];
 
 /// The writes `core_call` runs in an embedded core when no daemon answers (the revoke stopgap before M2-23: a revoke made
 /// in kith-auth must reach the core even with `kith serve` stopped). The terminal methods need the daemon's sockets.
 #[cfg(unix)]
-const EMBEDDED_METHODS: &[&str] = &["people.suspend", "people.undo", "people.removePerson", "people.removeBot"];
+const EMBEDDED_METHODS: &[&str] =
+    &["people.suspend", "people.undo", "people.removePerson", "people.removeBot", "people.revoke"];
 
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
 /// Inside kith-auth's `CORE_CALL_SECS`, which it waits under auth.json.lock.

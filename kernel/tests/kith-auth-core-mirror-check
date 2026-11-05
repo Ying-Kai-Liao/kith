@@ -8,6 +8,7 @@
 #   2. core down, or no kith program: kith-auth exits 0, auth.json shows the person revoked, the warning is on stderr
 #   3. a person the core doesn't know (refused, exit 4): the same warning; a lost answer (exit 5): "may not be updated"
 #   4. bot --rm: a renamed bot is removed under every id it had; "x is a person" is not "already gone"
+#   4b. member --rm: people.revoke with the person and the agents; absent in the core is quiet; `*`; the core down warns
 #   5. the fake refuses methods that are not in CORE_CALL_METHODS (read from serve/host/src/core_front.rs, as `kith kernel
 #      core-call` does), so MIRROR_METHOD in kith-auth can not drift outside that list without this check failing
 # The rules themselves: kith-auth-revoke-check. Throwaway dirs, never ~/.kith.
@@ -52,6 +53,14 @@ if os.path.exists(d + '/slow'):
     import time; time.sleep(30)
 if os.path.exists(d + '/lost'):
     print('the answer was lost', file=sys.stderr); sys.exit(5)
+if method == 'people.revoke':   # a membership: idempotent, refuses no one (the real core says the line even for a ghost)
+    with open(d + '/calls', 'a') as f:
+        f.write(f"{method} {params['person']} {params['agent']}\n")
+    db = json.load(open(d + '/members.json')) if os.path.exists(d + '/members.json') else {}
+    for ag in params['agent'].split(','):
+        db.get(ag, {}).pop(params['person'], None)
+    json.dump(db, open(d + '/members.json', 'w'))
+    print(json.dumps({'lines': ['ok']})); sys.exit(0)
 pid = params['id']
 with open(d + '/calls', 'a') as f:
     f.write(f'{method} {pid}\n')
@@ -171,6 +180,22 @@ A bot bot-none --rm >"$T/out" 2>"$T/err"; rc=$?
 check "bot rm with no kith program: removed, warned like person rm" "[ $rc -eq 0 ] && [ \"\$(auth_has bot-none)\" = False ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err"
 export KITH_BIN=$T/fakekith PATH=$ORIG_PATH
 
+
+# 4b. member --rm
+in_auth() { python3 -c "import json,sys; sys.exit(0 if '$1' in json.load(open('$KITH_AUTH'))['members'].get('house',{}) else 1)"; }
+A person mem name=mem >/dev/null; A member house mem >/dev/null
+echo '{"house": {"mem": {}, "*": {}}}' > "$FAKE_DIR/members.json"
+A member house mem --rm >"$T/out" 2>"$T/err"; rc=$?
+check "member rm up: gone from auth.json and the core, no warning" "[ $rc -eq 0 ] && grep -q '^people.revoke mem house\$' $FAKE_DIR/calls && ! grep -q '\"mem\"' $FAKE_DIR/members.json && [ ! -s $T/err ] && ! in_auth mem"
+A member house mem --rm >"$T/out" 2>"$T/err"; rc=$?
+check "member rm twice / absent in the core: exits 0, no warning" "[ $rc -eq 0 ] && [ ! -s $T/err ] && [ \"\$(grep -c '^people.revoke mem house\$' $FAKE_DIR/calls)\" = 2 ]"
+A member house '*' >/dev/null; A member house '*' --rm >"$T/out" 2>"$T/err"; rc=$?
+check "member rm of everyone: reaches the core as *" "[ $rc -eq 0 ] && grep -q '^people.revoke [*] house\$' $FAKE_DIR/calls && ! grep -q '\"[*]\"' $FAKE_DIR/members.json && [ ! -s $T/err ]"
+A person mem2 name=mem2 >/dev/null; A member house mem2 >/dev/null
+down
+A member house mem2 --rm >"$T/out" 2>"$T/err"; rc=$?
+check "member rm down: still removed in auth.json, warned" "[ $rc -eq 0 ] && grep -qx 'removed in auth.json; ${CF} not updated ${TELL}' $T/err && ! in_auth mem2"
+up
 
 # 6. a renamed bot: the core still holds the old id (a rename is not mirrored), the new one is unknown there
 A bot bot-old --of kai >/dev/null; core_add bot-old
