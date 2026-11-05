@@ -399,7 +399,7 @@ pub(crate) fn claim_in(
 
 /// A turn's claim chooses its account, so it is made by `accounts::failover::claim_next` (which calls
 /// [`claim_checked_in`] itself), never by [`claim`] or [`claim_in`]. Tests build claims directly (`direct_ok`).
-fn refuse_direct_turn(kind: Kind, direct_ok: bool) -> Result<()> {
+pub(super) fn refuse_direct_turn(kind: Kind, direct_ok: bool) -> Result<()> {
     if kind == Kind::Turn && !direct_ok {
         return Err(Error::BadParams(
             "kith-core: a turn claim is made by claim_next, which picks its account".into(),
@@ -765,16 +765,24 @@ pub(crate) fn stop_in(
     Ok(kill)
 }
 
+/// The run an ask started, as the ask recorded it. `claim_id` is set for an ask made since the column existed and names
+/// the run's claim exactly; an older row has only the `pid`, and stop matches by that.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AskRun {
+    pub pid: Option<i64>,
+    pub claim_id: Option<i64>,
+}
+
 /// What a conversation's automated work stops (`kith ask --end` of the ask that runs it): its queued and parked turns are
 /// cancelled, and each live claim of kind `turn` goes through [`stop_in`] (the turn cancelled, the kill returned to be
 /// re-sent until the process is gone; an unspawned claim ends at once), and so does an `external` claim whose pid is the
-/// one the ask recorded (`ask_pid`: the ask's own `--direct` run). A person's writers are left alone: a queued take-over
+/// one the ask recorded (`ask`: the ask's own `--direct` run, by its claim id, or by its pid for an older ask). A person's writers are left alone: a queued take-over
 /// and a terminal or other external claim are what someone resumed to steer the thread, and the stop is what frees the
 /// writer for them. Safe to repeat: a second call finds nothing queued and answers an `ending` claim's kill again.
 pub(crate) fn stop_conversation_in(
     tx: &Transaction<'_>,
     conversation: &str,
-    ask_pid: Option<i64>,
+    ask: AskRun,
     reason: &str,
     now: i64,
 ) -> Result<Vec<Kill>> {
@@ -787,9 +795,10 @@ pub(crate) fn stop_conversation_in(
         let mut st = tx.prepare(
             "SELECT claim_id FROM claims
              WHERE conversation = ?1 AND state IN ('claimed', 'running', 'ending')
-               AND (kind = 'turn' OR (kind = 'external' AND pid = ?2))",
+               AND (kind = 'turn' OR (kind = 'external'
+                    AND CASE WHEN ?3 IS NOT NULL THEN claim_id = ?3 ELSE pid = ?2 END))",
         )?;
-        st.query_map(params![conversation, ask_pid], |r| r.get(0))?
+        st.query_map(params![conversation, ask.pid, ask.claim_id], |r| r.get(0))?
             .collect::<std::result::Result<_, _>>()?
     };
     let mut kills = Vec::new();

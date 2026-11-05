@@ -147,7 +147,7 @@ fn the_cores_take_and_release_return_typed_answers_with_the_claim() {
 
 use std::sync::Mutex;
 
-use super::{TurnStep, begin_turn, exit_body, finish_turn, forget_proc};
+use super::{TurnStep, begin_turn, end_stuck_claim, exit_body, finish_turn, forget_proc};
 use crate::conversations::claims::{self, Kind, NewClaim};
 use crate::db::{Core, MIGRATIONS, RecordedProc};
 use crate::layout::Layout;

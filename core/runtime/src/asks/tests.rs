@@ -552,6 +552,7 @@ fn two_opens_of_one_id_on_two_connections_let_exactly_one_through() {
                         brief: None,
                         pid: None,
                         conversation: None,
+                        claim_id: None,
                     };
                     let r = open_in(&tx, &m, &|_| None, &o, false, NOW);
                     if r.is_ok() {
@@ -592,6 +593,7 @@ fn open_waits_for_the_write_lock_as_claim_tx_does() {
             brief: None,
             pid: None,
             conversation: None,
+            claim_id: None,
         };
         let r = super::open(&mut core, &machine, &|_| None, &o, false, NOW);
         done.send(()).unwrap();
@@ -1059,6 +1061,59 @@ mod stop {
         let out = call(&mut core, "ask.end", &json!({"roots": ["r"]})).unwrap();
         assert_eq!(out["kill"].as_array().unwrap().len(), 1);
         assert_eq!(claim_state(&core, id), "ending");
+    }
+
+    /// An ask that recorded the claim it started is stopped by that claim id, whatever pid the process has now; an older
+    /// row (NULL) is matched by pid as before (the test above).
+    #[test]
+    fn an_ask_with_a_claim_id_stops_that_claim_and_not_one_that_only_shares_its_pid() {
+        let t = Tree::new();
+        for id in ["r", "x"] {
+            t.reg(
+                id,
+                &json!({"asked": "x", "chain": id, "hop": 0, "reply_to": {"session": "s1"}, "at": 1.0, "state": "open",
+                        "cost": 0.0, "person": "kai", "pid": 777}),
+            );
+        }
+        t.import();
+        let mut core = t.core();
+        reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
+        set_conv(&core, "r", "conv-r");
+        set_conv(&core, "x", "conv-x");
+        turn(&mut core, "conv-r");
+        turn(&mut core, "conv-x");
+        // r's run is a claim whose process is 888 now; x's claim has the pid the ask recorded, but is not x's run.
+        let mine = take_over(&mut core, "conv-r", Kind::External, Some((888, "e888")));
+        let other = take_over(&mut core, "conv-x", Kind::External, Some((777, "e777")));
+        core.conn()
+            .execute("UPDATE asks SET claim_id = ?1 WHERE id = 'r'", [mine])
+            .unwrap();
+        core.conn()
+            .execute("UPDATE asks SET claim_id = ?1 WHERE id = 'x'", [mine])
+            .unwrap();
+        let out = call(&mut core, "ask.end", &json!({"roots": ["r", "x"]})).unwrap();
+        assert_eq!(out["kill"].as_array().unwrap().len(), 1);
+        assert_eq!(claim_state(&core, mine), "ending");
+        assert_eq!(claim_state(&core, other), "running");
+    }
+
+    /// A new ask records the claim id it was opened with; the column is not part of the record `kith ask` prints.
+    #[test]
+    fn open_records_the_claim_id_and_the_record_does_not_show_it() {
+        let t = Tree::new();
+        let mut core = t.core();
+        let out = call(
+            &mut core,
+            "ask.open",
+            &t.params(&json!({"id": "n1", "asked": "x", "claimId": 55})),
+        )
+        .unwrap();
+        assert!(out["record"].get("claim_id").is_none(), "{out}");
+        let stored: Option<i64> = core
+            .conn()
+            .query_row("SELECT claim_id FROM asks WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored, Some(55));
     }
 
     #[test]
