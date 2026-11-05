@@ -16,6 +16,7 @@ The id is a hash of the rule text, so adding the same rule twice is one entry.
 it offers "Always allow", and again, from the same card input, when it saves.
 """
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
@@ -173,6 +174,21 @@ def _first_words(command):
         return None
 
 
+def _globs_trust(words):
+    """True when a word the shell would expand (a glob or a brace) could name a trust file or run/once, matched per path
+    part as the shell does; a brace counts as a wildcard."""
+    for w in words:
+        if not re.search(r'[*?\[{]', w):
+            continue
+        w = re.sub(r'\{[^}]*\}', '*', w.lower())
+        parts = [p for p in re.split(r'[/=<>|;&(),:]', w) if p]
+        if any(fnmatch.fnmatchcase(n.lower(), p) for p in parts for n in TRUST_NAMES):
+            return True
+        if any(fnmatch.fnmatchcase('run', a) and fnmatch.fnmatchcase('once', b) for a, b in zip(parts, parts[1:])):
+            return True
+    return False
+
+
 def prose(agent, tool, tool_input):
     action = json.dumps(tool_input, sort_keys=True, ensure_ascii=False)
     return ('The owner approved the agent "%s" doing exactly this one thing with %s: %s. It is allowed, with that input only; '
@@ -185,7 +201,8 @@ def derive(agent, tool, tool_input, reason=''):
     Narrow by construction: an exact command, one file, one host, one named MCP tool; a prose entry (naming the agent and the
     exact input) for what a permission rule cannot hold. Refused: anything in a must-ask class (kith_guard.must_ask: a
     secret, a trust file, a delete, something outward, code with no name), any delete (a remembered rule has no roots to
-    keep it inside), a command or file that names a trust file anywhere (TRUST_NAMED), a bare or code-running shell, a
+    keep it inside), a command or file that names a trust file anywhere (TRUST_NAMED, also unquoted or through a glob or
+    brace; not through a variable, nor a folder copy such as `cp -R tmpl/. role/`), a bare or code-running shell, a
     folder, a rule that would be a wildcard. A path that is not a file yet is a sentence, never an Edit rule. A sentence
     is not offered when `reason` (the classifier's) names a hard_deny rule: it would never take effect."""
     d = _derive(agent, tool, tool_input)
@@ -240,7 +257,7 @@ def _derive_bash(agent, tool_input):
     if words is None or not words:
         return no('not a command that can be remembered exactly')
     first = os.path.basename(words[0])
-    if TRUST_NAMED.search(command):
+    if TRUST_NAMED.search(command) or TRUST_NAMED.search(' '.join(words)) or _globs_trust(words):
         return no(WHY['trust'])
     if re.search(r'(?:^|[\s;&|(`/])(?:rm|rmdir|unlink|trash|truncate)\s', command):
         return no(WHY['destroy'])
