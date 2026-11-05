@@ -110,9 +110,20 @@ check "revoke: the run sam's claim named is ended" "! kill -0 $HOLDER"
 check "revoke: the owner's process is not" "kill -0 $OWNER_RUN"
 kill $OWNER_RUN 2>/dev/null
 check "revoking again is fine and sweeps nothing more" "A person sam --revoke && [ \"\$(R ask-owner \"['state']\")\" = open ]"
+SUM=$(md5 -q "$KITH_AUTH" 2>/dev/null || md5sum "$KITH_AUTH" | cut -d' ' -f1)
+check "a revoked person can not be made the owner, and says to unrevoke first" \
+  "! A person sam owner && { A person sam owner 2>&1 || true; } | grep -q 'person sam --unrevoke first'"
+check "and auth.json is untouched" "[ \"\$(md5 -q '$KITH_AUTH' 2>/dev/null || md5sum '$KITH_AUTH' | cut -d' ' -f1)\" = \"$SUM\" ]"
+check "and the owner is still kai" "[ \"\$(J \"[n for n, p in d['people'].items() if p.get('owner')]\")\" = \"['kai']\" ]"
 A person sam --unrevoke >/dev/null
 check "undo: an ended delegation stays ended" "[ \"\$(R ask-sam \"['state']\")\" = stopped ]"
 check "undo: access is back" "A may sam house"
+A person zed >/dev/null; A person zed id=zed2 >/dev/null; A person zed2 --revoke >/dev/null
+SUM3=$(md5 -q "$KITH_AUTH" 2>/dev/null || md5sum "$KITH_AUTH" | cut -d' ' -f1)
+check "an old id of a revoked person can not be made the owner either: it was renamed" \
+  "! A person zed owner && { A person zed owner 2>&1 || true; } | grep -q 'was renamed to zed2'"
+check "and writes nothing" "[ \"\$(md5 -q '$KITH_AUTH' 2>/dev/null || md5sum '$KITH_AUTH' | cut -d' ' -f1)\" = \"$SUM3\" ]"
+A person zed2 --rm >/dev/null
 unset KITH_STATE KITH_WAKE_NO_KICK
 
 # the channels' hold (R8): a linked Mac serves non-owners only while kith serve's lease on the cloud sync is live
