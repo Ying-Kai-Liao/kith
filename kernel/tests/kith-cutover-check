@@ -61,6 +61,31 @@ printf 'state=switched\nat=1\n' > "$M/core/cutover/authority.switch"
 check "KITH_CORE=python is refused for the authority module once switched" "run python authority; grep -q 'has moved to the core' $T/out && grep -q 'kith rollback authority' $T/out"
 rm "$M/core/cutover/authority.switch"
 
+# kith-auth's writes take auth.json.lock, the lock a cutover step holds from the import through the tombstone: while
+# another process holds it, a write waits, so it cannot slip in between.
+printf '{"people": {}}\n' > "$T/lock-auth.json"
+cat > "$T/hold.py" <<'PY'
+import fcntl, sys, time
+f = open(sys.argv[1] + '.lock', 'a')
+fcntl.flock(f, fcntl.LOCK_EX)
+open(sys.argv[2], 'w').close()
+time.sleep(3)
+PY
+cat > "$T/try.py" <<'PY'
+import subprocess, sys
+env = {'PATH': '/usr/bin:/bin', 'KITH_AUTH': sys.argv[2], 'KITH': sys.argv[3]}
+try:
+    subprocess.run([sys.executable, sys.argv[1], 'env', 'a', 'anthropic', 'X=1'], env=env, capture_output=True, timeout=1)
+except subprocess.TimeoutExpired:
+    sys.exit(0)
+sys.exit('kith-auth did not wait for the lock')
+PY
+check "(control) the same write goes through at once when nobody holds the lock" "! python3 -I \"$T/try.py\" \"$KERNEL/bin/kith-auth\" \"$T/lock-auth.json\" \"$KERNEL\" >$T/out 2>&1; grep -q 'did not wait' $T/out"
+python3 -I "$T/hold.py" "$T/lock-auth.json" "$T/held" & HOLDER=$!
+for _ in $(seq 100); do [[ -e "$T/held" ]] && break; sleep 0.05; done
+check "kith-auth waits on auth.json.lock while another process holds it" "python3 -I \"$T/try.py\" \"$KERNEL/bin/kith-auth\" \"$T/lock-auth.json\" \"$KERNEL\" >$T/out 2>&1"
+kill $HOLDER 2>/dev/null; wait $HOLDER 2>/dev/null
+
 [[ $fails -eq 0 ]] && { echo "all cutover checks passed"; exit 0; }
 echo "$fails check(s) failed"
 exit 1

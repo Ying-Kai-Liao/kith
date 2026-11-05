@@ -178,6 +178,11 @@ pub(crate) trait Module {
     fn before_tombstone(&self, _env: &Env) -> Result<()> {
         Ok(())
     }
+    /// The lock the old store's writers take, held by `rollback` from before the rolling-back record to the end: a
+    /// refusal at the lock then writes nothing (no record, no secret restored). Default: none.
+    fn rollback_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
+        Ok(None)
+    }
 }
 
 /// What [`Module::source_lock`] holds; dropping it lets the lock go.
@@ -394,6 +399,7 @@ pub(crate) fn rollback(
             live.join("; ")
         ));
     }
+    let _source = m.rollback_lock(env)?;
     state::write(
         &env.layout,
         name,
