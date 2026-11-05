@@ -93,6 +93,8 @@ serve/host/src/calls.rs
 serve/host/src/store/botguests.rs
 serve/host/src/api/roles_props.rs
 serve/host/src/api/botguests_props.rs
+serve/host/src/api/peers_tests.rs
+serve/host/src/api/room_secrets_props.rs
 
 .github/workflows/
 packaging/

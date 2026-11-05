@@ -183,6 +183,31 @@ has "kith-pkg check: an own-package rule fails" "$C" "is must-ask (trust)"
 has "kith-pkg check: an autoMode.allow sentence naming a class fails" "$C" "autoMode.allow names a must-ask class (outward)"
 rm -f "$PKG/settings.json"
 
+# --- the repo's protected paths (.github/kith-protected-paths) -----------------------------------------------------------------
+# Rule: every who-may-do-what file, and every file a verify skill (.claude/skills/*/SKILL.md) names, is listed. Dropping an entry fails here.
+LIST=$KERNEL/../.github/kith-protected-paths
+listed() { python3 -I -c '
+import sys
+lst = [l.strip() for l in open(sys.argv[1]) if l.strip() and not l.startswith("#")]
+sys.exit(0 if any(sys.argv[2] == l or (l.endswith("/") and sys.argv[2].startswith(l)) for l in lst) else 1)' "$LIST" "$1"; }
+for p in kernel/bin/kith-allow kernel/lib/kith_allowed.py kernel/lib/kith_settings.py kernel/lib/kith_guard.py serve/host/src/agent/bot/hq.rs \
+         serve/host/src/access.rs serve/host/src/calls.rs serve/host/src/api/calls.rs kernel/tests/kith-allow-check kernel/tests/kith-must-ask-check \
+         kernel/tests/kith-auth-revoke-check kernel/tests/kith-guest-sandbox-check kernel/tests/kith-recall-check; do
+  listed "$p" && ok "protected: $p" || bad "protected: $p is missing from .github/kith-protected-paths"
+done
+missing=$(python3 -I -c '
+import glob, os, re, sys
+root = os.path.abspath(sys.argv[1])
+lst = [l.strip() for l in open(root + "/.github/kith-protected-paths") if l.strip() and not l.startswith("#")]
+for f in sorted(glob.glob(root + "/.claude/skills/*/SKILL.md")):
+    for m in re.finditer(r"(?<![\w/.-])((?:kernel|serve)/[A-Za-z0-9_./-]*[A-Za-z0-9_])", open(f).read()):
+        p = m.group(1)
+        if p.endswith("Cargo.toml") or not os.path.isfile(os.path.join(root, p)):
+            continue   # a manifest named as a cargo argument is not a file the skill covers
+        if not any(p == l or (l.endswith("/") and p.startswith(l)) for l in lst):
+            print(p)' "$KERNEL/.." | sort -u)
+is "every file a verify skill names is protected" "$missing" ""
+
 echo
 (( fails )) && { echo "$fails failed"; exit 1; }
 echo "all passed"
