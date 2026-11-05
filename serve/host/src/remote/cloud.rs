@@ -283,6 +283,20 @@ fn core_on(hub: &Hub) -> bool {
     }
 }
 
+/// Whether the core is kept told about the requests: the opt-in is set, whatever the gate says right now. The gate follows
+/// auth.json and flips with every write kith-auth makes, so a request must not be filed in one store and ended in the
+/// other because of when it was asked. Requests move no access (`may`/`resolve` never read them), so the core's copy is
+/// always kept up, and `core_on` only chooses which side answers.
+fn mirrors(hub: &Hub) -> bool {
+    #[cfg(test)]
+    return hub.store.kv_get("test_core_authority").is_some() || hub.store.kv_get("test_core_mirror").is_some();
+    #[cfg(not(test))]
+    {
+        let _ = hub;
+        crate::api::authority::opted_in()
+    }
+}
+
 /// Tells the apps the requests changed. With `KITH_CORE_AUTHORITY=1` the list is the core's (what `accessRequests`
 /// answers), so the event and the answer agree; a core that can't be asked sends nothing (the app asks again).
 async fn emit_requests(hub: &Hub) {
@@ -311,24 +325,20 @@ pub async fn core_requests(local: bool) -> Result<Vec<Value>> {
 /// when a request came, and a request held in memory from before the switch was turned on, are filed on the next one.
 /// Returns whether anything new went in.
 async fn file_in_core(hub: &Hub) -> bool {
-    if !core_on(hub) {
+    if !mirrors(hub) {
         return false;
     }
     let mine: Vec<Request> = hub.cloud.requests.locked().clone();
     let mut filed = false;
     let deadline = tokio::time::Instant::now() + CORE_DENY_BUDGET;
     for r in mine {
-        let params = json!({
-            "id": r.id, "deviceKey": b64(&r.device_key), "deviceName": r.device_name, "platform": r.platform,
-            "email": r.email, "person": r.person, "createdAt": r.created_at, "expiresAt": r.expires_at, "code": r.code,
-        });
-        let call = crate::api::authority::owner_call("people.fileRequest", params, false);
+        let call = file_one(&r);
         match tokio::time::timeout_at(deadline, call).await {
             Err(_) => {
                 tracing::warn!("the core didn't answer in time; the rest of the requests are filed on the next pull");
                 break;
             }
-            Ok(Ok(answer)) => filed |= answer["filed"] == true,
+            Ok(Ok(new)) => filed |= new,
             Ok(Err(e)) => tracing::warn!(
                 error = format!("{e:#}"),
                 request_id = r.id,
@@ -337,6 +347,33 @@ async fn file_in_core(hub: &Hub) -> bool {
         }
     }
     filed
+}
+
+/// Files one request in the core (`people.fileRequest`, idempotent); whether it was new there.
+async fn file_one(r: &Request) -> Result<bool> {
+    let params = json!({
+        "id": r.id, "deviceKey": b64(&r.device_key), "deviceName": r.device_name, "platform": r.platform,
+        "email": r.email, "person": r.person, "createdAt": r.created_at, "expiresAt": r.expires_at, "code": r.code,
+    });
+    let answer = crate::api::authority::owner_call("people.fileRequest", params, false).await?;
+    Ok(answer["filed"] == true)
+}
+
+/// Ends a request in the core after the host settled it by itself (the gate was closed): the core's copy must not stay
+/// pending to be listed or decided again when the gate opens. Best effort: "unknown request" is fine (never filed, or
+/// ended already) and a core that can't be asked is logged; the host's own end stands.
+async fn end_in_core(hub: &Hub, id: &str, approved: bool) {
+    if !mirrors(hub) || core_on(hub) {
+        return;
+    }
+    let method = if approved { "people.approve" } else { "people.deny" };
+    match crate::api::authority::owner_call(method, json!({"id": id, "local": true}), false).await {
+        Ok(_) => {}
+        Err(e) if e.downcast_ref::<crate::api::authority::CoreRefused>().is_some() => {}
+        Err(e) => {
+            tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't end an access request in the core");
+        }
+    }
 }
 
 /// An error answer from the cloud (`{"error":{"code","message"}}`).
@@ -880,9 +917,11 @@ fn set_deny_queue(hub: &Hub, ids: &[String]) {
 /// or no longer knows ("unknown request" is a refusal, and fine). A core that can't be asked within the budget is
 /// logged and its ids are left out.
 async fn deny_in_core(hub: &Hub, ids: &[String]) -> Vec<String> {
-    if !core_on(hub) {
+    if !mirrors(hub) {
         return ids.to_vec();
     }
+    // The core answers only while the gate is open; otherwise the host's own end stands and the core is just told.
+    let answers = core_on(hub);
     let deadline = tokio::time::Instant::now() + CORE_DENY_BUDGET;
     let mut done = vec![];
     for id in ids {
@@ -896,9 +935,16 @@ async fn deny_in_core(hub: &Hub, ids: &[String]) -> Vec<String> {
                     request_id = id,
                     "couldn't deny an access request in the core"
                 );
+                if !answers {
+                    done.push(id.clone());
+                }
             }
             Err(_) => {
                 tracing::warn!("the core didn't answer in time; the rest of the denials wait for the next pull");
+                if !answers {
+                    let rest: Vec<String> = ids.iter().filter(|i| !done.contains(i)).cloned().collect();
+                    done.extend(rest);
+                }
                 break;
             }
         }
@@ -1040,6 +1086,9 @@ async fn decide_in_core_until(
         emit_requests(hub).await;
         bail!(NOT_MEMBER);
     }
+    // The request may have been taken up while the gate was closed and not filed yet (the pull files them on its next
+    // turn): filed now, so the core can decide it. Idempotent; a core that can't be asked fails the decide just below.
+    drop(file_one(&held).await);
     // The device the core holds must be the one this host holds the request of, and that is looked at before the core
     // approves: an approval cannot be taken back (the row is no longer pending), so a refusal after it would leave an
     // approved row for a device nobody was granted. A row filed by something else first ends here, in the core too.
@@ -1134,6 +1183,15 @@ async fn decide_in_core_until(
 
 /// `by_owner`: the owner decided on this Mac (not auto mode), so a member's device needs no invite token as well.
 async fn settle(hub: &Hub, id: &str, approve: bool, by_owner: bool) -> Result<()> {
+    let said = settle_here(hub, id, approve, by_owner).await;
+    // Ended here whatever the outcome, unless the request was never held (nothing to end).
+    if !matches!(&said, Err(e) if e.to_string() == "unknown request") {
+        end_in_core(hub, id, approve && said.is_ok()).await;
+    }
+    said
+}
+
+async fn settle_here(hub: &Hub, id: &str, approve: bool, by_owner: bool) -> Result<()> {
     let base = base(hub)?;
     let r =
         hub.cloud.requests.locked().iter().find(|r| r.id == id).cloned().ok_or_else(|| anyhow!("unknown request"))?;
@@ -2200,6 +2258,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_request_filed_with_the_gate_open_and_decided_with_it_closed_is_ended_in_the_core_too() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let _rig = CoreRig::new().await;
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        hub.cloud.requests.locked().extend([waiting("req_a", 1, Some("sam"), 0), waiting("req_b", 2, Some("sam"), 1)]);
+        assert!(file_in_core(&hub).await);
+        assert_eq!(ids_in_core(true).await, ["req_a", "req_b"]);
+
+        // A write by kith-auth closes the gate: the host answers with its own store now.
+        hub.store.kv_delete("test_core_authority").unwrap();
+        hub.store.kv_set("test_core_mirror", "1").unwrap();
+        decide(&hub, "req_a", true).await.unwrap();
+        settle(&hub, "req_b", false, true).await.unwrap();
+        assert!(hub.store.device(&b64(&[1; 32])).is_some(), "the host's own store has the device");
+        assert_eq!(ids_in_core(true).await, Vec::<String>::new(), "the core's copies are ended, not left pending");
+
+        // The gate opens again: nothing is left to decide twice, and no row in the core grants access (requests are not
+        // read by may/resolve).
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        let again = decide_in_core(&hub, "req_a", true, true, true).await.unwrap_err();
+        assert_eq!(again.to_string(), "unknown request");
+    }
+
+    #[tokio::test]
+    async fn a_request_taken_up_with_the_gate_closed_is_filed_when_it_opens_and_decided() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let _rig = CoreRig::new().await;
+        hub.cloud.requests.locked().push(waiting("req_c", 3, Some("sam"), 0));
+        assert!(ids_in_core(true).await.is_empty(), "never filed: the gate was closed");
+
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        decide_in_core(&hub, "req_c", true, true, true).await.unwrap();
+        assert!(hub.store.device(&b64(&[3; 32])).is_some());
+        assert_eq!(ids_in_core(true).await, [] as [String; 0]);
+    }
+
+    #[tokio::test]
     async fn a_person_with_no_membership_has_their_requests_denied_every_pass_in_the_core_too() {
         let hub = temp_hub();
         let fake = Arc::new(FakeCloud::default());
@@ -2476,17 +2579,15 @@ mod tests {
         assert!(again.to_string().contains("unknown request"), "{again:#}");
         assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[1; 32])).count(), 1);
 
-        // Off when filed (nothing is in the core), on when decided: the core refuses what it never saw, nothing is
-        // stored, and the request waits; the next pull files it and the decision then goes through once.
+        // Off when filed (nothing is in the core), on when decided: the decide files the request first (the pull has
+        // not yet), so the core knows it and the decision goes through once; a second decide finds nothing held.
         hub.cloud.requests.locked().push(waiting("req_b", 2, Some("sam"), 1));
         hub.store.kv_set("test_core_authority", "1").unwrap();
-        let err = decide_in_core(&hub, "req_b", true, true, true).await.unwrap_err();
-        assert!(err.to_string().contains("unknown request"), "{err:#}");
-        assert!(hub.store.device(&b64(&[2; 32])).is_none(), "nothing was stored by the refused decision");
-        file_in_core(&hub).await;
+        assert!(ids_in_core(true).await.iter().all(|i| i != "req_b"), "the core has not seen req_b");
         decide_in_core(&hub, "req_b", true, true, true).await.unwrap();
-        assert!(hub.store.device(&b64(&[2; 32])).is_some());
+        assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[2; 32])).count(), 1);
         assert!(decide_in_core(&hub, "req_b", true, true, true).await.is_err());
+        assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[2; 32])).count(), 1);
     }
 
     #[tokio::test]

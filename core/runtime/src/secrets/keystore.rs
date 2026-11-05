@@ -257,6 +257,30 @@ impl KeyStore for MemoryKeyStore {
     }
 }
 
+/// Whether `security -i` reads `s` as one word: no space, quote, backslash or control character.
+pub(crate) fn is_one_word(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| !c.is_whitespace() && !c.is_control() && !matches!(c, '"' | '\'' | '\\'))
+}
+
+/// Writes (or updates) a generic-password item of the macOS Keychain: what `kith-auth set` does, for the cutover's
+/// rollback to put a secret back where `kith-auth` reads it. The value goes in as hex on stdin, never on an argv. `-i`
+/// exits 0 whatever happened, so the caller reads the item back to know it landed.
+pub(crate) fn put_generic_password(service: &str, account: &str, value: &str) -> Result<()> {
+    if !is_one_word(service) || !is_one_word(account) {
+        return Err(Error::Refused(format!(
+            "kith-core: the Keychain item {service}#{account} has a space, quote or control character in its name"
+        )));
+    }
+    let line = Zeroizing::new(format!(
+        "add-generic-password -U -s {service} -a {account} -X {}\n",
+        hex_encode(value.as_bytes()).as_str()
+    ));
+    run(SECURITY, &["-i"], Some(line.as_bytes()))?;
+    Ok(())
+}
+
 fn is_plain(s: &str) -> bool {
     !s.is_empty()
         && s.chars()

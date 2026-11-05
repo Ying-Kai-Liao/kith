@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 
 use sha2::{Digest as _, Sha256};
+use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 
@@ -27,7 +28,7 @@ const MARKER: &str = "kith-split:1:";
 
 /// The OS secret store, as far as a rollback needs it: read and write by item name. No delete, on purpose.
 pub(crate) trait OsStore {
-    fn get(&self, name: &str) -> Result<Option<String>>;
+    fn get(&self, name: &str) -> Result<Option<Zeroizing<String>>>;
     fn put(&mut self, name: &str, value: &str) -> Result<()>;
 }
 
@@ -60,7 +61,7 @@ fn chunks(value: &str, limit: usize) -> Vec<&str> {
 
 /// The item as the store holds it: a plain value, or a split one reassembled. `None` when absent or when a split value's
 /// chunks are missing or fail their digest (so the caller writes it again).
-pub(crate) fn read_back(store: &dyn OsStore, name: &str) -> Result<Option<String>> {
+pub(crate) fn read_back(store: &dyn OsStore, name: &str) -> Result<Option<Zeroizing<String>>> {
     let Some(head) = store.get(name)? else {
         return Ok(None);
     };
@@ -73,7 +74,7 @@ pub(crate) fn read_back(store: &dyn OsStore, name: &str) -> Result<Option<String
     let Ok(n) = n.parse::<usize>() else {
         return Ok(None);
     };
-    let mut whole = String::new();
+    let mut whole = Zeroizing::new(String::new());
     for i in 0..n {
         match store.get(&format!("{name}#{i}"))? {
             Some(c) => whole.push_str(&c),
@@ -119,7 +120,7 @@ pub(crate) fn restore_all(
     }
     let (mut wrote, mut same) = (Vec::new(), 0usize);
     for (name, value) in items {
-        if read_back(store, name)?.as_deref() == Some(value.as_str()) {
+        if read_back(store, name)?.is_some_and(|v| v.as_str() == value.as_str()) {
             same += 1;
             continue;
         }
@@ -158,8 +159,8 @@ mod tests {
     }
 
     impl OsStore for Mem {
-        fn get(&self, name: &str) -> Result<Option<String>> {
-            Ok(self.items.get(name).cloned())
+        fn get(&self, name: &str) -> Result<Option<Zeroizing<String>>> {
+            Ok(self.items.get(name).cloned().map(Zeroizing::new))
         }
         fn put(&mut self, name: &str, value: &str) -> Result<()> {
             if self.limit > 0 && value.len() > self.limit {
@@ -208,7 +209,10 @@ mod tests {
                 .all(|(_, v)| v.len() <= 10),
             "chunks are at most the limit"
         );
-        assert_eq!(read_back(&s, "k").unwrap().as_deref(), Some(big.as_str()));
+        assert_eq!(
+            read_back(&s, "k").unwrap().as_ref().map(|v| v.as_str()),
+            Some(big.as_str())
+        );
         let before = s.puts;
         restore_all(&mut s, &items(&[("k", &big)]), Some(10)).unwrap();
         assert_eq!(
@@ -225,7 +229,10 @@ mod tests {
         s.items.remove("k#1");
         assert_eq!(read_back(&s, "k").unwrap(), None);
         restore_all(&mut s, &items(&[("k", &big)]), Some(10)).unwrap();
-        assert_eq!(read_back(&s, "k").unwrap().as_deref(), Some(big.as_str()));
+        assert_eq!(
+            read_back(&s, "k").unwrap().as_ref().map(|v| v.as_str()),
+            Some(big.as_str())
+        );
         assert_eq!(
             s.items["other"], "keep",
             "an item outside the call is untouched"

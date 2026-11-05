@@ -125,9 +125,7 @@ pub fn call_host(folders: &Paths, method: &str, params: &Value) -> Answer {
 /// ([`start_beside_host`]) and read by `kith_core` from there, never written to a file, put in an environment or passed
 /// to a child, and a write is never sent twice. A reason the host rows are not served here (a daemon too old for them, or
 /// one without a Host) is logged once in the core log, apart from "no daemon".
-// No relay code calls the lease rows through the core yet (the host's lease is still its own file until M3), so only
-// the tests use it today.
-#[cfg_attr(not(test), allow(dead_code))]
+// The authority gate (`cutover.mayServe`) is its caller today; the lease rows come with M3.
 pub fn call_as_host(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
     match kith_core::reach_as_host(folders, method, params, host_row_is_repeatable(method)) {
         kith_core::Reached::Answered(answer) => Some(answer),
@@ -687,6 +685,26 @@ mod tests {
         );
         let bad = secrets_call_at(&folders, "secrets.has", &json!({}), wait);
         assert!(bad.is_err(), "missing params are refused: {bad:?}");
+        daemon.stop();
+        let _ = std::fs::remove_dir_all(&folders.home);
+    }
+
+    /// M2-18a host-start guard: a core that has not imported auth.json does not open the authority gate, so
+    /// `KITH_CORE_AUTHORITY=1` alone leaves the host on kith-auth (and says why); no core at all is the same.
+    #[cfg(unix)]
+    #[test]
+    fn the_authority_gate_stays_closed_for_a_core_without_the_switch() {
+        let folders = short_folders("ag");
+        let (open, why) = crate::api::authority::read_gate(
+            call_as_host(&folders, "cutover.mayServe", &json!({"module": "authority"})).as_ref(),
+        );
+        assert!(!open && why.is_some_and(|w| w.contains("did not answer")), "no daemon");
+        let daemon = serve_for_test(&folders);
+        let answer = call_as_host(&folders, "cutover.mayServe", &json!({"module": "authority"}))
+            .expect("the daemon answers the host");
+        assert_eq!(answer["ok"], false, "{answer}");
+        let (open, why) = crate::api::authority::read_gate(Some(&answer));
+        assert!(!open && why.is_some_and(|w| w.contains("staying on kith-auth")));
         daemon.stop();
         let _ = std::fs::remove_dir_all(&folders.home);
     }

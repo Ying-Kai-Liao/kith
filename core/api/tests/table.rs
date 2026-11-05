@@ -705,3 +705,25 @@ fn the_launch_keys_row_is_the_owners_alone() {
     }
     assert!(row.cli.hidden);
 }
+
+#[test]
+fn the_launch_keys_person_is_required_in_the_contract() {
+    let doc = openrpc::generate();
+    let m = doc["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["name"] == "secrets.serviceKeys")
+        .unwrap();
+    let req = |n: &str| {
+        m["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == n)
+            .unwrap()["required"]
+            .clone()
+    };
+    assert!(req("person").as_bool().unwrap());
+    assert!(!req("vars").as_bool().unwrap());
+}
