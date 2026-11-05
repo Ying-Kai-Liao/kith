@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use kith_kernel::delegation::{self as d, Reg};
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension as _, Row, params};
 use serde_json::{Map, Value, json};
 
 use crate::conversations::claims::{self, Kill};
@@ -437,6 +437,31 @@ pub(crate) fn open_in(
         )));
     }
     let get = |k: &str| env(k).filter(|v| !v.is_empty());
+    // The id decides which external claim `ask --end` stops, so it must be the run's own: an `external` claim on the ask's
+    // conversation with the ask's pid and person. A wrong or stale id could otherwise stop another person's `--direct`
+    // writer.
+    if let Some(claim) = o.claim_id {
+        let ours: Option<(String, String, Option<i64>, String)> = tx
+            .query_row(
+                "SELECT kind, conversation, pid, person FROM claims WHERE claim_id = ?1",
+                [claim],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?;
+        let person = get("KITH_PERSON").unwrap_or_else(|| "owner".to_owned());
+        let fits = ours.is_some_and(|(kind, conv, pid, who)| {
+            kind == "external"
+                && o.conversation == Some(conv.as_str())
+                && o.pid.is_some()
+                && pid == o.pid
+                && who == person
+        });
+        if !fits {
+            return Err(Error::Refused(format!(
+                "kith-core: asks: claim {claim} is not this ask's own run (an external claim on its conversation, with its pid and person)"
+            )));
+        }
+    }
     let ask = Ask {
         id: o.id.to_owned(),
         chain: place.chain.clone().unwrap_or_else(|| o.id.to_owned()),

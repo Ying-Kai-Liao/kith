@@ -31,6 +31,46 @@ fn ms(now: f64) -> i64 {
     (now * 1000.0) as i64
 }
 
+/// The agent core.db names for a conversation, when it has one.
+pub(crate) fn agent_of_in(tx: &Transaction<'_>, session: &str) -> Result<Option<String>> {
+    Ok(tx
+        .query_row(
+            "SELECT agent FROM conversations WHERE id = ?1",
+            [session],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// A conversation has one agent: an owed host-door item for a session core.db gives to another agent gets no turn. Its
+/// requests that no run carries end as `failed` (the answer `kith-wake status` gives), the same way a waiter whose session
+/// belongs to someone else is dropped, so the take goes on to the next item instead of stopping every unnamed take behind it.
+pub(crate) fn fail_foreign_in(tx: &Transaction<'_>, st: &mut State, now: f64) -> Result<()> {
+    for s in st.order() {
+        let Some(it) = st.items.get(&s) else { continue };
+        if it.door != "host" || it.turn.is_some() {
+            continue;
+        }
+        match agent_of_in(tx, &s)? {
+            Some(agent) if agent != it.agent => {}
+            _ => continue,
+        }
+        let Some(it) = st.items.get_mut(&s) else {
+            continue;
+        };
+        let ids: Vec<String> = it
+            .requests
+            .iter()
+            .filter(|r| r.run.is_none())
+            .map(|r| r.id.clone())
+            .collect();
+        it.requests.retain(|r| r.run.is_some());
+        st.mark_answered(&ids, "failed", None, now);
+        st.settle(&s);
+    }
+    Ok(())
+}
+
 /// Creates the turn for the run `turn` (the JSON `queue::take` answered) and parks it when a writer holds the session.
 /// `sid` is the session the caller resumes, when it said (the conversation otherwise).
 pub(crate) fn start_in(

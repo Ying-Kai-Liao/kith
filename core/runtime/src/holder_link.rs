@@ -506,6 +506,15 @@ const RESEND_TRIES: u32 = 3;
 /// Sends again the kills whose wait is over. One that is still not gone goes back with one more round; past
 /// [`END_STUCK_ROUNDS`] the core log says so once, and `holder.ending` (in `kith doctor`) counts it.
 fn resend_ends(shared: &Shared, client: &mut Client, relay: &Relay) {
+    for (claim, pid) in shared.terminals.take_owed_claim_ends() {
+        if !try_end_stuck_claim(shared, claim, pid) {
+            shared.terminals.owe_claim_end(claim, pid);
+            log::note(
+                &shared.logs,
+                &format!("holder: could not end claim {claim} of a stuck lock yet; asking again"),
+            );
+        }
+    }
     let due = shared.terminals.due_ends();
     if due.is_empty() {
         return;
@@ -1255,14 +1264,32 @@ pub(crate) fn end_stuck_claim(
     core.with(|c| claims::stop(c, claim_id, "lock_stuck", true, now_ms()))
 }
 
+/// [`end_stuck_claim`] a few times with a short pause between the tries (a busy core.db is what usually fails the write).
+/// False when none went through; the caller keeps the end owed.
+fn try_end_stuck_claim(core: &impl CoreAccess, claim_id: i64, pid: Option<u32>) -> bool {
+    for i in 0..3 {
+        if i > 0 {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if end_stuck_claim(core, claim_id, pid).is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Runs one turn step the caller queued.
 fn serve_turn(shared: &Shared, client: &mut Client, seen: &Known, req: &TurnReq) {
+    let mut stuck_pid = 0;
     let step = match turn_target(seen.of(req.held.id), &req.key, req.claim) {
         Err(refused) => refused,
-        Ok((pid, conv)) => match req.op {
-            TurnOp::Begin => begin_turn(client, shared, &req.held, &conv, req.claim, pid),
-            TurnOp::Finish => finish_turn(client, &req.held, &conv, req.claim),
-        },
+        Ok((pid, conv)) => {
+            stuck_pid = pid;
+            match req.op {
+                TurnOp::Begin => begin_turn(client, shared, &req.held, &conv, req.claim, pid),
+                TurnOp::Finish => finish_turn(client, &req.held, &conv, req.claim),
+            }
+        }
     };
     if let TurnStep::LockStuck(why) = &step {
         log::note(
@@ -1272,27 +1299,12 @@ fn serve_turn(shared: &Shared, client: &mut Client, seen: &Known, req: &TurnReq)
                 req.key, req.held.id
             ),
         );
-        let pid = seen.of(req.held.id).map(|(_, pid, _)| pid);
         // The process is killed whatever the core says: the lock is held until it dies. A core write that failed is
-        // tried again (a few times here; the claim is then left to the reconcile pass, which ends the claims of
-        // processes the holder no longer lists).
-        let mut ended = None;
-        for _ in 0..3 {
-            let r = end_stuck_claim(shared, req.claim, pid);
-            let ok = r.is_ok();
-            ended = Some(r);
-            if ok {
-                break;
-            }
-        }
-        if let Some(Err(e)) = ended {
-            log::note(
-                &shared.logs,
-                &format!(
-                    "holder: could not end claim {}: {e}; killing process {} all the same",
-                    req.claim, req.held.id
-                ),
-            );
+        // tried again, a few times at once and then by the supervisor on every round (`resend_ends`) until it goes
+        // through: nothing else ends a `claimed` turn claim before the next core restart.
+        let pid = Some(stuck_pid);
+        if !try_end_stuck_claim(shared, req.claim, pid) {
+            shared.terminals.owe_claim_end(req.claim, pid);
         }
         // The claim's end is the process's end: the holder is asked to kill it, and asked again until it is gone.
         shared.terminals.requeue_end(req.held.clone(), 0);

@@ -910,11 +910,32 @@ mod import {
 }
 
 /// The Python `kith-wake take` has no conversations lane, so it starts a session whatever agent core.db has for it. Here a
-/// session that is another agent's conversation is refused and the take rolls back whole (no run is marked, no turn is
-/// made): a conversation has one agent, and a turn for the wrong one must not be queued. Intended difference; the cost is
-/// that such an item blocks an unnamed take until it is withdrawn, while `--session` takes the others.
+/// session that is another agent's conversation gets no turn: its requests end as `failed` in the same take, which goes
+/// on to the next owed session (one bad item must not stop every unnamed take). Intended difference. `wake.enqueue`
+/// refuses such a session at the start, so only an item queued before the conversation was written gets here.
 #[test]
-fn a_take_for_another_agents_conversation_is_refused_and_rolled_back() {
+fn a_take_for_another_agents_conversation_fails_that_item_and_goes_on() {
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    enqueue(&mut c, &f, "s2", "a", "host");
+    enqueue(&mut c, &f, "s1", "b", "host");
+    c.conn()
+        .execute(
+            "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('s2', 'other', 'claude', 1, 1)",
+            [],
+        )
+        .unwrap();
+    let took = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap();
+    assert_eq!(took["turn"]["session"], "s1");
+    assert_eq!(turns_of(&c, "s1").len(), 1);
+    assert_eq!(turns_of(&c, "s2").len(), 0);
+    let st = state(&mut c);
+    assert!(!st.items.contains_key("s2"));
+    assert_eq!(queue::status(&st, "a").0, "failed");
+}
+
+#[test]
+fn enqueue_refuses_a_session_core_db_gives_to_another_agent() {
     let (t, _l, mut c) = core();
     let f = Fake::new(&t.path().join("state"));
     c.conn()
@@ -923,19 +944,16 @@ fn a_take_for_another_agents_conversation_is_refused_and_rolled_back() {
             [],
         )
         .unwrap();
-    enqueue(&mut c, &f, "s2", "a", "host");
-    enqueue(&mut c, &f, "s1", "b", "host");
-    let err = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap_err();
-    assert!(err.to_string().contains("belongs to other"), "{err}");
-    assert!(state(&mut c).items["s2"].turn.is_none(), "no run marked");
-    assert_eq!(turns_of(&c, "s2").len(), 0);
-    let took = row(
+    let err = row(
         &mut c,
         &f,
-        "wake.take",
-        &json!({"holder": 1, "session": "s1"}),
+        "wake.enqueue",
+        &json!({"session": "s2", "id": "a", "agent": "coder", "door": "host", "text": ["hi"]}),
     )
-    .unwrap();
-    assert_eq!(took["turn"]["session"], "s1");
-    assert_eq!(turns_of(&c, "s1").len(), 1);
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("belongs to another agent"),
+        "{err}"
+    );
+    assert!(!state(&mut c).items.contains_key("s2"));
 }

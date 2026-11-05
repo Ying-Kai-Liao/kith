@@ -114,7 +114,7 @@ Warm      == Variant \in {"lockstuck", "stuckdrop", "stucklog"}
 Alive(c)  == pr[c] \in {"stub", "writing", "locked", "stuck", "stuckx"}
 Held(c)   == pr[c] \in {"writing", "locked", "stuck", "stuckx"}   \* the stub holds the conversation's lock
 Writing   == \E c \in Claims : Held(c)
-TermLive  == \E c \in Claims : ck[c] = "tw" /\ cs[c] \in {"queued", "claimed", "running", "ending"}
+TermLive  == \E c \in Claims : ck[c] = "tw" /\ cs[c] \in {"claimed", "running", "ending"}   \* person_writer_live_in: a queued take-over is not live
 Fenced(t) == t \in Auto /\ aSt = "stopped" /\ Variant # "nofence"
 
 Init ==
@@ -350,6 +350,9 @@ TypeOK ==
 
 \* claims_one_writer: the partial unique index.
 OneLive == Cardinality({c \in Claims : Live(c)}) <= 1
+\* One process holds the conversation's lock at a time (a writing, locked or stuck stub). The lock itself guarantees it; the old
+\* end_stuck_claim (c4-stuckdrop) broke no lock property, only StuckHasClaim.
+OneHolder == Cardinality({c \in Claims : Held(c)}) <= 1
 \* One process writes at a time.
 OneWriter == Cardinality({c \in Claims : pr[c] = "writing"}) <= 1
 \* A writing process's claim is the writer (running, or ending until it is gone): never ended while it writes.
@@ -358,8 +361,10 @@ WriterHasClaim == \A c \in Claims : pr[c] = "writing" => cs[c] \in {"running", "
 StoppedNeverRuns == aSt = "stopped" => \A t \in Auto : ts[t] \notin {"claimed", "running"}
 \* After a revoke, none of the person's turns is claimed or running.
 RevokedQuiet == rev > 0 => \A t \in Turns : ts[t] \notin {"claimed", "running"}
-\* A stub that is stuck on the lock of a claim that was `claimed` is still that claim's: it is live until the process is gone
-\* (the old end_stuck_claim ended it with no pid recorded: c4-stuckdrop).
+\* The claim row is the lock's writer: a stub that is stuck on the lock of a claim that was `claimed` keeps that claim live until
+\* the process is gone. A design rule, not a lock property (the old end_stuck_claim, c4-stuckdrop, ended the claim with no pid
+\* recorded and still killed the process by id: OneHolder and every other check hold). It keeps the conversation's slot taken, so
+\* the turn is requeued instead of going through a new claim, a Busy and a lock_busy park.
 StuckHasClaim == \A c \in Claims : pr[c] = "stuck" => cs[c] \in {"claimed", "running", "ending"}
 \* A turn that was cancelled stays cancelled (a late done report does not undo a stop).
 CancelledStays == [][\A t \in Turns : ts[t] = "cancelled" => ts'[t] = "cancelled"]_vars
