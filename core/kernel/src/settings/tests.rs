@@ -129,7 +129,8 @@ fn python_text() {
 #[test]
 fn write_bytes_are_pythons() {
     let (root, _) = world("bytes", None);
-    let text = r#"{"zeta":1,"agents":{"é☃":{"limit":1.5e-7,"cap":2.0,"big":1e22}},"alpha":[1,0.1]}"#;
+    let text =
+        r#"{"zeta":1,"agents":{"é☃":{"limit":1.5e-7,"cap":2.0,"big":1e22}},"alpha":[1,0.1]}"#;
     let serde_json::Value::Object(m) = serde_json::from_str::<serde_json::Value>(text).unwrap()
     else {
         panic!("not an object");
