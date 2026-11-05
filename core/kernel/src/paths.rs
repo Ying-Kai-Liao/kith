@@ -317,6 +317,19 @@ pub fn process_home() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// The process's home when it can be known: `$HOME`, else the password database's home (`$HOME` is unset under some
+/// launchers). `None` when neither says: a caller that needs a folder under it must refuse, never use a relative path.
+pub fn known_home() -> Option<PathBuf> {
+    let home = process_home();
+    if !home.as_os_str().is_empty() {
+        return Some(home);
+    }
+    #[cfg(unix)]
+    return crate::threads::os::passwd_home().filter(|h| h.is_absolute());
+    #[cfg(not(unix))]
+    None
+}
+
 /// `paths` for this process: its `$HOME` and environment, and the given kernel folder.
 pub fn from_process(kernel: &Path) -> Paths {
     paths(&process_home(), kernel, &process_env)
