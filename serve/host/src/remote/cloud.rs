@@ -332,7 +332,7 @@ async fn file_in_core(hub: &Hub) -> bool {
     let mut filed = false;
     let deadline = tokio::time::Instant::now() + CORE_DENY_BUDGET;
     for r in mine {
-        let call = file_one(&r);
+        let call = file_one(&r, None);
         match tokio::time::timeout_at(deadline, call).await {
             Err(_) => {
                 tracing::warn!("the core didn't answer in time; the rest of the requests are filed on the next pull");
@@ -349,31 +349,28 @@ async fn file_in_core(hub: &Hub) -> bool {
     filed
 }
 
-/// Files one request in the core (`people.fileRequest`, idempotent); whether it was new there.
-async fn file_one(r: &Request) -> Result<bool> {
+/// Files one request in the core (`people.fileRequest`, idempotent); whether it was new there. The call gives up at
+/// `deadline`, when there is one.
+async fn file_one(r: &Request, deadline: Option<tokio::time::Instant>) -> Result<bool> {
     let params = json!({
         "id": r.id, "deviceKey": b64(&r.device_key), "deviceName": r.device_name, "platform": r.platform,
         "email": r.email, "person": r.person, "createdAt": r.created_at, "expiresAt": r.expires_at, "code": r.code,
     });
-    let answer = crate::api::authority::owner_call("people.fileRequest", params, false).await?;
+    let answer = core_call_until(deadline, "people.fileRequest", params, false).await?;
     Ok(answer["filed"] == true)
 }
 
-/// Ends a request in the core after the host settled it by itself (the gate was closed): the core's copy must not stay
-/// pending to be listed or decided again when the gate opens. Best effort: "unknown request" is fine (never filed, or
-/// ended already) and a core that can't be asked is logged; the host's own end stands.
-async fn end_in_core(hub: &Hub, id: &str, approved: bool) {
-    if !mirrors(hub) || core_on(hub) {
+/// Ends a request in the core after the host settled it by itself: the core's copy must not stay pending to be listed
+/// or decided again when the gate opens. Whatever the gate says and whichever way the host decided, it is ended with
+/// `people.deny` through the queue (`deny_or_queue`): that ends a pending row with or without its code, and "denied"
+/// for a request the host approved is harmless (nothing reads it, and the grant is the host's). A call that fails or
+/// runs out of `deadline` stays queued for the next pull.
+async fn end_in_core(hub: &Hub, id: &str, deadline: Option<tokio::time::Instant>) {
+    if !mirrors(hub) {
         return;
     }
-    let method = if approved { "people.approve" } else { "people.deny" };
-    match crate::api::authority::owner_call(method, json!({"id": id, "local": true}), false).await {
-        Ok(_) => {}
-        Err(e) if e.downcast_ref::<crate::api::authority::CoreRefused>().is_some() => {}
-        Err(e) => {
-            tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't end an access request in the core");
-        }
-    }
+    queue_for_core(hub, [&id.to_owned()]);
+    deny_or_queue(hub, id, deadline).await;
 }
 
 /// An error answer from the cloud (`{"error":{"code","message"}}`).
@@ -581,7 +578,7 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
                 }
                 decide_in_core_until(hub, &id, true, true, false, Some(deadline)).await
             } else {
-                settle(hub, &id, true, false).await
+                settle_until(hub, &id, true, false, Some(deadline)).await
             };
             if let Err(e) = settled {
                 tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't auto-approve an access request");
@@ -865,7 +862,7 @@ async fn end_queued_in_core(hub: &Hub, between: impl Future<Output = ()>) {
     ended.retain(|id| !held.contains(id));
     ended.sort();
     ended.dedup();
-    let done = deny_in_core(hub, &ended).await;
+    let done = deny_in_core(hub, &ended).await.core;
     between.await;
     // Only the ids ended here leave the queue. A held id stays: a path that queues an id before it drops its own copy
     // (refuse_mismatch, the not-a-member path) must not lose it; the next pass ends it once the host no longer holds it.
@@ -891,12 +888,13 @@ fn queue_for_core<'a>(hub: &Hub, ids: impl IntoIterator<Item = &'a String>) {
     edit_deny_queue(hub, |queue| queue.extend(ids.into_iter().cloned()));
 }
 
-/// Ends `id` in the core; one the core could not be told about is queued for the next sync, which the host's own copy
-/// of the request no longer leads to once it is dropped. "Unknown request" is fine.
+/// Ends `id` in the core; one the core could not be told about is queued for the next sync (and one it ended leaves the
+/// queue), which the host's own copy of the request no longer leads to once it is dropped. "Unknown request" is fine.
 async fn deny_or_queue(hub: &Hub, id: &str, deadline: Option<tokio::time::Instant>) {
+    let ended = |hub: &Hub| edit_deny_queue(hub, |queue| queue.retain(|q| q != id));
     match core_call_until(deadline, "people.deny", json!({"id": id, "local": true}), false).await {
-        Ok(_) => {}
-        Err(e) if e.downcast_ref::<crate::api::authority::CoreRefused>().is_some() => {}
+        Ok(_) => ended(hub),
+        Err(e) if e.downcast_ref::<crate::api::authority::CoreRefused>().is_some() => ended(hub),
         Err(e) => {
             tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't deny an access request in the core");
             queue_for_core(hub, [&id.to_owned()]);
@@ -912,18 +910,28 @@ fn set_deny_queue(hub: &Hub, ids: &[String]) {
     }
 }
 
-/// Ends `ids` in the core (`people.deny`, local) when it holds the authority, so they stop showing in the app's list
-/// (M2-17). Returns the ids that are ended there: all of them with the switch off; with it on, those the core ended
-/// or no longer knows ("unknown request" is a refusal, and fine). A core that can't be asked within the budget is
-/// logged and its ids are left out.
-async fn deny_in_core(hub: &Hub, ids: &[String]) -> Vec<String> {
+/// What `deny_in_core` finished.
+struct Denied {
+    /// Ended in the core (or unknown there): these leave the queue.
+    core: Vec<String>,
+    /// The host may end its own copy: `core` plus, while the gate is closed (the host's end stands), the ones the core
+    /// could not be told about, which are queued instead.
+    host: Vec<String>,
+}
+
+/// Ends `ids` in the core (`people.deny`, local) so they stop showing in the app's list (M2-17), whatever the gate
+/// says. `core`: those the core ended or no longer knows ("unknown request" is a refusal, and fine). A core that can't
+/// be asked within the budget is logged. With the gate closed the host's own end stands, so `host` also holds the ones
+/// the core couldn't be told about, and those are queued: the next pull ends them once the host has dropped its copy.
+async fn deny_in_core(hub: &Hub, ids: &[String]) -> Denied {
     if !mirrors(hub) {
-        return ids.to_vec();
+        return Denied { core: ids.to_vec(), host: ids.to_vec() };
     }
     // The core answers only while the gate is open; otherwise the host's own end stands and the core is just told.
     let answers = core_on(hub);
     let deadline = tokio::time::Instant::now() + CORE_DENY_BUDGET;
     let mut done = vec![];
+    let mut host_only = vec![];
     for id in ids {
         let call = crate::api::authority::owner_call("people.deny", json!({"id": id, "local": true}), false);
         match tokio::time::timeout_at(deadline, call).await {
@@ -936,20 +944,26 @@ async fn deny_in_core(hub: &Hub, ids: &[String]) -> Vec<String> {
                     "couldn't deny an access request in the core"
                 );
                 if !answers {
-                    done.push(id.clone());
+                    host_only.push(id.clone());
                 }
             }
             Err(_) => {
                 tracing::warn!("the core didn't answer in time; the rest of the denials wait for the next pull");
                 if !answers {
-                    let rest: Vec<String> = ids.iter().filter(|i| !done.contains(i)).cloned().collect();
-                    done.extend(rest);
+                    let rest: Vec<String> =
+                        ids.iter().filter(|i| !done.contains(i) && !host_only.contains(i)).cloned().collect();
+                    host_only.extend(rest);
                 }
                 break;
             }
         }
     }
-    done
+    if !host_only.is_empty() {
+        queue_for_core(hub, &host_only);
+    }
+    let mut host = done.clone();
+    host.extend(host_only);
+    Denied { core: done, host }
 }
 
 /// Denies the pending requests of a person who has no membership here (M2-17, gap "membership gone"): the cloud can
@@ -975,7 +989,7 @@ pub(super) async fn deny_without_membership(hub: &Hub) {
         tracing::info!(request_id = id, "denying an access request: its account has no membership here");
     }
     // A request the core could not be told about stays where it is, so the next sync denies it again.
-    let done = deny_in_core(hub, &orphans).await;
+    let done = deny_in_core(hub, &orphans).await.host;
     for id in &done {
         if let Some(base) = &base {
             deny(hub, base, id).await;
@@ -1044,6 +1058,10 @@ async fn core_call_until(
     params: Value,
     repeatable: bool,
 ) -> Result<Value> {
+    // A spent budget makes no call: a future that is ready at once would otherwise win against the timeout.
+    if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
+        bail!("the core didn't answer in time");
+    }
     let call = crate::api::authority::owner_call(method, params, repeatable);
     match deadline {
         Some(d) => tokio::time::timeout_at(d, call).await.unwrap_or_else(|_| bail!("the core didn't answer in time")),
@@ -1088,7 +1106,10 @@ async fn decide_in_core_until(
     }
     // The request may have been taken up while the gate was closed and not filed yet (the pull files them on its next
     // turn): filed now, so the core can decide it. Idempotent; a core that can't be asked fails the decide just below.
-    drop(file_one(&held).await);
+    drop(file_one(&held, deadline).await);
+    // The core lists the name as filed but names it cut to 100 characters when it approves (requests.rs), so the
+    // device it answers is compared with the host's name cut the same way (characters, not bytes).
+    let held_name: String = held.device_name.chars().take(100).collect();
     // The device the core holds must be the one this host holds the request of, and that is looked at before the core
     // approves: an approval cannot be taken back (the row is no longer pending), so a refusal after it would leave an
     // approved row for a device nobody was granted. A row filed by something else first ends here, in the core too.
@@ -1130,7 +1151,7 @@ async fn decide_in_core_until(
         && (said["device"]["key"].as_str() != Some(b64(&held.device_key).as_str())
             || said["device"]["personId"].as_str() != held.person.as_deref()
             || said["device"]["platform"].as_str() != Some(held.platform.as_str())
-            || said["device"]["name"].as_str() != Some(held.device_name.as_str()))
+            || said["device"]["name"].as_str() != Some(held_name.as_str()))
     {
         return refuse_mismatch(hub, &base, id, deadline).await;
     }
@@ -1183,10 +1204,23 @@ async fn decide_in_core_until(
 
 /// `by_owner`: the owner decided on this Mac (not auto mode), so a member's device needs no invite token as well.
 async fn settle(hub: &Hub, id: &str, approve: bool, by_owner: bool) -> Result<()> {
+    settle_until(hub, id, approve, by_owner, None).await
+}
+
+/// `settle` with the call that ends the request in the core bounded by `deadline` (a pull's auto-approvals share one).
+async fn settle_until(
+    hub: &Hub,
+    id: &str,
+    approve: bool,
+    by_owner: bool,
+    deadline: Option<tokio::time::Instant>,
+) -> Result<()> {
     let said = settle_here(hub, id, approve, by_owner).await;
-    // Ended here whatever the outcome, unless the request was never held (nothing to end).
-    if !matches!(&said, Err(e) if e.to_string() == "unknown request") {
-        end_in_core(hub, id, approve && said.is_ok()).await;
+    // Ended here whatever the outcome, unless the request was never held (nothing to end) or is still held (a refusal
+    // before the host ended it, say the code hasn't shown: the request stays open on both sides).
+    let held = hub.cloud.requests.locked().iter().any(|r| r.id == id);
+    if !held && !matches!(&said, Err(e) if e.to_string() == "unknown request") {
+        end_in_core(hub, id, deadline).await;
     }
     said
 }
@@ -2634,5 +2668,124 @@ mod tests {
         sync_requests(&hub, &base, vec![], None).await;
         assert_eq!(ids_in_core(true).await, Vec::<String>::new());
         assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn a_request_filed_before_its_code_is_ended_in_the_core_when_the_host_approves_it_with_the_gate_closed() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let _rig = CoreRig::new().await;
+        // Filed by a pull that came before the device showed its code: the core's copy has none.
+        let mut early = waiting("req_a", 1, Some("sam"), 0);
+        early.code = None;
+        hub.cloud.requests.locked().push(early);
+        hub.store.kv_set("test_core_mirror", "1").unwrap();
+        assert!(file_in_core(&hub).await);
+        hub.cloud.requests.locked().iter_mut().for_each(|r| r.code = Some("123456".into()));
+
+        decide(&hub, "req_a", true).await.unwrap();
+        assert!(hub.store.device(&b64(&[1; 32])).is_some(), "the host's own store has the device");
+        // `people.approve` would be refused ("hasn't shown its code"); the deny ends it whatever the code.
+        assert_eq!(ids_in_core(true).await, Vec::<String>::new(), "not left pending for the owner to tap");
+        assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn an_end_the_core_could_not_take_is_queued_and_retried_by_the_next_pull() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let mut rig = CoreRig::new().await;
+        hub.cloud.requests.locked().push(waiting("req_a", 1, Some("sam"), 0));
+        hub.store.kv_set("test_core_mirror", "1").unwrap();
+        assert!(file_in_core(&hub).await);
+        rig.stop();
+
+        decide(&hub, "req_a", true).await.unwrap();
+        assert_eq!(take_deny_queue(&hub), ["req_a"], "the failed end is queued, not forgotten");
+        // A pull with the core still down keeps it; once the core answers the next pull ends it.
+        end_queued_in_core(&hub, async {}).await;
+        assert_eq!(take_deny_queue(&hub), ["req_a"], "still queued: the core did not take it");
+        rig.restart();
+        end_queued_in_core(&hub, async {}).await;
+        assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
+        assert_eq!(ids_in_core(true).await, Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn the_host_may_end_its_copy_when_the_core_is_down_but_the_core_keeps_it_queued() {
+        let hub = temp_hub();
+        let mut rig = CoreRig::new().await;
+        hub.store.kv_set("test_core_mirror", "1").unwrap();
+        rig.stop();
+        let ids = vec!["req_a".to_owned()];
+        let denied = deny_in_core(&hub, &ids).await;
+        assert_eq!(denied.host, ids, "the host's own end stands with the gate closed");
+        assert!(denied.core.is_empty(), "the core did not end it");
+        assert_eq!(take_deny_queue(&hub), ids, "so it waits in the queue");
+    }
+
+    #[tokio::test]
+    async fn a_gate_that_opened_while_the_host_settled_still_ends_the_request_in_the_core() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let _rig = CoreRig::new().await;
+        hub.cloud.requests.locked().push(waiting("req_a", 1, Some("sam"), 0));
+        hub.store.kv_set("test_core_mirror", "1").unwrap();
+        assert!(file_in_core(&hub).await);
+        // The host settled with the gate closed; by the time it ends the core's copy the gate is open.
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        settle(&hub, "req_a", true, true).await.unwrap();
+        assert_eq!(ids_in_core(true).await, Vec::<String>::new(), "ended, not skipped because the gate is open");
+    }
+
+    #[tokio::test]
+    async fn the_end_and_the_filing_of_a_request_stop_at_the_pulls_budget() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let _rig = CoreRig::new().await;
+        hub.cloud.requests.locked().push(waiting("req_a", 1, Some("sam"), 0));
+        hub.store.kv_set("test_core_mirror", "1").unwrap();
+        let spent = Some(tokio::time::Instant::now());
+        let held = hub.cloud.requests.locked()[0].clone();
+        assert!(file_one(&held, spent).await.is_err(), "the filing is given up on");
+        assert_eq!(ids_in_core(true).await, Vec::<String>::new());
+        assert!(file_one(&held, None).await.unwrap());
+
+        settle_until(&hub, "req_a", true, true, spent).await.unwrap();
+        assert_eq!(take_deny_queue(&hub), ["req_a"], "the end ran out of budget and waits for the next pull");
+        end_queued_in_core(&hub, async {}).await;
+        assert_eq!(ids_in_core(true).await, Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn a_device_name_over_100_characters_is_compared_cut_like_the_core_cuts_it() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let _rig = CoreRig::new().await;
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        // Characters, not bytes: 150 two-byte characters.
+        let mut long = waiting("req_a", 1, Some("sam"), 0);
+        long.device_name = "\u{e9}".repeat(150);
+        hub.cloud.requests.locked().push(long);
+        file_in_core(&hub).await;
+
+        decide_in_core(&hub, "req_a", true, true, true).await.unwrap();
+        let d = hub.store.device(&b64(&[1; 32])).expect("the long name is not a mismatch");
+        assert_eq!(d.name.chars().count(), 100);
     }
 }
