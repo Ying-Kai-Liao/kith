@@ -22,6 +22,16 @@
 //! (`removed_bots`, the whole transitive set); the table walk still runs and is unioned in, which is what a suspend (rows
 //! kept) relies on.
 //!
+//! The record (M2-18c): every removal also writes a row in `open_removals` (the bot set, possibly empty), in the same
+//! transaction: "removed, order not finished". The core runs this order right after the removal commits; the order
+//! unions the row in (a retry needs no `--bots`) and deletes it last, after its effect. A row left by a crash or an
+//! error is run again at core start and on the supervisor's pass ([`replay_open`]). While a row names an id,
+//! `people.addPerson` and `people.addBot` refuse it ([`open_removal_naming`]), and the order refuses (never skips) a
+//! recorded name that is in `people` and does not chain to the person. A row that can not be read stops the order.
+//! The names passed in `--bots` are checked first: the owner, or a name in `people` whose `bot_of` chain does not lead to
+//! the person, is refused before anything is written; a name with no row and no record is ignored. A removal from before
+//! the record falls back to the bots still in `people.bot_of`.
+//!
 //! One claim transaction per principal (`revoke_person` each), then one for the asks (`end_tree`); a rewrite to share one
 //! is the claims lane's. A crash after the person's step leaves the bots' in-flight claims unfenced until the retry, and
 //! the asks not yet ended; nothing new of the person's can start. Calling this again (with the same bots) finishes it,
@@ -31,10 +41,12 @@
 
 use std::collections::BTreeSet;
 
+use rusqlite::OptionalExtension;
+
 use crate::asks::{self, EndReq};
 use crate::conversations::claims::{self, Kill};
 use crate::db::Core;
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// What [`revoke_everywhere`] did.
 #[derive(Debug, Default, PartialEq)]
@@ -70,6 +82,105 @@ fn bots_of(core: &Core, person: &str) -> Result<Vec<String>> {
     Ok(seen.into_iter().collect())
 }
 
+/// The bots a removal of `person` recorded (see `open_removals`), empty when it recorded none (a removal from before
+/// the record, or a suspend, whose rows are still in `people`). A row that is not a JSON array of ids is an error that
+/// names the row: reading it as "no bots" would lose the very set the row exists to keep.
+fn recorded_bots(conn: &rusqlite::Connection, person: &str) -> Result<Vec<String>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT bots FROM open_removals WHERE person = ?1",
+            [person],
+            |r| r.get(0),
+        )
+        .optional()?;
+    json.map_or(Ok(Vec::new()), |j| parse_bots(person, &j))
+}
+
+fn parse_bots(person: &str, json: &str) -> Result<Vec<String>> {
+    serde_json::from_str(json).map_err(|e| {
+        Error::Refused(format!(
+            "kith-core: revoke: the open_removals row of {person} holds bots that are not a JSON list of ids ({e}); not guessing what it named"
+        ))
+    })
+}
+
+/// Whose open removal names `id`, as the person or as one of their bots. `people.addPerson` and `people.addBot` refuse
+/// such an id until the order has run, so a recorded name can not vouch for someone who joined again.
+pub(crate) fn open_removal_naming(conn: &rusqlite::Connection, id: &str) -> Result<Option<String>> {
+    let mut st = conn.prepare("SELECT person, bots FROM open_removals ORDER BY person")?;
+    let rows: Vec<(String, String)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    for (person, bots) in rows {
+        if person == id || parse_bots(&person, &bots)?.iter().any(|b| b == id) {
+            return Ok(Some(person));
+        }
+    }
+    Ok(None)
+}
+
+/// Called by the authority removal write, in its transaction: keeps the removed person's transitive bot set (possibly
+/// empty) until [`revoke_everywhere`] has run, because the write drops the bots' `people` rows. A row means "removed,
+/// order not finished"; merges with a row already there (a repeat removal).
+pub(crate) fn record_removal(
+    conn: &rusqlite::Connection,
+    person: &str,
+    bots: &[String],
+    now_ms: f64,
+) -> Result<()> {
+    let mut all: BTreeSet<String> = recorded_bots(conn, person)?.into_iter().collect();
+    all.extend(bots.iter().cloned());
+    let all: Vec<String> = all.into_iter().collect();
+    #[allow(clippy::cast_possible_truncation)]
+    let at = now_ms as i64;
+    let json = serde_json::to_string(&all).map_err(|e| {
+        Error::Refused(format!(
+            "kith-core: revoke: could not record the bots of {person}: {e}"
+        ))
+    })?;
+    conn.execute(
+        "INSERT OR REPLACE INTO open_removals (person, bots, at) VALUES (?1, ?2, ?3)",
+        rusqlite::params![person, json, at],
+    )?;
+    Ok(())
+}
+
+/// Runs the order again for every open removal, at core start and on the supervisor's pass. One row failing does not
+/// stop the others; each failure comes back as a line naming the row. The kills are for the caller to send.
+pub(crate) fn replay_open(core: &mut Core, now: i64) -> Result<(Vec<Kill>, Vec<String>)> {
+    let persons: Vec<String> = {
+        let mut st = core
+            .conn()
+            .prepare("SELECT person FROM open_removals ORDER BY at, person")?;
+        st.query_map([], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?
+    };
+    let (mut kill, mut failed) = (Vec::new(), Vec::new());
+    for p in persons {
+        match revoke_everywhere(core, &p, &[], now) {
+            Ok(out) => kill.extend(out.kill),
+            Err(e) => failed.push(format!("open removal of {p}: {e}")),
+        }
+    }
+    Ok((kill, failed))
+}
+
+fn core_has_row(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
+    Ok(conn
+        .query_row("SELECT 1 FROM people WHERE id = ?1", [id], |_| Ok(()))
+        .optional()?
+        .is_some())
+}
+
+fn is_owner(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
+    Ok(conn
+        .query_row("SELECT owner FROM people WHERE id = ?1", [id], |r| {
+            r.get::<_, i64>(0)
+        })
+        .optional()?
+        == Some(1))
+}
+
 /// Revokes `person` in the conversations: their claims and their bots', then their ask tree. Call it after the authority
 /// revoke is visible to the may check (see [`claims::revoke_person`]). `removed_bots` are the bots (the whole transitive
 /// set) read before an authority removal deleted their rows; pass `&[]` when the rows are still there. Safe to repeat.
@@ -79,10 +190,41 @@ pub(crate) fn revoke_everywhere(
     removed_bots: &[String],
     now: i64,
 ) -> Result<Everywhere> {
+    // The names the caller passes are checked before anything is written: only a bot that chains to the person (in
+    // `people` now, or recorded by their removal) may be revoked with them. A forged name would otherwise end an
+    // unrelated bot's asks, or the owner's. A name with no row and no record is nobody's: it is ignored, so a retry of
+    // a call that finished is not an error.
+    let mut bots: BTreeSet<String> = bots_of(core, person)?.into_iter().collect();
+    let recorded = recorded_bots(core.conn(), person)?;
+    if is_owner(core.conn(), person)? {
+        return Err(Error::Refused(format!(
+            "kith-core: revoke: {person} is the owner: the owner can not be revoked"
+        )));
+    }
+    // A recorded name that has a current row but does not chain to the person has joined again: the add refuses that
+    // while the record is open, so only a broken invariant gets here. Refuse, never skip.
+    for b in &recorded {
+        if core_has_row(core.conn(), b)? && !bots.contains(b) {
+            return Err(Error::Refused(format!(
+                "kith-core: revoke: the open_removals row of {person} names {b}, which is in people and not a bot of {person}; not revoking it"
+            )));
+        }
+    }
+    bots.extend(recorded);
+    for b in removed_bots.iter().filter(|b| *b != person) {
+        if is_owner(core.conn(), b)? {
+            return Err(Error::Refused(format!(
+                "kith-core: revoke: --bots names the owner ({b}): the owner is nobody's bot"
+            )));
+        }
+        if !bots.contains(b) && core_has_row(core.conn(), b)? {
+            return Err(Error::Refused(format!(
+                "kith-core: revoke: {b} is not a bot of {person} (its bot_of chain does not lead to them)"
+            )));
+        }
+    }
     let mut out = Everywhere::default();
     out.principals.push(person.to_owned());
-    let mut bots: BTreeSet<String> = bots_of(core, person)?.into_iter().collect();
-    bots.extend(removed_bots.iter().filter(|b| *b != person).cloned());
     out.principals.extend(bots);
     for p in out.principals.clone() {
         let r = claims::revoke_person(core, &p, now)?;
@@ -105,6 +247,9 @@ pub(crate) fn revoke_everywhere(
             out.kill.push(k);
         }
     }
+    // Last, so a crash before here finds the record again (the replay); nothing is left to lose once the order has run.
+    core.conn()
+        .execute("DELETE FROM open_removals WHERE person = ?1", [person])?;
     Ok(out)
 }
 
