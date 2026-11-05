@@ -99,3 +99,26 @@ Copied from `/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-03-wri
 | r4-keepidle | fix (keep the idle process) | invariants + P7 | P7 fails (13,090 states) | |
 
 `keepidle` failing P7 is not a bug in the "fix" design: P1 to P6 hold with the idle process kept (the lock refuses a prompt while the terminal holds it, the hash check refuses a stale process). It shows P7 is not vacuous. Not checked: liveness of `killidle` (a terminal waiting for the kill while the holder is down never registers; P3 says nothing about direct runs).
+
+---
+
+# Added by M3-8 (writer-lock drift, Claims4)
+
+`Claims4.tla` gains the warm turn's lock step and `LockStuck` (holder_link.rs `begin_turn` / `serve_turn` / `end_stuck_claim`) and the park for a terminal (wake/turns.rs `start_in`). TLC v1.7.4, 4 workers, 3 GB heap, 2026-11-05. The old Claims4 rows are unchanged (the new actions are off unless `Variant` is one of the warm ones; their verdicts are re-checked by `run.sh`).
+
+What is modelled (process states `locked`, `stuck`, `stuckx`):
+- `StubLock`: the stub takes the conversation's lock for the claim before the core is asked; `RedeemOK` is the redeem CAS; `GiveBack` is a refused redeem (the claim is not `claimed`), the lock goes back and the stub exits.
+- `Stuck` (LockStuck: redeem failed or refused, and the give-back failed too). The code records the stub's pid on the claim first (a `spawned` report) and then stops it: the claim goes `ending` with a kill to send, and the holder is asked to kill the process by id (`requeue_end`, resent). `stuckx` is the corner where the claim was over already (ended unspawned): only the by-id kill is left, and a new instance's `Meet` owes it again.
+- `parkterm`: a turn is parked only while a take-over (terminal) claim exists, the q217 rule; nothing types into the terminal.
+
+| Config | Variant | Checks | Result | Distinct states |
+|---|---|---|---|---|
+| c4-lockstuck-small | lockstuck, no holder crash, revoke or take-over | invariants (+ `StuckHasClaim`) + P3, EndingEnds, StuckEnds | pass | 137,697 |
+| c4-lockstuck-revto | lockstuck, a revoke and a take-over, 3 claims | same | pass | 239,555 |
+| c4-lockstuck-die | lockstuck, one holder crash that kills its group, 3 claims | same | pass | 246,228 |
+| c4-lockstuck-survive | lockstuck, one holder crash the group survives, 3 claims | same | pass | 247,758 |
+| c4-parkterm | terminal_live park | invariants + P3 | pass | 5,144 |
+| c4-stuckdrop | the old `end_stuck_claim`: a claim with no pid ends at once while the stub holds the lock | `StuckHasClaim` | fails (71 states at the violation) | |
+| c4-stucklog | the Err path only logs (no stop, no kill) | `StuckEnds` | fails (temporal; 818 states) | |
+
+`c4-stuckdrop` is the expected violation: the claim row ends while the stub still holds the lock, so the conversation's writer slot is free while the lock is not. (The old code did queue a kill by id; the model says the claim must stay `ending` until the process is gone, the same rule as `WriterHasClaim` for a writing process.) Not covered: a redeem write that fails while the claim is still `claimed` and the give-back works (the stub goes back to `stub` and the take is retried; modelling it loops under weak fairness without adding a state the other rows lack). Rows with 4 claims and a revoke, a take-over or a holder crash together ran past 4.7 GB of TLC state files after 25 minutes and were stopped; the 3-claim rows above are the ones recorded.

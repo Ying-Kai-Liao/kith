@@ -52,6 +52,28 @@
 (* refusal, in a transaction of its own (a drain, M3-10). The fencecancel   *)
 (* variant is that caller-side cancel, for both refusals.                   *)
 (*                                                                          *)
+(* M3-8 (writer-lock drift, holder_link.rs begin_turn / serve_turn):      *)
+(* the warm turn's lock is its own step. The stub takes the lock           *)
+(* (StubLock, process state "locked"), then the redeem CAS runs            *)
+(* (RedeemOK) or is refused (GiveBack: the claim is not `claimed`, the     *)
+(* lock is given back, the stub exits). A redeem that fails and a give-back*)
+(* that fails too is LockStuck (Stuck): the stub may still hold the        *)
+(* conversation. The code (end_stuck_claim) records the stub's pid on the  *)
+(* claim first and then stops it, so the claim goes `ending` with a kill   *)
+(* to send, and serve_turn asks the holder to kill the process by id too   *)
+(* (requeue_end, resent): the lock cannot outlive a claim that is not      *)
+(* `ending`. A stuck lock whose claim was over already (ended unspawned,   *)
+(* the ask stopped before `spawned` was reported) is "stuckx": nothing is  *)
+(* left to end but the process, and only the by-id kill does it.           *)
+(* The park for a terminal (terminal_live, wake/turns.rs start_in) is the  *)
+(* variant parkterm: a turn is parked only while a take-over (terminal)    *)
+(* claim exists.                                                           *)
+(*   lockstuck     the code: the warm lock step, LockStuck as above        *)
+(*   stuckdrop     the old end_stuck_claim: a claim with no pid recorded   *)
+(*                 ends at once while the stub holds the lock              *)
+(*   stucklog      the Err path only logs: no stop, no kill                *)
+(*   parkterm      terminal_live: park only while a terminal claim lives   *)
+(*                                                                          *)
 (* Variant (default "fix" = the code at origin/rust-rebuild cf308ebc):      *)
 (*   nofence       claim does not refuse an ask/wake turn of a stopped ask  *)
 (*   fencecancel   the caller cancels a turn claim_in refused (stopped ask  *)
@@ -88,8 +110,11 @@ vars   == <<claimV, procV, turnV, rev, aSt, nTO, hV>>
 
 Live(c)   == cs[c] \in {"claimed", "running", "ending"}
 AnyLive   == \E c \in Claims : Live(c)
-Alive(c)  == pr[c] \in {"stub", "writing"}
-Writing   == \E c \in Claims : pr[c] = "writing"
+Warm      == Variant \in {"lockstuck", "stuckdrop", "stucklog"}
+Alive(c)  == pr[c] \in {"stub", "writing", "locked", "stuck", "stuckx"}
+Held(c)   == pr[c] \in {"writing", "locked", "stuck", "stuckx"}   \* the stub holds the conversation's lock
+Writing   == \E c \in Claims : Held(c)
+TermLive  == \E c \in Claims : ck[c] = "tw" /\ cs[c] \in {"queued", "claimed", "running", "ending"}
 Fenced(t) == t \in Auto /\ aSt = "stopped" /\ Variant # "nofence"
 
 Init ==
@@ -114,7 +139,7 @@ TurnArrive(t) ==   \* enqueue_turn; after the stop this is a wake given back or 
   /\ UNCHANGED <<claimV, procV, ms, rev, aSt, nTO, hV>>
 
 Park(t) ==   \* park(lock_busy | terminal_live)
-  /\ ts[t] = "queued" /\ ts' = [ts EXCEPT ![t] = "parked"]
+  /\ ts[t] = "queued" /\ (Variant # "parkterm" \/ TermLive) /\ ts' = [ts EXCEPT ![t] = "parked"]
   /\ UNCHANGED <<claimV, procV, ms, rev, aSt, nTO, hV>>
 
 Unpark(t) ==   \* unpark_ready: no live claim and the lock free (probed outside the transaction)
@@ -151,7 +176,7 @@ SpawnedRep(c) ==   \* report `spawned`: record the stub's pid
   /\ UNCHANGED <<cs, ct, ck, nextC, procV, turnV, rev, aSt, nTO, hV>>
 
 Redeem(c) ==   \* the stub: CAS claimed -> running while it holds the lock; a released claim's stub exits
-  /\ pr[c] = "stub"
+  /\ pr[c] = "stub" /\ (~Warm \/ cs[c] # "claimed")
   /\ IF cs[c] = "claimed"
        THEN /\ \A d \in Claims \ {c} : pr[d] # "writing"
             /\ cs' = [cs EXCEPT ![c] = "running"] /\ cp' = [cp EXCEPT ![c] = TRUE]
@@ -161,8 +186,45 @@ Redeem(c) ==   \* the stub: CAS claimed -> running while it holds the lock; a re
             /\ UNCHANGED <<cs, cp, ts>>
   /\ UNCHANGED <<ct, ck, nextC, ex, sp, kp, km, ms, rev, aSt, nTO, hV>>
 
+StubLock(c) ==   \* begin_turn: the stub takes the conversation's lock for the claim before the core is asked
+  /\ Warm /\ hUp /\ pr[c] = "stub" /\ \A d \in Claims \ {c} : ~Held(d)
+  /\ pr' = [pr EXCEPT ![c] = "locked"]
+  /\ UNCHANGED <<claimV, ex, sp, kp, km, turnV, rev, aSt, nTO, hV>>
+
+RedeemOK(c) ==   \* the redeem CAS, with the lock held
+  /\ Warm /\ hUp /\ pr[c] = "locked" /\ cs[c] = "claimed"
+  /\ cs' = [cs EXCEPT ![c] = "running"] /\ cp' = [cp EXCEPT ![c] = TRUE]
+  /\ pr' = [pr EXCEPT ![c] = "writing"]
+  /\ ts' = IF ct[c] # 0 THEN [ts EXCEPT ![ct[c]] = "running"] ELSE ts
+  /\ UNCHANGED <<ct, ck, nextC, ex, sp, kp, km, ms, rev, aSt, nTO, hV>>
+
+GiveBack(c) ==   \* the redeem is refused (the claim is over): the lock is given back and the stub exits
+  /\ Warm /\ hUp /\ pr[c] = "locked" /\ cs[c] # "claimed"
+  /\ pr' = [pr EXCEPT ![c] = "dead"]
+  /\ UNCHANGED <<claimV, ex, sp, kp, km, turnV, rev, aSt, nTO, hV>>
+
+Stuck(c) ==   \* LockStuck: the redeem failed or was refused and the lock could not be given back
+  /\ Warm /\ hUp /\ pr[c] = "locked"
+  /\ IF cs[c] = "claimed"
+       THEN /\ pr' = [pr EXCEPT ![c] = "stuck"]
+            /\ IF Variant = "lockstuck"
+                 THEN /\ cp' = [cp EXCEPT ![c] = TRUE]            \* end_stuck_claim records the pid, then stops
+                      /\ cs' = [cs EXCEPT ![c] = "ending"]
+                      /\ kp' = [kp EXCEPT ![c] = TRUE] /\ km' = [km EXCEPT ![c] = TRUE]
+                      /\ ts' = IF ct[c] # 0 /\ ts[ct[c]] = "claimed" THEN [ts EXCEPT ![ct[c]] = "queued"] ELSE ts
+               ELSE IF Variant = "stuckdrop"
+                 THEN /\ cs' = [cs EXCEPT ![c] = "ended"]          \* no pid recorded: ends at once
+                      /\ km' = [km EXCEPT ![c] = TRUE]
+                      /\ ts' = IF ct[c] # 0 /\ ts[ct[c]] = "claimed" THEN [ts EXCEPT ![ct[c]] = "queued"] ELSE ts
+                      /\ UNCHANGED <<cp, kp>>
+               ELSE UNCHANGED <<cs, cp, kp, km, ts>>
+       ELSE /\ pr' = [pr EXCEPT ![c] = "stuckx"]
+            /\ km' = [km EXCEPT ![c] = Variant # "stucklog" \/ km[c]]
+            /\ UNCHANGED <<cs, cp, kp, ts>>
+  /\ UNCHANGED <<ct, ck, nextC, ex, sp, rev, aSt, nTO, ms, hV>>
+
 Busy(c) ==   \* the stub finds the lock taken: exits, the holder keeps `busy`
-  /\ pr[c] = "stub" /\ cs[c] = "claimed" /\ \E d \in Claims \ {c} : pr[d] = "writing"
+  /\ pr[c] = "stub" /\ cs[c] = "claimed" /\ \E d \in Claims \ {c} : Held(d)
   /\ pr' = [pr EXCEPT ![c] = "dead"] /\ ex' = [ex EXCEPT ![c] = IF hUp THEN "busy" ELSE "none"]
   /\ UNCHANGED <<claimV, sp, kp, km, turnV, rev, aSt, nTO, hV>>
 
@@ -262,18 +324,19 @@ Meet ==   \* different_holder: the new instance lists nothing, so every live non
         ELSE IF cp[c] THEN "ending" ELSE "ended"]
   /\ ts' = [t \in Turns |-> IF ts[t] \in {"claimed", "running"} THEN "queued" ELSE ts[t]]
   /\ kp' = [c \in Claims |-> IF Variant # "nokillresend" /\ cs[c] \in {"running", "ending"} /\ cp[c] THEN TRUE ELSE kp[c]]
-  /\ UNCHANGED <<ct, ck, cp, nextC, pr, ex, sp, km, ms, rev, aSt, nTO, hUp, hc>>
+  /\ km' = [c \in Claims |-> IF Warm /\ pr[c] \in {"locked", "stuck", "stuckx"} THEN TRUE ELSE km[c]]   \* step 7 ends the old instance's groups
+  /\ UNCHANGED <<ct, ck, cp, nextC, pr, ex, sp, ms, rev, aSt, nTO, hUp, hc>>
 
 ---------------------------------------------------------------------------
 Next ==
   \/ \E t \in Turns : MayCheck(t) \/ TurnArrive(t) \/ Park(t) \/ Unpark(t) \/ Claim(t) \/ FenceCancel(t)
-  \/ \E c \in Claims : Spawn(c) \/ SpawnedRep(c) \/ Redeem(c) \/ Busy(c) \/ EngineExit(c) \/ Report(c)
+  \/ \E c \in Claims : Spawn(c) \/ SpawnedRep(c) \/ Redeem(c) \/ StubLock(c) \/ RedeemOK(c) \/ GiveBack(c) \/ Stuck(c) \/ Busy(c) \/ EngineExit(c) \/ Report(c)
                        \/ PromoteTW(c) \/ SendKill(c) \/ HKill(c) \/ EndGone(c)
   \/ AskStop \/ Revoke \/ TakeOver \/ HCrash \/ HUp \/ Meet
 
 Fairness ==
   /\ \A t \in Turns : WF_vars(Unpark(t)) /\ WF_vars(Claim(t)) /\ WF_vars(FenceCancel(t))
-  /\ \A c \in Claims : WF_vars(Spawn(c)) /\ WF_vars(Redeem(c)) /\ WF_vars(Busy(c)) /\ WF_vars(EngineExit(c) /\ cs[c] # "ending")   \* an engine under a stop may hang: only the kill ends it
+  /\ \A c \in Claims : WF_vars(Spawn(c)) /\ WF_vars(Redeem(c)) /\ WF_vars(StubLock(c)) /\ WF_vars(RedeemOK(c)) /\ WF_vars(GiveBack(c)) /\ WF_vars(Busy(c)) /\ WF_vars(EngineExit(c) /\ cs[c] # "ending")   \* an engine under a stop may hang: only the kill ends it
                        /\ WF_vars(Report(c)) /\ WF_vars(PromoteTW(c)) /\ WF_vars(SendKill(c))
                        /\ WF_vars(HKill(c)) /\ WF_vars(EndGone(c))
   /\ WF_vars(HUp) /\ WF_vars(Meet)
@@ -295,6 +358,9 @@ WriterHasClaim == \A c \in Claims : pr[c] = "writing" => cs[c] \in {"running", "
 StoppedNeverRuns == aSt = "stopped" => \A t \in Auto : ts[t] \notin {"claimed", "running"}
 \* After a revoke, none of the person's turns is claimed or running.
 RevokedQuiet == rev > 0 => \A t \in Turns : ts[t] \notin {"claimed", "running"}
+\* A stub that is stuck on the lock of a claim that was `claimed` is still that claim's: it is live until the process is gone
+\* (the old end_stuck_claim ended it with no pid recorded: c4-stuckdrop).
+StuckHasClaim == \A c \in Claims : pr[c] = "stuck" => cs[c] \in {"claimed", "running", "ending"}
 \* A turn that was cancelled stays cancelled (a late done report does not undo a stop).
 CancelledStays == [][\A t \in Turns : ts[t] = "cancelled" => ts'[t] = "cancelled"]_vars
 \* The ask stop spares the owner's take-over claim ("a person's writers are left alone").
@@ -302,6 +368,8 @@ AskSparesTakeOver == [][(aSt = "open" /\ aSt' = "stopped") => \A c \in Claims : 
 
 \* Every stop ends: an `ending` claim ends once the kill gets through (resent after a holder crash).
 EndingEnds == \A c \in Claims : (cs[c] = "ending") ~> (cs[c] = "ended")
+\* A stuck lock is always ended: the process dies, by the claim's kill or by the kill by id (c4-stucklog: nothing does).
+StuckEnds == \A c \in Claims : (pr[c] \in {"stuck", "stuckx"}) ~> (pr[c] = "dead")
 \* A turn the claims layer accepts ends done or cancelled. Exempt: a turn whose may check predates a revoke and one of a
 \* stopped ask (both are refused for ever; P3Strict says that is a leak). The `nextC = MaxClaims` escape is only the bound
 \* of the model (a turn that waits when the claim numbers ran out); it hides no stuck state: P3Strict has it too, and
