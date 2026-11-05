@@ -3,8 +3,13 @@ import Testing
 @testable import KithKit
 @testable import KithUI
 
-// The chat is flat (docs/design/DESIGN.md "Room chat"): every task's and thread's replies, and the tool calls, sit in
-// the main chat in time order. The host keeps its task and thread model.
+// The chat is flat (docs/design/DESIGN.md "Room chat"): replies and tool calls sit in the main chat in time order. A
+// bot's task is the exception: its first message and thread fold into one card where the task started (TaskCard).
+
+private func threadIds(_ items: [ChatItem], of root: String) -> [String] {
+    for item in items { if case let .task(r, thread) = item.kind, r.id == root { return thread.map(\.id) } }
+    return []
+}
 
 private func flat(_ id: String, _ kind: String, at: Int64, thread: String? = nil, text: String? = nil, final: Bool? = nil,
                   task: Bool? = nil) -> Entry {
@@ -18,7 +23,7 @@ private func flat(_ id: String, _ kind: String, at: Int64, thread: String? = nil
 private func rowIds(_ items: [ChatItem]) -> [String] {
     items.compactMap {
         switch $0.kind {
-        case .entry, .steps: $0.id
+        case .entry, .steps, .task: $0.id
         default: nil
         }
     }
@@ -35,13 +40,10 @@ private func rowIds(_ items: [ChatItem]) -> [String] {
         flat("th", "thought", at: 11, thread: "t1", text: "hm"),
     ]
     let items = ChatItem.build(entries, groupingExchanges: true)
-    // Thinking stays in the trace; the task's roots are plain messages now.
-    #expect(rowIds(items) == ["t1", "steps-r1", "r2", "c1", "t2", "r3"])
-    // Agent replies in a row share an author: only the first is a group start.
-    let starts = items.compactMap { item -> Bool? in
-        if case let .entry(e, start) = item.kind, e.id == "r2" || e.id == "c1" { start } else { nil }
-    }
-    #expect(starts == [true, false])
+    // Each task is one card at its first message; its replies and tools sit inside it, by time.
+    #expect(rowIds(items) == ["t1", "c1", "t2"])
+    #expect(threadIds(items, of: "t1") == ["th", "r1", "r2"])
+    #expect(threadIds(items, of: "t2") == ["r3"])
 }
 
 @Test func theFlatChatFoldsAToolRunIntoOneStepsRowAndShowsEachThingOnce() {
@@ -49,8 +51,13 @@ private func rowIds(_ items: [ChatItem]) -> [String] {
     let reply = flat("done", "agent", at: 200, thread: "t1", text: "Done", final: true)
     // The reply arrives in the chat's entries and again from the thread fetch.
     let items = ChatItem.build([flat("t1", "user", at: 99, text: "Go", task: true)] + tools + [reply, reply], groupingExchanges: true)
-    #expect(rowIds(items) == ["t1", "steps-x1", "done"])
-    guard case let .steps(run) = items.first(where: { $0.id == "steps-x1" })?.kind else { Issue.record("no steps"); return }
+    #expect(rowIds(items) == ["t1"])
+    // The card holds the tools and the reply once each; its open view folds the tools into one steps row.
+    let thread = threadIds(items, of: "t1")
+    #expect(thread.filter { $0 == "done" }.count == 1 && thread.count == 8)
+    guard case let .task(_, entries)? = items.first(where: { $0.id == "t1" })?.kind else { Issue.record("no card"); return }
+    let replies = ThreadFeed.replies(entries)
+    guard case let .steps(run)? = replies.first(where: { if case .steps = $0 { true } else { false } }) else { Issue.record("no steps"); return }
     #expect(run.steps.count == 7 && run.failed == 0 && !run.isRunning)
 }
 
@@ -82,11 +89,12 @@ private func mcp(_ id: String, _ at: Int64, _ title: String, status: String? = "
     #expect(StepsRow.title(run) == "Working · 3 steps, 1 failed")
 }
 
-@Test func aPendingCardInATasksThreadShowsInTheMainChat() {
+@Test func aPendingCardInATasksThreadShowsOnTheTasksCard() {
     var card = flat("p1", "permission", at: 50, thread: "t1")
     card.data.status = "pending"
     let items = ChatItem.build([flat("t1", "user", at: 49, text: "Run it", task: true), card], groupingExchanges: true)
-    #expect(rowIds(items) == ["t1", "p1"])
+    #expect(rowIds(items) == ["t1"])
+    #expect(threadIds(items, of: "t1") == ["p1"])
 }
 
 @Test func yourOwnTaskMessageKeepsItsRowIdInTheFlatChat() {
@@ -111,10 +119,9 @@ private func mcp(_ id: String, _ at: Int64, _ title: String, status: String? = "
     let entries = [mine, flat("r1", "tool", at: 12, thread: "srv-1"), flat("r2", "agent", at: 20, thread: "srv-1", text: "Fixed.", final: true)]
     let items = ChatItem.build(entries, groupingExchanges: true)
     func row(_ entry: String) -> String? { items.first { $0.holds(entry: entry) }?.id }
-    // A thread reply is its own row; a tool call is found inside its steps row.
-    #expect(row("r2") == "r2")
-    #expect(row("r1") == "steps-r1")
-    // A sent message keeps its user-<nonce> row, found by the host id or the row id.
+    // A task's replies and tool calls are found on its card; a sent message keeps its user-<nonce> row.
+    #expect(row("r2") == "user-n1")
+    #expect(row("r1") == "user-n1")
     #expect(row("srv-1") == "user-n1")
     #expect(row("user-n1") == "user-n1")
     #expect(row("nope") == nil)

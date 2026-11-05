@@ -48,14 +48,13 @@ private func bot(_ json: String) throws -> Bot {
     #expect(Tasks.status(of: root, bot: idle, replies: [stopped, entry("r", "agent", thread: "t") { $0.final = true }]) == .done)
 }
 
-@Test func aTaskShowsInlineWhileBusyAndWhileTheNewestIsFresh() {
-    let now: Int64 = 100 * Tasks.idleMs
-    #expect(Tasks.isOpen(.done, newest: true, lastAt: now - 60_000, now: now))
-    #expect(!Tasks.isOpen(.done, newest: true, lastAt: now - Tasks.idleMs, now: now))
-    #expect(!Tasks.isOpen(.done, newest: false, lastAt: now - 60_000, now: now))
-    #expect(Tasks.isOpen(.working, newest: false, lastAt: 0, now: now))
-    #expect(!Tasks.isOpen(.working, newest: true, lastAt: now, now: now, choice: false))
-    #expect(Tasks.isOpen(.done, newest: false, lastAt: 0, now: now, choice: true))
+@Test func aCardOpensWhileItWorksAndFoldsWhenDoneUnlessTheUserChose() {
+    #expect(Tasks.isOpen(.working))
+    #expect(!Tasks.isOpen(.done))
+    #expect(!Tasks.isOpen(.needsYou))
+    #expect(!Tasks.isOpen(.stopped))
+    #expect(!Tasks.isOpen(.working, choice: false))
+    #expect(Tasks.isOpen(.done, choice: true))
 }
 
 @Test func aVoiceCallFollowsTheChatAndItsTasksNotOtherThreads() {
@@ -93,4 +92,156 @@ private func bot(_ json: String) throws -> Bot {
     let settled = Tasks.place([old, later].map(BotExchangeGroup.Item.entry))
     #expect(settled.slots.map(\.id) == ["old", "m"])
     #expect(settled.moved.isEmpty)
+}
+
+private func summary(_ json: String) throws -> ThreadSummary {
+    try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+}
+
+@Test func theFoldShowsTheLastReplyAndCountsOnlyWhatItHides() {
+    let thread = [
+        entry("a1", "agent", thread: "t") { $0.final = true },
+        entry("s1", "tool", thread: "t"),
+        entry("s2", "tool", thread: "t"),
+        entry("u2", "user", thread: "t"),
+        entry("think", "agent", thread: "t"),
+        entry("p", "permission", thread: "t") { $0.status = "pending" },
+        entry("a2", "agent", thread: "t") { $0.final = true },
+    ]
+    let fold = Tasks.fold(thread) { _ in true }
+    #expect(fold.last?.id == "a2")
+    #expect(fold.messages == 2 && fold.steps == 2)
+    #expect(Tasks.foldLine(messages: 2, steps: 2) == "2 messages · 2 steps")
+    #expect(Tasks.foldLine(messages: 0, steps: 1) == "1 step")
+    #expect(Tasks.foldLine(messages: 1, steps: 0) == "1 message")
+    #expect(Tasks.foldLine(messages: 0, steps: 0) == nil)
+    // A tool that delivered a file is not a step.
+    #expect(Tasks.fold(thread) { $0.id != "s1" }.steps == 1)
+}
+
+@Test func theHeadShowsStatusOriginOrTheTerminalHoldingIt() throws {
+    #expect(Tasks.head(.done, thread: nil, mac: "Mac mini") == TaskHead(status: nil, origin: nil, held: false))
+    let telegram = try summary(#"{"count":1,"lastAt":1,"authors":[],"origin":"telegram"}"#)
+    #expect(Tasks.head(.done, thread: telegram, mac: "Mac mini") == TaskHead(status: nil, origin: "Telegram", held: false))
+    let held = try summary(#"{"count":1,"lastAt":1,"authors":[],"liveWriter":"terminal","liveBusy":true}"#)
+    #expect(Tasks.head(.working, thread: held, mac: "Mac mini") == TaskHead(status: "Working", origin: "In terminal · Mac mini", held: true))
+    #expect(Tasks.head(.needsYou, thread: nil, mac: "") .status == "Needs you")
+}
+
+@Test func theBoxGoesOnWithTheNewestTaskWhileItWorksOrForTenIdleMinutes() throws {
+    let now: Int64 = 100 * Tasks.idleMs
+    let idle = try bot(#"{"id":"b","workingLanes":[]}"#)
+    func task(_ id: String, at: Int64, origin: String? = nil) throws -> Entry {
+        var e = entry(id, "user") { $0.task = true; $0.text = id }
+        e.createdAt = at
+        if let origin { e.data.thread = try summary(#"{"count":0,"lastAt":0,"authors":[],"origin":"\#(origin)"}"#) }
+        return e
+    }
+    let fresh = try task("a", at: now - 60_000)
+    #expect(Tasks.continuing(bot: idle, chat: [fresh], now: now)?.id == "a")
+    #expect(Tasks.continuing(bot: idle, chat: [try task("a", at: now - Tasks.idleMs)], now: now) == nil)
+    let working = try bot(#"{"id":"b","workingLanes":[{"chat":"b","thread":"old"}]}"#)
+    #expect(Tasks.continuing(bot: working, chat: [try task("old", at: 0)], now: now)?.id == "old")
+    // A newer terminal session isn't gone on with by itself; the app's task before it is.
+    #expect(Tasks.continuing(bot: idle, chat: [fresh, try task("term", at: now - 1_000, origin: "terminal")], now: now)?.id == "a")
+
+    #expect(Tasks.of(entry("r", "agent", thread: "a")) == "a")
+    #expect(Tasks.of(fresh) == "a")
+    #expect(Tasks.of(entry("n", "user") { $0.text = "plain" }) == nil)
+}
+
+@Test func theBoxSendsWhereThePillsSay() throws {
+    let now: Int64 = 100 * Tasks.idleMs
+    let idle = try bot(#"{"id":"b","workingLanes":[]}"#)
+    var old = entry("old", "user") { $0.task = true }
+    old.createdAt = 0
+    var fresh = entry("fresh", "user") { $0.task = true }
+    fresh.createdAt = now - 60_000
+    let chat = [old, fresh]
+    let unset = Tasks.destination(target: nil, bot: idle, chat: chat, now: now)
+    #expect(unset.going?.id == "fresh" && unset.into?.id == "fresh" && !unset.picked && !unset.newTask)
+    let picked = Tasks.destination(target: .task("old"), bot: idle, chat: chat, now: now)
+    #expect(picked.going?.id == "old" && picked.into?.id == "old" && picked.picked)
+    // New task: nothing carried, but the Continues pill still names a task to switch back to.
+    let new = Tasks.destination(target: .new, bot: idle, chat: chat, now: now)
+    #expect(new.into == nil && new.newTask && new.going?.id == "fresh")
+    // A picked task that is gone falls back to the one the host would go on with.
+    #expect(Tasks.destination(target: .task("gone"), bot: idle, chat: chat, now: now).going?.id == "fresh")
+}
+
+private struct TerminalBusy: Error {}
+
+@Test @MainActor func aSendToAPickedTaskAnIdleTerminalHoldsGoesOnlyAfterTheTakeOver() async throws {
+    let held = try summary(#"{"count":1,"lastAt":1,"authors":[],"origin":"terminal","liveWriter":"terminal","liveBusy":false}"#)
+    var calls: [String] = []
+    #expect(Tasks.takesOver(held, picked: true))
+    let ok = await Tasks.sendIn(held, picked: true, takeOver: { calls.append("take") }, send: { calls.append("send") })
+    #expect(ok == nil)
+    #expect(calls == ["take", "send"])
+}
+
+@Test @MainActor func aFailedTakeOverSendsNothing() async throws {
+    let held = try summary(#"{"count":1,"lastAt":1,"authors":[],"origin":"terminal","liveWriter":"terminal","liveBusy":false}"#)
+    var calls: [String] = []
+    let failed = await Tasks.sendIn(held, picked: true, takeOver: { calls.append("take"); throw TerminalBusy() },
+                                    send: { calls.append("send") })
+    #expect(failed is TerminalBusy, "the caller keeps the text in the box and shows why")
+    #expect(calls == ["take"], "never sent, so never a new task")
+}
+
+@Test @MainActor func aBusyTerminalOrAnUnpickedTaskIsSentToAsTheHostRoutesIt() async throws {
+    let busy = try summary(#"{"count":1,"lastAt":1,"authors":[],"liveWriter":"terminal","liveBusy":true}"#)
+    let idleHeld = try summary(#"{"count":1,"lastAt":1,"authors":[],"liveWriter":"terminal","liveBusy":false}"#)
+    var calls: [String] = []
+    _ = await Tasks.sendIn(busy, picked: true, takeOver: { calls.append("take") }, send: { calls.append("send") })
+    #expect(calls == ["send"])
+    calls = []
+    _ = await Tasks.sendIn(nil, picked: true, takeOver: { calls.append("take") }, send: { calls.append("send") })
+    #expect(calls == ["send"])
+    calls = []
+    #expect(!Tasks.takesOver(idleHeld, picked: false))
+    _ = await Tasks.sendIn(idleHeld, picked: false, takeOver: { calls.append("take") }, send: { calls.append("send") })
+    #expect(calls == ["send"])
+}
+
+private func held(_ writer: String, busy: Bool) throws -> Entry {
+    var e = entry("t", "user") { $0.task = true; $0.text = "deploy" }
+    e.data.thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"count":1,"lastAt":1,"authors":[],"liveWriter":"\#(writer)","liveBusy":\#(busy)}"#.utf8))
+    return e
+}
+
+// Ported from tasks.test.ts: a terminal's own turn, a prompt in a thread another writer holds, a parked limit card.
+@Test func aTaskATerminalIsMidTurnInIsWorkingThoughTheHostRunsNoLaneForIt() throws {
+    let idle = try bot(#"{"id":"b","workingLanes":[]}"#)
+    #expect(Tasks.status(of: try held("terminal", busy: true), bot: idle, replies: []) == .working)
+    #expect(Tasks.status(of: try held("terminal", busy: false), bot: idle, replies: []) == .done)
+    #expect(Tasks.status(of: try held("app", busy: true), bot: idle, replies: []) == .done)
+}
+
+@Test func aPromptInAThreadAnotherWriterHoldsIsNotOursToAnswer() throws {
+    let working = try bot(#"{"id":"b","workingLanes":[{"chat":"b","thread":"t"}]}"#)
+    let prompt = entry("p", "permission", thread: "t") { $0.status = "pending" }
+    #expect(Tasks.status(of: try held("terminal", busy: false), bot: working, replies: [prompt]) == .working)
+}
+
+@Test func aMessageParkedAtTheMonthlyLimitNeedsYouWithNoLaneAtWork() throws {
+    let idle = try bot(#"{"id":"b","workingLanes":[]}"#)
+    let root = entry("t", "user") { $0.task = true }
+    let limit = try JSONDecoder().decode(LimitCardData.self, from: Data(#"{"kind":"agent","agent":"a","spent":5,"limit":5,"month":"2026-11"}"#.utf8))
+    let parked = entry("l", "permission", thread: "t") { $0.status = "pending"; $0.limit = limit }
+    #expect(Tasks.status(of: root, bot: idle, replies: [parked]) == .needsYou)
+    let answered = entry("l", "permission", thread: "t") { $0.status = "answered"; $0.limit = limit }
+    #expect(Tasks.status(of: root, bot: idle, replies: [answered]) == .done)
+}
+
+@Test func aSecondCallWithTheSameKeyIsRefusedUntilTheFirstEnds() {
+    var flight = InFlight()
+    let first = flight.begin("b/t")
+    let second = flight.begin("b/t")
+    let other = flight.begin("b/other")
+    #expect(first && !second && other)
+    flight.end("b/t")
+    #expect(!flight.contains("b/t"))
+    let again = flight.begin("b/t")
+    #expect(again)
 }
