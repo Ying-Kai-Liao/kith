@@ -58,3 +58,10 @@ Claims4	c4-fenceleak	fail	temporal	fast
 Claims4	c4-fencecancel	pass	-	fast
 Claims4	c4-epochleak	fail	temporal	fast
 Claims4	c4-epochcancel	pass	-	fast
+Claims4	c4-parkterm	pass	-	fast
+Claims4	c4-lockstuck-small	pass	-	fast
+Claims4	c4-lockstuck-die	pass	-	fast
+Claims4	c4-lockstuck-survive	pass	-	fast
+Claims4	c4-stuckdrop	fail	StuckHasClaim	fast
+Claims4	c4-stucklog	fail	temporal	fast
+Claims4	c4-lockstuck-revto	pass	-	fast
