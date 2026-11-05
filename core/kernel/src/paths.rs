@@ -327,7 +327,9 @@ pub fn known_home() -> Option<PathBuf> {
     #[cfg(unix)]
     return crate::threads::os::passwd_home().filter(|h| h.is_absolute());
     #[cfg(not(unix))]
-    None
+    std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .filter(|h| h.is_absolute())
 }
 
 /// `paths` for this process: its `$HOME` and environment, and the given kernel folder.
