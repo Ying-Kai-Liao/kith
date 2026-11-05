@@ -466,7 +466,8 @@ def run_side(side, work, case, prefix):
     env = build(side, side_dir, case)
     if WITH_CORE and side == 'new':
         make_core(side_dir, env, case['name'])
-    daemon = start_daemon(side_dir, env, case) if WITH_DAEMON and side == 'new' else None
+    # no_daemon: a case that runs `core-migrate` itself needs the core unlocked (a daemon holds the lock), so it runs bare in this pass
+    daemon = start_daemon(side_dir, env, case) if WITH_DAEMON and side == 'new' and not case.get('no_daemon') else None
     norm = Normalizer(side_dir, case.get('normalize', []), case.get('mask_keys', []))
     try:
         facets = run_steps(side, side_dir, case, prefix, env, norm)

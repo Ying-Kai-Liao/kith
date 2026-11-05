@@ -1,6 +1,7 @@
 //! The cutover framework (M3-10a): ONE module-keyed way to move a part of Kith from its Python store to core.db, check it
 //! answers the same, make the move one-way for the old readers, and go back. M3's lanes and M2's `authority` plug into it;
-//! the framework's own tests use a fake module; the real ones are in [`modules`] (S1: `accounts`, `transcripts`).
+//! the framework's own tests use a fake module; the real ones are in [`modules`] (S1: `accounts`, `transcripts`) and
+//! `authority` (M2-18a, `authority.rs`; the switch stays OFF).
 //!
 //! # A module
 //! A [`Module`] is a name plus six hooks: `import` (idempotent; `--dry-run` gets no core; `--force`), `same_answer`
@@ -42,6 +43,9 @@ use crate::db::{Core, MIGRATIONS};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 
+pub(crate) mod authority;
+#[cfg(test)]
+mod authority_tests;
 pub(crate) mod marker;
 pub(crate) mod modules;
 pub(crate) mod same_answer;
@@ -58,6 +62,9 @@ use state::{Phase, Switch};
 pub(crate) struct Env {
     pub machine: PathBuf,
     pub layout: Layout,
+    /// Where the caller's auth.json and agent folders are, for the modules whose sources live there (`authority`). The
+    /// daemon takes it from the request (the `home`, `kernel` and `env` the caller sends, as `people.*` does).
+    pub ctx: Option<kith_kernel::secrets::Ctx>,
     /// `$KITH_STATE` (the session registry lives below it) and the home folder, for the modules that read more than the
     /// machine folder (transcripts). `new` leaves them empty: a module that needs them says so.
     pub state: Option<PathBuf>,
@@ -74,6 +81,7 @@ impl Env {
         Self {
             machine: machine.to_path_buf(),
             layout: Layout::new(machine),
+            ctx: None,
             state: None,
             home: machine.to_path_buf(),
             paths: None,
@@ -88,6 +96,11 @@ impl Env {
             paths: Some(paths.clone()),
             ..Self::new(&paths.machine)
         }
+    }
+
+    pub(crate) fn with_ctx(mut self, ctx: kith_kernel::secrets::Ctx) -> Self {
+        self.ctx = Some(ctx);
+        self
     }
 }
 
@@ -156,13 +169,14 @@ pub(crate) trait Module {
 pub(crate) type SourceLock = Box<dyn std::any::Any>;
 
 /// The registered modules, in switch order (S1 here, then M4-5a's schedules; S2 claims+turns, S4 wake, S3 asks and S5 failover plug in after them,
-/// and M2's `authority`). Registered is not switched: nothing steps a module but `kith migrate step`.
+/// and M2's `authority`, M2-18a: registered, switch off). Registered is not switched: nothing steps a module but `kith migrate step`.
 pub(crate) fn registry() -> Vec<Box<dyn Module>> {
     vec![
         Box::new(modules::accounts::Accounts),
         Box::new(modules::transcripts::Transcripts),
         Box::new(modules::claims::Claims),
         Box::new(modules::schedules::Schedules::new()),
+        Box::new(authority::AuthorityModule::real()),
     ]
 }
 
@@ -457,9 +471,11 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
     let folders = core.folders().ok_or_else(|| {
         Error::NotServed("kith-core: this core was opened without its folders".into())
     })?;
+    // The caller's view of the folders (`home`, `kernel`, `env` of the params, as `people.*` reads them) goes in the ctx:
+    // a module whose sources are the caller's own files (auth.json) is asked about those; the marker stays the daemon's.
     serve_json(
         &registry(),
-        &Env::with_paths(folders),
+        &Env::with_paths(folders).with_ctx(crate::authority::call::ctx_of(core, params)?),
         core.conn(),
         name,
         opt_in_env(name),
@@ -469,8 +485,16 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
 
 /// `kith kernel cutover ...`: `step MODULE [--dry-run] [--force]`, `rollback MODULE [--force]`, `status`, `check MODULE`,
 /// `modules`.
-pub(crate) fn run(paths: &kith_kernel::paths::Paths, args: &[String]) -> Result<Vec<String>> {
-    run_with(&registry(), &Env::with_paths(paths), args)
+pub(crate) fn run(
+    paths: &kith_kernel::paths::Paths,
+    kernel: &std::path::Path,
+    args: &[String],
+) -> Result<Vec<String>> {
+    let env = Env::with_paths(paths).with_ctx(crate::authority::call::ctx_from(
+        paths,
+        kernel.to_path_buf(),
+    ));
+    run_with(&registry(), &env, args)
 }
 
 pub(crate) fn run_with(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<String>> {

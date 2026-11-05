@@ -1,0 +1,53 @@
+[
+  {
+    "name": "cutover-authority-import-and-same-answer",
+    "command": "cutover",
+    "needs": "rust",
+    "no_daemon": true,
+    "ignore": ["/core/"],
+    "normalize": [["core-pre-import-[0-9]+", "core-pre-import-<ts>"]],
+    "program": {
+      "old": ["{BIN}", "kernel"],
+      "new": ["{BIN}", "kernel"]
+    },
+    "setup": [
+      {
+        "write": "kith/agents/house/role/agent.md",
+        "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+      },
+      {
+        "write": "home/.kith/secrets/auth.json",
+        "text": "{\"profiles\": {}, \"grants\": {}, \"people\": {\"kai\": {\"name\": \"Kai\", \"owner\": true}, \"sam\": {\"name\": \"Sam\"}, \"sam-bot\": {\"bot_of\": \"sam\"}}, \"presets\": {\"member\": {\"mode\": \"default\"}}, \"members\": {\"house\": {\"sam\": {\"preset\": \"member\"}}}, \"retired\": {\"old\": {\"at\": 1}}}"
+      }
+    ],
+    "run": [
+      ["cutover", "modules"],
+      ["cutover", "status"],
+      ["core-migrate", "--authority"],
+      ["cutover", "check", "authority"],
+      ["cutover", "step", "authority", "--dry-run"]
+    ]
+  },
+  {
+    "name": "cutover-authority-owner-and-revoked-is-refused",
+    "command": "cutover",
+    "needs": "rust",
+    "no_daemon": true,
+    "ignore": ["/core/"],
+    "normalize": [["core-pre-import-[0-9]+", "core-pre-import-<ts>"]],
+    "program": {
+      "old": ["{BIN}", "kernel"],
+      "new": ["{BIN}", "kernel"]
+    },
+    "setup": [
+      {
+        "write": "home/.kith/secrets/auth.json",
+        "text": "{\"people\": {\"kai\": {\"name\": \"Kai\", \"owner\": true, \"revoked\": true}}}"
+      }
+    ],
+    "run": [
+      ["core-migrate", "--authority", "--dry-run"],
+      ["core-migrate", "--authority"]
+    ]
+  }
+]
