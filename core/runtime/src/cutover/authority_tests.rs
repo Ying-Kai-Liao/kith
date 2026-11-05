@@ -585,9 +585,15 @@ fn a_rollback_names_an_item_the_keychain_no_longer_holds() {
         .borrow_mut()
         .insert("keychain:svc#gone".into(), "s3cr3t-val".into());
     let lines = rollback(&reg, &r.env, "authority", opts()).unwrap();
-    assert!(said(&lines, "secret restored: keychain:svc#gone"), "{lines:?}");
+    assert!(
+        said(&lines, "secret restored: keychain:svc#gone"),
+        "{lines:?}"
+    );
     assert_eq!(r.os.borrow()["keychain:svc#gone"], "s3cr3t-val");
-    assert!(!lines.iter().any(|l| l.contains("s3cr3t-val")), "names only");
+    assert!(
+        !lines.iter().any(|l| l.contains("s3cr3t-val")),
+        "names only"
+    );
 }
 
 #[test]

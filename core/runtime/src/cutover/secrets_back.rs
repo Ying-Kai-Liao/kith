@@ -209,7 +209,10 @@ mod tests {
                 .all(|(_, v)| v.len() <= 10),
             "chunks are at most the limit"
         );
-        assert_eq!(read_back(&s, "k").unwrap().as_ref().map(|v| v.as_str()), Some(big.as_str()));
+        assert_eq!(
+            read_back(&s, "k").unwrap().as_ref().map(|v| v.as_str()),
+            Some(big.as_str())
+        );
         let before = s.puts;
         restore_all(&mut s, &items(&[("k", &big)]), Some(10)).unwrap();
         assert_eq!(
@@ -226,7 +229,10 @@ mod tests {
         s.items.remove("k#1");
         assert_eq!(read_back(&s, "k").unwrap(), None);
         restore_all(&mut s, &items(&[("k", &big)]), Some(10)).unwrap();
-        assert_eq!(read_back(&s, "k").unwrap().as_ref().map(|v| v.as_str()), Some(big.as_str()));
+        assert_eq!(
+            read_back(&s, "k").unwrap().as_ref().map(|v| v.as_str()),
+            Some(big.as_str())
+        );
         assert_eq!(
             s.items["other"], "keep",
             "an item outside the call is untouched"
