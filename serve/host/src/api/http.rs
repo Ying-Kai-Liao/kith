@@ -226,6 +226,7 @@ async fn routine_hook(
             Refused::Unauthorized => StatusCode::UNAUTHORIZED,
             Refused::Paused | Refused::Busy => StatusCode::CONFLICT,
             Refused::Invalid(_) => StatusCode::BAD_REQUEST,
+            Refused::Held => StatusCode::SERVICE_UNAVAILABLE,
         };
         ApiError(status, e.to_string())
     })

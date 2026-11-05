@@ -24,6 +24,9 @@ pub enum Refused {
     /// The routine is already running; the sender (or the cloud queue) tries again later.
     Busy,
     Invalid(String),
+    /// The schedules are the core's now and it did not answer (or the host cannot tell whose they are yet): the sender,
+    /// or the cloud queue, tries again later. Only while the core owns the schedules (`routines::switch`).
+    Held,
 }
 
 impl Refused {
@@ -33,11 +36,12 @@ impl Refused {
             Self::Paused => "paused",
             Self::Busy => "busy",
             Self::Invalid(_) => "invalid",
+            Self::Held => "held",
         }
     }
 
     pub fn retry(&self) -> bool {
-        matches!(self, Self::Busy)
+        matches!(self, Self::Busy | Self::Held)
     }
 }
 
@@ -48,6 +52,7 @@ impl std::fmt::Display for Refused {
             Self::Paused => f.write_str("routine is paused"),
             Self::Busy => f.write_str("routine already has an active run"),
             Self::Invalid(why) => f.write_str(why),
+            Self::Held => f.write_str("routines are moving to the Kith core; try again shortly"),
         }
     }
 }

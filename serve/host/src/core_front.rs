@@ -89,7 +89,25 @@ pub enum Answer {
 
 /// One call of the owner's to the daemon. `repeatable` is for reads; a write is never sent a second time.
 pub fn call_owner(folders: &Paths, method: &str, params: &Value, repeatable: bool) -> Answer {
-    match kith_core::reach(folders, method, params, repeatable) {
+    answer_of(kith_core::reach(folders, method, params, repeatable))
+}
+
+/// One write row of the Host principal's (`schedule.fire`, M4-5b), on a connection that proves the host secret, which only
+/// the serve's own daemon has: any other daemon answers a mismatch (`Down`), which the caller reads as "try again". Never
+/// sent twice.
+pub fn call_host(folders: &Paths, method: &str, params: &Value) -> Answer {
+    answer_of(kith_core::reach_as_host(folders, method, params, false))
+}
+
+/// Whether a module's switch file is there (`<core folder>/cutover/<module>.switch`), the core's one record of "this module
+/// moved". Only its existence is read, never its content, for the one question the gate cannot answer when the core is
+/// down: "was this module switched?". A host that cannot tell must not run the module's work from the old store.
+pub fn switch_file_exists(folders: &Paths, module: &str) -> bool {
+    folders.machine.join("core").join("cutover").join(format!("{module}.switch")).exists()
+}
+
+fn answer_of(reached: kith_core::Reached) -> Answer {
+    match reached {
         kith_core::Reached::Answered(v) => Answer::Done(v),
         kith_core::Reached::Refused(e) => Answer::Refused(e.to_string()),
         kith_core::Reached::NoDaemon => Answer::Down { why: "no core is running".to_owned(), lost: false },
