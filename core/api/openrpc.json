@@ -9964,6 +9964,45 @@
           }
         }
       }
+    },
+    {
+      "name": "holder.forget",
+      "summary": "Drops a process from the holder record (for a `blocked` holder whose old process cannot be told from a stranger). Nothing is signalled. Answers `{forgot}`: whether the pid was in the record; asked again it is false.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The recorded process's pid.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "holder",
+          "forget"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "positional"
+          }
+        }
+      }
     }
   ],
   "components": {

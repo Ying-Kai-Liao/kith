@@ -462,7 +462,10 @@ fn a_retried_report_is_idempotent_and_a_late_busy_cannot_replace_a_done() {
     assert_eq!(state(&c, id), "ended");
     assert_eq!(turn_state(&c, t), "done");
     assert_eq!(
-        count(&c, "SELECT count(*) FROM reports WHERE claim_id = 1"),
+        count(
+            &c,
+            &format!("SELECT count(*) FROM reports WHERE claim_id = {id}")
+        ),
         2,
         "done and busy are both kept, keyed by kind"
     );
@@ -1008,6 +1011,29 @@ fn a_report_with_no_pid_moves_a_claim_with_a_recorded_pid_to_ending_and_end_gone
     assert_eq!(state(&c, id2), "ended");
 }
 
+/// The body the holder link sends for a process's exit (`holder_link::exit_body`): the pid, how it ended and
+/// `out_of_usage: false`. It follows the pid rules of any report, and a repeat of it changes nothing.
+#[test]
+fn the_holder_links_exit_body_ends_the_claim_of_its_pid_only() {
+    let (_t, mut c) = open();
+    let (id, turn) = running(&mut c, "c1", 100);
+    let body = |pid: u32| {
+        format!(r#"{{"out_of_usage":false,"pid":{pid},"code":0,"signal":null,"lapsed":false}}"#)
+    };
+    report(&mut c, id, "exit", &body(101), 30).expect("another process");
+    assert_eq!(state(&c, id), "running", "a respawn's exit ends nothing");
+    report(&mut c, id, "exit", &body(100), 31).expect("its own");
+    assert_eq!(state(&c, id), "ended");
+    assert_eq!(turn_state(&c, turn), "queued", "the turn goes back");
+    report(&mut c, id, "exit", &body(100), 32).expect("repeat");
+    assert_eq!(state(&c, id), "ended");
+    assert_eq!(
+        count(&c, "SELECT COUNT(*) FROM reports WHERE kind = 'exit'"),
+        2,
+        "one report per process, a repeat is the same one"
+    );
+}
+
 #[test]
 fn a_report_with_no_pid_on_a_claim_with_no_pid_ends_a_claimed_one_only() {
     let (_t, mut c) = open();
@@ -1210,4 +1236,15 @@ fn a_claimed_claim_with_a_spawned_process_stopped_is_ending_until_it_is_gone() {
         .expect("kill");
     assert_eq!(kill.pid, Some(100));
     assert_eq!(state(&c, id), "ending");
+}
+
+/// Every claim path takes its id from the same counter, which a fresh db moves above the epoch-ms ids older cores sent a
+/// surviving holder (it answers every lower claim `Stale`): a turn claim, not only a terminal's, gets one.
+#[test]
+fn a_claim_on_a_fresh_db_gets_an_id_above_the_clock_and_the_next_follows() {
+    let (_t, mut c) = open();
+    let (id, _) = take(&mut c, "c1");
+    assert!(id > 1_000_000_000_000, "{id}");
+    let (id2, _) = take(&mut c, "c2");
+    assert_eq!(id2, id + 1);
 }

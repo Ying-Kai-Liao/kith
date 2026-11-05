@@ -39,6 +39,10 @@ pub(crate) mod asks;
 pub(crate) mod accounts;
 mod authority;
 mod check;
+// M3-10b3: the writer claim files. Not wired into `kith migrate` yet (M3-10 does that), so only the tests call it.
+#[cfg(unix)]
+#[allow(dead_code, reason = "M3-10 wires it into kith migrate")]
+pub(crate) mod claims;
 pub(crate) mod items;
 pub(crate) mod schedules;
 // The wake queue's files (M3-7): nothing runs it until the switch (M3-10); the tests do.
