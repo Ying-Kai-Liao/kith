@@ -3,9 +3,9 @@
 //! line prints the same thing and exits with the same code (the difftest golden `permit.json` holds the Python's answers);
 //! `kith-permit` itself stays Python until `permit` is in `lib/core-switched.txt`.
 //!
-//! The stdio MCP server (`approve`, `request_access`, `report_bug`, `ask_helper`, `run_door` and the key tool) has no Rust side
-//! yet: a command line that is not one of the four verbs would start it in Python, and here answers 2, except when stdin
-//! holds no message (then, as there, nothing is printed and the exit code is 0).
+//! Any other command line starts the stdio MCP server (`mcp.rs`): `approve`, `request_access`, `request_secret`, `report_bug`,
+//! `ask_helper` and `run_door`, the permission prompt tool of every `claude -p` run. `bug.rs` and `door.rs` still lean on a Python
+//! helper for what has no Rust side (the scrubbing of a report, the door's sandbox).
 //!
 //! Where Python dies with a traceback (`issue` with a pid that is no number, a hook payload that is not UTF-8) this prints the
 //! last line of it (or reads the bytes lossily) and exits 1 (or goes on).
@@ -17,11 +17,20 @@
     clippy::cast_possible_truncation
 )]
 
+mod access;
 mod apply;
+mod bug;
+mod decide;
+mod door;
+mod helper;
 mod hooks;
 mod host;
 mod issue;
+mod mcp;
+mod proc;
 mod pyval;
+#[cfg(test)]
+mod mcp_tests;
 #[cfg(test)]
 mod tests;
 
@@ -42,6 +51,8 @@ pub struct Out {
 pub struct Env {
     vars: BTreeMap<String, String>,
     pub home: PathBuf,
+    /// The Python the helper calls run (`python3` when empty).
+    pub python: String,
 }
 
 impl Env {
@@ -57,6 +68,7 @@ impl Env {
                 })
                 .collect(),
             home: crate::paths::process_home(),
+            python: String::new(),
         }
     }
 
@@ -68,6 +80,30 @@ impl Env {
                 .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
                 .collect(),
             home: PathBuf::new(),
+            python: String::new(),
+        }
+    }
+
+    /// Every variable, empty ones too (what a child process is given).
+    pub fn vars(&self) -> &BTreeMap<String, String> {
+        &self.vars
+    }
+
+    /// This environment without these variables.
+    #[must_use]
+    pub fn without(&self, names: &[&str]) -> Env {
+        let mut e = self.clone();
+        for n in names {
+            e.vars.remove(*n);
+        }
+        e
+    }
+
+    pub fn python(&self) -> &str {
+        if self.python.is_empty() {
+            "python3"
+        } else {
+            &self.python
         }
     }
 
@@ -115,20 +151,41 @@ pub fn run(env: &Env, kernel: &Path, args: &[String], stdin: &mut dyn Read) -> O
         }
         ["apply", file] => apply::apply(env, kernel, file),
         _ => {
-            let mut raw = Vec::new();
-            let _ = stdin.read_to_end(&mut raw);
-            if String::from_utf8_lossy(&raw)
-                .lines()
-                .any(|l| !pyval::strip(l).is_empty())
-            {
-                Out {
-                    stderr: "kith kernel permit: the MCP server (kith-permit with no verb) has no Rust side yet\n".to_owned(),
-                    code: 2,
-                    ..Out::default()
-                }
-            } else {
-                Out::default()
+            // the MCP server, with its replies collected (the program streams them: `serve_stdio`)
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = mcp::serve(
+                env,
+                kernel,
+                &mut std::io::BufReader::new(stdin),
+                &mut out,
+                &mut err,
+            );
+            Out {
+                stdout: String::from_utf8_lossy(&out).into_owned(),
+                stderr: String::from_utf8_lossy(&err).into_owned(),
+                code,
             }
         }
     }
+}
+
+/// Whether `args` is one of the four command-line verbs (anything else starts the MCP server, as `kith-permit`'s `sys.argv`
+/// matching does).
+pub fn is_verb(args: &[String]) -> bool {
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    matches!(
+        a.as_slice(),
+        ["issue", _, _, _] | ["denied" | "once", "--dir", _] | ["apply", _]
+    )
+}
+
+/// The MCP server on this process's stdin and stdout: each reply is written and flushed as soon as its line has been read.
+pub fn serve_stdio(env: &Env, kernel: &Path) -> i32 {
+    mcp::serve(
+        env,
+        kernel,
+        &mut std::io::stdin().lock(),
+        &mut std::io::stdout().lock(),
+        &mut std::io::stderr().lock(),
+    )
 }
