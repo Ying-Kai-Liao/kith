@@ -499,6 +499,9 @@ fn connected(
     Ok(())
 }
 
+/// How many kills a re-sent end may send in one round.
+const RESEND_TRIES: u32 = 3;
+
 /// Sends again the kills whose wait is over. One that is still not gone goes back with one more round; past
 /// [`END_STUCK_ROUNDS`] the core log says so once, and `holder.ending` (in `kith doctor`) counts it.
 fn resend_ends(shared: &Shared, client: &mut Client, relay: &Relay) {
@@ -507,7 +510,8 @@ fn resend_ends(shared: &Shared, client: &mut Client, relay: &Relay) {
         return;
     }
     for (held, rounds) in due {
-        if end_held(client, relay, &held) {
+        // A few kills a round, not forty: a tree that will not die must not keep the supervisor out of its pump.
+        if end_held_within(client, relay, &held, RESEND_TRIES) {
             continue;
         }
         let rounds = shared.terminals.requeue_end(held.clone(), rounds);
@@ -1102,7 +1106,8 @@ pub(crate) enum TurnStep {
     /// No answer, or the core.db write failed: asking again is safe (a take is `Locked` again for the same claim).
     Lost(String),
     /// The lock was taken, the claim could not be run, and giving the lock back failed too: the stub may still hold the
-    /// conversation. The supervisor writes it to the core log; the caller ends the claim, which ends the process.
+    /// conversation. The supervisor writes it to the core log; the warm turn driver of M3-10c ends the claim (a stop of a
+    /// `claimed` claim), which ends the process and so frees the lock. Nothing in this module does that.
     LockStuck(String),
 }
 

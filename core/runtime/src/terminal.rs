@@ -481,12 +481,17 @@ impl Terminals {
     /// supervisor out of its pump and its other requests. `rounds` is how many rounds it has had; the new count comes
     /// back.
     pub(crate) fn requeue_end(&self, held: HeldId, rounds: u32) -> u32 {
-        let rounds = rounds.saturating_add(1);
-        let wait = END_BACKOFF.saturating_mul(rounds).min(END_BACKOFF_MAX);
-        self.retries
+        let mut list = self
+            .retries
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push((held, rounds, Instant::now() + wait));
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // One entry per process: a second request for the same end keeps the larger round count.
+        let mut rounds = rounds.saturating_add(1);
+        if let Some(i) = list.iter().position(|(h, _, _)| *h == held) {
+            rounds = rounds.max(list.remove(i).1);
+        }
+        let wait = END_BACKOFF.saturating_mul(rounds).min(END_BACKOFF_MAX);
+        list.push((held, rounds, Instant::now() + wait));
         rounds
     }
 
@@ -905,7 +910,6 @@ struct Wire {
 fn wire_claim(shared: &Shared, session: &str) -> Result<Wire> {
     let now = now_ms();
     shared.with_core(|core| {
-        seed_claim_counter(core, now)?;
         let seen = claims::revoke_epoch(core, OWNER)?;
         let req = NewClaim {
             conversation: session,
@@ -933,41 +937,9 @@ fn wire_claim(shared: &Shared, session: &str) -> Result<Wire> {
     })
 }
 
-/// `meta` key: the claim counter was moved above the epoch-ms ids older cores sent the holder.
-#[cfg(unix)]
-const SEEDED: &str = "claim_counter_seeded_ms";
-
-/// Until this core, a terminal's spawn carried epoch milliseconds, and a holder that outlived the old core keeps the
-/// highest claim it saw per conversation and answers every lower one `Stale` for ever. So the first time this core
-/// opens a terminal it moves `counters.claim_id` up to the clock, once (a marker in `meta`); the ids then go on from
-/// there, one at a time. No row is rewritten and no migration is needed: the counter only has to be higher than any
-/// claim id there is.
-#[cfg(unix)]
-fn seed_claim_counter(core: &mut Core, now: i64) -> Result<()> {
-    let tx = core.claim_tx()?;
-    let done: Option<String> = tx
-        .query_row("SELECT value FROM meta WHERE key = ?1", [SEEDED], |r| {
-            r.get(0)
-        })
-        .ok();
-    if done.is_none() {
-        tx.execute(
-            "UPDATE counters SET value = MAX(value, ?1) WHERE name = 'claim_id'",
-            [now],
-        )?;
-        tx.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
-            rusqlite::params![SEEDED, now.to_string()],
-        )?;
-    }
-    tx.commit()?;
-    Ok(())
-}
-
-/// Tests: the id the spawn would carry for a session that is no conversation (the fallback), seeding included.
+/// Tests: the id the spawn would carry for a session that is no conversation (the fallback).
 #[cfg(all(test, unix))]
-pub(crate) fn wire_claim_for_test(core: &mut Core, now: i64) -> Result<i64> {
-    seed_claim_counter(core, now)?;
+pub(crate) fn wire_claim_for_test(core: &mut Core) -> Result<i64> {
     let tx = core.claim_tx()?;
     let id = Core::next_claim_id(&tx)?;
     tx.commit()?;

@@ -512,6 +512,9 @@ fn an_end_that_is_not_finished_is_sent_again_and_acked_only_when_gone() {
     assert_eq!(terminals.due_ends(), vec![(held.clone(), 1)]);
     assert_eq!(terminals.ending(), 0);
     assert_eq!(terminals.requeue_end(held.clone(), 1), 2, "rounds count up");
+    // The same end asked twice is one entry, with the larger count.
+    assert_eq!(terminals.requeue_end(held.clone(), 0), 2);
+    assert_eq!(terminals.ending(), 1, "de-duplicated by held id");
     // Asked again with tries, it ends and is acked.
     let mut done = false;
     for _ in 0..20 {

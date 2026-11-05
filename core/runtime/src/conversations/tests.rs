@@ -462,7 +462,10 @@ fn a_retried_report_is_idempotent_and_a_late_busy_cannot_replace_a_done() {
     assert_eq!(state(&c, id), "ended");
     assert_eq!(turn_state(&c, t), "done");
     assert_eq!(
-        count(&c, "SELECT count(*) FROM reports WHERE claim_id = 1"),
+        count(
+            &c,
+            &format!("SELECT count(*) FROM reports WHERE claim_id = {id}")
+        ),
         2,
         "done and busy are both kept, keyed by kind"
     );
@@ -1233,4 +1236,15 @@ fn a_claimed_claim_with_a_spawned_process_stopped_is_ending_until_it_is_gone() {
         .expect("kill");
     assert_eq!(kill.pid, Some(100));
     assert_eq!(state(&c, id), "ending");
+}
+
+/// Every claim path takes its id from the same counter, which a fresh db moves above the epoch-ms ids older cores sent a
+/// surviving holder (it answers every lower claim `Stale`): a turn claim, not only a terminal's, gets one.
+#[test]
+fn a_claim_on_a_fresh_db_gets_an_id_above_the_clock_and_the_next_follows() {
+    let (_t, mut c) = open();
+    let (id, _) = take(&mut c, "c1");
+    assert!(id > 1_000_000_000_000, "{id}");
+    let (id2, _) = take(&mut c, "c2");
+    assert_eq!(id2, id + 1);
 }

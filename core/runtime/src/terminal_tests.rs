@@ -691,7 +691,7 @@ echo $$ > "$lock/$key.pid"
             rig.d
                 .shared()
                 .with_core(|c| {
-                    let w = super::super::wire_claim_for_test(c, now)?;
+                    let w = super::super::wire_claim_for_test(c)?;
                     Ok(w)
                 })
                 .unwrap()
