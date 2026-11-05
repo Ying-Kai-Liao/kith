@@ -2225,6 +2225,12 @@ mod tests {
         room.send("@a hold on", None).await;
         std::fs::write(room.dir.join("a/release"), "").unwrap();
         room.settle().await;
+        // Settling can catch a gap between a's turn ending and the next one starting: wait for
+        // conversation 2 to end before asserting that nobody was woken.
+        let conv2 = room.closed().await;
+        room.settle().await;
+        assert_eq!(room.conversations().len(), 2, "two conversations: {:?}", room.conversations());
+        assert_ne!(conv2.state, ConvState::Open);
         let replies: Vec<_> = room
             .hub
             .store
@@ -2235,6 +2241,14 @@ mod tests {
             .collect();
         let late = replies.iter().find(|e| e.data["late"] == true).expect("a late reply");
         assert!(late.data["text"].as_str().unwrap().contains("@b"), "{late:?}");
+        // A current reply from a exists, so the second round ran with the late line stored.
+        assert!(
+            replies.iter().any(|e| e.data["author"] == "a" && e.data["late"] != true),
+            "a also gave a current final reply: {replies:?}"
+        );
+        // Conversation 1, conversation 2's first pass, and the pass after something was said.
+        let prompts = std::fs::read_to_string(room.dir.join("a/prompts.jsonl")).unwrap();
+        assert_eq!(prompts.lines().count(), 3, "a was prompted three times: {prompts}");
         assert!(!room.dir.join("b/prompts.jsonl").exists(), "the late @b woke nobody");
         room.shutdown().await;
     }
