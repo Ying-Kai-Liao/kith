@@ -1367,7 +1367,9 @@ fn help_is_kith_auth_own_usage_on_stdout() {
     assert!(!t.0.join("secrets").exists(), "nothing was created or read");
 }
 
-const NOTE: &str = r#"{"kith_tombstone": 1, "module": "authority", "rollback": "kith kernel cutover rollback authority"}"#;
+// What core/runtime/src/cutover/tombstone.rs `note()` writes.
+const NOTE: &str = r#"{"kith_tombstone":1,"module":"authority","message":"this data moved to the Kith core (module authority); the old reader must not use this file","rollback":"kith rollback authority"}"#;
+const NOTE_NO_ROLLBACK: &str = r#"{"kith_tombstone":1,"module":"authority"}"#;
 
 #[test]
 fn a_tombstone_is_refused_by_every_read_and_never_written_over() {
@@ -1377,7 +1379,7 @@ fn a_tombstone_is_refused_by_every_read_and_never_written_over() {
     std::fs::write(&c.auth, NOTE).unwrap();
     let want = Die {
         msg: format!(
-            "{} moved to the Kith core (module authority); this reader must not use it (kith kernel cutover rollback authority)",
+            "{} moved to the Kith core (module authority); this reader must not use it (kith rollback authority)",
             c.auth.display()
         ),
         code: 3,
@@ -1402,4 +1404,22 @@ fn a_tombstone_is_refused_by_every_read_and_never_written_over() {
         })
         .collect();
     assert!(left.is_empty(), "{left:?}");
+}
+
+#[test]
+fn a_tombstone_without_a_rollback_field_names_the_default() {
+    let t = Tmp::new("tombstone-bare");
+    let c = ctx(&t);
+    std::fs::create_dir_all(c.auth.parent().unwrap()).unwrap();
+    std::fs::write(&c.auth, NOTE_NO_ROLLBACK).unwrap();
+    assert_eq!(
+        load_auth(&c).unwrap_err(),
+        Die {
+            msg: format!(
+                "{} moved to the Kith core (module authority); this reader must not use it (kith rollback authority)",
+                c.auth.display()
+            ),
+            code: 3,
+        }
+    );
 }

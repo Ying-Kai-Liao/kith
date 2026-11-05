@@ -295,13 +295,13 @@ check "builtin: a user's agent of the same name is not a built-in" "A may bi scr
 rm -rf "$KITH_HOME/agents/scratch"
 rm -f "$KITH_HOME/agents/garden/role/capabilities.yaml"
 
-# --- a cutover tombstone (kith kernel cutover step authority): every reader fails closed, no writer saves over it
+# --- a cutover tombstone (kith migrate step authority): every reader fails closed, no writer saves over it
 cp "$KITH_AUTH" "$T/auth.before"
-printf '%s\n' '{"kith_tombstone": 1, "module": "authority", "rollback": "kith kernel cutover rollback authority"}' > "$KITH_AUTH"
+printf '%s\n' '{"kith_tombstone":1,"module":"authority","message":"this data moved to the Kith core (module authority); the old reader must not use this file","rollback":"kith rollback authority"}' > "$KITH_AUTH"
 cp "$KITH_AUTH" "$T/note"
 rc() { "$@" >"$T/out" 2>"$T/err"; echo $?; }
 check "tombstone: may is refused (exit 3), not 'not a person'" "[ \"\$(rc A may kai house)\" = 3 ] && [ ! -s $T/out ]"
-check "tombstone: the refusal names the rollback" "grep -q 'kith kernel cutover rollback authority' $T/err"
+check "tombstone: the refusal names the rollback" "grep -q '(kith rollback authority)' $T/err"
 check "tombstone: resolve and door are refused too" "[ \"\$(rc A resolve house --person kai)\" = 3 ] && [ ! -s $T/out ] && [ \"\$(rc A door house kai telegram --json)\" = 3 ]"
 check "tombstone: ls and people are refused" "[ \"\$(rc A ls)\" = 3 ] && [ \"\$(rc A people --json)\" = 3 ]"
 check "tombstone: a write is refused and the file stays the note" "[ \"\$(rc A person zed)\" = 3 ] && cmp -s $KITH_AUTH $T/note"
@@ -330,6 +330,8 @@ sys.exit(1)
 PY"
 check "tombstone: kith-doctor reports the state, no crash" \
   "python3 \"$KERNEL/bin/kith-doctor\" >\"$T/doc\" 2>&1; grep -q 'switched to the core' \"$T/doc\""
+printf '%s\n' '{"kith_tombstone":1,"module":"authority"}' > "$KITH_AUTH"
+check "tombstone with no rollback field: the default 'kith rollback authority' is named" "[ \"\$(rc A may kai house)\" = 3 ] && grep -q '(kith rollback authority)' $T/err"
 cp "$T/auth.before" "$KITH_AUTH"
 check "tombstone gone: reads work again" "A may kai house"
 exit $fail
