@@ -3,6 +3,9 @@
 //! differential harness (`kernel/tests/difftest`) fails when they differ.
 
 pub mod accounts;
+// Unix only: it runs `kith-auth` through the secrets module's timeout helper.
+#[cfg(unix)]
+pub mod cost;
 pub mod delegation;
 pub mod engines;
 // Unix only: these write modes with mode(2), sync directories, send signals and read `ps`. The Windows build of this crate

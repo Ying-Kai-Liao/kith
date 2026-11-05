@@ -7,7 +7,14 @@
 //! "not available on this operating system yet" for every cutover verb, and the accounts failover there stays behind its
 //! `meta.accounts_core_writes` flag, which nothing sets).
 
+//!
+//! M4-5a: [`schedules`], the host's routines and `kith-sched`'s state. It does have secrets (the webhook keys), which it
+//! writes into the envelope itself and puts back into serve.db at a rollback; see its doc.
+
 pub(crate) mod accounts;
+pub(crate) mod schedules;
+#[cfg(test)]
+mod schedules_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod transcripts;
