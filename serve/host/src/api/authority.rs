@@ -31,22 +31,22 @@
 //! person's shared projects (`store.person(..).projects`: the host's, not an access grant), and the member / bot /
 //! unproven method lists (the contract).
 //!
-//! M2-17 puts the owner's side on the same switch: `api/people.rs setPersonAccess` sends `people.grant` / `people.revoke`
-//! ([`owner_call`]; kith-auth is not written), the listing of people reads the membership rows from `people.list`
+//! M2-17 puts the owner's side on the same switch: `api/people.rs setPersonAccess` writes kith-auth first (auth.json is
+//! the truth until the switch, M2-18a) and then mirrors `people.grant` / `people.revoke` ([`owner_call`]), the listing of people reads the membership rows from `people.list`
 //! (`members::auth_people_now`, also what the 10-second mirror reads), and `api/remote.rs accessRequests` /
 //! `decideAccessRequest` use `people.requests|approve|deny` (`cloud::decide_in_core`, which stores exactly the device the
-//! core answered). The host files each request it holds with `people.fileRequest` on every pull. All of it fails CLOSED:
-//! a core that can't be reached is an error to the app ([`CoreDown`]), never a write to kith-auth or an answer from the
-//! host's copy.
+//! core answered). The host files each request it holds with `people.fileRequest` on every pull. The reads and the request
+//! decisions fail CLOSED: a core that can't be reached is an error to the app ([`CoreDown`]), never an answer from the
+//! host's copy. The owner's writes do not need the core: a mirror that fails is logged, and only closes the gate.
 
 use super::roles;
 use crate::store::Store;
 use kith_kernel::paths::Paths;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The opt-in: set to `1` and the event filter asks the core's authority.
 pub const SWITCH: &str = "KITH_CORE_AUTHORITY";
@@ -241,9 +241,158 @@ impl Selected {
     }
 }
 
-/// Whether the opt-in is set.
+/// Whether the opt-in is set AND the core's gate (`cutover.mayServe` for `authority`, asked as the Host) says it may serve.
+/// The variable alone is not enough (M2-18a): while the core has not imported auth.json, or auth.json changed in a way
+/// the core has not, the host stays on kith-auth. Until the first answer (the daemon starts beside the host) it is off.
 pub fn core_selected() -> bool {
+    opted_in() && gate_open(&fingerprint_of(auth_path()))
+}
+
+pub fn opted_in() -> bool {
     std::env::var(SWITCH).is_ok_and(|v| v == "1")
+}
+
+/// The gate's last answer, what auth.json looked like and when the ask was made.
+struct Gate {
+    ok: bool,
+    fingerprint: String,
+    /// When the ask began: the answer is at least this old. A latch past [`GATE_MAX_AGE`] is closed, so a gate thread
+    /// that hangs on a hung daemon (or died) cannot leave the last "yes" standing.
+    asked_at: Instant,
+}
+
+static GATE: Mutex<Option<Gate>> = Mutex::new(None);
+
+/// How often the gate is asked again. A change of auth.json closes it at once (the fingerprint no longer matches) until
+/// the next answer, so this is how long a switched-on host can stay on kith-auth after a harmless write, not how long a
+/// stale core can answer.
+const GATE_EVERY: Duration = Duration::from_secs(2);
+
+/// How old the latch may be and still count: a few asks. One slow ask passes; a thread that is stuck or gone does not.
+const GATE_MAX_AGE: Duration = Duration::from_secs(3 * GATE_EVERY.as_secs());
+
+fn gate_open(now: &str) -> bool {
+    gate_open_at(now, Instant::now())
+}
+
+fn gate_open_at(fingerprint: &str, at: Instant) -> bool {
+    GATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|g| {
+        g.ok && g.fingerprint == fingerprint && at.saturating_duration_since(g.asked_at) < GATE_MAX_AGE
+    })
+}
+
+fn close_gate() {
+    *GATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(Gate { ok: false, fingerprint: String::new(), asked_at: Instant::now() });
+}
+
+/// Closes the gate when the gate thread ends for any reason, a panic included.
+struct CloseOnExit;
+
+impl Drop for CloseOnExit {
+    fn drop(&mut self) {
+        close_gate();
+        if std::thread::panicking() {
+            tracing::error!("the authority gate thread panicked; staying on kith-auth until the host restarts");
+        }
+    }
+}
+
+/// The auth.json the core's gate reads: `folders.secrets/auth.json`, which is how the core resolves it from the
+/// `home`, `kernel` and `env` this process sends (`folders_for` + `ctx_from`).
+fn auth_of(core: &CoreData) -> PathBuf {
+    core.folders.secrets.join("auth.json")
+}
+
+/// The same path for every request, resolved once (no path work per request beyond the one stat).
+fn auth_path() -> &'static Path {
+    static AUTH: OnceLock<PathBuf> = OnceLock::new();
+    AUTH.get_or_init(|| auth_of(&CoreData::from_process()))
+}
+
+/// auth.json's inode, size and mtime (the framework's own fingerprint of it), or `none`. `kith-auth` writes the file
+/// as a temporary file and `os.replace`s it over (`save_auth`), so every write is a new inode: the stat sees it even
+/// when size and mtime would repeat.
+fn fingerprint_of(auth: &Path) -> String {
+    match std::fs::metadata(auth) {
+        Ok(md) => {
+            use std::os::unix::fs::MetadataExt as _;
+            format!("{}:{}:{}:{}", md.ino(), md.len(), md.mtime(), md.mtime_nsec())
+        }
+        Err(_) => "none".into(),
+    }
+}
+
+/// What the gate's answer means for the host: whether to use the core, and the line to log when it is no (or a warning
+/// with a yes). `None` is a core that did not answer.
+pub fn read_gate(answer: Option<&Value>) -> (bool, Option<String>) {
+    let Some(a) = answer else {
+        return (false, Some("the core did not answer the authority gate; staying on kith-auth".into()));
+    };
+    let warning = a["warning"].as_str().map(str::to_owned);
+    if a["ok"] == true {
+        return (true, warning);
+    }
+    let msg = match warning {
+        // "authority: N difference(s) between the core and the old store (...)": the import is behind the file.
+        Some(w) => match w.split_once(" difference(s)").and_then(|(head, _)| head.rsplit(' ').next()?.parse::<usize>().ok()) {
+            Some(n) => format!(
+                "the core missed {n} changes, run `kith kernel core-migrate --authority --force`; staying on kith-auth ({w})"
+            ),
+            None => format!("{w}; staying on kith-auth"),
+        },
+        None => "authority is not switched to the core (run `kith kernel core-migrate --authority`, then `kith migrate step authority`); staying on kith-auth"
+            .into(),
+    };
+    (false, Some(msg))
+}
+
+/// One ask of the gate: the core's `cutover.mayServe` for `authority` on the Host connection, with this process's view of
+/// the folders (the core reads the caller's own auth.json, not its own).
+fn ask_gate(core: &CoreData) -> (bool, Option<String>) {
+    let (Some(home), Some(kernel)) = (core.home.to_str(), core.kernel.to_str()) else {
+        return (false, Some("home or kernel folder is not UTF-8; staying on kith-auth".into()));
+    };
+    let params = json!({"module": "authority", "home": home, "kernel": kernel, "env": core.env});
+    read_gate(crate::core_front::call_as_host(&core.folders, "cutover.mayServe", &params).as_ref())
+}
+
+/// `KITH_CORE_AUTHORITY=1` at host start: from now on the gate is asked every [`GATE_EVERY`] on a thread of its own and
+/// the answer is kept with auth.json's fingerprint. Without the variable nothing runs and the host is on kith-auth.
+pub fn start_gate() {
+    if !opted_in() {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("authority-gate".into()).spawn(|| {
+        let _closes = CloseOnExit;
+        let core = CoreData::from_process();
+        let auth = auth_of(&core);
+        let mut last: Option<(bool, Option<String>)> = None;
+        loop {
+            // Fingerprint first: a write that lands during the ask leaves the answer older than the file, and it is dropped.
+            let asked_at = Instant::now();
+            let fingerprint = fingerprint_of(&auth);
+            let (ok, line) = ask_gate(&core);
+            *GATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Gate { ok, fingerprint, asked_at });
+            if last.as_ref() != Some(&(ok, line.clone())) {
+                match (ok, &line) {
+                    (true, None) => tracing::info!("KITH_CORE_AUTHORITY=1: the core serves authority"),
+                    (true, Some(w)) => tracing::warn!("KITH_CORE_AUTHORITY=1: the core serves authority. {w}"),
+                    (false, w) => tracing::warn!(
+                        "KITH_CORE_AUTHORITY=1 is not honoured: {}",
+                        w.as_deref().unwrap_or("the core does not serve authority")
+                    ),
+                }
+                last = Some((ok, line));
+            }
+            std::thread::sleep(GATE_EVERY);
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!(
+            "KITH_CORE_AUTHORITY=1 is not honoured: the gate thread would not start ({e}); staying on kith-auth"
+        );
+    }
 }
 
 /// [`core_selected`] for the request guard: also on while a test has given it a core (`TEST_CORE`), so a test does not
@@ -304,5 +453,82 @@ pub async fn owner_call(method: &'static str, mut params: Value, repeatable: boo
         crate::core_front::Answer::Down { why, lost: true } => {
             Err(anyhow::anyhow!(CoreDown(format!("{why}; it may have run"))))
         }
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    #[test]
+    fn a_denied_gate_names_how_many_changes_the_core_missed() {
+        let a = json!({"ok": false, "warning": "authority: 3 difference(s) between the core and the old store (x); not served from the core"});
+        let (open, line) = read_gate(Some(&a));
+        let line = line.unwrap();
+        assert!(!open);
+        assert!(
+            line.contains("the core missed 3 changes, run `kith kernel core-migrate --authority --force`"),
+            "{line}"
+        );
+        let (open, line) = read_gate(Some(&json!({"ok": false, "warning": null})));
+        assert!(!open && line.unwrap().contains("not switched"));
+        assert_eq!(read_gate(Some(&json!({"ok": true, "warning": null}))), (true, None));
+        let (open, line) = read_gate(Some(&json!({"ok": true, "warning": "WARNING x"})));
+        assert!(open && line.as_deref() == Some("WARNING x"));
+    }
+
+    /// The latch is one static: the tests that touch it take turns.
+    static LATCH: Mutex<()> = Mutex::new(());
+
+    fn open_latch(at: Instant) {
+        *GATE.lock().unwrap() = Some(Gate { ok: true, fingerprint: "1:2:3:4".into(), asked_at: at });
+    }
+
+    #[test]
+    fn the_gate_is_closed_until_asked_and_closes_when_auth_json_changes() {
+        let _one = LATCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *GATE.lock().unwrap() = None;
+        // Not asked yet (or no thread running): closed.
+        assert!(!gate_open("1:2:3:4"));
+        open_latch(Instant::now());
+        assert!(gate_open("1:2:3:4"));
+        assert!(!gate_open("1:2:9:9"), "a changed auth.json closes it at once");
+        *GATE.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn a_stale_latch_reads_closed() {
+        let _one = LATCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let asked = Instant::now();
+        open_latch(asked);
+        assert!(gate_open_at("1:2:3:4", asked + GATE_EVERY), "one ask old is fine");
+        assert!(!gate_open_at("1:2:3:4", asked + GATE_MAX_AGE), "a thread stuck on a hung daemon closes it by age");
+        assert!(!gate_open_at("1:2:3:4", asked + GATE_MAX_AGE * 10));
+        *GATE.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn a_panicking_gate_thread_leaves_the_gate_closed() {
+        let _one = LATCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        open_latch(Instant::now());
+        assert!(gate_open("1:2:3:4"));
+        let t = std::thread::spawn(|| {
+            let _closes = CloseOnExit;
+            panic!("the gate thread dies");
+        });
+        assert!(t.join().is_err());
+        assert!(!gate_open("1:2:3:4"));
+        *GATE.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn the_gate_and_the_core_read_the_same_auth_json() {
+        // The core resolves the file from the home, kernel and env this process sends it (`folders_for`); the gate thread's
+        // fingerprint and `core_selected` stat what that comes to.
+        let core = CoreData::from_process();
+        let lookup = |name: &str| core.env.get(name).and_then(Value::as_str).map(str::to_owned);
+        let theirs = kith_kernel::paths::paths(&core.home, &core.kernel, &lookup).secrets.join("auth.json");
+        assert_eq!(auth_of(&core), theirs);
+        assert_eq!(auth_path(), theirs.as_path());
     }
 }

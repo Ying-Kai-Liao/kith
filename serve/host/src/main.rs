@@ -837,7 +837,9 @@ fn core_migrate_authority(_: &kith_kernel::paths::Paths, _: bool, _: bool) -> i3
 /// `kith kernel cutover ...`: the lines of the framework's answer (exit code).
 #[cfg(unix)]
 fn cutover_verb(p: &kith_kernel::paths::Paths, args: &[String]) -> i32 {
-    match kith_core::cutover(p, args) {
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
+    match kith_core::cutover(p, &kernel, args) {
         Ok(lines) => {
             for line in &lines {
                 println!("{line}");
@@ -1580,6 +1582,8 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
     // The core's daemon front: the owner socket for the CLI and the link to the holder. It starts on its own thread,
     // never delays this startup, and a core that will not start is a line in the core log, not an error here.
     let core_front = core_front::start_beside_host();
+    // `KITH_CORE_AUTHORITY=1` is honoured only while the core's gate says so (M2-18a).
+    api::authority::start_gate();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), bind, port, "kith-serve listening");
     // Peer addresses: some settings may only be changed from this computer.
     let app = api::router(hub.clone()).into_make_service_with_connect_info::<std::net::SocketAddr>();

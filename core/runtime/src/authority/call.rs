@@ -76,15 +76,23 @@ pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
         .get("home")
         .and_then(Value::as_str)
         .map_or_else(kith_kernel::paths::process_home, PathBuf::from);
-    Ok(Ctx {
+    let mut ctx = ctx_from(&folders, kernel);
+    ctx.serve = ServeDir::Fixed(serve_dir_of(params, &home));
+    Ok(ctx)
+}
+
+/// The rules' context over a caller's folders (also the cutover module's, which has no params to read them from; its
+/// serve folder is the machine's, `ctx_of` sets the caller's).
+pub(crate) fn ctx_from(folders: &kith_kernel::paths::Paths, kernel: PathBuf) -> Ctx {
+    Ctx {
         auth: folders.secrets.join("auth.json"),
         agents: folders.agents.clone(),
         kernel,
         person: None,
         now_ms: secrets::now_ms(),
         sandbox: Sandbox::Fixed(false),
-        serve: ServeDir::Fixed(serve_dir_of(params, &home)),
-    })
+        serve: ServeDir::Fixed(folders.machine.join("serve")),
+    }
 }
 
 fn life_of(core: &Core, params: &Value) -> Result<Life> {
