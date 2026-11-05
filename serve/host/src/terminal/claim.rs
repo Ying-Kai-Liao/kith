@@ -107,6 +107,15 @@ pub fn read(path: &Path) -> Option<Claim> {
 /// The live claim on `sid` (either name) that keeps the host from writing, if any. A host turn's own claim (`Kind::App`,
 /// see `agent/bot/turn.rs`) is not one: it only keeps a terminal out. A take-over's claim is.
 pub fn holder(state: &Path, sid: &str) -> Option<Claim> {
+    let files = holder_files(state, sid);
+    match super::core_claims::folders_for(state) {
+        // Flag on: the core's claim holds too (the files only name a writer from before the flag).
+        Some(f) if files.is_none() => super::core_claims::holder(&f, sid),
+        _ => files,
+    }
+}
+
+fn holder_files(state: &Path, sid: &str) -> Option<Claim> {
     [false, true]
         .into_iter()
         .filter_map(|t| read(&path(state, sid, t)))
@@ -130,6 +139,29 @@ pub fn take_as(
     person: Option<&str>,
     agent: Option<&str>,
 ) -> std::io::Result<Result<(), Held>> {
+    take_for_turn(state, sid, kind, pid, takeover, person, agent, None)
+}
+
+/// [`take_as`] for a host turn, which knows the run's folder (`cwd`): with the core flag on, the turn's session row names it.
+#[allow(clippy::too_many_arguments, reason = "take_as's inputs and the folder")]
+pub fn take_for_turn(
+    state: &Path,
+    sid: &str,
+    kind: Kind,
+    pid: u32,
+    takeover: bool,
+    person: Option<&str>,
+    agent: Option<&str>,
+    cwd: Option<&str>,
+) -> std::io::Result<Result<(), Held>> {
+    // Flag on: a session's claim is the core's. A proc claim names no session and a take-over claim is the host's step towards
+    // a stop (`sync::take_over` goes through the core itself), so both stay files.
+    if !takeover
+        && !sid.starts_with("proc-")
+        && let Some(f) = super::core_claims::folders_for(state)
+    {
+        return super::core_claims::take_as(&f, state, sid, kind, pid, person, agent, cwd);
+    }
     if !safe_id(sid) {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a session id"));
     }
@@ -470,6 +502,9 @@ impl Lock {
 
 /// Gives the claim back; only the claimer's own file is removed.
 pub fn release(state: &Path, sid: &str, pid: u32, takeover: bool) {
+    if !takeover && let Some(f) = super::core_claims::folders_for(state) {
+        super::core_claims::release(&f, sid, pid);
+    }
     let p = path(state, sid, takeover);
     // Under the claim lock: a taker may have replaced our (stale) claim with its own between the read and the remove.
     let Some(parent) = p.parent() else { return };

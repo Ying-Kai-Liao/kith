@@ -968,6 +968,16 @@ async fn take_over_inner(hub: &Arc<Hub>, t: &Thread) -> Result<Value> {
     // Held from here to the end: nobody resumes or sends into the session while it is being ended and imported. The
     // terminal's own claim stays its own; this one is the host's, named for the take-over.
     let sid = reg.session_id.clone();
+    // With the core flag on and a claim of the terminal in the core, the take-over is the core's: the claim stays the writer
+    // until it is `ended`, and the host goes on only then (a terminal started before the flag has only a claim file and takes
+    // the path below).
+    if let Some(f) = super::core_claims::folders_for(&env.state) {
+        let (f2, s2) = (f.clone(), sid.clone());
+        let id = tokio::task::spawn_blocking(move || super::core_claims::terminal_claim(&f2, &s2)).await?;
+        if let Some(id) = id {
+            return take_over_core(hub, t, reg, &env, f, id).await;
+        }
+    }
     if claim::take(&env.state, &sid, claim::Kind::App, std::process::id(), true)?.is_err() {
         // A second take-over of the same session is already running.
         return Ok(json!({"liveWriter": null, "tookOver": false}));
@@ -1004,6 +1014,49 @@ async fn take_over_inner(hub: &Arc<Hub>, t: &Thread) -> Result<Value> {
     {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    take_over_tail(hub, t, reg).await
+}
+
+/// The take-over through the core's claim (M3-10f): the same steps as the file path, but the writer is the core's claim, and
+/// nothing is promoted until the core shows it `ended`. The terminal is signalled first (it is idle: checked just before),
+/// then the claim is stopped (`ending`: still the writer) and the host waits for the core to end it (`settle` confirms the
+/// process gone). A claim still `ending` after the wait refuses the take-over: nobody writes, and Stop again is safe.
+async fn take_over_core(
+    hub: &Arc<Hub>,
+    t: &Thread,
+    reg: Registry,
+    env: &Env,
+    f: kith_kernel::paths::Paths,
+    claim_id: i64,
+) -> Result<Value> {
+    let taken = registry::dir(&env.state).join(format!("{}.taken", reg.session_id));
+    write_private(&taken, &chrono::Utc::now().to_rfc3339())?;
+    let idle = registry::liveness(&reg, env.sessions.as_deref()) == Live::Idle;
+    if idle {
+        super::intent::write(&env.state, &reg.session_id, "taken over in the app", reg.pid);
+    }
+    if !idle || !registry::terminate(reg.pid) {
+        let _ = std::fs::remove_file(super::intent::path(&env.state, &reg.session_id));
+        let _ = std::fs::remove_file(&taken);
+        return Err(TerminalBusy("terminalBusy: The terminal changed while taking over. Try again.").into());
+    }
+    let ended = tokio::task::spawn_blocking(move || super::core_claims::take_over(&f, claim_id, EXIT_WAIT)).await?;
+    match ended {
+        Ok(super::core_claims::Taken::Ended) => {}
+        Ok(super::core_claims::Taken::StillEnding) => {
+            let _ = std::fs::remove_file(&taken);
+            return Err(TerminalBusy("terminalBusy: The terminal didn't close. Close it yourself.").into());
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(&taken);
+            return Err(error.into());
+        }
+    }
+    take_over_tail(hub, t, reg).await
+}
+
+/// After the terminal is gone and its claim given back: import its last lines and hand the thread to the host.
+async fn take_over_tail(hub: &Arc<Hub>, t: &Thread, reg: Registry) -> Result<Value> {
     // The terminal's last lines, before the host writes after them.
     let (h, thread, r) = (hub.clone(), t.clone(), reg);
     tokio::task::spawn_blocking(move || {

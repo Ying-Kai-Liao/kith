@@ -1475,3 +1475,6 @@ async fn a_mirrored_ask_card_reaches_the_owner_and_no_invited_person_or_bot_gues
         assert!(roles::event_for_bot(&r.hub.store, "some-bot", ev).is_none(), "a bot guest saw an owner-only run");
     }
 }
+
+#[path = "core_claims_flow_tests.rs"]
+mod core_claims;

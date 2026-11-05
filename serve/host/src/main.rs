@@ -1579,6 +1579,12 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
     watchdog::start();
     // The core's daemon front: the owner socket for the CLI and the link to the holder. It starts on its own thread,
     // never delays this startup, and a core that will not start is a line in the core log, not an error here.
+    // M3-10f: off unless KITH_HOST_CORE_CLAIMS=1. On, the session claims, the terminal take-over and the host's turn claims go
+    // through the core's `hostclaim.*` rows instead of the claim files.
+    if terminal::core_claims::flag_on() {
+        terminal::core_claims::enable(&terminal::Env::default().state, core_front::process_folders());
+        tracing::info!("session claims go through the core (KITH_HOST_CORE_CLAIMS=1)");
+    }
     let core_front = core_front::start_beside_host();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), bind, port, "kith-serve listening");
     // Peer addresses: some settings may only be changed from this computer.
