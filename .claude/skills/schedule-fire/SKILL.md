@@ -206,7 +206,7 @@ The two "cancel in a second transaction" variants, run against every property (n
 4. A pass can have lost the ability to fail: break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `cf308ebcbc3fb43e8d2a983bce57ab18efbe0135` (origin/rust-rebuild after M4-3 and #776; the code table above was checked against `fire.rs` / `sync.rs` at M4-4a. The model itself, `Fire.tla`, was not run again: nothing in M4-3 or M4-4a changes a modelled action).
+**Sync commit:** `d8d8c6f8a22200f92ac56477a49e2afb81b76a1f` (M4-5a: the fire skips a job whose `mac` is another Mac's, a tick where every due job fails is counted (limit 10), and old `sched_fires` rows are pruned hourly; none is a modelled action, `run.sh` was run again and every row is as expected. Before that: origin/rust-rebuild after M4-3 and #776; the code table above was checked against `fire.rs` / `sync.rs` at M4-4a. The model itself, `Fire.tla`, was not run again: nothing in M4-3 or M4-4a changes a modelled action).
 
 ## Map of the folder
 

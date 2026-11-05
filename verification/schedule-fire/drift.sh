@@ -10,7 +10,7 @@ set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below: origin/rust-rebuild after M4-3 (the fire
 # transaction) and M4-4a, with the code table in the skill checked against fire.rs / sync.rs.
-SYNC=cf308ebcbc3fb43e8d2a983bce57ab18efbe0135
+SYNC=d8d8c6f8a22200f92ac56477a49e2afb81b76a1f
 
 FILES=(
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)
