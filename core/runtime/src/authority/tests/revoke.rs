@@ -974,3 +974,91 @@ fn a_database_imported_before_handles_cannot_say_a_person_is_unused() {
     rig.lines("people.removePerson", &json!({"id": "hal", "unused": true}))
         .unwrap();
 }
+
+// --- lane B filled by the import ---------------------------------------------------------------------------------------------
+
+/// A world the real importer fills: a person with an `agent@<id>` grant, one who owns a profile, one it is lent to, one with
+/// nothing, and an owned profile of an id that is no longer a person.
+fn imported_world() -> Rig {
+    let rig = Rig::new(&json!({}));
+    crate::import::insert_all_for_tests(
+        rig.core.conn(),
+        &json!({
+            "people": {"kai": {"owner": true}, "ivy": {}, "jon": {}, "kim": {}, "zed": {}},
+            "profiles": {
+                "github/jon": {"GITHUB_TOKEN": "keychain:kith/github/jon#GITHUB_TOKEN", "person": "jon"},
+                "github/kai": {"person": "kai", "with": ["kim", "kai"]},
+                "github/lee": {"person": "lee"},
+                "github/shared": {}
+            },
+            "grants": {"house": {"github": "github/shared"}, "house@ivy": {"github": "github/shared"}}
+        }),
+    )
+    .unwrap();
+    rig
+}
+
+#[test]
+fn after_an_import_remove_unused_refuses_a_person_with_a_grant_a_profile_or_one_lent_to_them() {
+    let mut rig = imported_world();
+    for (who, what) in [("ivy", "grants"), ("jon", "profiles"), ("kim", "profiles")] {
+        assert_eq!(
+            refused(
+                &mut rig,
+                "people.removePerson",
+                &json!({"id": who, "unused": true})
+            ),
+            format!(
+                "{who} is not unused ({what}): kith-auth person {who} --rm removes them and retires the id"
+            )
+        );
+    }
+    rig.lines("people.removePerson", &json!({"id": "zed", "unused": true}))
+        .unwrap();
+}
+
+#[test]
+fn after_an_import_a_removed_persons_id_is_kept_while_they_own_a_profile() {
+    let mut rig = imported_world();
+    assert_eq!(
+        rig.lines("people.retired", &id("lee")).unwrap(),
+        ["a removed 'lee' still owns github/lee"]
+    );
+    assert_eq!(
+        refused(&mut rig, "people.addPerson", &id("lee")),
+        "a removed 'lee' still owns github/lee: give the new person another id (e.g. lee-2)"
+    );
+    // an id nothing is left of is free
+    assert_eq!(
+        rig.lines("people.retired", &id("nobody")).unwrap(),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_database_imported_before_the_tables_were_filled_cannot_say_an_id_is_free_or_a_person_unused() {
+    let mut rig = imported_world();
+    // what m0022 leaves on a database that already had people
+    rig.core
+        .conn()
+        .execute_batch(
+            "DELETE FROM secret_profiles; DELETE FROM secret_vars; DELETE FROM secret_grants; \
+             INSERT INTO secret_stale VALUES ('imported before secret_grants');",
+        )
+        .unwrap();
+    let said = rig.lines("people.retired", &id("lee")).unwrap();
+    assert!(said[0].contains("import again first"), "{said:?}");
+    let said = refused(
+        &mut rig,
+        "people.removePerson",
+        &json!({"id": "zed", "unused": true}),
+    );
+    assert!(said.contains("import again first"), "{said}");
+    // a re-import (what `--force` does) empties the mark with the tables it refills
+    rig.core
+        .conn()
+        .execute_batch("DELETE FROM secret_stale")
+        .unwrap();
+    rig.lines("people.removePerson", &json!({"id": "zed", "unused": true}))
+        .unwrap();
+}

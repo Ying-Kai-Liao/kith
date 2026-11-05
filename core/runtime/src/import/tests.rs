@@ -146,7 +146,7 @@ fn real_shaped() -> String {
             "github/work": {"GITHUB_TOKEN": "keychain:kith/github/work#GITHUB_TOKEN"},
             "other/home": {"KEY": "env:SOME_VAR"}
         },
-        "grants": {"house": ["github/work"]},
+        "grants": {"house": {"github": "github/work", "multi": ["other/home", "github/work"]}},
         "env": {"house": {"svc": {"A": "plain-value"}}},
         "once": {},
         "people": {
@@ -185,6 +185,9 @@ fn a_real_shaped_file_goes_in_with_a_backup_a_log_row_and_the_keychain_item() {
     assert_eq!(f.count("presets"), 1);
     assert_eq!(f.count("invites"), 1);
     assert_eq!(f.count("retired"), 1);
+    assert_eq!(f.count("secret_profiles"), 2);
+    assert_eq!(f.count("secret_vars"), 2);
+    assert_eq!(f.count("secret_grants"), 3);
     assert_eq!(f.count("import_log"), 1);
     assert_eq!(
         sink.records
@@ -193,7 +196,8 @@ fn a_real_shaped_file_goes_in_with_a_backup_a_log_row_and_the_keychain_item() {
         Some(b"tok".as_slice())
     );
     let said = rep.lines.join("\n");
-    assert!(said.contains("left behind: profiles"), "{said}");
+    assert!(!said.contains("left behind: profiles"), "{said}");
+    assert!(!said.contains("left behind: grants"), "{said}");
     assert!(said.contains("left behind: env"), "{said}");
     assert!(said.contains("person keys"), "{said}");
     assert!(
@@ -505,7 +509,7 @@ fn the_same_answer_check_catches_rows_that_say_something_else() {
     let conn = {
         let mut c = Connection::open_in_memory().unwrap();
         crate::db::apply(&mut c, crate::db::MIGRATIONS, Some("t")).unwrap();
-        super::authority::insert_all(&c, &other).unwrap();
+        super::authority::insert_all(&c, &other, &super::authority::Services::none()).unwrap();
         c
     };
     let diffs = check::diffs(&auth, &conn, &f.ctx).unwrap();
@@ -517,7 +521,7 @@ fn the_same_answer_check_catches_rows_that_say_something_else() {
     let conn = {
         let mut c = Connection::open_in_memory().unwrap();
         crate::db::apply(&mut c, crate::db::MIGRATIONS, Some("t")).unwrap();
-        super::authority::insert_all(&c, &auth).unwrap();
+        super::authority::insert_all(&c, &auth, &super::authority::Services::none()).unwrap();
         c
     };
     assert_eq!(
@@ -748,4 +752,475 @@ fn no_people_is_an_empty_list_and_a_database_from_before_handles_has_none() {
     assert_eq!(rows[0]["kith"], "");
     assert_eq!(rows[0]["handles"], json!({}));
     assert_eq!(rows[0]["id"], "kai", "everything else is still answered");
+}
+
+// --- profiles and grants (m0021) ------------------------------------------------------------------------------------------
+
+fn secrets_file() -> Value {
+    json!({
+        "people": {"kai": {"owner": true}, "sam": {"name": "Sam"}},
+        "profiles": {
+            "github/work": {"GITHUB_TOKEN": "keychain:kith/github/work#GITHUB_TOKEN", "person": "sam", "with": ["kai", "mia"]},
+            "github/bare": {},
+            "chrome-agent/main": {"browser": "chrome"},
+            "chrome-agent/team": {"person": "*"},
+            "other/env": {"KEY": "env:SOME_VAR", "FILE": "env-file:~/.x#FILE"},
+            "host/svc": {"store": "host"}
+        },
+        "grants": {
+            "coder": {"github": "github/work", "multi": ["other/env", "github/work", "other/env"], "none": null},
+            "coder@sam": {"github": ["github/work"]},
+            "coder@gone": {"github": "github/bare"},
+            "scratch": null
+        }
+    })
+}
+
+/// A fixture whose kernel folder has a `chrome-agent` login service and a `github` API-key one.
+fn with_services(f: &Fixture) {
+    let d = f.ctx.kernel.join("services");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("chrome-agent.json"), r#"{"kind": "login"}"#).unwrap();
+    std::fs::write(d.join("github.json"), r#"{"kind": "cli"}"#).unwrap();
+}
+
+fn query(f: &Fixture, sql: &str) -> Vec<Vec<Option<String>>> {
+    let core = open_all(&f.layout);
+    let mut st = core.conn().prepare(sql).unwrap();
+    let n = st.column_count();
+    st.query_map([], |r| {
+        (0..n)
+            .map(|i| r.get::<_, rusqlite::types::Value>(i))
+            .map(|v| {
+                v.map(|v| match v {
+                    rusqlite::types::Value::Null => None,
+                    rusqlite::types::Value::Integer(i) => Some(i.to_string()),
+                    rusqlite::types::Value::Text(t) => Some(t),
+                    other => Some(format!("{other:?}")),
+                })
+            })
+            .collect()
+    })
+    .unwrap()
+    .map(|r| r.unwrap())
+    .collect()
+}
+
+#[allow(clippy::unnecessary_wraps, reason = "the rows hold optional text")]
+fn s(v: &str) -> Option<String> {
+    Some(v.to_owned())
+}
+
+#[test]
+fn profiles_vars_and_grants_go_in_as_the_file_has_them() {
+    let f = Fixture::new();
+    with_services(&f);
+    f.auth(&secrets_file().to_string());
+    let kc = FakeKeychain::default().with("kith/github/work", "GITHUB_TOKEN", "tok");
+    let mut sink = MemSink::default();
+    let rep = f.run(AuthorityOptions::default(), &kc, &mut sink).unwrap();
+    let said = rep.lines.join("\n");
+    assert!(
+        !said.contains("left behind: profiles") && !said.contains("left behind: grants"),
+        "{said}"
+    );
+    assert_eq!(
+        query(
+            &f,
+            "SELECT profile, person, lent, browser FROM secret_profiles ORDER BY profile"
+        ),
+        vec![
+            vec![s("chrome-agent/main"), s("kai"), None, s("chrome")],
+            vec![s("chrome-agent/team"), None, None, None],
+            vec![s("github/bare"), None, None, None],
+            vec![s("github/work"), s("sam"), s(r#"["kai","mia"]"#), None],
+            vec![s("host/svc"), None, None, None],
+            vec![s("other/env"), None, None, None],
+        ],
+        "a profile with no variables is a row; a login's owner is worked out; `*` is NULL"
+    );
+    assert_eq!(
+        query(
+            &f,
+            "SELECT profile, var, source FROM secret_vars ORDER BY profile, var"
+        ),
+        vec![
+            vec![
+                s("github/work"),
+                s("GITHUB_TOKEN"),
+                s("keychain:kith/github/work#GITHUB_TOKEN")
+            ],
+            vec![s("host/svc"), s("store"), s("host")],
+            vec![s("other/env"), s("FILE"), s("env-file:~/.x#FILE")],
+            vec![s("other/env"), s("KEY"), s("env:SOME_VAR")],
+        ],
+        "references only; the sealed value is in the envelope, not here"
+    );
+    assert_eq!(
+        query(
+            &f,
+            "SELECT agent, service, profile, seq FROM secret_grants ORDER BY agent, service, seq"
+        ),
+        vec![
+            vec![s("coder"), s("github"), s("github/work"), s("0")],
+            vec![s("coder"), s("multi"), s("other/env"), s("0")],
+            vec![s("coder"), s("multi"), s("github/work"), s("1")],
+            vec![s("coder@gone"), s("github"), s("github/bare"), s("0")],
+            vec![s("coder@sam"), s("github"), s("github/work"), s("0")],
+        ],
+        "file order in a list, a duplicate once, a null grant none, an agent@person kept as spelled"
+    );
+    assert!(
+        query(&f, "SELECT 1 FROM secret_vars WHERE source LIKE '%tok'").is_empty(),
+        "no value in core.db"
+    );
+}
+
+#[test]
+fn a_reimport_gives_the_same_rows_and_clears_what_the_file_no_longer_has() {
+    let f = Fixture::new();
+    with_services(&f);
+    f.auth(&secrets_file().to_string());
+    let mut sink = MemSink::default();
+    f.import(&mut sink).unwrap();
+    let rows = |f: &Fixture| {
+        (
+            query(f, "SELECT * FROM secret_profiles ORDER BY profile"),
+            query(f, "SELECT * FROM secret_vars ORDER BY profile, var"),
+            query(
+                f,
+                "SELECT * FROM secret_grants ORDER BY agent, service, seq",
+            ),
+        )
+    };
+    let first = rows(&f);
+    let rep = f.import(&mut sink).unwrap();
+    assert!(!rep.changed, "{:?}", rep.lines);
+    assert_eq!(rows(&f), first);
+    let force = AuthorityOptions {
+        dry_run: false,
+        force: true,
+    };
+    f.run(force, &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(rows(&f), first, "a forced re-import of the same file");
+    // the file drops a grant and a profile: the forced re-import drops them from the core
+    let mut auth = secrets_file();
+    auth["grants"]["coder"]
+        .as_object_mut()
+        .unwrap()
+        .remove("github");
+    auth["profiles"]
+        .as_object_mut()
+        .unwrap()
+        .remove("github/bare");
+    f.auth(&auth.to_string());
+    let e = f.import(&mut sink).unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("--force")),
+        "{e:?}"
+    );
+    f.run(force, &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(f.count("secret_profiles"), 5);
+    assert_eq!(f.count("secret_grants"), 4);
+}
+
+#[test]
+fn a_file_without_profiles_or_grants_imports_none() {
+    let f = Fixture::new();
+    f.auth(r#"{"people": {"kai": {"owner": true}}}"#);
+    f.import(&mut MemSink::default()).unwrap();
+    assert_eq!(
+        (
+            f.count("secret_profiles"),
+            f.count("secret_vars"),
+            f.count("secret_grants")
+        ),
+        (0, 0, 0)
+    );
+}
+
+#[test]
+fn a_profile_that_could_hold_a_plain_value_refuses_the_file_without_showing_it() {
+    for (profile, why) in [
+        (json!({"TOKEN": "hunter2-plain"}), "reference"),
+        (json!({"TOKEN": 5}), "not text"),
+        (json!({"with": "kai"}), "list of people"),
+    ] {
+        let f = Fixture::new();
+        f.auth(
+            &json!({"people": {"kai": {"owner": true}}, "profiles": {"github/work": profile}})
+                .to_string(),
+        );
+        let e = f.import(&mut MemSink::default()).unwrap_err();
+        let said = e.to_string();
+        assert!(
+            matches!(&e, Error::Refused(_)) && said.contains("github/work") && said.contains(why),
+            "{said}"
+        );
+        assert!(!said.contains("hunter2") && !f.layout.db.exists(), "{said}");
+    }
+}
+
+#[test]
+fn a_grant_of_the_wrong_shape_refuses_the_file() {
+    for grants in [
+        json!({"coder": ["github/work"]}),
+        json!({"coder": {"github": 5}}),
+        json!({"coder": {"github": [1]}}),
+    ] {
+        let f = Fixture::new();
+        f.auth(&json!({"people": {}, "grants": grants}).to_string());
+        let e = f.import(&mut MemSink::default()).unwrap_err();
+        assert!(
+            matches!(&e, Error::Refused(m) if m.contains("grants.coder")),
+            "{e:?}"
+        );
+    }
+}
+
+#[test]
+fn an_unmarked_login_belongs_to_the_owner_or_to_the_stand_in_when_there_is_none() {
+    let with_owner = Fixture::new();
+    with_services(&with_owner);
+    with_owner.auth(
+        &json!({"people": {"sam": {}, "kai": {"owner": true}}, "profiles": {"chrome-agent/x": {}, "github/x": {}}})
+            .to_string(),
+    );
+    with_owner.import(&mut MemSink::default()).unwrap();
+    assert_eq!(
+        query(
+            &with_owner,
+            "SELECT profile, person FROM secret_profiles ORDER BY profile"
+        ),
+        vec![
+            vec![s("chrome-agent/x"), s("kai")],
+            vec![s("github/x"), None]
+        ]
+    );
+    let none = Fixture::new();
+    with_services(&none);
+    none.auth(&json!({"people": {"sam": {}}, "profiles": {"chrome-agent/x": {}}}).to_string());
+    none.import(&mut MemSink::default()).unwrap();
+    assert_eq!(
+        query(&none, "SELECT person FROM secret_profiles"),
+        vec![vec![s("the owner")]]
+    );
+    // this Mac's services folder counts too, after the kernel's
+    let mac = Fixture::new();
+    let d = mac.layout.dir.parent().unwrap().join("services");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("notion.json"), r#"{"personal": true}"#).unwrap();
+    mac.auth(
+        &json!({"people": {"kai": {"owner": true}}, "profiles": {"notion/x": {}}}).to_string(),
+    );
+    mac.import(&mut MemSink::default()).unwrap();
+    assert_eq!(
+        query(&mac, "SELECT person FROM secret_profiles"),
+        vec![vec![s("kai")]]
+    );
+}
+
+#[test]
+fn a_service_spec_that_cannot_be_read_refuses_the_file() {
+    let f = Fixture::new();
+    let d = f.ctx.kernel.join("services");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("github.json"), "{not json").unwrap();
+    f.auth(&json!({"people": {"kai": {"owner": true}}, "profiles": {"github/x": {}}}).to_string());
+    let e = f.import(&mut MemSink::default()).unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("github")),
+        "{e:?}"
+    );
+}
+
+#[test]
+fn the_same_answer_check_names_a_profile_or_grant_that_differs() {
+    let f = Fixture::new();
+    with_services(&f);
+    f.auth(&secrets_file().to_string());
+    f.import(&mut MemSink::default()).unwrap();
+    let diffs =
+        |f: &Fixture| super::same_answer(&f.ctx, &f.layout, open_all(&f.layout).conn()).unwrap();
+    assert_eq!(diffs(&f), Vec::<String>::new());
+    // the file moves on: a new variable, a grant to another profile, a profile that is gone
+    let mut auth = secrets_file();
+    auth["profiles"]["github/work"]["EXTRA"] = json!("env:X");
+    auth["grants"]["coder"]["github"] = json!("github/bare");
+    auth["profiles"]
+        .as_object_mut()
+        .unwrap()
+        .remove("other/env");
+    f.auth(&auth.to_string());
+    let said = diffs(&f).join("\n");
+    assert!(
+        said.contains("profiles github/work: differs in variable EXTRA"),
+        "{said}"
+    );
+    assert!(said.contains("grants coder"), "{said}");
+    assert!(
+        said.contains("profiles other/env: in core.db, not in auth.json"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_database_imported_before_the_tables_were_filled_is_stale_until_it_is_imported_again() {
+    let f = Fixture::new();
+    f.auth(&secrets_file().to_string());
+    f.import(&mut MemSink::default()).unwrap();
+    // what m0022 leaves on a database that already had people: empty tables and the mark
+    let core = open_all(&f.layout);
+    core.conn()
+        .execute_batch(
+            "DELETE FROM secret_profiles; DELETE FROM secret_vars; DELETE FROM secret_grants; \
+             INSERT INTO secret_stale VALUES ('imported before secret_grants');",
+        )
+        .unwrap();
+    drop(core);
+    let snap = crate::authority::snapshot(open_all(&f.layout).conn()).unwrap();
+    assert_eq!(snap["secrets_stale"], true);
+    let said = super::same_answer(&f.ctx, &f.layout, open_all(&f.layout).conn())
+        .unwrap()
+        .join("\n");
+    assert!(
+        said.contains("imported before profiles and grants"),
+        "{said}"
+    );
+    let e = f.import(&mut MemSink::default()).unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("--force")),
+        "{e:?}"
+    );
+    f.run(
+        AuthorityOptions {
+            dry_run: false,
+            force: true,
+        },
+        &FakeKeychain::default(),
+        &mut MemSink::default(),
+    )
+    .unwrap();
+    assert_eq!((f.count("secret_stale"), f.count("secret_grants")), (0, 5));
+}
+
+// --- parity with `kith-auth` -------------------------------------------------------------------------------------------
+
+/// `kith-auth account-state <agent> <service> --json`, or `None` where there is no python3.
+fn python_account_state(f: &Fixture, agent: &str, service: &str) -> Option<Value> {
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith-auth");
+    let out = std::process::Command::new("python3")
+        .arg(&script)
+        .args(["account-state", agent, service, "--json"])
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH")?)
+        .env("HOME", &f.root)
+        .env("KITH_AUTH", &f.ctx.auth)
+        .env("KITH_HOME", f.root.join("kith"))
+        .env("KITH_AGENTS", &f.ctx.agents)
+        .output()
+        .ok()?;
+    assert!(
+        out.status.success(),
+        "kith-auth account-state failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Some(serde_json::from_slice(&out.stdout).unwrap())
+}
+
+#[test]
+fn the_cores_owners_and_grants_are_what_kith_auth_account_state_answers() {
+    let mut f = Fixture::new();
+    // the real service specs, as the Python reads them
+    f.ctx.kernel = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel");
+    let auth = json!({
+        "people": {"sam": {}, "kai": {"owner": true}},
+        "profiles": {
+            "chrome-agent/kai": {},
+            "chrome-agent/shared": {"person": "*"},
+            "chrome-agent/sam": {"person": "sam", "with": ["kai"]},
+            "browser/main": {"browser": "chrome"},
+            "anthropic/work": {"ANTHROPIC_API_KEY": "keychain:kith/anthropic/work#ANTHROPIC_API_KEY"},
+            "anthropic/sam": {"person": "sam"},
+            "nospec/x": {}
+        },
+        "grants": {
+            "coder": {"chrome-agent": "chrome-agent/kai", "anthropic": ["anthropic/work", "anthropic/sam"], "browser": "browser/main"},
+            "coder@sam": {"chrome-agent": "chrome-agent/sam", "anthropic": "anthropic/sam"},
+            "house": {"nospec": "nospec/x"}
+        }
+    });
+    f.auth(&auth.to_string());
+    f.import(&mut MemSink::default()).unwrap();
+    let core = open_all(&f.layout);
+    let col = |sql: &str, p: &[&str]| -> Vec<String> {
+        let mut st = core.conn().prepare(sql).unwrap();
+        st.query_map(rusqlite::params_from_iter(p), |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    };
+    let mut compared = 0;
+    for (agent, service) in [
+        ("coder", "chrome-agent"),
+        ("coder", "anthropic"),
+        ("coder", "browser"),
+        ("house", "nospec"),
+    ] {
+        let ours_profiles: Vec<Value> = col(
+            "SELECT profile FROM secret_profiles WHERE profile LIKE ?1 || '/%' ORDER BY profile",
+            &[service],
+        )
+        .into_iter()
+        .map(|p| {
+            let owner: Option<String> = core
+                .conn()
+                .query_row(
+                    "SELECT person FROM secret_profiles WHERE profile = ?1",
+                    [&p],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let agents = col(
+                "SELECT DISTINCT agent FROM secret_grants WHERE profile = ?1 ORDER BY agent",
+                &[&p],
+            );
+            json!({"profile": p, "account": p.split_once('/').unwrap().1, "owner": owner, "agents": agents})
+        })
+        .collect();
+        let granted = col(
+            "SELECT profile FROM secret_grants WHERE agent = ?1 AND service = ?2 ORDER BY seq",
+            &[agent, service],
+        );
+        let Some(theirs) = python_account_state(&f, agent, service) else {
+            // CI must not pass on the expectations alone: the parity with kith-auth is the point of the test.
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "no python3 in CI: the parity with `kith-auth account-state` was not compared"
+            );
+            eprintln!("no python3: owners and grants not compared with kith-auth");
+            return;
+        };
+        assert_eq!(
+            Value::Array(ours_profiles),
+            theirs["profiles"],
+            "{agent} {service}"
+        );
+        assert_eq!(json!(granted), theirs["granted"], "{agent} {service}");
+        compared += 1;
+    }
+    assert_eq!(compared, 4);
+    // and what the Python answers is what the test meant to set up
+    assert_eq!(
+        col(
+            "SELECT profile || ':' || coalesce(person, '-') FROM secret_profiles WHERE profile LIKE 'chrome-agent/%' ORDER BY profile",
+            &[]
+        ),
+        [
+            "chrome-agent/kai:kai",
+            "chrome-agent/sam:sam",
+            "chrome-agent/shared:-"
+        ]
+    );
 }

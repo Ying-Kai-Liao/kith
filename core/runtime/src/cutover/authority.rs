@@ -6,15 +6,15 @@
 //! |------------------|------------------------------------------------------------------------------------------------------|
 //! | `tombstones`     | the caller's `auth.json`. (The host vault's rows in serve.db are not tombstoned: the host moves them itself at its first unlock, M2-7.) |
 //! | `import`         | `import::run_in` (M2-8, `kith kernel core-migrate --authority`): idempotent, a snapshot first, `--dry-run`, `--force`, the Keychain items sealed into the envelope |
-//! | `same_answer`    | `import::same_answer`: per person owner, revoked (yes/no), `bot_of`, `was`; the `retired` ids; the order of people; then `check.rs`: `may`, `resolve`, `resolve_bot`, `cut_off` over every person x agent x via x once, at the caller's "now" (so a grant that has expired or not started yet counts as the answer it gives now). NOT compared: the contents of invites, presets, `owner_bots_budget`, a bot's caps, and when a revoke or a grant was written. None of them is read by the host guard today (`may`, `resolve`, `resolve_bot`, `cut_off`); the host reading one of them is the point at which it joins the compare |
+//! | `same_answer`    | `import::same_answer`: per person owner, revoked (yes/no), `bot_of`, `was`; the `retired` ids; the order of people; then `check.rs`: `may`, `resolve`, `resolve_bot`, `cut_off` over every person x agent x via x once, at the caller's "now" (so a grant that has expired or not started yet counts as the answer it gives now). Also compared, by name: the profiles (person, lent to, browser, which variables and whether each source differs; never a value) and the grants (agent -> service -> profiles in order); the host guard does not read them, but `retired`, `person --rm --unused` and the rollback rest on them, and a core imported before they were kept (`secrets_stale`) is a difference. NOT compared: the contents of invites, presets, `owner_bots_budget`, a bot's caps, `env`, and when a revoke or a grant was written. None of them is read by the host guard today (`may`, `resolve`, `resolve_bot`, `cut_off`); the host reading one of them is the point at which it joins the compare |
 //! | `fingerprint`    | serve.db and its WAL (size, mtime), the number of vault rows in it, and the digest of core.db's authority tables (so a write made only through the core changes it); the framework adds auth.json's inode, size and mtime |
 //! | `digest`         | the first 16 hex of the SHA-256 of core.db's authority tables, as the marker stores it                |
-//! | `export_back`    | core.db -> auth.json, the shape `kith-auth` reads: the tables from core.db over the pre-cutover copy's other keys (`profiles`, `grants`, `env`, a person's `handles` ...) |
+//! | `export_back`    | core.db -> auth.json, the shape `kith-auth` reads: the tables from core.db (people, members, presets, invites, retired, `agent_access`, the budget, `profiles` and `grants`) over the pre-cutover copy's other keys (`env`, `once`, a person's `root` / `kith` / `agents` ...). The core wins for every key it holds: a profile or a grant deleted in the core does not come back from the copy. Only a core imported before lane B's tables were filled (`secrets_stale`) keeps the copy's `profiles` and `grants` |
 //! | `restore_secrets`| the envelope's `keychain:` records -> the OS store, before `export_back`                              |
 //!
 //! # What the file cannot say once it is a tombstone
-//! `export_back` needs the keys the core never held (`profiles`, `grants`, `env`, `once`, a person's
-//! `handles` / `root` / `kith` / `agents`). They come from the copy `tombstone::ensure` kept beside the file
+//! `export_back` needs the keys the core never held (`env`, `once`, a person's `root` / `kith` / `agents`; and `profiles` /
+//! `grants` for a core imported before they were kept). They come from the copy `tombstone::ensure` kept beside the file
 //! (`auth.json.pre-cutover-<time>`, the newest); with none, those tables are written empty and the report says so.
 //!
 //! # Refused on purpose
@@ -28,16 +28,17 @@
 //! - `people.addBot` / `people.removeBot`: the same transaction must clear the removed id's `agent@<id>` grants and its
 //!   place in profiles' `with` (Python `forget`), else a bot handed over by remove-and-re-add gets its old logins back
 //!   (test `forget_also_clears_grants_and_profiles`, ignored until then).
-//! - `people.removePerson --unused` and the `retired` check: `handles` are kept in core.db now (m0015) and checked, but
-//!   `agent@<id>` grants and owned profiles are read from `secret_grants` / `secret_profiles`, which are empty until lane
-//!   B's import fills them (nothing writes them yet). They must not be switched before that.
+//! - `people.removePerson --unused` and the `retired` check: `handles` (m0015), `agent@<id>` grants and owned or lent
+//!   profiles (`secret_grants` / `secret_profiles`, filled by the import now) are checked. A core imported before the
+//!   import kept them (`secrets_stale`, m0022) refuses both until it is imported again. The writers still have to keep
+//!   the tables current (`forget`, `bot_add` / `bot_remove`: another package) before these verbs are switched.
 //! - `kith-auth agent-access ... [--rm]`: `people.agentAccess` writes the `agent_access` table (and `merge_back` takes it
 //!   from the core), but only the write half is ported: the listing (`agent-access <agent> [--json]`, with the
 //!   package-declared hosts) has no core row, and the CLI words differ (`domain <host>` there, positional here), so the
 //!   verb stays on Python until the listing and the switch.
 //!
 //! These do not change what the gate (`may_serve`) serves, which is the READ side (`may`, `resolve`, the request guard);
-//! they are why `export_back` takes `profiles` and `grants` from the old copy and not from the core.
+//! they are why `step` stays refused. (Since the import fills `profiles` and `grants`, `export_back` takes them from the core.)
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -484,6 +485,51 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
         Some(v) => out.insert("owner_bots_budget".into(), v.clone()),
         None => out.shift_remove("owner_bots_budget"),
     };
+    // Lane B (m0021): the core holds the profiles and grants, so what it no longer has does not come back from the old
+    // copy. A database imported before the import filled them (`secrets_stale`, m0022) holds empty tables that say
+    // nothing: it keeps the old copy's, as it did before.
+    if snap.get("secrets_stale").is_none() {
+        out.insert(
+            "profiles".into(),
+            profiles_back(old("profiles"), snap.get("profiles")),
+        );
+        out.insert(
+            "grants".into(),
+            snap.get("grants")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(Map::new())),
+        );
+    }
+    Value::Object(out)
+}
+
+/// `profiles` of the file from the core's. A profile whose person the core holds as NULL is shared on purpose when the
+/// old copy marked it `*` (the core keeps no mark, and for a login `kith-auth` would otherwise take it as the owner's);
+/// the text `the owner` is the core's stand-in for an owner not yet named, which the file leaves unsaid.
+fn profiles_back(old: Option<&Value>, from: Option<&Value>) -> Value {
+    let mut out = Map::new();
+    for (name, p) in from.and_then(Value::as_object).into_iter().flatten() {
+        let mut p = p.clone();
+        if let Some(row) = p.as_object_mut() {
+            match row.get("person").and_then(Value::as_str) {
+                Some("the owner") => {
+                    row.shift_remove("person");
+                }
+                Some(_) => {}
+                None => {
+                    let shared = old
+                        .and_then(|o| o.get(name))
+                        .and_then(|o| o.get("person"))
+                        .and_then(Value::as_str)
+                        == Some("*");
+                    if shared {
+                        row.insert("person".into(), Value::String("*".into()));
+                    }
+                }
+            }
+        }
+        out.insert(name.clone(), p);
+    }
     Value::Object(out)
 }
 
@@ -590,7 +636,7 @@ impl Module for AuthorityModule {
             )]);
         }
         refuse_unmoved_vault(ctx, db)?;
-        crate::import::same_answer(ctx, db)
+        crate::import::same_answer(ctx, &env.layout, db)
     }
 
     fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
@@ -614,11 +660,11 @@ impl Module for AuthorityModule {
         let mut lines = Vec::new();
         match &from {
             Some(p) => lines.push(format!(
-                "auth.json: profiles, grants, env and each person's other keys come from {}",
+                "auth.json: env and each person's other keys come from {}",
                 p.display()
             )),
             None if base.is_none() => lines.push(
-                "auth.json: no earlier copy to take profiles, grants and env from; they are written empty (the Keychain items are written back separately)"
+                "auth.json: no earlier copy to take env from (and profiles and grants, for a core imported before they were kept); they are written empty or as the core has them (the Keychain items are written back separately)"
                     .into(),
             ),
             None => {}

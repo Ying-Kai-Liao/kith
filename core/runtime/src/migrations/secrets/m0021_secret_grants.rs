@@ -1,13 +1,13 @@
 //! Version 21: which profile of secrets an agent may use for a service (`secrets.serviceKeys`, M2-18b). Mapped from
 //! auth.json's `profiles` (profile -> VAR -> source, plus the profile's `person`, `with` and `browser`) and `grants`
-//! (agent -> service -> profile, or a list of profiles). Nothing writes them yet and the import leaves them behind: the
-//! kith-auth switch (M2-18) does.
+//! (agent -> service -> profile, or a list of profiles). The authority import fills them (`import/authority.rs`) and a
+//! rollback reads them back (`cutover/authority.rs`); nothing else writes them until the kith-auth switch (M2-18).
 //!
 //! - `secret_grants.agent` is the grants key as auth.json spells it: `coder` for the agent's own grant, `coder@<person>`
 //!   for a grant made for one person's runs (looked up first). A list of profiles keeps its order in `seq`.
 //! - `secret_profiles` is one row per profile, including those with no variables (a browser profile, a login service's):
 //!   `person` is its owner as `kith-auth`'s
-//!   `owner_of` answers it, which the M2-18 import (and later the `kith-auth` writers) must store: the named person; the
+//!   `owner_of` answers it, which the import stores (and the later `kith-auth` writers must): the named person; the
 //!   owner's id (or 'the owner' when none is named) for an unmarked profile of a personal service (login, browser, or
 //!   `"personal": true`); NULL only for '*' (shared on purpose) or a service that is not personal. A change to a
 //!   service's `personal` setting re-derives the column. The core has no service specs, so it cannot work this out

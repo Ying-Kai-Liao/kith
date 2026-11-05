@@ -307,10 +307,11 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
         }
     }
     // store.rs writes people, memberships, presets, invites, retired, agent_access and the budget; it does not write the
-    // snapshot's `profiles` and `grants` (lane B's tables, read only for the checks below) or `handles_stale`.
+    // snapshot's `profiles` and `grants` (lane B's tables, filled by the import and, for now, written by nothing else) or
+    // `handles_stale` / `secrets_stale`.
     let mut auth = Map::new();
-    // Lane B's tables, in auth.json's shape, only for the checks that read who owns or is lent a login or holds a grant
-    // (`retired`, `person --rm --unused`). Left out when empty: nothing writes them until the secrets switch, and the
+    // Lane B's tables, in auth.json's shape: the checks that read who owns or is lent a login or holds a grant
+    // (`retired`, `person --rm --unused`), and the rollback, which writes them back whole. Left out when empty; the
     // rules read neither.
     let profiles = read_profiles(tx)?;
     if !profiles.is_empty() {
@@ -349,6 +350,14 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
     if stale {
         auth.insert("handles_stale".to_owned(), Value::Bool(true));
     }
+    // Set by m0022 on a database that had people before the import filled lane B's tables; a re-import clears it. The
+    // checks that read `profiles` and `grants` refuse while it is set, and a rollback keeps the old copy's.
+    let secrets_stale = tx
+        .query_row("SELECT 1 FROM secret_stale", [], |_| Ok(()))
+        .is_ok();
+    if secrets_stale {
+        auth.insert("secrets_stale".to_owned(), Value::Bool(true));
+    }
     if let Some(cap) = cap {
         auth.insert(
             "owner_bots_budget".to_owned(),
@@ -358,22 +367,34 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
     Ok(Value::Object(auth))
 }
 
-/// `profiles` of auth.json from `secret_profiles`: `person` and `with` (the people it is lent to); the variables are not read.
+/// `profiles` of auth.json from `secret_profiles`: `person`, `with` (the people it is lent to), `browser`, and each
+/// variable's source (`secret_vars`; a reference such as `keychain:..`, never a value).
 fn read_profiles(tx: &Connection) -> Result<Map<String, Value>> {
     let mut out = Map::new();
-    let mut q = tx.prepare("SELECT profile, person, lent FROM secret_profiles ORDER BY profile")?;
+    let mut q =
+        tx.prepare("SELECT profile, person, lent, browser FROM secret_profiles ORDER BY profile")?;
     let mut rows = q.query([])?;
     while let Some(r) = rows.next()? {
         let mut p = Map::new();
         set(&mut p, "person", text(r, 1)?.map(Value::String));
         set(&mut p, "with", json(r, 2, "secret_profiles.lent")?);
+        set(&mut p, "browser", text(r, 3)?.map(Value::String));
         out.insert(r.get::<_, String>(0)?, Value::Object(p));
+    }
+    let mut q = tx.prepare("SELECT profile, var, source FROM secret_vars ORDER BY profile, var")?;
+    let mut rows = q.query([])?;
+    while let Some(r) = rows.next()? {
+        let (profile, var, source): (String, String, String) = (r.get(0)?, r.get(1)?, r.get(2)?);
+        // A variable of a profile that has no row (the tables carry no foreign key) is not shown.
+        if let Some(Value::Object(p)) = out.get_mut(&profile) {
+            p.insert(var, Value::String(source));
+        }
     }
     Ok(out)
 }
 
 /// `grants` of auth.json from `secret_grants`: agent (or `agent@person`) -> service -> profile. A list of profiles
-/// keeps its order; only the keys matter to the checks that read it.
+/// keeps its order. A list of one reads back as that one profile: `kith-auth` answers both the same (`grant_list`).
 fn read_grants(tx: &Connection) -> Result<Map<String, Value>> {
     let mut out = Map::new();
     let mut q = tx.prepare(
