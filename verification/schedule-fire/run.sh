@@ -2,6 +2,7 @@
 # Model-checks "the schedule fire protocol" (Fire.tla) with TLC, one command, no global install.
 #
 #   verification/schedule-fire/run.sh                  every row of checks.tsv: variant x property, expected pass/fail
+#   verification/schedule-fire/run.sh --smoke                       only the rows named in smoke.txt (CI when nothing the model covers changed)
 #   verification/schedule-fire/run.sh --show VARIANT PROPERTY   TLC's full output (the counterexample) for one row
 #   verification/schedule-fire/run.sh --list           the rows
 #
@@ -100,6 +101,17 @@ verdict() {   # reads TLC output; prints pass | fail | error
   else echo error; fi
 }
 
+SMOKE=0; [[ ${1:-} == --smoke ]] && SMOKE=1
+
+# rows -> the checks.tsv rows to run: all of them, or with --smoke only those named in smoke.txt ("VARIANT PROPERTY" per line).
+rows() {
+  if [[ $SMOKE == 1 ]]; then
+    grep -v '^#' "$HERE/checks.tsv" | grep -v '^$' | awk -F'\t' 'NR==FNR { if ($0 !~ /^#|^$/) { split($0, w, " "); want[w[1] " " w[2]]=1 } next } (($1 " " $3) in want)' "$HERE/smoke.txt" -
+  else
+    grep -v '^#' "$HERE/checks.tsv" | grep -v '^$'
+  fi
+}
+
 case "${1:-}" in
   --one)   # internal: one row, used for the parallel run
     setup; shift
@@ -119,12 +131,16 @@ case "${1:-}" in
   --list)  grep -v '^#' "$HERE/checks.tsv"; exit 0 ;;
 esac
 
+if [[ $SMOKE == 1 ]]; then
+  [[ $(grep -vc '^#\|^$' "$HERE/smoke.txt") -eq $(rows | wc -l) ]] || { echo "run.sh: smoke.txt names a row that is not in checks.tsv" >&2; exit 2; }
+fi
+
 setup
 echo "tla2tools $TLA_VERSION, java $(java_major "$JAVA") ($JAVA)"
 jobs=$(( $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) > 4 ? 4 : $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) ))
 res=$(mktemp "${TMPDIR:-/tmp}/kith-verify-res.XXXXXX")
 start=$(date +%s)
-grep -v '^#' "$HERE/checks.tsv" | grep -v '^$' \
+rows \
   | tr '\t\n' '\0\0' \
   | xargs -0 -n 4 -P "$jobs" "${BASH_SOURCE[0]}" --one >"$res" 2>&1 || true
 
@@ -134,9 +150,9 @@ while IFS='|' read -r v p want got st; do
   mark=ok; [[ $want == "$got" ]] || { mark=MISMATCH; bad=1; }
   printf '%-26s %-34s %-6s %-6s %-9s %s\n' "$v" "$p" "$want" "$got" "$st" "$([[ $mark == ok ]] || echo "<-- $mark")"
 done < <(sort "$res")
-rows=$(grep -vc '^#\|^$' "$HERE/checks.tsv" || true)
-[[ $(wc -l <"$res") -eq $rows ]] || { echo "run.sh: only $(wc -l <"$res") of $rows rows reported (TLC or setup failed); see: run.sh --show VARIANT PROPERTY"; cat "$res" | grep -v '|' || true; bad=1; }
+nrows=$(rows | wc -l)
+[[ $(wc -l <"$res") -eq $nrows ]] || { echo "run.sh: only $(wc -l <"$res") of $nrows rows reported (TLC or setup failed); see: run.sh --show VARIANT PROPERTY"; cat "$res" | grep -v '|' || true; bad=1; }
 rm -f "$res"
-echo "$rows rows in $(( $(date +%s) - start ))s"
+echo "$nrows rows in $(( $(date +%s) - start ))s"
 if (( bad )); then echo "RESULT: differs from checks.tsv"; exit 1; fi
 echo "RESULT: every row as expected"

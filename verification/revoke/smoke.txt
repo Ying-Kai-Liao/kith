@@ -1,0 +1,7 @@
+# VARIANT PROPERTY of the checks.tsv rows run.sh --smoke checks; CI runs them when nothing the model covers changed.
+# Chosen by the architect (2026-11-05). Not core-order Swept (115 s) or the asks liveness rows (53 s each).
+code R6
+core-order OrderKept
+broken-star R2
+broken-bridge-no-sync R6c
+code NeverBridgeServed

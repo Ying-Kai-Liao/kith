@@ -85,11 +85,29 @@ jobs:
       windows: ${{ steps.h.outputs.windows }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # On push to main dorny compares with the previous commit, so main only runs what changed.
+      # A workflow_dispatch run has no base, so dorny compares with the default branch (main). The batch run of a
+      # rust-rebuild batch is such a run on a branch that left main long ago, which would make every filter true.
+      # When the branch grew out of rust-rebuild (its fork point from rust-rebuild is past its fork point from main),
+      # compare with rust-rebuild instead. Anything else (a PR, a push, a main batch) keeps dorny's own base.
+      - name: Filter base
+        id: base
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if git rev-parse --verify -q origin/rust-rebuild >/dev/null; then
+            rr=$(git merge-base origin/rust-rebuild HEAD || true)
+            mn=$(git merge-base origin/main HEAD || true)
+            if [ -n "$rr" ] && [ "$rr" != "$mn" ] && git merge-base --is-ancestor "$mn" "$rr"; then
+              echo "base=rust-rebuild" >> "$GITHUB_OUTPUT"
+            fi
+          fi
       # Kernel and licenses keep markdown: the notices file and kernel docs are checked content.
       - uses: dorny/paths-filter@v3
         id: f
         with:
+          base: ${{ steps.base.outputs.base }}
           filters: |
             kernel:
               - 'kernel/**'
@@ -139,7 +157,9 @@ jobs:
               - 'core/kernel/src/threads/**'
               - 'kernel/tests/kith-threads-race'
               - '.github/workflows/ci.yml'
-            # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill).
+            # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill),
+            # plus the thread-writers code (the writer lock is what makes one thread have one writer). Not ci.yml: a workflow edit runs
+            # the smoke rows, not the full model (same for revoke and schedule_fire below).
             writer_lock:
               - 'verification/writer-lock/**'
               - 'verification/threads/run.sh'
@@ -150,7 +170,20 @@ jobs:
               - 'core/runtime/src/holder_link.rs'
               - 'core/runtime/src/terminal.rs'
               - 'core/runtime/src/conversations/**'
-              - '.github/workflows/ci.yml'
+              - 'kernel/bin/kith-sessions'
+              - 'kernel/bin/kith-lifecycle'
+              - 'kernel/bin/kith-wake'
+              - 'kernel/bin/kith'
+              - 'serve/host/src/terminal/**'
+              - 'serve/host/src/cards/resume.rs'
+              - 'serve/host/src/api/threads.rs'
+              - 'serve/host/src/api/bots.rs'
+              - 'serve/host/src/api/botguests.rs'
+              - 'serve/host/src/agent/bot/**'
+              - 'serve/host/src/hub/actors.rs'
+              - 'core/kernel/src/threads.rs'
+              - 'core/kernel/src/threads/**'
+              - 'kernel/tests/kith-threads-race'
             # The TLA+ model of revoking a person and the code it covers (the list in the revoke-access skill).
             revoke:
               - 'verification/revoke/**'
@@ -166,7 +199,6 @@ jobs:
               - 'serve/host/src/remote/**'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
-              - '.github/workflows/ci.yml'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
             secrets:
               - 'verification/secrets/**'
@@ -203,13 +235,13 @@ jobs:
               - 'core/runtime/src/migrations/schedules/**'
               - 'core/runtime/src/conversations/claims.rs'
               - 'kernel/bin/kith-sched'
-              - '.github/workflows/ci.yml'
       # 'every': a file must match the whole list, so each filter is one brace pattern plus a markdown
       # exclusion. A docs-only change then runs no heavy job. The only markdown that ships is
       # apps/ios/WhatsNew.md (an iOS resource), so ios excludes just READMEs.
       - uses: dorny/paths-filter@v3
         id: h
         with:
+          base: ${{ steps.base.outputs.base }}
           predicate-quantifier: every
           filters: |
             host:
@@ -378,9 +410,12 @@ jobs:
 
   # The same for the writer lock (WriterLock4.tla) and the holder's claim rules (Holder.tla): the fast rows of
   # verification/writer-lock/checks.tsv. The two slow rows (15-30 min each) run only with `run.sh --all`.
+  # The full fast rows run only when a file the model covers changed (filter writer_lock); every other run
+  # (including a ci.yml edit) runs the smoke rows listed in verification/writer-lock/smoke.txt. Skipped in check
+  # and model mode, where `changes` is skipped.
   writer-lock:
     needs: changes
-    if: needs.changes.outputs.writer_lock == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -394,12 +429,15 @@ jobs:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
-        run: verification/writer-lock/run.sh
+        env:
+          FULL: ${{ needs.changes.outputs.writer_lock }}
+        run: verification/writer-lock/run.sh $([ "$FULL" = true ] || echo --smoke)
 
   # The same for revoking a person: verification/revoke/checks.tsv, every row as expected.
+  # Full rows when the filter matches, else the smoke rows (verification/revoke/smoke.txt).
   revoke-access:
     needs: changes
-    if: needs.changes.outputs.revoke == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -413,7 +451,9 @@ jobs:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
-        run: verification/revoke/run.sh
+        env:
+          FULL: ${{ needs.changes.outputs.revoke }}
+        run: verification/revoke/run.sh $([ "$FULL" = true ] || echo --smoke)
 
   # The same for a secret card (one writer per card, never after it closed): verification/secrets/checks.tsv.
   secret-cards:
@@ -458,7 +498,7 @@ jobs:
   #   gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model
   schedule-fire:
     needs: changes
-    if: ${{ !cancelled() && (inputs.mode == 'model' || needs.changes.outputs.schedule_fire == 'true') }}
+    if: ${{ !cancelled() && (inputs.mode == 'model' || needs.changes.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -472,7 +512,11 @@ jobs:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
-        run: verification/schedule-fire/run.sh
+        env:
+          # mode=model is the by-hand full model run; otherwise full only when the filter matches, else smoke rows
+          # (verification/schedule-fire/smoke.txt).
+          FULL: ${{ (inputs.mode == 'model' || needs.changes.outputs.schedule_fire == 'true') && 'true' || '' }}
+        run: verification/schedule-fire/run.sh $([ "$FULL" = true ] || echo --smoke)
 
   # Format and clippy on the whole host workspace. The tests are in host-build, host-test and host-crates.
   host:
