@@ -857,6 +857,8 @@ const DENY_QUEUE_KEY: &str = "core_deny_queue";
 /// never stores its snapshot back, so a deny queued meanwhile survives. `between` runs after the read and before the
 /// write-back (a seam for the test of exactly that).
 async fn end_queued_in_core(hub: &Hub, between: impl Future<Output = ()>) {
+    // Ages the queue first, so a request nobody can decide any more isn't asked of the core once more.
+    edit_deny_queue(hub, |_| {});
     let mut ended = take_deny_queue(hub);
     let held: Vec<String> = hub.cloud.requests.locked().iter().map(|r| r.id.clone()).collect();
     ended.retain(|id| !held.contains(id));
@@ -869,14 +871,50 @@ async fn end_queued_in_core(hub: &Hub, between: impl Future<Output = ()>) {
     edit_deny_queue(hub, |queue| queue.retain(|id| !done.contains(id)));
 }
 
-/// The one way to change the queue: load, change and store under one lock.
+/// When each queued id first went in (ms), beside the queue: an id the core never answers ages out of it.
+const DENY_QUEUE_AT_KEY: &str = "core_deny_queue_at";
+
+/// A pending access request lives this long in the cloud (`REQUEST_TTL_MS` in serve/cloud routes/account.ts, peers.ts).
+const REQUEST_TTL_MS: i64 = 10 * 60_000;
+
+/// How long past its expiry a request stays queued for a core that is down; after that nobody can decide it, so a core
+/// that never comes back doesn't grow the queue for ever.
+const DENY_KEEP_MS: i64 = 24 * HOUR_MS;
+
+/// The one way to change the queue: load, change and store under one lock. Ids queued more than the request's lifetime
+/// plus `DENY_KEEP_MS` ago leave it here (an id keeps the time it first went in, however often it is queued again).
 fn edit_deny_queue(hub: &Hub, change: impl FnOnce(&mut Vec<String>)) {
+    edit_deny_queue_at(hub, now_ms(), change);
+}
+
+fn edit_deny_queue_at(hub: &Hub, now: i64, change: impl FnOnce(&mut Vec<String>)) {
     let _one = hub.cloud.deny_queue.locked();
     let mut queue = take_deny_queue(hub);
     change(&mut queue);
     queue.sort();
     queue.dedup();
+    let mut at: std::collections::BTreeMap<String, i64> =
+        hub.store.kv_get(DENY_QUEUE_AT_KEY).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+    at.retain(|id, _| queue.contains(id));
+    for id in &queue {
+        at.entry(id.clone()).or_insert(now);
+    }
+    for (id, since) in &at {
+        if now - since > REQUEST_TTL_MS + DENY_KEEP_MS {
+            tracing::warn!(request_id = id, "dropping an access request the core never ended from the queue");
+        }
+    }
+    at.retain(|_, since| now - *since <= REQUEST_TTL_MS + DENY_KEEP_MS);
+    queue.retain(|id| at.contains_key(id));
     set_deny_queue(hub, &queue);
+    if let Err(e) =
+        serde_json::to_string(&at).map_err(anyhow::Error::from).and_then(|v| hub.store.kv_set(DENY_QUEUE_AT_KEY, &v))
+    {
+        tracing::warn!(
+            error = format!("{e:#}"),
+            "couldn't save when the access requests still to end in the core were queued"
+        );
+    }
 }
 
 fn take_deny_queue(hub: &Hub) -> Vec<String> {
@@ -2573,6 +2611,22 @@ mod tests {
         assert!(fake.posts.lock().unwrap().is_empty());
         assert_eq!(ids_in_core(true).await, ["req_sam"], "still pending in the core");
         assert_eq!(hub.cloud.requests_json().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_id_the_core_never_answers_ages_out_of_the_deny_queue() {
+        let hub = temp_hub();
+        let t0 = 1_000_000;
+        edit_deny_queue_at(&hub, t0, |q| q.push("req_old".into()));
+        // Queued again later (a failed call does): it keeps the time it first went in.
+        edit_deny_queue_at(&hub, t0 + HOUR_MS, |q| q.extend(["req_old".to_owned(), "req_new".to_owned()]));
+        let edge = t0 + REQUEST_TTL_MS + DENY_KEEP_MS;
+        edit_deny_queue_at(&hub, edge, |_| {});
+        assert_eq!(take_deny_queue(&hub), ["req_new", "req_old"], "not yet past its expiry plus the keep time");
+        edit_deny_queue_at(&hub, edge + 1, |_| {});
+        assert_eq!(take_deny_queue(&hub), ["req_new"], "req_old aged out, req_new (queued later) stays");
+        edit_deny_queue_at(&hub, edge + HOUR_MS + 1, |_| {});
+        assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
     }
 
     #[tokio::test]
