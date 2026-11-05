@@ -17,13 +17,14 @@ use serde_json::{Value, json};
 
 /// The rows only the host may call (M2-10b): the principal check in `every_row_is_well_formed` pins Host to exactly
 /// these, so a new row cannot gain Host unnoticed.
-const HOST_ROWS: [&str; 6] = [
+const HOST_ROWS: [&str; 7] = [
     "syncLease.link",
     "syncLease.unlink",
     "syncLease.changed",
     "syncLease.drop",
     "syncLease.pulled",
     "syncLease.renew",
+    "schedule.fire",
 ];
 
 /// The one row that hands a secret's value back (M2-10c): the host's, because its proof is process memory, where the
@@ -449,6 +450,8 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people person clear-temp ann", "people.clearTemp"),
         ("people retired ann", "people.retired"),
         ("people may ann echo", "people.may"),
+        ("people resolve echo --person ann", "people.resolve"),
+        ("people bridge-held ann", "people.bridgeHeld"),
     ] {
         let argv: Vec<&str> = line.split(' ').collect();
         let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
@@ -683,4 +686,19 @@ fn only_the_host_reads_a_secrets_value_and_the_owner_keeps_the_rest() {
         .map(|m| m.name)
         .collect();
     assert_eq!(host_secrets, [SECRET_VALUE_ROW]);
+}
+
+#[test]
+fn the_launch_keys_row_is_the_owners_alone() {
+    let row = method("secrets.serviceKeys").unwrap();
+    assert_eq!(row.principals, &[Principal::Owner]);
+    for who in [
+        Principal::Host,
+        Principal::Member,
+        Principal::Bot,
+        Principal::RunToken,
+    ] {
+        assert!(!row.principals.contains(&who), "{who:?}");
+    }
+    assert!(row.cli.hidden);
 }

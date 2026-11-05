@@ -44,6 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import kith_settings  # noqa: E402
+import kith_tombstone  # noqa: E402
 from kith_paths import paths  # noqa: E402
 
 KERNEL = Path(__file__).resolve().parent.parent
@@ -491,7 +492,10 @@ def _state_lock():
 
 
 def _read_state():
-    """(accounts dict, corrupt): the file's accounts; {} and corrupt=True when it exists but isn't ours."""
+    """(accounts dict, corrupt): the file's accounts; {} and corrupt=True when it exists but isn't ours.
+    Raises kith_tombstone.Tombstoned when the file moved to the Kith core (`kith migrate step accounts`): the data is in
+    the core now, so reading {} here, or writing over the note, would fork it. `kith rollback accounts` brings it back."""
+    kith_tombstone.check(state_file())
     try:
         text = state_file().read_text()
     except FileNotFoundError:
@@ -510,6 +514,7 @@ def _read_state():
 
 def _write_state(accts):
     f = state_file()
+    kith_tombstone.check(f)   # the last stop before an atomic rename would replace the note
     _write_atomic(f, (json.dumps({'version': 1, 'accounts': accts}, indent=2) + '\n').encode())
 
 
@@ -545,6 +550,8 @@ def _import_kernel_marks():
                              since=int(v.get('since') or v['out_until']))
             _write_state(accts)
             os.replace(old, old.with_name(old.name + '.imported'))
+    except kith_tombstone.Tombstoned:
+        raise
     except (OSError, ValueError, TypeError):
         pass   # read-only disk or a race that lost: the next call tries again
 
@@ -568,6 +575,8 @@ def update_state(change):
                     pass
             change(accts)
             _write_state(accts)
+    except kith_tombstone.Tombstoned:
+        raise   # not a disk problem: the module moved, and a lost mark here would be silent
     except OSError:
         pass
 
@@ -1064,6 +1073,9 @@ if __name__ == '__main__':
             print(session_account(a[1]) or '')
         else:
             sys.exit(__doc__.strip())
+    except kith_tombstone.Tombstoned as e:   # accounts state moved to the core (kith migrate step accounts)
+        print(f'kith: {e}', file=sys.stderr)
+        sys.exit(4)
     except ValueError as e:
         print(f'kith: {e}', file=sys.stderr)
         sys.exit(4)
