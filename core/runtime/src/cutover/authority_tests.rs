@@ -88,7 +88,7 @@ struct Rig {
 fn original() -> Value {
     json!({
         "profiles": {"github/work": {"GITHUB_TOKEN": "keychain:kith/github/work#GITHUB_TOKEN"}},
-        "grants": {"house": ["github/work"]},
+        "grants": {"house": {"github": "github/work"}},
         "env": {"house": {"svc": {"A": "plain"}}},
         "once": {},
         "people": {
@@ -968,4 +968,209 @@ fn unmoved_vault_rows_make_step_and_check_refuse_until_the_slots_are_sealed() {
     }
     step(&reg, &r.env, "authority", opts()).expect("step once the rows have moved");
     assert!(tombstone::is_tombstone(&r.auth()));
+}
+
+// --- profiles and grants come back from the core (m0021) ---------------------------------------------------------------------
+
+/// Profiles and grants of every shape the import keeps: lent, a browser, a profile with no variables, `*`, the host-store
+/// mark, a list of profiles, an `agent@person` grant and one for a person who has been removed.
+fn lane_b() -> (Value, Value) {
+    (
+        json!({
+            "github/work": {"GITHUB_TOKEN": "keychain:kith/github/work#GITHUB_TOKEN", "person": "mia", "with": ["sam"]},
+            "github/bare": {},
+            "chrome-agent/main": {"browser": "chrome", "person": "*"},
+            "other/env": {"KEY": "env:SOME_VAR", "person": "kai"},
+            "host/svc": {"store": "host"}
+        }),
+        json!({
+            "house": {"github": "github/work", "multi": ["other/env", "github/work"]},
+            "house@mia": {"github": "github/bare"},
+            "house@gone": {"github": "github/work"}
+        }),
+    )
+}
+
+fn rolled_back(r: &Rig, reg: &[Box<dyn Module>]) -> Value {
+    rollback(reg, &r.env, "authority", opts()).unwrap();
+    serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap()
+}
+
+#[test]
+fn profiles_and_grants_survive_a_step_and_a_rollback_exactly() {
+    let (r, reg) = rig();
+    let (profiles, grants) = lane_b();
+    r.edit(|v| {
+        v["profiles"] = profiles.clone();
+        v["grants"] = grants.clone();
+    });
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert_eq!(
+        (r.count("secret_profiles"), r.count("secret_grants")),
+        (5, 5)
+    );
+    let after = rolled_back(&r, &reg);
+    assert_eq!(after["profiles"], profiles);
+    assert_eq!(after["grants"], grants);
+}
+
+#[test]
+fn a_grant_or_profile_removed_in_the_core_stays_removed_and_one_added_there_is_written() {
+    let (r, reg) = rig();
+    let (profiles, grants) = lane_b();
+    r.edit(|v| {
+        v["profiles"] = profiles;
+        v["grants"] = grants;
+    });
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    r.db()
+        .execute_batch(
+            "DELETE FROM secret_grants WHERE agent = 'house@gone'; \
+             DELETE FROM secret_grants WHERE agent = 'house' AND service = 'multi' AND profile = 'other/env'; \
+             DELETE FROM secret_profiles WHERE profile = 'github/bare'; \
+             DELETE FROM secret_vars WHERE profile = 'other/env'; \
+             INSERT INTO secret_profiles (profile, person, lent) VALUES ('slack/new', 'sam', '[\"mia\"]'); \
+             INSERT INTO secret_vars (profile, var, source) VALUES ('slack/new', 'TOKEN', 'keychain:kith/slack/new#TOKEN'); \
+             INSERT INTO secret_grants (agent, service, profile, seq) VALUES ('house@sam', 'slack', 'slack/new', 0);",
+        )
+        .unwrap();
+    let after = rolled_back(&r, &reg);
+    assert!(
+        after["grants"].get("house@gone").is_none(),
+        "{}",
+        after["grants"]
+    );
+    assert_eq!(
+        after["grants"]["house"]["multi"], "github/work",
+        "a list of one reads back as it"
+    );
+    assert_eq!(after["grants"]["house@sam"]["slack"], "slack/new");
+    assert!(after["profiles"].get("github/bare").is_none());
+    assert_eq!(
+        after["profiles"]["other/env"],
+        json!({"person": "kai"}),
+        "its variable is gone too"
+    );
+    assert_eq!(
+        after["profiles"]["slack/new"],
+        json!({"person": "sam", "with": ["mia"], "TOKEN": "keychain:kith/slack/new#TOKEN"})
+    );
+    // and a second rollback over the file it wrote gives the same file
+    let again = {
+        let (base, snap) = (
+            Some(after.clone()),
+            crate::authority::snapshot(&r.db()).unwrap(),
+        );
+        authority::merge_back(base, &snap)
+    };
+    assert_eq!(again, after);
+}
+
+#[test]
+fn the_cores_profiles_win_in_merge_back_and_the_two_stand_ins_are_written_as_the_file_says_them() {
+    let base = json!({
+        "profiles": {
+            "chrome-agent/team": {"person": "*", "browser": "chrome"},
+            "chrome-agent/main": {"browser": "chrome"},
+            "github/old": {"K": "env:K"}
+        },
+        "grants": {"house": {"github": "github/old"}}
+    });
+    // the core: `*` is NULL, an owner not yet named is `the owner`, github/old is gone, nothing granted
+    let snap = json!({
+        "profiles": {
+            "chrome-agent/team": {"browser": "chrome"},
+            "chrome-agent/main": {"person": "the owner", "browser": "chrome"},
+            "chrome-agent/kai": {"person": "kai"}
+        }
+    });
+    let out = authority::merge_back(Some(base), &snap);
+    assert_eq!(
+        out["profiles"]["chrome-agent/team"],
+        json!({"person": "*", "browser": "chrome"})
+    );
+    assert_eq!(
+        out["profiles"]["chrome-agent/main"],
+        json!({"browser": "chrome"})
+    );
+    assert_eq!(
+        out["profiles"]["chrome-agent/kai"],
+        json!({"person": "kai"})
+    );
+    assert!(out["profiles"].get("github/old").is_none());
+    assert_eq!(out["grants"], json!({}), "the core holds no grant");
+}
+
+#[test]
+fn a_core_imported_before_the_tables_were_filled_keeps_the_old_copys_profiles_and_grants() {
+    let base = json!({"profiles": {"github/work": {"person": "mia"}}, "grants": {"house": {"github": "github/work"}}});
+    let snap = json!({"people": {}, "secrets_stale": true});
+    let out = authority::merge_back(Some(base.clone()), &snap);
+    assert_eq!(out["profiles"], base["profiles"]);
+    assert_eq!(out["grants"], base["grants"]);
+    assert!(out.get("secrets_stale").is_none());
+    // with no copy at all they are written empty
+    let none = authority::merge_back(None, &snap);
+    assert_eq!(
+        (none["profiles"].clone(), none["grants"].clone()),
+        (json!({}), json!({}))
+    );
+}
+
+#[test]
+fn the_fingerprint_moves_when_a_grant_changes_in_the_core() {
+    let (r, reg) = imported();
+    let db = r.db();
+    let before = reg[0].fingerprint(&r.env, &db).unwrap();
+    db.execute(
+        "INSERT INTO secret_grants (agent, service, profile, seq) VALUES ('house', 'x', 'x/y', 0)",
+        [],
+    )
+    .unwrap();
+    assert_ne!(before, reg[0].fingerprint(&r.env, &db).unwrap());
+}
+
+#[test]
+fn the_same_answer_names_a_profile_that_differs_between_the_file_and_the_core() {
+    let (r, reg) = imported();
+    assert!(
+        r.diffs(reg[0].as_ref()).is_empty(),
+        "{:?}",
+        r.diffs(reg[0].as_ref())
+    );
+    r.db()
+        .execute("DELETE FROM secret_grants WHERE agent = 'house'", [])
+        .unwrap();
+    let said = r.diffs(reg[0].as_ref()).join("\n");
+    assert!(
+        said.contains("grants house: in auth.json, not in core.db"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_list_of_one_stays_a_list_and_a_derived_owner_is_left_unsaid() {
+    let base = json!({
+        "profiles": {"chrome-agent/x": {}, "chrome-agent/y": {"person": "kai"}},
+        "grants": {"house": {"github": ["github/a"], "slack": "slack/a"}}
+    });
+    let snap = json!({
+        "people": {"kai": {"owner": true}},
+        "profiles": {"chrome-agent/x": {"person": "kai"}, "chrome-agent/y": {"person": "kai"}},
+        "grants": {"house": {"github": "github/a", "slack": "slack/a", "other": "o/a"}}
+    });
+    let out = authority::merge_back(Some(base), &snap);
+    assert_eq!(out["grants"]["house"]["github"], json!(["github/a"]));
+    assert_eq!(out["grants"]["house"]["slack"], "slack/a");
+    assert_eq!(out["grants"]["house"]["other"], "o/a");
+    assert_eq!(
+        out["profiles"]["chrome-agent/x"],
+        json!({}),
+        "the old copy named no one"
+    );
+    assert_eq!(
+        out["profiles"]["chrome-agent/y"],
+        json!({"person": "kai"}),
+        "it did name the owner"
+    );
 }

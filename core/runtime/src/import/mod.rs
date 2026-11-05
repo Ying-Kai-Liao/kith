@@ -114,11 +114,23 @@ fn sha_hex(bytes: &[u8]) -> String {
         })
 }
 
+/// The service specs `kith-auth` reads: the kernel's, then this Mac's (the folder that holds the core's own).
+fn services_of(ctx: &Ctx, layout: &Layout) -> authority::Services {
+    authority::Services::new(&ctx.kernel, layout.dir.parent().unwrap_or(&layout.dir))
+}
+
+/// The import's own writer of the authority tables, for the tests of what reads them (no service specs: nothing is
+/// personal).
+#[cfg(test)]
+pub(crate) fn insert_all_for_tests(conn: &Connection, auth: &Value) -> Result<()> {
+    authority::insert_all(conn, auth, &authority::Services::none())
+}
+
 /// The tables as the file would leave them, in a throwaway database.
-fn scratch_db(auth: &Value) -> Result<Connection> {
+fn scratch_db(auth: &Value, services: &authority::Services) -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
     db::apply(&mut conn, MIGRATIONS, Some("import-scratch"))?;
-    authority::insert_all(&conn, auth)?;
+    authority::insert_all(&conn, auth, services)?;
     Ok(conn)
 }
 
@@ -133,6 +145,10 @@ fn copy_out(src: &Connection) -> Result<Connection> {
         "invites",
         "retired",
         "agent_access",
+        "secret_profiles",
+        "secret_vars",
+        "secret_grants",
+        "secret_stale",
         "authority_settings",
     ] {
         let cols: Vec<String> = src
@@ -168,6 +184,8 @@ fn is_empty(snapshot: &Value) -> bool {
         "invites",
         "retired",
         "agent_access",
+        "profiles",
+        "grants",
     ]
     .iter()
     .all(|t| {
@@ -255,9 +273,10 @@ pub(crate) fn run_in(
         ));
         return Ok(rep);
     };
-    authority::refuse_what_it_cannot_keep(&auth)?;
+    let services = services_of(ctx, layout);
+    authority::refuse_what_it_cannot_keep(&auth, &services)?;
     // Everything that can refuse happens on a scratch copy, before the real file is opened for writing.
-    let scratch = scratch_db(&auth)?;
+    let scratch = scratch_db(&auth, &services)?;
     let desired = crate::authority::snapshot(&scratch)?;
     let diffs = check::diffs(&auth, &scratch, ctx)?;
     if !diffs.is_empty() {
@@ -304,7 +323,7 @@ fn dry(
     };
     let ready = db
         .as_ref()
-        .filter(|c| has(c, "people") && has(c, "retired"));
+        .filter(|c| has(c, "people") && has(c, "retired") && has(c, "secret_stale"));
     let state = match ready {
         None => {
             rep.lines.push(
@@ -410,7 +429,7 @@ fn real(
         if state == Rows::Differs {
             authority::clear(&tx)?;
         }
-        authority::insert_all(&tx, auth)?;
+        authority::insert_all(&tx, auth, &services_of(ctx, layout))?;
         // The authority reader opens its own read transaction, which cannot nest in this write one, so the rows just
         // written are read back raw into a scratch database and asked from there: same bytes, same answers.
         let back = copy_out(&tx)?;
@@ -503,7 +522,7 @@ fn facts(snapshot: &Value) -> std::collections::BTreeMap<String, Value> {
 /// row `owner()` and `canonical()` take). Then `check.rs`: for every person x agent x via, `Rules` over the file and
 /// `Authority` over core.db give the same `may`, `resolve`, `resolve_bot` and `cut_off`. A file the import would refuse
 /// (an owner who is also revoked, a domain the rules cannot keep) is a difference too: it cannot have been imported.
-pub(crate) fn same_answer(ctx: &Ctx, conn: &Connection) -> Result<Vec<String>> {
+pub(crate) fn same_answer(ctx: &Ctx, layout: &Layout, conn: &Connection) -> Result<Vec<String>> {
     let auth = match read_source(&ctx.auth) {
         Ok(Some((auth, _))) => auth,
         // No file: the old store answers nothing, so only an empty core agrees.
@@ -511,10 +530,11 @@ pub(crate) fn same_answer(ctx: &Ctx, conn: &Connection) -> Result<Vec<String>> {
         Err(Error::Refused(why)) => return Ok(vec![why]),
         Err(e) => return Err(e),
     };
-    if let Err(Error::Refused(why)) = authority::refuse_what_it_cannot_keep(&auth) {
+    let services = services_of(ctx, layout);
+    if let Err(Error::Refused(why)) = authority::refuse_what_it_cannot_keep(&auth, &services) {
         return Ok(vec![why]);
     }
-    let want = crate::authority::snapshot(&scratch_db(&auth)?)?;
+    let want = crate::authority::snapshot(&scratch_db(&auth, &services)?)?;
     let have = crate::authority::snapshot(conn)?;
     let (want_people, have_people) = (facts(&want), facts(&have));
     let mut out = Vec::new();
@@ -547,6 +567,70 @@ pub(crate) fn same_answer(ctx: &Ctx, conn: &Connection) -> Result<Vec<String>> {
     for id in rh.difference(&rw) {
         out.push(format!("retired {id}: in core.db, not in auth.json"));
     }
+    out.extend(secret_diffs(&want, &have));
     out.extend(check::diffs(&auth, conn, ctx)?);
     Ok(out)
+}
+
+/// The profiles and grants of the file against the core's (m0021): by name, so the line names the profile or the agent.
+/// A variable is named, its source (a reference, still not shown) only said to differ. The rules read neither table, so
+/// this is not part of `check::diffs`; it is what `retired`, `person --rm --unused` and a rollback rest on.
+fn secret_diffs(want: &Value, have: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if have.get("secrets_stale").is_some() {
+        out.push(
+            "core.db was imported before profiles and grants were kept; import again (kith kernel core-migrate --authority --force)"
+                .into(),
+        );
+    }
+    let table = |v: &Value, t: &str| {
+        v.get(t)
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default()
+    };
+    for t in ["profiles", "grants"] {
+        let (w, h) = (table(want, t), table(have, t));
+        for name in w.keys().chain(h.keys().filter(|k| !w.contains_key(*k))) {
+            match (w.get(name), h.get(name)) {
+                (Some(a), Some(b)) if a == b => {}
+                (Some(_), None) => out.push(format!("{t} {name}: in auth.json, not in core.db")),
+                (None, Some(_)) => out.push(format!("{t} {name}: in core.db, not in auth.json")),
+                (Some(a), Some(b)) if t == "grants" => {
+                    out.push(format!("grants {name}: auth.json {a}, core.db {b}"));
+                }
+                (Some(a), Some(b)) => {
+                    // person, with, browser as they are; the variables by name, and whose source differs
+                    let keys = |p: &Value| -> Vec<String> {
+                        p.as_object()
+                            .into_iter()
+                            .flatten()
+                            .map(|(k, _)| k.clone())
+                            .collect()
+                    };
+                    let mut what = Vec::new();
+                    for k in keys(a)
+                        .into_iter()
+                        .chain(keys(b))
+                        .collect::<std::collections::BTreeSet<_>>()
+                    {
+                        if a.get(&k) != b.get(&k) {
+                            what.push(if ["person", "with", "browser"].contains(&k.as_str()) {
+                                format!(
+                                    "{k} (auth.json {}, core.db {})",
+                                    a.get(&k).unwrap_or(&Value::Null),
+                                    b.get(&k).unwrap_or(&Value::Null)
+                                )
+                            } else {
+                                format!("variable {k}")
+                            });
+                        }
+                    }
+                    out.push(format!("profiles {name}: differs in {}", what.join(", ")));
+                }
+                (None, None) => {}
+            }
+        }
+    }
+    out
 }

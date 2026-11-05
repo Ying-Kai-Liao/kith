@@ -122,8 +122,14 @@ pub(super) fn retired(auth: &Value, life: &Life, pid: &str, left: bool) -> Optio
             kept.join(", ")
         ));
     }
-    // `profiles` is read from `secret_profiles` (see `read_profiles`); nothing writes that table until lane B's import
-    // does, so this finds nothing yet and a reused id could inherit logins: `retired` must not be switched before then.
+    // `profiles` is read from `secret_profiles` (see `read_profiles`), which the authority import fills. A database
+    // imported before it did has none, and an id could then inherit logins it cannot see: it says so and refuses until
+    // the import is run again (`secrets_stale`, m0022).
+    if truthy(auth.get("secrets_stale")) {
+        return Some(format!(
+            "cannot tell whether a removed '{pid}' owned a login: this database was imported before profiles were kept; import again first"
+        ));
+    }
     let mut owned: Vec<&str> = auth
         .get("profiles")
         .and_then(Value::as_object)
@@ -431,8 +437,13 @@ pub(crate) fn person_remove_unused(auth: &mut Value, life: &Life, pid: &str) -> 
     }
     // `handles` (people.handles, m0015), `agent@<id>` grants and owned or lent profiles (the lane B tables, as
     // `read_grants` and `read_profiles` give them) are checked here in the same transaction, as `remove_unused` does.
-    // `secret_grants` and `secret_profiles` stay empty until lane B's import fills them (nothing writes them yet), so
-    // `--rm --unused` must not be switched before then (see docs/plans/one-bot-model.md).
+    // The authority import fills `secret_grants` and `secret_profiles`; a database imported before it did has them empty,
+    // which says nothing, so `secrets_stale` (m0022) refuses until the import is run again.
+    if truthy(auth.get("secrets_stale")) {
+        return die(format!(
+            "cannot check '{pid}' for grants and profiles: this database was imported before they were kept; import again first"
+        ));
+    }
     let p = people(auth).get(pid).cloned().unwrap_or(Value::Null);
     let mut has: Vec<String> = ["owner", "bot_of", "handles", "was", "revoked"]
         .into_iter()

@@ -263,7 +263,7 @@ pub(super) fn store(conn: &Connection, before: &Value, after: &Value) -> Result<
         }
     }
     let (old, new) = (table(before, "profiles"), table(after, "profiles"));
-    // no verb removes a profile, and its variables were never read into the snapshot: refuse, don't half-delete
+    // no verb removes a profile, and the store writes none of a profile's variables (the snapshot reads them, `secret_vars` is not its to delete): refuse, don't half-delete
     if let Some(name) = old.keys().find(|k| !new.contains_key(*k)) {
         return Err(bad(
             "profiles",
