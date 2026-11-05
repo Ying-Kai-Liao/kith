@@ -343,9 +343,9 @@
       }
     },
     "Revoked": {
-      "doc": "revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host.",
-      "fields": { "revoked": "bool", "coreUpdated": "bool?" },
-      "mayOmit": ["coreUpdated"]
+      "doc": "revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host, and when nothing was sent to the core (a repeat remove, no kith-auth) or kith-auth itself failed. authUpdated is false when kith-auth failed to remove the person (auth.json may still hold it); absent otherwise.",
+      "fields": { "revoked": "bool", "coreUpdated": "bool?", "authUpdated": "bool?" },
+      "mayOmit": ["coreUpdated", "authUpdated"]
     },
     "BotLimits": {
       "doc": "A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host.",

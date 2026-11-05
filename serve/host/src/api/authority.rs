@@ -83,7 +83,8 @@ impl CoreData {
 
     /// This process's view, as `kith people may` sends it.
     pub fn from_process() -> Self {
-        let home = kith_kernel::paths::process_home();
+        // `known_home`, not `process_home`: with HOME unset the account's own home still answers.
+        let home = kith_kernel::paths::known_home().unwrap_or_default();
         let folders = crate::kernel::folders(&home);
         let kernel = crate::kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
         Self::new(folders, home, kernel, crate::core_front::caller_env())
@@ -103,7 +104,10 @@ impl CoreData {
     /// The caller's view params every `people.*` call carries (`home`, `kernel`, `env`).
     fn view(&self) -> serde_json::Map<String, Value> {
         let mut m = serde_json::Map::new();
-        m.insert("home".into(), self.home.to_string_lossy().into_owned().into());
+        // An empty home is left out: the core then uses its own known home, or refuses, instead of being told "".
+        if !self.home.as_os_str().is_empty() {
+            m.insert("home".into(), self.home.to_string_lossy().into_owned().into());
+        }
         m.insert("kernel".into(), self.kernel.to_string_lossy().into_owned().into());
         m.insert("env".into(), Value::Object(self.env.clone()));
         m
@@ -406,6 +410,8 @@ pub fn guard_on_core() -> bool {
 }
 
 /// A test shuts the gate while its core stays up and opted in (what a write by kith-auth does for up to `GATE_EVERY`).
+/// Only read while `TEST_CORE` is set, and every test that sets `TEST_CORE` holds the rig's `ONE_AT_A_TIME` first, so
+/// no other test sees it.
 #[cfg(test)]
 pub static TEST_GATE_SHUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -491,6 +497,15 @@ mod gate_tests {
         assert_eq!(read_gate(Some(&json!({"ok": true, "warning": null}))), (true, None));
         let (open, line) = read_gate(Some(&json!({"ok": true, "warning": "WARNING x"})));
         assert!(open && line.as_deref() == Some("WARNING x"));
+    }
+
+    #[test]
+    fn a_view_without_a_known_home_sends_none_rather_than_an_empty_one() {
+        let folders = || crate::kernel::folders(Path::new("/h"));
+        let none = CoreData::new(folders(), PathBuf::new(), PathBuf::from("/k"), serde_json::Map::new());
+        assert!(none.view().get("home").is_none(), "the core would refuse \"\" as no home");
+        let some = CoreData::new(folders(), PathBuf::from("/h"), PathBuf::from("/k"), serde_json::Map::new());
+        assert_eq!(some.view()["home"], "/h");
     }
 
     /// The latch is one static: the tests that touch it take turns.

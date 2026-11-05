@@ -173,7 +173,7 @@ const LOCK_WAIT: Duration = Duration::from_secs(30);
 const OLD_VAULT_PREFIX: &str = "vault:v1:";
 
 /// Why a step is refused until M2-18 lifts it (the architect's gate list for #793: 1, 2, 4-8).
-const STEP_REFUSAL: &str = "not stepped: the M2-18 gates are open: kith-auth does not read the tombstone or answer from the core, and the host does not decide from the gate once switched (1, 2); addBot/removeBot and removePerson --unused do not clear grants, profiles and handles in one transaction (4, 5); no core writer for agent_access, profiles, grants or env (6, 7); the revoke bridge (8). `step authority --dry-run` and `check authority` work now";
+const STEP_REFUSAL: &str = "not stepped: the M2-18 gates are open: kith-auth does not read the tombstone or answer from the core, and the host does not decide from the gate once switched (1, 2); addBot/removeBot and removePerson --unused do not clear grants, profiles and handles in one transaction (4, 5); no core writer for agent_access, profiles, grants or env (6, 7); the revoke bridge (8); the 'already switched' branch re-tombstones a file a writer put back after the switch, with no sha check and no import (9); no core read verb with kith-auth `people --json`'s row shape (id, name, owner, bot_of, root, revoked/cut_off, revoked_at, agent rows, handles) for its readers: serve/host/src/remote/members.rs (revoke path), api/people.rs, kith_recall.py, kith-cost, kith people (10). `step authority --dry-run` and `check authority` work now";
 
 /// `auth.json.lock`, held (flock, exclusive): the lock `kith-auth` and `kith_kernel::secrets` take for a read-modify-write.
 /// Dropping it lets the lock go.
@@ -264,8 +264,9 @@ fn unmoved_vault_rows(ctx: &Ctx, core: &Connection) -> Result<Option<Vec<String>
 fn refuse_unmoved_vault(ctx: &Ctx, core: &Connection) -> Result<()> {
     match unmoved_vault_rows(ctx, core)? {
         Some(rows) if !rows.is_empty() => Err(Error::Refused(format!(
-            "authority: serve.db still holds {} credential record(s) that have not moved into the core's vault; unlock the vault in the app first",
-            rows.len()
+            "authority: serve.db still holds {} credential record(s) that have not moved into the core's vault ({}); unlock the vault in the app first so the host moves them. A record that is still here after that can never be moved (its legacy key is lost, or the row is corrupt): remove that credential in the app, then run this again",
+            rows.len(),
+            rows.join(", ")
         ))),
         _ => Ok(()),
     }
@@ -518,9 +519,24 @@ impl Module for AuthorityModule {
         Ok(Some(Box::new(held)))
     }
 
+    /// The writers' lock for a rollback: a `kith-auth` command that is mid-write finishes first. Taken before the
+    /// rolling-back record and the Keychain writes, so a refusal at the lock writes nothing.
+    fn rollback_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        let held = hold_auth_lock(&ctx(env)?.auth, self.lock_wait)?;
+        Ok(Some(Box::new(held)))
+    }
+
     fn before_tombstone(&self, env: &Env) -> Result<()> {
         let Some(want) = self.imported.borrow_mut().take() else {
-            return Ok(());
+            // A real step always recorded the sha at its import; none means the guard was skipped. Fail closed, so a
+            // file that was never checked is never tombstoned. (The unlifted module never reaches a real step.)
+            return if self.lifted {
+                Err(Error::Refused(
+                    "authority: the import did not record auth.json's sha, so the file cannot be checked before the tombstone; nothing was tombstoned, run it again".into(),
+                ))
+            } else {
+                Ok(())
+            };
         };
         if sha_of(&ctx(env)?.auth)? == want {
             Ok(())
@@ -577,9 +593,8 @@ impl Module for AuthorityModule {
 
     fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
         let ctx = ctx(env)?;
-        // The writers' lock: a `kith-auth` command that is mid-write finishes first, and none starts a read-modify-write
-        // on the file while it is replaced.
-        let _lock = hold_auth_lock(&ctx.auth, self.lock_wait)?;
+        // Runs under `rollback_lock` (taken before the rolling-back record), so no writer starts a read-modify-write on
+        // the file while it is replaced.
         let snap = crate::authority::snapshot(core.conn())?;
         // A file that is already a real auth.json (a rollback run again after it wrote) keeps its other keys; else the
         // copy the tombstone kept.
