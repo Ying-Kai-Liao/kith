@@ -1235,3 +1235,229 @@ fn a_grant_list_with_an_empty_entry_refuses_the_file() {
         "{e:?}"
     );
 }
+
+// A person who is in core.db and gone from the file leaves no `people` row after `clear()`, so the import writes the
+// open removal first (P4b); the revoke order then ends what they and their bots hold.
+
+fn crew(extra: &Value) -> String {
+    let mut people = json!({
+        "kai": {"name": "Kai", "owner": true},
+        "mia": {"name": "Mia"},
+        "mia-bot": {"bot_of": "mia"},
+        "sam": {"name": "Sam"},
+        "sam-bot": {"bot_of": "sam"},
+        "sam-bot2": {"bot_of": "sam"}
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        if v.is_null() {
+            people.as_object_mut().unwrap().remove(k);
+        } else {
+            people[k] = v.clone();
+        }
+    }
+    json!({ "people": people }).to_string()
+}
+
+fn ask_of(f: &Fixture, id: &str, person: &str) {
+    open_all(&f.layout)
+        .conn()
+        .execute(
+            "INSERT INTO asks (id, chain, parent, hop, caller_person, conversation, state, at_ms, cost)
+             VALUES (?1, 'r', NULL, 0, ?2, ?3, 'open', 1, 0.0)",
+            rusqlite::params![id, person, format!("c-{id}")],
+        )
+        .unwrap();
+}
+
+fn ask_state(f: &Fixture, id: &str) -> String {
+    open_all(&f.layout)
+        .conn()
+        .query_row("SELECT state FROM asks WHERE id = ?1", [id], |r| r.get(0))
+        .unwrap()
+}
+
+fn force() -> AuthorityOptions {
+    AuthorityOptions {
+        dry_run: false,
+        force: true,
+    }
+}
+
+#[test]
+fn a_person_gone_from_the_file_has_their_and_their_bots_asks_ended_by_the_reimport() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-mia", "mia");
+    ask_of(&f, "a-bot", "mia-bot");
+    ask_of(&f, "a-sam", "sam");
+    f.auth(&crew(&json!({"mia": null, "mia-bot": null})));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the removal of mia")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(ask_state(&f, "a-mia"), "stopped");
+    assert_eq!(ask_state(&f, "a-bot"), "stopped");
+    assert_eq!(
+        ask_state(&f, "a-sam"),
+        "open",
+        "a person who stays is not touched"
+    );
+    assert_eq!(
+        f.count("open_removals"),
+        0,
+        "the replay ran and cleared its rows"
+    );
+    assert_eq!(f.count("people"), 4);
+}
+
+#[test]
+fn the_rows_hold_the_removed_bots_and_the_replay_ends_the_asks_from_the_row_alone() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-mia", "mia");
+    ask_of(&f, "a-bot", "mia-bot");
+    let auth: Value = serde_json::from_str(&crew(&json!({"mia": null, "mia-bot": null}))).unwrap();
+    let mut core = open_all(&f.layout);
+    let ids = super::authority::record_removals(core.conn(), &auth, 1.0).unwrap();
+    assert_eq!(ids, ["mia"]);
+    let (person, bots): (String, String) = core
+        .conn()
+        .query_row("SELECT person, bots FROM open_removals", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!((person.as_str(), bots.as_str()), ("mia", r#"["mia-bot"]"#));
+    // clear() then drops the people; the replay (level-triggered) still ends the asks from the row.
+    super::authority::clear(core.conn()).unwrap();
+    let (_, failed) = crate::revoke_order::replay_open(&mut core, 5).unwrap();
+    assert!(failed.is_empty(), "{failed:?}");
+    drop(core);
+    assert_eq!(ask_state(&f, "a-mia"), "stopped");
+    assert_eq!(ask_state(&f, "a-bot"), "stopped");
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_bot_gone_from_the_file_while_its_owner_stays_is_a_removal_of_its_own() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-sam", "sam");
+    ask_of(&f, "a-b1", "sam-bot");
+    ask_of(&f, "a-b2", "sam-bot2");
+    let auth: Value = serde_json::from_str(&crew(&json!({"sam-bot": null}))).unwrap();
+    let core = open_all(&f.layout);
+    assert_eq!(
+        super::authority::removals(core.conn(), &auth).unwrap(),
+        [("sam-bot".to_owned(), Vec::<String>::new())]
+    );
+    drop(core);
+    f.auth(&crew(&json!({"sam-bot": null})));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(ask_state(&f, "a-b1"), "stopped");
+    assert_eq!(ask_state(&f, "a-sam"), "open");
+    assert_eq!(ask_state(&f, "a-b2"), "open");
+}
+
+#[test]
+fn a_bot_handed_to_someone_who_stays_is_not_removed_with_its_old_owner() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-b1", "sam-bot");
+    ask_of(&f, "a-b2", "sam-bot2");
+    // sam goes; their bot sam-bot now belongs to mia, sam-bot2 goes with sam
+    f.auth(&crew(
+        &json!({"sam": null, "sam-bot2": null, "sam-bot": {"bot_of": "mia"}}),
+    ));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(ask_state(&f, "a-b1"), "open");
+    assert_eq!(ask_state(&f, "a-b2"), "stopped");
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_reimport_with_nothing_removed_writes_no_rows_and_a_repeat_adds_none() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    f.auth(&crew(&json!({"mia": {"name": "Mia 2"}})));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(!rep.lines.iter().any(|l| l.contains("recorded the removal")));
+    assert_eq!(f.count("open_removals"), 0);
+    // the same file without mia, twice: the second run has no mia in people to remove
+    f.auth(&crew(&json!({"mia": null, "mia-bot": null})));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        !rep.lines.iter().any(|l| l.contains("recorded the removal")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_file_that_names_an_id_with_an_open_removal_is_refused() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    // an earlier removal whose order never finished: it names mia-bot
+    open_all(&f.layout)
+        .conn()
+        .execute(
+            "INSERT INTO open_removals (person, bots, at) VALUES ('old', '[\"mia-bot\"]', 1)",
+            [],
+        )
+        .unwrap();
+    f.auth(&crew(&json!({"sam": {"name": "Sam 2"}})));
+    let e = f
+        .run(force(), &FakeKeychain::default(), &mut sink)
+        .unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("mia-bot") && m.contains("old")),
+        "{e:?}"
+    );
+    assert_eq!(f.count("people"), 6, "nothing was imported");
+    assert_eq!(f.count("open_removals"), 1, "no row was added");
+}
+
+#[test]
+fn removing_the_owner_is_refused_and_nothing_changes() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    f.auth(&crew(&json!({"kai": null})));
+    let e = f
+        .run(force(), &FakeKeychain::default(), &mut sink)
+        .unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("owner kai")),
+        "{e:?}"
+    );
+    assert_eq!(f.count("people"), 6);
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_core_never_imported_has_nothing_to_remove() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(!rep.lines.iter().any(|l| l.contains("recorded the removal")));
+    assert_eq!(f.count("open_removals"), 0);
+}

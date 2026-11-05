@@ -293,7 +293,9 @@ pub(crate) fn run_in(
     }
     rep.lines.extend(authority::left_behind(&auth));
     if opts.dry_run {
-        dry(layout, opts, &desired, &scratch, &refs, sink, &mut rep)?;
+        dry(
+            layout, opts, &auth, &desired, &scratch, &refs, sink, &mut rep,
+        )?;
     } else {
         real(
             layout, ctx, opts, &auth, &sha, &desired, &scratch, &refs, source, sink, held, &mut rep,
@@ -302,9 +304,33 @@ pub(crate) fn run_in(
     Ok(rep)
 }
 
+/// Runs the revoke order for the removals the import just recorded. Best effort: a row that fails stays in
+/// `open_removals` and the core's replay (at start, and on the supervisor's pass) runs it again. The writers it would
+/// kill are ended by the holder's reconcile, as for any replay.
+fn replay_removals(core: &mut Core, removed: &[String], rep: &mut AuthorityReport) {
+    rep.lines.push(format!(
+        "authority: recorded the removal of {} (gone from the file); running the revoke order",
+        removed.join(", ")
+    ));
+    match crate::revoke_order::replay_open(core, now_secs().saturating_mul(1000)) {
+        Ok((_, failed)) => {
+            for f in failed {
+                rep.lines.push(format!(
+                    "authority: {f}; the row stays and the core runs it again"
+                ));
+            }
+        }
+        Err(e) => rep.lines.push(format!(
+            "authority: the revoke order could not run now ({e}); the rows stay and the core runs them at start"
+        )),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn dry(
     layout: &Layout,
     opts: AuthorityOptions,
+    auth: &Value,
     desired: &Value,
     scratch: &Connection,
     refs: &[Reference],
@@ -346,6 +372,14 @@ fn dry(
             rep.lines.push(format!(
                 "authority: would REPLACE the rows core.db holds with auth.json's ({counts}); --force given"
             ));
+            if let Some(c) = ready.filter(|c| has(c, "open_removals")) {
+                for (id, bots) in authority::removals(c, auth)? {
+                    rep.lines.push(format!(
+                        "authority: would record the removal of {id} (and {} bot(s)) and run the revoke order",
+                        bots.len()
+                    ));
+                }
+            }
             rep.changed = true;
         }
         Rows::Differs => {
@@ -421,12 +455,17 @@ fn real(
         .push(format!("backup of core.db: {}", backup.display()));
     rep.backup = Some(backup.clone());
 
+    let mut removed: Vec<String> = Vec::new();
     let tx = core.claim_tx()?;
     if state == Rows::Same {
         rep.lines
             .push("authority: already imported; unchanged".into());
     } else {
         if state == Rows::Differs {
+            // Before clear(): it drops every people row, so a person gone from the file would leave no record.
+            #[allow(clippy::cast_precision_loss)]
+            let now_ms = now_secs() as f64 * 1000.0;
+            removed = authority::record_removals(&tx, auth, now_ms)?;
             authority::clear(&tx)?;
         }
         authority::insert_all(&tx, auth, &services_of(ctx, layout))?;
@@ -484,6 +523,9 @@ fn real(
     )?;
     tx.commit()?;
     rep.changed = true;
+    if !removed.is_empty() {
+        replay_removals(core, &removed, rep);
+    }
     rep.lines.push(
         "done. core.db is a copy: kith-auth and the host still decide from auth.json (the cutover is a later step)".into(),
     );

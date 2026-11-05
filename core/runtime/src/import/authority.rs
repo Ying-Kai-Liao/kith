@@ -510,6 +510,76 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value, services: &Services) -
     Ok(())
 }
 
+/// The removals a forced re-import of `auth` makes: each person core.db holds that the file no longer has, with the
+/// removed bots under them, as `(id, bots)` in id order. Reads only; refuses what a revoke can not carry out.
+///
+/// `clear()` deletes every `people` row, so without this a person who is gone from the file would leave no record and the
+/// revoke order (`revoke_order`) would never end their claims, asks or bots'. A removed id whose owner stays is a root
+/// of its own (a bot gone from the file is a removal); a removed id whose owner is removed too belongs to that owner's
+/// set. A bot still in the file (handed over, `bot_of` changed) is not in any set and is not descended through: it stays.
+pub(super) fn removals(conn: &Connection, auth: &Value) -> Result<Vec<(String, Vec<String>)>> {
+    let keep: std::collections::BTreeSet<&str> = table(auth, "people")?
+        .into_iter()
+        .flatten()
+        .map(|(id, _)| id.as_str())
+        .collect();
+    let mut st = conn.prepare("SELECT id, bot_of, owner FROM people ORDER BY id")?;
+    let rows: Vec<(String, Option<String>, i64)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    let gone: std::collections::BTreeMap<&str, Option<&str>> = rows
+        .iter()
+        .filter(|(id, ..)| !keep.contains(id.as_str()))
+        .map(|(id, bot_of, _)| (id.as_str(), bot_of.as_deref()))
+        .collect();
+    if let Some((id, ..)) = rows
+        .iter()
+        .find(|(id, _, owner)| *owner == 1 && gone.contains_key(id.as_str()))
+    {
+        return Err(Error::Refused(format!(
+            "auth.json: the owner {id} is in core.db and not in the file; removing the owner is never right, so nothing was \
+             imported. Put {id} back in the file (as the owner) and run it again."
+        )));
+    }
+    // While an open removal names an id, `people.addPerson` and `people.addBot` refuse it; the import must not put it back.
+    for id in &keep {
+        if let Some(who) = crate::revoke_order::open_removal_naming(conn, id)? {
+            return Err(Error::Refused(format!(
+                "auth.json: {id} is in the file but the removal of {who} (which names {id}) has not finished in core.db; nothing \
+                 was imported. Let the core run it (it does at start), or take {id} out of the file, and run it again."
+            )));
+        }
+    }
+    let mut out = Vec::new();
+    for (&id, &owner) in &gone {
+        if owner.is_some_and(|o| gone.contains_key(o)) {
+            continue;
+        }
+        let mut bots = Vec::new();
+        let mut frontier = vec![id];
+        while let Some(o) = frontier.pop() {
+            for (&b, _) in gone.iter().filter(|(_, bo)| **bo == Some(o)) {
+                if b != id && !bots.iter().any(|x: &String| x == b) {
+                    bots.push(b.to_owned());
+                    frontier.push(b);
+                }
+            }
+        }
+        bots.sort();
+        out.push((id.to_owned(), bots));
+    }
+    Ok(out)
+}
+
+/// Writes the open removal for each of [`removals`]'s ids, in the caller's transaction, before `clear()`. Returns the ids.
+pub(super) fn record_removals(conn: &Connection, auth: &Value, now_ms: f64) -> Result<Vec<String>> {
+    let found = removals(conn, auth)?;
+    for (id, bots) in &found {
+        crate::revoke_order::record_removal(conn, id, bots, now_ms)?;
+    }
+    Ok(found.into_iter().map(|(id, _)| id).collect())
+}
+
 /// Empties the tables `insert_all` fills (a forced re-import). `authority_settings` keeps any key it does not own.
 pub(super) fn clear(conn: &Connection) -> Result<()> {
     conn.execute_batch(
