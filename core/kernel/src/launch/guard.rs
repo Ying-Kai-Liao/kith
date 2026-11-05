@@ -30,8 +30,8 @@ pub const SECRET_RULES: [&str; 10] = [
     "memory.db*",
     "core/**",
 ];
-const IN_FOLDER_TREES: [&str; 4] = [".claude", ".vscode", ".idea", ".git/hooks"];
-const IN_FOLDER_FILES: [&str; 6] = [
+pub(crate) const IN_FOLDER_TREES: [&str; 4] = [".claude", ".vscode", ".idea", ".git/hooks"];
+pub(crate) const IN_FOLDER_FILES: [&str; 6] = [
     "CLAUDE.md",
     "CLAUDE.local.md",
     ".mcp.json",

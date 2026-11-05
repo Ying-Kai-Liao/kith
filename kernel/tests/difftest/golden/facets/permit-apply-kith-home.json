@@ -1,0 +1,18 @@
+{
+  "fakes": "host-sock {\"method\": \"consumeAccess\", \"token\": \"run-tok-1\"}\n",
+  "state:home/.kith/index/": "<empty dir>\n",
+  "state:home/.kith/secrets/env": "X=1\n",
+  "state:home/kith/agents/a/docs/": "<empty dir>\n",
+  "state:home/kith/agents/b/x/": "<empty dir>\n",
+  "state:home/priv/sub/": "<empty dir>\n",
+  "state:home/proj/.claude/": "<empty dir>\n",
+  "state:home/proj/docs/": "<empty dir>\n",
+  "state:home/proj/notes.txt": "n",
+  "state:home/proj/out/log.txt": "l",
+  "state:home/ro/x/": "<empty dir>\n",
+  "state:home/s1.json": "{\n  \"permissions\": {\n    \"additionalDirectories\": [\n      \"<HOME>/kith/agents/a/docs\"\n    ],\n    \"allow\": [],\n    \"deny\": [\n      \"Edit(/<HOME>/kith/agents/a/docs/**)\"\n    ]\n  },\n  \"sandbox\": {\n    \"filesystem\": {\n      \"allowRead\": [\n        \"<HOME>/kith/agents/a/docs\"\n      ],\n      \"denyRead\": [\n        \"/\",\n        \"<HOME>/kith\",\n        \"<HOME>/kith/agents/b\",\n        \"<HOME>/agentsroot\"\n      ]\n    }\n  }\n}\n",
+  "state:home/serve/token": "fake-serve-token\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "kith: access given: read <HOME>/kith/agents/a/docs\n",
+  "step0.stdout": ""
+}
