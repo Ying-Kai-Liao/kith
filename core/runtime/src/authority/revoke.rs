@@ -39,6 +39,8 @@ pub(crate) struct Life {
     pub(crate) agents: PathBuf,
     pub(crate) state: PathBuf,
     pub(crate) machine: PathBuf,
+    /// The kernel folder, whose `services/` says which logins are personal.
+    pub(crate) kernel: PathBuf,
 }
 
 impl Life {
@@ -53,6 +55,7 @@ impl Life {
             agents: c.agents.clone(),
             state: home.join("state"),
             machine: home.join("machine"),
+            kernel: c.kernel.clone(),
         }
     }
 }
@@ -235,9 +238,14 @@ pub(crate) fn person_set(
     let mut out = Vec::new();
     if owner {
         let was = secrets::owner(auth);
-        if let Some(was) = was.filter(|w| w != pid) {
-            // TODO(lane B): kith-auth also pins the profiles that were the old owner's by default to them
-            // (`kept <was>'s: ...`); profiles are not in core.db yet.
+        if let Some(was) = was.clone().filter(|w| w != pid) {
+            let pinned = kept_logins(auth, life, &was)?;
+            if !pinned.is_empty() {
+                out.push(format!(
+                    "kept {was}'s: {} (kith-auth owner <profile> {pid} to hand one over)",
+                    pinned.join(", ")
+                ));
+            }
             out.push(format!(
                 "note: anyone using this Mac account, and {was}'s KITH_DISCORD_OWNER_ID, still run as the owner"
             ));
@@ -268,6 +276,73 @@ pub(crate) fn person_set(
         }
     ));
     Ok(out)
+}
+
+/// Every profile owned by `from` is owned by `to`; the profiles' names, sorted.
+fn repoint_profiles(auth: &mut Value, from: &str, to: &str) -> Vec<String> {
+    let mut moved = Vec::new();
+    let profiles = auth.get_mut("profiles").and_then(Value::as_object_mut);
+    for (name, prof) in profiles.into_iter().flatten() {
+        if str_of(prof, "person") == Some(from)
+            && let Some(o) = prof.as_object_mut()
+        {
+            o.insert("person".to_owned(), to.into());
+            moved.push(name.clone());
+        }
+    }
+    moved.sort_unstable();
+    moved
+}
+
+/// The owner changes: the logins that stay the old owner's, for the line kith-auth prints. The import already stored
+/// each default login as its owner's id, so they are the personal-service profiles held for `was`. A profile typed
+/// as `the owner` belongs to nobody, as in Python (`owner_of` pins only what had no `person`).
+fn kept_logins(auth: &Value, life: &Life, was: &str) -> R<Vec<String>> {
+    let mut out = Vec::new();
+    let profiles = auth.get("profiles").and_then(Value::as_object);
+    for (name, prof) in profiles.into_iter().flatten() {
+        if str_of(prof, "person") == Some(was)
+            && personal(life, name.split('/').next().unwrap_or(name))?
+        {
+            out.push(name.clone());
+        }
+    }
+    out.sort_unstable();
+    Ok(out)
+}
+
+/// `kith-auth`'s `personal(svc)`, read from the kernel's `services/` then this Mac's; a spec that cannot be read is
+/// refused, as the import refuses it.
+fn personal(life: &Life, svc: &str) -> R<bool> {
+    if svc.is_empty() || svc.contains(['/', '\\']) || svc == ".." || svc == "." {
+        return Ok(false);
+    }
+    for dir in [life.kernel.join("services"), life.machine.join("services")] {
+        let path = dir.join(format!("{svc}.json"));
+        if !path.is_file() {
+            continue;
+        }
+        let spec: Option<Value> = std::fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .filter(Value::is_object);
+        let Some(spec) = spec else {
+            return die(format!("the service spec of {svc} cannot be read"));
+        };
+        return Ok(match spec.get("personal") {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::Null) => false,
+            Some(Value::String(t)) => !t.is_empty(),
+            Some(Value::Number(n)) => n.as_f64() != Some(0.0),
+            Some(Value::Array(l)) => !l.is_empty(),
+            Some(Value::Object(m)) => !m.is_empty(),
+            None => matches!(
+                spec.get("kind").and_then(Value::as_str),
+                Some("login" | "browser")
+            ),
+        });
+    }
+    Ok(false)
 }
 
 /// `rename`: a person's new id, carried through every table that names them. The old id stays in `was`, so what
@@ -326,6 +401,26 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
             }
         }
     }
+    // `agent@old` grants are `agent@new`, in the same place; a profile they own or are lent follows
+    if let Some(grants) = auth.get_mut("grants").and_then(Value::as_object_mut) {
+        let suffix = format!("@{old}");
+        *grants = std::mem::take(grants)
+            .into_iter()
+            .map(|(k, g)| match k.strip_suffix(&suffix) {
+                Some(agent) => (format!("{agent}@{new}"), g),
+                None => (k, g),
+            })
+            .collect();
+    }
+    let owned = repoint_profiles(auth, old, new);
+    let profiles = auth.get_mut("profiles").and_then(Value::as_object_mut);
+    for prof in profiles.into_iter().flat_map(|p| p.values_mut()) {
+        if let Some(with) = prof.get_mut("with").and_then(Value::as_array_mut) {
+            for w in with.iter_mut().filter(|w| w.as_str() == Some(old)) {
+                *w = new.into();
+            }
+        }
+    }
     for inv in table(auth, "invites").values_mut() {
         if str_of(inv, "person") == Some(old)
             && let Some(o) = inv.as_object_mut()
@@ -333,7 +428,12 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
             o.insert("person".to_owned(), new.into());
         }
     }
-    Ok(vec![format!("{old} is now {new}{RENAMED_TAIL}")])
+    let owns = if owned.is_empty() {
+        String::new()
+    } else {
+        format!("; owns {}", owned.join(", "))
+    };
+    Ok(vec![format!("{old} is now {new}{owns}{RENAMED_TAIL}")])
 }
 
 /// What a rename's line ends with; the folders that really moved are said before it (`renamed` in `call.rs`).
