@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# kith-settings-switch-check — the `settings` switch (kernel/lib/core-switched.txt) and its rollback: `kith AGENT set
+# permission|call-model|limit|at-limit [--json]` is answered by `kith kernel settings` when the line is there and a kith
+# program lists the module, by lib/kith_settings.py when KITH_CORE=python, when the line is gone, or when the program is
+# missing or too old. Which side answered is read from a wrapper program that logs every call it gets. Needs the Rust
+# program: KITH_DIFFTEST_BIN=/path/to/kith (without one the check says so and exits 0).
+#
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-settings-switch-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+REAL=${KITH_DIFFTEST_BIN:-}
+if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN)"; exit 0; fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-settings-switch-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json TZ=UTC
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CORE KITH_BIN HQ_HOME KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR
+mkdir -p "$HOME" "$T/bin" "$T/state" "$KITH_HOME/agents/echo/role"
+export KITH_STATE=$T/state
+printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$KITH_HOME/agents/echo/role/agent.md"
+
+# The program the router finds: the real one behind a wrapper that logs what it was asked.
+LOG=$T/calls
+printf '#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n' "$LOG" "$REAL" > "$T/bin/kith-wrap"
+chmod +x "$T/bin/kith-wrap"
+# A program from before the settings module: it answers `kernel version` without it.
+printf '#!/bin/sh\necho "$*" >> "%s"\n[ "$1 $2" = "kernel version" ] && echo %s\nexit 0\n' "$LOG" "'{\"abi\":1,\"modules\":[\"paths\"]}'" > "$T/bin/kith-old"
+chmod +x "$T/bin/kith-old"
+
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+settings_calls() { grep -c '^kernel settings' "$LOG" 2>/dev/null || true; }
+reset() { rm -f "$T/state/settings.json" "$LOG"; touch "$LOG"; }
+
+KITH=$KERNEL/bin/kith
+LINES=(
+  "echo set permission plan --json"
+  "echo set call-model opus --json"
+  "echo set limit 12.5 --json"
+  "echo set at-limit hold --json"
+  "echo set limit nope --json"
+  "echo set permission plan"
+)
+
+# 1. Switched: every line reaches `kernel settings`, and the answer and the file are Python's.
+for l in "${LINES[@]}"; do
+  reset; KITH_BIN=$T/bin/kith-wrap "$KITH" $l > "$T/rust.out" 2>"$T/rust.err"; echo $? > "$T/rust.rc"
+  hit=$(settings_calls); cp "$T/state/settings.json" "$T/rust.file" 2>/dev/null || : > "$T/rust.file"
+  reset; KITH_CORE=python KITH_BIN=$T/bin/kith-wrap "$KITH" $l > "$T/py.out" 2>"$T/py.err"; echo $? > "$T/py.rc"
+  pyhit=$(settings_calls); cp "$T/state/settings.json" "$T/py.file" 2>/dev/null || : > "$T/py.file"
+  check "rust answers: $l" "[ \"$hit\" = 1 ]"
+  check "KITH_CORE=python keeps it in Python: $l" "[ \"$pyhit\" = 0 ]"
+  check "same stdout, stderr, exit code and file: $l" "cmp -s '$T/rust.out' '$T/py.out' && cmp -s '$T/rust.err' '$T/py.err' && cmp -s '$T/rust.rc' '$T/py.rc' && python3 -c 'import json,sys; a,b=[open(p).read() for p in sys.argv[1:]]; assert (json.loads(a) if a else None)==(json.loads(b) if b else None)' '$T/rust.file' '$T/py.file'"
+done
+
+# 2. Rollback: the line removed from a copy of the kernel folder, the Python answers again.
+cp -R "$KERNEL" "$T/k"
+grep -v '^settings	' "$KERNEL/lib/core-switched.txt" > "$T/k/lib/core-switched.txt"
+reset; KITH_BIN=$T/bin/kith-wrap "$T/k/bin/kith" echo set permission plan --json > "$T/out" 2>/dev/null
+check "line removed: Python answers" "[ \"\$(settings_calls)\" = 0 ] && grep -q '\"value\": \"plan\"' '$T/out' && grep -q plan '$T/state/settings.json'"
+
+# 3. A program that does not list the module (or is missing): the Python answers, silently.
+reset; KITH_BIN=$T/bin/kith-old "$KITH" echo set permission plan --json > "$T/out" 2>"$T/err"
+check "program without the module: Python answers, nothing on stderr" "! grep -q '^kernel settings' '$LOG' && grep -q plan '$T/state/settings.json' && [ ! -s '$T/err' ]"
+
+# 4. Two writers, one file: a value written by Python is read and kept by Rust, and the other way round.
+reset
+KITH_CORE=python "$KITH" echo set permission plan > /dev/null
+KITH_BIN=$T/bin/kith-wrap "$KITH" echo set limit 5 > /dev/null
+KITH_CORE=python "$KITH" echo set at-limit hold > /dev/null
+check "Rust and Python writes keep each other's keys" "python3 -c 'import json; a=json.load(open(\"$T/state/settings.json\"))[\"agents\"][\"echo\"]; assert a == {\"permission_mode\": \"plan\", \"limit\": 5, \"at_limit\": \"hold\"} or (a[\"permission_mode\"], a[\"limit\"], a[\"at_limit\"]) == (\"plan\", 5, \"hold\"), a'"
+
+# 5. An unknown agent is refused by the entry itself, before either side.
+reset; KITH_BIN=$T/bin/kith-wrap "$KITH" ghost set permission plan --json > "$T/out" 2>/dev/null; rc=$?
+check "unknown agent: refused before the router" "[ $rc != 0 ] && [ \"\$(settings_calls)\" = 0 ] && grep -q '\"ok\": false' '$T/out'"
+
+echo
+if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails check(s) failed"; exit 1; fi

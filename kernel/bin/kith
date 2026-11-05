@@ -271,10 +271,22 @@ if [[ ${1:-} == set ]]; then
   set_fail() { if [[ $set_json == 1 ]]; then python3 -c 'import json,sys; print(json.dumps({"ok": False, "error": sys.argv[1]}))' "$1"; else echo "$1" >&2; fi; exit "${2:-2}"; }
   [[ -n $(agent_dir "$agent") ]] || set_fail "kith: no agent '$agent' (try: kith ls)" 1
   jflag=(); [[ $set_json == 1 ]] && jflag=(--json)
-  if [[ ${2:-} == call-model && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set call_model "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
-  if [[ ${2:-} == limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set limit "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
-  if [[ ${2:-} == at-limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set at_limit "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
-  if [[ ${2:-} == permission && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set permission_mode "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
+  # The four writes of kith_settings.py are the Rust core's when `settings` is switched (lib/core-switched.txt) and a program
+  # lists it; kith_core_exec returns otherwise, and the Python answers. Same files, same lock, same answers (golden/settings.json).
+  . "$KITH/lib/kith-core.sh"
+  settings_verb=""
+  if [[ $# -eq 3 ]]; then
+    case ${2:-} in
+      call-model) settings_verb=call_model ;;
+      limit) settings_verb=limit ;;
+      at-limit) settings_verb=at_limit ;;
+      permission) settings_verb=permission_mode ;;
+    esac
+  fi
+  if [[ -n $settings_verb ]]; then
+    kith_core_exec settings --kernel "$KITH" set "$settings_verb" "$agent" "$3" "${jflag[@]+"${jflag[@]}"}" || true
+    exec python3 "$KITH/lib/kith_settings.py" set "$settings_verb" "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"
+  fi
   if [[ ${2:-} == harness && ( $# -eq 3 || ( $# -eq 5 && $4 == --model ) ) ]]; then exec "$KITH/bin/kith-pkg" set-harness "$agent" "${@:3}" "${jflag[@]+"${jflag[@]}"}"; fi
   if [[ ( ${2:-} == model || ${2:-} == effort ) && $# -eq 3 ]]; then exec "$KITH/bin/kith-pkg" set-field "$agent" "$2" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
   set_fail "usage: kith $agent set permission MODE   (MODE '' forgets this Mac's choice)
