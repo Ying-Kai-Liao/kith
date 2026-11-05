@@ -9967,7 +9967,7 @@
     },
     {
       "name": "holder.forget",
-      "summary": "Drops a process from the holder record in core.db (for a `blocked` holder whose old process cannot be told from a stranger). Nothing is signalled. Answers `{forgot}`: whether the pid was in the record; asked again it is false.",
+      "summary": "Drops a process from the holder record (for a `blocked` holder whose old process cannot be told from a stranger). Nothing is signalled. Answers `{forgot}`: whether the pid was in the record; asked again it is false.",
       "params": [
         {
           "name": "pid",
