@@ -1,0 +1,12 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{\n  \"agents\": {\n    \"echo\": {\n      \"limit\": 7,\n      \"permission_mode\": \"plan\"\n    }\n  }\n}\n",
+  "state:home/.kith/settings.json.lock": "",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agent\": \"echo\",\n  \"changed\": true,\n  \"previous\": null,\n  \"setting\": \"permission\",\n  \"value\": \"plan\"\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": ""
+}

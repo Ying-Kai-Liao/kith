@@ -1,0 +1,10 @@
+{
+  "fakes": "",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: no agent 'ghost' (try: kith ls)\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.json": "{\n  \"error\": \"kith: no agent 'ghost' (try: kith ls)\",\n  \"ok\": false\n}\n",
+  "step1.stderr": ""
+}
