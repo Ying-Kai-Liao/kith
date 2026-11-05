@@ -161,5 +161,12 @@ check "share --public of an agent with personal details: error object, non-zero"
 OUT=$("$KITH" share ghost --json 2>"$T/err"); rc=$?
 check "share unknown agent --json: error object, non-zero" "[ $rc != 0 ] && errshape"
 
+# ---- authority tombstone: the JSON error contract holds (the note is what core/runtime/src/cutover/tombstone.rs writes) ----
+printf '%s\n' '{"kith_tombstone":1,"module":"authority","message":"this data moved to the Kith core (module authority); the old reader must not use this file","rollback":"kith rollback authority"}' > "$KITH_AUTH"
+printf 'needs: [telegram]\n' > "$T/remotes/pal/shared/capabilities.yaml"; git -C "$T/remotes/pal/shared" add -A; git -C "$T/remotes/pal/shared" commit -qm svc
+OUT=$("$KITH" install "$T/remotes/pal/shared" --preview --json 2>"$T/err"); rc=$?
+check "install --preview --json on an authority tombstone: exit 3, one error object naming the rollback" "[ $rc = 3 ] && errshape && [ ! -s $T/err ] && jv 'd[\"error\"]' | grep -q 'kith rollback authority'"
+rm -f "$KITH_AUTH"
+
 echo
 [ $fails = 0 ] && echo "all ok" || { echo "$fails FAILED"; exit 1; }

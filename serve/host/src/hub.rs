@@ -197,6 +197,8 @@ impl Hub {
         // Room turns a restart cut off go on (their speaker first, not charged again).
         crate::chat::group::resume(self)?;
         tokio::spawn(crate::agent::gate::run(self.gate.clone(), Arc::downgrade(self)));
+        // Who owns the schedules (the core's gate), known before the runner's first second.
+        self.routines.refresh_gate();
         crate::routines::start(self);
         crate::run_outbox::start(self);
         crate::analytics::start(self);

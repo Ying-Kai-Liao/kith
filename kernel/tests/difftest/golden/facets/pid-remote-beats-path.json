@@ -1,0 +1,18 @@
+{
+  "fakes": "",
+  "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"bypath\": {\n      \"paths\": [\n        \"~/repo\"\n      ],\n      \"remotes\": []\n    },\n    \"byremote\": {\n      \"paths\": [],\n      \"remotes\": [\n        \"github.com/o/r\"\n      ]\n    }\n  }\n}\n",
+  "state:home/plain/": "<empty dir>\n",
+  "state:home/repo/.git/HEAD": "ref: refs/heads/master\n",
+  "state:home/repo/.git/description": "Unnamed repository; edit this file 'description' to name the repository.\n",
+  "state:home/repo/.git/info/exclude": "# git ls-files --others --exclude-from=.git/info/exclude\n# Lines that start with '#' are comments.\n# For a project mostly in C, the following would be a good set of\n# exclude patterns (uncomment them if you want to use them):\n# *.[oa]\n# *~\n",
+  "state:home/repo/.git/objects/info/": "<empty dir>\n",
+  "state:home/repo/.git/objects/pack/": "<empty dir>\n",
+  "state:home/repo/.git/refs/heads/": "<empty dir>\n",
+  "state:home/repo/.git/refs/tags/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "byremote\n",
+  "step1.exit": "1\n",
+  "step1.stderr": "",
+  "step1.stdout": ""
+}

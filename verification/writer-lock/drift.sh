@@ -24,7 +24,8 @@ FILES=(
   core/runtime/src/conversations      # (M3-2) claims.rs: the claim transaction, claim ids, redeem CAS, reports, reconcile, revoke, new holder instance (park and wake, take-over: later)
   core/runtime/src/asks/mod.rs        # (M3-10b1, Claims4.tla) end_tree: the stopped-ask stop; its fence is in claims.rs claim_in
   core/runtime/src/wake/queue.rs      # (M3-10b1, Claims4.tla) give_back / release: a wake given back after a stop
-  core/runtime/src/import/claims.rs   # (M3-10b3) the claim files into core.db: only live claimers, never a second live row on a conversation
+  core/runtime/src/wake/turns.rs      # (M3-10c, Claims4.tla) the wake's turn: start_in parks terminal_live, a run's end closes its turn
+  core/runtime/src/import/claims.rs  # (M3-10b3) the claim files into core.db: only live claimers, never a second live row on a conversation
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

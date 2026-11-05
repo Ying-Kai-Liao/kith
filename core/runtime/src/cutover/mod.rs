@@ -152,10 +152,19 @@ pub(crate) trait Module {
     fn step_refusal(&self, _env: &Env) -> Option<String> {
         None
     }
+    /// Why `rollback` must refuse right now (one line), checked before anything is read or written and NOT overridable by
+    /// `--force` (unlike `live`): for a state a forced rollback cannot be safe against. Default: never.
+    fn rollback_refusal(&self, _env: &Env) -> Option<String> {
+        None
+    }
     /// Whether `step --dry-run` still runs while `step_refusal` refuses (it reads and writes nothing, so a module that
     /// wants its import looked at before its lane exists says yes). A real step stays refused. Default: no.
     fn dry_run_despite_refusal(&self) -> bool {
         false
+    }
+    /// Informational lines `check` appends (never a difference, never counted). Default none.
+    fn check_notes(&self, _env: &Env) -> Vec<String> {
+        Vec::new()
     }
     /// The lock the old store's own writers take, held by `step` from the import through the tombstone: a write between
     /// the two would be lost, and a writer that checked the file before the tombstone and renames after it would put the
@@ -343,6 +352,9 @@ pub(crate) fn rollback(
             )));
         }
     }
+    if let Some(why) = m.rollback_refusal(env) {
+        return Err(Error::Refused(format!("cutover: {name}: {why}")));
+    }
     let mut lines = Vec::new();
     let mut core = lock(env)?;
     if cur.phase == Phase::Stepping {
@@ -430,11 +442,14 @@ pub(crate) fn check(reg: &[Box<dyn Module>], env: &Env, name: &str) -> Result<Ve
     )
     .map_err(|e| Error::Io(format!("cutover: core.db cannot be read here: {e}")))?;
     let c = same_answer::check(m, env, &db)?;
-    if c.count == 0 {
-        return Ok(vec![format!("{name}: same answer")]);
-    }
-    let mut out = vec![format!("{name}: {} difference(s)", c.count)];
-    out.extend(c.first);
+    let mut out = if c.count == 0 {
+        vec![format!("{name}: same answer")]
+    } else {
+        let mut o = vec![format!("{name}: {} difference(s)", c.count)];
+        o.extend(c.first);
+        o
+    };
+    out.extend(m.check_notes(env));
     Ok(out)
 }
 

@@ -7,6 +7,9 @@ mod runner;
 mod schedule;
 #[cfg(test)]
 mod schedule_golden;
+pub mod switch;
+#[cfg(test)]
+mod switch_tests;
 pub use runner::start;
 pub use schedule::Trigger;
 
@@ -102,11 +105,20 @@ pub struct Routines {
     stopping: std::sync::atomic::AtomicBool,
     /// Bumped whenever the webhook set the relay registers (`hooks()`) changes.
     hooks_rev: tokio::sync::watch::Sender<u64>,
+    /// Who runs the schedules (see [`switch`]); `Own` until the core's gate says otherwise.
+    gate: Mutex<switch::Gate>,
+    link: Mutex<Arc<dyn switch::Link>>,
+    last_core_tick: Mutex<i64>,
+    core_ticking: std::sync::atomic::AtomicBool,
 }
 
 impl Default for Routines {
     fn default() -> Self {
         Self {
+            gate: Mutex::default(),
+            link: Mutex::new(Arc::new(switch::CoreLink)),
+            last_core_tick: Mutex::default(),
+            core_ticking: std::sync::atomic::AtomicBool::default(),
             state: Mutex::default(),
             active: Mutex::default(),
             scheduler: Mutex::default(),
@@ -204,6 +216,7 @@ impl Routines {
     }
 
     pub fn save(&self, hub: &Hub, bot: &str, body: &Value) -> Result<Value> {
+        self.refuse_edit()?;
         let row = hub
             .store
             .bot(bot)?
@@ -288,6 +301,7 @@ impl Routines {
     }
 
     pub fn set_enabled(&self, store: &Store, bot: &str, id: &str, enabled: bool) -> Result<Value> {
+        self.refuse_edit()?;
         self.change(store, |s| {
             let r = s
                 .routines
@@ -311,6 +325,7 @@ impl Routines {
     }
 
     pub fn remove(&self, store: &Store, bot: &str, id: &str) -> Result<Value> {
+        self.refuse_edit()?;
         self.change(store, |s| {
             let r = s
                 .routines
@@ -365,6 +380,8 @@ impl Routines {
     /// local one, and the key. `rotate` replaces the key first, cutting off the old one.
     pub fn credentials(&self, hub: &Hub, bot: &str, id: &str, rotate: bool) -> Result<Value> {
         if rotate {
+            // The core holds the key it checks deliveries against; a new one here would cut every sender off.
+            self.refuse_edit()?;
             self.change(&hub.store, |s| {
                 let r = s
                     .routines
@@ -399,6 +416,11 @@ impl Routines {
     /// One delivery from the local endpoint or the cloud: checks the key or signature, then
     /// queues a run when the event matches. Retries of a delivery id return its first run.
     pub fn receive(&self, hub: &Hub, id: &str, headers: &hooks::Headers, body: &[u8]) -> Result<Value, Refused> {
+        match self.gate() {
+            switch::Gate::Own => {}
+            switch::Gate::Core => return self.receive_via_core(hub, id, headers, body),
+            switch::Gate::Held(_) => return Err(Refused::Held),
+        }
         let r = self.state.locked().routines.iter().find(|r| r.id == id && !r.deleted).cloned();
         let Some(r) = r.filter(|r| hooks::authorized(&r.webhook_key, headers, body)) else {
             return Err(Refused::Unauthorized);
@@ -470,9 +492,7 @@ pub fn call(hub: &Arc<Hub>, bot: &str, name: &str, args: &Value) -> Result<Value
             args["enabled"].as_bool().context("enabled is required")?,
         ),
         "delete_routine" => hub.routines.remove(&hub.store, bot, required(args, "id")?),
-        "run_routine" => {
-            hub.routines.enqueue(&hub.store, bot, required(args, "id")?, json!({"source":"test"}), None, true)
-        }
+        "run_routine" => hub.routines.run_now(hub, bot, required(args, "id")?),
         "routine_webhook" => {
             hub.routines.credentials(hub, bot, required(args, "id")?, args["rotate"].as_bool().unwrap_or(false))
         }

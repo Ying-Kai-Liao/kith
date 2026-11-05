@@ -21,6 +21,9 @@ pub mod pkg;
 #[cfg(unix)]
 pub mod permit;
 pub mod procstart;
+// Unix only: it writes projects.json through `secrets::pyjson`.
+#[cfg(unix)]
+pub mod project;
 pub mod schedule;
 #[cfg(unix)]
 pub mod secrets;
