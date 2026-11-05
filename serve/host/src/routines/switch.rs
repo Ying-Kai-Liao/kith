@@ -12,7 +12,7 @@
 //! - the app's and the agent's "run now" goes to `schedule.runNow`;
 //! - creating, editing, pausing and deleting a routine is refused: jobs.json is the store now and a host edit would
 //!   silently diverge from it (change it with `kith schedule`);
-//! - a routine the import refused (a host-native bot with no kith agent, `hq_agent` empty) has no job: its hook answers
+//! - a routine the import refused (a host-native bot whose config `hqAgent` is unset or empty; the import has no fallback agent) has no job: its hook answers
 //!   `unauthorized` (told apart from nothing else, as an unknown routine is) and it never fires;
 //! - runs the host started before the step (rows in serve.db) still finish and publish; serve.db's routines stay as
 //!   they were (a rollback writes them back) and are never read as live.
