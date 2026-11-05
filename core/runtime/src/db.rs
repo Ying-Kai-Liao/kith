@@ -268,6 +268,7 @@ impl Core {
         allow(dead_code, reason = "the first caller is the claim code of M3")
     )]
     pub(crate) fn next_claim_id(tx: &Transaction<'_>) -> Result<i64> {
+        seed_claim_counter(tx)?;
         tx.execute(
             "UPDATE counters SET value = value + 1 WHERE name = 'claim_id'",
             [],
@@ -278,6 +279,42 @@ impl Core {
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
     }
+}
+
+/// `meta` key: the claim counter was moved above the epoch-ms ids older cores sent the holder.
+const CLAIM_SEEDED: &str = "claim_counter_seeded_ms";
+
+/// Until this core, a terminal's spawn carried epoch milliseconds, and a holder that outlived an old core keeps the
+/// highest claim it saw per conversation and answers every lower one `Stale` for ever. So the first claim id any path
+/// takes (a terminal, a turn, a failover, an import) moves `counters.claim_id` up to the clock, once (a marker in `meta`);
+/// ids then go on one at a time. No row is rewritten and no migration is needed: the counter only has to be higher than
+/// any claim id there is. In the caller's transaction, so a rolled-back claim leaves it unseeded.
+fn seed_claim_counter(tx: &Transaction<'_>) -> Result<()> {
+    let done: Option<String> = tx
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [CLAIM_SEEDED],
+            |r| r.get(0),
+        )
+        .ok();
+    if done.is_some() {
+        return Ok(());
+    }
+    let now = i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis()),
+    )
+    .unwrap_or(i64::MAX);
+    tx.execute(
+        "UPDATE counters SET value = MAX(value, ?1) WHERE name = 'claim_id'",
+        [now],
+    )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+        rusqlite::params![CLAIM_SEEDED, now.to_string()],
+    )?;
+    Ok(())
 }
 
 /// Opens core.db. When SQLite cannot, the message carries its extended result code and what the operating system says

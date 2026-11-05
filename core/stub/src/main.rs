@@ -168,6 +168,12 @@ fn report(fd: Option<i32>, word: &str) {
 /// engine starts. Nothing to do yet.
 ///
 /// Resident mode runs it per take, before `locked` is answered; an `Err` there frees the lock and answers `error`.
+///
+/// It runs with the lock held, so it must do in-process work only: files and sockets this process opens itself, never a
+/// fork, an exec or a spawned helper (`std::process::Command`, `posix_spawn`, `fork`). A child started while the
+/// lock is held is a process the holder's group kill and the stub's exit do not account for, and a fork before its exec
+/// copies the lock's open description (Claims4, `c4` rows on the stub). The test `the_redeem_forks_nothing` reads this
+/// function's source for those names.
 fn redeem_run_token() -> Result<(), String> {
     Ok(())
 }
@@ -379,4 +385,28 @@ fn main() -> ExitCode {
     drop(lock);
     // The engine's full code (Windows codes are 32 bits), not its low byte.
     std::process::exit(code)
+}
+
+#[cfg(test)]
+mod tests {
+    /// The redeem runs under the writer lock: no code in it may start another process. A source check, because a spawn
+    /// is a side effect nothing else observes from outside the stub.
+    #[test]
+    fn the_redeem_forks_nothing() {
+        // A Windows checkout has CRLF line ends.
+        let src = include_str!("main.rs").replace("\r\n", "\n");
+        let from = src
+            .find("fn redeem_run_token")
+            .expect("the redeem is in this file");
+        let body = &src[from..];
+        let body = &body[..body.find("\n}\n").expect("the redeem ends") + 3];
+        for banned in [
+            "Command", "spawn", "fork", "exec", "system(", "popen", "daemon(",
+        ] {
+            assert!(
+                !body.contains(banned),
+                "the redeem runs with the lock held and must not start a process, but names {banned:?}:\n{body}"
+            );
+        }
+    }
 }
