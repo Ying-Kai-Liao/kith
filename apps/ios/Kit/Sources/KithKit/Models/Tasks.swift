@@ -222,3 +222,13 @@ extension Entry {
     /// The first message of a task, in the main chat.
     public var isTask: Bool { kind == "user" && threadId == nil && data.task == true }
 }
+
+/// Calls on their way, by key: the second tap on a button whose call is still in flight is refused.
+public struct InFlight: Equatable, Sendable {
+    public private(set) var keys: Set<String> = []
+    public init() {}
+    /// True when the call may go; false when one with this key is already on its way.
+    public mutating func begin(_ key: String) -> Bool { keys.insert(key).inserted }
+    public mutating func end(_ key: String) { keys.remove(key) }
+    public func contains(_ key: String) -> Bool { keys.contains(key) }
+}

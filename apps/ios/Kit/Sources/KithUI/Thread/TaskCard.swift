@@ -32,7 +32,7 @@ extension ThreadView {
         let working = status == .working && summary?.isBusyInTerminal != true
         let guest = bot?.botGuest != nil || bot?.isReadOnly == true
         let destination = model.destination(botId)
-        let target = destination.map { !$0.newTask && $0.going?.id == root.id && model.taskTargets[botId] != nil } == true
+        let target = destination.map { !$0.newTask && $0.going?.id == root.id } == true
         let missing = missingReplies(root)
         let toggle = {
             withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { model.taskChoices[root.id] = !open }
@@ -41,7 +41,8 @@ extension ThreadView {
                              fill: needsYou ? AgentTint.resolve(asker?.avatarColor ?? bot?.avatarColor) : nil) {
             TaskHeadRow(head: head, status: status, time: root.date, open: open, tint: tint,
                         busyInTerminal: summary?.isBusyInTerminal == true, toggle: toggle,
-                        stop: !open && working ? { model.stop(botId, thread: root.id) } : nil)
+                        stop: !open && working ? { model.stop(botId, thread: root.id) } : nil,
+                        stopping: model.isStopping(botId, thread: root.id))
             entryRow(root, groupStart: true)
             if open {
                 ForEach(ThreadFeed.replies(thread)) { reply in
@@ -64,7 +65,7 @@ extension ThreadView {
                 ForEach(waiting) { entryRow($0, groupStart: true) }
             }
             if open, working, let bot {
-                TaskLiveLine(bot: bot, thinking: model.currentThinking(botId, thread: root.id)) {
+                TaskLiveLine(bot: bot, thinking: model.currentThinking(botId, thread: root.id), stopping: model.isStopping(botId, thread: root.id)) {
                     model.stop(botId, thread: root.id)
                 }
             }
@@ -135,6 +136,7 @@ private struct TaskHeadRow: View {
     let busyInTerminal: Bool
     let toggle: () -> Void
     let stop: (() -> Void)?
+    var stopping = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -180,7 +182,7 @@ private struct TaskHeadRow: View {
             .accessibilityElement(children: .combine)
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             .accessibilityHint(open ? "Folds the task" : "Shows the whole task")
-            if let stop { TaskStopButton(action: stop) }
+            if let stop { TaskStopButton(action: stop, disabled: stopping) }
         }
     }
 
@@ -220,12 +222,13 @@ private struct TaskFoldLine: View {
 private struct TaskLiveLine: View {
     let bot: Bot
     let thinking: String?
+    var stopping = false
     let stop: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             WorkingIndicator(bot: bot, thinking: thinking)
-            TaskStopButton(action: stop)
+            TaskStopButton(action: stop, disabled: stopping)
         }
         .padding(.top, 6)
     }
@@ -233,6 +236,7 @@ private struct TaskLiveLine: View {
 
 private struct TaskStopButton: View {
     let action: () -> Void
+    var disabled = false
 
     var body: some View {
         Button(action: action) {
@@ -247,6 +251,8 @@ private struct TaskStopButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(PressScale())
+        .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1)
         .accessibilityLabel("Stop this task")
     }
 }

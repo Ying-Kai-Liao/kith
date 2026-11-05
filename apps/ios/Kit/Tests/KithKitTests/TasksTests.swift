@@ -203,3 +203,45 @@ private struct TerminalBusy: Error {}
     _ = await Tasks.sendIn(idleHeld, picked: false, takeOver: { calls.append("take") }, send: { calls.append("send") })
     #expect(calls == ["send"])
 }
+
+private func held(_ writer: String, busy: Bool) throws -> Entry {
+    var e = entry("t", "user") { $0.task = true; $0.text = "deploy" }
+    e.data.thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"count":1,"lastAt":1,"authors":[],"liveWriter":"\#(writer)","liveBusy":\#(busy)}"#.utf8))
+    return e
+}
+
+// Ported from tasks.test.ts: a terminal's own turn, a prompt in a thread another writer holds, a parked limit card.
+@Test func aTaskATerminalIsMidTurnInIsWorkingThoughTheHostRunsNoLaneForIt() throws {
+    let idle = try bot(#"{"id":"b","workingLanes":[]}"#)
+    #expect(Tasks.status(of: try held("terminal", busy: true), bot: idle, replies: []) == .working)
+    #expect(Tasks.status(of: try held("terminal", busy: false), bot: idle, replies: []) == .done)
+    #expect(Tasks.status(of: try held("app", busy: true), bot: idle, replies: []) == .done)
+}
+
+@Test func aPromptInAThreadAnotherWriterHoldsIsNotOursToAnswer() throws {
+    let working = try bot(#"{"id":"b","workingLanes":[{"chat":"b","thread":"t"}]}"#)
+    let prompt = entry("p", "permission", thread: "t") { $0.status = "pending" }
+    #expect(Tasks.status(of: try held("terminal", busy: false), bot: working, replies: [prompt]) == .working)
+}
+
+@Test func aMessageParkedAtTheMonthlyLimitNeedsYouWithNoLaneAtWork() throws {
+    let idle = try bot(#"{"id":"b","workingLanes":[]}"#)
+    let root = entry("t", "user") { $0.task = true }
+    let limit = try JSONDecoder().decode(LimitCardData.self, from: Data(#"{"kind":"agent","agent":"a","spent":5,"limit":5,"month":"2026-11"}"#.utf8))
+    let parked = entry("l", "permission", thread: "t") { $0.status = "pending"; $0.limit = limit }
+    #expect(Tasks.status(of: root, bot: idle, replies: [parked]) == .needsYou)
+    let answered = entry("l", "permission", thread: "t") { $0.status = "answered"; $0.limit = limit }
+    #expect(Tasks.status(of: root, bot: idle, replies: [answered]) == .done)
+}
+
+@Test func aSecondCallWithTheSameKeyIsRefusedUntilTheFirstEnds() {
+    var flight = InFlight()
+    let first = flight.begin("b/t")
+    let second = flight.begin("b/t")
+    let other = flight.begin("b/other")
+    #expect(first && !second && other)
+    flight.end("b/t")
+    #expect(!flight.contains("b/t"))
+    let again = flight.begin("b/t")
+    #expect(again)
+}

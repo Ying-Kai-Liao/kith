@@ -103,6 +103,8 @@ public final class BotStore {
     var replyQuotes: [String: Entry] = [:]
     /// What the user picked per task on this device: open or folded in the main chat; nil follows the task.
     var taskChoices: [String: Bool] = [:]
+    /// Stop calls on their way, so a second tap sends nothing.
+    var stopping = InFlight()
     /// Where each chat's one box sends: the task a card's (or a message's) Reply picked, or a new task. Unset, it goes
     /// on with the task the host would (`Tasks.continuing`).
     var taskTargets: [String: TaskTarget] = [:]
