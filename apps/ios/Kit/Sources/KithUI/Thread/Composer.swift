@@ -181,6 +181,8 @@ struct Composer: View {
         .photosPicker(isPresented: $pickingPhotos, selection: $photoItems, maxSelectionCount: 10, matching: .images)
         // Replying to a message puts the cursor in the box.
         .onChange(of: model.replyQuotes[botId]?.id) { _, id in if id != nil { focused = true } }
+        // A task's Reply or a take-over picks where the message goes: the cursor follows, as on the Mac.
+        .onChange(of: model.taskTargets[botId]) { _, target in if target != nil { focused = true } }
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
@@ -219,7 +221,7 @@ struct Composer: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 if let going = destination.going {
-                    let note = Tasks.takesOver(going.data.thread, picked: destination.picked) ? " · takes over from the terminal" : ""
+                    let note = Tasks.takesOver(going.data.thread, picked: destination.picked) && !destination.newTask ? " · takes over from the terminal" : ""
                     TaskPill(on: !destination.newTask, systemImage: "arrow.turn.down.right",
                              label: Text("Continues ") + Text(Tasks.title(going)).fontWeight(.semibold) + Text(note)) {
                         model.taskTargets[botId] = .task(going.id)

@@ -1,8 +1,8 @@
 import Foundation
 
 // Tasks (host `chat/tasks.rs`): each burst of the user's chat with a bot is a task. Its first message is a root in
-// the chat (`data.task`); the bot's answers and the rest of the burst are its thread. The chat shows a task inline
-// while it's going and folds it into a card once it's idle.
+// the chat (`data.task`); the bot's answers and the rest of the burst are its thread. The chat shows a task as a card: open
+// while it works, folded once it stops (the user's chevron overrides either).
 
 public enum TaskStatus: Sendable {
     case working, needsYou, stopped, failed, done
@@ -21,7 +21,7 @@ public enum TaskStatus: Sendable {
 }
 
 public enum Tasks {
-    /// The host's `tasks::IDLE_MS`: a task idle this long is over, and folds.
+    /// The host's `tasks::IDLE_MS`: a task idle this long is over, and a new message starts a new task.
     public static let idleMs: Int64 = 10 * 60_000
 
     /// The newest task in a chat: where a message without a thread goes on, and what the chat's Stop stops.

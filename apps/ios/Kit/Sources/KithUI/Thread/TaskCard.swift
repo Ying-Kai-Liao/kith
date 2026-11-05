@@ -20,7 +20,7 @@ extension ThreadView {
         let focusInside = model.focusEntry.map { focus in
             focus.chat == botId && thread.contains { $0.id == focus.entry || ThreadFeed.stableId($0) == focus.entry }
         } == true
-        let open = focusInside || Tasks.isOpen(status, choice: model.taskChoices[root.id])
+        let open = Tasks.isOpen(status, choice: model.taskChoices[root.id])
         let summary = root.data.thread
         let head = Tasks.head(status, thread: summary, mac: model.hostName)
         let fold = Tasks.fold(thread) { !ThreadFeed.isDelivery($0) }
@@ -80,6 +80,8 @@ extension ThreadView {
                 }
             }
         }
+        // A search jump opens the card once; the chevron can fold it again.
+        .onChange(of: focusInside, initial: true) { _, inside in if inside { model.taskChoices[root.id] = true } }
         .onAppear { visibleTasks.ids.insert(root.id) }
         .onDisappear { visibleTasks.ids.remove(root.id) }
         .task(id: missing) {

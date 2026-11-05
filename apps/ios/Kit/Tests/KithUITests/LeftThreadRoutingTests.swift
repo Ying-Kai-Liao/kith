@@ -5,8 +5,7 @@ import Testing
 
 @MainActor
 struct LeftThreadRoutingTests {
-    private func store() -> BotStore {
-        let suite = "TaskTargets.\(UUID().uuidString)"
+    private func store(suite: String) -> BotStore {
         let key = Data(repeating: 3, count: 32)
         let encoded = key.base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
@@ -23,7 +22,9 @@ struct LeftThreadRoutingTests {
     /// A Reply on a task's row, or on a message in its thread, points the chat's box at that task; a message outside
     /// any task changes nothing.
     @Test func replyingPointsTheBoxAtTheMessagesTask() {
-        let model = store()
+        let suite = "TaskTargets.\(UUID().uuidString)"
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let model = store(suite: suite)
         model.target(taskOf: entry("plain"))
         #expect(model.taskTargets["a"] == nil)
         model.target(taskOf: entry("root", task: true))
@@ -33,6 +34,8 @@ struct LeftThreadRoutingTests {
     }
 
     @Test func aChatWithoutTasksHasNoDestination() {
-        #expect(store().destination("a") == nil)
+        let suite = "TaskTargets.\(UUID().uuidString)"
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        #expect(store(suite: suite).destination("a") == nil)
     }
 }
