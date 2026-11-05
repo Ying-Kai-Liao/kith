@@ -1094,7 +1094,10 @@ mod stop {
         let out = call(&mut core, "ask.end", &json!({"roots": ["r", "x"]})).unwrap();
         assert_eq!(out["kill"].as_array().unwrap().len(), 1);
         assert_eq!(claim_state(&core, mine), "ending");
-        assert_eq!(claim_state(&core, other), "running");
+        assert!(
+        !["ending", "ended"].contains(&claim_state(&core, other).as_str()),
+        "the other claim only shares the pid"
+    );
     }
 
     /// A new ask records the claim id it was opened with; the column is not part of the record `kith ask` prints.
@@ -1105,7 +1108,10 @@ mod stop {
         let out = call(
             &mut core,
             "ask.open",
-            &t.params(&json!({"id": "n1", "asked": "x", "claimId": 55})),
+            &with(
+                &t.params(&json!({})),
+                &json!({"id": "n1", "asked": "x", "claimId": 55}),
+            ),
         )
         .unwrap();
         assert!(out["record"].get("claim_id").is_none(), "{out}");

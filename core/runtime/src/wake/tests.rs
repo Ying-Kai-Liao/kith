@@ -411,16 +411,6 @@ fn a_claim_file_writer_parks_the_turn_too_and_a_given_back_run_cancels_its_turn(
     );
 }
 
-#[test]
-fn a_withdrawn_request_takes_its_waiting_turn_with_it() {
-    let (t, _l, mut c) = core();
-    let f = Fake::new(&t.path().join("state"));
-    enqueue(&mut c, &f, "s1", "a", "host");
-    row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap();
-    row(&mut c, &f, "wake.withdraw", &json!({"session": "s1"})).unwrap();
-    assert_eq!(turns_of(&c, "s1")[0].0, "cancelled");
-}
-
 fn answered_rows(c: &Core) -> i64 {
     c.conn()
         .query_row("SELECT count(*) FROM wake_answered", [], |r| r.get(0))

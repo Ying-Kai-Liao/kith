@@ -676,6 +676,7 @@ fn the_cli_words_parse() {
         vec![
             "accounts: not switched",
             "transcripts: not switched",
+            "claims: not switched",
             "schedules: not switched"
         ]
     );
