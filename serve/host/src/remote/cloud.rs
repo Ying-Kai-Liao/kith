@@ -2579,17 +2579,15 @@ mod tests {
         assert!(again.to_string().contains("unknown request"), "{again:#}");
         assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[1; 32])).count(), 1);
 
-        // Off when filed (nothing is in the core), on when decided: the core refuses what it never saw, nothing is
-        // stored, and the request waits; the next pull files it and the decision then goes through once.
+        // Off when filed (nothing is in the core), on when decided: the decide files the request first (the pull has
+        // not yet), so the core knows it and the decision goes through once; a second decide finds nothing held.
         hub.cloud.requests.locked().push(waiting("req_b", 2, Some("sam"), 1));
         hub.store.kv_set("test_core_authority", "1").unwrap();
-        let err = decide_in_core(&hub, "req_b", true, true, true).await.unwrap_err();
-        assert!(err.to_string().contains("unknown request"), "{err:#}");
-        assert!(hub.store.device(&b64(&[2; 32])).is_none(), "nothing was stored by the refused decision");
-        file_in_core(&hub).await;
+        assert!(ids_in_core(true).await.iter().all(|i| i != "req_b"), "the core has not seen req_b");
         decide_in_core(&hub, "req_b", true, true, true).await.unwrap();
-        assert!(hub.store.device(&b64(&[2; 32])).is_some());
+        assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[2; 32])).count(), 1);
         assert!(decide_in_core(&hub, "req_b", true, true, true).await.is_err());
+        assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[2; 32])).count(), 1);
     }
 
     #[tokio::test]
