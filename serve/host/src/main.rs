@@ -845,12 +845,11 @@ fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
-    let env = |n: &str| kith_kernel::paths::process_env(n).filter(|v| !v.is_empty());
     let ctx = kith_kernel::project::Ctx {
         state: kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state,
         home,
         cwd: std::env::current_dir().unwrap_or_default(),
-        guest: env("KITH_RUN_TOKEN").is_some() && env("KITH_RUN_SOCKET").is_some(),
+        guest: kith_kernel::project::is_guest(|n| std::env::var_os(n)),
     };
     let out = kith_kernel::project::run(&ctx, args);
     print!("{}", out.stdout);

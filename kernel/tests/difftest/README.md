@@ -80,7 +80,7 @@ ways, a worktree and a detached HEAD, nested aliases with the longest winning, a
 `--children [--all]`, `--where`, `--root`, `--register` (parent, home, bare `--home`, existing entries keeping their fields) and
 its usage errors, with loops and a missing parent in the seeded `projects.json`. They run the Python as `program.old` and
 `kith kernel project-id` as `program.new`, so the Rust side is compared without the verb being switched (no `core-switched.txt` line).
-A malformed `projects.json` (`pid-malformed-projects`) is `unswitched` too: Python tracebacks, Rust prints one stderr line, both exit 1 (an intended difference; the golden replay does not read intended.json).
+A malformed `projects.json` (`pid-malformed-projects`) is `unswitched` too: Python tracebacks, Rust prints one stderr line, both exit 1; JSON that Python accepts and serde rejects (`NaN`, `Infinity`) falls under the same difference (an intended difference; the golden replay does not read intended.json).
 Not ported: the guest branch (`KITH_RUN_TOKEN` and `KITH_RUN_SOCKET` set: the host answers over the run socket). The core refuses there
 with exit 2, so `pid-guest-branch-stays-python` is `unswitched` (Python replay only). Whoever switches the verb keeps guest calls on
 Python (`runauth.rs` `project_args` and the run-tokens property tests ask the Python).

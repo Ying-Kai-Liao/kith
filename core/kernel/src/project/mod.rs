@@ -38,6 +38,13 @@ pub struct Ctx {
     pub guest: bool,
 }
 
+/// Whether the environment makes this a guest run. Takes the raw values (`var_os`): a token that is not UTF-8 still
+/// counts, as it does for the Python.
+pub fn is_guest(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
+    let set = |n: &str| get(n).is_some_and(|v| !v.is_empty());
+    set("KITH_RUN_TOKEN") && set("KITH_RUN_SOCKET")
+}
+
 /// Where a new project's home goes unless projects.json says "homes".
 const ROOT: &str = "~/Documents";
 

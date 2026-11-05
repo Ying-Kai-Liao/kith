@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::{Ctx, Out, normalize, repr, run};
+use super::{Ctx, Out, is_guest, normalize, repr, run};
 
 fn ctx(root: &Path) -> Ctx {
     let state = root.join("state");
@@ -126,4 +126,22 @@ fn register_refuses_a_bad_id_and_an_unknown_parent() {
         "project-id: 'ghost' is not a project (register it first)\n"
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_token_that_is_not_utf8_still_makes_a_guest() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let env = |token: OsString, socket: &'static str| {
+        move |n: &str| match n {
+            "KITH_RUN_TOKEN" => Some(token.clone()),
+            "KITH_RUN_SOCKET" => Some(OsString::from(socket)),
+            _ => None,
+        }
+    };
+    assert!(is_guest(env(OsString::from_vec(vec![0xff, 0xfe]), "/s")));
+    assert!(is_guest(env(OsString::from("t"), "/s")));
+    assert!(!is_guest(env(OsString::from(""), "/s")));
+    assert!(!is_guest(env(OsString::from("t"), "")));
 }
