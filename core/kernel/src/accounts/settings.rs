@@ -362,8 +362,10 @@ pub fn write(file: &Path, s: &Map) -> std::io::Result<()> {
         f.write_all((pyjson::dumps_pretty(&Value::Object(s.clone())) + "\n").as_bytes())?;
         f.sync_all()?;
         std::fs::rename(&tmp, file)?;
-        // the rename itself must survive a crash too (as kith_settings.py does)
-        std::fs::File::open(dir)?.sync_all()
+        // the rename itself must survive a crash too (as kith_settings.py does); a directory cannot be opened on Windows
+        #[cfg(unix)]
+        std::fs::File::open(dir)?.sync_all()?;
+        Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
