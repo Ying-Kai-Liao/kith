@@ -1,0 +1,3 @@
+\* unswitched, gate on, and a core-only change of the revoked fact (hand-run core-call): the latched gate answers from it until its next parity ask
+CoreGate = TRUE
+CoreOnlyWrite = TRUE

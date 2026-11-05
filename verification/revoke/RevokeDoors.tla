@@ -96,7 +96,14 @@ CONSTANTS
     \* ---- the core's authority behind the host's request guard (M2-15/16/18a, KITH_CORE_AUTHORITY=1; OFF in every deploy) ----
     CoreGate,           \* TRUE = the host's guard (app and bot doors) asks the core's copy of the revoked fact while the
                         \*   gate is open, and kith-auth's mirror writes the core after auth.json (FALSE = the host asks kith-auth)
-    CoreGateStale       \* the gate stays open on a latched answer after auth.json changed (no fingerprint check)
+    CoreGateStale,      \* the gate stays open on a latched answer after auth.json changed (no fingerprint check)
+    \* ---- the switched host (#875: auth.json is a tombstone; the core is the only store) ----
+    Switched,           \* TRUE = authority is on the core: the host's kith-auth calls are people.* writes (run_auth), the guard asks
+                        \*   the core with no gate in between (core_selected = switched() || ...), a revoke changes the one fact
+    SwitchLag,          \* BROKEN: the host's cached switched() (2 s) outlives a rollback: the revoke goes to the core only, the file
+                        \*   (now kith-auth's again) never gets it, and the guard is back on kith-auth
+    CoreOnlyWrite,      \* the core's revoked fact can change with no write of auth.json (a hand-run core-call people.suspend/undo)
+    CoreSideShutsGate   \* ... and the gate sees it at once (parity checked per request); FALSE = the latch stays open until its next ask
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -144,7 +151,8 @@ VARIABLES
     bdoor,         \* bdoor[m] \in GDoor: B's guest door on m (its own tick names the door)
     cardst,        \* cardst[m] \in CardSt: P's card on m (asked, answered yes, picked up, or withdrawn)
     cardhit,       \* cardhit[m]: a revoke has landed on m while the card was open or unused (the oracle; no step reads it)
-    crev,          \* crev[m]: the core's copy of P's revoked fact on m (people.suspend / people.undo), written after auth.json
+    crev,          \* crev[m].v: the core's copy of P's revoked fact on m (people.suspend / people.undo), written after auth.json;
+                   \*   crev[m].side: a core-only write left the gate's latch open on it (until the gate's next parity ask)
     ptick          \* P holds the door's job (P's tick on P's own row), given and taken back by the owner
 
 CardSt == {"none", "open", "approved", "used", "withdrawn"}
@@ -167,10 +175,14 @@ May(m, w) == IF w = "P" THEN MayP(m) ELSE MayB(m)
 \* gate is open: the gate latches the core's parity answer with auth.json's fingerprint, and any write of auth.json (a new
 \* inode) shuts it at once, so the host is back on kith-auth until the core has been told (core_selected). The model reads
 \* the parity in the same step as the check. That is sound because fingerprint_of covers auth.json only and the core's revoked fact changes
-\* only through mirror_to_core after save_auth under the same flock. A core-only write (a hand-run core-call, or core-side writers once
-\* #875 lands) would leave the latch open and out of step for up to GATE_MAX_AGE, which the model does not have. The core's own answer is the same rule: a revoked person is refused before any row.
-GateOpen(m) == CoreGate /\ (CoreGateStale \/ crev[m] = revoked[m])
-GuardP(m) == IF GateOpen(m) THEN ~crev[m] /\ rows[m] # {} ELSE MayP(m)
+\* only through mirror_to_core after save_auth under the same flock. A core-only write (a hand-run core-call; no production
+\* writer: switched, the host writes the core and nothing else) leaves the latch open and out of step until the gate thread asks again
+\* (GATE_EVERY, 2 s; GATE_MAX_AGE, 6 s, only if that thread hangs): CoreOnlyWrite and `crev[m].side` model it. The core's own answer is the same rule: a revoked person is refused before any row.
+\* Switched (#875): no gate at all. core_selected() is switched() first, and the core is the only store, so the answer is the
+\* core's own read per request (the host caches only whether the file is a tombstone, by its fingerprint, for 2 s).
+\* The core-only writer above exists only unswitched (rows core-only-write*): switched there is no latch.
+GateOpen(m) == CoreGate /\ ~SwitchLag /\ (Switched \/ CoreGateStale \/ crev[m].v = revoked[m] \/ crev[m].side)
+GuardP(m) == IF GateOpen(m) THEN ~crev[m].v /\ rows[m] # {} ELSE MayP(m)
 GuardB(m) == BotRow[m] /\ (BotIgnoresOwner \/ GuardP(m))
 GuardMay(m, w) == IF w = "P" THEN GuardP(m) ELSE GuardB(m)
 
@@ -218,7 +230,7 @@ ItemsStep(m, val) == IF val THEN ItemsRevoke(m) ELSE ItemsUndo(m)
 Init ==
     /\ rows = Rows0
     /\ revoked = [m \in Macs |-> FALSE]
-    /\ crev = [m \in Macs |-> FALSE]
+    /\ crev = [m \in Macs |-> [v |-> FALSE, side |-> FALSE]]
     /\ ver = [m \in Macs |-> 0]
     /\ outbox = [m \in Macs |-> FALSE]
     /\ net = [m \in Macs |-> IF HandleSync /\ m = "m2" THEN "offline" ELSE "online"]
@@ -282,13 +294,20 @@ CardsAfter(m, nowRevoked) ==
 CardHitAfter(m, nowRevoked) ==
     IF nowRevoked /\ cardst[m] \in {"open", "approved"} THEN [cardhit EXCEPT ![m] = TRUE] ELSE cardhit
 
+\* Switched, the write the revoke makes IS the core's: kith-auth's file and the core's copy are one fact (run_auth ->
+\* people.suspend / people.undo). Not under SwitchLag: the revoke then reaches the core only.
+CrevAfter(m, v) == IF Switched THEN [crev EXCEPT ![m] = [v |-> v, side |-> FALSE]]
+                   ELSE [crev EXCEPT ![m].side = FALSE]   \* a write of auth.json moves its fingerprint: the latch is shut
+RevokedAfter(m, v) == IF SwitchLag THEN revoked ELSE [revoked EXCEPT ![m] = v]
+
 \* On m's terminal: local flag at once (rows untouched), cloud now or later.
 CliRevoke(m) ==
     /\ OwnerCli
     /\ revokes = 0
     /\ ~CliNeedsCloud \/ net[m] = "online"
     /\ revokes' = 1
-    /\ revoked' = [revoked EXCEPT ![m] = TRUE]
+    /\ revoked' = RevokedAfter(m, TRUE)
+    /\ crev' = CrevAfter(m, TRUE)
     /\ rows' = IF RevokeDeletesRows THEN [rows EXCEPT ![m] = {}] ELSE rows
     /\ Publish(m, TRUE)
     /\ ItemsRevoke(m)
@@ -296,7 +315,7 @@ CliRevoke(m) ==
     /\ bdoor' = DoorsSwept(bdoor, m, TRUE)
     /\ cardst' = CardsAfter(m, TRUE)
     /\ cardhit' = CardHitAfter(m, TRUE)
-    /\ UNCHANGED <<crev, net, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<net, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 CliUndo(m) ==
     /\ OwnerCli
@@ -306,21 +325,38 @@ CliUndo(m) ==
     /\ ~CliNeedsCloud \/ net[m] = "online"
     /\ undos' = 1
     /\ revoked' = [revoked EXCEPT ![m] = FALSE]
+    /\ crev' = CrevAfter(m, FALSE)
     /\ Publish(m, FALSE)
     /\ ItemsUndo(m)
     /\ gdoor' = DoorsUndone(gdoor, m, FALSE)
     /\ bdoor' = DoorsUndone(bdoor, m, FALSE)
     /\ cardst' = CardsAfter(m, FALSE)
     /\ cardhit' = cardhit
-    /\ UNCHANGED <<rows, crev, net, revokes, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<rows, net, revokes, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 \* kith-auth's mirror (kernel/bin/kith-auth mirror_to_core, after save_auth; the embedded core when no daemon runs): the core's
 \* copy takes the revoked fact once auth.json has it. One try, no queue; a try that fails (a warning, exit 0) is the step not taken,
 \* and the gate then stays shut until the core is told (`core-migrate`, or the owner runs the command again).
 CoreMirror(m) ==
     /\ CoreGate
-    /\ crev[m] # revoked[m]
-    /\ crev' = [crev EXCEPT ![m] = revoked[m]]
+    /\ ~Switched   \* switched there is no second copy to catch up
+    /\ crev[m].v # revoked[m]
+    /\ crev' = [crev EXCEPT ![m] = [v |-> revoked[m], side |-> FALSE]]
+    /\ UNCHANGED <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ext>>
+
+\* A write of the core's revoked fact that never touches auth.json (a hand-run `kith kernel core-call people.undo`): the fingerprint
+\* does not move, so the latch stays open until the gate thread asks the parity again (up to GATE_MAX_AGE).
+CoreSide(m) ==
+    /\ CoreOnlyWrite
+    /\ CoreGate
+    /\ crev' = [crev EXCEPT ![m] = [v |-> ~crev[m].v, side |-> ~CoreSideShutsGate]]
+    /\ UNCHANGED <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ext>>
+
+\* The gate thread asks the parity again (every GATE_EVERY): a latch open on an out-of-step core shuts.
+GateAsk(m) ==
+    /\ CoreOnlyWrite
+    /\ crev[m].side
+    /\ crev' = [crev EXCEPT ![m].side = FALSE]
     /\ UNCHANGED <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ext>>
 
 (* ---- cloud and network ---- *)
@@ -340,6 +376,7 @@ CloudDeliver(m) ==
     /\ ~outbox[m]
     /\ ver[m] # cloudVer
     /\ revoked' = [revoked EXCEPT ![m] = cloudRevoked]
+    /\ crev' = CrevAfter(m, cloudRevoked)
     /\ ver' = [ver EXCEPT ![m] = cloudVer]
     /\ rows' = IF RevokeDeletesRows /\ cloudRevoked THEN [rows EXCEPT ![m] = {}] ELSE rows
     /\ ItemsStep(m, cloudRevoked)
@@ -347,7 +384,7 @@ CloudDeliver(m) ==
     /\ bdoor' = DoorsUndone(DoorsSwept(bdoor, m, cloudRevoked), m, cloudRevoked)
     /\ cardst' = CardsAfter(m, cloudRevoked)
     /\ cardhit' = CardHitAfter(m, cloudRevoked)
-    /\ UNCHANGED <<crev, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 \* Internet lost, Kith cloud lost (or unreachable from m), or back.
 SetNet(m, n) ==
@@ -650,6 +687,8 @@ Next ==
           \/ Push(m)
           \/ CloudDeliver(m)
           \/ CoreMirror(m)
+          \/ CoreSide(m)
+          \/ GateAsk(m)
           \/ \E n \in Nets \ {net[m]} : SetNet(m, n)
           \/ AppStart(m)
           \/ BotStart(m)
@@ -690,7 +729,7 @@ Spec == Init /\ [][Next]_vars
 TypeOK ==
     /\ rows \in [Macs -> SUBSET Kinds]
     /\ revoked \in [Macs -> BOOLEAN]
-    /\ crev \in [Macs -> BOOLEAN]
+    /\ crev \in [Macs -> [v : BOOLEAN, side : BOOLEAN]]
     /\ ver \in [Macs -> 0..2]
     /\ outbox \in [Macs -> BOOLEAN]
     /\ net \in [Macs -> Nets]
@@ -799,9 +838,11 @@ CardNoResurrect == [][\A m \in Macs : cardst[m] = "withdrawn" => cardst'[m] = "w
 
 (* ---- probes: each must FAIL on the design (a reachability witness), unless noted ---- *)
 \* The core takes the revoked fact (the mirror is reachable) ...
-NeverCoreRevoked == \A m \in Macs : ~crev[m]
+NeverCoreRevoked == \A m \in Macs : ~crev[m].v
 \* ... and there is a moment when the core has not been told, which is when the gate is shut and the host asks kith-auth.
-NeverGateShut == \A m \in Macs : crev[m] = revoked[m]
+NeverGateShut == \A m \in Macs : crev[m].v = revoked[m]
+\* Switched: the core's copy and the file's fact are never apart (there is one). Fails under SwitchLag and CoreOnlyWrite.
+CoreInStep == \A m \in Macs : crev[m].v = revoked[m]
 \* A card before any revoke is picked up (the card path is reachable).
 NeverCardUsed == \A m \in Macs : cardst[m] # "used"
 \* ... and a revoke does withdraw one.
