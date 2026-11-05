@@ -1,0 +1,20 @@
+{
+  "fakes": "",
+  "state:home/.kith/cost.db": "## req: CREATE TABLE req (id text primary key, session text, ts text, project text, model text, agent text, turn text, input int,\n  output int, cache_read int, cache_write int, cost real)\n## runs: CREATE TABLE runs (session text primary key, agent text, version text, model text, effort text, via text, project text,\n  started text, person text, provider text, account text, account_id text)\n{\"account\": \"work\", \"account_id\": \"claude:work\", \"agent\": \"alpha\", \"effort\": \"max\", \"model\": \"opus\", \"person\": \"sam\", \"project\": \"/work/b\", \"provider\": \"claude\", \"session\": \"s-a2\", \"started\": \"2026-11-02@00:00\", \"version\": \"1.1\", \"via\": \"discord\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"alpha\", \"effort\": \"high\", \"model\": \"sonnet\", \"person\": null, \"project\": \"/work/a\", \"provider\": null, \"session\": \"s-a1\", \"started\": \"2026-11-01@00:00\", \"version\": \"1.0\", \"via\": \"terminal\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"alpha\", \"effort\": null, \"model\": null, \"person\": \"bot-s\", \"project\": \"/work/c\", \"provider\": null, \"session\": \"s-bot\", \"started\": \"2026-11-03@00:00\", \"version\": \"1.1\", \"via\": \"discord\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"alpha\", \"effort\": null, \"model\": null, \"person\": \"old-sam\", \"project\": \"/work/c\", \"provider\": null, \"session\": \"s-old\", \"started\": \"2026-11-03@00:00\", \"version\": \"1.0\", \"via\": \"terminal\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"beta\", \"effort\": \"low\", \"model\": \"opus\", \"person\": null, \"project\": \"/work/d\", \"provider\": null, \"session\": \"s-b1\", \"started\": \"2026-11-04@00:00\", \"version\": \"2.0\", \"via\": \"terminal\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"gamma\", \"effort\": \"high\", \"model\": \"sonnet\", \"person\": \"sam\", \"project\": \"/work/e\", \"provider\": null, \"session\": \"s-g1\", \"started\": \"2026-11-05@09:00\", \"version\": \"1.0\", \"via\": \"discord\"}\n## seen: CREATE TABLE seen (path text primary key, size int)\n",
+  "state:home/.kith/settings.json": "{\n  \"agents\": {\n    \"beta\": {\n      \"at_limit\": \"hold\"\n    }\n  }\n}\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agent\": \"alpha\",\n  \"at\": \"ask\",\n  \"limit\": null,\n  \"over\": false\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"agent\": \"alpha\",\n  \"at\": \"ask\",\n  \"limit\": null,\n  \"over\": false\n}\n",
+  "step2.stderr": "",
+  "step3.exit": "0\n",
+  "step3.json": "{\n  \"agent\": \"beta\",\n  \"at\": \"hold\",\n  \"limit\": null,\n  \"over\": false\n}\n",
+  "step3.stderr": "",
+  "step4.exit": "0\n",
+  "step4.json": "{\n  \"agent\": \"alpha\",\n  \"at\": \"ask\",\n  \"limit\": null,\n  \"over\": false\n}\n",
+  "step4.stderr": ""
+}

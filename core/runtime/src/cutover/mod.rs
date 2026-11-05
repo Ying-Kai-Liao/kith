@@ -62,6 +62,11 @@ pub(crate) struct Env {
     /// machine folder (transcripts). `new` leaves them empty: a module that needs them says so.
     pub state: Option<PathBuf>,
     pub home: PathBuf,
+    /// The folders (agents, state ...), for the modules that read agents' files (schedules). `new` leaves them empty.
+    pub paths: Option<kith_kernel::paths::Paths>,
+    /// The host's `serve.db`, when it is not where the host keeps it (`$KITH_SERVE_DB`, `$KITH_SERVE_HOME`, else
+    /// `<home>/.kith/serve/serve.db`): the schedules module reads the routines from it.
+    pub serve_db: Option<PathBuf>,
 }
 
 impl Env {
@@ -71,6 +76,8 @@ impl Env {
             layout: Layout::new(machine),
             state: None,
             home: machine.to_path_buf(),
+            paths: None,
+            serve_db: None,
         }
     }
 
@@ -78,6 +85,7 @@ impl Env {
         Self {
             state: Some(paths.state.clone()),
             home: paths.home.clone(),
+            paths: Some(paths.clone()),
             ..Self::new(&paths.machine)
         }
     }
@@ -131,6 +139,11 @@ pub(crate) trait Module {
     fn step_refusal(&self, _env: &Env) -> Option<String> {
         None
     }
+    /// Whether `step --dry-run` still runs while `step_refusal` refuses (it reads and writes nothing, so a module that
+    /// wants its import looked at before its lane exists says yes). A real step stays refused. Default: no.
+    fn dry_run_despite_refusal(&self) -> bool {
+        false
+    }
     /// The lock the old store's own writers take, held by `step` from the import through the tombstone: a write between
     /// the two would be lost, and a writer that checked the file before the tombstone and renames after it would put the
     /// old file back over the note. Waits for a writer, or fails with a clear error; the lock is let go when the step ends.
@@ -142,12 +155,13 @@ pub(crate) trait Module {
 /// What [`Module::source_lock`] holds; dropping it lets the lock go.
 pub(crate) type SourceLock = Box<dyn std::any::Any>;
 
-/// The registered modules, in switch order (S1 here; S2 claims+turns, S4 wake, S3 asks and S5 failover plug in after them,
+/// The registered modules, in switch order (S1 here, then M4-5a's schedules; S2 claims+turns, S4 wake, S3 asks and S5 failover plug in after them,
 /// and M2's `authority`). Registered is not switched: nothing steps a module but `kith migrate step`.
 pub(crate) fn registry() -> Vec<Box<dyn Module>> {
     vec![
         Box::new(modules::accounts::Accounts),
         Box::new(modules::transcripts::Transcripts),
+        Box::new(modules::schedules::Schedules::new()),
     ]
 }
 
@@ -190,7 +204,9 @@ pub(crate) fn step(
     opts: Opts,
 ) -> Result<Vec<String>> {
     let m = find(reg, name)?;
-    if let Some(why) = m.step_refusal(env) {
+    if let Some(why) = m.step_refusal(env)
+        && !(opts.dry_run && m.dry_run_despite_refusal())
+    {
         return Err(Error::Refused(format!("cutover: {name}: {why}")));
     }
     let cur = state::read(&env.layout, name)?;
