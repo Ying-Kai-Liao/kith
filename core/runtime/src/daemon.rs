@@ -116,6 +116,7 @@ impl Shared {
 
     /// The revoke order (and the authority tables it reads) is unix-only for now.
     #[cfg(not(unix))]
+    #[allow(clippy::unused_self)]
     pub(crate) fn replay_open_removals(&self) {}
 
     /// Runs `f` on the core. The core is gone once the daemon has stopped.
