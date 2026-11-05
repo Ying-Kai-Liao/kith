@@ -210,6 +210,8 @@ Never put a bare `kith backup`, `update` or `migrate` in a corpus line unless ac
 serve` must not start a host (use `help`/`status`-like lines). Everything is a throwaway home, so acting is safe, but
 launchd, the Keychain and the network are fakes only.
 
+Git noise: `.git/index`, `.git/objects/*`, `.git/hooks/*` and `.git/config` are never compared (they vary with the runner's git version and OS, not with kith); HEAD, refs and logs are. See `GIT_NOISE` in `kith-difftest`.
+
 ## Intended differences
 
 `intended.json` is a list of `{"case": glob, "facet": glob, "why": text}`. Facets are named `stepN.exit`,
