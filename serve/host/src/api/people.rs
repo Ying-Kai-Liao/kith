@@ -95,12 +95,12 @@ pub(super) async fn auth_bin() -> Result<std::path::PathBuf> {
 }
 
 async fn person_exists(bin: &Path, id: &str) -> bool {
-    account::run(bin, &["people", id]).await.is_ok()
+    super::authority::run_auth(bin, &["people", id]).await.is_ok()
 }
 
 /// A removed person's id (or someone's old one): a new person never takes it, so never their memory, files or logins.
 async fn retired(bin: &Path, id: &str) -> bool {
-    account::run(bin, &["retired", id]).await.is_ok()
+    super::authority::run_auth(bin, &["retired", id]).await.is_ok()
 }
 
 async fn grant(bin: &Path, person: &str, agent: &str, role: &str, fresh: bool) -> Result<()> {
@@ -111,7 +111,7 @@ async fn grant(bin: &Path, person: &str, agent: &str, role: &str, fresh: bool) -
     if fresh {
         args.push(&budget);
     }
-    account::run(bin, &args).await.map(drop)
+    super::authority::run_auth(bin, &args).await.map(drop)
 }
 
 /// [`grant`] through the core: `people.grant`, with the settings `kith-auth member` gets.
@@ -142,12 +142,12 @@ impl Undo {
             hub.store.delete_invite(i).ok();
         }
         for (person, agent) in &self.agents {
-            account::run(bin, &["member", agent, person, "--rm"]).await.ok();
+            super::authority::run_auth(bin, &["member", agent, person, "--rm"]).await.ok();
         }
         // No link went out, so the id isn't retired (--unused, which kith-auth refuses if they have anything). Refused,
         // they stay in both: a retry with the same name finds them again.
         if let Some(p) = &self.person
-            && account::run(bin, &["person", p, "--rm", "--unused"]).await.is_ok()
+            && super::authority::run_auth(bin, &["person", p, "--rm", "--unused"]).await.is_ok()
         {
             hub.store.delete_person(p).ok();
         }
@@ -211,7 +211,7 @@ async fn make_invite(
             }
             if !person_exists(bin, &id).await {
                 let arg = format!("name={name}");
-                account::run(bin, &["person", &id, &arg]).await?;
+                super::authority::run_auth(bin, &["person", &id, &arg]).await?;
                 undo.person = Some(id.clone());
             }
             hub.store.put_person(&id, name)?;
@@ -392,7 +392,8 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
             // (M2-18a): the file is the truth until the switch, so a change that reached only the core would close the
             // gate and send the guard back to a file that never got it (a revoke undone). A mirror that fails is
             // logged: the file has the change, and the gate only closes until `core-migrate` imports it.
-            let on_core = super::authority::mirrors_to_core();
+            // A switched host wrote the core already (`run_auth`): no second copy to make.
+            let on_core = super::authority::mirrors_to_core() && !super::authority::switched();
             for (agent, role) in &want {
                 let had = roles::may_use(id, agent).await;
                 grant(&bin, id, agent, role, !had).await.with_context(|| format!("giving {id} {agent}"))?;
@@ -407,7 +408,7 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
             // (say the agent's folder is gone) must not stop the rest: it is reported, and the row stays in `made`
             // so a later change tries again.
             for agent in held.iter().filter(|a| !want.contains_key(*a)) {
-                match account::run(&bin, &["member", agent, id, "--rm"]).await {
+                match super::authority::run_auth(&bin, &["member", agent, id, "--rm"]).await {
                     Ok(_) => {
                         made.retain(|m| m != agent);
                         if on_core && let Err(e) = core_revoke(id, agent).await {
@@ -505,8 +506,22 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
 pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<bool> {
     let core_updated = {
         let _w = AUTH_WRITES.lock().await;
-        let (_, said) =
-            account::run_noted(bin, &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"]).await?;
+        let said = super::authority::run_auth_noted(
+            bin,
+            &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"],
+        )
+        .await;
+        let said = match said {
+            Ok((_, said)) => said,
+            Err(e) => {
+                // Switched, the core is the only store: a revoke it didn't take must still stop what runs (the host's
+                // half is fail-closed), and the owner is told to run it again.
+                if revoke && super::authority::switched() {
+                    cut_off(hub, id).await;
+                }
+                return Err(e);
+            }
+        };
         account::note_stderr(id, &said);
         !account::core_missed(&said)
     };
@@ -556,7 +571,7 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
     super::botguests::sweep_claims(hub, ids, false).await;
     // Once nothing of theirs runs: the Claude Code temp folder their runs wrote in (<machine>/run/t/<id>).
     if let Some(bin) = account::bin().await
-        && let Err(e) = account::run(&bin, &["person", person, "--clear-temp"]).await
+        && let Err(e) = super::authority::run_auth(&bin, &["person", person, "--clear-temp"]).await
     {
         tracing::warn!(error = format!("{e:#}"), person, "couldn't remove a revoked person's temp folder");
     }

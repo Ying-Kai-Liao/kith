@@ -217,10 +217,55 @@ How it is made hermetic:
   `permit-issue-down-restart-fails` records the refusal with a `launchctl` that fails, which reads the same on Linux; the sequence
   `print` -> `bootstrap` -> `kickstart -k` and the wait for the port are a Rust unit test with a fake `launchctl`), `issue` with a
   pid that is no number (Python dies with a traceback; Rust prints its last line), a payload that is not UTF-8, and a command line
-  that is no verb but has MCP messages on stdin (Python serves them; Rust exits 2 until the server is ported).
+  that is no verb but has MCP messages on stdin (the server: see "Permit MCP server" below).
 - **Settings files of an odd shape.** `permissions.deny` that is a string, `filesystem` that is a list and so on make Python raise
   inside `apply_grants`; the cases record its message (`could not add the granted access (...)`) for the ones named in
   `permit-apply-settings-files`.
+
+### Permit MCP server (M5-5, slice 2)
+
+`golden/permit-mcp.json` (also in `corpus/`) freezes the stdio MCP server of `kernel/bin/kith-permit` (no verb; the permission
+prompt tool of every `claude -p` run): 62 cases, 137 steps. Each step feeds one file of JSON-RPC lines (`in/`) to the server and
+compares the replies, the exit code and every request the stand-in host read. The cases are `needs: rust` with `program` set (`sh w.sh
+py k` against `sh w.sh rs BIN k`), not `unswitched`: only the `permit` line in `lib/core-switched.txt` is not made.
+
+- **The handshake.** initialize (version echoed, defaults, odd params), ping, unknown methods, notifications, every shape of `id`
+  (echoed as it came, ASCII-escaped), blank and broken lines, `tools/list` under six environments (no host, owner run, guest run,
+  person only, token without socket, empty values).
+- **approve.** allow (the input back exactly as asked, key order kept), deny with and without a message, `waiting` (the ask is parked
+  in `<state>/live/ask`), error replies of every shape, a host that is down, no token, the guest's pair before the owner's, the same
+  `tool_use_id` twice (two cards: it is not forwarded), malformed requests.
+- **request_access / request_secret.** a path or a domain (both or neither refused), `write` only for `true`, every reply shape; the
+  host refuses secrets and rule W, the tool relays its words.
+- **report_bug.** scrubbing (token, bearer, password, card number, email, home folder, private words, a person's name and handle),
+  the card with the draft, `gh` fake (similar issues, a create that fails on labels or otherwise, no `gh`), allow versus every other
+  answer, the same draft twice (filed once), odd arguments. The inputs hold no token-shaped text: `w.sh` fills `@GHTOKEN@`
+  and `@APIVALUE@` from words it splits (`gh""p_`), so the corpus and the golden never hold one. The draft's OS, the kernel's short
+  sha and the draft's id are masked (they differ per machine).
+- **ask_helper.** `w.sh` builds a kernel folder (`home/k`: copies of `kith-permit` and `kith-auth`, `lib` linked, a stand-in
+  `kith-ask` that does what the launch does: `kith-auth resolve --take-once`, and tells the fake log who it ran as and whether
+  an ask token came along). Granted (no card), not granted (a card: yes, no, waiting, error, host down), "just this once" (the host's
+  side effect, `replies/NAME.do`, writes the grant before it answers yes; the second call asks again), "always" (the second call
+  does not), revoked while the card waits, revoked before, a person who may not use the caller (no card), the caller itself,
+  `kith-ask` failing in every way, the 20000-character limit, the 2000-character task in the card, no guest environment. The real
+  `kith ask` (an engine run) is not in the harness; the stand-in's access check is the real `kith-auth`.
+- **run_door.** a real `capabilities.yaml` with a lockfile, `kith-auth` for the tick: not ticked, another version (the lockfile
+  changed after the tick), ticked but not prepared, held (this Mac out of sync), revoked, the card answers, the prepare card (what it
+  downloads), a folder outside the person's slice, bad names, no capabilities. **Not in the golden:** a door that goes on to run
+  or prepare. `kith_door.run` / `prepare` need `sandbox-exec` (macOS only) and the owner's node, so the outcome differs per
+  machine. They are Rust unit tests with a fake Python (`permit/mcp_tests.rs`), and were run for real on a Mac through the Rust server
+  (the stub door of `kernel/tests/kith-guest-door-check`). A path that differs from its real path only in case also reads differently
+  on a Mac (`in_slice` folds case there) and is left out for the same reason.
+- `mask_keys` hides the times `kith-auth` writes into `auth.json` (`since`, `at`, and the helper names under `helper_once` /
+  `helper_since`): each side's setup runs at its own time.
+
+Where the Rust differs from the Python (none is in the golden; `intended.json` needed no entry): a message whose `params` /
+`arguments` is no object makes Python die with a traceback (exit 1); the Rust prints the last line (`AttributeError: ...`) and
+exits 1. Python text mode splits a line on a lone `\r`; the Rust does not. `NaN` / `Infinity` in a message parse in Python only. A Python helper
+that fails (scrubbing, a door) is a short message here where Python would raise. A killed (`-9`) server leaves a running door's
+supervisor behind in Rust (the helper `python3`, which stops the door itself within 0.5 s when its parent is gone); in Python the
+sweep ends it. Cards of the door tool are asked with this process's environment, not the guest-scrubbed copy (it differs only if a
+credential variable names a path in the guest's writable folders).
 
 ## Per-command summary
 

@@ -1,0 +1,6 @@
+{
+  "fakes": "",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"result\": {\n    \"content\": [\n      {\n        \"text\": \"{\\\"behavior\\\": \\\"deny\\\", \\\"message\\\": \\\"No approval channel for this run: the action was refused. Say so and carry on without it.\\\"}\",\n        \"type\": \"text\"\n      }\n    ]\n  }\n}\n",
+  "step0.stderr": ""
+}
