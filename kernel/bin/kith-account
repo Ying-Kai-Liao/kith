@@ -57,6 +57,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_accounts as acc  # noqa: E402
 import kith_settings  # noqa: E402
+import kith_tombstone  # noqa: E402
 
 WARNING = """\
 Before adding a second Claude subscription account:
@@ -721,6 +722,8 @@ def main(argv):
             pass
         commands[cmd](rest)
     except ValueError as e:   # settings the file can't be written back to
+        die(str(e))
+    except kith_tombstone.Tombstoned as e:   # accounts state moved to the core (kith migrate step accounts)
         die(str(e))
 
 

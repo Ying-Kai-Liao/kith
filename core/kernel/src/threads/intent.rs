@@ -96,7 +96,7 @@ pub fn how_it_ended(
             i.get("procStart")
                 .and_then(Value::as_str)
                 .filter(|p| !p.is_empty())
-                .is_some_and(|p| s.split_whitespace().collect::<Vec<_>>().join(" ") != p)
+                .is_some_and(|p| !crate::procstart::same_process(p, s))
         });
         if pid_ok && !start_clash {
             return i.get("why").and_then(Value::as_str).map(str::to_owned);

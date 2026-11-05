@@ -33,7 +33,7 @@ pub struct Registry {
     /// Who or what started a one-shot, as the room shows it ("asked by architect"); None for a terminal.
     #[serde(default)]
     pub label: Option<String>,
-    /// When the claude process started (`ps -o lstart`): a one-shot's liveness, since `claude -p` may keep no session file.
+    /// When the claude process started (a start stamp; `ps -o lstart` text in files from before): a one-shot's liveness, since `claude -p` may keep no session file.
     #[serde(default)]
     pub proc_start: Option<String>,
     /// The login the session was made under (`claude`, `claude:work`): the host loads it only there. Files written
@@ -176,31 +176,41 @@ pub fn liveness(reg: &Registry, sessions: Option<&Path>) -> Live {
     Live::Closed
 }
 
-/// Whether the process `pid` started when the session file says (`procStart`, as `ps -o lstart` prints it). A pid
-/// reused after a crash starts at another time. When either side can't be read the file is believed. Claude Code
-/// writes its own session file's start in UTC, the kernel its files' in the Mac's local time: either one matches.
+/// Whether the process `pid` started when the session file says (`procStart`). One of our stamps is compared with the
+/// process' own (`kith_kernel::procstart`; a different form or an unreadable start is believed). The other text is Claude
+/// Code's own session file, `ps -o lstart` as it prints it: a pid reused after a crash starts at another time. When either
+/// side can't be read the file is believed. Claude writes that start in UTC, the kernel's old files' in the Mac's local
+/// time: either one matches.
 fn started_as(pid: u32, claimed: Option<&str>) -> bool {
     let Some(claimed) = claimed else { return true };
-    let claimed = normalized(claimed);
-    match proc_start(pid) {
-        Some(actual) if actual == claimed => true,
-        Some(_) => lstart(pid, true).is_some_and(|utc| utc == claimed),
-        None => true,
+    if kith_kernel::procstart::is_stamp(claimed) {
+        return proc_start(pid).is_none_or(|actual| kith_kernel::procstart::same_process(claimed, &actual));
     }
+    lstart_matches(pid, claimed).unwrap_or(true)
+}
+
+/// Whether `pid` started at the `ps -o lstart` text `claimed`, local time or UTC; `None` when the process' start can't be
+/// read. The only comparison of the old text left: a holder that holds it is believed (a guess here must not free a live
+/// writer), and a caller about to signal asks for a positive `Some(true)`.
+pub(super) fn lstart_matches(pid: u32, claimed: &str) -> Option<bool> {
+    let claimed = normalized(claimed);
+    let local = lstart(pid, false)?;
+    Some(local == claimed || lstart(pid, true).is_some_and(|utc| utc == claimed))
 }
 
 fn normalized(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The start time of `pid` as `ps` prints it in the C locale and the Mac's time zone, whitespace squeezed: the text the
-/// kernel writes (`kith-sessions`), and claims hold.
+/// The start stamp of `pid` (`kith_kernel::procstart`: `e<ms>` or `b<boot id>:<ticks>`), the string `kith-sessions` and
+/// the core write too; `None` when it is gone or can't be read.
 pub fn proc_start(pid: u32) -> Option<String> {
-    lstart(pid, false)
+    kith_kernel::procstart::start_stamp(pid)
 }
 
-/// The start time of `pid` as `ps` prints it in the C locale, in UTC when `utc`.
-fn lstart(pid: u32, utc: bool) -> Option<String> {
+/// The start time of `pid` as `ps` prints it in the C locale, in UTC when `utc`: the text Claude Code's own session files
+/// and registry files from before stamps hold.
+pub(super) fn lstart(pid: u32, utc: bool) -> Option<String> {
     lstart_via(std::process::Command::new("ps"), pid, utc)
 }
 

@@ -3,7 +3,7 @@
 //! crash, and a deliberate stop never does. The kernel writes and clears the same file (`kernel/lib/kith_lifecycle.py`:
 //! the wrapper's idle stop and `/exit`; a process taking the session's writer claim clears it).
 //!
-//! `{"why": "...", "at": "<rfc3339>", "pid": N, "procStart": "<ps lstart>"}`; the start time ties it to the process it
+//! `{"why": "...", "at": "<rfc3339>", "pid": N, "procStart": "<start stamp>"}`; the start time ties it to the process it
 //! was written for. Best effort: a stop never waits on bookkeeping that failed.
 
 use super::registry::{proc_start, safe_id};

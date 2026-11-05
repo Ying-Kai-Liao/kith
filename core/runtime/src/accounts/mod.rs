@@ -183,7 +183,8 @@ pub(crate) const OUT_FOR: i64 = 3600;
 /// Python stays the only writer. Nothing sets it in production.
 pub(crate) const CORE_WRITES: &str = "accounts_core_writes";
 
-/// Whether the core may write account state (see [`CORE_WRITES`]).
+/// Whether the core may write account state: the `accounts` cutover module is switched ([`switched`]), or the flag
+/// [`CORE_WRITES`] says so (the lane's own tests and a hand-set dev core; nothing sets it in production).
 pub(crate) fn core_writes(conn: &Connection) -> Result<bool> {
     use rusqlite::OptionalExtension as _;
     let v: Option<String> = conn
@@ -193,7 +194,40 @@ pub(crate) fn core_writes(conn: &Connection) -> Result<bool> {
             |r| r.get(0),
         )
         .optional()?;
-    Ok(v.as_deref() == Some("1"))
+    Ok(v.as_deref() == Some("1") || switched(conn))
+}
+
+/// The `accounts` cutover module is switched for THIS core: the switch file, the marker in this very database and the
+/// tombstone all agree (`cutover::same_answer::may_serve`), so a core.db from another machine, a forged switch file or a
+/// rolled-back module answers no. The machine folder is found from the connection's own path; a database that is not at
+/// `<machine>/core/core.db` (memory, a test's scratch file) is never switched. Unix only, like the framework.
+#[cfg(unix)]
+fn switched(conn: &Connection) -> bool {
+    use crate::cutover::{Env, modules::accounts::Accounts, same_answer::may_serve};
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    let Some(db) = conn.path().map(std::path::Path::new) else {
+        return false;
+    };
+    let Some(machine) = db.parent().and_then(std::path::Path::parent) else {
+        return false;
+    };
+    let env = Env::new(machine);
+    if env.layout.db != db {
+        return false;
+    }
+    let s = may_serve(&Accounts, &env, conn, false);
+    // The one place the core acts although the old file is no tombstone any more (the framework serves on, loudly): say so
+    // in the core log, once, not on every write.
+    if let Some(w) = s.warning.as_ref().filter(|_| s.ok) {
+        WARNED
+            .call_once(|| kith_kernel::log::note(&format!("accounts: core writes continue: {w}")));
+    }
+    s.ok
+}
+
+#[cfg(not(unix))]
+fn switched(_: &Connection) -> bool {
+    false
 }
 
 /// `mark_out` of `kith_accounts.py`: the entry is out until `until` (default an hour from `now`), epoch seconds. With
