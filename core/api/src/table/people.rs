@@ -209,7 +209,13 @@ pub(super) const ROWS: &[Method] = &[
     people(
         "people.removeBot",
         "Remove a bot, with its memberships.",
-        &[pos("id", "string", true, "The bot."), KERNEL, HOME, ENV, VIA],
+        &[
+            pos("id", "string", true, "The bot."),
+            KERNEL,
+            HOME,
+            ENV,
+            VIA,
+        ],
         &["people", "bot", "remove"],
     ),
     people(
@@ -256,7 +262,13 @@ pub(super) const ROWS: &[Method] = &[
     people(
         "people.removeInvite",
         "Take a `/link` code back before it is used.",
-        &[pos("code", "string", true, "The code."), KERNEL, HOME, ENV, VIA],
+        &[
+            pos("code", "string", true, "The code."),
+            KERNEL,
+            HOME,
+            ENV,
+            VIA,
+        ],
         &["people", "invite-remove"],
     ),
     people(
@@ -349,19 +361,37 @@ pub(super) const ROWS: &[Method] = &[
     people(
         "people.suspend",
         "Cut a person off from everything on this computer, and their bots with them. Their rows are kept; `people undo` brings it all back.",
-        &[pos("id", "string", true, "The person."), KERNEL, HOME, ENV, VIA],
+        &[
+            pos("id", "string", true, "The person."),
+            KERNEL,
+            HOME,
+            ENV,
+            VIA,
+        ],
         &["people", "suspend"],
     ),
     people(
         "people.undo",
         "Bring back a person cut off by `people suspend`, with exactly the access they had.",
-        &[pos("id", "string", true, "The person."), KERNEL, HOME, ENV, VIA],
+        &[
+            pos("id", "string", true, "The person."),
+            KERNEL,
+            HOME,
+            ENV,
+            VIA,
+        ],
         &["people", "undo"],
     ),
     people(
         "people.clearTemp",
         "Remove the temp folder of a person's runs, and of their bots' (their runs must be stopped).",
-        &[pos("id", "string", true, "The person."), KERNEL, HOME, ENV, VIA],
+        &[
+            pos("id", "string", true, "The person."),
+            KERNEL,
+            HOME,
+            ENV,
+            VIA,
+        ],
         &["people", "person", "clear-temp"],
     ),
     people(

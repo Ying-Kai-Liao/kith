@@ -453,7 +453,7 @@ async fn the_core_refuses_a_switched_route_write_once_the_phase_is_not_switched(
     let marked = |preset: &str| json!({"person": "sam", "agent": "house", "preset": preset, "viaSwitch": true});
     // No record at all (rolled back and cleared): refused, nothing written.
     assert!(core.ask("people.grant", marked("guest")).is_none());
-    assert!(core.rows().is_empty());
+    assert_eq!(core.rows().len(), 0);
     core.phase("switched");
     assert!(core.ask("people.grant", marked("guest")).is_some());
     assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
