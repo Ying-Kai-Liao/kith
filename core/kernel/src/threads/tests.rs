@@ -1183,3 +1183,17 @@ fn the_verbs_answer_like_kith_sessions() {
         "a pid that is no number"
     );
 }
+
+#[test]
+fn help_is_kith_sessions_own_usage_on_stderr() {
+    let t = Tmp::new();
+    let env = run_env(&[]);
+    let c = ctx(&t, &env);
+    let stdin = || String::new();
+    for flag in ["-h", "--help"] {
+        let o = cli::run(&c, &NoHost, &args(&[flag]), &stdin);
+        assert_eq!(o.code, 1, "{flag}");
+        assert_eq!(o.stdout, "", "{flag}");
+        assert!(o.stderr.starts_with("kith-sessions — terminal"), "{flag}");
+    }
+}

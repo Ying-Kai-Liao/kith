@@ -248,6 +248,31 @@ def people():
     if len(owners) != 1:
         bad(f'{len(owners)} owners in people ({", ".join(owners) or "none"}): kith auth person <you> owner')
     issues = 0
+    # data from before kith-auth refused it: may() checks the owner first, so such an owner (and their bots) still get in
+    # as the owner, while cut_off (chat, run tokens) refuses them. Same walk as kith-auth cut_off.
+    for pid in owners:
+        seen, cur, cut = set(), pid, False
+        while cur and cur not in seen and not cut:
+            cut = bool(folks.get(cur, {}).get('revoked'))
+            seen.add(cur)
+            cur = folks.get(cur, {}).get('bot_of')
+        if not cut and not folks[pid].get('bot_of'):
+            continue
+        issues += 1
+        bots = sorted(b for b, v in folks.items() if v.get('bot_of') == pid)
+        bot_txt = f' and their bots ({", ".join(bots)})' if bots else ''
+        if folks[pid].get('bot_of'):
+            parent = folks[pid]['bot_of']
+            # chat refuses only when some id up the bot_of chain is revoked (cut_off); otherwise the split is latent
+            chat = 'chat refuses them' if cut else f'if {parent} is ever revoked, chat would refuse them'
+            bad(f'people: {pid} is the owner and also a bot of {parent} (old data; a bot can\'t be made the owner now): '
+                f'kith-auth lets them in as the owner, and {chat}. Fix: kith auth person {pid} --rm '
+                f'(removes {pid}{bot_txt}), then kith auth person <you> owner')
+            continue
+        bad(f'people: {pid} is the owner and also revoked (old data): kith-auth still lets them and their bots in as the '
+            f'owner, while chat refuses them. If {pid} is you, the Mac\'s owner, on each Mac where kith doctor shows this: kith auth person {pid} --unrevoke. '
+            f'If not, in this order: kith auth person {pid} --rm (removes {pid}{bot_txt} for good; the id is retired), '
+            f'then kith auth person <you> owner')
     for agent, rows in members.items():
         if agent not in known:
             issues += 1
@@ -489,10 +514,13 @@ def core():
         if state == 'connected':
             ok(f'holder: instance {h.get("instance")}, pid {h.get("pid")}, {h.get("processes")} process(es)'
                + (' (tied to the daemon\'s job: it ends with it)' if h.get('tied_to_starter') else ''))
+            if h.get('ending'):
+                warn(f'holder: {h.get("ending")} process(es) the core is ending are not gone yet; it keeps sending the kill (see the core log)')
         elif state == 'absent':
             note('holder: no kith-holder program beside kith (nothing uses a holder before M1)')
         elif state == 'blocked':
-            warn(f'holder: blocked: {h.get("error")} (the daemon retries slowly and signals nothing)')
+            warn(f'holder: blocked: {h.get("error")} (the daemon retries slowly and signals nothing). '
+                 'If that process is not the holder\'s any more, drop it from the record: kith holder forget <pid>')
         elif state in ('unreachable',):
             warn(f'holder: {h.get("error")} (the daemon retries; nothing uses a holder before M1)')
         else:

@@ -149,4 +149,39 @@ check "and writes nothing" "[ \"\$(J \"'revoked' in d['people']['sam']\")\" = Fa
 check "linked: --local (kith serve's writer) writes here" "A person sam --revoke --local && [ \"\$(J \"'revoked' in d['people']['sam']\")\" = True ]"
 check "linked, kith serve down: undo is refused" "! A person sam --unrevoke && [ \"\$(J \"'revoked' in d['people']['sam']\")\" = True ]"
 check "linked: --local undo" "A person sam --unrevoke --local && A may sam house"
+
+# data from before the refusal: an owner who is also revoked. A kernel copy (no git around it), so the doctor's update
+# check has nothing to fetch.
+cp -R "$KERNEL" "$KITH_HOME/kernel"
+DOC=$KITH_HOME/kernel/bin/kith
+D() { "$DOC" doctor "$@" 2>/dev/null; }
+D > "$T/clean.txt"
+check "doctor: a clean auth.json says nothing about a revoked owner" "! grep -q 'owner and also revoked' '$T/clean.txt'"
+# bad.json.src: kai (the owner) revoked, with a bot; me is the real owner's other id (not the owner here).
+python3 -c "
+import json; p='$KITH_AUTH'; d=json.load(open(p)); d['people']['kai']['revoked']={'at':'2026-01-01T00:00:00Z'}
+d['people']['bot-b']={'bot_of':'kai'}; d['people']['me']={}; json.dump(d,open('$T/bad.json.src','w'))"
+rm -f "$KITH_SERVE_DIR/cloud-sync.json"   # the linked checks above are over
+BAD() { cp "$T/bad.json.src" "$KITH_AUTH"; }
+BAD
+D > "$T/bad.txt"; D --json > "$T/bad.json"
+check "doctor: says what is true: kith-auth lets them in as the owner, chat refuses" "grep -q 'kai is the owner and also revoked (old data): kith-auth still lets them and their bots in as the owner, while chat refuses them' '$T/bad.txt' && ! grep -q 'treats them as revoked' '$T/bad.txt'"
+check "doctor: names the bots --rm removes, both --rm steps in order, and --unrevoke" "grep -q 'person kai --rm (removes kai and their bots (bot-b) for good; the id is retired), then kith auth person <you> owner' '$T/bad.txt' && grep -q 'person kai --unrevoke' '$T/bad.txt' && grep -q 'on each Mac where kith doctor shows this' '$T/bad.txt'"
+check "doctor --json: the same line, not ok" "python3 -c \"import json; d=json.load(open('$T/bad.json')); assert any(not c['ok'] and 'owner and also revoked' in c['name'] for c in d['checks'])\""
+check "owner: revoke is still refused" "! A person kai --revoke"
+check "owner: undo is allowed, and the doctor line is gone" "A person kai --unrevoke && ! D | grep -q 'owner and also revoked'"
+check "and the owner is still kai, with no revoked flag" "[ \"\$(J \"[n for n, p in d['people'].items() if p.get('owner') and not p.get('revoked')]\")\" = \"['kai']\" ]"
+check "undoing an owner who is not revoked changes nothing" "A person kai --unrevoke"
+BAD
+check "--rm then <you> owner: both run on the bad file" "A person kai --rm && A person me owner"
+check "and the doctor line is gone, the bot with it" "! D | grep -q 'owner and also revoked' && [ \"\$(J \"'bot-b' in d['people']\")\" = False ]"
+# an owner who is a bot of someone: the same hole, through cut_off's bot_of walk
+python3 -c "
+import json; d=json.load(open('$T/bad.json.src')); d['people']['kai'].pop('revoked'); d['people']['kai']['bot_of']='me'; json.dump(d,open('$KITH_AUTH','w'))"
+D > "$T/bot.txt"
+check "doctor: an owner who is a bot of someone is flagged too, and says the split is latent (nobody revoked)" "grep -q \"kai is the owner and also a bot of me (old data; a bot can't be made the owner now): kith-auth lets them in as the owner, and if me is ever revoked, chat would refuse them. Fix: kith auth person kai --rm (removes kai and their bots (bot-b)), then kith auth person <you> owner\" '$T/bot.txt' && ! grep -q 'is retired\\|the id is retired' '$T/bot.txt'"
+python3 -c "
+import json; d=json.load(open('$KITH_AUTH')); d['people']['me']['revoked']=True; json.dump(d,open('$KITH_AUTH','w'))"
+D > "$T/bot2.txt"
+check "doctor: when the chain reaches a revoked person, chat refuses them" "grep -q 'kith-auth lets them in as the owner, and chat refuses them' '$T/bot2.txt' && ! grep -q 'is retired' '$T/bot2.txt'"
 exit $fail

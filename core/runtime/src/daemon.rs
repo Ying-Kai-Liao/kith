@@ -95,6 +95,30 @@ impl Shared {
         self.stop.load(Ordering::SeqCst)
     }
 
+    /// Runs the revoke order again for every removal whose record is still open (a crash, or an error mid-order). At
+    /// core start and on the supervisor's pass; each pass re-reads every row, and a row goes only after its effect.
+    /// The writers it would kill are ended by the holder's reconcile and `end_gone`; a failure is logged, not fatal.
+    #[cfg(unix)]
+    pub(crate) fn replay_open_removals(&self) {
+        #[allow(clippy::cast_possible_truncation)]
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as i64);
+        match self.with_core(|c| crate::revoke_order::replay_open(c, now)) {
+            Ok((_, failed)) => {
+                for f in failed {
+                    log::note(&self.logs, &format!("daemon: revoke order: {f}"));
+                }
+            }
+            Err(e) => log::note(&self.logs, &format!("daemon: revoke order: {e}")),
+        }
+    }
+
+    /// The revoke order (and the authority tables it reads) is unix-only for now.
+    #[cfg(not(unix))]
+    #[allow(clippy::unused_self)]
+    pub(crate) fn replay_open_removals(&self) {}
+
     /// Runs `f` on the core. The core is gone once the daemon has stopped.
     pub(crate) fn with_core<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R> {
         let mut guard = self
@@ -177,6 +201,18 @@ impl Shared {
         }
         if method == "terminal.list" {
             let answer = self.terminals.list(params)?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
+        if method == "holder.forget" {
+            let (blocked, live) = {
+                let h = self
+                    .holder
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                (h.state == "blocked", h.pids.clone())
+            };
+            let answer = self.with_core(|c| holder_link::forget_proc(c, params, blocked, &live))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
@@ -344,6 +380,7 @@ fn holder_json(h: &HolderState) -> Value {
         "pid": h.pid,
         "tied_to_starter": h.tied_to_starter,
         "processes": h.procs,
+        "ending": h.ending,
         "binary": h.binary,
         "error": h.error,
     })
@@ -532,6 +569,7 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         }
         *slot = Some(core);
     }
+    shared.replay_open_removals();
     let for_calls = shared.clone();
     let handler: Arc<Handler> =
         Arc::new(move |who, method, params| for_calls.dispatch(who, method, params));
