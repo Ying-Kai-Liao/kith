@@ -8,10 +8,12 @@
 //! - `waiters.rs`: `ci:`, `pid:` and `at:` waiters and their evaluation.
 //! - `outside.rs`: what they ask of the world (the clock, the process table, `gh`, the transcripts), as traits.
 //! - `store.rs`: the tables; `call.rs`: the `wake.*` rows.
+//! - `turns.rs`: a run's turn in the conversations lane, written by `take` in the same transaction (M3-10c).
 //!
 //! One call is one claim transaction over the whole state (a few rows), which replaces the Python's three locks (the ask
-//! box's, `waits/.lock`, `queue/.lock`). A turn is not started here: `take` only marks what is owed as carried and returns
-//! the turn as `kith-wake take` prints it; creating the turn in the conversations lane is the switch's step.
+//! box's, `waits/.lock`, `queue/.lock`). `take` marks what is owed as carried, returns the
+//! turn as `kith-wake take` prints it, and queues the run's turn through the claims API (parked as `terminal_live` when a
+//! terminal holds the session). Nothing starts that turn before the switch.
 
 mod call;
 mod model;
@@ -22,6 +24,7 @@ mod queue;
 mod store;
 #[cfg(test)]
 mod tests;
+mod turns;
 mod waiters;
 
 pub(crate) use call::{call, serves};
@@ -42,11 +45,22 @@ pub(crate) fn write<T>(
     now: f64,
     f: impl FnOnce(&mut State) -> Result<T>,
 ) -> Result<T> {
+    write_tx(core, now, |_, st| f(st))
+}
+
+/// [`write`] for a step that also writes the conversations lane (`take` makes the run's turn): `f` gets the transaction.
+/// Whatever runs left the queue in the step has its waiting turn closed in the same transaction.
+pub(crate) fn write_tx<T>(
+    core: &mut Core,
+    now: f64,
+    f: impl FnOnce(&rusqlite::Transaction<'_>, &mut State) -> Result<T>,
+) -> Result<T> {
     let tx = core.claim_tx()?;
     let before = load(&tx)?;
     let mut after = before.clone();
     after.prune(now);
-    let said = f(&mut after)?;
+    let said = f(&tx, &mut after)?;
+    turns::close_gone_in(&tx, &before, &after, now)?;
     save(&tx, &before, &after)?;
     tx.commit()?;
     Ok(said)
@@ -86,6 +100,7 @@ pub(crate) fn write_after<T>(
         if current != seen {
             continue;
         }
+        turns::close_gone_in(&tx, &current, &after, now)?;
         save(&tx, &current, &after)?;
         tx.commit()?;
         return Ok(said);
@@ -116,6 +131,7 @@ pub(crate) fn withdraw_owed_in(
     if !persons.is_empty() {
         n += queue::withdraw_person(&mut after, now, persons);
     }
+    turns::close_gone_in(tx, &before, &after, now)?;
     save(tx, &before, &after)?;
     Ok(n)
 }
