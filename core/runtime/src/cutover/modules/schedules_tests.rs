@@ -820,7 +820,7 @@ fn a_routine_that_changes_its_trigger_count_or_agent_leaves_no_stale_job() {
         .unwrap()
         .execute(
             "INSERT INTO bots (id, rev, config) VALUES ('b3', 1, ?1)",
-            [json!({"id": "b3", "hq_agent": "ola"}).to_string()],
+            [json!({"id": "b3", "hqAgent": "ola"}).to_string()],
         )
         .unwrap();
     let mut v = w.serve_routines();

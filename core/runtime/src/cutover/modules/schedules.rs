@@ -8,7 +8,7 @@
 //!
 //! # What moves
 //! - **Routines**: serve.db's kv row `routines.v1` (the host's `Routine`: bot, name, instruction, triggers, enabled,
-//!   webhook key) into `<agent>/jobs.json` of the kith agent that owns the bot (`hq_agent` of the bot's config), under the
+//!   webhook key) into `<agent>/jobs.json` of the kith agent that owns the bot (`hqAgent` of the bot's config, as the host serializes it), under the
 //!   same `<machine>/sched/<agent>.jobs.lock` `kith-sched` and the core's reader take. Definitions stay in the agent's
 //!   folder (architect, 2026-11-04). serve.db is only ever read here.
 //!   - One job per trigger. The job id is the routine's id when it has one trigger, else `<routine id>-<n>` (n counts
@@ -20,7 +20,7 @@
 //!   - Idempotent: a job of the same id that this import made on this Mac is brought up to date (a re-import of an
 //!     unchanged routine writes nothing); a job of that id that is not this routine's is a collision and that routine is
 //!     refused, never overwritten; one made on another Mac is theirs and is left alone, with the same refusal.
-//!   - A routine whose bot has no kith agent (a host-native bot, `hq_agent` empty) is refused: "make it a kith agent
+//!   - A routine whose bot has no kith agent (a host-native bot, `hqAgent` empty) is refused: "make it a kith agent
 //!     first" (C5). So is one whose agent is not on this Mac, whose trigger does not validate, or whose id cannot be a job
 //!     id. A refused routine is a difference for `same_answer`, so the step cannot switch while one is left.
 //!   - A job this import made whose routine is gone from serve.db is removed again.
@@ -298,7 +298,7 @@ enum Owner {
     Agent(String),
 }
 
-/// The kith agent that owns a bot: the `hq_agent` of its config.
+/// The kith agent that owns a bot: the `hqAgent` of its config (camelCase: the host's BotConfig).
 fn agent_of(db: &Connection, bot: &str) -> Owner {
     let config: Option<String> = db
         .query_row(
@@ -312,11 +312,7 @@ fn agent_of(db: &Connection, bot: &str) -> Owner {
     let Some(config) = config.and_then(|c| serde_json::from_str::<Value>(&c).ok()) else {
         return Owner::Missing;
     };
-    // The host's BotConfig serializes camelCase (`hqAgent`); `hq_agent` is read too, for rows written by hand.
-    match text(&config, "hqAgent")
-        .filter(|a| !a.is_empty())
-        .or_else(|| text(&config, "hq_agent").filter(|a| !a.is_empty()))
-    {
+    match text(&config, "hqAgent").filter(|a| !a.is_empty()) {
         Some(a) => Owner::Agent(a.to_owned()),
         None => Owner::Native,
     }
