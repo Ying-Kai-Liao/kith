@@ -503,6 +503,7 @@ enum KernelCmd {
         args: Vec<String>,
     },
     /// `kith-pkg resolve`: the pinned package folder a run starts from (not routed from `kith` yet).
+    #[command(disable_help_flag = true)]
     Pkg {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]

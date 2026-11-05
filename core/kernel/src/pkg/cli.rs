@@ -37,6 +37,13 @@ pub fn run(ctx: &Ctx, args: &[String]) -> Out {
             ..Out::default()
         };
     };
+    if cmd == "-h" || cmd == "--help" {
+        // kith-pkg prints its whole docstring; this verb only says what it answers
+        return Out {
+            stdout: format!("{USAGE}\n"),
+            ..Out::default()
+        };
+    }
     if cmd != "resolve" {
         return Out {
             stderr: format!(

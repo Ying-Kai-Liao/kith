@@ -427,6 +427,21 @@ fn resolve_with_no_good_version_runs_unchecked_edits() {
 }
 
 #[test]
+fn help_is_answered_by_the_verb_not_clap() {
+    let t = Tmp::new();
+    let ctx = t.ctx();
+    for h in ["-h", "--help"] {
+        let out = cli::run(&ctx, &[h.to_owned()]);
+        assert_eq!(out.code, 0);
+        assert!(
+            out.stdout.starts_with("usage: kith kernel pkg resolve"),
+            "{}",
+            out.stdout
+        );
+    }
+}
+
+#[test]
 fn pins_and_editing_markers() {
     let t = Tmp::new();
     t.agent("echo");
