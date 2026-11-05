@@ -193,7 +193,7 @@ fn agents_here(hub: &Hub) -> Vec<String> {
 /// What a failed `createBotInvite` puts back in kith-auth.
 async fn undo_auth(bin: &Path, person: &str) {
     let _w = AUTH_WRITES.lock().await;
-    account::run(bin, &["bot", person, "--rm"]).await.ok();
+    super::authority::run_auth(bin, &["bot", person, "--rm"]).await.ok();
 }
 
 /// `createBotInvite {name, provider?, agents, botId?}`: the bot (a kith-auth person that is a guest of its owner), its
@@ -349,12 +349,12 @@ async fn new_bot(hub: &Arc<Hub>, actor: &Actor, bin: &Path, owner_id: &str, b: &
     {
         let _w = AUTH_WRITES.lock().await;
         let (name_arg, provider_arg) = (format!("name={name}"), format!("provider={provider}"));
-        account::run(bin, &["bot", &bot.person_id, "--of", owner_id, &name_arg, &provider_arg])
+        super::authority::run_auth(bin, &["bot", &bot.person_id, "--of", owner_id, &name_arg, &provider_arg])
             .await
             .context("making the bot's person")?;
         for agent in &bot.agents {
-            if let Err(e) = account::run(bin, &["member", agent, &bot.person_id, "preset=guest"]).await {
-                account::run(bin, &["bot", &bot.person_id, "--rm"]).await.ok();
+            if let Err(e) = super::authority::run_auth(bin, &["member", agent, &bot.person_id, "preset=guest"]).await {
+                super::authority::run_auth(bin, &["bot", &bot.person_id, "--rm"]).await.ok();
                 return Err(e.context(format!("giving the bot {agent}")));
             }
         }
@@ -682,7 +682,7 @@ pub(crate) async fn end_bot_noted(
     let mut mirror = Mirror::NotSent;
     if let Some(bin) = account::bin().await {
         let _w = AUTH_WRITES.lock().await;
-        match account::run_noted(&bin, &["bot", &bot.person_id, "--rm"]).await {
+        match super::authority::run_auth_noted(&bin, &["bot", &bot.person_id, "--rm"]).await {
             Ok((_, said)) => {
                 account::note_stderr(&bot.person_id, &said);
                 mirror = if account::core_missed(&said) { Mirror::CoreKept } else { Mirror::Updated };

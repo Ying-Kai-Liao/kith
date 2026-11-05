@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below (see the skill's "Sync commit").
-SYNC=fb5f140f6c84bc079684575a8ce93373eba51275
+SYNC=10c4eb6c012f6ad77389633bd7ecb5881054f5f4
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
@@ -34,6 +34,9 @@ FILES=(
   core/runtime/src/doors/mod.rs           # M2-14: the door table (start, mark_live, sweep, sweep_ids, end: DoorStart, DoorSweep)
   core/runtime/src/doors/call.rs          # M2-14: the doors.* rows
   core/runtime/src/migrations/doors/m0060_doors.rs  # M2-14: the doors table
+  core/runtime/src/revoke_order.rs        # M3-10d/M2-18c: the order (claims of P and B, then the asks), open_removals, replay_open (ClaimSweep, AskSweep)
+  core/runtime/src/authority/call.rs      # which writes run the order (a removal does; a suspend does not yet), the open-removal join refusal
+  serve/host/src/api/authority.rs         # the host's gate for KITH_CORE_AUTHORITY=1: fingerprint latch (CoreGate, GuardP)
   core/runtime/src/authority/mod.rs       # the readers: snapshot (revoked), may/resolve/cut_off over secrets
 )
 paths=()
