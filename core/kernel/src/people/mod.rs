@@ -1,6 +1,6 @@
 //! `kith kernel people people|invite ...`: the command line of `kernel/bin/kith-people` in Rust. `people [ls]` and
 //! `people show` read who is invited from `kith-auth people --json` (the one reader of auth.json; when the authority
-//! moves to core.db this is the place that changes: `Backend::people`), `invite add|ls|revoke` go through the running
+//! moves into the core this is the place that changes: `Backend::people`), `invite add|ls|revoke` go through the running
 //! host's loopback API with the owner token (`system::host_call`, `kith_host.host_call`'s twin). Same stdout, stderr and
 //! exit codes (0 done, 1 refused / host unreachable / not found, 2 usage); the difftest golden `people.json` holds the
 //! Python's answers. `kith-people` stays Python until `people` is in `lib/core-switched.txt`.
