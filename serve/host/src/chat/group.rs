@@ -728,8 +728,11 @@ fn outside_member(guest: &BotGuest) -> BotConfig {
 }
 
 /// The lane's messages since the user last wrote there, that message included.
+/// Late replies (stored after a newer message moved the lane on) are left out: their
+/// @-mentions wake nobody (C3).
 fn since_last_user_message(hub: &Hub, lane: &Lane) -> Result<Vec<Entry>> {
-    let recent = hub.store.messages_after(lane, 0, HISTORY_LINES)?;
+    let mut recent = hub.store.messages_after(lane, 0, HISTORY_LINES)?;
+    recent.retain(|e| e.data["late"] != true);
     let start = recent.iter().rposition(is_person_message).unwrap_or(0);
     Ok(recent[start..].to_vec())
 }
@@ -2203,6 +2206,50 @@ mod tests {
             (idle["late"].as_bool(), idle["unprompted"].as_bool(), idle["lateWhy"].is_null()),
             (Some(false), Some(true), true)
         );
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_late_replys_mention_does_not_wake_the_next_agent() {
+        let room = Room::new();
+        let main = Lane::main(&room.group);
+        room.send("@a MENTIONB BLOCK slow", None).await;
+        let hub = room.hub.clone();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hub.bot_runtime("a").status != BotStatus::Working {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("a starts");
+        room.send("@a hold on", None).await;
+        std::fs::write(room.dir.join("a/release"), "").unwrap();
+        room.settle().await;
+        // Settling can catch a gap between a's turn ending and the next one starting: wait for
+        // conversation 2 to end before asserting that nobody was woken.
+        let conv2 = room.closed().await;
+        room.settle().await;
+        assert_eq!(room.conversations().len(), 2, "two conversations: {:?}", room.conversations());
+        assert_ne!(conv2.state, ConvState::Open);
+        let replies: Vec<_> = room
+            .hub
+            .store
+            .messages_after(&main, 0, 100)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "agent" && e.data["final"] == true)
+            .collect();
+        let late = replies.iter().find(|e| e.data["late"] == true).expect("a late reply");
+        assert!(late.data["text"].as_str().unwrap().contains("@b"), "{late:?}");
+        // A current reply from a exists, so the second round ran with the late line stored.
+        assert!(
+            replies.iter().any(|e| e.data["author"] == "a" && e.data["late"] != true),
+            "a also gave a current final reply: {replies:?}"
+        );
+        // Conversation 1, conversation 2's first pass, and the pass after something was said.
+        let prompts = std::fs::read_to_string(room.dir.join("a/prompts.jsonl")).unwrap();
+        assert_eq!(prompts.lines().count(), 3, "a was prompted three times: {prompts}");
+        assert!(!room.dir.join("b/prompts.jsonl").exists(), "the late @b woke nobody");
         room.shutdown().await;
     }
 
