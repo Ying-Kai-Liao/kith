@@ -78,7 +78,10 @@ fn every_row_is_well_formed() {
         // The sync lease's writes are the host's (M2-10b); the sync-lease test below holds each of those rows.
         let want: &[Principal] = if on_the_run_socket.contains(&m.name) {
             &[Principal::RunToken]
-        } else if HOST_ROWS.contains(&m.name) || m.name == SECRET_VALUE_ROW {
+        } else if HOST_ROWS.contains(&m.name)
+            || m.name == SECRET_VALUE_ROW
+            || m.name.starts_with("hostclaim.")
+        {
             &[Principal::Host]
         // The host also reads two owner rows: the lease counter (`mark`) and the cutover gate (`cutover.mayServe`, which
         // the host-start guard calls). `kernel.cutover`, the write side, stays Owner only.
