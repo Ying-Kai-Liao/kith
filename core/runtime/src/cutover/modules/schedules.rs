@@ -38,7 +38,7 @@
 //!   `state.json` is written again (the last tick and each job's last run from the core, beside whatever other keys the
 //!   original had) over the tombstone. A routine deleted from serve.db since is not brought back (said, not guessed). The
 //!   host keeps routines in memory and saves them over serve.db's `routines.v1`, so a rollback refuses while the host
-//!   runs (`live`; `--force` overrides it like any live reason): stop the host first, roll back, start it.
+//!   runs (`rollback_refusal`; `--force` does not override it): stop the host first, roll back, start it.
 //!   Jobs made on another Mac stay (their `mac` is not this one's); `check` names them.
 //! - `live`: scheduled turns that have not finished.
 
@@ -148,23 +148,41 @@ fn serve_db_of(env: &Env) -> PathBuf {
         .join("serve.db")
 }
 
-/// Whether a host holds `host.lock` in its data folder (the folder of serve.db): an advisory lock the OS drops with the
-/// process, so a stale file or a reused pid never reads as running. Read-only: the file is never created. Anything but
-/// "no file" or "lock free" counts as running (the conservative answer; `rollback --force` still goes through).
-fn host_running(env: &Env) -> bool {
-    let Some(dir) = serve_db_of(env).parent().map(Path::to_path_buf) else {
-        return false;
-    };
+/// Why the host cannot be called stopped, if it cannot: `host.lock` in its data folder (the folder of serve.db) is an
+/// advisory lock the OS drops with the process, so a stale file or a reused pid never reads as running. Read-only: the
+/// file is never created. No file, or a free lock, is stopped. A held lock says "running"; any other open or lock error
+/// says the lock cannot be checked (still a refusal, but never worded as "stop the host").
+fn host_blocker(env: &Env) -> Option<HostBlock> {
+    let dir = serve_db_of(env).parent().map(Path::to_path_buf)?;
     let file = match std::fs::File::open(dir.join("host.lock")) {
         Ok(f) => f,
-        Err(e) => return e.kind() != std::io::ErrorKind::NotFound,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => return Some(HostBlock::Unknown(e.to_string())),
     };
+    // The probe holds a shared lock for microseconds and drops it at once. A host whose `try_lock_exclusive` lands in
+    // that window fails to start once (it can be started again); it is not worth a retry loop here.
     match fs2::FileExt::try_lock_shared(&file) {
         Ok(()) => {
             let _ = fs2::FileExt::unlock(&file);
-            false
+            None
         }
-        Err(_) => true,
+        Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+            Some(HostBlock::Running)
+        }
+        Err(e) => Some(HostBlock::Unknown(e.to_string())),
+    }
+}
+
+enum HostBlock {
+    Running,
+    Unknown(String),
+}
+
+/// The refusal line for a host in the way, in the words of the verb (`running` is that verb's "the host is running").
+fn host_refusal(env: &Env, running: &str) -> Option<String> {
+    match host_blocker(env)? {
+        HostBlock::Running => Some(running.to_owned()),
+        HostBlock::Unknown(e) => Some(format!("host.lock cannot be checked: {e}")),
     }
 }
 
@@ -486,7 +504,7 @@ fn lock_jobs(machine: &Path, agent: &str) -> Result<JobsLock> {
     loop {
         match f.try_lock_exclusive() {
             Ok(()) => return Ok(JobsLock(f)),
-            Err(e) if e.kind() == fs2::lock_contended_error().kind() => {
+            Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
                 if Instant::now() >= until {
                     return Err(Error::Refused(format!(
                         "cutover: schedules: {} is held by another writer (kith-sched?) for more than {}s; try again",
@@ -673,10 +691,19 @@ impl Module for Schedules {
     fn step_refusal(&self, env: &Env) -> Option<String> {
         // The host reads the switch when it starts. A running host started before the step would keep running every
         // routine from serve.db next to the core's fire, so each would run twice.
-        host_running(env).then(|| {
-            "not stepped: the host is running and reads the schedules switch only when it starts; stop the host, step schedules, start the host. `step schedules --dry-run` and `check schedules` work while it runs"
-                .into()
-        })
+        host_refusal(
+            env,
+            "not stepped: the host is running and reads the schedules switch only when it starts; stop the host, step schedules, start the host. `step schedules --dry-run` and `check schedules` work while it runs",
+        )
+    }
+
+    fn rollback_refusal(&self, env: &Env) -> Option<String> {
+        // Not a `live` reason: `--force` must not get past it. The running host saves its in-memory routines over
+        // serve.db's `routines.v1`, silently undoing the keys and flags the rollback puts back there.
+        host_refusal(
+            env,
+            "the host is running and would save its routines over the ones put back; stop the host first (then roll back, then start it); --force does not override this",
+        )
     }
 
     fn check_notes(&self, env: &Env) -> Vec<String> {
@@ -692,16 +719,8 @@ impl Module for Schedules {
         false
     }
 
-    fn live(&self, env: &Env, core: &Core) -> Result<Vec<String>> {
+    fn live(&self, _env: &Env, core: &Core) -> Result<Vec<String>> {
         let mut out = Vec::new();
-        // The running host saves its in-memory routines over serve.db's `routines.v1`, undoing the keys and flags the
-        // rollback puts back there.
-        if host_running(env) {
-            out.push(
-                "the host is running and would save its routines over the ones put back; stop the host first (then roll back, then start it)"
-                    .into(),
-            );
-        }
         let n: i64 = core.conn().query_row(
             "SELECT COUNT(DISTINCT t.id) FROM sched_fires f JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER)
              WHERE f.turn_id IS NOT NULL AND t.state IN ('queued', 'parked', 'claimed', 'running')",

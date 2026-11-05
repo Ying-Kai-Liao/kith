@@ -139,6 +139,11 @@ pub(crate) trait Module {
     fn step_refusal(&self, _env: &Env) -> Option<String> {
         None
     }
+    /// Why `rollback` must refuse right now (one line), checked before anything is read or written and NOT overridable by
+    /// `--force` (unlike `live`): for a state a forced rollback cannot be safe against. Default: never.
+    fn rollback_refusal(&self, _env: &Env) -> Option<String> {
+        None
+    }
     /// Whether `step --dry-run` still runs while `step_refusal` refuses (it reads and writes nothing, so a module that
     /// wants its import looked at before its lane exists says yes). A real step stays refused. Default: no.
     fn dry_run_despite_refusal(&self) -> bool {
@@ -331,6 +336,9 @@ pub(crate) fn rollback(
                 other.name()
             )));
         }
+    }
+    if let Some(why) = m.rollback_refusal(env) {
+        return Err(Error::Refused(format!("cutover: {name}: {why}")));
     }
     let mut lines = Vec::new();
     let mut core = lock(env)?;

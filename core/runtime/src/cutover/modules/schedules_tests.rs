@@ -309,6 +309,21 @@ fn a_rollback_refuses_while_the_host_runs_and_goes_through_once_it_stops() {
     assert_eq!(w.serve_routines(), before, "serve.db was not touched");
     assert!(state::read(&w.env.layout, "schedules").unwrap().is_some());
     assert!(tombstone::is_tombstone(&w.state_file()));
+    // `--force` does not get past a running host: it would overwrite what the rollback puts back.
+    let err = rollback(
+        &reg,
+        &w.env,
+        "schedules",
+        Opts {
+            force: true,
+            ..opts()
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("stop the host first"), "{err}");
+    assert_eq!(w.serve_routines(), before, "serve.db was not touched");
+    assert!(state::read(&w.env.layout, "schedules").unwrap().is_some());
     drop(host);
     let out = rollback(&reg, &w.env, "schedules", opts())
         .unwrap()
@@ -325,6 +340,28 @@ fn a_stale_lock_file_without_a_host_does_not_count_as_running() {
     let w = world(false);
     std::fs::write(w.serve.parent().unwrap().join("host.lock"), "").unwrap();
     step(&w.reg(), &w.env, "schedules", opts()).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lock_file_that_cannot_be_opened_refuses_without_saying_stop_the_host() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let w = world(false);
+    let lock = w.serve.parent().unwrap().join("host.lock");
+    std::fs::write(&lock, "").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // A superuser can still open it: nothing to test then.
+    if std::fs::File::open(&lock).is_ok() {
+        return;
+    }
+    let e = step(&registry(), &w.env, "schedules", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("host.lock cannot be checked") && !e.contains("stop the host"),
+        "{e}"
+    );
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o644)).unwrap();
 }
 
 #[test]
