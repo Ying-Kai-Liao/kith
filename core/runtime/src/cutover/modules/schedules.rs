@@ -298,7 +298,7 @@ enum Owner {
     Agent(String),
 }
 
-/// The kith agent that owns a bot: the `hqAgent` of its config (camelCase: the host's BotConfig).
+/// The kith agent that owns a bot: the `hqAgent` of its config (camelCase: the host's `BotConfig`).
 fn agent_of(db: &Connection, bot: &str) -> Owner {
     let config: Option<String> = db
         .query_row(
