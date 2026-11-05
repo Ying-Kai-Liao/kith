@@ -1,0 +1,5 @@
+\* switched (#875) with the core's revoke order and the asks
+CoreGate = TRUE
+Switched = TRUE
+Asks = TRUE
+CoreSweep = TRUE

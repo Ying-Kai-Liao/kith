@@ -98,12 +98,17 @@ CONSTANTS
                         \*   gate is open, and kith-auth's mirror writes the core after auth.json (FALSE = the host asks kith-auth)
     CoreGateStale,      \* the gate stays open on a latched answer after auth.json changed (no fingerprint check)
     \* ---- the switched host (#875: auth.json is a tombstone; the core is the only store) ----
-    Switched,           \* TRUE = authority is on the core: the host's kith-auth calls are people.* writes (run_auth), the guard asks
+    Switched,           \* (CliRevoke/CliUndo stand for the host's local_revoke; the terminal's `kith person --revoke` exits 3 on a tombstone
+                        \*   and `person` is not in core-switched.txt: M2-18 gate 1, open) TRUE = authority is on the core: the host's kith-auth calls are people.* writes (run_auth), the guard asks
                         \*   the core with no gate in between (core_selected = switched() || ...), a revoke changes the one fact
     SwitchLag,          \* BROKEN: the host's cached switched() (2 s) outlives a rollback: the revoke goes to the core only, the file
                         \*   (now kith-auth's again) never gets it, and the guard is back on kith-auth
-    CoreOnlyWrite,      \* the core's revoked fact can change with no write of auth.json (a hand-run core-call people.suspend/undo)
+    CoreOnlyWrite,      \* the core's REVOKED FACT can change with no write of auth.json (a hand-run core-call people.suspend/undo). The
+                        \*   access-request writes (decide_in_core, deny_or_queue, fileRequest in cloud.rs; core_grant/core_revoke in people.rs) are
+                        \*   core-only too, but they write agent rows and requests, never this fact
     CoreSideShutsGate   \* ... and the gate sees it at once (parity checked per request); FALSE = the latch stays open until its next ask
+
+ASSUME (Switched => CoreGate) /\ (SwitchLag => Switched) /\ (CoreSideShutsGate => CoreOnlyWrite)
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -324,7 +329,7 @@ CliUndo(m) ==
     /\ revoked[m]
     /\ ~CliNeedsCloud \/ net[m] = "online"
     /\ undos' = 1
-    /\ revoked' = [revoked EXCEPT ![m] = FALSE]
+    /\ revoked' = RevokedAfter(m, FALSE)
     /\ crev' = CrevAfter(m, FALSE)
     /\ Publish(m, FALSE)
     /\ ItemsUndo(m)
@@ -375,7 +380,7 @@ CloudDeliver(m) ==
     /\ net[m] = "online"
     /\ ~outbox[m]
     /\ ver[m] # cloudVer
-    /\ revoked' = [revoked EXCEPT ![m] = cloudRevoked]
+    /\ revoked' = RevokedAfter(m, cloudRevoked)
     /\ crev' = CrevAfter(m, cloudRevoked)
     /\ ver' = [ver EXCEPT ![m] = cloudVer]
     /\ rows' = IF RevokeDeletesRows /\ cloudRevoked THEN [rows EXCEPT ![m] = {}] ELSE rows
@@ -842,7 +847,9 @@ NeverCoreRevoked == \A m \in Macs : ~crev[m].v
 \* ... and there is a moment when the core has not been told, which is when the gate is shut and the host asks kith-auth.
 NeverGateShut == \A m \in Macs : crev[m].v = revoked[m]
 \* Switched: the core's copy and the file's fact are never apart (there is one). Fails under SwitchLag and CoreOnlyWrite.
-CoreInStep == \A m \in Macs : crev[m].v = revoked[m]
+CoreInStep == NeverGateShut   \* the same fact; this name is the one a switched row asserts
+\* The latch is open on an out-of-step core only after a core-only write, and never switched. Run on switched and core-gate.
+SideOnlyLatched == \A m \in Macs : crev[m].side => (CoreOnlyWrite /\ ~Switched)
 \* A card before any revoke is picked up (the card path is reachable).
 NeverCardUsed == \A m \in Macs : cardst[m] # "used"
 \* ... and a revoke does withdraw one.

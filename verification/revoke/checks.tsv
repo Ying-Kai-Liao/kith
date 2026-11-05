@@ -147,3 +147,29 @@ broken-switch-lag	PROPERTY	R6	fail
 # A core-only write of the revoked fact (a hand-run core-call; no production writer) while UNSWITCHED: the latch answers from the stale copy until its next parity ask (the window #876 named); a gate that checks parity per request has none
 core-only-write	PROPERTY	R1	fail
 core-only-write-parity	PROPERTY	R1	pass
+# --- switched, the configuration M2-23 runs: the full code row set, and the door/cards/order hooks combined with it ---
+switched	INVARIANT	R2	pass
+switched	INVARIANT	R4	pass
+switched	INVARIANT	SyncAgrees	pass
+switched	INVARIANT	BotBelowOwner	pass
+switched	INVARIANT	SideOnlyLatched	pass
+core-gate	INVARIANT	SideOnlyLatched	pass
+switched	PROPERTY	R6cDown	pass
+switched	PROPERTY	R6cWake	pass
+switched	PROPERTY	NeverBridgeInCloudDown	pass
+switched-door	INVARIANT	TypeOK	pass
+switched-door	PROPERTY	DoorD2	pass
+switched-door	PROPERTY	DoorD2c	pass
+switched-door	PROPERTY	DoorD1	pass
+switched-door	PROPERTY	DoorNoResurrect	pass
+switched-door	INVARIANT	DoorsCutWithRevoke	pass
+switched-cards	INVARIANT	TypeOK	pass
+switched-cards	PROPERTY	CardsCut	pass
+switched-cards	PROPERTY	CardNoResurrect	pass
+switched-order	INVARIANT	TypeOK	pass
+switched-order	INVARIANT	OrderKept	pass
+switched-order	PROPERTY	Swept	pass
+switched-order	PROPERTY	AsksEnded	pass
+switched-order	PROPERTY	StoppedNeverWakes	pass
+# the origin Mac itself serves P while the cloud has the revoke (Publish made it look in sync)
+broken-switch-lag	PROPERTY	R6c	fail
