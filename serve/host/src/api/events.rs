@@ -9,7 +9,6 @@ use futures::future::Either;
 use futures::{Stream, StreamExt, stream};
 use serde_json::{Value, json};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Entries a fresh client receives per bot before paging with `history`.
@@ -31,18 +30,19 @@ pub fn term_events(hub: &Hub, id: &str) -> Option<impl Stream<Item = Value> + Se
 }
 
 /// Counts a connected phone (pushes are held while one is connected) for as long as its stream lives.
-struct PhoneClientGuard(Arc<Hub>);
+/// It counts for its own person (`None` is the owner): another person's open app holds back nothing of theirs.
+struct PhoneClientGuard(Arc<Hub>, Option<String>);
 
 impl PhoneClientGuard {
-    fn new(hub: Arc<Hub>) -> Self {
-        hub.phone_clients.fetch_add(1, Ordering::Relaxed);
-        Self(hub)
+    fn new(hub: Arc<Hub>, person: Option<String>) -> Self {
+        hub.phone_joined(person.as_deref());
+        Self(hub, person)
     }
 }
 
 impl Drop for PhoneClientGuard {
     fn drop(&mut self) {
-        self.0.phone_clients.fetch_sub(1, Ordering::Relaxed);
+        self.0.phone_left(self.1.as_deref());
     }
 }
 
@@ -125,7 +125,8 @@ pub fn events_stream(
     catch_up.insert(0, if who.is_some() { roles::hello_for(&hello) } else { hello });
 
     let local = matches!(caller, Caller::Local);
-    let guard = Arc::new(matches!(client, Some("ios" | "android")).then(|| PhoneClientGuard::new(hub.clone())));
+    let guard =
+        Arc::new(matches!(client, Some("ios" | "android")).then(|| PhoneClientGuard::new(hub.clone(), who.clone())));
     let hub = hub.clone();
     let tail = live.filter_map(move |msg| {
         let _keep = guard.clone();
