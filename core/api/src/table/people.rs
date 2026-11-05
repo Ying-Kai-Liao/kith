@@ -343,6 +343,19 @@ pub(super) const ROWS: &[Method] = &[
         &["people", "retired"],
     ),
     people(
+        "people.agentAccess",
+        "Keep (or, with --rm, stop keeping) a host every guest of the agent may reach, invited people and bot guests, never the owner. Kept on the agent, not on a person's row, so it needs no membership. A host that is not a plain name (a wildcard, an address, a port) is refused; removing one that is not kept changes nothing.",
+        &[
+            pos("agent", "string", true, "The agent."),
+            pos("domain", "string", true, "The host name."),
+            sw("remove", &["--rm"], "Stop keeping it."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "agent-access"],
+    ),
+    people(
         "people.requests",
         "The devices asking this computer for access, waiting for the owner (with the code to compare once the device has shown it).",
         &[

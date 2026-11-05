@@ -59,6 +59,7 @@ impl Rig {
             "authority_settings",
             "invites",
             "retired",
+            "agent_access",
         ] {
             self.core
                 .conn()
@@ -1070,6 +1071,16 @@ fn op() -> impl Strategy<Value = Op> {
             }),
         1 => pick(&["bot-a", "bot-b", "sam", "ghost"])
             .prop_map(|id| Op { method: "people.removeBot", params: json!({"id": id}), code: "" }),
+        2 => (
+            pick(&["house", "garden", "ghost", "Bad Name"]),
+            pick(&["a.example.com", "b.example.com", "*.example.com", "10.0.0.1"]),
+            any::<bool>(),
+        )
+            .prop_map(|(agent, domain, remove)| Op {
+                method: "people.agentAccess",
+                params: json!({"agent": agent, "domain": domain, "remove": remove}),
+                code: "",
+            }),
         1 => pick(&["50", "0", "off", "x", "12.5"])
             .prop_map(|amount| Op { method: "people.botsCap", params: json!({"amount": amount}), code: "" }),
         1 => (pick(&PERSONS), maybe(pick(&[0i64, 15, -5, 30])), pick(&["AAAAAA", "BBBBBB"]))
@@ -1399,4 +1410,134 @@ fn an_invite_with_minutes_out_of_range_is_a_usage_refusal() {
     )
     .unwrap_err();
     assert!(matches!(e, Error::BadParams(_)), "{e}");
+}
+
+// --- agent access -------------------------------------------------------------------------------------------------
+
+fn access(agent: &str, domain: &str, remove: bool) -> Value {
+    json!({"agent": agent, "domain": domain, "remove": remove})
+}
+
+#[test]
+fn a_kept_domain_is_added_once_removed_and_reaches_every_guest() {
+    let mut rig = Rig::new(&base());
+    rig.lines("people.grant", &grant("sam", "house", &json!({})))
+        .unwrap();
+    assert_eq!(
+        rig.lines(
+            "people.agentAccess",
+            &access("house", "api.example.com", false)
+        )
+        .unwrap(),
+        ["every guest of house may reach api.example.com beyond the box"]
+    );
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "api.example.com", false),
+    )
+    .unwrap();
+    let t = rig.tables();
+    let row = &t["agent_access"]["house"];
+    assert_eq!(row["domains"], json!(["api.example.com"]), "{t}");
+    assert_eq!(row["by"], json!({"api.example.com": null}));
+    assert!(row["since"]["api.example.com"].as_i64().unwrap() > 0);
+    let r = Authority::new(rig.core.conn(), &rig.c)
+        .resolve("house", "sam", None, false)
+        .unwrap();
+    assert!(
+        r["access"]["domains"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("api.example.com")),
+        "{r:?}"
+    );
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", false),
+    )
+    .unwrap();
+    let gone = rig
+        .lines(
+            "people.agentAccess",
+            &access("house", "api.example.com", true),
+        )
+        .unwrap();
+    assert_eq!(
+        gone,
+        ["api.example.com is no longer kept for everyone house is shared with"]
+    );
+    let t = rig.tables();
+    assert_eq!(
+        t["agent_access"]["house"]["domains"],
+        json!(["b.example.com"])
+    );
+    assert!(
+        t["agent_access"]["house"]["since"]
+            .get("api.example.com")
+            .is_none()
+    );
+    // the last one takes the agent's row with it; a repeat and an unknown agent change nothing
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", true),
+    )
+    .unwrap();
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", true),
+    )
+    .unwrap();
+    rig.lines(
+        "people.agentAccess",
+        &access("ghost", "x.example.com", true),
+    )
+    .unwrap();
+    assert!(rig.tables()["agent_access"].as_object().unwrap().is_empty());
+}
+
+#[test]
+fn a_kept_domain_must_be_a_plain_host_and_the_agent_a_name() {
+    let mut rig = Rig::new(&base());
+    for bad in [
+        "*.example.com",
+        "10.0.0.1",
+        "example.com:80",
+        "localhost",
+        "",
+    ] {
+        let e = rig
+            .lines("people.agentAccess", &access("house", bad, false))
+            .unwrap_err();
+        assert!(e.contains("is not a plain host name"), "{bad}: {e}");
+    }
+    let e = rig
+        .lines(
+            "people.agentAccess",
+            &access("../x", "a.example.com", false),
+        )
+        .unwrap_err();
+    assert!(e.contains("agent-access <agent>"), "{e}");
+    assert!(rig.tables()["agent_access"].as_object().unwrap().is_empty());
+}
+
+#[test]
+fn a_newline_or_control_character_in_either_name_is_a_usage_refusal() {
+    let (_t, c) = machine();
+    let mut auth = base();
+    for (agent, host, remove) in [
+        ("house\n", "a.example.com", false),
+        ("house", "a.example.com\n", false),
+        ("house", "a.example.com\n", true),
+        ("ho\u{7}use", "a.example.com", true),
+        ("house", "a.exam\tple.com", false),
+    ] {
+        let e = write::agent_access(&mut auth, &c, agent, host, remove).unwrap_err();
+        assert_eq!(e.code, 2, "{agent:?} {host:?}");
+        assert!(e.msg.contains("control character"), "{}", e.msg);
+    }
+    assert!(
+        auth["agent_access"]
+            .as_object()
+            .is_none_or(serde_json::Map::is_empty)
+    );
 }

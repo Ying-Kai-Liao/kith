@@ -746,6 +746,83 @@ pub(crate) fn invite_remove(auth: &mut Value, c: &Ctx, code: &str) -> R<Vec<Stri
     Ok(vec![format!("{code} removed")])
 }
 
+/// `AGENT_RE`: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` (Python's `$` also lets one newline through).
+fn is_agent_name(s: &str) -> bool {
+    let s = s.strip_suffix('\n').unwrap_or(s);
+    let mut cs = s.chars();
+    cs.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && s.len() <= 64
+        && cs.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// `cmd_agent_access` with a host: keeps it for every guest of the agent, or (`remove`) stops keeping it. Adding twice
+/// and removing what is not kept change nothing; a removal checks nothing about the host, as in `kith-auth`.
+pub(crate) fn agent_access(
+    auth: &mut Value,
+    c: &Ctx,
+    agent: &str,
+    host: &str,
+    remove: bool,
+) -> R<Vec<String>> {
+    // `kith-auth` lets a trailing newline through (Python's `$`); a name with one, or any control character, is no name
+    // for a table key the owner reads back.
+    if agent.chars().chain(host.chars()).any(char::is_control) {
+        return usage("an agent or host name may not hold a newline or other control character");
+    }
+    if !is_agent_name(agent) {
+        return usage("agent-access <agent> [--json] | agent-access <agent> domain <host> [--rm]");
+    }
+    tables(auth);
+    if remove {
+        let kept = table(auth, "agent_access");
+        let was = kept
+            .get(agent)
+            .and_then(|k| k.get("domains"))
+            .and_then(Value::as_array)
+            .is_some_and(|d| d.iter().any(|x| x.as_str() == Some(host)));
+        if was && let Some(row) = kept.get_mut(agent).and_then(Value::as_object_mut) {
+            if let Some(d) = row.get_mut("domains").and_then(Value::as_array_mut) {
+                d.retain(|x| x.as_str() != Some(host));
+            }
+            for meta in ["since", "by"] {
+                if let Some(m) = row.get_mut(meta).and_then(Value::as_object_mut) {
+                    m.remove(host);
+                }
+            }
+            if !truthy(row.get("domains")) {
+                kept.remove(agent);
+            }
+        }
+        return Ok(vec![format!(
+            "{host} is no longer kept for everyone {agent} is shared with"
+        )]);
+    }
+    if !kith_kernel::launch::guard::valid_domain(host) {
+        return usage(format!(
+            "'{host}' is not a plain host name (no wildcard, address or port)"
+        ));
+    }
+    let row = entry(table(auth, "agent_access"), agent);
+    let have = row
+        .entry("domains")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !have.is_array() {
+        *have = Value::Array(Vec::new());
+    }
+    let list = have.as_array_mut().expect("just made");
+    if !list.iter().any(|x| x.as_str() == Some(host)) {
+        list.push(json!(host));
+        // a clock in milliseconds is far inside i64
+        #[allow(clippy::cast_possible_truncation)]
+        let at = c.now_ms as i64;
+        entry(row, "since").insert(host.to_owned(), json!(at));
+        entry(row, "by").insert(host.to_owned(), Value::Null);
+    }
+    Ok(vec![format!(
+        "every guest of {agent} may reach {host} beyond the box"
+    )])
+}
+
 /// What `save_auth` does on every save: the codes that ran out are gone.
 pub(super) fn prune_invites(auth: &mut Value, c: &Ctx) {
     let now = c.now_ms / 1000.0;
