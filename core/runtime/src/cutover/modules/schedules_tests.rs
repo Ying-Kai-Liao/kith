@@ -60,6 +60,9 @@ impl Module for Lifted {
     fn step_refusal(&self, env: &Env) -> Option<String> {
         self.0.step_refusal(env)
     }
+    fn rollback_refusal(&self, env: &Env) -> Option<String> {
+        self.0.rollback_refusal(env)
+    }
     fn dry_run_despite_refusal(&self) -> bool {
         self.0.dry_run_despite_refusal()
     }
