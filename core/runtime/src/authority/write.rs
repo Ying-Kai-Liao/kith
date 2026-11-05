@@ -287,11 +287,9 @@ fn drop_self_approved(auth: &mut Value, agent: &str, pid: &str) -> usize {
     gone
 }
 
-// TODO(M2-18): Python's `forget` also drops the `agent@<id>` grants and removes the id from profiles' `with` (lane B
-// tables). Until the same transaction clears those, `addBot`/`removeBot` must not be switched: a bot handed over by
-// remove-and-re-add would get its old logins back. See the ignored test `forget_also_clears_grants_and_profiles`.
-/// `forget`: everything that gives these ids access in the tables the core keeps: memberships and open invites. (A
-/// removed person's grants and shared profiles are lane B's.)
+/// `forget`: everything that gives these ids access, as Python's: memberships, their `agent@<id>` grants, open
+/// invites, and their place in profiles' `with` (an emptied `with` is dropped; profiles the id owns stay). Without
+/// the grants, a bot handed over by remove-and-re-add would get its old logins back.
 pub(super) fn forget(auth: &mut Value, ids: &[&str]) {
     let members = table(auth, "members");
     for rows in members.values_mut() {
@@ -302,7 +300,31 @@ pub(super) fn forget(auth: &mut Value, ids: &[&str]) {
         }
     }
     members.retain(|_, r| truthy(Some(&*r)));
+    if let Some(grants) = auth.get_mut("grants").and_then(Value::as_object_mut) {
+        grants.retain(|k, _| match k.rsplit_once('@') {
+            Some((_, id)) => !ids.contains(&id),
+            None => true,
+        });
+    }
     table(auth, "invites").retain(|_, i| !ids.iter().any(|x| str_of(i, "person") == Some(*x)));
+    let profiles = auth.get_mut("profiles").and_then(Value::as_object_mut);
+    for prof in profiles.into_iter().flat_map(|p| p.values_mut()) {
+        let Some(with) = prof.get("with").and_then(Value::as_array) else {
+            continue;
+        };
+        let lent = |w: &Value| w.as_str().is_some_and(|w| ids.contains(&w));
+        if !with.iter().any(lent) {
+            continue;
+        }
+        let kept: Vec<Value> = with.iter().filter(|w| !lent(w)).cloned().collect();
+        if let Some(o) = prof.as_object_mut() {
+            if kept.is_empty() {
+                o.remove("with");
+            } else {
+                o.insert("with".to_owned(), Value::Array(kept));
+            }
+        }
+    }
 }
 
 /// The `key=value` settings of a command, the last of a repeated key winning.

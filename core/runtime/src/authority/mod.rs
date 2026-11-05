@@ -306,8 +306,8 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             agent_access.insert(r.get::<_, String>(0)?, Value::Object(row));
         }
     }
-    // store.rs writes people, memberships, presets, invites, retired, agent_access and the budget; it does not write the
-    // snapshot's `profiles` and `grants` (lane B's tables, read only for the checks below) or `handles_stale`.
+    // store.rs writes people, memberships, presets, invites, retired, agent_access, the budget, and the snapshot's
+    // `grants` and `profiles` (person and `with` only, for `forget`); it does not write `handles_stale`.
     let mut auth = Map::new();
     // Lane B's tables, in auth.json's shape, only for the checks that read who owns or is lent a login or holds a grant
     // (`retired`, `person --rm --unused`). Left out when empty: nothing writes them until the secrets switch, and the
