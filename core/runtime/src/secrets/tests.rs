@@ -754,3 +754,24 @@ fn service_keys_refuses_without_the_master_key() {
     .to_string();
     assert!(e.contains("master key"), "{e}");
 }
+
+#[test]
+fn service_keys_on_a_database_imported_before_grants_were_kept_says_to_import_again() {
+    use serde_json::json;
+    let c = db();
+    let store = MemoryKeyStore::default();
+    let s = slot(&store);
+    launch_fixture(&c, s.lock().unwrap().as_mut().unwrap());
+    c.execute_batch(
+        "DELETE FROM secret_grants; INSERT INTO secret_stale VALUES ('imported before secret_grants');",
+    )
+    .expect("stale");
+    let e = keys(
+        &c,
+        &s,
+        json!({"agent": "coder", "service": "github", "vars": ["GITHUB_TOKEN"], "person": "sam"}),
+    )
+    .expect_err("stale")
+    .to_string();
+    assert!(e.contains("import again"), "{e}");
+}

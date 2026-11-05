@@ -1224,3 +1224,14 @@ fn the_cores_owners_and_grants_are_what_kith_auth_account_state_answers() {
         ]
     );
 }
+
+#[test]
+fn a_grant_list_with_an_empty_entry_refuses_the_file() {
+    let f = Fixture::new();
+    f.auth(&json!({"people": {}, "grants": {"coder": {"github": ["", "a"]}}}).to_string());
+    let e = f.import(&mut MemSink::default()).unwrap_err();
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("grants.coder.github") && m.contains("empty entry")),
+        "{e:?}"
+    );
+}

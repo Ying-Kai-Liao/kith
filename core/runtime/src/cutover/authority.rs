@@ -488,16 +488,21 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
     // Lane B (m0021): the core holds the profiles and grants, so what it no longer has does not come back from the old
     // copy. A database imported before the import filled them (`secrets_stale`, m0022) holds empty tables that say
     // nothing: it keeps the old copy's, as it did before.
+    let owner = snap
+        .get("people")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .find(|(_, p)| p.get("owner") == Some(&Value::Bool(true)))
+        .map(|(id, _)| id.clone());
     if snap.get("secrets_stale").is_none() {
         out.insert(
             "profiles".into(),
-            profiles_back(old("profiles"), snap.get("profiles")),
+            profiles_back(old("profiles"), snap.get("profiles"), owner.as_deref()),
         );
         out.insert(
             "grants".into(),
-            snap.get("grants")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(Map::new())),
+            grants_back(old("grants"), snap.get("grants")),
         );
     }
     Value::Object(out)
@@ -506,7 +511,27 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
 /// `profiles` of the file from the core's. A profile whose person the core holds as NULL is shared on purpose when the
 /// old copy marked it `*` (the core keeps no mark, and for a login `kith-auth` would otherwise take it as the owner's);
 /// the text `the owner` is the core's stand-in for an owner not yet named, which the file leaves unsaid.
-fn profiles_back(old: Option<&Value>, from: Option<&Value>) -> Value {
+/// `grants` of the file from the core's. The core keeps no mark for a list of one, which `kith-auth` treats differently
+/// from the bare profile (`KITH_AUTH_PROFILE` picks from a list), so a list of exactly that profile in the old copy stays one.
+fn grants_back(old: Option<&Value>, from: Option<&Value>) -> Value {
+    let mut out = from.and_then(Value::as_object).cloned().unwrap_or_default();
+    for (agent, by_service) in &mut out {
+        for (service, g) in by_service.as_object_mut().into_iter().flatten() {
+            let was = old
+                .and_then(|o| o.get(agent))
+                .and_then(|a| a.get(service))
+                .and_then(Value::as_array);
+            if let (Some(profile), Some([only])) = (g.as_str(), was.map(Vec::as_slice))
+                && only.as_str() == Some(profile)
+            {
+                *g = Value::Array(vec![only.clone()]);
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+fn profiles_back(old: Option<&Value>, from: Option<&Value>, owner: Option<&str>) -> Value {
     let mut out = Map::new();
     for (name, p) in from.and_then(Value::as_object).into_iter().flatten() {
         let mut p = p.clone();
@@ -515,7 +540,15 @@ fn profiles_back(old: Option<&Value>, from: Option<&Value>) -> Value {
                 Some("the owner") => {
                     row.shift_remove("person");
                 }
-                Some(_) => {}
+                Some(named) => {
+                    // the import worked this owner out; the old copy did not name one
+                    let unnamed = old
+                        .and_then(|o| o.get(name))
+                        .is_some_and(|o| o.get("person").is_none());
+                    if unnamed && owner == Some(named) {
+                        row.shift_remove("person");
+                    }
+                }
                 None => {
                     let shared = old
                         .and_then(|o| o.get(name))

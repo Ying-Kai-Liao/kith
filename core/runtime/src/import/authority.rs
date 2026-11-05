@@ -290,13 +290,21 @@ fn parse_grants(auth: &Value) -> Result<Vec<(String, String, String, i64)>> {
             let list: Vec<&str> = match g {
                 Value::Null => continue,
                 Value::String(s) => vec![s.as_str()],
-                Value::Array(l) => l
-                    .iter()
-                    .map(|p| {
-                        p.as_str()
-                            .ok_or_else(|| bad(&what, "is not a profile or a list of profiles"))
-                    })
-                    .collect::<Result<_>>()?,
+                Value::Array(l) => {
+                    let list: Vec<&str> = l
+                        .iter()
+                        .map(|p| {
+                            p.as_str()
+                                .ok_or_else(|| bad(&what, "is not a profile or a list of profiles"))
+                        })
+                        .collect::<Result<_>>()?;
+                    // `kith-auth` takes the first entry of a list as the grant, so an empty one cannot be dropped
+                    // without the core granting what the file does not.
+                    if list.iter().any(|p| p.is_empty()) {
+                        return Err(bad(&what, "is a list with an empty entry"));
+                    }
+                    list
+                }
                 _ => return Err(bad(&what, "is not a profile or a list of profiles")),
             };
             let mut seen = std::collections::BTreeSet::new();

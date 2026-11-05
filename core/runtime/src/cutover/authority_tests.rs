@@ -1147,3 +1147,30 @@ fn the_same_answer_names_a_profile_that_differs_between_the_file_and_the_core() 
         "{said}"
     );
 }
+
+#[test]
+fn a_list_of_one_stays_a_list_and_a_derived_owner_is_left_unsaid() {
+    let base = json!({
+        "profiles": {"chrome-agent/x": {}, "chrome-agent/y": {"person": "kai"}},
+        "grants": {"house": {"github": ["github/a"], "slack": "slack/a"}}
+    });
+    let snap = json!({
+        "people": {"kai": {"owner": true}},
+        "profiles": {"chrome-agent/x": {"person": "kai"}, "chrome-agent/y": {"person": "kai"}},
+        "grants": {"house": {"github": "github/a", "slack": "slack/a", "other": "o/a"}}
+    });
+    let out = authority::merge_back(Some(base), &snap);
+    assert_eq!(out["grants"]["house"]["github"], json!(["github/a"]));
+    assert_eq!(out["grants"]["house"]["slack"], "slack/a");
+    assert_eq!(out["grants"]["house"]["other"], "o/a");
+    assert_eq!(
+        out["profiles"]["chrome-agent/x"],
+        json!({}),
+        "the old copy named no one"
+    );
+    assert_eq!(
+        out["profiles"]["chrome-agent/y"],
+        json!({"person": "kai"}),
+        "it did name the owner"
+    );
+}
