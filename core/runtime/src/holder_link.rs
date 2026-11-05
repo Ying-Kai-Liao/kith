@@ -1237,6 +1237,16 @@ fn turn_target(
     Ok((pid, conv))
 }
 
+/// A `LockStuck` turn's end: the claim is stopped (its turn goes back to the queue), so the claim row never stays
+/// `claimed` while its process may hold the conversation. Repeating it changes nothing: a claim that is not live is left
+/// alone. The process itself is ended by the kill the caller queues for the holder.
+pub(crate) fn end_stuck_claim(
+    core: &impl CoreAccess,
+    claim_id: i64,
+) -> Result<Option<claims::Kill>> {
+    core.with(|c| claims::stop(c, claim_id, "lock_stuck", true, now_ms()))
+}
+
 /// Runs one turn step the caller queued.
 fn serve_turn(shared: &Shared, client: &mut Client, seen: &Known, req: &TurnReq) {
     let step = match turn_target(seen.of(req.held.id), &req.key, req.claim) {
@@ -1250,10 +1260,20 @@ fn serve_turn(shared: &Shared, client: &mut Client, seen: &Known, req: &TurnReq)
         log::note(
             &shared.logs,
             &format!(
-                "holder: the lock of {} may still be held by process {} ({why}); end its claim to end the process",
+                "holder: the lock of {} may still be held by process {} ({why}); ending its claim",
                 req.key, req.held.id
             ),
         );
+        match end_stuck_claim(shared, req.claim) {
+            // The claim's end is the process's end: the holder is asked to kill it, and asked again until it is gone.
+            Ok(_) => {
+                shared.terminals.requeue_end(req.held.clone(), 0);
+            }
+            Err(e) => log::note(
+                &shared.logs,
+                &format!("holder: could not end claim {}: {e}", req.claim),
+            ),
+        }
     }
     let _ = req.reply.send(TurnDone(step));
 }

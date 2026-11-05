@@ -365,6 +365,7 @@ pub(crate) fn cancel_fenced(
 /// transaction. The partial index `claims_one_writer` is the last word on a second writer. Refused until this
 /// generation's reconcile has committed (step 5).
 pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Claimed> {
+    refuse_direct_turn(req.kind, cfg!(test))?;
     let claimed = (|| {
         let generation = core.generation();
         let tx = core.claim_tx()?;
@@ -392,7 +393,19 @@ pub(crate) fn claim_in(
     req: &NewClaim<'_>,
     now: i64,
 ) -> Result<Claimed> {
+    refuse_direct_turn(req.kind, cfg!(test))?;
     claim_checked_in(tx, generation, req, now)?.map_err(|fence| fence.refusal(req))
+}
+
+/// A turn's claim chooses its account, so it is made by `accounts::failover::claim_next` (which calls
+/// [`claim_checked_in`] itself), never by [`claim`] or [`claim_in`]. Tests build claims directly (`direct_ok`).
+fn refuse_direct_turn(kind: Kind, direct_ok: bool) -> Result<()> {
+    if kind == Kind::Turn && !direct_ok {
+        return Err(Error::BadParams(
+            "kith-core: a turn claim is made by claim_next, which picks its account".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// [`claim_in`] that hands back the [`Fence`] it refused on (`Ok(Err(fence))`) instead of an error, so the caller cancels
