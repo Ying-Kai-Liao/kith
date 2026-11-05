@@ -1,6 +1,7 @@
 //! `fetch(home)`: downloads each third-party skill `skills.json` links that is not already there at its pinned commit.
 
 use std::fs;
+use std::os::unix::fs::DirBuilderExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -9,21 +10,25 @@ use serde_json::Value;
 
 use super::git::run;
 use super::problems::{external_skills, read, source_line};
-use super::py::{Kind, PyErr, R, is_file, os_err, strip, write_text};
+use super::py::{Kind, PyErr, R, is_file, os_err, rmtree, strip, write_text};
 use super::Ctx;
 
+/// The skills of one `(repo, ref)`: `(name, path in the repo)`.
+type Group = ((String, String), Vec<(String, String)>);
+
 /// A temporary folder that goes away with it (`tempfile.TemporaryDirectory(prefix='kith-fetch-')`).
-struct TempDir(PathBuf);
+pub(super) struct TempDir(pub(super) PathBuf);
 
 impl TempDir {
-    fn new() -> R<Self> {
+    pub(super) fn new() -> R<Self> {
         let base = std::env::temp_dir();
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.subsec_nanos());
         for n in 0..100u32 {
             let p = base.join(format!("kith-fetch-{:x}{:x}{n}", std::process::id(), stamp));
-            match fs::create_dir(&p) {
+            // like mkdtemp: nobody else reads what a fetch puts here
+            match fs::DirBuilder::new().mode(0o700).create(&p) {
                 Ok(()) => return Ok(Self(p)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(e) => return Err(os_err(&e, &p)),
@@ -88,7 +93,6 @@ pub fn fetch(ctx: &Ctx, home: &Path, force: bool) -> R<Vec<String>> {
         }
     }
     // (repo, ref) -> [(name, path)], in the order they were first seen
-    type Group = ((String, String), Vec<(String, String)>);
     let mut groups: Vec<Group> = vec![];
     for (name, src) in todo.iter().map(|s| (&s.0, &s.1)) {
         let key = (field(src, "repo").to_owned(), field(src, "ref").to_owned());
@@ -151,14 +155,14 @@ pub fn fetch(ctx: &Ctx, home: &Path, force: bool) -> R<Vec<String>> {
             }
             let dest = home.join("skills").join(name);
             let part = home.join("skills").join(format!(".{name}.part"));
-            let _ = fs::remove_dir_all(&part);
+            rmtree(&part);
             copytree(&src, &part)?;
             let link = skills.iter().find(|s| &s.0 == name).map(|s| &s.1);
             write_text(
                 &part.join(".source"),
                 &format!("{}\n", link.map(source_line).unwrap_or_default()),
             )?;
-            let _ = fs::remove_dir_all(&dest);
+            rmtree(&dest);
             fs::rename(&part, &dest).map_err(|e| os_err(&e, &part))?;
         }
     }

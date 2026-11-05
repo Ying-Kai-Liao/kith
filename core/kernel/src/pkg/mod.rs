@@ -187,18 +187,27 @@ pub fn fingerprint(ctx: &Ctx, home: &Path) -> R<String> {
     } else {
         ctx.state.clone()
     };
-    let mut data = format!("format {FORMAT}\nstate {}\n", at.display()).into_bytes();
     let protocol = ctx.kernel.join("PROTOCOL.md");
     let files = package_files(home);
     let labelled = files
         .iter()
         .map(|p| (p.as_path(), p.strip_prefix(home).unwrap_or(p)))
         .chain(std::iter::once((protocol.as_path(), Path::new("PROTOCOL.md"))));
+    let mut entries = vec![];
     for (p, label) in labelled {
         let st = fs::metadata(p).map_err(|e| os_err(&e, p))?;
         let ns = i128::from(st.mtime()) * 1_000_000_000 + i128::from(st.mtime_nsec());
-        data.extend_from_slice(label.as_os_str().as_bytes());
-        data.extend_from_slice(format!("\0{}\0{ns}\n", st.size()).as_bytes());
+        entries.push((label.as_os_str().as_bytes().to_vec(), st.size(), ns));
     }
-    Ok(sha1::hex(&data)[..10].to_owned())
+    Ok(fingerprint_of(&at.display().to_string(), &entries))
+}
+
+/// The hash itself: `(name, size, mtime in ns)` of each file, after the format and where the life is.
+pub fn fingerprint_of(at: &str, entries: &[(Vec<u8>, u64, i128)]) -> String {
+    let mut data = format!("format {FORMAT}\nstate {at}\n").into_bytes();
+    for (label, size, ns) in entries {
+        data.extend_from_slice(label);
+        data.extend_from_slice(format!("\0{size}\0{ns}\n").as_bytes());
+    }
+    sha1::hex(&data)[..10].to_owned()
 }

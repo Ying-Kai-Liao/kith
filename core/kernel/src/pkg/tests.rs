@@ -85,44 +85,141 @@ fn sha1_is_sha1() {
     assert_eq!(sha1::hex(&[b'a'; 1000]), "291e9a6c66994949b57ba5e650361e98fc36b1ba");
 }
 
-/// The fingerprint of a fixed package, as `kith-pkg` printed it for the same files (names, sizes, mtimes to the nanosecond,
-/// and where the agent's life is). The folder is fixed because its path is part of the hash.
+const VECTOR_FILES: [(&str, &str, u64, u32); 10] = [
+    ("agents/echo/role/agent.md", "---\nname: echo\ndescription: d\n---\nhi\n", 1_700_000_000, 123_456_789),
+    ("agents/echo/role/notes.md", "notes \u{e9}\n", 1_700_000_001, 0),
+    ("agents/echo/role/sub/x.txt", "x", 1_600_000_000, 1),
+    ("agents/echo/role/sub/.DS_Store", "skipped", 1_700_000_002, 0),
+    ("agents/echo/role/memory/m.md", "state", 1_700_000_003, 0),
+    ("agents/echo/role/sub/memory/keep.md", "nested memory is package", 1_700_000_004, 0),
+    ("agents/echo/role/node_modules/n.js", "skipped", 1_700_000_005, 0),
+    ("agents/plain/agent.md", "---\nname: plain\ndescription: d\n---\nhi\n", 1_700_000_006, 0),
+    ("agents/plain/z.txt", "zz", 1_700_000_007, 0),
+    ("kernel/PROTOCOL.md", "# protocol\n", 1_700_000_008, 0),
+];
+
+/// What the hash is over for the counted files of `VECTOR_FILES`, in `os.walk` order: `(label, size, mtime ns)`.
+fn vector_entries(names: &[(&str, &str)]) -> Vec<(Vec<u8>, u64, i128)> {
+    names
+        .iter()
+        .map(|(rel, label)| {
+            let (_, text, secs, nanos) = VECTOR_FILES.iter().find(|f| f.0 == *rel).unwrap();
+            (
+                label.as_bytes().to_vec(),
+                text.len() as u64,
+                i128::from(*secs) * 1_000_000_000 + i128::from(*nanos),
+            )
+        })
+        .collect()
+}
+
+const ROLE_FILES: [(&str, &str); 5] = [
+    ("agents/echo/role/agent.md", "agent.md"),
+    ("agents/echo/role/notes.md", "notes.md"),
+    ("agents/echo/role/sub/x.txt", "sub/x.txt"),
+    ("agents/echo/role/sub/memory/keep.md", "sub/memory/keep.md"),
+    ("kernel/PROTOCOL.md", "PROTOCOL.md"),
+];
+const PLAIN_FILES: [(&str, &str); 3] = [
+    ("agents/plain/agent.md", "agent.md"),
+    ("agents/plain/z.txt", "z.txt"),
+    ("kernel/PROTOCOL.md", "PROTOCOL.md"),
+];
+
+/// The hash of a fixed package, as `kith-pkg` printed it for the same names, sizes, mtimes (to the nanosecond) and place of
+/// the agent's life. Pure, so the place is a fixed string.
 #[test]
-fn fingerprint_matches_the_python() {
-    let root = PathBuf::from("/tmp/kith-pkg-fp-vector");
-    let _ = fs::remove_dir_all(&root);
-    let files: [(&str, &str, u64, u32); 10] = [
-        ("agents/echo/role/agent.md", "---\nname: echo\ndescription: d\n---\nhi\n", 1_700_000_000, 123_456_789),
-        ("agents/echo/role/notes.md", "notes \u{e9}\n", 1_700_000_001, 0),
-        ("agents/echo/role/sub/x.txt", "x", 1_600_000_000, 1),
-        ("agents/echo/role/sub/.DS_Store", "skipped", 1_700_000_002, 0),
-        ("agents/echo/role/memory/m.md", "state", 1_700_000_003, 0),
-        ("agents/echo/role/sub/memory/keep.md", "nested memory is package", 1_700_000_004, 0),
-        ("agents/echo/role/node_modules/n.js", "skipped", 1_700_000_005, 0),
-        ("agents/plain/agent.md", "---\nname: plain\ndescription: d\n---\nhi\n", 1_700_000_006, 0),
-        ("agents/plain/z.txt", "zz", 1_700_000_007, 0),
-        ("kernel/PROTOCOL.md", "# protocol\n", 1_700_000_008, 0),
-    ];
-    for (rel, text, secs, nanos) in files {
-        let p = root.join(rel);
+fn fingerprint_hash_matches_the_python() {
+    let root = "/tmp/kith-pkg-fp-vector";
+    assert_eq!(
+        super::fingerprint_of(&format!("{root}/agents/echo"), &vector_entries(&ROLE_FILES)),
+        "5ec0694041"
+    );
+    assert_eq!(
+        super::fingerprint_of(&format!("{root}/state"), &vector_entries(&PLAIN_FILES)),
+        "d508ed54ec"
+    );
+}
+
+/// The same files on disk, in a folder of this test's own: what is walked, skipped and stat-ed gives the same entries.
+#[test]
+fn fingerprint_walks_the_package_the_python_way() {
+    let t = Tmp::new();
+    for (rel, text, secs, nanos) in VECTOR_FILES {
+        let p = t.0.join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(&p, text).unwrap();
         set_mtime(&p, secs, nanos);
     }
-    fs::create_dir_all(root.join("state")).unwrap();
-    let ctx = Ctx {
-        kernel: root.join("kernel"),
-        agents: root.join("agents"),
-        state: root.join("state"),
-        store: root.join("state/store"),
-        github: String::new(),
-        python: "python3".to_owned(),
+    fs::create_dir_all(t.0.join("state")).unwrap();
+    let ctx = t.ctx();
+    let root = t.0.display().to_string();
+    assert_eq!(
+        fingerprint(&ctx, &t.0.join("agents/echo/role")).unwrap(),
+        super::fingerprint_of(&format!("{root}/agents/echo"), &vector_entries(&ROLE_FILES))
+    );
+    assert_eq!(
+        fingerprint(&ctx, &t.0.join("agents/plain")).unwrap(),
+        super::fingerprint_of(&format!("{root}/state"), &vector_entries(&PLAIN_FILES))
+    );
+}
+
+#[test]
+fn a_fetch_folder_is_private() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let d = super::fetch::TempDir::new().unwrap();
+    let mode = fs::metadata(&d.0).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700);
+}
+
+#[test]
+fn rmtree_leaves_a_link_alone() {
+    let t = Tmp::new();
+    fs::create_dir_all(t.0.join("real/inner")).unwrap();
+    std::os::unix::fs::symlink("real", t.0.join("link")).unwrap();
+    super::py::rmtree(&t.0.join("link"));
+    assert!(fs::symlink_metadata(t.0.join("link")).is_ok() && t.0.join("real/inner").is_dir());
+    super::py::rmtree(&t.0.join("real"));
+    assert!(!t.0.join("real").exists());
+}
+
+#[test]
+fn pids_read_as_python_ints_and_probe_like_os_kill() {
+    use super::py::py_int;
+    assert_eq!(py_int(" +12 "), Some(12));
+    assert_eq!(py_int("1_000"), Some(1000));
+    assert_eq!(py_int("-3"), Some(-3));
+    for bad in ["", "_1", "1_", "1__0", "x", "1x", "+", "--1"] {
+        assert_eq!(py_int(bad), None, "{bad:?}");
+    }
+    let t = Tmp::new();
+    let me = std::process::id();
+    let cases = [
+        (format!("{me}.a"), true),
+        (" +1.b".to_owned(), true),
+        ("0.c".to_owned(), true),
+        ("999999.d".to_owned(), false),
+        ("junk.e".to_owned(), false),
+    ];
+    for (name, alive) in cases {
+        let dir = t.0.join(format!("snap-{name}"));
+        t.put(&format!("snap-{name}/.runs/{name}"), "");
+        assert_eq!(super::store::running(&dir), alive, "{name}");
+        // a record of a finished run is cleared
+        assert_eq!(dir.join(".runs").join(&name).exists(), alive, "{name}");
+    }
+}
+
+#[test]
+fn paths_are_spelled_as_pythons_path_spells_them() {
+    let env = |k: &str| match k {
+        "KITH_AGENTS" => Some("/a//b/./c/".to_owned()),
+        "KITH_STATE" => Some("/s/./t//".to_owned()),
+        _ => None,
     };
-    let role = fingerprint(&ctx, &root.join("agents/echo/role")).unwrap();
-    let plain = fingerprint(&ctx, &root.join("agents/plain")).unwrap();
-    let _ = fs::remove_dir_all(&root);
-    assert_eq!(role, "5ec0694041");
-    assert_eq!(plain, "d508ed54ec");
+    let p = crate::paths::paths(Path::new("/h"), Path::new("/k"), &env);
+    assert_eq!(p.agents, PathBuf::from("/a/b/c"));
+    assert_eq!(p.state, PathBuf::from("/s/t"));
 }
 
 #[test]

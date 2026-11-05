@@ -219,3 +219,31 @@ pub fn mtime(m: &fs::Metadata) -> f64 {
 pub fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
+
+/// `shutil.rmtree(p, ignore_errors=True)`: a link is not removed (`rmtree` refuses it), so a later rename onto it fails as in
+/// Python.
+pub fn rmtree(p: &Path) {
+    if fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
+        return;
+    }
+    let _ = fs::remove_dir_all(p);
+}
+
+/// `int(s)` for the pids in `.runs/<pid>.<x>`: surrounding whitespace, a sign, digits with single `_` between them.
+pub fn py_int(s: &str) -> Option<i64> {
+    let t = strip(s);
+    let (neg, digits) = match t.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, t.strip_prefix('+').unwrap_or(t)),
+    };
+    let ok = !digits.is_empty()
+        && !digits.starts_with('_')
+        && !digits.ends_with('_')
+        && !digits.contains("__")
+        && digits.chars().all(|c| c.is_ascii_digit() || c == '_');
+    if !ok {
+        return None;
+    }
+    let n: i64 = digits.replace('_', "").parse().ok()?;
+    Some(if neg { -n } else { n })
+}

@@ -12,11 +12,11 @@ use serde_json::{Value, json};
 
 use super::git::run;
 use super::problems::{needs, read};
-use super::py::{R, is_dir, mtime, now, os_err, read_text, strip, write_text};
+use super::py::{R, is_dir, py_int, rmtree, mtime, now, os_err, read_text, strip, write_text};
 use super::text::frontmatter;
 use super::{Ctx, KEEP, SKIP, STATE, life, name_of, package_files};
 use crate::secrets::pyjson;
-use crate::threads::os::pid_runs;
+use crate::threads::os::pid_probe;
 
 /// `pointers(agent)`: `(good, pin)`, the files that name an agent's good and pinned version.
 pub fn pointers(ctx: &Ctx, agent: &str) -> R<(PathBuf, PathBuf)> {
@@ -80,10 +80,9 @@ pub fn running(pkg: &Path) -> bool {
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         let pid = name.split('.').next().unwrap_or("");
-        match pid.parse::<i64>() {
-            // A pid of zero or below would name a process group to kill(2), which succeeds for the caller's own.
-            Ok(p) if p <= 0 => alive = true,
-            Ok(p) if pid_runs(p) => alive = true,
+        // `os.kill(int(pid), 0)`: a pid of zero or below names a process group; EPERM still means alive
+        match py_int(pid).map(pid_probe) {
+            Some(true) => alive = true,
             _ => {
                 let _ = fs::remove_file(e.path());
             }
@@ -100,7 +99,7 @@ pub fn gc(ctx: &Ctx, agent: &str) -> R<()> {
         // Subagent sessions don't record runs, so anything made in the last two days stays too.
         let recent = now() - made(&d) < 2.0 * 86400.0;
         if !keep.contains(&version_of(&d)) && !recent && !running(&d) {
-            let _ = fs::remove_dir_all(&d);
+            rmtree(&d);
         }
     }
     Ok(())
@@ -206,7 +205,7 @@ pub fn snapshot(ctx: &Ctx, agent: &str, home: &Path, version: &str) -> R<PathBuf
     let cloned = run(cp, Duration::from_secs(3600)).is_ok_and(|r| r.code == 0);
     if !cloned {
         // another disk: no clones, so share what didn't change instead
-        let _ = fs::remove_dir_all(&tmp);
+        rmtree(&tmp);
         fs::create_dir(&tmp).map_err(|e| os_err(&e, &tmp))?;
         let prev = all_versions(ctx, agent).into_iter().next();
         for p in package_files(home) {
@@ -246,7 +245,7 @@ pub fn snapshot(ctx: &Ctx, agent: &str, home: &Path, version: &str) -> R<PathBuf
     lock_files(&tmp)?;
     if fs::rename(&tmp, &dest).is_err() {
         // another run made the same version first
-        let _ = fs::remove_dir_all(&tmp);
+        rmtree(&tmp);
     }
     Ok(dest)
 }
