@@ -70,12 +70,26 @@ fn serve_dir_of(params: &Value, home: &Path) -> PathBuf {
         .map_or_else(|| home.join(".kith/serve"), PathBuf::from)
 }
 
+/// The caller's home: the one it names, else `process` (the process's own, when it can be known). Never a relative
+/// path: an empty `$HOME` would make the serve folder `.kith/serve` under the working directory, which holds no
+/// `cloud-sync.json` and reads "never linked", which fails open. Refused instead.
+pub(super) fn home_of(params: &Value, process: Option<PathBuf>) -> Result<PathBuf> {
+    let home = match params.get("home").and_then(Value::as_str) {
+        Some(h) => PathBuf::from(h),
+        None => process.unwrap_or_default(),
+    };
+    if home.is_absolute() {
+        Ok(home)
+    } else {
+        Err(Error::Refused(
+            "authority: no home folder to find the serve folder in (HOME is unset and the account has none)".into(),
+        ))
+    }
+}
+
 pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let (folders, kernel) = core.folders_for(params)?;
-    let home = params
-        .get("home")
-        .and_then(Value::as_str)
-        .map_or_else(kith_kernel::paths::process_home, PathBuf::from);
+    let home = home_of(params, kith_kernel::paths::known_home())?;
     let mut ctx = ctx_from(&folders, kernel);
     ctx.serve = ServeDir::Fixed(serve_dir_of(params, &home));
     Ok(ctx)

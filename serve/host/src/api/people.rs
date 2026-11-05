@@ -392,7 +392,7 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
             // (M2-18a): the file is the truth until the switch, so a change that reached only the core would close the
             // gate and send the guard back to a file that never got it (a revoke undone). A mirror that fails is
             // logged: the file has the change, and the gate only closes until `core-migrate` imports it.
-            let on_core = super::authority::guard_on_core();
+            let on_core = super::authority::mirrors_to_core();
             for (agent, role) in &want {
                 let had = roles::may_use(id, agent).await;
                 grant(&bin, id, agent, role, !had).await.with_context(|| format!("giving {id} {agent}"))?;
