@@ -121,7 +121,14 @@ fn answer_of(reached: kith_core::Reached) -> Answer {
 /// `None`, which the host side must read as "not in sync", never as a lease it still holds. The rest (`link`, `unlink`,
 /// `pulled`, `renew`) say a thing is so, and are never sent twice.
 fn host_row_is_repeatable(method: &str) -> bool {
-    matches!(method, "syncLease.changed" | "syncLease.drop")
+    // The claim reads, and `settle` (it only ends what the core confirms gone).
+    matches!(method, "syncLease.changed" | "syncLease.drop" | "hostclaim.epoch" | "hostclaim.show" | "hostclaim.settle")
+}
+
+/// [`call_as_host`] that keeps what the core said: a refusal's words and "no daemon" are told apart (the claim adapter,
+/// M3-10f, must not read a core that was not there as a claim that was refused, nor the other way round).
+pub fn call_host_claims(folders: &Paths, method: &str, params: &Value) -> Answer {
+    answer_of(kith_core::reach_as_host(folders, method, params, host_row_is_repeatable(method)))
 }
 
 /// One row the daemon takes from the host alone (the sync-lease writes, M2-10b), called on a connection that proves the

@@ -73,8 +73,8 @@ CONSTANTS
     Asks,               \* TRUE = P's delegations and the wakes their answers make are in the model
     NoAskSweep,         \* a revoke leaves P's open delegations running
     CoreSweep,          \* TRUE = the core's claim sweep (conversations::claims::revoke_person for P and B, M3-10d) is in
-                        \*   the model, and the asks are ended only after it (revoke_order.rs); FALSE = no claim sweep. Triggered by a removal in the code;
-                        \*   for a suspend it is the design, pending Finding 1 (open before M2-23)
+                        \*   the model, and the asks are ended only after it (revoke_order.rs); FALSE = no claim sweep. Triggered by a removal and by a suspend in the code
+                        \*   (people.suspend records the order and runs it after the commit)
     AsksFirst,          \* the asks are ended before the claims are swept (the wrong order)
     SkipBots,           \* the claim sweep covers P's own claims only, not B's (the bot principal holds its own)
     NoWakeWithdraw,     \* a revoke leaves the wake owed to P's session
@@ -524,8 +524,8 @@ WakeStart(m) ==
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
     /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick>>
 \* The core's claim sweep (revoke_person, M3-10d): once the revoked fact is on m, P's live turns there, and B's unless
-\* SkipBots, are stopped. A later step than the revoke itself (two transactions). For a removal this is the code; for a suspend it is the design, pending
-\* Finding 1 (open before M2-23: nothing calls the order for people.suspend). The starts are already
+\* SkipBots, are stopped. A later step than the revoke itself (two transactions). For a removal and for a suspend this is the code
+\* (people.suspend records the order in open_removals and runs it after the commit). The starts are already
 \* refused by the fence, this stops the ones that began before it.
 SweptWho == IF SkipBots THEN {"P"} ELSE Who
 ClaimSweep(m) ==

@@ -32,6 +32,11 @@
 //! the person, is refused before anything is written; a name with no row and no record is ignored. A removal from before
 //! the record falls back to the bots still in `people.bot_of`.
 //!
+//! A suspend (`people.suspend`) writes the same kind of row, with no bots (its rows stay in `people`), and the core runs
+//! the order after the commit the same way. `people.undo` before the order has run does not touch the row: [`run_open`]
+//! drops the row of someone who is in `people`, no longer suspended and has no recorded bots, without acting. Cores that
+//! suspended people before this record existed are not swept retroactively.
+//!
 //! One claim transaction per principal (`revoke_person` each), then one for the asks (`end_tree`); a rewrite to share one
 //! is the claims lane's. A crash after the person's step leaves the bots' in-flight claims unfenced until the retry, and
 //! the asks not yet ended; nothing new of the person's can start. Calling this again (with the same bots) finishes it,
@@ -145,6 +150,43 @@ pub(crate) fn record_removal(
     Ok(())
 }
 
+/// Called by the authority suspend write, in its transaction: "suspended, order not finished". The rows stay in `people`,
+/// so the record names no bots (the table walk finds them). Merges with a row already there (a repeat suspend, or a
+/// suspend that follows an earlier removal's).
+pub(crate) fn record_suspend(conn: &rusqlite::Connection, person: &str, now_ms: f64) -> Result<()> {
+    record_removal(conn, person, &[], now_ms)
+}
+
+/// Runs the order for one open record. A record that names no bots, for someone who is in `people` and no longer
+/// suspended (`people.undo` ran before the order did), is dropped without acting: the sweep must not hit someone who has
+/// their access back. (A removal's record never meets this: the write deleted the row, and an add of the id is refused
+/// while the record is open.) Everything else is [`revoke_everywhere`].
+pub(crate) fn run_open(core: &mut Core, person: &str, now: i64) -> Result<Everywhere> {
+    let unrevoked = core
+        .conn()
+        .query_row("SELECT revoked FROM people WHERE id = ?1", [person], |r| {
+            r.get::<_, i64>(0)
+        })
+        .optional()?
+        == Some(0);
+    // The owner can not be revoked, so a row for them (an old file that marks the owner revoked) would replay forever:
+    // drop it, with a line in the log and no error.
+    if is_owner(core.conn(), person)? {
+        eprintln!(
+            "kith-core: revoke: dropping the open record of {person}: the owner can not be revoked"
+        );
+        core.conn()
+            .execute("DELETE FROM open_removals WHERE person = ?1", [person])?;
+        return Ok(Everywhere::default());
+    }
+    if unrevoked && recorded_bots(core.conn(), person)?.is_empty() {
+        core.conn()
+            .execute("DELETE FROM open_removals WHERE person = ?1", [person])?;
+        return Ok(Everywhere::default());
+    }
+    revoke_everywhere(core, person, &[], now)
+}
+
 /// Runs the order again for every open removal, at core start and on the supervisor's pass. One row failing does not
 /// stop the others; each failure comes back as a line naming the row. The kills are for the caller to send.
 pub(crate) fn replay_open(core: &mut Core, now: i64) -> Result<(Vec<Kill>, Vec<String>)> {
@@ -157,7 +199,7 @@ pub(crate) fn replay_open(core: &mut Core, now: i64) -> Result<(Vec<Kill>, Vec<S
     };
     let (mut kill, mut failed) = (Vec::new(), Vec::new());
     for p in persons {
-        match revoke_everywhere(core, &p, &[], now) {
+        match run_open(core, &p, now) {
             Ok(out) => kill.extend(out.kill),
             Err(e) => failed.push(format!("open removal of {p}: {e}")),
         }
