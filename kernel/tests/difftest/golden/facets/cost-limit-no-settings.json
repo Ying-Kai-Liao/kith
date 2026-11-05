@@ -1,0 +1,9 @@
+{
+  "fakes": "",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agent\": \"alpha\",\n  \"at\": \"ask\",\n  \"limit\": null,\n  \"over\": false\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": ""
+}
