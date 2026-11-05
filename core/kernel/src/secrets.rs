@@ -309,6 +309,9 @@ pub fn read_auth(path: &Path) -> R<Value> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Object(Map::new()),
         Err(e) => return die(format!("{}: {e}", path.display())),
     };
+    if let Some(d) = tombstone_die(path, &data) {
+        return Err(d);
+    }
     let Some(obj) = data.as_object_mut() else {
         return die(format!("{}: not a JSON object", path.display()));
     };
@@ -316,6 +319,25 @@ pub fn read_auth(path: &Path) -> R<Value> {
         obj.entry(t).or_insert_with(|| Value::Object(Map::new()));
     }
     Ok(data)
+}
+
+/// `kith_tombstone.Tombstoned`: auth.json is a cutover note (`kith kernel cutover step authority`), the authority moved
+/// to the core. Nothing here answers from it or writes over it; exit 3 like the other tombstoned tools.
+fn tombstone_die(path: &Path, data: &Value) -> Option<Die> {
+    let note = data.as_object().filter(|o| o.contains_key("kith_tombstone"))?;
+    let module = note.get("module").and_then(Value::as_str).unwrap_or("?");
+    let rollback = note
+        .get("rollback")
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty())
+        .map_or_else(|| format!("kith rollback {module}"), str::to_owned);
+    Some(Die {
+        msg: format!(
+            "{} moved to the Kith core (module {module}); this reader must not use it ({rollback})",
+            path.display()
+        ),
+        code: 3,
+    })
 }
 
 /// `load_auth()` with no lock: a snapshot for a read.
@@ -398,6 +420,14 @@ pub fn save_auth(c: &Ctx, held: &Locked) -> R<()> {
         f.write_all(text.as_bytes())?;
         f.flush()?;
         f.sync_all()?;
+        // Under the lock, right before the replace: a tombstone is never written over.
+        if let Some(d) = std::fs::read(&c.auth)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| tombstone_die(&c.auth, &v))
+        {
+            return Err(std::io::Error::other(Tombstoned(d)));
+        }
         std::fs::rename(&tmp, &c.auth)?;
         File::open(dir)?.sync_all()
     };
@@ -405,8 +435,26 @@ pub fn save_auth(c: &Ctx, held: &Locked) -> R<()> {
         .inspect_err(|_| {
             let _ = std::fs::remove_file(&tmp);
         })
-        .map_err(fail)
+        .map_err(|e| match e.get_ref().and_then(|i| i.downcast_ref::<Tombstoned>()) {
+            Some(Tombstoned(d)) => Die {
+                msg: d.msg.clone(),
+                code: d.code,
+            },
+            None => fail(e),
+        })
 }
+
+/// A tombstone seen by `save_auth` inside its write closure, carried out as an io error.
+#[derive(Debug)]
+struct Tombstoned(Die);
+
+impl std::fmt::Display for Tombstoned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0.msg)
+    }
+}
+
+impl std::error::Error for Tombstoned {}
 
 /// A name of its own in the file's folder, as `tempfile.mkstemp(prefix='auth.json.', suffix='.tmp')` makes one.
 fn unique_tmp(auth: &Path) -> PathBuf {
