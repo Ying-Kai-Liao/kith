@@ -163,6 +163,12 @@ pub(crate) trait Module {
     fn source_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
         Ok(None)
     }
+    /// Runs under the source lock, just before the tombstones are put: a module that recorded what its import read
+    /// refuses here when a source changed since (a writer that does not take the lock), so the step never tombstones a
+    /// file it did not import. Default: nothing to check.
+    fn before_tombstone(&self, _env: &Env) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// What [`Module::source_lock`] holds; dropping it lets the lock go.
@@ -315,6 +321,7 @@ pub(crate) fn step(
     } else {
         lines.push(format!("{name} is already switched"));
     }
+    m.before_tombstone(env)?;
     for p in m.tombstones(env) {
         lines.push(tombstone::ensure(&p, name, now_secs())?);
     }

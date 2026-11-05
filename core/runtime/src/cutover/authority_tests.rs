@@ -326,7 +326,7 @@ fn fingerprint_follows_the_vault_rows_and_the_serve_db() {
     std::fs::create_dir_all(&serve).unwrap();
     let s = Connection::open(serve.join("serve.db")).unwrap();
     s.execute_batch(
-        "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT); INSERT INTO kv VALUES ('vault:v1:a', 'x');",
+        "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT); INSERT INTO kv VALUES ('slot', 'vault:v1:x');",
     )
     .unwrap();
     drop(s);
