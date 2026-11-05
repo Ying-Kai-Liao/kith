@@ -3,8 +3,8 @@
 //! and still has open, binds the key to that invite's bot, and lists it in the signed ACL. A key the cloud made up is
 //! never admitted, and one that never shows the invite token (`proveBotInvite`) is dropped again after ten minutes.
 
-use crate::api::botguests;
 use crate::LockExt;
+use crate::api::botguests;
 use crate::hub::Hub;
 use crate::remote::crypto;
 use crate::store::{BotState, Device, DeviceSource, Scope, Store, now_ms};

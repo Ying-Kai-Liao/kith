@@ -232,7 +232,8 @@ fn update_pending(store: &Store, change: impl FnOnce(&mut Vec<String>)) {
     let _one_at_a_time = WRITING.locked();
     let mut ids = pending(store);
     change(&mut ids);
-    let saved = serde_json::to_string(&ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(PENDING_REVOKES, &v));
+    let saved =
+        serde_json::to_string(&ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(PENDING_REVOKES, &v));
     if let Err(e) = saved {
         tracing::warn!(error = format!("{e:#}"), "couldn't remember a membership to revoke");
     }
