@@ -1,0 +1,19 @@
+{
+  "fakes": "",
+  "state:home/auth.json": "{\n  \"memberships\": {\n    \"house\": {\n      \"old\": {}\n    }\n  },\n  \"people\": {\n    \"kai\": {\n      \"owner\": true\n    },\n    \"old\": {},\n    \"older\": {\n      \"agents\": [],\n      \"name\": null,\n      \"revoked\": 0\n    }\n  }\n}\n",
+  "state:kith/agents/garden/role/agent.md": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n",
+  "state:kith/agents/house/role/agent.md": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n",
+  "state:kith/state/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "old    ·  no agents\nolder  None  ·  no agents\n",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"ok\": true,\n  \"people\": [\n    {\n      \"agents\": [],\n      \"bots\": [],\n      \"everyone_agents\": [],\n      \"id\": \"old\",\n      \"name\": \"\",\n      \"revoked\": false,\n      \"revoked_at\": null\n    },\n    {\n      \"agents\": [],\n      \"bots\": [],\n      \"everyone_agents\": [],\n      \"id\": \"older\",\n      \"name\": null,\n      \"revoked\": false,\n      \"revoked_at\": null\n    }\n  ]\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "old    ·  no agents\n",
+  "step3.exit": "0\n",
+  "step3.json": "{\n  \"ok\": true,\n  \"person\": {\n    \"agents\": [],\n    \"bots\": [],\n    \"everyone_agents\": [],\n    \"id\": \"older\",\n    \"name\": null,\n    \"revoked\": false,\n    \"revoked_at\": null\n  }\n}\n",
+  "step3.stderr": ""
+}
