@@ -492,7 +492,7 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
         /// `resolve <agent> [--person ID] [--via CALLER] [--take-once] [--json]` or `may <id> <agent> [--via CALLER] [--once]`.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
     /// What Claude Code usage costs, the verbs the launch and the apps call (`kernel/bin/kith-cost`): `limit AGENT [--json|--sh]`,
@@ -874,7 +874,8 @@ fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let home = kith_kernel::paths::process_home();
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
     let ctx = kith_kernel::secrets::Ctx::from_process(&kernel);
-    let (verb, rest) = args.split_first().map_or(("", &[][..]), |(v, r)| (v.as_str(), r));
+    // No verb is `kith-auth` with no arguments: its usage text and exit 0 (not clap's usage error).
+    let (verb, rest) = args.split_first().map_or(("--help", &[][..]), |(v, r)| (v.as_str(), r));
     let out = kith_kernel::secrets::run(&ctx, verb, rest);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);

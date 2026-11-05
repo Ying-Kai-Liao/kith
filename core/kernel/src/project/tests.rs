@@ -145,3 +145,66 @@ fn a_token_that_is_not_utf8_still_makes_a_guest() {
     assert!(!is_guest(env(OsString::from(""), "/s")));
     assert!(!is_guest(env(OsString::from("t"), "")));
 }
+
+#[test]
+fn two_registers_at_once_both_land() {
+    let root = scratch("concurrent");
+    let c = std::sync::Arc::new(ctx(&root));
+    let handles: Vec<_> = (0..8)
+        .map(|i| {
+            let c = c.clone();
+            std::thread::spawn(move || {
+                let id = format!("proj{i}");
+                let out = go(&c, &["--register", &id, "--home", ""]);
+                assert_eq!(out.code, 0, "{}", out.stderr);
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    let reg: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(c.state.join("projects.json")).unwrap())
+            .unwrap();
+    for i in 0..8 {
+        assert!(
+            reg["projects"].get(format!("proj{i}")).is_some(),
+            "proj{i} lost: {reg}"
+        );
+    }
+}
+
+#[test]
+fn a_crash_before_the_rename_leaves_the_old_file_whole() {
+    let root = scratch("crash");
+    let c = ctx(&root);
+    assert_eq!(go(&c, &["--register", "first", "--home", ""]).code, 0);
+    let file = c.state.join("projects.json");
+    let before = std::fs::read_to_string(&file).unwrap();
+    let err = super::write_atomic(&file, b"{\"projects\": {\"torn", true).unwrap_err();
+    assert!(err.to_string().contains("crash"), "{err}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+    let strays: Vec<_> = std::fs::read_dir(&c.state)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.contains(".tmp"))
+        .collect();
+    assert!(strays.is_empty(), "temp left behind: {strays:?}");
+}
+
+#[test]
+fn a_held_lock_makes_a_register_wait_until_it_is_released() {
+    let root = scratch("held");
+    let c = std::sync::Arc::new(ctx(&root));
+    let held = super::lock(&c.state).unwrap();
+    let c2 = c.clone();
+    let t = std::thread::spawn(move || go(&c2, &["--register", "late", "--home", ""]));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(
+        !c.state.join("projects.json").exists(),
+        "register ran under a held lock"
+    );
+    drop(held);
+    assert_eq!(t.join().unwrap().code, 0);
+    assert!(c.state.join("projects.json").exists());
+}

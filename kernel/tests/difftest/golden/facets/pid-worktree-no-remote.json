@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"delta\": {\n      \"paths\": [\n        \"~/main repo\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/main repo/.git/COMMIT_EDITMSG": "m\n",
   "state:home/main repo/.git/HEAD": "ref: refs/heads/master\n",
   "state:home/main repo/.git/description": "Unnamed repository; edit this file 'description' to name the repository.\n",
