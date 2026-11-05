@@ -1095,9 +1095,9 @@ mod stop {
         assert_eq!(out["kill"].as_array().unwrap().len(), 1);
         assert_eq!(claim_state(&core, mine), "ending");
         assert!(
-        !["ending", "ended"].contains(&claim_state(&core, other).as_str()),
-        "the other claim only shares the pid"
-    );
+            !["ending", "ended"].contains(&claim_state(&core, other).as_str()),
+            "the other claim only shares the pid"
+        );
     }
 
     /// A new ask records the claim id it was opened with; the column is not part of the record `kith ask` prints.
