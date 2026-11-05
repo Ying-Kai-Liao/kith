@@ -764,6 +764,11 @@ pub(crate) fn agent_access(
     host: &str,
     remove: bool,
 ) -> R<Vec<String>> {
+    // `kith-auth` lets a trailing newline through (Python's `$`); a name with one, or any control character, is no name
+    // for a table key the owner reads back.
+    if agent.chars().chain(host.chars()).any(char::is_control) {
+        return usage("an agent or host name may not hold a newline or other control character");
+    }
     if !is_agent_name(agent) {
         return usage("agent-access <agent> [--json] | agent-access <agent> domain <host> [--rm]");
     }
@@ -775,19 +780,17 @@ pub(crate) fn agent_access(
             .and_then(|k| k.get("domains"))
             .and_then(Value::as_array)
             .is_some_and(|d| d.iter().any(|x| x.as_str() == Some(host)));
-        if was {
-            if let Some(row) = kept.get_mut(agent).and_then(Value::as_object_mut) {
-                if let Some(d) = row.get_mut("domains").and_then(Value::as_array_mut) {
-                    d.retain(|x| x.as_str() != Some(host));
+        if was && let Some(row) = kept.get_mut(agent).and_then(Value::as_object_mut) {
+            if let Some(d) = row.get_mut("domains").and_then(Value::as_array_mut) {
+                d.retain(|x| x.as_str() != Some(host));
+            }
+            for meta in ["since", "by"] {
+                if let Some(m) = row.get_mut(meta).and_then(Value::as_object_mut) {
+                    m.remove(host);
                 }
-                for meta in ["since", "by"] {
-                    if let Some(m) = row.get_mut(meta).and_then(Value::as_object_mut) {
-                        m.remove(host);
-                    }
-                }
-                if !truthy(row.get("domains")) {
-                    kept.remove(agent);
-                }
+            }
+            if !truthy(row.get("domains")) {
+                kept.remove(agent);
             }
         }
         return Ok(vec![format!(
@@ -809,7 +812,10 @@ pub(crate) fn agent_access(
     let list = have.as_array_mut().expect("just made");
     if !list.iter().any(|x| x.as_str() == Some(host)) {
         list.push(json!(host));
-        entry(row, "since").insert(host.to_owned(), json!(c.now_ms as i64));
+        // a clock in milliseconds is far inside i64
+        #[allow(clippy::cast_possible_truncation)]
+        let at = c.now_ms as i64;
+        entry(row, "since").insert(host.to_owned(), json!(at));
         entry(row, "by").insert(host.to_owned(), Value::Null);
     }
     Ok(vec![format!(

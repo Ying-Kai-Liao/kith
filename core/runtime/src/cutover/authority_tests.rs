@@ -405,6 +405,37 @@ fn a_step_switches_and_a_rollback_gives_the_same_auth_json_back() {
 }
 
 #[test]
+fn a_host_the_owner_stopped_keeping_stays_gone_after_a_rollback() {
+    let (r, reg) = rig();
+    r.edit(|v| {
+        v["agent_access"] = json!({"house": {
+            "domains": ["a.example.com", "b.example.com"],
+            "since": {"a.example.com": 1, "b.example.com": 2},
+            "by": {"a.example.com": null, "b.example.com": null}
+        }});
+    });
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    {
+        let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+        crate::authority::call::call_with(
+            &mut core,
+            r.env.ctx.as_ref().unwrap(),
+            "people.agentAccess",
+            &json!({"agent": "house", "domain": "a.example.com", "remove": true}),
+        )
+        .unwrap();
+    }
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    let after: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(
+        after["agent_access"]["house"]["domains"],
+        json!(["b.example.com"]),
+        "the removed host is not brought back from the old file"
+    );
+    assert!(after["agent_access"]["house"]["since"]["a.example.com"].is_null());
+}
+
+#[test]
 fn import_will_not_read_a_tombstone_as_an_empty_file() {
     let (r, reg) = rig();
     step(&reg, &r.env, "authority", opts()).unwrap();

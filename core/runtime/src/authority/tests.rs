@@ -640,8 +640,32 @@ fn auth_strategy() -> impl Strategy<Value = Value> {
             some(strs(&["Bash", "Edit"])),
         ),
         some(pick(&["50", "0"])),
+        // kept hosts, so `people.agentAccess` has rows to add to and to take away from
+        prop::collection::vec(
+            prop::option::weighted(0.4, strs(&["a.example.com", "b.example.com"])),
+            MEMBERS.len(),
+        ),
     )
-        .prop_map(|(people, rows, presets, cap)| auth_value(&people, &rows, &presets, cap))
+        .prop_map(|(people, rows, presets, cap, kept)| {
+            let mut auth = auth_value(&people, &rows, &presets, cap);
+            let mut access = serde_json::Map::new();
+            for (agent, domains) in MEMBERS.iter().zip(kept) {
+                if let Some(mut d) = domains.filter(|d| !d.is_empty()) {
+                    d.sort_unstable();
+                    d.dedup();
+                    let since: serde_json::Map<_, _> =
+                        d.iter().map(|h| ((*h).to_owned(), json!(5))).collect();
+                    let by: serde_json::Map<_, _> =
+                        d.iter().map(|h| ((*h).to_owned(), Value::Null)).collect();
+                    access.insert(
+                        (*agent).to_owned(),
+                        json!({"domains": d, "since": since, "by": by}),
+                    );
+                }
+            }
+            auth["agent_access"] = Value::Object(access);
+            auth
+        })
 }
 
 #[test]

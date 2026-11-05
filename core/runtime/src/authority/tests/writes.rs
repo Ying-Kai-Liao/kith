@@ -59,6 +59,7 @@ impl Rig {
             "authority_settings",
             "invites",
             "retired",
+            "agent_access",
         ] {
             self.core
                 .conn()
@@ -1070,6 +1071,16 @@ fn op() -> impl Strategy<Value = Op> {
             }),
         1 => pick(&["bot-a", "bot-b", "sam", "ghost"])
             .prop_map(|id| Op { method: "people.removeBot", params: json!({"id": id}), code: "" }),
+        2 => (
+            pick(&["house", "garden", "ghost", "Bad Name"]),
+            pick(&["a.example.com", "b.example.com", "*.example.com", "10.0.0.1"]),
+            any::<bool>(),
+        )
+            .prop_map(|(agent, domain, remove)| Op {
+                method: "people.agentAccess",
+                params: json!({"agent": agent, "domain": domain, "remove": remove}),
+                code: "",
+            }),
         1 => pick(&["50", "0", "off", "x", "12.5"])
             .prop_map(|amount| Op { method: "people.botsCap", params: json!({"amount": amount}), code: "" }),
         1 => (pick(&PERSONS), maybe(pick(&[0i64, 15, -5, 30])), pick(&["AAAAAA", "BBBBBB"]))
@@ -1507,4 +1518,26 @@ fn a_kept_domain_must_be_a_plain_host_and_the_agent_a_name() {
         .unwrap_err();
     assert!(e.contains("agent-access <agent>"), "{e}");
     assert!(rig.tables()["agent_access"].as_object().unwrap().is_empty());
+}
+
+#[test]
+fn a_newline_or_control_character_in_either_name_is_a_usage_refusal() {
+    let (_t, c) = machine();
+    let mut auth = base();
+    for (agent, host, remove) in [
+        ("house\n", "a.example.com", false),
+        ("house", "a.example.com\n", false),
+        ("house", "a.example.com\n", true),
+        ("ho\u{7}use", "a.example.com", true),
+        ("house", "a.exam\tple.com", false),
+    ] {
+        let e = write::agent_access(&mut auth, &c, agent, host, remove).unwrap_err();
+        assert_eq!(e.code, 2, "{agent:?} {host:?}");
+        assert!(e.msg.contains("control character"), "{}", e.msg);
+    }
+    assert!(
+        auth["agent_access"]
+            .as_object()
+            .is_none_or(serde_json::Map::is_empty)
+    );
 }
