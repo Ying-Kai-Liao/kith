@@ -13,7 +13,7 @@
 //! | `restore_secrets`| the envelope's `keychain:` records -> the OS store, before `export_back`                              |
 //!
 //! # What the file cannot say once it is a tombstone
-//! `export_back` needs the keys the core never held (`profiles`, `grants`, `env`, `once`, `agent_access`, a person's
+//! `export_back` needs the keys the core never held (`profiles`, `grants`, `env`, `once`, a person's
 //! `handles` / `root` / `kith` / `agents`). They come from the copy `tombstone::ensure` kept beside the file
 //! (`auth.json.pre-cutover-<time>`, the newest); with none, those tables are written empty and the report says so.
 //!
@@ -30,8 +30,10 @@
 //!   (test `forget_also_clears_grants_and_profiles`, ignored until then).
 //! - `people.removePerson --unused` and the `retired` check: `handles`, `agent@<id>` grants and owned profiles must be
 //!   checked in the same transaction (core.db has no `handles` column and no lane B tables yet).
-//! - `kith-auth agent-access ... [--rm]` writes only auth.json: the import keeps the `agent_access` table and the rules
-//!   read it (m0013), but no core method writes it, so the verb stays on Python until one does.
+//! - `kith-auth agent-access ... [--rm]`: `people.agentAccess` writes the `agent_access` table (and `merge_back` takes it
+//!   from the core), but only the write half is ported: the listing (`agent-access <agent> [--json]`, with the
+//!   package-declared hosts) has no core row, and the CLI words differ (`domain <host>` there, positional here), so the
+//!   verb stays on Python until the listing and the switch.
 //!
 //! These do not change what the gate (`may_serve`) serves, which is the READ side (`may`, `resolve`, the request guard);
 //! they are why `export_back` takes `profiles` and `grants` from the old copy and not from the core.
@@ -467,7 +469,7 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
         );
     }
     out.insert("presets".into(), Value::Object(presets));
-    for t in ["invites", "retired"] {
+    for t in ["invites", "retired", "agent_access"] {
         out.insert(
             t.into(),
             snap.get(t)
