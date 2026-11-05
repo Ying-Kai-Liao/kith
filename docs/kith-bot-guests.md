@@ -1039,7 +1039,7 @@ overrides the cloud. Exit 3 if neither exists.
 
 ```
 kith join <link> [--name NAME] [--provider P] [--wait SECS] [--rekey] [--credentials-file PATH] [--json]
-kith ask <@agent|agent> [--thread cv_..] [--ref EXT] [--room rm_.. [--gen G]] [--speaker S]
+kith ask <@agent|agent> [--thread cv_..] [--ref EXT] [--room rm_.. [--gen G]] [--speaker S]   # --gen needs a guest from this release
          [--stream | --wait] [--timeout SECS] [--idempotency-key K] [--no-queue] [--json] [TEXT | -]
 kith read <conversation> [--after SEQ] [--wait] [--timeout SECS] [--json]
 kith threads [--json]
@@ -1047,7 +1047,7 @@ kith stop <conversation>
 kith agents [--json]
 kith status [--json]
 kith room read <room> [--since CURSOR] [--json]        (7.12)
-kith room post <room> --conversation C --epoch E [--turn-key K] [--gen G] [--nonce N] [--json] <TEXT | ->
+kith room post <room> --conversation C --epoch E [--turn-key K] [--gen G] [--nonce N] [--json] <TEXT | ->   # --gen needs a guest from this release
 kith room secret <id> (--to-file PATH | --stdout) [--json]    (room secrets)
 kith link-account --speaker S [--json]          (package 7)
 kith leave
