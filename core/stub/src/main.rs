@@ -393,7 +393,8 @@ mod tests {
     /// is a side effect nothing else observes from outside the stub.
     #[test]
     fn the_redeem_forks_nothing() {
-        let src = include_str!("main.rs");
+        // A Windows checkout has CRLF line ends.
+        let src = include_str!("main.rs").replace("\r\n", "\n");
         let from = src
             .find("fn redeem_run_token")
             .expect("the redeem is in this file");
