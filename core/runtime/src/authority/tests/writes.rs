@@ -59,6 +59,10 @@ impl Rig {
             "authority_settings",
             "invites",
             "retired",
+            "agent_access",
+            "secret_grants",
+            "secret_profiles",
+            "secret_vars",
         ] {
             self.core
                 .conn()
@@ -1070,6 +1074,16 @@ fn op() -> impl Strategy<Value = Op> {
             }),
         1 => pick(&["bot-a", "bot-b", "sam", "ghost"])
             .prop_map(|id| Op { method: "people.removeBot", params: json!({"id": id}), code: "" }),
+        2 => (
+            pick(&["house", "garden", "ghost", "Bad Name"]),
+            pick(&["a.example.com", "b.example.com", "*.example.com", "10.0.0.1"]),
+            any::<bool>(),
+        )
+            .prop_map(|(agent, domain, remove)| Op {
+                method: "people.agentAccess",
+                params: json!({"agent": agent, "domain": domain, "remove": remove}),
+                code: "",
+            }),
         1 => pick(&["50", "0", "off", "x", "12.5"])
             .prop_map(|amount| Op { method: "people.botsCap", params: json!({"amount": amount}), code: "" }),
         1 => (pick(&PERSONS), maybe(pick(&[0i64, 15, -5, 30])), pick(&["AAAAAA", "BBBBBB"]))
@@ -1382,10 +1396,99 @@ fn a_helper_once_grant_and_the_far_future_survive_a_write_beside_them() {
 }
 
 #[test]
-#[ignore = "lane B: grants and profiles are not core.db tables yet; M2-18 must not switch addBot/removeBot before this passes"]
 fn forget_also_clears_grants_and_profiles() {
     // Python's `forget` drops the `agent@<id>` grants of a removed bot and its id from profiles' `with`.
-    panic!("not implemented: the tables of lane B");
+    let mut rig = Rig::new(&base());
+    rig.lines("people.grant", &grant("bot-a", "house", &json!({})))
+        .unwrap();
+    let db = |sql: &str| rig.core.conn().execute(sql, []).unwrap();
+    db(
+        "INSERT INTO secret_grants VALUES ('house@bot-a', 'gh', 'p1', 0), ('house@bot-a', 'gh', 'p2', 1), \
+        ('house@amy', 'gh', 'p1', 0), ('house', 'gh', 'p1', 0), ('house', 'web', 'p3', 0), ('house', 'web', 'p4', 1)",
+    );
+    db("INSERT INTO secret_vars VALUES ('p1', 'TOKEN', 'keychain'), ('p2', 'TOKEN', 'keychain')");
+    db(
+        "INSERT INTO secret_profiles VALUES ('p1', 'kai', '[\"bot-a\",\"amy\"]', NULL), \
+        ('p2', 'kai', '[\"bot-a\"]', NULL), ('p3', 'bot-a', NULL, 'br'), ('p4', 'kai', '[\"amy\"]', NULL)",
+    );
+    rig.lines("people.removeBot", &json!({"id": "bot-a"}))
+        .unwrap();
+    let t = rig.tables();
+    assert_eq!(
+        t["grants"],
+        json!({"house@amy": {"gh": "p1"}, "house": {"gh": "p1", "web": ["p3", "p4"]}}),
+        "{t}"
+    );
+    assert_eq!(t["profiles"]["p1"]["with"], json!(["amy"]));
+    assert!(t["profiles"]["p2"].get("with").is_none(), "{t}");
+    assert_eq!(
+        t["profiles"]["p3"]["person"], "bot-a",
+        "an owned profile stays"
+    );
+    assert_eq!(t["profiles"]["p4"]["with"], json!(["amy"]));
+    let browser: Option<String> = rig
+        .core
+        .conn()
+        .query_row(
+            "SELECT browser FROM secret_profiles WHERE profile = 'p3'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(browser.as_deref(), Some("br"));
+    let vars: i64 = rig
+        .core
+        .conn()
+        .query_row("SELECT count(*) FROM secret_vars", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(vars, 2, "variables survive the rewrite of `with`");
+    // the same id taken again gets none of it back, and removing it again changes nothing
+    rig.lines("people.addBot", &json!({"id": "bot-a", "of": "sam"}))
+        .unwrap();
+    let t2 = rig.tables();
+    assert_eq!(t2["grants"], t["grants"]);
+    assert_eq!(t2["profiles"], t["profiles"]);
+    rig.lines("people.removeBot", &json!({"id": "bot-a"}))
+        .unwrap();
+    let t3 = rig.tables();
+    assert_eq!(t3["grants"], t["grants"]);
+    assert_eq!(t3["profiles"], t["profiles"]);
+}
+
+#[test]
+fn store_rewrites_a_changed_grant_list_in_order_and_refuses_to_drop_a_profile() {
+    let rig = Rig::new(&base());
+    let conn = rig.core.conn();
+    let one = json!({"grants": {"a@x": {"gh": ["p2", "p1"], "web": "p3"}}, "profiles": {"p1": {"person": "kai"}}});
+    store::store(conn, &json!({}), &one).unwrap();
+    let rows = |conn: &rusqlite::Connection| -> Vec<(String, String, i64)> {
+        let mut q = conn
+            .prepare("SELECT service, profile, seq FROM secret_grants WHERE agent = 'a@x' ORDER BY service, seq")
+            .unwrap();
+        q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(
+        rows(conn),
+        [
+            ("gh".into(), "p2".into(), 0),
+            ("gh".into(), "p1".into(), 1),
+            ("web".into(), "p3".into(), 0)
+        ]
+    );
+    let two = json!({"grants": {"a@x": {"gh": ["p1", "p2", "p4"]}}, "profiles": {"p1": {"person": "kai"}}});
+    store::store(conn, &one, &two).unwrap();
+    assert_eq!(
+        rows(conn),
+        [
+            ("gh".into(), "p1".into(), 0),
+            ("gh".into(), "p2".into(), 1),
+            ("gh".into(), "p4".into(), 2)
+        ]
+    );
+    assert!(store::store(conn, &two, &json!({"grants": {"a@x": {"gh": ["p1"]}}})).is_err());
 }
 
 #[test]
@@ -1399,4 +1502,134 @@ fn an_invite_with_minutes_out_of_range_is_a_usage_refusal() {
     )
     .unwrap_err();
     assert!(matches!(e, Error::BadParams(_)), "{e}");
+}
+
+// --- agent access -------------------------------------------------------------------------------------------------
+
+fn access(agent: &str, domain: &str, remove: bool) -> Value {
+    json!({"agent": agent, "domain": domain, "remove": remove})
+}
+
+#[test]
+fn a_kept_domain_is_added_once_removed_and_reaches_every_guest() {
+    let mut rig = Rig::new(&base());
+    rig.lines("people.grant", &grant("sam", "house", &json!({})))
+        .unwrap();
+    assert_eq!(
+        rig.lines(
+            "people.agentAccess",
+            &access("house", "api.example.com", false)
+        )
+        .unwrap(),
+        ["every guest of house may reach api.example.com beyond the box"]
+    );
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "api.example.com", false),
+    )
+    .unwrap();
+    let t = rig.tables();
+    let row = &t["agent_access"]["house"];
+    assert_eq!(row["domains"], json!(["api.example.com"]), "{t}");
+    assert_eq!(row["by"], json!({"api.example.com": null}));
+    assert!(row["since"]["api.example.com"].as_i64().unwrap() > 0);
+    let r = Authority::new(rig.core.conn(), &rig.c)
+        .resolve("house", "sam", None, false)
+        .unwrap();
+    assert!(
+        r["access"]["domains"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("api.example.com")),
+        "{r:?}"
+    );
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", false),
+    )
+    .unwrap();
+    let gone = rig
+        .lines(
+            "people.agentAccess",
+            &access("house", "api.example.com", true),
+        )
+        .unwrap();
+    assert_eq!(
+        gone,
+        ["api.example.com is no longer kept for everyone house is shared with"]
+    );
+    let t = rig.tables();
+    assert_eq!(
+        t["agent_access"]["house"]["domains"],
+        json!(["b.example.com"])
+    );
+    assert!(
+        t["agent_access"]["house"]["since"]
+            .get("api.example.com")
+            .is_none()
+    );
+    // the last one takes the agent's row with it; a repeat and an unknown agent change nothing
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", true),
+    )
+    .unwrap();
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", true),
+    )
+    .unwrap();
+    rig.lines(
+        "people.agentAccess",
+        &access("ghost", "x.example.com", true),
+    )
+    .unwrap();
+    assert!(rig.tables()["agent_access"].as_object().unwrap().is_empty());
+}
+
+#[test]
+fn a_kept_domain_must_be_a_plain_host_and_the_agent_a_name() {
+    let mut rig = Rig::new(&base());
+    for bad in [
+        "*.example.com",
+        "10.0.0.1",
+        "example.com:80",
+        "localhost",
+        "",
+    ] {
+        let e = rig
+            .lines("people.agentAccess", &access("house", bad, false))
+            .unwrap_err();
+        assert!(e.contains("is not a plain host name"), "{bad}: {e}");
+    }
+    let e = rig
+        .lines(
+            "people.agentAccess",
+            &access("../x", "a.example.com", false),
+        )
+        .unwrap_err();
+    assert!(e.contains("agent-access <agent>"), "{e}");
+    assert!(rig.tables()["agent_access"].as_object().unwrap().is_empty());
+}
+
+#[test]
+fn a_newline_or_control_character_in_either_name_is_a_usage_refusal() {
+    let (_t, c) = machine();
+    let mut auth = base();
+    for (agent, host, remove) in [
+        ("house\n", "a.example.com", false),
+        ("house", "a.example.com\n", false),
+        ("house", "a.example.com\n", true),
+        ("ho\u{7}use", "a.example.com", true),
+        ("house", "a.exam\tple.com", false),
+    ] {
+        let e = write::agent_access(&mut auth, &c, agent, host, remove).unwrap_err();
+        assert_eq!(e.code, 2, "{agent:?} {host:?}");
+        assert!(e.msg.contains("control character"), "{}", e.msg);
+    }
+    assert!(
+        auth["agent_access"]
+            .as_object()
+            .is_none_or(serde_json::Map::is_empty)
+    );
 }

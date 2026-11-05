@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'dcf2c9f6f7731c0787e76c2f7f47923ef67acab12089707b2eb1e34b1fdb6c6e'
+export const CONTRACT_SHA256 = '8c73c5229c55c9757a5ac051d498a77ba8bf5e5e585e05c2bd50aacb209264ae'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -413,9 +413,11 @@ export interface BotInviteCreated {
   share: string
 }
 
-/** revoked is false when it already was. */
+/** revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host, and when nothing was sent to the core (a repeat remove, no kith-auth) or kith-auth itself failed. authUpdated is false when kith-auth failed to remove the person (auth.json may still hold it); absent otherwise. */
 export interface Revoked {
   revoked: boolean
+  coreUpdated?: boolean | null
+  authUpdated?: boolean | null
 }
 
 /** A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host. */
@@ -1279,7 +1281,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     CallAccepted: { fields: { botId: 'string' } },
     Proven: { fields: { proven: 'bool' } },
     BotInviteCreated: { fields: { botId: 'string', inviteId: 'string', expiresAt: 'int', link: 'string', kithLink: 'string', share: 'string' } },
-    Revoked: { fields: { revoked: 'bool' } },
+    Revoked: { fields: { revoked: 'bool', coreUpdated: 'bool?', authUpdated: 'bool?' }, mayOmit: ['coreUpdated', 'authUpdated'] },
     BotLimits: { fields: { ratePerHour: 'int', concurrent: 'int', turnTimeoutS: 'int?', wakeProfile: 'string?' }, mayOmit: ['turnTimeoutS', 'wakeProfile'] },
     BotGuest: { fields: { botId: 'string', name: 'string', provider: 'BotProvider', state: 'BotGuestState', ownerPerson: 'string?', ownerName: 'string?', agents: '[string]', limits: 'BotLimits', connected: 'bool', createdAt: 'int', joinedAt: 'int?', decidedAt: 'int?', decidedBy: 'string?', lastSeenAt: 'int?', revokedAt: 'int?', revokedWhy: 'string?', personId: 'string?', conversations: 'json?' }, mayOmit: ['personId', 'conversations'] },
     BotGuests: { fields: { bots: '[BotGuest]' } },

@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "dcf2c9f6f7731c0787e76c2f7f47923ef67acab12089707b2eb1e34b1fdb6c6e"
+    public static let sha256 = "8c73c5229c55c9757a5ac051d498a77ba8bf5e5e585e05c2bd50aacb209264ae"
 }
 
 extension HostContract {
@@ -864,12 +864,16 @@ extension HostContract {
         }
     }
 
-    /// revoked is false when it already was.
+    /// revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host, and when nothing was sent to the core (a repeat remove, no kith-auth) or kith-auth itself failed. authUpdated is false when kith-auth failed to remove the person (auth.json may still hold it); absent otherwise.
     public struct Revoked: Codable, Hashable, Sendable {
         public var revoked: Bool
+        public var coreUpdated: Bool?
+        public var authUpdated: Bool?
 
-        public init(revoked: Bool) {
+        public init(revoked: Bool, coreUpdated: Bool? = nil, authUpdated: Bool? = nil) {
             self.revoked = revoked
+            self.coreUpdated = coreUpdated
+            self.authUpdated = authUpdated
         }
     }
 

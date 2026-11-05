@@ -1,0 +1,16 @@
+{
+  "fakes": "host-sock {\"method\": \"consumeAccess\", \"token\": \"run-tok-1\"}\n",
+  "state:home/.kith/index/": "<empty dir>\n",
+  "state:home/.kith/secrets/env": "X=1\n",
+  "state:home/priv/sub/": "<empty dir>\n",
+  "state:home/proj/.claude/": "<empty dir>\n",
+  "state:home/proj/docs/": "<empty dir>\n",
+  "state:home/proj/notes.txt": "n",
+  "state:home/proj/out/log.txt": "l",
+  "state:home/ro/x/": "<empty dir>\n",
+  "state:home/s1.json": "{\n  \"hooks\": {},\n  \"permissions\": {\n    \"additionalDirectories\": [],\n    \"allow\": [\n      \"Bash(ls)\"\n    ],\n    \"deny\": [\n      \"Read(/x)\"\n    ]\n  },\n  \"sandbox\": {\n    \"filesystem\": {\n      \"allowRead\": [\n        \"/already\"\n      ],\n      \"allowWrite\": [],\n      \"denyRead\": [\n        \"/\",\n        \"<HOME>/.kith/index\",\n        \"<HOME>/priv\"\n      ],\n      \"denyWrite\": [\n        \"<HOME>/ro\"\n      ]\n    },\n    \"network\": {\n      \"allowedDomains\": [\n        \"pre.example.com\",\n        \"1.2.3.4.com\",\n        \"ok-1.example.net\"\n      ]\n    }\n  }\n}\n",
+  "state:home/serve/token": "fake-serve-token\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "kith: access given: domain 1.2.3.4.com\nkith: access given: domain ok-1.example.net\n",
+  "step0.stdout": ""
+}

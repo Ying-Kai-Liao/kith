@@ -10,12 +10,35 @@ import json, os, re
 from pathlib import Path
 
 from kith_paths import paths
+from kith_tombstone import Tombstoned, load_json
 from kith_trajectory import redact as base_redact
 
 _SECRET_NAME = re.compile(r'(?i)secret|token|passw|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|credential|authorization'
                           r'|_key$|_pass$|_dsn$|database_url|db_url|^dsn$')
 EMAIL = re.compile(r'[\w.+-]+@[\w-]+(\.[\w-]+)*\.[A-Za-z]{2,}\b')
 MIN_WORD = 3          # shorter names/ids would eat ordinary words
+
+
+def _people(auth):
+    """The people registry. After the authority cutover auth.json is a tombstone note with no people in it; the people
+    are then read from the newest `auth.json.pre-cutover-*` copy the cutover kept beside it (a stale list is fine here:
+    hiding too many names is harmless). With no readable copy there is no list to hide, and the rest of the scrub still runs."""
+    try:
+        try:
+            people = load_json(auth).get('people')
+        except Tombstoned:
+            copies = sorted(Path(auth).parent.glob(Path(auth).name + '.pre-cutover-*'),
+                            key=lambda c: (c.stat().st_mtime, c.name), reverse=True)
+            people = None
+            for c in copies:
+                try:
+                    people = load_json(c).get('people')
+                    break
+                except (OSError, ValueError, AttributeError):
+                    continue   # unreadable copy: try the next newest
+        return people if isinstance(people, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
 
 
 def _words(env):
@@ -30,15 +53,12 @@ def _words(env):
     home = env.get('HOME') or str(Path.home())
     out += [os.path.basename(home.rstrip('/')), env.get('USER', ''), env.get('LOGNAME', '')]
     auth = env.get('KITH_AUTH') or str(Path(str(p['KITH_SECRETS'])) / 'auth.json')
-    try:
-        for pid, v in (json.load(open(auth)).get('people') or {}).items():
-            out.append(pid)
-            if isinstance(v, dict):
-                out += [v.get(k) for k in ('name', 'display_name')]
-                if isinstance(v.get('handles'), list):
-                    out += v['handles']
-    except (OSError, ValueError, AttributeError):
-        pass
+    for pid, v in _people(auth).items():
+        out.append(pid)
+        if isinstance(v, dict):
+            out += [v.get(k) for k in ('name', 'display_name')]
+            if isinstance(v.get('handles'), list):
+                out += v['handles']
     return sorted({w for w in out if isinstance(w, str) and len(w) >= MIN_WORD}, key=len, reverse=True)
 
 

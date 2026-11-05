@@ -6,15 +6,15 @@
 //! |------------------|------------------------------------------------------------------------------------------------------|
 //! | `tombstones`     | the caller's `auth.json`. (The host vault's rows in serve.db are not tombstoned: the host moves them itself at its first unlock, M2-7.) |
 //! | `import`         | `import::run_in` (M2-8, `kith kernel core-migrate --authority`): idempotent, a snapshot first, `--dry-run`, `--force`, the Keychain items sealed into the envelope |
-//! | `same_answer`    | `import::same_answer`: per person owner, revoked (yes/no), `bot_of`, `was`; the `retired` ids; the order of people; then `check.rs`: `may`, `resolve`, `resolve_bot`, `cut_off` over every person x agent x via x once, at the caller's "now" (so a grant that has expired or not started yet counts as the answer it gives now). NOT compared: the contents of invites, presets, `owner_bots_budget`, a bot's caps, and when a revoke or a grant was written. None of them is read by the host guard today (`may`, `resolve`, `resolve_bot`, `cut_off`); the host reading one of them is the point at which it joins the compare |
+//! | `same_answer`    | `import::same_answer`: per person owner, revoked (yes/no), `bot_of`, `was`; the `retired` ids; the order of people; then `check.rs`: `may`, `resolve`, `resolve_bot`, `cut_off` over every person x agent x via x once, at the caller's "now" (so a grant that has expired or not started yet counts as the answer it gives now). Also compared, by name: the profiles (person, lent to, browser, which variables and whether each source differs; never a value) and the grants (agent -> service -> profiles in order); the host guard does not read them, but `retired`, `person --rm --unused` and the rollback rest on them, and a core imported before they were kept (`secrets_stale`) is a difference. NOT compared: the contents of invites, presets, `owner_bots_budget`, a bot's caps, `env`, and when a revoke or a grant was written. None of them is read by the host guard today (`may`, `resolve`, `resolve_bot`, `cut_off`); the host reading one of them is the point at which it joins the compare |
 //! | `fingerprint`    | serve.db and its WAL (size, mtime), the number of vault rows in it, and the digest of core.db's authority tables (so a write made only through the core changes it); the framework adds auth.json's inode, size and mtime |
 //! | `digest`         | the first 16 hex of the SHA-256 of core.db's authority tables, as the marker stores it                |
-//! | `export_back`    | core.db -> auth.json, the shape `kith-auth` reads: the tables from core.db over the pre-cutover copy's other keys (`profiles`, `grants`, `env`, a person's `handles` ...) |
+//! | `export_back`    | core.db -> auth.json, the shape `kith-auth` reads: the tables from core.db (people, members, presets, invites, retired, `agent_access`, the budget, `profiles` and `grants`) over the pre-cutover copy's other keys (`env`, `once`, a person's `root` / `kith` / `agents` ...). The core wins for every key it holds: a profile or a grant deleted in the core does not come back from the copy. Only a core imported before lane B's tables were filled (`secrets_stale`) keeps the copy's `profiles` and `grants` |
 //! | `restore_secrets`| the envelope's `keychain:` records -> the OS store, before `export_back`                              |
 //!
 //! # What the file cannot say once it is a tombstone
-//! `export_back` needs the keys the core never held (`profiles`, `grants`, `env`, `once`, `agent_access`, a person's
-//! `handles` / `root` / `kith` / `agents`). They come from the copy `tombstone::ensure` kept beside the file
+//! `export_back` needs the keys the core never held (`env`, `once`, a person's `root` / `kith` / `agents`; and `profiles` /
+//! `grants` for a core imported before they were kept). They come from the copy `tombstone::ensure` kept beside the file
 //! (`auth.json.pre-cutover-<time>`, the newest); with none, those tables are written empty and the report says so.
 //!
 //! # Refused on purpose
@@ -28,17 +28,22 @@
 //! - `people.addBot` / `people.removeBot`: the same transaction must clear the removed id's `agent@<id>` grants and its
 //!   place in profiles' `with` (Python `forget`), else a bot handed over by remove-and-re-add gets its old logins back
 //!   (test `forget_also_clears_grants_and_profiles`, ignored until then).
-//! - `people.removePerson --unused` and the `retired` check: `handles`, `agent@<id>` grants and owned profiles must be
-//!   checked in the same transaction (core.db has no `handles` column and no lane B tables yet).
-//! - `kith-auth agent-access ... [--rm]` writes only auth.json: the import keeps the `agent_access` table and the rules
-//!   read it (m0013), but no core method writes it, so the verb stays on Python until one does.
+//! - `people.removePerson --unused` and the `retired` check: `handles` (m0015), `agent@<id>` grants and owned or lent
+//!   profiles (`secret_grants` / `secret_profiles`, filled by the import now) are checked. A core imported before the
+//!   import kept them (`secrets_stale`, m0022) refuses both until it is imported again. The writers still have to keep
+//!   the tables current (`forget`, `bot_add` / `bot_remove`: another package) before these verbs are switched.
+//! - `kith-auth agent-access ... [--rm]`: `people.agentAccess` writes the `agent_access` table (and `merge_back` takes it
+//!   from the core), but only the write half is ported: the listing (`agent-access <agent> [--json]`, with the
+//!   package-declared hosts) has no core row, and the CLI words differ (`domain <host>` there, positional here), so the
+//!   verb stays on Python until the listing and the switch.
 //!
 //! These do not change what the gate (`may_serve`) serves, which is the READ side (`may`, `resolve`, the request guard);
-//! they are why `export_back` takes `profiles` and `grants` from the old copy and not from the core.
+//! they are why `step` stays refused. (Since the import fills `profiles` and `grants`, `export_back` takes them from the core.)
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use kith_kernel::secrets::Ctx;
 use rusqlite::Connection;
@@ -47,7 +52,7 @@ use sha2::{Digest as _, Sha256};
 use zeroize::{Zeroize as _, Zeroizing};
 
 use super::secrets_back::{self, OsStore};
-use super::{Env, Module, Opts, tombstone};
+use super::{Env, Module, Opts, SourceLock, tombstone};
 use crate::AuthorityOptions;
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -55,9 +60,10 @@ use crate::import::items::{Item, ItemSource, Keychain, OsEnvelope, SecretSink};
 use crate::secrets::{Envelope, keystore};
 
 /// The person keys the core holds (the import's list): `export_back` takes them from core.db and everything else a person
-/// has from the old copy.
+/// has from the old copy. `handles` is one: if the core's row has none, the old copy's must not come back, or an id that
+/// was freed and re-added would give the old person's telegram/slack/kith handles to the new one.
 const PERSON_KEYS: &[&str] = &[
-    "name", "lang", "tz", "owner", "bot_of", "revoked", "was", "provider",
+    "name", "lang", "tz", "owner", "bot_of", "revoked", "was", "provider", "handles",
 ];
 const MEMBER_KEYS: &[&str] = &[
     "preset",
@@ -163,7 +169,119 @@ impl OsStore for KeychainStore {
     }
 }
 
+/// How long a step or a rollback waits for `auth.json.lock` (a `kith-auth` command holds it for milliseconds).
+const LOCK_WAIT: Duration = Duration::from_secs(30);
+
+/// The old vault's records in serve.db's `kv` table: the value starts with this (the key is the slot's name).
+const OLD_VAULT_PREFIX: &str = "vault:v1:";
+
+/// Why a step is refused until M2-18 lifts it (the architect's gate list for #793: 1, 2, 4-8).
+const STEP_REFUSAL: &str = "not stepped: the M2-18 gates are open: kith-auth does not read the tombstone or answer from the core, and the host does not decide from the gate once switched (1, 2); addBot/removeBot and removePerson --unused do not clear grants, profiles and handles in one transaction (4, 5); no core writer for agent_access, profiles, grants or env (6, 7); the revoke bridge (8); the 'already switched' branch re-tombstones a file a writer put back after the switch, with no sha check and no import (9); no core read verb with kith-auth `people --json`'s row shape (id, name, owner, bot_of, root, revoked/cut_off, revoked_at, agent rows, handles) for its readers: serve/host/src/remote/members.rs (revoke path), api/people.rs, kith_recall.py, kith-cost, kith people (10). `step authority --dry-run` and `check authority` work now";
+
+/// `auth.json.lock`, held (flock, exclusive): the lock `kith-auth` and `kith_kernel::secrets` take for a read-modify-write.
+/// Dropping it lets the lock go.
+struct AuthLock(#[allow(dead_code, reason = "held for its flock")] std::fs::File);
+
+fn hold_auth_lock(auth: &Path, wait: Duration) -> Result<AuthLock> {
+    use fs2::FileExt as _;
+    let io = |e: std::io::Error| Error::Io(format!("authority: {}: {e}", auth.display()));
+    if let Some(parent) = auth.parent() {
+        std::fs::create_dir_all(parent).map_err(io)?;
+    }
+    let mut name = auth.file_name().unwrap_or_default().to_os_string();
+    name.push(".lock");
+    let file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(auth.with_file_name(name))
+        .map_err(io)?;
+    let deadline = Instant::now() + wait;
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => return Ok(AuthLock(file)),
+            Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                if Instant::now() >= deadline {
+                    return Err(Error::Refused(format!(
+                        "authority: auth.json.lock is held by another writer (a kith-auth command?) for more than {} s; nothing was changed, run it again",
+                        wait.as_secs().max(1)
+                    )));
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(e) => return Err(io(e)),
+        }
+    }
+}
+
+/// The SHA-256 of the file's bytes; "missing" when it does not exist.
+fn sha_of(path: &Path) -> Result<String> {
+    use std::fmt::Write as _;
+    match std::fs::read(path) {
+        Ok(b) => Ok(Sha256::digest(&b).iter().fold(String::new(), |mut s, x| {
+            let _ = write!(s, "{x:02x}");
+            s
+        })),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("missing".to_owned()),
+        Err(e) => Err(Error::Io(format!("authority: {}: {e}", path.display()))),
+    }
+}
+
+const CHANGED: &str =
+    "authority: auth.json changed during the step; nothing was tombstoned. Run it again";
+
+/// The slots of serve.db's old vault records that the core's envelope does not hold yet. The host moves them at its first
+/// unlock (M2-7) and leaves the old rows in place, so a row counts only while its slot is missing from the envelope; an
+/// old-format record whose key cannot be read stays unmoved for good. `None`: there is no serve.db (or no `kv` table).
+fn unmoved_vault_rows(ctx: &Ctx, core: &Connection) -> Result<Option<Vec<String>>> {
+    let db = serve_db(ctx);
+    if !db.exists() {
+        return Ok(None);
+    }
+    let io = |e: rusqlite::Error| {
+        Error::Refused(format!(
+            "authority: serve.db cannot be read to look for credential records that have not moved: {e}"
+        ))
+    };
+    let serve =
+        Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(io)?;
+    serve.busy_timeout(Duration::from_secs(2)).map_err(io)?;
+    let slots: Vec<String> =
+        match serve.prepare("SELECT k FROM kv WHERE substr(v, 1, length(?1)) = ?1 ORDER BY k") {
+            Ok(mut st) => st
+                .query_map([OLD_VAULT_PREFIX], |r| r.get(0))
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<String>>>())
+                .map_err(io)?,
+            Err(rusqlite::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => {
+                return Ok(None);
+            }
+            Err(e) => return Err(io(e)),
+        };
+    let sealed: BTreeSet<String> = Envelope::list(core)?.into_iter().collect();
+    Ok(Some(
+        slots.into_iter().filter(|s| !sealed.contains(s)).collect(),
+    ))
+}
+
+/// Refuses while serve.db holds old vault records the envelope lacks: the import does not carry them, and a switch over
+/// them would leave the host's credentials behind.
+fn refuse_unmoved_vault(ctx: &Ctx, core: &Connection) -> Result<()> {
+    match unmoved_vault_rows(ctx, core)? {
+        Some(rows) if !rows.is_empty() => Err(Error::Refused(format!(
+            "authority: serve.db still holds {} credential record(s) that have not moved into the core's vault ({}); unlock the vault in the app first so the host moves them. A record that is still here after that can never be moved (its legacy key is lost, or the row is corrupt): remove that credential in the app, then run this again",
+            rows.len(),
+            rows.join(", ")
+        ))),
+        _ => Ok(()),
+    }
+}
+
 pub(crate) struct AuthorityModule {
+    /// False in the real module: `step` refuses until M2-18 lifts it. The tests build a lifted one to run the inner step.
+    lifted: bool,
+    /// How long to wait for `auth.json.lock`.
+    lock_wait: Duration,
+    /// What the import read: auth.json's sha, checked again just before the tombstone. (`None` outside a step.)
+    imported: RefCell<Option<String>>,
     /// Where `import` reads the Keychain items the profiles name.
     source: Box<dyn ItemSource>,
     /// Where `import` seals them.
@@ -178,13 +296,29 @@ pub(crate) struct AuthorityModule {
 
 impl AuthorityModule {
     pub(crate) fn real() -> Self {
-        Self::with(
-            Box::new(Keychain),
-            Box::new(OsEnvelope::default()),
-            Box::new(EnvelopeVault::default()),
-            Box::new(KeychainStore),
-            None,
-        )
+        Self {
+            lifted: false,
+            ..Self::with(
+                Box::new(Keychain),
+                Box::new(OsEnvelope::default()),
+                Box::new(EnvelopeVault::default()),
+                Box::new(KeychainStore),
+                None,
+            )
+        }
+    }
+
+    /// The same module with the step refusal back (tests of the refusal).
+    #[cfg(test)]
+    pub(crate) fn refusing(mut self) -> Self {
+        self.lifted = false;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn waiting(mut self, wait: Duration) -> Self {
+        self.lock_wait = wait;
+        self
     }
 
     pub(crate) fn with(
@@ -195,6 +329,9 @@ impl AuthorityModule {
         limit: Option<usize>,
     ) -> Self {
         Self {
+            lifted: true,
+            lock_wait: LOCK_WAIT,
+            imported: RefCell::new(None),
             source,
             sink: RefCell::new(sink),
             vault: RefCell::new(vault),
@@ -336,7 +473,7 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
         );
     }
     out.insert("presets".into(), Value::Object(presets));
-    for t in ["invites", "retired"] {
+    for t in ["invites", "retired", "agent_access"] {
         out.insert(
             t.into(),
             snap.get(t)
@@ -348,6 +485,84 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
         Some(v) => out.insert("owner_bots_budget".into(), v.clone()),
         None => out.shift_remove("owner_bots_budget"),
     };
+    // Lane B (m0021): the core holds the profiles and grants, so what it no longer has does not come back from the old
+    // copy. A database imported before the import filled them (`secrets_stale`, m0022) holds empty tables that say
+    // nothing: it keeps the old copy's, as it did before.
+    let owner = snap
+        .get("people")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .find(|(_, p)| p.get("owner") == Some(&Value::Bool(true)))
+        .map(|(id, _)| id.clone());
+    if snap.get("secrets_stale").is_none() {
+        out.insert(
+            "profiles".into(),
+            profiles_back(old("profiles"), snap.get("profiles"), owner.as_deref()),
+        );
+        out.insert(
+            "grants".into(),
+            grants_back(old("grants"), snap.get("grants")),
+        );
+    }
+    Value::Object(out)
+}
+
+/// `profiles` of the file from the core's. A profile whose person the core holds as NULL is shared on purpose when the
+/// old copy marked it `*` (the core keeps no mark, and for a login `kith-auth` would otherwise take it as the owner's);
+/// the text `the owner` is the core's stand-in for an owner not yet named, which the file leaves unsaid.
+/// `grants` of the file from the core's. The core keeps no mark for a list of one, which `kith-auth` treats differently
+/// from the bare profile (`KITH_AUTH_PROFILE` picks from a list), so a list of exactly that profile in the old copy stays one.
+fn grants_back(old: Option<&Value>, from: Option<&Value>) -> Value {
+    let mut out = from.and_then(Value::as_object).cloned().unwrap_or_default();
+    for (agent, by_service) in &mut out {
+        for (service, g) in by_service.as_object_mut().into_iter().flatten() {
+            let was = old
+                .and_then(|o| o.get(agent))
+                .and_then(|a| a.get(service))
+                .and_then(Value::as_array);
+            if let (Some(profile), Some([only])) = (g.as_str(), was.map(Vec::as_slice))
+                && only.as_str() == Some(profile)
+            {
+                *g = Value::Array(vec![only.clone()]);
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+fn profiles_back(old: Option<&Value>, from: Option<&Value>, owner: Option<&str>) -> Value {
+    let mut out = Map::new();
+    for (name, p) in from.and_then(Value::as_object).into_iter().flatten() {
+        let mut p = p.clone();
+        if let Some(row) = p.as_object_mut() {
+            match row.get("person").and_then(Value::as_str) {
+                Some("the owner") => {
+                    row.shift_remove("person");
+                }
+                Some(named) => {
+                    // the import worked this owner out; the old copy did not name one
+                    let unnamed = old
+                        .and_then(|o| o.get(name))
+                        .is_some_and(|o| o.get("person").is_none());
+                    if unnamed && owner == Some(named) {
+                        row.shift_remove("person");
+                    }
+                }
+                None => {
+                    let shared = old
+                        .and_then(|o| o.get(name))
+                        .and_then(|o| o.get("person"))
+                        .and_then(Value::as_str)
+                        == Some("*");
+                    if shared {
+                        row.insert("person".into(), Value::String("*".into()));
+                    }
+                }
+            }
+        }
+        out.insert(name.clone(), p);
+    }
     Value::Object(out)
 }
 
@@ -360,6 +575,57 @@ impl Module for AuthorityModule {
         env.ctx.iter().map(|c| c.auth.clone()).collect()
     }
 
+    fn step_refusal(&self, _env: &Env) -> Option<String> {
+        (!self.lifted).then(|| STEP_REFUSAL.to_owned())
+    }
+
+    fn dry_run_despite_refusal(&self) -> bool {
+        true
+    }
+
+    /// `auth.json.lock` from before the import reads the file until the tombstone is in place. The vault rows are looked
+    /// at under it, before the framework writes a snapshot or a record.
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        let ctx = ctx(env)?;
+        let held = hold_auth_lock(&ctx.auth, self.lock_wait)?;
+        if !tombstone::is_tombstone(&ctx.auth) {
+            let db = Connection::open_with_flags(
+                &env.layout.db,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .map_err(|e| Error::Io(format!("authority: core.db cannot be read: {e}")))?;
+            refuse_unmoved_vault(ctx, &db)?;
+        }
+        *self.imported.borrow_mut() = None;
+        Ok(Some(Box::new(held)))
+    }
+
+    /// The writers' lock for a rollback: a `kith-auth` command that is mid-write finishes first. Taken before the
+    /// rolling-back record and the Keychain writes, so a refusal at the lock writes nothing.
+    fn rollback_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        let held = hold_auth_lock(&ctx(env)?.auth, self.lock_wait)?;
+        Ok(Some(Box::new(held)))
+    }
+
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        let Some(want) = self.imported.borrow_mut().take() else {
+            // A real step always recorded the sha at its import; none means the guard was skipped. Fail closed, so a
+            // file that was never checked is never tombstoned. (The unlifted module never reaches a real step.)
+            return if self.lifted {
+                Err(Error::Refused(
+                    "authority: the import did not record auth.json's sha, so the file cannot be checked before the tombstone; nothing was tombstoned, run it again".into(),
+                ))
+            } else {
+                Ok(())
+            };
+        };
+        if sha_of(&ctx(env)?.auth)? == want {
+            Ok(())
+        } else {
+            Err(Error::Refused(CHANGED.into()))
+        }
+    }
+
     fn import(&self, env: &Env, core: Option<&mut Core>, opts: Opts) -> Result<Vec<String>> {
         let ctx = ctx(env)?;
         if tombstone::is_tombstone(&ctx.auth) {
@@ -368,6 +634,12 @@ impl Module for AuthorityModule {
                 ctx.auth.display()
             )));
         }
+        // Recorded only for a real step (under the source lock); a file that moves while it is read is not imported.
+        let before = if core.is_some() {
+            Some(sha_of(&ctx.auth)?)
+        } else {
+            None
+        };
         let rep = crate::import::run_in(
             &env.layout,
             ctx,
@@ -379,6 +651,12 @@ impl Module for AuthorityModule {
             &mut **self.sink.borrow_mut(),
             core,
         )?;
+        if let Some(before) = before {
+            if sha_of(&ctx.auth)? != before {
+                return Err(Error::Refused(CHANGED.into()));
+            }
+            *self.imported.borrow_mut() = Some(before);
+        }
         Ok(rep.lines)
     }
 
@@ -390,11 +668,14 @@ impl Module for AuthorityModule {
                 ctx.auth.display()
             )]);
         }
-        crate::import::same_answer(ctx, db)
+        refuse_unmoved_vault(ctx, db)?;
+        crate::import::same_answer(ctx, &env.layout, db)
     }
 
     fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
         let ctx = ctx(env)?;
+        // Runs under `rollback_lock` (taken before the rolling-back record), so no writer starts a read-modify-write on
+        // the file while it is replaced.
         let snap = crate::authority::snapshot(core.conn())?;
         // A file that is already a real auth.json (a rollback run again after it wrote) keeps its other keys; else the
         // copy the tombstone kept.
@@ -412,11 +693,11 @@ impl Module for AuthorityModule {
         let mut lines = Vec::new();
         match &from {
             Some(p) => lines.push(format!(
-                "auth.json: profiles, grants, env and each person's other keys come from {}",
+                "auth.json: env and each person's other keys come from {}",
                 p.display()
             )),
             None if base.is_none() => lines.push(
-                "auth.json: no earlier copy to take profiles, grants and env from; they are written empty (the Keychain items are written back separately)"
+                "auth.json: no earlier copy to take env from (and profiles and grants, for a core imported before they were kept); they are written empty or as the core has them (the Keychain items are written back separately)"
                     .into(),
             ),
             None => {}
@@ -525,21 +806,17 @@ impl Module for AuthorityModule {
     /// one read of small tables per ask, which the 2 s poll can afford.
     fn fingerprint(&self, env: &Env, db: &Connection) -> Result<String> {
         let core = self.digest(env, db)?;
-        let db = serve_db(ctx(env)?);
-        let wal = PathBuf::from(format!("{}-wal", db.display()));
-        let vault_rows =
-            Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .and_then(|c| {
-                    c.query_row(
-                        "SELECT COUNT(*) FROM kv WHERE k LIKE 'vault:v1:%'",
-                        [],
-                        |r| r.get::<_, i64>(0),
-                    )
-                })
-                .map_or_else(|_| "novault".to_owned(), |n| n.to_string());
+        let serve = serve_db(ctx(env)?);
+        let wal = PathBuf::from(format!("{}-wal", serve.display()));
+        // The rows the envelope lacks: a slot the host moves changes the number, so a cached `ok` cannot outlive it.
+        let vault_rows = match unmoved_vault_rows(ctx(env)?, db) {
+            Ok(Some(rows)) => rows.len().to_string(),
+            Ok(None) => "novault".to_owned(),
+            Err(_) => "unreadable".to_owned(),
+        };
         Ok(format!(
             "{}{}vault:{vault_rows};core:{core}",
-            stat_line(&db),
+            stat_line(&serve),
             stat_line(&wal)
         ))
     }

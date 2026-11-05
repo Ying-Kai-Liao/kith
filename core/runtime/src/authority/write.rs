@@ -287,11 +287,9 @@ fn drop_self_approved(auth: &mut Value, agent: &str, pid: &str) -> usize {
     gone
 }
 
-// TODO(M2-18): Python's `forget` also drops the `agent@<id>` grants and removes the id from profiles' `with` (lane B
-// tables). Until the same transaction clears those, `addBot`/`removeBot` must not be switched: a bot handed over by
-// remove-and-re-add would get its old logins back. See the ignored test `forget_also_clears_grants_and_profiles`.
-/// `forget`: everything that gives these ids access in the tables the core keeps: memberships and open invites. (A
-/// removed person's grants and shared profiles are lane B's.)
+/// `forget`: everything that gives these ids access, as Python's: memberships, their `agent@<id>` grants, open
+/// invites, and their place in profiles' `with` (an emptied `with` is dropped; profiles the id owns stay). Without
+/// the grants, a bot handed over by remove-and-re-add would get its old logins back.
 pub(super) fn forget(auth: &mut Value, ids: &[&str]) {
     let members = table(auth, "members");
     for rows in members.values_mut() {
@@ -302,7 +300,31 @@ pub(super) fn forget(auth: &mut Value, ids: &[&str]) {
         }
     }
     members.retain(|_, r| truthy(Some(&*r)));
+    if let Some(grants) = auth.get_mut("grants").and_then(Value::as_object_mut) {
+        grants.retain(|k, _| match k.rsplit_once('@') {
+            Some((_, id)) => !ids.contains(&id),
+            None => true,
+        });
+    }
     table(auth, "invites").retain(|_, i| !ids.iter().any(|x| str_of(i, "person") == Some(*x)));
+    let profiles = auth.get_mut("profiles").and_then(Value::as_object_mut);
+    for prof in profiles.into_iter().flat_map(|p| p.values_mut()) {
+        let Some(with) = prof.get("with").and_then(Value::as_array) else {
+            continue;
+        };
+        let lent = |w: &Value| w.as_str().is_some_and(|w| ids.contains(&w));
+        if !with.iter().any(lent) {
+            continue;
+        }
+        let kept: Vec<Value> = with.iter().filter(|w| !lent(w)).cloned().collect();
+        if let Some(o) = prof.as_object_mut() {
+            if kept.is_empty() {
+                o.remove("with");
+            } else {
+                o.insert("with".to_owned(), Value::Array(kept));
+            }
+        }
+    }
 }
 
 /// The `key=value` settings of a command, the last of a repeated key winning.
@@ -744,6 +766,83 @@ pub(crate) fn invite_remove(auth: &mut Value, c: &Ctx, code: &str) -> R<Vec<Stri
     }
     table(auth, "invites").remove(&code);
     Ok(vec![format!("{code} removed")])
+}
+
+/// `AGENT_RE`: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` (Python's `$` also lets one newline through).
+fn is_agent_name(s: &str) -> bool {
+    let s = s.strip_suffix('\n').unwrap_or(s);
+    let mut cs = s.chars();
+    cs.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && s.len() <= 64
+        && cs.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// `cmd_agent_access` with a host: keeps it for every guest of the agent, or (`remove`) stops keeping it. Adding twice
+/// and removing what is not kept change nothing; a removal checks nothing about the host, as in `kith-auth`.
+pub(crate) fn agent_access(
+    auth: &mut Value,
+    c: &Ctx,
+    agent: &str,
+    host: &str,
+    remove: bool,
+) -> R<Vec<String>> {
+    // `kith-auth` lets a trailing newline through (Python's `$`); a name with one, or any control character, is no name
+    // for a table key the owner reads back.
+    if agent.chars().chain(host.chars()).any(char::is_control) {
+        return usage("an agent or host name may not hold a newline or other control character");
+    }
+    if !is_agent_name(agent) {
+        return usage("agent-access <agent> [--json] | agent-access <agent> domain <host> [--rm]");
+    }
+    tables(auth);
+    if remove {
+        let kept = table(auth, "agent_access");
+        let was = kept
+            .get(agent)
+            .and_then(|k| k.get("domains"))
+            .and_then(Value::as_array)
+            .is_some_and(|d| d.iter().any(|x| x.as_str() == Some(host)));
+        if was && let Some(row) = kept.get_mut(agent).and_then(Value::as_object_mut) {
+            if let Some(d) = row.get_mut("domains").and_then(Value::as_array_mut) {
+                d.retain(|x| x.as_str() != Some(host));
+            }
+            for meta in ["since", "by"] {
+                if let Some(m) = row.get_mut(meta).and_then(Value::as_object_mut) {
+                    m.remove(host);
+                }
+            }
+            if !truthy(row.get("domains")) {
+                kept.remove(agent);
+            }
+        }
+        return Ok(vec![format!(
+            "{host} is no longer kept for everyone {agent} is shared with"
+        )]);
+    }
+    if !kith_kernel::launch::guard::valid_domain(host) {
+        return usage(format!(
+            "'{host}' is not a plain host name (no wildcard, address or port)"
+        ));
+    }
+    let row = entry(table(auth, "agent_access"), agent);
+    let have = row
+        .entry("domains")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !have.is_array() {
+        *have = Value::Array(Vec::new());
+    }
+    let list = have.as_array_mut().expect("just made");
+    if !list.iter().any(|x| x.as_str() == Some(host)) {
+        list.push(json!(host));
+        // a clock in milliseconds is far inside i64
+        #[allow(clippy::cast_possible_truncation)]
+        let at = c.now_ms as i64;
+        entry(row, "since").insert(host.to_owned(), json!(at));
+        entry(row, "by").insert(host.to_owned(), Value::Null);
+    }
+    Ok(vec![format!(
+        "every guest of {agent} may reach {host} beyond the box"
+    )])
 }
 
 /// What `save_auth` does on every save: the codes that ran out are gone.

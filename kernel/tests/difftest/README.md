@@ -72,6 +72,19 @@ files with one masked name are an error), and `unswitched` (text saying why the 
 with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
 red until the verb exists. The Python replay always runs every case.
 
+### project-id (M5-2)
+
+`golden/project-id.json` (also in `corpus/`) freezes `kernel/bin/project-id` before `kith kernel project-id` replaces it: 19 cases of the
+bare form (git and non-git folders, paths with spaces and non-ASCII names, symlinks to a folder and to a repo, a remote written five
+ways, a worktree and a detached HEAD, nested aliases with the longest winning, a remote beating a path), `--list`, `--info`,
+`--children [--all]`, `--where`, `--root`, `--register` (parent, home, bare `--home`, existing entries keeping their fields) and
+its usage errors, with loops and a missing parent in the seeded `projects.json`. They run the Python as `program.old` and
+`kith kernel project-id` as `program.new`, so the Rust side is compared without the verb being switched (no `core-switched.txt` line).
+A malformed `projects.json` (`pid-malformed-projects`) is `unswitched` too: Python tracebacks, Rust prints one stderr line, both exit 1; JSON that Python accepts and serde rejects (`NaN`, `Infinity`) falls under the same difference (an intended difference; the golden replay does not read intended.json).
+Not ported: the guest branch (`KITH_RUN_TOKEN` and `KITH_RUN_SOCKET` set: the host answers over the run socket). The core refuses there
+with exit 2, so `pid-guest-branch-stays-python` is `unswitched` (Python replay only). Whoever switches the verb keeps guest calls on
+Python (`runauth.rs` `project_args` and the run-tokens property tests ask the Python).
+
 ### Package resolve (M5-3)
 
 `golden/pkg-resolve.json` freezes `kith-pkg resolve` (the launch path: `bin/kith` asks it for the pinned package dir) as the Python
@@ -178,6 +191,36 @@ made. Case names differ by more than case (the facet files are named after them 
 
 Not covered: a settings value the Python crashes on (`KEY AGENT` of a list that holds a non-string prints a traceback there, a short line
 and exit 1 here), a caps file that is not UTF-8, a JSON text only Python reads (`NaN`, `Infinity`: the Rust reader treats the file as unusable).
+
+### Permit (M5-5, slice 1)
+
+`golden/permit.json` (also in `corpus/`) freezes the four command-line verbs of `kernel/bin/kith-permit`: `issue AGENT SESSION PID`
+(the ask token from the host's loopback API), `denied --dir DIR` and `once --dir DIR` (the auto-mode hooks and their one-shots) and
+`apply SETTINGS_FILE` (the access a guest's launch adds, `kith_guard.apply_grants`). The stdio MCP server and its tools are the next
+slice. The cases are `needs: rust` with `program` set (`sh w.sh py KERNEL` against `sh w.sh rs BIN KERNEL`, which runs
+`kernel/bin/kith-permit` or `{BIN} kernel permit --kernel {KERNEL}`), not `unswitched`: only the switch (a `permit` line in
+`lib/core-switched.txt`) is not made.
+
+How it is made hermetic:
+
+- **The host.** `w.sh` (written by the case's setup) takes `MODE STDIN VERB ARGS...` per line and starts `fh.py` first: `ask:NAME` /
+  `run:NAME` is a Unix socket (`KITH_ASK_SOCKET` / `KITH_RUN_SOCKET`) that answers `replies/NAME` with one line and hangs up (a name
+  with no file: it hangs up without a word), `http:NAME` is the loopback API on a free port (`KITH_SERVE_PORT`; the file's first line
+  is the HTTP status, the rest the body), `deadask` / `deadrun` / `deadhttp` point at a place nobody listens. Every request the stand-in
+  reads goes to the fake log (`host-sock ...` / `host-http ...` with the serve token's header, the JSON sorted), so the request body
+  each side sent is compared too. Tokens in the cases are made-up words.
+- **STDIN.** A name in `in/` (the hook payloads), or `-`.
+- **One-shots written by Python.** `permit-once-python-keys` writes its files under the names the Python `once_key` gives (the generator
+  imported the Python function), so the Rust `once` is checked against hashes Python made: key order, `description` of Bash only,
+  non-ASCII (`ensure_ascii=False`), floats, big numbers, nested lists. File times in the cases that need an old file are set with `touch -t`.
+- **Not recorded** (platform-dependent or not Python's text): the host-down path that restarts the launchd job (it only runs on macOS:
+  `permit-issue-down-restart-fails` records the refusal with a `launchctl` that fails, which reads the same on Linux; the sequence
+  `print` -> `bootstrap` -> `kickstart -k` and the wait for the port are a Rust unit test with a fake `launchctl`), `issue` with a
+  pid that is no number (Python dies with a traceback; Rust prints its last line), a payload that is not UTF-8, and a command line
+  that is no verb but has MCP messages on stdin (Python serves them; Rust exits 2 until the server is ported).
+- **Settings files of an odd shape.** `permissions.deny` that is a string, `filesystem` that is a list and so on make Python raise
+  inside `apply_grants`; the cases record its message (`could not add the granted access (...)`) for the ones named in
+  `permit-apply-settings-files`.
 
 ## Per-command summary
 

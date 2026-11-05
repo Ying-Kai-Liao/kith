@@ -221,6 +221,10 @@ impl Envelope {
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(rows)
         };
+        let stale = || {
+            conn.query_row("SELECT 1 FROM secret_stale", [], |_| Ok(()))
+                .is_ok()
+        };
         let person = p.person;
         let mut list = if person.is_empty() {
             Vec::new()
@@ -231,6 +235,11 @@ impl Envelope {
             list = granted(agent)?;
         }
         let profile = match (p.profile, list.first()) {
+            (_, None) if stale() => {
+                return Err(Error::Refused(format!(
+                    "kith-core: cannot tell whether {agent} has a grant for {service}: this database was imported before grants were kept; import again first"
+                )));
+            }
             (_, None) => {
                 return Err(Error::Refused(format!(
                     "kith-core: {agent} has no grant for {service} (kith-auth grant {agent} {service} <profile>)"
@@ -252,6 +261,11 @@ impl Envelope {
             )
             .optional()?;
         let Some(row) = row else {
+            if stale() {
+                return Err(Error::Refused(format!(
+                    "kith-core: cannot tell whether profile '{profile}' exists: this database was imported before profiles were kept; import again first"
+                )));
+            }
             return Err(Error::Refused(format!(
                 "kith-core: no profile '{profile}' (granted to {agent} for {service}; kith-auth set {profile} <var>)"
             )));

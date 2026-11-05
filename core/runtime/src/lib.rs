@@ -233,6 +233,50 @@ pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
     }
 }
 
+/// What [`call_authority_embedded`] came to.
+#[cfg(unix)]
+#[derive(Debug)]
+pub enum EmbeddedCall {
+    /// The method ran in this process, under the core's lifetime lock.
+    Answered(serde_json::Value),
+    /// A daemon (or another embedded command) holds the lock: nothing ran; the caller asks the daemon.
+    Busy,
+    /// There is no core yet (a fresh install: no core.db, or an empty one, and no marker): nothing ran, and there is
+    /// nothing to keep in step. A marker with no core.db is not this: the core existed and is lost (a restore), so the
+    /// open refuses and the caller warns.
+    NoCore(std::path::PathBuf),
+}
+
+/// Runs one owner `people.*` write (`people.suspend`, `people.undo`, `people.removePerson`, `people.removeBot`) inside an
+/// embedded core, for a caller that found no daemon (kith-auth's mirror of a revoke). The same door as the daemon's:
+/// the method must exist and be open to the owner, the lock is the one lock, and the generation is bumped. Never creates
+/// a core.db and never migrates one: those stay with the daemon and `kith migrate`.
+#[cfg(unix)]
+pub fn call_authority_embedded(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<EmbeddedCall, Error> {
+    if !authority::call::serves(method) {
+        return Err(Error::NoSuchMethod(format!(
+            "kith-core: {method} is not an authority method"
+        )));
+    }
+    call::check(kith_api::Principal::Owner, method, params)?;
+    let layout = Layout::new(&paths.machine);
+    // A 0-byte file is what a failed first open leaves; with no marker it never held a core either.
+    let empty = std::fs::metadata(&layout.db).map_or(true, |m| m.len() == 0);
+    if empty && !layout.marker.exists() {
+        return Ok(EmbeddedCall::NoCore(layout.dir));
+    }
+    match open_embedded(paths)? {
+        Embedded::Open(mut core) => {
+            authority::call::call(&mut core, method, params).map(EmbeddedCall::Answered)
+        }
+        Embedded::DaemonRunning { .. } => Ok(EmbeddedCall::Busy),
+    }
+}
+
 /// Points the kernel's notes (a lock or write it could not do and carried on) at the core log for the rest of this
 /// process: a kernel verb that does not go through the core (`kernel accounts`) calls this itself.
 pub fn route_kernel_notes(paths: &Paths) {

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# kith-project-id-lock-check — project-id --register / --root take projects.json.lock (the same flock the Rust
+# project-id takes): a held lock makes a register wait, and parallel registers all land. Throwaway KITH_HOME.
+#
+#   kernel/tests/kith-project-id-lock-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-project-id-lock-check.XXXXXX")
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith
+unset KITH_STATE HQ_STATE KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_PERSON
+mkdir -p "$HOME" "$KITH_HOME/state" "$T/w"
+PID=("python3" "$KERNEL/bin/project-id")
+REGF=$KITH_HOME/state/projects.json
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+
+N=8
+for i in $(seq 1 $N); do
+  mkdir -p "$T/w/p$i"
+  "${PID[@]}" --register "p$i" "$T/w/p$i" >/dev/null 2>&1 &
+done
+wait
+n=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))['projects']))" "$REGF")
+check "$N parallel registers all land ($n)" "[ '$n' = $N ]"
+
+# hold the lock for 2s from another process; a register must not finish before it lets go
+python3 -c "
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o644)
+fcntl.flock(fd, fcntl.LOCK_EX)
+open(sys.argv[1] + '.held', 'w').close()
+time.sleep(2)
+" "$REGF.lock" &
+holder=$!
+while [ ! -e "$REGF.lock.held" ]; do sleep 0.1; done
+t0=$(date +%s)
+mkdir -p "$T/w/late"
+"${PID[@]}" --register late "$T/w/late" >/dev/null 2>&1
+t1=$(date +%s)
+wait $holder
+check "a held lock makes a register wait ($((t1 - t0))s)" "[ $((t1 - t0)) -ge 1 ]"
+check "the waiting register still landed" "grep -q '\"late\"' '$REGF'"
+check "a read does not take the lock" "\"\${PID[@]}\" --list"
+if [ $fail = 0 ]; then echo "all passed"; else echo "failed"; exit 1; fi

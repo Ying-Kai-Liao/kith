@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
 use serde_json::{Value, json};
 
+use super::people_json;
 use super::requests;
 use super::revoke::{self, Life};
 use super::store;
@@ -24,6 +25,7 @@ pub(crate) fn serves(method: &str) -> bool {
         "people.grant"
             | "people.revoke"
             | "people.list"
+            | "people.listPeople"
             | "people.may"
             | "people.resolve"
             | "people.bridgeHeld"
@@ -42,6 +44,7 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.undo"
             | "people.clearTemp"
             | "people.retired"
+            | "people.agentAccess"
             | "people.requests"
             | "people.approve"
             | "people.deny"
@@ -70,12 +73,26 @@ fn serve_dir_of(params: &Value, home: &Path) -> PathBuf {
         .map_or_else(|| home.join(".kith/serve"), PathBuf::from)
 }
 
+/// The caller's home: the one it names, else `process` (the process's own, when it can be known). Never a relative
+/// path: an empty `$HOME` would make the serve folder `.kith/serve` under the working directory, which holds no
+/// `cloud-sync.json` and reads "never linked", which fails open. Refused instead.
+pub(super) fn home_of(params: &Value, process: Option<PathBuf>) -> Result<PathBuf> {
+    let home = match params.get("home").and_then(Value::as_str) {
+        Some(h) => PathBuf::from(h),
+        None => process.unwrap_or_default(),
+    };
+    if home.is_absolute() {
+        Ok(home)
+    } else {
+        Err(Error::Refused(
+            "authority: no home folder to find the serve folder in (HOME is unset and the account has none)".into(),
+        ))
+    }
+}
+
 pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let (folders, kernel) = core.folders_for(params)?;
-    let home = params
-        .get("home")
-        .and_then(Value::as_str)
-        .map_or_else(kith_kernel::paths::process_home, PathBuf::from);
+    let home = home_of(params, kith_kernel::paths::known_home())?;
     let mut ctx = ctx_from(&folders, kernel);
     ctx.serve = ServeDir::Fixed(serve_dir_of(params, &home));
     Ok(ctx)
@@ -220,6 +237,10 @@ pub(crate) fn call_in(
             core,
             |a| json!({ "rows": write::list(a, c, word(params, "agent"), word(params, "person")) }),
         ),
+        // `kith-auth people --json`: every person, bots and revoked ones too, with their agent rows and handles.
+        "people.listPeople" => {
+            store::read(core, |a| json!({ "rows": people_json::people_json(a, c) }))
+        }
         // The answer of `may` itself (M2-15): the host's event filter asks it per person and agent. A refusal of the
         // rules is a "no" with its words, as for `kith-auth may`.
         "people.may" => {
@@ -453,6 +474,13 @@ pub(super) fn write_in(
             out["was"] = json!(was);
             Ok(out)
         }
+        "people.agentAccess" => Ok(lines(write::agent_access(
+            a,
+            c,
+            need(params, "agent")?,
+            need(params, "domain")?,
+            switch(params, "remove"),
+        )?)),
         "people.botsCap" => Ok(lines(write::bots_cap(a, need(params, "amount")?)?)),
         "people.invite" => {
             let said = write::invite_create(

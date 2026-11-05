@@ -17,7 +17,13 @@ pub mod paths;
 // Unix only: `resolve` clones with cp, sets modes and asks `kill(2)` whether a run is alive.
 #[cfg(unix)]
 pub mod pkg;
+// Unix only: the run socket is a Unix socket and the one-shots are modes.
+#[cfg(unix)]
+pub mod permit;
 pub mod procstart;
+// Unix only: it writes projects.json through `secrets::pyjson`.
+#[cfg(unix)]
+pub mod project;
 pub mod schedule;
 #[cfg(unix)]
 pub mod secrets;

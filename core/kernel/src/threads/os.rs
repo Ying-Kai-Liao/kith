@@ -121,6 +121,12 @@ pub fn parent_pid() -> i64 {
     i64::from(std::os::unix::process::parent_id())
 }
 
+/// `os.getuid()`: the user this process runs as (the launchd domain `gui/<uid>` is named by it).
+pub fn uid() -> u32 {
+    // SAFETY: getuid has no arguments and cannot fail.
+    unsafe { libc::getuid() }
+}
+
 /// The home folder of this process's real user from the password database, as Python's `pwd.getpwuid(os.getuid()).pw_dir`
 /// (`getpwuid_r`, no subprocess, no `$HOME`). `None` when the user has no entry or an empty home: the caller counts that
 /// as a guest.

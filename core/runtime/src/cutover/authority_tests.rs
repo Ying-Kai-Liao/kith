@@ -88,7 +88,7 @@ struct Rig {
 fn original() -> Value {
     json!({
         "profiles": {"github/work": {"GITHUB_TOKEN": "keychain:kith/github/work#GITHUB_TOKEN"}},
-        "grants": {"house": ["github/work"]},
+        "grants": {"house": {"github": "github/work"}},
         "env": {"house": {"svc": {"A": "plain"}}},
         "once": {},
         "people": {
@@ -106,6 +106,11 @@ fn original() -> Value {
 }
 
 fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
+    rig_full(limit, false)
+}
+
+/// `refuse`: the module as the real one is, with the step refused until M2-18 lifts it.
+fn rig_full(limit: Option<usize>, refuse: bool) -> (Rig, Vec<Box<dyn Module>>) {
     let (t, m) = machine();
     let root = t.path().to_path_buf();
     std::fs::create_dir_all(&m).unwrap();
@@ -142,7 +147,9 @@ fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
             puts: puts.clone(),
         }),
         limit,
-    );
+    )
+    .waiting(std::time::Duration::from_millis(300));
+    let module = if refuse { module.refusing() } else { module };
     let rig = Rig {
         env: Env::new(&m).with_ctx(ctx),
         dir: t,
@@ -326,7 +333,7 @@ fn fingerprint_follows_the_vault_rows_and_the_serve_db() {
     std::fs::create_dir_all(&serve).unwrap();
     let s = Connection::open(serve.join("serve.db")).unwrap();
     s.execute_batch(
-        "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT); INSERT INTO kv VALUES ('vault:v1:a', 'x');",
+        "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT); INSERT INTO kv VALUES ('slot', 'vault:v1:x');",
     )
     .unwrap();
     drop(s);
@@ -402,6 +409,59 @@ fn a_step_switches_and_a_rollback_gives_the_same_auth_json_back() {
         Some("tok"),
         "the secret went back before the file"
     );
+}
+
+#[test]
+fn a_host_the_owner_stopped_keeping_stays_gone_after_a_rollback() {
+    let (r, reg) = rig();
+    r.edit(|v| {
+        v["agent_access"] = json!({"house": {
+            "domains": ["a.example.com", "b.example.com"],
+            "since": {"a.example.com": 1, "b.example.com": 2},
+            "by": {"a.example.com": null, "b.example.com": null}
+        }});
+    });
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    {
+        let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+        crate::authority::call::call_with(
+            &mut core,
+            r.env.ctx.as_ref().unwrap(),
+            "people.agentAccess",
+            &json!({"agent": "house", "domain": "a.example.com", "remove": true}),
+        )
+        .unwrap();
+    }
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    let after: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(
+        after["agent_access"]["house"]["domains"],
+        json!(["b.example.com"]),
+        "the removed host is not brought back from the old file"
+    );
+    assert!(after["agent_access"]["house"]["since"]["a.example.com"].is_null());
+}
+
+#[test]
+fn handles_the_core_does_not_have_do_not_come_back_from_the_old_file() {
+    // an id freed and re-added: the old person's handles must not go to the new one on a rollback
+    let base =
+        json!({"people": {"sam": {"name": "Sam", "handles": {"telegram": "1", "kith": "k"}}}});
+    let snap = json!({"people": {"sam": {"name": "Sam"}}});
+    let once = authority::merge_back(Some(base), &snap);
+    assert!(once["people"]["sam"].get("handles").is_none());
+    let twice = authority::merge_back(Some(once.clone()), &snap);
+    assert_eq!(once, twice, "running it again gives the same file");
+}
+
+#[test]
+fn handles_the_core_changed_win_over_the_old_file() {
+    let base = json!({"people": {"sam": {"name": "Sam", "handles": {"telegram": "1"}}}});
+    let snap = json!({"people": {"sam": {"name": "Sam", "handles": {"slack": "U2"}}}});
+    let once = authority::merge_back(Some(base), &snap);
+    assert_eq!(once["people"]["sam"]["handles"], json!({"slack": "U2"}));
+    let twice = authority::merge_back(Some(once.clone()), &snap);
+    assert_eq!(once, twice);
 }
 
 #[test]
@@ -633,4 +693,484 @@ fn a_rollback_writes_auth_json_private_and_keeps_a_newer_keychain_value() {
         assert_eq!(mode & 0o777, 0o600);
     }
     assert!(!r.auth().with_extension("restore.tmp").exists());
+}
+
+// --- M2-18 step guard: the refusal, the lock with its sha check, the vault rows ---------------------------------------
+
+#[test]
+fn a_real_step_is_refused_with_the_open_gates_and_auth_json_is_untouched() {
+    let (r, reg) = rig_full(None, true);
+    let before = std::fs::read(r.auth()).unwrap();
+    for _ in 0..2 {
+        let e = step(&reg, &r.env, "authority", opts())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("M2-18 gates are open")
+                && e.contains("revoke bridge")
+                && e.contains("'already switched' branch")
+                && e.contains("people --json"),
+            "{e}"
+        );
+    }
+    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    assert!(
+        phase(&r.env, "authority").is_none(),
+        "no record was written"
+    );
+}
+
+#[test]
+fn a_dry_run_and_check_still_work_while_the_step_is_refused() {
+    let (r, reg) = rig_full(None, true);
+    let dry = Opts {
+        dry_run: true,
+        ..opts()
+    };
+    let lines = step(&reg, &r.env, "authority", dry).expect("dry run");
+    assert!(said(&lines, "nothing was changed"), "{lines:?}");
+    drop(crate::start_with(&r.env.layout, MIGRATIONS).unwrap());
+    let out = check(&reg, &r.env, "authority").expect("check");
+    assert!(!out.is_empty(), "{out:?}");
+    assert!(!tombstone::is_tombstone(&r.auth()));
+}
+
+/// Wraps a module and writes to auth.json between the import and the tombstone (inside `same_answer`).
+struct WriteInBetween(Box<dyn Module>, PathBuf);
+
+impl Module for WriteInBetween {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
+        self.0.tombstones(env)
+    }
+    fn import(&self, env: &Env, core: Option<&mut Core>, o: Opts) -> Result<Vec<String>> {
+        self.0.import(env, core, o)
+    }
+    fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
+        let out = self.0.same_answer(env, db);
+        let mut v: Value = serde_json::from_slice(&std::fs::read(&self.1).unwrap()).unwrap();
+        v["people"]["sam"]["revoked"] = json!({"at": 1});
+        std::fs::write(&self.1, v.to_string()).unwrap();
+        out
+    }
+    fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
+        self.0.export_back(env, core)
+    }
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        self.0.source_lock(env)
+    }
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        self.0.before_tombstone(env)
+    }
+    fn digest(&self, env: &Env, db: &Connection) -> Result<String> {
+        self.0.digest(env, db)
+    }
+}
+
+#[test]
+fn a_write_between_the_import_and_the_tombstone_refuses_and_leaves_auth_json() {
+    let (r, mut reg) = rig();
+    let inner = reg.remove(0);
+    let reg: Vec<Box<dyn Module>> = vec![Box::new(WriteInBetween(inner, r.auth()))];
+    let e = step(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("auth.json changed during the step"), "{e}");
+    assert!(
+        !tombstone::is_tombstone(&r.auth()),
+        "auth.json is still the file"
+    );
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(
+        v["people"]["sam"]["revoked"]["at"], 1,
+        "the late write is kept"
+    );
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Stepping));
+}
+
+#[test]
+fn the_step_holds_the_writers_lock_from_the_import_through_the_tombstone() {
+    use fs2::FileExt as _;
+    let (r, reg) = rig();
+    let lock = r.auth().with_file_name("auth.json.lock");
+    {
+        let held = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&lock)
+            .unwrap();
+        held.lock_exclusive().unwrap();
+        // A writer holds it: the step waits a bounded time, then refuses and changes nothing.
+        let e = step(&reg, &r.env, "authority", opts())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("auth.json.lock is held"), "{e}");
+        assert!(!tombstone::is_tombstone(&r.auth()));
+        assert!(phase(&r.env, "authority").is_none());
+    }
+    step(&reg, &r.env, "authority", opts()).expect("step");
+    assert!(tombstone::is_tombstone(&r.auth()));
+    let f = std::fs::File::open(&lock).unwrap();
+    f.try_lock_exclusive().expect("the step let the lock go");
+}
+
+/// Wraps a module and, at each point between the import and the tombstone, tries the writers' lock from a second open
+/// file: it must be contended all along.
+struct ProbeLock(Box<dyn Module>, PathBuf);
+
+impl ProbeLock {
+    fn held(&self) {
+        use fs2::FileExt as _;
+        let f = std::fs::File::open(self.1.with_file_name("auth.json.lock")).unwrap();
+        assert!(f.try_lock_exclusive().is_err(), "the lock was let go");
+    }
+}
+
+impl Module for ProbeLock {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
+        self.0.tombstones(env)
+    }
+    fn import(&self, env: &Env, core: Option<&mut Core>, o: Opts) -> Result<Vec<String>> {
+        let out = self.0.import(env, core, o);
+        self.held();
+        out
+    }
+    fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
+        self.held();
+        self.0.same_answer(env, db)
+    }
+    fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
+        self.held();
+        self.0.export_back(env, core)
+    }
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        self.0.source_lock(env)
+    }
+    fn rollback_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        self.0.rollback_lock(env)
+    }
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        self.held();
+        self.0.before_tombstone(env)
+    }
+    fn digest(&self, env: &Env, db: &Connection) -> Result<String> {
+        self.0.digest(env, db)
+    }
+}
+
+#[test]
+fn the_lock_is_held_throughout_the_step_and_the_rollback() {
+    let (r, mut reg) = rig();
+    let inner = reg.remove(0);
+    let reg: Vec<Box<dyn Module>> = vec![Box::new(ProbeLock(inner, r.auth()))];
+    step(&reg, &r.env, "authority", opts()).expect("step");
+    rollback(&reg, &r.env, "authority", opts()).expect("rollback");
+}
+
+#[test]
+fn a_lifted_step_that_recorded_no_sha_does_not_tombstone() {
+    let (r, reg) = rig();
+    let e = reg[0].before_tombstone(&r.env).unwrap_err().to_string();
+    assert!(e.contains("did not record auth.json's sha"), "{e}");
+    // The unlifted module is never in a real step, so it has nothing to check.
+    let (r, reg) = rig_full(None, true);
+    reg[0].before_tombstone(&r.env).expect("not lifted");
+}
+
+#[test]
+fn export_back_waits_for_the_lock_and_refuses_when_it_is_not_let_go() {
+    use fs2::FileExt as _;
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    let lock = r.auth().with_file_name("auth.json.lock");
+    let held = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&lock)
+        .unwrap();
+    held.lock_exclusive().unwrap();
+    let e = rollback(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("auth.json.lock is held"), "{e}");
+    assert!(
+        tombstone::is_tombstone(&r.auth()),
+        "the file was not written"
+    );
+    // The lock is taken before the rolling-back record, so the refusal wrote nothing.
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    // A holder that lets go within the wait: the rollback goes through.
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(held);
+    });
+    rollback(&reg, &r.env, "authority", opts()).expect("rollback after the lock was let go");
+    t.join().unwrap();
+    assert!(!tombstone::is_tombstone(&r.auth()));
+}
+
+fn serve_with(r: &Rig, rows: &[(&str, &str)]) {
+    let serve = r.dir.path().join("serve");
+    std::fs::create_dir_all(&serve).unwrap();
+    let s = Connection::open(serve.join("serve.db")).unwrap();
+    s.execute_batch("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
+        .unwrap();
+    for (k, v) in rows {
+        s.execute("INSERT OR REPLACE INTO kv VALUES (?1, ?2)", [k, v])
+            .unwrap();
+    }
+}
+
+#[test]
+fn unmoved_vault_rows_make_step_and_check_refuse_until_the_slots_are_sealed() {
+    let (r, reg) = rig();
+    drop(crate::start_with(&r.env.layout, MIGRATIONS).unwrap());
+    // A plaintext row is not an old record; the two `vault:v1:` ones are.
+    serve_with(
+        &r,
+        &[
+            ("router.key", "vault:v1:AAAA"),
+            ("slack.token", "vault:v1:BBBB"),
+            ("setting", "plain"),
+        ],
+    );
+    let before = std::fs::read(r.auth()).unwrap();
+    let e = step(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("2 credential record(s)")
+            && e.contains("router.key, slack.token")
+            && e.contains("unlock the vault in the app first")
+            && e.contains("remove that credential in the app"),
+        "{e}"
+    );
+    let e = check(&reg, &r.env, "authority").unwrap_err().to_string();
+    assert!(e.contains("unlock the vault in the app first"), "{e}");
+    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+    assert!(
+        phase(&r.env, "authority").is_none(),
+        "refused before any record"
+    );
+    // The host moves the slots at its unlock and leaves the old rows: the envelope has them, so they no longer count.
+    for name in ["router.key", "slack.token"] {
+        r.db()
+            .execute(
+                "INSERT INTO secret_records (name, key_id, nonce, ciphertext, created_at, updated_at) VALUES (?1, 'k', zeroblob(24), x'00', 0, 0)",
+                [name],
+            )
+            .unwrap();
+    }
+    step(&reg, &r.env, "authority", opts()).expect("step once the rows have moved");
+    assert!(tombstone::is_tombstone(&r.auth()));
+}
+
+// --- profiles and grants come back from the core (m0021) ---------------------------------------------------------------------
+
+/// Profiles and grants of every shape the import keeps: lent, a browser, a profile with no variables, `*`, the host-store
+/// mark, a list of profiles, an `agent@person` grant and one for a person who has been removed.
+fn lane_b() -> (Value, Value) {
+    (
+        json!({
+            "github/work": {"GITHUB_TOKEN": "keychain:kith/github/work#GITHUB_TOKEN", "person": "mia", "with": ["sam"]},
+            "github/bare": {},
+            "chrome-agent/main": {"browser": "chrome", "person": "*"},
+            "other/env": {"KEY": "env:SOME_VAR", "person": "kai"},
+            "host/svc": {"store": "host"}
+        }),
+        json!({
+            "house": {"github": "github/work", "multi": ["other/env", "github/work"]},
+            "house@mia": {"github": "github/bare"},
+            "house@gone": {"github": "github/work"}
+        }),
+    )
+}
+
+fn rolled_back(r: &Rig, reg: &[Box<dyn Module>]) -> Value {
+    rollback(reg, &r.env, "authority", opts()).unwrap();
+    serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap()
+}
+
+#[test]
+fn profiles_and_grants_survive_a_step_and_a_rollback_exactly() {
+    let (r, reg) = rig();
+    let (profiles, grants) = lane_b();
+    r.edit(|v| {
+        v["profiles"] = profiles.clone();
+        v["grants"] = grants.clone();
+    });
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert_eq!(
+        (r.count("secret_profiles"), r.count("secret_grants")),
+        (5, 5)
+    );
+    let after = rolled_back(&r, &reg);
+    assert_eq!(after["profiles"], profiles);
+    assert_eq!(after["grants"], grants);
+}
+
+#[test]
+fn a_grant_or_profile_removed_in_the_core_stays_removed_and_one_added_there_is_written() {
+    let (r, reg) = rig();
+    let (profiles, grants) = lane_b();
+    r.edit(|v| {
+        v["profiles"] = profiles;
+        v["grants"] = grants;
+    });
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    r.db()
+        .execute_batch(
+            "DELETE FROM secret_grants WHERE agent = 'house@gone'; \
+             DELETE FROM secret_grants WHERE agent = 'house' AND service = 'multi' AND profile = 'other/env'; \
+             DELETE FROM secret_profiles WHERE profile = 'github/bare'; \
+             DELETE FROM secret_vars WHERE profile = 'other/env'; \
+             INSERT INTO secret_profiles (profile, person, lent) VALUES ('slack/new', 'sam', '[\"mia\"]'); \
+             INSERT INTO secret_vars (profile, var, source) VALUES ('slack/new', 'TOKEN', 'keychain:kith/slack/new#TOKEN'); \
+             INSERT INTO secret_grants (agent, service, profile, seq) VALUES ('house@sam', 'slack', 'slack/new', 0);",
+        )
+        .unwrap();
+    let after = rolled_back(&r, &reg);
+    assert!(
+        after["grants"].get("house@gone").is_none(),
+        "{}",
+        after["grants"]
+    );
+    assert_eq!(
+        after["grants"]["house"]["multi"], "github/work",
+        "a list of one reads back as it"
+    );
+    assert_eq!(after["grants"]["house@sam"]["slack"], "slack/new");
+    assert!(after["profiles"].get("github/bare").is_none());
+    assert_eq!(
+        after["profiles"]["other/env"],
+        json!({"person": "kai"}),
+        "its variable is gone too"
+    );
+    assert_eq!(
+        after["profiles"]["slack/new"],
+        json!({"person": "sam", "with": ["mia"], "TOKEN": "keychain:kith/slack/new#TOKEN"})
+    );
+    // and a second rollback over the file it wrote gives the same file
+    let again = {
+        let (base, snap) = (
+            Some(after.clone()),
+            crate::authority::snapshot(&r.db()).unwrap(),
+        );
+        authority::merge_back(base, &snap)
+    };
+    assert_eq!(again, after);
+}
+
+#[test]
+fn the_cores_profiles_win_in_merge_back_and_the_two_stand_ins_are_written_as_the_file_says_them() {
+    let base = json!({
+        "profiles": {
+            "chrome-agent/team": {"person": "*", "browser": "chrome"},
+            "chrome-agent/main": {"browser": "chrome"},
+            "github/old": {"K": "env:K"}
+        },
+        "grants": {"house": {"github": "github/old"}}
+    });
+    // the core: `*` is NULL, an owner not yet named is `the owner`, github/old is gone, nothing granted
+    let snap = json!({
+        "profiles": {
+            "chrome-agent/team": {"browser": "chrome"},
+            "chrome-agent/main": {"person": "the owner", "browser": "chrome"},
+            "chrome-agent/kai": {"person": "kai"}
+        }
+    });
+    let out = authority::merge_back(Some(base), &snap);
+    assert_eq!(
+        out["profiles"]["chrome-agent/team"],
+        json!({"person": "*", "browser": "chrome"})
+    );
+    assert_eq!(
+        out["profiles"]["chrome-agent/main"],
+        json!({"browser": "chrome"})
+    );
+    assert_eq!(
+        out["profiles"]["chrome-agent/kai"],
+        json!({"person": "kai"})
+    );
+    assert!(out["profiles"].get("github/old").is_none());
+    assert_eq!(out["grants"], json!({}), "the core holds no grant");
+}
+
+#[test]
+fn a_core_imported_before_the_tables_were_filled_keeps_the_old_copys_profiles_and_grants() {
+    let base = json!({"profiles": {"github/work": {"person": "mia"}}, "grants": {"house": {"github": "github/work"}}});
+    let snap = json!({"people": {}, "secrets_stale": true});
+    let out = authority::merge_back(Some(base.clone()), &snap);
+    assert_eq!(out["profiles"], base["profiles"]);
+    assert_eq!(out["grants"], base["grants"]);
+    assert!(out.get("secrets_stale").is_none());
+    // with no copy at all they are written empty
+    let none = authority::merge_back(None, &snap);
+    assert_eq!(
+        (none["profiles"].clone(), none["grants"].clone()),
+        (json!({}), json!({}))
+    );
+}
+
+#[test]
+fn the_fingerprint_moves_when_a_grant_changes_in_the_core() {
+    let (r, reg) = imported();
+    let db = r.db();
+    let before = reg[0].fingerprint(&r.env, &db).unwrap();
+    db.execute(
+        "INSERT INTO secret_grants (agent, service, profile, seq) VALUES ('house', 'x', 'x/y', 0)",
+        [],
+    )
+    .unwrap();
+    assert_ne!(before, reg[0].fingerprint(&r.env, &db).unwrap());
+}
+
+#[test]
+fn the_same_answer_names_a_profile_that_differs_between_the_file_and_the_core() {
+    let (r, reg) = imported();
+    assert!(
+        r.diffs(reg[0].as_ref()).is_empty(),
+        "{:?}",
+        r.diffs(reg[0].as_ref())
+    );
+    r.db()
+        .execute("DELETE FROM secret_grants WHERE agent = 'house'", [])
+        .unwrap();
+    let said = r.diffs(reg[0].as_ref()).join("\n");
+    assert!(
+        said.contains("grants house: in auth.json, not in core.db"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_list_of_one_stays_a_list_and_a_derived_owner_is_left_unsaid() {
+    let base = json!({
+        "profiles": {"chrome-agent/x": {}, "chrome-agent/y": {"person": "kai"}},
+        "grants": {"house": {"github": ["github/a"], "slack": "slack/a"}}
+    });
+    let snap = json!({
+        "people": {"kai": {"owner": true}},
+        "profiles": {"chrome-agent/x": {"person": "kai"}, "chrome-agent/y": {"person": "kai"}},
+        "grants": {"house": {"github": "github/a", "slack": "slack/a", "other": "o/a"}}
+    });
+    let out = authority::merge_back(Some(base), &snap);
+    assert_eq!(out["grants"]["house"]["github"], json!(["github/a"]));
+    assert_eq!(out["grants"]["house"]["slack"], "slack/a");
+    assert_eq!(out["grants"]["house"]["other"], "o/a");
+    assert_eq!(
+        out["profiles"]["chrome-agent/x"],
+        json!({}),
+        "the old copy named no one"
+    );
+    assert_eq!(
+        out["profiles"]["chrome-agent/y"],
+        json!({"person": "kai"}),
+        "it did name the owner"
+    );
 }

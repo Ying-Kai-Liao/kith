@@ -895,3 +895,69 @@ async fn a_used_nonce_replays_the_same_ask_and_refuses_anything_else() {
     assert_eq!(users(), 1);
     assert_eq!(r.hub.store.audit_count_since(&person, "botAsk", 0), audits);
 }
+
+/// A stand-in for the kith program whose `kernel core-call` is the core: down (exit 3) when `down` exists next to it.
+fn fake_core(r: &Rig) -> std::path::PathBuf {
+    let bin = r.dir.join("fakekith");
+    let dir = r.dir.display();
+    std::fs::write(
+        &bin,
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"memory hook\" ]; then echo 'usage: kith memory hook --phase'; exit 0; fi\n\
+             [ -e {dir}/down ] && {{ echo 'no core daemon answers' >&2; exit 3; }}\n\
+             echo \"$3\" >> {dir}/calls; echo '{{}}'\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    bin
+}
+
+#[tokio::test]
+async fn removing_a_bot_says_whether_the_core_got_it_and_the_removal_stands_either_way() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let bin = fake_core(&r);
+    crate::channels::hq::TEST_ENV.lock().unwrap().push(("KITH_BIN", bin));
+
+    // The core answers: told, and true.
+    let hit = active_bot(&r).await;
+    let out = call(&r, &Caller::Local, "revokeBot", json!({"botId": hit.bot})).await.unwrap();
+    assert_eq!(out, json!({"revoked": true, "coreUpdated": true}));
+    assert!(std::fs::read_to_string(r.dir.join("calls")).unwrap().contains("people.removeBot"));
+    // A second remove is the no-op it was, with no false "missed".
+    let again = call(&r, &Caller::Local, "revokeBot", json!({"botId": hit.bot})).await.unwrap();
+    // It sent nothing to the core, so it claims nothing about it.
+    assert_eq!(again, json!({"revoked": false}));
+
+    // No daemon: the guest is cut off all the same, and the answer says the core's copy missed it.
+    let miss = active_bot(&r).await;
+    std::fs::write(r.dir.join("down"), "").unwrap();
+    let out = call(&r, &Caller::Local, "revokeBot", json!({"botId": miss.bot})).await.unwrap();
+    assert_eq!(out, json!({"revoked": true, "coreUpdated": false}));
+    assert_eq!(principal(&r.hub.store, &miss.caller), Principal::Nobody);
+    assert!(!r.hub.store.bot_guest(&miss.bot).unwrap().state.live());
+
+    // kith-auth itself failing is not the core missing: the answer says authUpdated false and leaves coreUpdated out.
+    std::fs::remove_file(r.dir.join("down")).unwrap();
+    let broke = active_bot(&r).await;
+    let good = crate::remote::account::TEST_BIN.lock().unwrap().clone();
+    let failing = r.dir.join("kith-auth-failing");
+    std::fs::write(&failing, "#!/bin/sh\necho 'auth.json is locked' >&2\nexit 1\n").unwrap();
+    std::fs::set_permissions(&failing, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(failing);
+    let out = call(&r, &Caller::Local, "revokeBot", json!({"botId": broke.bot})).await.unwrap();
+    *crate::remote::account::TEST_BIN.lock().unwrap() = good;
+    assert_eq!(out, json!({"revoked": true, "authUpdated": false}));
+    assert!(!r.hub.store.bot_guest(&broke.bot).unwrap().state.live(), "the host's removal stands");
+}
+
+#[test]
+fn the_revoked_answer_says_only_what_was_checked() {
+    use super::botguests::{Mirror, revoked_answer};
+    assert_eq!(revoked_answer(true, Some(Mirror::Updated)), json!({"revoked": true, "coreUpdated": true}));
+    assert_eq!(revoked_answer(true, Some(Mirror::CoreKept)), json!({"revoked": true, "coreUpdated": false}));
+    assert_eq!(revoked_answer(true, Some(Mirror::AuthFailed)), json!({"revoked": true, "authUpdated": false}));
+    assert_eq!(revoked_answer(true, Some(Mirror::NotSent)), json!({"revoked": true}));
+    assert_eq!(revoked_answer(false, None), json!({"revoked": false}));
+}

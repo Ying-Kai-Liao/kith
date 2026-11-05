@@ -452,6 +452,10 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people undo ann", "people.undo"),
         ("people person clear-temp ann", "people.clearTemp"),
         ("people retired ann", "people.retired"),
+        (
+            "people agent-access echo api.example.com --rm",
+            "people.agentAccess",
+        ),
         ("people may ann echo", "people.may"),
         ("people resolve echo --person ann", "people.resolve"),
         ("people bridge-held ann", "people.bridgeHeld"),

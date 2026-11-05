@@ -111,6 +111,12 @@ pub(super) const ROWS: &[Method] = &[
         &["people", "access"],
     ),
     people(
+        "people.listPeople",
+        "Every person the owner knows, as of the last import, as `kith-auth people --json` lists them: the owner first, then everyone by id with each person's bots after them. Each has the id, name, owner flag, the person a bot belongs to (`bot_of`) and the person at the top (`root`), whether their access is removed (`revoked`, `revoked_at`), the cloud link (`kith`), the other accounts (`handles`) and the agents they have a row for (`agents`: agent, role, via). People imported before handles were kept have none until imported again.",
+        &[KERNEL, HOME, ENV],
+        &["people", "who"],
+    ),
+    people(
         "people.may",
         "Whether a person may use an agent right now, and why (the kernel's `may`: a removed access beats every row, then their own, then everyone's), with whether they are the owner and the preset they hold.",
         &[
@@ -341,6 +347,19 @@ pub(super) const ROWS: &[Method] = &[
         "Why a new person or bot can't take this id (removed, an old id of someone, or what a removal left); nothing when it can.",
         &[pos("id", "string", true, "The id."), KERNEL, HOME, ENV],
         &["people", "retired"],
+    ),
+    people(
+        "people.agentAccess",
+        "Keep (or, with --rm, stop keeping) a host every guest of the agent may reach, invited people and bot guests, never the owner. Kept on the agent, not on a person's row, so it needs no membership. A host that is not a plain name (a wildcard, an address, a port) is refused; removing one that is not kept changes nothing.",
+        &[
+            pos("agent", "string", true, "The agent."),
+            pos("domain", "string", true, "The host name."),
+            sw("remove", &["--rm"], "Stop keeping it."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "agent-access"],
     ),
     people(
         "people.requests",

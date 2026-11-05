@@ -89,7 +89,25 @@ pub enum Answer {
 
 /// One call of the owner's to the daemon. `repeatable` is for reads; a write is never sent a second time.
 pub fn call_owner(folders: &Paths, method: &str, params: &Value, repeatable: bool) -> Answer {
-    match kith_core::reach(folders, method, params, repeatable) {
+    answer_of(kith_core::reach(folders, method, params, repeatable))
+}
+
+/// One write row of the Host principal's (`schedule.fire`, M4-5b), on a connection that proves the host secret, which only
+/// the serve's own daemon has: any other daemon answers a mismatch (`Down`), which the caller reads as "try again". Never
+/// sent twice.
+pub fn call_host(folders: &Paths, method: &str, params: &Value) -> Answer {
+    answer_of(kith_core::reach_as_host(folders, method, params, false))
+}
+
+/// Whether a module's switch file is there (`<core folder>/cutover/<module>.switch`), the core's one record of "this module
+/// moved". Only its existence is read, never its content, for the one question the gate cannot answer when the core is
+/// down: "was this module switched?". A host that cannot tell must not run the module's work from the old store.
+pub fn switch_file_exists(folders: &Paths, module: &str) -> bool {
+    folders.machine.join("core").join("cutover").join(format!("{module}.switch")).exists()
+}
+
+fn answer_of(reached: kith_core::Reached) -> Answer {
+    match reached {
         kith_core::Reached::Answered(v) => Answer::Done(v),
         kith_core::Reached::Refused(e) => Answer::Refused(e.to_string()),
         kith_core::Reached::NoDaemon => Answer::Down { why: "no core is running".to_owned(), lost: false },
@@ -401,8 +419,73 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.removeBot",
 ];
 
-/// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered, 3 no daemon
-/// answers (nothing ran, the caller falls back), 4 refused, 5 lost after sending, 2 usage.
+/// The writes `core_call` runs in an embedded core when no daemon answers (the revoke stopgap before M2-23: a revoke made
+/// in kith-auth must reach the core even with `kith serve` stopped). The terminal methods need the daemon's sockets.
+#[cfg(unix)]
+const EMBEDDED_METHODS: &[&str] = &["people.suspend", "people.undo", "people.removePerson", "people.removeBot"];
+
+/// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
+/// Inside kith-auth's `CORE_CALL_SECS`, which it waits under auth.json.lock.
+#[cfg(unix)]
+const DAEMON_APPEARS: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// No daemon answered: run the write inside an embedded core (the same lock, so never alongside a live daemon). When the
+/// lock is held (a daemon starting, or another embedded command) the daemon is asked again until `DAEMON_APPEARS` passes.
+/// No core file yet answers `{"noCore":true}` and exit 0: a fresh install has nothing to keep in step. 0 ran, 3 nothing ran,
+/// 4 the core refused the call, 5 it failed after it may have written.
+#[cfg(unix)]
+fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
+    let started = std::time::Instant::now();
+    loop {
+        match kith_core::call_authority_embedded(folders, method, params) {
+            Ok(kith_core::EmbeddedCall::Answered(answer)) => {
+                println!("{answer}");
+                return 0;
+            }
+            Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
+                eprintln!("no core db at {}: nothing to update", dir.display());
+                println!("{}", json!({"noCore": true}));
+                return 0;
+            }
+            Ok(kith_core::EmbeddedCall::Busy) => {
+                // A daemon that came up meanwhile is used, never raced.
+                match kith_core::reach(folders, method, params, false) {
+                    kith_core::Reached::Answered(answer) => {
+                        println!("{answer}");
+                        return 0;
+                    }
+                    kith_core::Reached::Refused(e) => {
+                        eprintln!("{e}");
+                        return 4;
+                    }
+                    _ => {}
+                }
+                if started.elapsed() >= DAEMON_APPEARS {
+                    eprintln!("no core daemon answers, and another core holds the lock");
+                    return 3;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                return match e {
+                    kith_core::Error::NoSuchMethod(_)
+                    | kith_core::Error::BadParams(_)
+                    | kith_core::Error::NotAllowed(_)
+                    | kith_core::Error::NotServed(_)
+                    | kith_core::Error::Refused(_)
+                    | kith_core::Error::Stopped(_) => 4,
+                    kith_core::Error::Io(_) => 5,
+                    _ => 3,
+                };
+            }
+        }
+    }
+}
+
+/// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered (for the
+/// people.* writes with no daemon: ran in an embedded core, or `{"noCore":true}` when there is no core to update), 3 no
+/// daemon answers and nothing ran (the caller falls back), 4 refused, 5 lost after sending, 2 usage.
 pub fn core_call(method: &str, params_stdin: bool) -> i32 {
     if !CORE_CALL_METHODS.contains(&method) {
         eprintln!("core-call: {method} is not one of {}", CORE_CALL_METHODS.join(", "));
@@ -433,6 +516,10 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         kith_core::Reached::Refused(e) => {
             eprintln!("{e}");
             4
+        }
+        #[cfg(unix)]
+        kith_core::Reached::NoDaemon if EMBEDDED_METHODS.contains(&method) => {
+            core_call_embedded(&folders, method, &params)
         }
         kith_core::Reached::NoDaemon => {
             eprintln!("no core daemon answers");

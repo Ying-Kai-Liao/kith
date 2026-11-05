@@ -492,7 +492,7 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
         /// `resolve <agent> [--person ID] [--via CALLER] [--take-once] [--json]` or `may <id> <agent> [--via CALLER] [--once]`.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
     /// What Claude Code usage costs, the verbs the launch and the apps call (`kernel/bin/kith-cost`): `limit AGENT [--json|--sh]`,
@@ -518,6 +518,16 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
+    /// The kith project of a directory, as `kernel/bin/project-id` answers it (not routed from `kith` yet; a guest run is
+    /// refused here and stays with the Python, which asks the host over the run socket).
+    #[command(name = "project-id", disable_help_flag = true)]
+    ProjectId {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// `kith-pkg resolve`: the pinned package folder a run starts from (not routed from `kith` yet).
     #[command(disable_help_flag = true)]
     Pkg {
@@ -525,6 +535,17 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
+    /// `kernel/bin/kith-permit`'s command-line verbs: `issue AGENT SESSION PID`, `denied --dir DIR`, `once --dir DIR` and
+    /// `apply SETTINGS_FILE`. Prints what `kith-permit` prints, with its exit codes (2: the stdio MCP server, which has no Rust
+    /// side yet). Not routed from `kith` yet.
+    #[command(disable_help_flag = true)]
+    Permit {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
     /// What a launch assembles, one piece at a time (not routed from `kith AGENT` yet).
@@ -864,7 +885,8 @@ fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let home = kith_kernel::paths::process_home();
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
     let ctx = kith_kernel::secrets::Ctx::from_process(&kernel);
-    let (verb, rest) = args.split_first().map_or(("", &[][..]), |(v, r)| (v.as_str(), r));
+    // No verb is `kith-auth` with no arguments: its usage text and exit 0 (not clap's usage error).
+    let (verb, rest) = args.split_first().map_or(("--help", &[][..]), |(v, r)| (v.as_str(), r));
     let out = kith_kernel::secrets::run(&ctx, verb, rest);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
@@ -879,6 +901,36 @@ fn print_cost(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
     let paths = kith_kernel::cost::Paths::from_process(&kernel);
     let out = kith_kernel::cost::run(&paths, &kith_kernel::cost::Env::from_process(), args);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
+}
+
+/// `kith kernel permit ARGS...`: what `kith-permit`'s verbs print, with its exit codes. The hooks read their payload from stdin.
+fn print_permit(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let env = kith_kernel::permit::Env::from_process();
+    let out = kith_kernel::permit::run(&env, &kernel, args, &mut std::io::stdin().lock());
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
+}
+
+fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let ctx = kith_kernel::project::Ctx {
+        state: kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state,
+        home,
+        cwd: std::env::current_dir().unwrap_or_default(),
+        guest: kith_kernel::project::is_guest(|n| std::env::var_os(n)),
+    };
+    let out = kith_kernel::project::run(&ctx, args);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
@@ -1417,8 +1469,14 @@ async fn main() -> Result<()> {
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
             }
+            if let KernelCmd::ProjectId { kernel, args } = cmd {
+                std::process::exit(project_id_cmd(kernel, &args));
+            }
             if let KernelCmd::Pkg { kernel, args } = cmd {
                 std::process::exit(pkg_cmd::run(kernel, &args));
+            }
+            if let KernelCmd::Permit { kernel, args } = cmd {
+                std::process::exit(print_permit(kernel, &args));
             }
             through_core(|| -> Result<()> {
                 match cmd {
@@ -1493,7 +1551,9 @@ async fn main() -> Result<()> {
                     | KernelCmd::Cost { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
+                    | KernelCmd::ProjectId { .. }
                     | KernelCmd::Pkg { .. }
+                    | KernelCmd::Permit { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }

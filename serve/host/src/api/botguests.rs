@@ -379,14 +379,28 @@ async fn revoke_bot_invite(hub: &Arc<Hub>, caller: &Caller, invite_id: &str) -> 
         return Err(NotAllowed("That isn't one of your bots' invites.".into()).into());
     };
     let revoked = hub.store.revoke_bot_invite(invite_id)?;
+    let mut mirror = None;
     if revoked {
         botsync::revoke_invite_in_cloud(hub, invite_id).await;
         // A bot that never joined is gone with its only invite.
         if bot.state == BotState::Invited && !hub.store.bot_invites_of(&bot.bot_id)?.iter().any(|i| i.open(now_ms())) {
-            end_bot(hub, &bot.bot_id, BotState::Revoked, actor_kind(&actor), &actor_label(hub, caller).await).await;
+            mirror =
+                end_bot_noted(hub, &bot.bot_id, BotState::Revoked, actor_kind(&actor), &actor_label(hub, caller).await)
+                    .await;
         }
     }
-    Ok(json!({"revoked": revoked}))
+    Ok(revoked_answer(revoked, mirror))
+}
+
+/// The `Revoked` answer: coreUpdated and authUpdated only when this call sent something to kith-auth, so a repeat
+/// remove or a host without kith-auth says nothing it didn't check.
+pub(super) fn revoked_answer(revoked: bool, mirror: Option<Mirror>) -> Value {
+    match mirror {
+        Some(Mirror::Updated) => json!({"revoked": revoked, "coreUpdated": true}),
+        Some(Mirror::CoreKept) => json!({"revoked": revoked, "coreUpdated": false}),
+        Some(Mirror::AuthFailed) => json!({"revoked": revoked, "authUpdated": false}),
+        Some(Mirror::NotSent) | None => json!({"revoked": revoked}),
+    }
 }
 
 fn actor_kind(actor: &Actor) -> &'static str {
@@ -401,8 +415,9 @@ async fn revoke_bot(hub: &Arc<Hub>, caller: &Caller, bot_id: &str) -> Result<Val
     let actor = Actor::of(hub, caller)?;
     let bot = hub.store.bot_guest(bot_id).filter(|g| actor.manages(g));
     let bot = bot.ok_or_else(|| NotAllowed("That isn't one of your bots.".into()))?;
-    let ended = end_bot(hub, &bot.bot_id, BotState::Revoked, actor_kind(&actor), &actor_label(hub, caller).await).await;
-    Ok(json!({"revoked": ended}))
+    let ended =
+        end_bot_noted(hub, &bot.bot_id, BotState::Revoked, actor_kind(&actor), &actor_label(hub, caller).await).await;
+    Ok(revoked_answer(ended.is_some(), ended))
 }
 
 async fn actor_label(hub: &Hub, caller: &Caller) -> String {
@@ -604,14 +619,39 @@ fn chats_of(hub: &Hub, person: &str) -> Vec<(String, Option<String>)> {
 /// `Revoked`, or `Denied` for a request answered no. Running the steps again is harmless: only the first caller
 /// gets past the row. Returns whether this call ended it.
 pub(crate) async fn end_bot(hub: &Hub, bot_id: &str, final_state: BotState, why: &str, actor: &str) -> bool {
-    let Some(bot) = hub.store.bot_guest(bot_id) else { return false };
+    end_bot_noted(hub, bot_id, final_state, why, actor).await.is_some()
+}
+
+/// What removing a bot's person from kith-auth did to the core's copy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mirror {
+    /// kith-auth removed the person and the core took it too.
+    Updated,
+    /// kith-auth removed the person; it warned that the core's copy kept it.
+    CoreKept,
+    /// kith-auth itself failed: auth.json (the truth) may still hold the person, and the core wasn't reached.
+    AuthFailed,
+    /// No kith-auth on this host: nothing was sent.
+    NotSent,
+}
+
+/// `end_bot`, saying what the core made of it: `None` when this call didn't end the bot (nothing to mirror, so nothing
+/// missed), else what kith-auth and the core did. The host's removal stands either way (the core is a mirror).
+pub(crate) async fn end_bot_noted(
+    hub: &Hub,
+    bot_id: &str,
+    final_state: BotState,
+    why: &str,
+    actor: &str,
+) -> Option<Mirror> {
+    let bot = hub.store.bot_guest(bot_id)?;
     // First, so every in-flight check fails from here on.
     match hub.store.end_bot_guest(bot_id, final_state, why, now_ms()) {
         Ok(true) => {}
-        Ok(false) => return false,
+        Ok(false) => return None,
         Err(e) => {
             tracing::warn!(error = format!("{e:#}"), bot = bot_id, "couldn't end a bot");
-            return false;
+            return None;
         }
     }
     // A room waiting on this bot's post stops waiting: its turn ends as a pass.
@@ -639,10 +679,28 @@ pub(crate) async fn end_bot(hub: &Hub, bot_id: &str, final_state: BotState, why:
         hub.add_entry(&lane, EntryKind::Notice, hub.store.max_turn(&c.chat_bot_id), &data);
     }
     // kith-auth: the person and, with it, its memberships. Its memory folder stays (a rejoin gets it back).
+    let mut mirror = Mirror::NotSent;
     if let Some(bin) = account::bin().await {
         let _w = AUTH_WRITES.lock().await;
-        if let Err(e) = account::run(&bin, &["bot", &bot.person_id, "--rm"]).await {
-            tracing::warn!(error = format!("{e:#}"), bot = bot_id, "couldn't remove a bot's person from kith-auth");
+        match account::run_noted(&bin, &["bot", &bot.person_id, "--rm"]).await {
+            Ok((_, said)) => {
+                account::note_stderr(&bot.person_id, &said);
+                mirror = if account::core_missed(&said) { Mirror::CoreKept } else { Mirror::Updated };
+                if mirror == Mirror::CoreKept {
+                    tracing::warn!(
+                        bot = bot_id,
+                        "the core kept a removed bot's person (host and kith-auth removed it)"
+                    );
+                }
+            }
+            Err(e) => {
+                mirror = Mirror::AuthFailed;
+                tracing::warn!(
+                    error = format!("{e:#}"),
+                    bot = bot_id,
+                    "couldn't remove a bot's person from kith-auth; auth.json may still hold it"
+                );
+            }
         }
     }
     if let Some(cloud_device) = &bot.cloud_device {
@@ -657,7 +715,7 @@ pub(crate) async fn end_bot(hub: &Hub, bot_id: &str, final_state: BotState, why:
     hub.store.audit_add(actor, "", method, Some(bot_id), true);
     emit_updated(hub, bot_id);
     tracing::info!(bot = bot_id, why, "a bot guest ended");
-    true
+    Some(mirror)
 }
 
 /// Ends every live bot of `person` (their person was revoked, or their last membership is gone), and any process still

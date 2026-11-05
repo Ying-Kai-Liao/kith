@@ -47,6 +47,8 @@ PUBLIC = {
     ("lib.rs", "migrate_authority"), ("lib.rs", "AuthorityOptions"), ("lib.rs", "AuthorityReport"),
     ("lib.rs", "field:dry_run"), ("lib.rs", "field:force"), ("lib.rs", "field:changed"), ("lib.rs", "field:backup"),
     ("lib.rs", "field:lines"),
+    # `kith kernel core-call` with no daemon (the revoke stopgap before M2-23): one owner `people.*` write in an embedded core.
+    ("lib.rs", "call_authority_embedded"), ("lib.rs", "EmbeddedCall"),
     ("lib.rs", "cutover"),   # `kith kernel cutover ...` (M3-10a): argv in, lines out
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
     ("call.rs", "call"),

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "dcf2c9f6f7731c0787e76c2f7f47923ef67acab12089707b2eb1e34b1fdb6c6e";
+pub const CONTRACT_SHA256: &str = "8c73c5229c55c9757a5ac051d498a77ba8bf5e5e585e05c2bd50aacb209264ae";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -928,11 +928,15 @@ pub struct BotInviteCreated {
     pub share: String,
 }
 
-/// revoked is false when it already was.
+/// revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host, and when nothing was sent to the core (a repeat remove, no kith-auth) or kith-auth itself failed. authUpdated is false when kith-auth failed to remove the person (auth.json may still hold it); absent otherwise.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Revoked {
     pub revoked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_updated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_updated: Option<bool>,
 }
 
 /// A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host.
@@ -1817,7 +1821,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "CallAccepted", fields: &[("botId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "Proven", fields: &[("proven", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotInviteCreated", fields: &[("botId", "string"), ("inviteId", "string"), ("expiresAt", "int"), ("link", "string"), ("kithLink", "string"), ("share", "string")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Revoked", fields: &[("revoked", "bool")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Revoked", fields: &[("revoked", "bool"), ("coreUpdated", "bool?"), ("authUpdated", "bool?")], may_omit: &["coreUpdated", "authUpdated"] },
         crate::check::TypeSchema { name: "BotLimits", fields: &[("ratePerHour", "int"), ("concurrent", "int"), ("turnTimeoutS", "int?"), ("wakeProfile", "string?")], may_omit: &["turnTimeoutS", "wakeProfile"] },
         crate::check::TypeSchema { name: "BotGuest", fields: &[("botId", "string"), ("name", "string"), ("provider", "BotProvider"), ("state", "BotGuestState"), ("ownerPerson", "string?"), ("ownerName", "string?"), ("agents", "[string]"), ("limits", "BotLimits"), ("connected", "bool"), ("createdAt", "int"), ("joinedAt", "int?"), ("decidedAt", "int?"), ("decidedBy", "string?"), ("lastSeenAt", "int?"), ("revokedAt", "int?"), ("revokedWhy", "string?"), ("personId", "string?"), ("conversations", "json?")], may_omit: &["personId", "conversations"] },
         crate::check::TypeSchema { name: "BotGuests", fields: &[("bots", "[BotGuest]")], may_omit: &[] },

@@ -23,6 +23,7 @@ use crate::error::{Error, Result};
 pub(crate) mod call;
 #[cfg(test)]
 mod load;
+mod people_json;
 mod requests;
 mod revoke;
 mod store;
@@ -187,7 +188,7 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
     let mut people = Map::new();
     {
         let mut q = tx.prepare(
-            "SELECT id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider FROM people ORDER BY seq",
+            "SELECT id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider, handles FROM people ORDER BY seq",
         )?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -208,6 +209,7 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             }
             set(&mut p, "was", json(r, 8, "people.was")?);
             set(&mut p, "provider", text(r, 9)?.map(Value::String));
+            set(&mut p, "handles", json(r, 10, "people.handles")?);
             people.insert(r.get::<_, String>(0)?, Value::Object(p));
         }
     }
@@ -304,7 +306,21 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             agent_access.insert(r.get::<_, String>(0)?, Value::Object(row));
         }
     }
+    // store.rs writes people, memberships, presets, invites, retired, agent_access, the budget, and the snapshot's
+    // `grants` and `profiles` (person and `with` only, for `forget`); it does not write a profile's variables, `browser`,
+    // `handles_stale` or `secrets_stale`. Lane B's tables are filled by the import.
     let mut auth = Map::new();
+    // Lane B's tables, in auth.json's shape: the checks that read who owns or is lent a login or holds a grant
+    // (`retired`, `person --rm --unused`), and the rollback, which writes them back whole. Left out when empty; the
+    // rules read neither.
+    let profiles = read_profiles(tx)?;
+    if !profiles.is_empty() {
+        auth.insert("profiles".to_owned(), Value::Object(profiles));
+    }
+    let grants = read_grants(tx)?;
+    if !grants.is_empty() {
+        auth.insert("grants".to_owned(), Value::Object(grants));
+    }
     auth.insert("agent_access".to_owned(), Value::Object(agent_access));
     auth.insert("invites".to_owned(), Value::Object(invites));
     auth.insert("retired".to_owned(), Value::Object(retired));
@@ -322,6 +338,26 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             e => Err(e),
         })?;
+    // Set by m0015 on a database imported before `people.handles` existed; a re-import clears it. Only `person --rm
+    // --unused` reads it (a NULL handles may then hide a person's handles).
+    let stale = tx
+        .query_row(
+            "SELECT 1 FROM authority_settings WHERE key = 'handles_stale'",
+            [],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if stale {
+        auth.insert("handles_stale".to_owned(), Value::Bool(true));
+    }
+    // Set by m0022 on a database that had people before the import filled lane B's tables; a re-import clears it. The
+    // checks that read `profiles` and `grants` refuse while it is set, and a rollback keeps the old copy's.
+    let secrets_stale = tx
+        .query_row("SELECT 1 FROM secret_stale", [], |_| Ok(()))
+        .is_ok();
+    if secrets_stale {
+        auth.insert("secrets_stale".to_owned(), Value::Bool(true));
+    }
     if let Some(cap) = cap {
         auth.insert(
             "owner_bots_budget".to_owned(),
@@ -329,4 +365,57 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
         );
     }
     Ok(Value::Object(auth))
+}
+
+/// `profiles` of auth.json from `secret_profiles`: `person`, `with` (the people it is lent to), `browser`, and each
+/// variable's source (`secret_vars`; a reference such as `keychain:..`, never a value).
+fn read_profiles(tx: &Connection) -> Result<Map<String, Value>> {
+    let mut out = Map::new();
+    let mut q =
+        tx.prepare("SELECT profile, person, lent, browser FROM secret_profiles ORDER BY profile")?;
+    let mut rows = q.query([])?;
+    while let Some(r) = rows.next()? {
+        let mut p = Map::new();
+        set(&mut p, "person", text(r, 1)?.map(Value::String));
+        set(&mut p, "with", json(r, 2, "secret_profiles.lent")?);
+        set(&mut p, "browser", text(r, 3)?.map(Value::String));
+        out.insert(r.get::<_, String>(0)?, Value::Object(p));
+    }
+    let mut q = tx.prepare("SELECT profile, var, source FROM secret_vars ORDER BY profile, var")?;
+    let mut rows = q.query([])?;
+    while let Some(r) = rows.next()? {
+        let (profile, var, source): (String, String, String) = (r.get(0)?, r.get(1)?, r.get(2)?);
+        // A variable of a profile that has no row (the tables carry no foreign key) is not shown.
+        if let Some(Value::Object(p)) = out.get_mut(&profile) {
+            p.insert(var, Value::String(source));
+        }
+    }
+    Ok(out)
+}
+
+/// `grants` of auth.json from `secret_grants`: agent (or `agent@person`) -> service -> profile. A list of profiles
+/// keeps its order. A list of one reads back as that one profile: `kith-auth` answers both the same (`grant_list`).
+fn read_grants(tx: &Connection) -> Result<Map<String, Value>> {
+    let mut out = Map::new();
+    let mut q = tx.prepare(
+        "SELECT agent, service, profile FROM secret_grants ORDER BY agent, service, seq",
+    )?;
+    let mut rows = q.query([])?;
+    while let Some(r) = rows.next()? {
+        let (agent, service, profile): (String, String, String) = (r.get(0)?, r.get(1)?, r.get(2)?);
+        let Value::Object(by_service) = out
+            .entry(agent)
+            .or_insert_with(|| Value::Object(Map::new()))
+        else {
+            continue;
+        };
+        match by_service.get_mut(&service) {
+            None => {
+                by_service.insert(service, Value::String(profile));
+            }
+            Some(Value::Array(list)) => list.push(Value::String(profile)),
+            Some(first) => *first = Value::Array(vec![first.clone(), Value::String(profile)]),
+        }
+    }
+    Ok(out)
 }

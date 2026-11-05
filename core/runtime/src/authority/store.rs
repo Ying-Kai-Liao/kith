@@ -103,7 +103,7 @@ fn truthy(v: Option<&Value>) -> bool {
 
 /// Stores what differs between the two values. Rows are matched by their key, so a changed person keeps its `seq` (the
 /// order `canonical` and `owner` read), and a new one goes last, where `kith-auth` appends it.
-fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
+pub(super) fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
     let (old, new) = (table(before, "people"), table(after, "people"));
     for id in old.keys().filter(|k| !new.contains_key(*k)) {
         conn.execute("DELETE FROM people WHERE id = ?1", [id])?;
@@ -120,17 +120,18 @@ fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
         let (name, lang, tz) = (text(p, "name")?, text(p, "lang")?, text(p, "tz")?);
         let (bot_of, provider, was) = (text(p, "bot_of")?, text(p, "provider")?, json(p, "was"));
         let owner = i64::from(truthy(p.get("owner")));
+        let handles = json(p, "handles");
         if old.contains_key(id) {
             conn.execute(
                 "UPDATE people SET name = ?2, lang = ?3, tz = ?4, owner = ?5, bot_of = ?6, revoked = ?7, \
-                 revoked_at = ?8, was = ?9, provider = ?10 WHERE id = ?1",
-                params![id, name, lang, tz, owner, bot_of, i64::from(revoked), at, was, provider],
+                 revoked_at = ?8, was = ?9, provider = ?10, handles = ?11 WHERE id = ?1",
+                params![id, name, lang, tz, owner, bot_of, i64::from(revoked), at, was, provider, handles],
             )?;
         } else {
             conn.execute(
-                "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![id, name, lang, tz, owner, bot_of, i64::from(revoked), at, was, provider],
+                "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider, handles) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![id, name, lang, tz, owner, bot_of, i64::from(revoked), at, was, provider, handles],
             )?;
         }
     }
@@ -221,6 +222,64 @@ fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
                 params![id, r.get("at").and_then(Value::as_i64)],
             )?;
         }
+    }
+
+    // same row shape as `load` makes from auth.json
+    let (old, new) = (table(before, "agent_access"), table(after, "agent_access"));
+    for agent in old.keys().filter(|k| !new.contains_key(*k)) {
+        conn.execute("DELETE FROM agent_access WHERE agent = ?1", [agent])?;
+    }
+    for (agent, r) in new {
+        if old.get(agent) != Some(r) {
+            conn.execute(
+                "INSERT OR REPLACE INTO agent_access (agent, domains, since, by) VALUES (?1, ?2, ?3, ?4)",
+                params![agent, json(r, "domains"), json(r, "since"), json(r, "by")],
+            )?;
+        }
+    }
+
+    // lane B's tables: only what the core's writes change (`forget` drops grants and `with` entries). A profile's
+    // variables and browser stay as they are; a grant list keeps its order in `seq`.
+    let (old, new) = (table(before, "grants"), table(after, "grants"));
+    for agent in old
+        .keys()
+        .chain(new.keys().filter(|k| !old.contains_key(*k)))
+    {
+        if old.get(agent) == new.get(agent) {
+            continue;
+        }
+        conn.execute("DELETE FROM secret_grants WHERE agent = ?1", [agent])?;
+        for (service, v) in new.get(agent).map(table_of).into_iter().flatten() {
+            let profiles: Vec<&Value> = match v {
+                Value::Array(list) => list.iter().collect(),
+                one => vec![one],
+            };
+            for (seq, profile) in profiles.into_iter().filter_map(Value::as_str).enumerate() {
+                conn.execute(
+                    "INSERT OR REPLACE INTO secret_grants (agent, service, profile, seq) VALUES (?1, ?2, ?3, ?4)",
+                    params![agent, service, profile, i64::try_from(seq).unwrap_or(i64::MAX)],
+                )?;
+            }
+        }
+    }
+    let (old, new) = (table(before, "profiles"), table(after, "profiles"));
+    // no verb removes a profile, and the store writes none of a profile's variables (the snapshot reads them, `secret_vars` is not its to delete): refuse, don't half-delete
+    if let Some(name) = old.keys().find(|k| !new.contains_key(*k)) {
+        return Err(bad(
+            "profiles",
+            format!("a profile cannot be removed through the core yet ('{name}')"),
+        ));
+    }
+    for (name, p) in new {
+        let same = |o: &Value| o.get("person") == p.get("person") && o.get("with") == p.get("with");
+        if old.get(name).is_some_and(same) {
+            continue;
+        }
+        conn.execute(
+            "INSERT INTO secret_profiles (profile, person, lent) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(profile) DO UPDATE SET person = excluded.person, lent = excluded.lent",
+            params![name, text(p, "person")?, json(p, "with")],
+        )?;
     }
 
     match (
