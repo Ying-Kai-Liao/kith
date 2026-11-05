@@ -1184,7 +1184,17 @@ fn usage(verb: &str) -> String {
     }
 }
 
+/// `kith-auth`'s own usage text (`kith-auth -h`), printed on stdout with exit 0.
+const HELP: &str = include_str!("secrets/usage.txt");
+
 fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
+    if matches!(verb, "-h" | "--help") {
+        return Ok(Outcome {
+            stdout: HELP.to_owned(),
+            stderr: String::new(),
+            code: 0,
+        });
+    }
     if !matches!(verb, "may" | "resolve") {
         return Err(Die {
             msg: format!("unknown command: {verb} (kith-auth --help)"),
