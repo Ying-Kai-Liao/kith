@@ -361,7 +361,9 @@ pub fn write(file: &Path, s: &Map) -> std::io::Result<()> {
         let mut f = super::create_new(&tmp, 0o666)?;
         f.write_all((pyjson::dumps_pretty(&Value::Object(s.clone())) + "\n").as_bytes())?;
         f.sync_all()?;
-        std::fs::rename(&tmp, file)
+        std::fs::rename(&tmp, file)?;
+        // the rename itself must survive a crash too (as kith_settings.py does)
+        std::fs::File::open(dir)?.sync_all()
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);

@@ -10,7 +10,8 @@
 //! (flock, as Python) and replace the file atomically.
 //!
 //! Where the Python would crash with a traceback (a settings value that is a list of numbers printed with `KEY AGENT`, a
-//! caps file that is not UTF-8) this answers a short line and exit 1.
+//! caps file that is not UTF-8) this answers a short line and exit 1; a caps file that is not UTF-8 counts as a reader
+//! (`reads_others` true), never as `reads_others: false`.
 #![allow(clippy::cast_possible_truncation, clippy::float_cmp)]
 
 mod pyval;
@@ -90,7 +91,7 @@ impl Env {
         Env {
             agent_run: ["KITH_ASK_ID", "KITH_AGENT", "CLAUDE_CODE_SESSION_ID"]
                 .iter()
-                .any(|k| std::env::var(k).is_ok_and(|v| !v.is_empty())),
+                .any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty())),
         }
     }
 }
@@ -501,7 +502,12 @@ fn reads_others(caps_file: &str) -> bool {
         return true;
     };
     // `^reads_others: *false\b` with re.M
-    !String::from_utf8_lossy(&bytes).split('\n').any(|line| {
+    // A file that is not UTF-8 makes Python crash; here it takes the conservative answer (a reader), so it can never
+    // be what lets `reads_others: false` be found.
+    let Ok(text) = String::from_utf8(bytes) else {
+        return true;
+    };
+    !text.split('\n').any(|line| {
         line.strip_prefix("reads_others:")
             .map(|r| r.trim_start_matches(' '))
             .and_then(|r| r.strip_prefix("false"))

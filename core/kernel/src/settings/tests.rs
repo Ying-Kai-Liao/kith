@@ -123,3 +123,19 @@ fn python_text() {
     assert_eq!(pyval::float(" 1_000 "), Some(1000.0));
     assert_eq!(pyval::float("1__0"), None);
 }
+
+/// The bytes a write leaves are the bytes Python's `json.dumps(s, indent=2) + "\n"` leaves: key order, `\u` escapes for
+/// non-ASCII, and the float spellings (`1.5e-07`, `2.0`, `1e+22`).
+#[test]
+fn write_bytes_are_pythons() {
+    let (root, _) = world("bytes", None);
+    let text = r#"{"zeta":1,"agents":{"é☃":{"limit":1.5e-7,"cap":2.0,"big":1e22}},"alpha":[1,0.1]}"#;
+    let serde_json::Value::Object(m) = serde_json::from_str::<serde_json::Value>(text).unwrap()
+    else {
+        panic!("not an object");
+    };
+    let file = root.join("settings.json");
+    crate::accounts::settings::write(&file, &m).unwrap();
+    let want = "{\n  \"zeta\": 1,\n  \"agents\": {\n    \"\\u00e9\\u2603\": {\n      \"limit\": 1.5e-07,\n      \"cap\": 2.0,\n      \"big\": 1e+22\n    }\n  },\n  \"alpha\": [\n    1,\n    0.1\n  ]\n}\n";
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), want);
+}

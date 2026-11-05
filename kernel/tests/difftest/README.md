@@ -144,7 +144,7 @@ that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never
 `call_model`, `accounts`, `pin`, `limit AGENT`, `delegation.chain_cost_cap_usd`, `cap`, `reads-others`) against no file, an empty or
 malformed one, old-format keys, retired modes, explicit `[]` accounts and invalid values, and the writes (`set permission_mode|call_model|at_limit`,
 `set limit`, `set delegation.chain_cost_cap_usd`, with and without `--json`, on files that can and cannot be used). A case's last
-snapshot is the settings file itself, so every write is compared byte for byte (as data, keys in file order are not compared; the
+snapshot is the settings file itself, so every write is compared as parsed JSON, not byte for byte (keys in file order are not compared; the unit test `write_bytes_are_pythons` holds the exact bytes, and the
 unit tests and `write-keeps-key-order` hold the order). The cases are `needs: rust` with `program` set (`lib/kith_settings.py` against
 `{BIN} kernel settings --kernel {KERNEL}`), not `unswitched`: the Rust side exists, only the switch (a `settings` line in `lib/core-switched.txt`) is not
 made. Case names differ by more than case (the facet files are named after them and macOS folds case).
