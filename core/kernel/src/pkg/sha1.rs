@@ -19,9 +19,9 @@ pub fn hex(data: &[u8]) -> String {
         msg.push(0);
     }
     msg.extend_from_slice(&((data.len() as u64) * 8).to_be_bytes());
-    for block in msg.chunks_exact(64) {
+    for block in msg.chunks(64) {
         let mut w = [0u32; 80];
-        for (i, word) in block.chunks_exact(4).enumerate() {
+        for (i, word) in block.chunks(4).enumerate() {
             w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
         }
         for i in 16..80 {
