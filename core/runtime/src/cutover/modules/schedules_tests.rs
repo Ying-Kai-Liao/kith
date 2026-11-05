@@ -679,3 +679,158 @@ fn registered_but_never_stepped_the_module_changes_nothing() {
     assert_eq!(std::fs::read(w.mel_jobs()).unwrap(), before);
     assert!(!Path::new(&w.state_file()).exists());
 }
+
+fn ids(jobs: &[Value]) -> Vec<String> {
+    jobs.iter()
+        .map(|j| j["id"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn a_routine_that_changes_its_trigger_count_or_agent_leaves_no_stale_job() {
+    let w = world(false);
+    let reg = w.reg();
+    let mut core = w.core();
+    reg[0].import(&w.env, Some(&mut core), opts()).unwrap();
+    // 1 -> 2 triggers: r1 becomes r1-1 and r1-2, and the old r1 goes.
+    let mut v = w.serve_routines();
+    v["routines"][0]["triggers"] = json!([cron(), {"type": "interval", "seconds": 600}]);
+    w.set_serve_routines(&v);
+    let diffs = reg[0].same_answer(&w.env, core.conn()).unwrap();
+    assert!(
+        diffs.iter().any(|d| d.contains("mel/r1:")),
+        "the old job is a difference: {diffs:?}"
+    );
+    reg[0].import(&w.env, Some(&mut core), opts()).unwrap();
+    assert_eq!(ids(&w.jobs()), ["digest", "r2-1", "r2-2", "r1-1", "r1-2"]);
+    assert_eq!(
+        reg[0].same_answer(&w.env, core.conn()).unwrap(),
+        Vec::<String>::new()
+    );
+    // 2 -> 1.
+    let mut v = w.serve_routines();
+    v["routines"][0]["triggers"] = json!([cron()]);
+    w.set_serve_routines(&v);
+    reg[0].import(&w.env, Some(&mut core), opts()).unwrap();
+    assert_eq!(ids(&w.jobs()), ["digest", "r2-1", "r2-2", "r1"]);
+    // A routine that is only refused this round keeps its jobs: r1's bot becomes a host-native one.
+    let mut v = w.serve_routines();
+    v["routines"][0]["botId"] = json!("b2");
+    w.set_serve_routines(&v);
+    reg[0].import(&w.env, Some(&mut core), opts()).unwrap();
+    assert!(ids(&w.jobs()).contains(&"r1".to_owned()));
+    let mut v = w.serve_routines();
+    v["routines"][0]["botId"] = json!("b1");
+    w.set_serve_routines(&v);
+    // The bot moves to another agent: the job and its key go from mel to ola.
+    let ola = w.env.machine.join("agents/ola");
+    std::fs::create_dir_all(ola.join("role")).unwrap();
+    std::fs::write(ola.join("role/agent.md"), "---\nname: ola\n---\n").unwrap();
+    Connection::open(&w.serve)
+        .unwrap()
+        .execute(
+            "INSERT INTO bots (id, rev, config) VALUES ('b3', 1, ?1)",
+            [json!({"id": "b3", "hq_agent": "ola"}).to_string()],
+        )
+        .unwrap();
+    let mut v = w.serve_routines();
+    v["routines"][1]["botId"] = json!("b3");
+    w.set_serve_routines(&v);
+    reg[0].import(&w.env, Some(&mut core), opts()).unwrap();
+    assert_eq!(ids(&w.jobs()), ["digest", "r1"]);
+    let ola_jobs: Vec<Value> =
+        serde_json::from_slice(&std::fs::read(ola.join("jobs.json")).unwrap()).unwrap();
+    assert_eq!(ids(&ola_jobs), ["r2-1", "r2-2"]);
+    drop(core);
+    assert_eq!(
+        w.secret(&crate::schedules::hook_key_name("mel", "r2-1")),
+        None
+    );
+    assert_eq!(
+        w.secret(&crate::schedules::hook_key_name("ola", "r2-1"))
+            .as_deref(),
+        Some(SECRET)
+    );
+}
+
+#[test]
+fn a_check_compares_the_key_without_showing_it() {
+    let w = world(false);
+    let reg = w.reg();
+    let mut core = w.core();
+    reg[0].import(&w.env, Some(&mut core), opts()).unwrap();
+    let mut v = w.serve_routines();
+    v["routines"][1]["webhookKey"] = json!("the-host-rotated-its-key");
+    w.set_serve_routines(&v);
+    let diffs = reg[0].same_answer(&w.env, core.conn()).unwrap().join("\n");
+    assert!(diffs.contains("not the host's"), "{diffs}");
+    assert!(
+        !diffs.contains(SECRET) && !diffs.contains("rotated"),
+        "{diffs}"
+    );
+}
+
+#[test]
+fn a_rollback_that_crashed_after_the_jobs_went_strands_no_key_when_run_again() {
+    let w = world(false);
+    let reg = w.reg();
+    step(&reg, &w.env, "schedules", opts()).unwrap();
+    // The crash: the jobs are already out of jobs.json, the key records are not yet deleted.
+    let jobs: Vec<Value> = w
+        .jobs()
+        .into_iter()
+        .filter(|j| j.get("routine").is_none())
+        .collect();
+    std::fs::write(w.mel_jobs(), serde_json::to_string_pretty(&jobs).unwrap()).unwrap();
+    assert!(
+        w.secret(&crate::schedules::hook_key_name("mel", "r2-1"))
+            .is_some()
+    );
+    rollback(&reg, &w.env, "schedules", opts()).unwrap();
+    assert!(
+        w.secret(&crate::schedules::hook_key_name("mel", "r2-1"))
+            .is_none()
+    );
+    assert!(state::read(&w.env.layout, "schedules").unwrap().is_none());
+}
+
+#[test]
+fn pausing_one_trigger_of_a_multi_trigger_routine_keeps_it_enabled_through_a_rollback() {
+    let w = world(false);
+    let mut v = w.serve_routines();
+    v["routines"][1]["enabled"] = json!(true);
+    w.set_serve_routines(&v);
+    let reg = w.reg();
+    step(&reg, &w.env, "schedules", opts()).unwrap();
+    let mut jobs = w.jobs();
+    for j in &mut jobs {
+        if j["id"] == "r2-1" {
+            j["paused"] = json!(true);
+        }
+    }
+    std::fs::write(w.mel_jobs(), serde_json::to_string_pretty(&jobs).unwrap()).unwrap();
+    rollback(&reg, &w.env, "schedules", opts()).unwrap();
+    assert_eq!(w.serve_routines()["routines"][1]["enabled"], true);
+}
+
+#[test]
+fn the_dry_run_leaves_serve_db_and_the_sched_state_exactly_as_they_were() {
+    let w = world(false);
+    write_state(&w, &json!({"tick": "2026-11-04T08:00", "last": {}}));
+    let (db, st) = (
+        std::fs::read(&w.serve).unwrap(),
+        std::fs::read(w.state_file()).unwrap(),
+    );
+    step(
+        &registry(),
+        &w.env,
+        "schedules",
+        Opts {
+            dry_run: true,
+            ..opts()
+        },
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(&w.serve).unwrap(), db);
+    assert_eq!(std::fs::read(w.state_file()).unwrap(), st);
+}

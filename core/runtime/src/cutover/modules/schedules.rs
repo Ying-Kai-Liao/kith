@@ -117,8 +117,9 @@ struct Plan {
     rows: Vec<Row>,
     /// Routines the import will not take, and why (one line each).
     refused: Vec<String>,
-    /// Every routine id serve.db holds that is not deleted, taken or not (for removing the jobs of a routine that is gone).
-    known: BTreeSet<String>,
+    /// The routines in `refused`: their jobs from an earlier import stay (the host still runs the routine; a refusal is
+    /// a reason to look, not to take its jobs away).
+    refused_ids: BTreeSet<String>,
     notes: Vec<String>,
 }
 
@@ -287,11 +288,9 @@ fn plan(env: &Env, mac: &str) -> Result<Plan> {
         let id = text(&r, "id").unwrap_or_default().to_owned();
         let name = text(&r, "name").unwrap_or_default();
         let who = format!("routine {name:?} ({id})");
-        if !id.is_empty() {
-            plan.known.insert(id.clone());
-        }
         if let Err(why) = routine_rows(&db, paths, &r, &id, mac, &mut plan.rows) {
             plan.refused.push(format!("{who}: {why}"));
+            plan.refused_ids.insert(id);
         }
     }
     Ok(plan)
@@ -495,15 +494,21 @@ fn verdict(jobs: &[Value], row: &Row, mac: &str) -> Verdict {
     }
 }
 
-/// Jobs this import made on `mac` whose routine serve.db no longer has.
-fn orphans(jobs: &[Value], mac: &str, known: &BTreeSet<String>) -> Vec<usize> {
+/// Jobs this import made on `mac` in `agent`'s file that no accepted routine asks for any more: its routine is gone, or
+/// has fewer triggers now (`r-2` after 2 became 1), or moved to another agent. Left alone: a job of a routine that is
+/// only refused this round.
+fn orphans(jobs: &[Value], agent: &str, mac: &str, plan: &Plan) -> Vec<usize> {
     jobs.iter()
         .enumerate()
         .filter(|(_, j)| {
             text(j, "mac") == Some(mac)
                 && j.get("routine")
                     .and_then(|r| text(r, "id"))
-                    .is_some_and(|id| !known.contains(id))
+                    .is_some_and(|rid| !plan.refused_ids.contains(rid))
+                && !plan
+                    .rows
+                    .iter()
+                    .any(|r| r.agent == agent && text(j, "id") == Some(r.job.as_str()))
         })
         .map(|(i, _)| i)
         .collect()
@@ -585,7 +590,7 @@ fn apply_agent(cx: &mut Apply<'_>, agent: &str, rows: &[&Row]) -> Result<()> {
             Verdict::Refuse(why) => cx.lines.push(format!("refused {agent}/{}: {why}", row.job)),
         }
     }
-    for &i in orphans(&jobs, cx.mac, &cx.plan.known).iter().rev() {
+    for &i in orphans(&jobs, agent, cx.mac, cx.plan).iter().rev() {
         let j = jobs.remove(i);
         cx.counts.removed += 1;
         cx.removed.push((
@@ -594,7 +599,7 @@ fn apply_agent(cx: &mut Apply<'_>, agent: &str, rows: &[&Row]) -> Result<()> {
         ));
         changed = true;
         cx.lines.push(format!(
-            "{agent}/{}: job removed (its routine is gone from serve.db)",
+            "{agent}/{}: job removed (its routine is gone, or no longer asks for it)",
             text(&j, "id").unwrap_or_default()
         ));
     }
@@ -677,7 +682,7 @@ impl Module for Schedules {
             }
             let file = crate::schedules::jobs_file(paths, &a);
             if let Ok((_, jobs)) = crate::schedules::read_jobs(&env.machine, &a, &file)
-                && !orphans(&jobs, &mac, &plan.known).is_empty()
+                && !orphans(&jobs, &a, &mac, &plan).is_empty()
             {
                 visit.insert(a);
             }
@@ -788,16 +793,31 @@ impl Module for Schedules {
                     }
                     Verdict::Refuse(why) => diffs.push(format!("{agent}/{}: {why}", row.job)),
                 }
-                if row.key.is_some() && !key_record_exists(db, &agent, &row.job)? {
-                    diffs.push(format!(
-                        "{agent}/{}: the webhook key is not in the core",
-                        row.job
-                    ));
+                if let Some(want) = &row.key {
+                    if key_record_exists(db, &agent, &row.job)? {
+                        // Compared by digest; neither value is ever printed.
+                        match self.stored_key_digest(db, &agent, &row.job) {
+                            Ok(Some(d)) if d == sha_hex(want.as_bytes()) => {}
+                            Ok(_) => diffs.push(format!(
+                                "{agent}/{}: the webhook key in the core is not the host's",
+                                row.job
+                            )),
+                            Err(e) => diffs.push(format!(
+                                "{agent}/{}: the webhook key in the core cannot be read ({e})",
+                                row.job
+                            )),
+                        }
+                    } else {
+                        diffs.push(format!(
+                            "{agent}/{}: the webhook key is not in the core",
+                            row.job
+                        ));
+                    }
                 }
             }
-            for i in orphans(&jobs, &mac, &plan.known) {
+            for i in orphans(&jobs, &agent, &mac, &plan) {
                 diffs.push(format!(
-                    "{agent}/{}: a job whose routine is gone from serve.db",
+                    "{agent}/{}: a job whose routine is gone from serve.db, or no longer asks for it",
                     text(&jobs[i], "id").unwrap_or_default()
                 ));
             }
@@ -846,10 +866,19 @@ impl Module for Schedules {
             }
             write_list(&file, &jobs)?;
         }
-        // The jobs are gone, so the keys they held are: `restore_secrets` already put them back in serve.db.
-        for (agent, job) in &removed {
-            Envelope::delete(core.conn(), &crate::schedules::hook_key_name(agent, job))?;
+        // The jobs are gone, so the keys they held are: `restore_secrets` already put them back in serve.db. By prefix, not
+        // by the jobs removed just now: after a crash and a re-run those jobs are already gone, and their records must not
+        // be stranded.
+        let prefix = "routine-webhook/";
+        let mut dropped = 0;
+        for name in Envelope::list(core.conn())? {
+            if name.starts_with(prefix) && Envelope::delete(core.conn(), &name)? {
+                dropped += 1;
+            }
         }
+        lines.push(format!(
+            "schedules: deleted {dropped} webhook key record(s)"
+        ));
         lines.push(format!(
             "schedules: removed {} imported job(s) from the agents' jobs.json",
             removed.len()
@@ -878,7 +907,28 @@ impl Module for Schedules {
     }
 }
 
+fn sha_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            use std::fmt::Write as _;
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
 impl Schedules {
+    /// SHA-256 of the key stored for a job, read with an envelope of its own (the check holds only a connection).
+    fn stored_key_digest(&self, db: &Connection, agent: &str, job: &str) -> Result<Option<String>> {
+        let mut envelope = match &self.keys {
+            Some(make) => Envelope::with_store(make()),
+            None => Envelope::os()?,
+        };
+        Ok(envelope
+            .get(db, &crate::schedules::hook_key_name(agent, job))?
+            .map(|b| sha_hex(&b)))
+    }
+
     /// The job's key as the secret record hooks.rs reads. Written only when missing or different, so a re-import changes
     /// nothing. Says that it wrote, never what.
     fn put_key(&self, core: &Core, row: &Row) -> Result<Vec<String>> {
