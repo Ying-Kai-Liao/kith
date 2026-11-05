@@ -13,6 +13,9 @@
 //! 6. write the turn id into the fire row;
 //! 7. move the watermark (never backwards).
 //!
+//! A job whose `mac` names another Mac is fired on that Mac only: the tick plans nothing for it, and a webhook/event
+//! delivery or a run-now for it is refused before anything is written ([`super::not_on_this_mac`]).
+//!
 //! Only the clock is read before the transaction, and the file of jobs, the person and the revoke epoch the caller needs
 //! to hand in (`Fire`). The file is looked at again inside the transaction, under the shared `<agent>.jobs.lock`, before
 //! the index is written from it: a read that is no longer the file's is not applied (`Outcome::Stale`, nothing written),
@@ -29,7 +32,10 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 use serde_json::{Value, json};
 
 use super::sync::{self, Read, Synced};
-use super::{AgentJobs, index, mac_id, ms_of_slot, slot_of_local, slot_of_ms};
+use super::{
+    AgentJobs, index, mac_id, ms_of_slot, names_other_mac, not_on_this_mac, slot_of_local,
+    slot_of_ms,
+};
 use crate::authority;
 use crate::conversations::claims::{self, NewTurn};
 use crate::db::Core;
@@ -742,11 +748,7 @@ pub(super) fn tick(
             let id = sync::job_id(def);
             // A job that names a Mac (an imported routine, in a jobs.json that syncs between Macs) is due on that Mac and
             // on no other: nothing is planned, counted or recorded here for it.
-            if def
-                .get("mac")
-                .and_then(Value::as_str)
-                .is_some_and(|only| only != mac)
-            {
+            if names_other_mac(def, &mac) {
                 continue;
             }
             let trigger = match sync::trigger_of(def) {
@@ -976,6 +978,12 @@ fn run_now_once(
             "kith-core: schedule: {agent} has no job {job:?}"
         )));
     };
+    // Before this Mac's id is made: a refusal writes nothing.
+    if not_on_this_mac(def, &paths.machine)? {
+        return Err(Error::Refused(format!(
+            "kith-core: schedule: {agent}'s job {job:?} is not on this Mac"
+        )));
+    }
     let mac = mac_id(&paths.machine)?;
     let auth = authority::tables_within(core.conn())?;
     let person = person_of(

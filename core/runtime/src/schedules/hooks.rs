@@ -2,6 +2,9 @@
 //! keeps only the listener: it hands the raw headers and body to `schedule.fire` and the core decides everything, in
 //! this order:
 //!
+//! 0. **where**: a job that names another Mac (`mac`, set by the routines import so a synced jobs.json fires on one
+//!    Mac) answers `not-here` before the key is looked at (so it says nothing of whether one exists) and writes
+//!    nothing, this Mac's id file included. A job with no `mac` is every Mac's;
 //! 1. **who**: the job must exist and have a `webhook` or `event` trigger, its key must be set in the secrets lane (the
 //!    record [`key_name`]), and the delivery must carry that key (`Authorization: Bearer <key>`) or a GitHub-style
 //!    `X-Hub-Signature-256: sha256=<hex HMAC-SHA256(key, body)>`. Every failure here answers the same `unauthorized`,
@@ -34,7 +37,7 @@ use sha2::{Digest as _, Sha256};
 
 use super::fire::{self, Fire, Outcome, READS, no_step, outcome_json};
 use super::sync::{self, Read};
-use super::{index, mac_id, trigger_of};
+use super::{index, mac_id, not_on_this_mac, trigger_of};
 use crate::authority;
 use crate::conversations::claims;
 use crate::db::Core;
@@ -54,6 +57,8 @@ pub(super) enum Refused {
     /// passed: after it, a failure is `Gone` or a retryable error, never a permanent auth failure for a valid key.
     Unauthorized,
     Paused,
+    /// The job names another Mac. Answered before the key is looked at, so it says nothing of whether one exists.
+    NotHere,
     /// The job was removed after the proof passed. Not `Unauthorized`: the sender's key was good.
     Gone,
     Invalid(String),
@@ -64,6 +69,7 @@ impl Refused {
         match self {
             Self::Unauthorized => "unauthorized",
             Self::Paused => "paused",
+            Self::NotHere => "not-here",
             Self::Gone => "gone",
             Self::Invalid(_) => "invalid",
         }
@@ -73,6 +79,7 @@ impl Refused {
         match self {
             Self::Unauthorized => "invalid webhook key or signature".into(),
             Self::Paused => "routine is paused".into(),
+            Self::NotHere => "routine is not on this Mac".into(),
             Self::Gone => "routine no longer exists".into(),
             Self::Invalid(why) => why.clone(),
         }
@@ -391,6 +398,9 @@ pub(super) fn deliver_between(
     if !matches!(trigger, Trigger::Webhook | Trigger::Event { .. }) {
         return no(Refused::Unauthorized);
     }
+    if not_on_this_mac(def, &paths.machine)? {
+        return no(Refused::NotHere);
+    }
     let Some(key) = key_of(core, agent, job)? else {
         return no(Refused::Unauthorized);
     };
@@ -435,6 +445,10 @@ pub(super) fn deliver_between(
         let Some(def) = a.jobs.iter().find(|j| sync::job_id(j) == job) else {
             return no(Refused::Gone);
         };
+        // The file may have been synced from another Mac since the pre-check.
+        if not_on_this_mac(def, &paths.machine)? {
+            return no(Refused::NotHere);
+        }
         let auth = authority::tables_within(core.conn())?;
         let person = fire::person_of(
             def.get("person")

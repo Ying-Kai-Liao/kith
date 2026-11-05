@@ -354,14 +354,18 @@ pub fn migrate_file(ctx: &Ctx<'_>) -> std::io::Result<bool> {
 }
 
 /// The whole file, atomically (a reader never sees half of it), with the permissions a plain write would give it.
-fn write(file: &Path, s: &Map) -> std::io::Result<()> {
+pub fn write(file: &Path, s: &Map) -> std::io::Result<()> {
     let dir = file.parent().unwrap_or(Path::new("."));
     let tmp = super::temp_in(dir, "settings.json.", ".tmp");
     let result = (|| {
         let mut f = super::create_new(&tmp, 0o666)?;
         f.write_all((pyjson::dumps_pretty(&Value::Object(s.clone())) + "\n").as_bytes())?;
         f.sync_all()?;
-        std::fs::rename(&tmp, file)
+        std::fs::rename(&tmp, file)?;
+        // the rename itself must survive a crash too (as kith_settings.py does); a directory cannot be opened on Windows
+        #[cfg(unix)]
+        std::fs::File::open(dir)?.sync_all()?;
+        Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);

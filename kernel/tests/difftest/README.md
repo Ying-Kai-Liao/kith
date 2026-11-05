@@ -72,6 +72,33 @@ files with one masked name are an error), and `unswitched` (text saying why the 
 with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
 red until the verb exists. The Python replay always runs every case.
 
+### Package resolve (M5-3)
+
+`golden/pkg-resolve.json` freezes `kith-pkg resolve` (the launch path: `bin/kith` asks it for the pinned package dir) as the Python
+kernel prints and does it: usage errors, an unknown agent, `--all`, one and several packages (role layout, plain layout, hidden and
+empty folders), the snapshot (`prompt.md`, `settings.json`, `.home`, `.meta.json`, what the fingerprint skips), version pins,
+`.editing` (fresh, stale, with no good version yet), the failure ladder (checks fail with a good version to fall back to, or without
+one: an unchecked snapshot and its `.unchecked` note, then the second run), every check `problems()` makes, the fallback to the live
+folder when the snapshot itself throws, linked third-party skills fetched from a local stand-in for GitHub (`KITH_GITHUB_GIT`), a
+fetch that cannot reach its source, the commit of every good version into the agent's own repo, and the store's garbage collection.
+`resolve` is not read-only: it fetches, snapshots, moves the `.good` pointer, collects old versions and commits.
+
+How it is made hermetic:
+
+- **The kernel.** Each case copies `bin/kith-pkg` into `home/k/bin` next to a linked `lib/` and `services/`, with its own one-line
+  `PROTOCOL.md` and a stand-in `agents/scratch`, so a snapshot's `prompt.md` does not hold this checkout's protocol text. The Rust
+  side runs `kith kernel pkg --kernel home/k resolve ...`.
+- **`w.sh`.** One call: `$1` is a change to the agents made first (`-` for none, `a,b` for two; edit, break, pin, `.editing`, an old
+  store), the rest is the line. After it, the store's listing (versions counted, their hash masked) goes to the fake log, because the
+  folder names carry a fingerprint that differs per side (it hashes the agent's path and its files' mtimes).
+- **Fingerprints.** Masked in text. Cases that make several versions of one agent leave the hashed folders out of the state
+  comparison (`ignore`) and compare the listing instead; the others compare every file of the snapshot (`normalize_paths`).
+  The algorithm itself is checked by the Rust unit tests against values the Python printed.
+- **Python's own error texts.** An `invalid JSON (...)` reason is Python's `json` wording (`Expecting value: line 1 column 1 (char 0)`);
+  the Rust side takes it from `secrets::pyjson::error_of`. Git's own words in a failed fetch are masked.
+- **The one Python left.** The judging of `settings.json` allow rules against the must-ask classes (`kith_guard.must_ask_rule`)
+  stays in Python until the host moves; the Rust side calls it only when `settings.json` has rules to judge.
+
 ### Schedules (M4-0)
 
 `golden/sched.json` freezes `kith-sched` before M4 replaces it (39 cases, `unswitched`: "kith-sched has no Rust side yet"):
@@ -138,6 +165,20 @@ Not covered (no Rust side yet, `kith kernel cost` exits 2): `today|week|month|al
 and the hooks `tag` / `record`. A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
 that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`).
 
+### Settings (M5-4)
+
+`golden/settings.json` (also in `corpus/`) freezes the command line of `kernel/lib/kith_settings.py`: the reads (`KEY`, `KEY AGENT`,
+`call_model`, `accounts`, `pin`, `limit AGENT`, `delegation.chain_cost_cap_usd`, `cap`, `reads-others`) against no file, an empty or
+malformed one, old-format keys, retired modes, explicit `[]` accounts and invalid values, and the writes (`set permission_mode|call_model|at_limit`,
+`set limit`, `set delegation.chain_cost_cap_usd`, with and without `--json`, on files that can and cannot be used). A case's last
+snapshot is the settings file itself, so every write is compared as parsed JSON, not byte for byte (keys in file order are not compared; the unit test `write_bytes_are_pythons` holds the exact bytes, and the
+unit tests and `write-keeps-key-order` hold the order). The cases are `needs: rust` with `program` set (`lib/kith_settings.py` against
+`{BIN} kernel settings --kernel {KERNEL}`), not `unswitched`: the Rust side exists, only the switch (a `settings` line in `lib/core-switched.txt`) is not
+made. Case names differ by more than case (the facet files are named after them and macOS folds case).
+
+Not covered: a settings value the Python crashes on (`KEY AGENT` of a list that holds a non-string prints a traceback there, a short line
+and exit 1 here), a caps file that is not UTF-8, a JSON text only Python reads (`NaN`, `Infinity`: the Rust reader treats the file as unusable).
+
 ## Per-command summary
 
 `--summary FILE` (`-` for stdout) writes `{"commands": {"<command>": {"green": bool, "cases": {"<case>": "same" |
@@ -169,6 +210,8 @@ Add an object to a file in `corpus/` (a list per file). Fields:
 Never put a bare `kith backup`, `update` or `migrate` in a corpus line unless acting is the point of the case; `kith
 serve` must not start a host (use `help`/`status`-like lines). Everything is a throwaway home, so acting is safe, but
 launchd, the Keychain and the network are fakes only.
+
+Git noise: `.git/index`, `.git/objects/*`, `.git/hooks/*` and `.git/config` are never compared (they vary with the runner's git version and OS, not with kith); HEAD, refs and logs are. See `GIT_NOISE` in `kith-difftest`.
 
 ## Intended differences
 

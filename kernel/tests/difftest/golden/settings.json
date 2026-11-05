@@ -1,0 +1,11229 @@
+[
+ {
+  "name": "settings-read-none",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-empty",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": ""
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-malformed",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{not json"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-array",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "[1, 2]"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-rich",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"permission_mode\": \"plan\", \"plugins\": [\"a@b\", \"c@d\"], \"call_model\": \"haiku\", \"account_policy\": \"spread\", \"accounts\": [\"claude\", \"codex:x\"], \"account_cross_harness\": true, \"delegation\": {\"chain_cost_cap_usd\": 7.5}, \"agents\": {\"alpha\": {\"permission_mode\": \"acceptEdits\", \"limit\": 12.5, \"at_limit\": \"hold\", \"call_model\": \"opus\", \"accounts\": [\"codex\"], \"pin\": {\"id\": \"codex\", \"only\": true}, \"plugins\": [\"p@q\"]}, \"beta\": {\"limit\": 3, \"accounts\": []}, \"gamma\": {\"pin\": {\"id\": \"claude\"}, \"call_model\": \"own\"}, \"delta\": {\"call_model\": 5, \"plugins\": {\"k\": [1, null, true, 2.5, \"it's\"]}}, \"eps\": {\"permission_mode\": \"dontAsk\", \"limit\": 2.0}}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-retired",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"permission_mode\": \"manual\", \"agents\": {\"a\": {\"permission_mode\": \"dontAsk\"}}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-old",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"account\": \"codex\", \"backups\": [\"claude\", \"claude:work\"], \"agents\": {\"a\": {\"account\": \"claude:x\", \"backups\": []}, \"b\": {\"backups\": [\"codex\"]}}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-explicit-empty",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude\"], \"agents\": {\"a\": {\"accounts\": []}}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-bad-limit",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"a\": {\"limit\": -1}}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-bad-mode",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"permission_mode\": \"nope\"}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-bad-plugins",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": \"x\"}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-bad-cap",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 0}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-cap-none",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": \"none\"}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-cap-int",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 12}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode"
+   ],
+   [
+    "plugins"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "account_policy"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "pin"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ],
+   [
+    "permission_mode",
+    "alpha"
+   ],
+   [
+    "accounts",
+    "alpha"
+   ],
+   [
+    "call_model",
+    "alpha"
+   ],
+   [
+    "pin",
+    "alpha"
+   ],
+   [
+    "limit",
+    "alpha"
+   ],
+   [
+    "plugins",
+    "alpha"
+   ],
+   [
+    "account_policy",
+    "alpha"
+   ],
+   [
+    "permission_mode",
+    "beta"
+   ],
+   [
+    "accounts",
+    "beta"
+   ],
+   [
+    "call_model",
+    "beta"
+   ],
+   [
+    "pin",
+    "beta"
+   ],
+   [
+    "limit",
+    "beta"
+   ],
+   [
+    "plugins",
+    "beta"
+   ],
+   [
+    "account_policy",
+    "beta"
+   ],
+   [
+    "permission_mode",
+    "gamma"
+   ],
+   [
+    "accounts",
+    "gamma"
+   ],
+   [
+    "call_model",
+    "gamma"
+   ],
+   [
+    "pin",
+    "gamma"
+   ],
+   [
+    "limit",
+    "gamma"
+   ],
+   [
+    "plugins",
+    "gamma"
+   ],
+   [
+    "account_policy",
+    "gamma"
+   ],
+   [
+    "permission_mode",
+    "delta"
+   ],
+   [
+    "accounts",
+    "delta"
+   ],
+   [
+    "call_model",
+    "delta"
+   ],
+   [
+    "pin",
+    "delta"
+   ],
+   [
+    "limit",
+    "delta"
+   ],
+   [
+    "plugins",
+    "delta"
+   ],
+   [
+    "account_policy",
+    "delta"
+   ],
+   [
+    "permission_mode",
+    "eps"
+   ],
+   [
+    "accounts",
+    "eps"
+   ],
+   [
+    "call_model",
+    "eps"
+   ],
+   [
+    "pin",
+    "eps"
+   ],
+   [
+    "limit",
+    "eps"
+   ],
+   [
+    "plugins",
+    "eps"
+   ],
+   [
+    "account_policy",
+    "eps"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "pin",
+    "a"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "plugins",
+    "a"
+   ],
+   [
+    "account_policy",
+    "a"
+   ],
+   [
+    "permission_mode",
+    "b"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "call_model",
+    "b"
+   ],
+   [
+    "pin",
+    "b"
+   ],
+   [
+    "limit",
+    "b"
+   ],
+   [
+    "plugins",
+    "b"
+   ],
+   [
+    "account_policy",
+    "b"
+   ],
+   [
+    "permission_mode",
+    "nobody"
+   ],
+   [
+    "accounts",
+    "nobody"
+   ],
+   [
+    "call_model",
+    "nobody"
+   ],
+   [
+    "pin",
+    "nobody"
+   ],
+   [
+    "limit",
+    "nobody"
+   ],
+   [
+    "plugins",
+    "nobody"
+   ],
+   [
+    "account_policy",
+    "nobody"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-caps",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/caps-false.yaml",
+    "text": "name: x\nreads_others: false\n"
+   },
+   {
+    "write": "home/caps-true.yaml",
+    "text": "reads_others: true\n"
+   },
+   {
+    "write": "home/caps-none.yaml",
+    "text": "name: x\n"
+   },
+   {
+    "write": "home/caps-falsey.yaml",
+    "text": "reads_others: falsey\n"
+   },
+   {
+    "write": "home/caps-spaces.yaml",
+    "text": "reads_others:   false # c\n"
+   },
+   {
+    "write": "home/caps-indented.yaml",
+    "text": "  reads_others: false\n"
+   },
+   {
+    "write": "home/caps-mid.yaml",
+    "text": "a: 1\nreads_others: false\nb: 2\n"
+   },
+   {
+    "write": "home/caps-underscore.yaml",
+    "text": "reads_others: false_\n"
+   }
+  ],
+  "run": [
+   [
+    "reads-others",
+    "{HOME}/caps-false.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-false.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-false.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-false.yaml"
+   ],
+   [
+    "reads-others",
+    "{HOME}/caps-falsey.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-falsey.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-falsey.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-falsey.yaml"
+   ],
+   [
+    "reads-others",
+    "{HOME}/caps-indented.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-indented.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-indented.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-indented.yaml"
+   ],
+   [
+    "reads-others",
+    "{HOME}/caps-mid.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-mid.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-mid.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-mid.yaml"
+   ],
+   [
+    "reads-others",
+    "{HOME}/caps-none.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-none.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-none.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-none.yaml"
+   ],
+   [
+    "reads-others",
+    "{HOME}/caps-spaces.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-spaces.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-spaces.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-spaces.yaml"
+   ],
+   [
+    "reads-others",
+    "{HOME}/caps-true.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-true.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-true.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-true.yaml"
+   ],
+   [
+    "reads-others",
+    "{HOME}/caps-underscore.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-underscore.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-underscore.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-underscore.yaml"
+   ],
+   [
+    "reads-others",
+    "{HOME}/caps-missing.yaml"
+   ],
+   [
+    "cap",
+    "bypassPermissions",
+    "{HOME}/caps-missing.yaml"
+   ],
+   [
+    "cap",
+    "auto",
+    "{HOME}/caps-missing.yaml"
+   ],
+   [
+    "cap",
+    "plan",
+    "{HOME}/caps-missing.yaml"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-usage",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [],
+  "run": [
+   [],
+   [
+    "bogus"
+   ],
+   [
+    "-h"
+   ],
+   [
+    "--help"
+   ],
+   [
+    "permission_mode",
+    "a",
+    "b"
+   ],
+   [
+    "set"
+   ],
+   [
+    "set",
+    "x"
+   ],
+   [
+    "set",
+    "limit",
+    "a"
+   ],
+   [
+    "limit"
+   ],
+   [
+    "cap",
+    "auto"
+   ],
+   [
+    "--json"
+   ],
+   [
+    "pin",
+    "a",
+    "b"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "b",
+    "c"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-unsupported",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "auto"
+   ],
+   [
+    "set",
+    "at_limit",
+    "ask"
+   ],
+   [
+    "set",
+    "plugins",
+    "a",
+    "b"
+   ],
+   [
+    "set",
+    "accounts",
+    "a",
+    "b"
+   ],
+   [
+    "set",
+    "limit",
+    "a"
+   ],
+   [
+    "set",
+    "bogus",
+    "a",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-auto",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "auto"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-default",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "default"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-acceptEdits",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "acceptEdits"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-plan",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-bypassPermissions",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "bypassPermissions"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-forget",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    ""
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-manual",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "manual"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-dontAsk",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "dontAsk"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-nope",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "nope"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-new-agent",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "z",
+    "plan"
+   ],
+   [
+    "permission_mode",
+    "z"
+   ],
+   [
+    "plugins"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-no-file",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "z",
+    "plan"
+   ],
+   [
+    "permission_mode",
+    "z"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-forget-unknown",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "zz",
+    ""
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-mode-json",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "auto",
+    "--json"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "auto",
+    "--json"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "",
+    "--json"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "x",
+    "--json"
+   ],
+   [
+    "--json",
+    "set",
+    "permission_mode",
+    "b",
+    "plan"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-sonnet",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "sonnet"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-sonnet",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "sonnet"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-haiku",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "haiku"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-haiku",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "haiku"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-opus",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "opus"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-opus",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "opus"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-opus_1m_",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "opus[1m]"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-opus_1m_",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "opus[1m]"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-claude-sonnet-5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "claude-sonnet-5"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-claude-sonnet-5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "claude-sonnet-5"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-claude-opus-4.5_1m_",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "claude-opus-4.5[1m]"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-claude-opus-4.5_1m_",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "claude-opus-4.5[1m]"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-own",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "own"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-own",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "own"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-default",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "default"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-default",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "default"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-empty",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    ""
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-empty",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    ""
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-gpt-5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "gpt-5"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-gpt-5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "gpt-5"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-sonnet-caps",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "Sonnet"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-sonnet-caps",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "Sonnet"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-claude-",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "claude-"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-claude-",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "claude-"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-default_1m_",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "default[1m]"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-default_1m_",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "default[1m]"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-agent-claude-x-caps",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "claude-X"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-global-claude-x-caps",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "claude-X"
+   ],
+   [
+    "call_model"
+   ],
+   [
+    "call_model",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-call-model-json",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "a",
+    "opus",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "a",
+    "opus",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "a",
+    "default",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "a",
+    "bad",
+    "--json"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-at-limit-ask",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "at_limit",
+    "a",
+    "ask"
+   ],
+   [
+    "limit",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-at-limit-tell",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "at_limit",
+    "a",
+    "tell"
+   ],
+   [
+    "limit",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-at-limit-hold",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "at_limit",
+    "a",
+    "hold"
+   ],
+   [
+    "limit",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-at-limit-forget",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "at_limit",
+    "a",
+    ""
+   ],
+   [
+    "limit",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-at-limit-never",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "at_limit",
+    "a",
+    "never"
+   ],
+   [
+    "limit",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-at-limit-json",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "at_limit",
+    "a",
+    "tell",
+    "--json"
+   ],
+   [
+    "set",
+    "at_limit",
+    "a",
+    "nope",
+    "--json"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-usd5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "$5"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-2.5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "2.5"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-0.125",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "0.125"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-0.135",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "0.135"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-1e3",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "1e3"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-12.345",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "12.345"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-1_000",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "1_000"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-sp7sp",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    " 7 "
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-usdsp7",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "$ 7"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-none",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "none"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-none-caps",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "NONE"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-off",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "off"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-0",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "0"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-empty",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    ""
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-0.0",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "0.0"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit--3",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "-3"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-abc",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "abc"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-nan",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "nan"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-inf",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "inf"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-1e7",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "1e7"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-9999999",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "9999999"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-itqs",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "it's"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-+4",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "+4"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-.5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    ".5"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-5.",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5."
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-0.001",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "0.001"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "limit",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-new-agent",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "z",
+    "10"
+   ],
+   [
+    "limit",
+    "z"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-forget-unknown",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "zz",
+    "none"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-forget-last-key",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"a\": {\"limit\": 3}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "none"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-no-file",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "limit",
+    "a",
+    "none"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-json",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "9",
+    "--json"
+   ],
+   [
+    "set",
+    "limit",
+    "a",
+    "9.0",
+    "--json"
+   ],
+   [
+    "set",
+    "limit",
+    "a",
+    "none",
+    "--json"
+   ],
+   [
+    "set",
+    "limit",
+    "a",
+    "none",
+    "--json"
+   ],
+   [
+    "set",
+    "limit",
+    "a",
+    "x",
+    "--json"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "5"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-usd2.5",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "$2.5"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-0.12345",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "0.12345"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-1e3",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "1e3"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-none",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "none"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-off",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "off"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-default",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "default"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-empty",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    ""
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-0",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "0"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap--1",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "-1"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-abc",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "abc"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-3.0",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3.0"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-99999.99999",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "99999.99999"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-forget-last-key",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 3}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "default"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-no-file",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "default"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-agent-run-kith_ask_id",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": "x",
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "4"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-agent-run-kith_agent",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": "x",
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "4"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-agent-run-claude_code_session_id",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": "x"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "4"
+   ],
+   [
+    "delegation.chain_cost_cap_usd"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-cap-empty-env-is-owner",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": "",
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "4"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-set-limit-agent-run-ok",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": "x",
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "4"
+   ],
+   [
+    "limit",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-empty",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": ""
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-malformed",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{not json"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-truncated",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"a\": "
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-extra",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{} x"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-array",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "[1]"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-limit",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"a\": {\"limit\": \"x\"}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-agents",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": []}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-agent-entry",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"a\": 1}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-plugins",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [1]}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-mode",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"a\": {\"permission_mode\": \"x\"}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-policy",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"account_policy\": \"x\"}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-pin",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"a\": {\"pin\": {\"id\": \"\"}}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-top-pin",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"pin\": {\"id\": \"a\"}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-accounts",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": \"x\"}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-account",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"account\": \"\"}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-cross",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"account_cross_harness\": 1}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-cap",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": \"x\"}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-delegation",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": []}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-at-limit",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"at_limit\": \"x\"}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-limit-float",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"limit\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-limit-list",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"a\": {\"limit\": [1]}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-bad-at-limit-q",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"agents\": {\"a\": {\"at_limit\": \"it's\"}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "plan",
+    "--json"
+   ],
+   [
+    "set",
+    "call_model",
+    "x"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-refused-dir",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith/settings.json"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-old-limit",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"account\": \"codex\", \"backups\": [\"claude\", \"claude:work\"], \"permission_mode\": \"manual\", \"agents\": {\"a\": {\"account\": \"claude:x\", \"backups\": [], \"permission_mode\": \"dontAsk\"}, \"b\": {\"backups\": [\"codex\"]}, \"c\": {\"account\": \"codex\"}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "5"
+   ],
+   [
+    "accounts"
+   ],
+   [
+    "accounts",
+    "a"
+   ],
+   [
+    "accounts",
+    "b"
+   ],
+   [
+    "pin",
+    "c"
+   ],
+   [
+    "permission_mode",
+    "a"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-old-mode",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"account\": \"codex\", \"backups\": [\"claude\", \"claude:work\"], \"permission_mode\": \"manual\", \"agents\": {\"a\": {\"account\": \"claude:x\", \"backups\": [], \"permission_mode\": \"dontAsk\"}, \"b\": {\"backups\": [\"codex\"]}, \"c\": {\"account\": \"codex\"}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "permission_mode",
+    "b",
+    "plan"
+   ],
+   [
+    "accounts",
+    "b"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-old-cap",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"account\": \"codex\", \"backups\": [\"claude\", \"claude:work\"], \"permission_mode\": \"manual\", \"agents\": {\"a\": {\"account\": \"claude:x\", \"backups\": [], \"permission_mode\": \"dontAsk\"}, \"b\": {\"backups\": [\"codex\"]}, \"c\": {\"account\": \"codex\"}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "2"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-old-global-call-model",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"account\": \"codex\", \"backups\": [\"claude\", \"claude:work\"], \"permission_mode\": \"manual\", \"agents\": {\"a\": {\"account\": \"claude:x\", \"backups\": [], \"permission_mode\": \"dontAsk\"}, \"b\": {\"backups\": [\"codex\"]}, \"c\": {\"account\": \"codex\"}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "call_model",
+    "opus"
+   ],
+   [
+    "permission_mode"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-keeps-key-order",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"z\": 1, \"plugins\": [], \"agents\": {\"q\": {\"x\": 1}, \"a\": {\"limit\": 1}}, \"a\": 2}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "8"
+   ],
+   [
+    "set",
+    "limit",
+    "n",
+    "8"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "n",
+    "plan"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-unicode-keeps",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"note\": \"caf\\u00e9 \\ud83d\\ude00\", \"agents\": {\"\\u00e9\": {}}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "\u00e9",
+    "3"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-in-a-row",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "a",
+    "1"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "a",
+    "auto"
+   ],
+   [
+    "set",
+    "call_model",
+    "a",
+    "opus"
+   ],
+   [
+    "set",
+    "at_limit",
+    "a",
+    "hold"
+   ],
+   [
+    "set",
+    "delegation.chain_cost_cap_usd",
+    "3"
+   ],
+   [
+    "set",
+    "call_model",
+    "haiku"
+   ],
+   [
+    "limit",
+    "a"
+   ],
+   [
+    "call_model",
+    "a"
+   ],
+   [
+    "call_model"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-write-empty-agent-name",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "set",
+    "limit",
+    "",
+    "3"
+   ],
+   [
+    "set",
+    "permission_mode",
+    "",
+    "plan"
+   ],
+   [
+    "limit",
+    ""
+   ],
+   [
+    "permission_mode",
+    ""
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ },
+ {
+  "name": "settings-read-agent-empty-name",
+  "command": "settings",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/lib/kith_settings.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "settings",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"plugins\": [\"a@b\"], \"agents\": {\"a\": {\"permission_mode\": \"plan\", \"limit\": 4}}, \"delegation\": {\"chain_cost_cap_usd\": 9}}"
+   }
+  ],
+  "run": [
+   [
+    "permission_mode",
+    ""
+   ],
+   [
+    "call_model",
+    ""
+   ],
+   [
+    "accounts",
+    ""
+   ],
+   [
+    "pin",
+    ""
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "/\\.claude/"
+  ]
+ }
+]
