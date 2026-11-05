@@ -214,8 +214,12 @@ pub(crate) fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<Authorit
 /// [--force]`, `status`, `check MODULE`, `modules`). Returns the lines to print. Takes the core's lifetime lock for the
 /// verbs that write, so a running daemon refuses them.
 #[cfg(unix)]
-pub fn cutover(paths: &Paths, args: &[String]) -> Result<Vec<String>, Error> {
-    cutover::run(paths, args)
+pub fn cutover(
+    paths: &Paths,
+    kernel: &std::path::Path,
+    args: &[String],
+) -> Result<Vec<String>, Error> {
+    cutover::run(paths, kernel, args)
 }
 
 /// Opens the core inside this process for one command.
