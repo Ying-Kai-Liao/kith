@@ -6,6 +6,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use super::access_core_tests::Core;
 use super::devices::{Caller, Forbidden, NotAllowed, Principal, principal};
 use super::rig::Rig;
 use super::roles::{self, BOT_METHODS, BOT_PENDING_METHODS};
@@ -79,6 +80,8 @@ struct MBot {
 }
 
 struct State {
+    /// Declared before the rig: it clears the process-wide switch before the rig lets the next test in.
+    core: Option<Core>,
     r: Rig,
     /// Who calls: Kai's own apps, then the two people's phones.
     callers: [Caller; 3],
@@ -128,6 +131,12 @@ const CONCS: [i64; 6] = [0, 1, 2, 3, 8, 9];
 #[allow(clippy::needless_range_loop)]
 impl State {
     async fn new(pool: Vec<String>) -> Self {
+        Self::build(pool, false).await
+    }
+
+    /// `switched`: once the people are made, a core daemon takes them over (the same people, grants and the owner), and
+    /// auth.json becomes a tombstone, so every later write and read of the host goes to the core.
+    async fn build(pool: Vec<String>, switched: bool) -> Self {
         let r = Rig::new().await;
         r.owner_bot("house");
         r.owner_bot("money");
@@ -149,7 +158,20 @@ impl State {
             .collect();
         members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
         let callers = [Caller::Local, r.device("sam-phone", Some("sam")), r.device("ann-phone", Some("ann"))];
+        let core = switched.then(|| {
+            let core = Core::start(&r);
+            core.ask("people.addPerson", json!({"id": "ann"})).expect("ann");
+            for p in ["sam", "ann"] {
+                for a in AGENTS {
+                    core.ask("people.grant", json!({"person": p, "agent": a, "preset": "member"})).expect("grant");
+                }
+            }
+            core.on();
+            core.switched();
+            core
+        });
         Self {
+            core,
             r,
             callers,
             roles: [[0; 2], [1, 1], [1, 1]],
@@ -731,12 +753,23 @@ fn sim() -> (tokio::runtime::Runtime, Vec<String>) {
 /// people around it.
 #[test]
 fn a_bot_never_has_more_than_its_owner_holds_now() {
+    sequences(false);
+}
+
+/// The same sequences and the same model with the host switched (P6): auth.json is a tombstone and a core holds the
+/// people, grants and bots, so a revoke, a removal and a shrink go through the core, and every read comes from it.
+#[test]
+fn a_bot_never_has_more_than_its_owner_holds_now_on_a_switched_host() {
+    sequences(true);
+}
+
+fn sequences(switched: bool) {
     let (rt, pool) = sim();
     assert!(pool.len() > 100, "router walk found {} methods", pool.len());
     runner(10)
         .run(&proptest::collection::vec(op(), 1..9), |ops| {
             // Dropped before the next case builds its own: the rig holds the process-wide environment.
-            let mut state = rt.block_on(State::new(pool.clone()));
+            let mut state = rt.block_on(State::build(pool.clone(), switched));
             let outcome = rt.block_on(async {
                 // Kai's own bot first, so a case never passes by refusing everything.
                 state.create(0, 3).await?;
@@ -762,6 +795,55 @@ fn a_bot_never_has_more_than_its_owner_holds_now() {
         })
         .unwrap();
     assert!(SERVED.load(Ordering::Relaxed) > 0, "no ask was ever served: the property checked nothing");
+}
+
+/// (14, 16, 17, P6) A switched host whose core is down: every bot call is refused, nobody can make a bot or change
+/// access (a removal still ends the bot here), and nothing is written to the tombstone (a switched host never runs kith-auth).
+#[test]
+fn a_switched_host_with_the_core_down_refuses_every_bot_call() {
+    let (rt, pool) = sim();
+    let mut state = rt.block_on(State::build(pool.clone(), true));
+    let tomb =
+        || std::fs::read_to_string(crate::api::authority::TEST_AUTH_FILE.lock().unwrap().clone().unwrap()).unwrap();
+    let before = tomb();
+    rt.block_on(async {
+        // A live bot of Kai's and of Sam's, served while the core is up.
+        state.create(0, 3).await.unwrap();
+        state.create(1, 3).await.unwrap();
+        for bot in 0..2 {
+            state.step(&Op::Allow { bot, always: false }).await.unwrap();
+        }
+        state.check_all().await.unwrap();
+        // The core is up: Sam's bot is served.
+        let ask = json!({"agent": "house", "text": "hi", "clientNonce": "up"});
+        let res = state.call(&state.bots[1].caller, "botAsk", ask).await;
+        assert!(res.is_ok(), "the bot is served while the core is up: {res:?}");
+    });
+    state.core.as_mut().unwrap().stop();
+    rt.block_on(async {
+        for bi in 0..state.bots.len() {
+            let id = state.bots[bi].id.clone();
+            let ask = json!({"agent": "house", "text": "hi", "clientNonce": format!("down{bi}")});
+            let res = state.call(&state.bots[bi].caller, "botAsk", ask).await;
+            assert!(res.is_err(), "bot {id} was served with the core down");
+        }
+        let body = json!({"name": "late", "provider": "grok", "agents": ["house"]});
+        for (actor, caller) in state.callers.iter().enumerate() {
+            let res = state.call(caller, "createBotInvite", body.clone()).await;
+            assert!(res.is_err(), "{} made a bot with the core down", WHO[actor]);
+        }
+        // A removal is the one write that stays safe without the core: the host ends the bot here (the cut is local, as in
+        // `a_switched_revoke_with_the_core_down_still_cuts_the_person_off_here`), and the bot is refused after it.
+        let id = state.bots[1].id.clone();
+        let res = state.call(&state.callers[1], "revokeBot", json!({"botId": id})).await;
+        assert!(res.is_ok(), "an owner can still remove their bot with the core down: {res:?}");
+        let ask = json!({"agent": "house", "text": "hi", "clientNonce": "after"});
+        let res = state.call(&state.bots[1].caller, "botAsk", ask).await;
+        assert!(res.err().is_some_and(|e| e.is::<Forbidden>()), "a removed bot is refused");
+        let res = state.call(&Caller::Local, "setPersonAccess", json!({"personId": "sam", "agents": {}})).await;
+        assert!(res.is_err(), "access was changed while the core could not record it");
+    });
+    assert_eq!(tomb(), before, "nothing is written to the tombstone");
 }
 
 /// (f) Ten live bots per owner, counted per owner: the eleventh is refused with `tooMany` whatever another owner

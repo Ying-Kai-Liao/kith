@@ -35,16 +35,21 @@ async fn joined(r: &Rig) {
 }
 
 /// A core daemon beside the rig's kith-auth, with the owner and `sam`. `on()` makes it the host's authority.
-struct Core {
+pub(super) struct Core {
     tmp: Tmp,
     daemon: Option<crate::core_front::TestDaemon>,
     data: Arc<CoreData>,
 }
 
 impl Core {
-    fn start(r: &Rig) -> Self {
+    pub(super) fn start(r: &Rig) -> Self {
+        Self::start_at(&r.dir)
+    }
+
+    /// The same beside any test folder that has (or is given) a `home/agents`.
+    pub(super) fn start_at(dir: &std::path::Path) -> Self {
         let tmp = Tmp::new();
-        let home = r.dir.join("home");
+        let home = dir.join("home");
         let env = json!({"KITH_AGENTS": home.join("agents").to_string_lossy()});
         let data = Arc::new(CoreData::new(
             folders(&tmp.path().join("machine")),
@@ -59,25 +64,25 @@ impl Core {
         core
     }
 
-    fn ask(&self, method: &str, mut params: Value) -> Option<Value> {
+    pub(super) fn ask(&self, method: &str, mut params: Value) -> Option<Value> {
         params["home"] = self.data.home.to_str().unwrap().into();
         params["kernel"] = self.data.kernel.to_str().unwrap().into();
         params["env"] = Value::Object(self.data.env.clone());
         crate::core_front::ask(&self.data.folders, method, &params)
     }
 
-    fn on(&self) {
+    pub(super) fn on(&self) {
         *TEST_CORE.lock().unwrap() = Some(self.data.clone());
     }
 
     /// The gate closes: the guard falls back to kith-auth.
     #[allow(clippy::unused_self)] // kept a method so it reads next to `on`
-    fn off(&self) {
+    pub(super) fn off(&self) {
         *TEST_CORE.lock().unwrap() = None;
     }
 
     /// What the core says sam holds by their own row: (agent, preset).
-    fn rows(&self) -> Vec<(String, String)> {
+    pub(super) fn rows(&self) -> Vec<(String, String)> {
         let list = self.ask("people.list", json!({"person": "sam"})).expect("list");
         list["rows"]
             .as_array()
@@ -94,14 +99,14 @@ impl Core {
     }
 
     /// auth.json is a tombstone: the core is the only store, with or without the env.
-    fn switched(&self) {
+    pub(super) fn switched(&self) {
         let auth = self.tmp.path().join("auth.json");
         std::fs::write(&auth, r#"{"kith_tombstone": 1, "module": "authority", "rollback": "kith rollback authority"}"#)
             .unwrap();
         *crate::api::authority::TEST_AUTH_FILE.lock().unwrap() = Some(auth);
     }
 
-    fn stop(&mut self) {
+    pub(super) fn stop(&mut self) {
         if let Some(d) = self.daemon.take() {
             d.stop();
         }
