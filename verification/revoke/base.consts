@@ -38,3 +38,5 @@ RemoveKeeps = FALSE
 CardsOn = FALSE
 CardNoWithdraw = FALSE
 CardUndoRevives = FALSE
+CoreGate = FALSE
+CoreGateStale = FALSE

@@ -91,7 +91,11 @@ CONSTANTS
     \* ---- the core's cards (M2-11b, core/runtime/src/cards, authority/revoke.rs follow_in_cards) ----
     CardsOn,            \* TRUE = one card of P's, asked on m1 before any revoke, and the yes that becomes a once grant
     CardNoWithdraw,     \* the revoke leaves P's open cards and unused grants as they were (before M2-11b)
-    CardUndoRevives     \* an undo puts a withdrawn card back (the core's undo touches no card)
+    CardUndoRevives,    \* an undo puts a withdrawn card back (the core's undo touches no card)
+    \* ---- the core's authority behind the host's request guard (M2-15/16/18a, KITH_CORE_AUTHORITY=1; OFF in every deploy) ----
+    CoreGate,           \* TRUE = the host's guard (app and bot doors) asks the core's copy of the revoked fact while the
+                        \*   gate is open, and kith-auth's mirror writes the core after auth.json (FALSE = the host asks kith-auth)
+    CoreGateStale       \* the gate stays open on a latched answer after auth.json changed (no fingerprint check)
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -139,22 +143,33 @@ VARIABLES
     bdoor,         \* bdoor[m] \in GDoor: B's guest door on m (its own tick names the door)
     cardst,        \* cardst[m] \in CardSt: P's card on m (asked, answered yes, picked up, or withdrawn)
     cardhit,       \* cardhit[m]: a revoke has landed on m while the card was open or unused (the oracle; no step reads it)
+    crev,          \* crev[m]: the core's copy of P's revoked fact on m (people.suspend / people.undo), written after auth.json
     ptick          \* P holds the door's job (P's tick on P's own row), given and taken back by the owner
 
 CardSt == {"none", "open", "approved", "used", "withdrawn"}
 AskState == {"none", "open", "answered", "stopped"}
 
-vars == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor,
+vars == <<rows, revoked, crev, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor,
           items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 ext4 == <<items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, hat, clk, hops>>
 ext == <<ext4, bdoor, ptick>>
-auth == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos>>
+auth == <<rows, revoked, crev, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos>>
 
 (* ---- access ---- *)
 MayP(m) == \/ StarIgnoresRevoke /\ "star" \in rows[m]
            \/ ~revoked[m] /\ rows[m] # {}
 MayB(m) == BotRow[m] /\ (BotIgnoresOwner \/ MayP(m))
 May(m, w) == IF w = "P" THEN MayP(m) ELSE MayB(m)
+
+\* The host's request guard (api/roles.rs resolve -> api/authority.rs core_verdict), which the app door's start, the bot
+\* door's start and a bot's reply (botThread) ask. With KITH_CORE_AUTHORITY=1 it asks the core's copy, but only while the
+\* gate is open: the gate latches the core's parity answer with auth.json's fingerprint, and any write of auth.json (a new
+\* inode) shuts it at once, so the host is back on kith-auth until the core has been told (core_selected). The model reads
+\* the parity in the same step as the check. The core's own answer is the same rule: a revoked person is refused before any row.
+GateOpen(m) == CoreGate /\ (CoreGateStale \/ crev[m] = revoked[m])
+GuardP(m) == IF GateOpen(m) THEN ~crev[m] /\ rows[m] # {} ELSE MayP(m)
+GuardB(m) == BotRow[m] /\ (BotIgnoresOwner \/ GuardP(m))
+GuardMay(m, w) == IF w = "P" THEN GuardP(m) ELSE GuardB(m)
 
 DoorOf(m, w) == IF w = "P" THEN door[m] ELSE "bot"
 
@@ -200,6 +215,7 @@ ItemsStep(m, val) == IF val THEN ItemsRevoke(m) ELSE ItemsUndo(m)
 Init ==
     /\ rows = Rows0
     /\ revoked = [m \in Macs |-> FALSE]
+    /\ crev = [m \in Macs |-> FALSE]
     /\ ver = [m \in Macs |-> 0]
     /\ outbox = [m \in Macs |-> FALSE]
     /\ net = [m \in Macs |-> IF HandleSync /\ m = "m2" THEN "offline" ELSE "online"]
@@ -231,7 +247,7 @@ AppRevoke ==
     /\ revokes' = 1
     /\ cloudRevoked' = TRUE
     /\ cloudVer' = cloudVer + 1
-    /\ UNCHANGED <<rows, revoked, ver, outbox, net, undos, turn, door, gdoor, ext>>
+    /\ UNCHANGED <<rows, revoked, crev, ver, outbox, net, undos, turn, door, gdoor, ext>>
 
 \* The app shows the cloud's record; undo is offered when it says revoked.
 AppUndo ==
@@ -241,7 +257,7 @@ AppUndo ==
     /\ undos' = 1
     /\ cloudRevoked' = FALSE
     /\ cloudVer' = cloudVer + 1
-    /\ UNCHANGED <<rows, revoked, ver, outbox, net, revokes, turn, door, gdoor, ext>>
+    /\ UNCHANGED <<rows, revoked, crev, ver, outbox, net, revokes, turn, door, gdoor, ext>>
 
 \* The core's revoke hook (authority/revoke.rs follow_in_doors): in the transaction that sets the revoked fact on m, the
 \* rows of P's and B's running doors there become swept ("killed" here: the ROW is swept; the box is stopped by whoever
@@ -277,7 +293,7 @@ CliRevoke(m) ==
     /\ bdoor' = DoorsSwept(bdoor, m, TRUE)
     /\ cardst' = CardsAfter(m, TRUE)
     /\ cardhit' = CardHitAfter(m, TRUE)
-    /\ UNCHANGED <<net, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<crev, net, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 CliUndo(m) ==
     /\ OwnerCli
@@ -293,7 +309,16 @@ CliUndo(m) ==
     /\ bdoor' = DoorsUndone(bdoor, m, FALSE)
     /\ cardst' = CardsAfter(m, FALSE)
     /\ cardhit' = cardhit
-    /\ UNCHANGED <<rows, net, revokes, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<rows, crev, net, revokes, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+
+\* kith-auth's mirror (kernel/bin/kith-auth mirror_to_core, after save_auth; the embedded core when no daemon runs): the core's
+\* copy takes the revoked fact once auth.json has it. One try, no queue; a try that fails (a warning, exit 0) is the step not taken,
+\* and the gate then stays shut until the core is told (`core-migrate`, or the owner runs the command again).
+CoreMirror(m) ==
+    /\ CoreGate
+    /\ crev[m] # revoked[m]
+    /\ crev' = [crev EXCEPT ![m] = revoked[m]]
+    /\ UNCHANGED <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ext>>
 
 (* ---- cloud and network ---- *)
 \* An online Mac with an outbox pushes its flag; the cloud takes it as a new version (last writer wins).
@@ -304,7 +329,7 @@ Push(m) ==
     /\ cloudVer' = cloudVer + 1
     /\ ver' = [ver EXCEPT ![m] = cloudVer + 1]
     /\ outbox' = [outbox EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<rows, revoked, net, revokes, undos, turn, door, gdoor, ext>>
+    /\ UNCHANGED <<rows, revoked, crev, net, revokes, undos, turn, door, gdoor, ext>>
 
 \* The cloud delivers its latest record to an online Mac that has nothing to push; kith-auth applies it.
 CloudDeliver(m) ==
@@ -319,13 +344,13 @@ CloudDeliver(m) ==
     /\ bdoor' = DoorsUndone(DoorsSwept(bdoor, m, cloudRevoked), m, cloudRevoked)
     /\ cardst' = CardsAfter(m, cloudRevoked)
     /\ cardhit' = CardHitAfter(m, cloudRevoked)
-    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<crev, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 \* Internet lost, Kith cloud lost (or unreachable from m), or back.
 SetNet(m, n) ==
     /\ ~HandleSync \/ (m = "m2" /\ n = "online")   \* handle rows: m2 starts off and comes on once
     /\ net' = [net EXCEPT ![m] = n]
-    /\ UNCHANGED <<rows, revoked, ver, outbox, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ext>>
+    /\ UNCHANGED <<rows, revoked, crev, ver, outbox, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ext>>
 
 (* ---- doors ---- *)
 \* APP door: P's app message arrives through the relay. Relay check, Mac's may() and the start are one step.
@@ -333,7 +358,7 @@ AppStart(m) ==
     /\ turn[m]["P"] = "idle"
     /\ net[m] = "online"
     /\ RelayOK
-    /\ MayP(m)
+    /\ GuardP(m)
     /\ turn' = [turn EXCEPT ![m]["P"] = "running"]
     /\ door' = [door EXCEPT ![m] = "app"]
     /\ UNCHANGED <<auth, gdoor, ext>>
@@ -345,7 +370,7 @@ BotStart(m) ==
     /\ turn[m]["B"] = "idle"
     /\ net[m] = "online"
     /\ RelayOK
-    /\ MayB(m)
+    /\ GuardB(m)
     /\ turn' = [turn EXCEPT ![m]["B"] = "running"]
     /\ UNCHANGED <<auth, door, gdoor, ext>>
 
@@ -392,7 +417,7 @@ Deliver(m, w) ==
                            IF NoDeliverRecheck \/ May(m, w) THEN "delivered" ELSE "aborted"]
        ELSE /\ net[m] = "online"
             /\ turn' = [turn EXCEPT ![m][w] =
-                           IF NoDeliverRecheck \/ (May(m, w) /\ RelayOK) THEN "delivered" ELSE "aborted"]
+                           IF NoDeliverRecheck \/ (GuardMay(m, w) /\ RelayOK) THEN "delivered" ELSE "aborted"]
     /\ UNCHANGED <<auth, door, gdoor, ext>>
 
 \* Optional: the door stops a live turn once the revoke reached m.
@@ -620,6 +645,7 @@ Next ==
           \/ CliUndo(m)
           \/ Push(m)
           \/ CloudDeliver(m)
+          \/ CoreMirror(m)
           \/ \E n \in Nets \ {net[m]} : SetNet(m, n)
           \/ AppStart(m)
           \/ BotStart(m)
@@ -660,6 +686,7 @@ Spec == Init /\ [][Next]_vars
 TypeOK ==
     /\ rows \in [Macs -> SUBSET Kinds]
     /\ revoked \in [Macs -> BOOLEAN]
+    /\ crev \in [Macs -> BOOLEAN]
     /\ ver \in [Macs -> 0..2]
     /\ outbox \in [Macs -> BOOLEAN]
     /\ net \in [Macs -> Nets]
@@ -767,6 +794,10 @@ CardsCut == [][\A m \in Macs : (cardst[m] = "approved" /\ cardst'[m] = "used") =
 CardNoResurrect == [][\A m \in Macs : cardst[m] = "withdrawn" => cardst'[m] = "withdrawn"]_vars
 
 (* ---- probes: each must FAIL on the design (a reachability witness), unless noted ---- *)
+\* The core takes the revoked fact (the mirror is reachable) ...
+NeverCoreRevoked == \A m \in Macs : ~crev[m]
+\* ... and there is a moment when the core has not been told, which is when the gate is shut and the host asks kith-auth.
+NeverGateShut == \A m \in Macs : crev[m] = revoked[m]
 \* A card before any revoke is picked up (the card path is reachable).
 NeverCardUsed == \A m \in Macs : cardst[m] # "used"
 \* ... and a revoke does withdraw one.

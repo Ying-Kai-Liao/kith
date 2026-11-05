@@ -121,3 +121,14 @@ broken-card-undo-revives	PROPERTY	CardsCut	fail
 broken-card-undo-revives	PROPERTY	CardNoResurrect	fail
 cards	INVARIANT	NeverCardUsed	fail
 cards	INVARIANT	NeverCardWithdrawn	fail
+# --- the core behind the host's guard (KITH_CORE_AUTHORITY=1, OFF in every deploy; M2-16/18a): kith-auth writes auth.json, then the core; the gate shuts on any write of auth.json ---
+core-gate	INVARIANT	TypeOK	pass
+core-gate	PROPERTY	R1	pass
+core-gate	PROPERTY	R5	pass
+core-gate	PROPERTY	R5c	pass
+core-gate	PROPERTY	R6	pass
+core-gate	PROPERTY	R6c	pass
+broken-core-gate-stale	PROPERTY	R1	fail
+broken-core-gate-stale	PROPERTY	R5	fail
+core-gate	INVARIANT	NeverCoreRevoked	fail
+core-gate	INVARIANT	NeverGateShut	fail
