@@ -100,7 +100,7 @@ jobs:
             rr=$(git merge-base origin/rust-rebuild HEAD || true)
             mn=$(git merge-base origin/main HEAD || true)
             if [ -n "$rr" ] && [ "$rr" != "$mn" ] && git merge-base --is-ancestor "$mn" "$rr"; then
-              echo "base=rust-rebuild" >> "$GITHUB_OUTPUT"
+              echo "base=flow/ci-writerlock-split-smoke" >> "$GITHUB_OUTPUT"
             fi
           fi
       # Kernel and licenses keep markdown: the notices file and kernel docs are checked content.
