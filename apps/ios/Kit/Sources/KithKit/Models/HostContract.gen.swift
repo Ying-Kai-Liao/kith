@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "740fba2d9a3de43301f12e4d11e76982ce198aa9cfe40eb8913fffb16250b6f9"
+    public static let sha256 = "bc3ef31542338898f9e8fcf31b6cd9580a454ab13313c47abbae43585f12d071"
 }
 
 extension HostContract {
@@ -1083,19 +1083,21 @@ extension HostContract {
         }
     }
 
-    /// A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next.
+    /// A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), the bot's membership generation gen (what a post or room ask names; it rises each time the bot is put back in the room), and the cursor to read from next.
     public struct BotRoom: Codable, Hashable, Sendable {
         public var room: String
         public var conversation: String?
         public var epoch: Int64?
+        public var gen: Int64?
         public var entries: [BotEntry]
         public var cursor: Int64
         public var secrets: [BotRoomSecret]?
 
-        public init(room: String, conversation: String? = nil, epoch: Int64? = nil, entries: [BotEntry], cursor: Int64, secrets: [BotRoomSecret]? = nil) {
+        public init(room: String, conversation: String? = nil, epoch: Int64? = nil, gen: Int64? = nil, entries: [BotEntry], cursor: Int64, secrets: [BotRoomSecret]? = nil) {
             self.room = room
             self.conversation = conversation
             self.epoch = epoch
+            self.gen = gen
             self.entries = entries
             self.cursor = cursor
             self.secrets = secrets
@@ -1671,16 +1673,18 @@ extension HostContract {
         public var conversation: String?
         public var ref: String?
         public var room: String?
+        public var gen: Int64?
         public var speaker: String?
         public var clientNonce: String
         public var noQueue: Bool?
 
-        public init(agent: String? = nil, text: String, conversation: String? = nil, ref: String? = nil, room: String? = nil, speaker: String? = nil, clientNonce: String, noQueue: Bool? = nil) {
+        public init(agent: String? = nil, text: String, conversation: String? = nil, ref: String? = nil, room: String? = nil, gen: Int64? = nil, speaker: String? = nil, clientNonce: String, noQueue: Bool? = nil) {
             self.agent = agent
             self.text = text
             self.conversation = conversation
             self.ref = ref
             self.room = room
+            self.gen = gen
             self.speaker = speaker
             self.clientNonce = clientNonce
             self.noQueue = noQueue
@@ -1693,14 +1697,16 @@ extension HostContract {
         public var conversation: String
         public var epoch: Int64
         public var turnKey: String?
+        public var gen: Int64?
         public var text: String
         public var clientNonce: String
 
-        public init(room: String, conversation: String, epoch: Int64, turnKey: String? = nil, text: String, clientNonce: String) {
+        public init(room: String, conversation: String, epoch: Int64, turnKey: String? = nil, gen: Int64? = nil, text: String, clientNonce: String) {
             self.room = room
             self.conversation = conversation
             self.epoch = epoch
             self.turnKey = turnKey
+            self.gen = gen
             self.text = text
             self.clientNonce = clientNonce
         }

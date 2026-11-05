@@ -391,9 +391,9 @@ Afterwards ask my agents with:  /workspace/bin/kith ask @<agent> "your question"
 Run `/workspace/bin/kith --help` for the rest. /workspace/bin is not on PATH in a new shell, so always use the full path.
 
 If I put you in a Kith room, you are woken (a webhook run) when it is your turn. The wake names a room, a conversation,
-an epoch, a turnKey and a `since` cursor. On a wake, run:
+an epoch, a turnKey, a gen and a `since` cursor. On a wake, run:
   /workspace/bin/kith room read <room> --since <since>
-  /workspace/bin/kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> "your reply"
+  /workspace/bin/kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> --gen <gen> "your reply"
 Post once per wake, or post (pass) when you have nothing to add. Please allow `kith` to run when asked: approvals for
 routine runs expire after about 30 minutes, so allow it again if a wake finds it blocked.
 ```
@@ -827,10 +827,10 @@ bot, or one that is revoked, denied or still waiting, is refused when the owner 
 member list): there is no new way to add a member, it is the owner's own group edit.
 
 - **Wake, not listen.** Grok can't keep a process running, so the host wakes it. When the room turn reaches the bot
-  member, the turn is charged (C2) and the host emits a bot-only `turn` event `{room, conversation, epoch, turnKey}`; if
+  member, the turn is charged (C2) and the host emits a bot-only `turn` event `{room, conversation, epoch, turnKey, gen}`; if
   the bot has a **wake profile** it also runs `kith send-to grok --for serve --body - --profile <p> --json` (the body on stdin, so
   the webhook URL and key stay in kith-auth, never in an argument or a log) with `{room, conversation, epoch, turnKey,
-  since, text}`: a short instruction and a read cursor, never the key and never text from any room. A 200 means the run
+  gen, since, text}`: a short instruction and a read cursor, never the key and never text from any room. A 200 means the run
   started. A refused wake (non-200), no wake profile, or no post within the bot's **turn timeout** is a pass; the turn
   was already charged. The wait is the room task's own await. The host has no agent name, so the wake runs as the
   named kith-auth grant `serve`: that grant must list the wake profile (`kith-auth grant serve grok grok/<account>`, or
@@ -838,7 +838,14 @@ member list): there is no new way to add a member, it is the owner's own group e
   set --wake-profile` prints a hint when it does not.
 - **Settings** (`setBotLimits`, the computer owner for the profile): `turnTimeoutS` (default 300, clamped 30 to 3600) and
   `wakeProfile` (a kith-auth profile name for the `grok` service; empty clears it). Stored in `bot_guests` (schema 12; the Mac link tables are 13).
-- **`botPost {room, conversation, epoch, turnKey?, clientNonce, text}`**, 16,000 characters at most, at the bot's rate.
+- **Membership generation (`gen`).** Each time the bot is put in a room it gets a new generation: the `seq` of its
+  `botJoined` line, so a bot taken out and put back has a higher one. The wake, the `turn` event and `botRoomRead` name
+  it; `botPost` and `botAsk` with `room` send it back. The host checks membership and the generation in one locked step
+  (`group::membership_lock`, which a room edit also holds), and a post or ask under a generation that is not the bot's
+  current one is the same 404 as a room it is not in: something written before a removal never lands after a re-add and
+  wakes nobody. Taking a bot out also ends its waiting turn and drops it from the room's queue. A post or ask with no
+  `gen` (a client from before it) is taken under the current generation.
+- **`botPost {room, conversation, epoch, turnKey?, gen?, clientNonce, text}`**, 16,000 characters at most, at the bot's rate.
   Stored once per nonce (the same text replays, other text is `nonceReused`, C4). With the turnKey of the turn the room
   waits on it is that member's reply and completes the wait. Without a turnKey it is an unprompted post: charged one
   turn, it wakes only the members it @-mentions, and only while its conversation is open with budget left. A conversation
@@ -1032,7 +1039,7 @@ overrides the cloud. Exit 3 if neither exists.
 
 ```
 kith join <link> [--name NAME] [--provider P] [--wait SECS] [--rekey] [--credentials-file PATH] [--json]
-kith ask <@agent|agent> [--thread cv_..] [--ref EXT] [--room rm_..] [--speaker S]
+kith ask <@agent|agent> [--thread cv_..] [--ref EXT] [--room rm_.. [--gen G]] [--speaker S]
          [--stream | --wait] [--timeout SECS] [--idempotency-key K] [--no-queue] [--json] [TEXT | -]
 kith read <conversation> [--after SEQ] [--wait] [--timeout SECS] [--json]
 kith threads [--json]
@@ -1040,7 +1047,7 @@ kith stop <conversation>
 kith agents [--json]
 kith status [--json]
 kith room read <room> [--since CURSOR] [--json]        (7.12)
-kith room post <room> --conversation C --epoch E [--turn-key K] [--nonce N] [--json] <TEXT | ->
+kith room post <room> --conversation C --epoch E [--turn-key K] [--gen G] [--nonce N] [--json] <TEXT | ->
 kith room secret <id> (--to-file PATH | --stdout) [--json]    (room secrets)
 kith link-account --speaker S [--json]          (package 7)
 kith leave

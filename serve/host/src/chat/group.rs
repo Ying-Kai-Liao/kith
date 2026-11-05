@@ -100,12 +100,31 @@ pub struct BotTurn {
     pub lane: Lane,
     conversation: String,
     epoch: u64,
+    /// The bot's membership generation in the room when the turn was sent (see [`membership_gen`]).
+    generation: i64,
     reply: oneshot::Sender<String>,
 }
 
 static BOT_TURNS: Mutex<BTreeMap<String, BotTurn>> = Mutex::new(BTreeMap::new());
 /// Members an unprompted post of an outside bot @-mentioned, per conversation, for its room turn to queue.
 static MENTIONS: Mutex<BTreeMap<String, Vec<String>>> = Mutex::new(BTreeMap::new());
+/// Members taken out of a room, per open conversation, for its room turn to drop from its queue.
+static DROPPED: Mutex<BTreeMap<String, Vec<String>>> = Mutex::new(BTreeMap::new());
+/// Held while a room's members change, and by a bot's post or room ask from its membership check to its last effect, so
+/// a post is checked and lands entirely before an edit or entirely after it.
+static MEMBERSHIP: Mutex<()> = Mutex::new(());
+
+/// The lock a membership check and what it allows run under (never across an await).
+pub fn membership_lock() -> std::sync::MutexGuard<'static, ()> {
+    MEMBERSHIP.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Bot guest `bot_id`'s membership generation in `room`, `None` when it is no member: the `seq` of its join line, so
+/// each time it is put back in the room the generation is higher. A wake, a turn and a read name it; a post or room ask
+/// under any other generation is refused (N3: nothing the bot wrote before a removal lands after a re-add).
+pub fn membership_gen(store: &Store, room: &str, bot_id: &str) -> Option<i64> {
+    is_room_member(store, room, bot_id).then(|| store.room_bot_point(room, bot_id)).flatten().map(|p| p.seq)
+}
 
 fn turns() -> std::sync::MutexGuard<'static, BTreeMap<String, BotTurn>> {
     BOT_TURNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -116,19 +135,24 @@ pub fn cancel_bot_turns(which: impl Fn(&BotTurn) -> bool) {
     turns().retain(|_, t| !which(t));
 }
 
+/// Whether `t` is this bot's turn in this conversation, epoch and membership generation.
+fn is_turn_of(t: &BotTurn, bot_id: &str, conversation: &str, epoch: u64, generation: i64) -> bool {
+    t.bot_id == bot_id && t.conversation == conversation && t.epoch == epoch && t.generation == generation
+}
+
 /// The bot's reply to the turn waiting under `key`, handed to the room turn; false when no such turn waits for this
-/// bot, in this conversation and epoch (the reply is late, or not this bot's).
-pub fn complete_bot_turn(key: &str, bot_id: &str, conversation: &str, epoch: u64, text: &str) -> bool {
+/// bot, in this conversation, epoch and generation (the reply is late, or not this bot's).
+pub fn complete_bot_turn(key: &str, bot_id: &str, conversation: &str, epoch: u64, generation: i64, text: &str) -> bool {
     let mut all = turns();
-    if !all.get(key).is_some_and(|t| t.bot_id == bot_id && t.conversation == conversation && t.epoch == epoch) {
+    if !all.get(key).is_some_and(|t| is_turn_of(t, bot_id, conversation, epoch, generation)) {
         return false;
     }
     all.remove(key).is_some_and(|t| t.reply.send(text.to_owned()).is_ok())
 }
 
 /// Whether the room is waiting on this bot under `key` (checked before a reply is stored, so it is stored plain).
-pub fn bot_turn_waits(key: &str, bot_id: &str, conversation: &str, epoch: u64) -> bool {
-    turns().get(key).is_some_and(|t| t.bot_id == bot_id && t.conversation == conversation && t.epoch == epoch)
+pub fn bot_turn_waits(key: &str, bot_id: &str, conversation: &str, epoch: u64, generation: i64) -> bool {
+    turns().get(key).is_some_and(|t| is_turn_of(t, bot_id, conversation, epoch, generation))
 }
 
 /// An unprompted post of an outside bot woke these members: the room turn queues them after everyone waiting.
@@ -309,6 +333,7 @@ fn spawn(hub: &Arc<Hub>, conv: Conversation) {
 async fn run(hub: &Arc<Hub>, mut conv: Conversation) -> Result<()> {
     let result = run_steps(hub, &mut conv).await;
     MENTIONS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&conv.id);
+    DROPPED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&conv.id);
     result
 }
 
@@ -336,6 +361,11 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
             if conv.queue.current.as_deref() != Some(&id) && !conv.queue.waiting.contains(&id) {
                 conv.queue.waiting.push(id);
             }
+        }
+        // Members taken out since the last step lose their place, even when they have been put back since.
+        let dropped = DROPPED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&conv.id);
+        if let Some(dropped) = dropped {
+            conv.queue.waiting.retain(|id| !dropped.contains(id));
         }
         // An outside bot is woken only by something said after it joined (a bot taken out and put back may still be
         // queued from before).
@@ -382,6 +412,8 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
             next.current = Some(id.clone());
             // An outside bot posts under a key of this turn; its wake goes out once.
             next.turn_key = guest_member(hub, &id).map(|_| uuid::Uuid::new_v4().to_string());
+            // ... and only in the membership generation it was queued in.
+            next.turn_gen = next.turn_key.as_ref().and_then(|_| membership_gen(&hub.store, &group_id, &id));
             next.woke = false;
             // The turn and the queue are written together, before the turn is sent.
             match hub.store.charge_turn(&conv.id, &next)? {
@@ -422,6 +454,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         };
         conv.queue.current = None;
         conv.queue.turn_key = None;
+        conv.queue.turn_gen = None;
         conv.queue.woke = false;
         conv.queue.wait_until = None;
         // Moved while the member worked: its reply is stored late and wakes nobody.
@@ -513,21 +546,32 @@ async fn bot_turn(
         return Ok(None);
     };
     let (reply, answer) = oneshot::channel();
-    turns().insert(
-        key.clone(),
-        BotTurn {
-            bot_id: guest.bot_id.clone(),
-            lane: conv.lane.clone(),
-            conversation: conv.id.clone(),
-            epoch: conv.epoch,
-            reply,
-        },
-    );
+    let generation = {
+        // Checked and registered in one step against a room edit: a bot taken out (and maybe put back) since its turn
+        // was queued passes, and one taken out from here on has its turn cancelled by the edit.
+        let _members = membership_lock();
+        let now = membership_gen(&hub.store, &conv.lane.chat, &guest.bot_id);
+        let Some(generation) = now.filter(|g| conv.queue.turn_gen.is_none_or(|t| t == *g)) else {
+            return Ok(None);
+        };
+        turns().insert(
+            key.clone(),
+            BotTurn {
+                bot_id: guest.bot_id.clone(),
+                lane: conv.lane.clone(),
+                conversation: conv.id.clone(),
+                epoch: conv.epoch,
+                generation,
+                reply,
+            },
+        );
+        generation
+    };
     // However this ends, nothing waits under the key afterwards.
     let _forget = Forget(key.clone());
     let _ = hub.events.send(json!({
         "type": "turn", "botId": guest.bot_id, "room": conv.lane.chat, "thread": conv.lane.thread,
-        "conversation": conv.id, "epoch": conv.epoch, "turnKey": key,
+        "conversation": conv.id, "epoch": conv.epoch, "turnKey": key, "gen": generation,
     }));
     let wait = Duration::from_secs(u64::try_from(guest.turn_timeout_s).unwrap_or(300));
     if !conv.queue.woke {
@@ -542,7 +586,7 @@ async fn bot_turn(
             // Never from before the bot joined, whatever it wrote last.
             let floor = hub.store.room_bot_point(&conv.lane.chat, &guest.bot_id).map_or(0, |p| p.rev);
             let since = hub.store.last_rev_of_bot_guest(&conv.lane.chat, &guest.bot_id).max(floor);
-            let body = wake_body(group, conv, &key, since);
+            let body = wake_body(group, conv, &key, generation, since);
             if !wake(profile, &body).await {
                 bot_notice(hub, &conv.lane, guest, "botTimedOut", Some(&conv.id), "didn't answer");
                 return Ok(None);
@@ -595,9 +639,21 @@ fn membership_notice(hub: &Hub, room: &str, g: &BotGuest, notice: &str, why: Opt
 }
 
 /// The room `room` went from members `before` to `after` (a group made or edited): each outside bot that came in gets
-/// its point, just at its join line, and each one that went out loses it. Members that stay change nothing, so a
-/// repeated edit writes no second line.
+/// its point, just at its join line (a new membership generation), and each one that went out loses it, its waiting
+/// turn and its place in the queue of each open conversation. Members that stay change nothing, so a repeated edit
+/// writes no second line. All under [`membership_lock`], so a bot's post never lands halfway through.
 pub fn members_changed(hub: &Hub, room: &str, before: &[String], after: &[String]) {
+    let _members = membership_lock();
+    let gone: Vec<String> = before.iter().filter(|m| !after.contains(m)).cloned().collect();
+    if !gone.is_empty() {
+        // An outside bot taken out of the room is no longer waited for.
+        cancel_bot_turns(|t| t.lane.chat == room && gone.contains(&t.bot_id));
+        let open = hub.store.open_conversations().unwrap_or_default();
+        let mut dropped = DROPPED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for conv in open.iter().filter(|c| c.lane.chat == room) {
+            dropped.entry(conv.id.clone()).or_default().extend(gone.iter().cloned());
+        }
+    }
     for id in after.iter().filter(|m| !before.contains(m)) {
         let Some(guest) = guest_member(hub, id) else { continue };
         // Until the point is stored the bot reads nothing of the room (`room_bot_floor`).
@@ -642,13 +698,13 @@ fn sees(hub: &Hub, room: &str, id: &str, trigger_seq: i64) -> bool {
 
 /// What the wake carries: where to post and a cursor to read from, in words a bot with a shell can act on. Never a key,
 /// and no text of the room itself: the bot reads that with `kith room read`.
-fn wake_body(group: &BotConfig, conv: &Conversation, key: &str, since: i64) -> Value {
+fn wake_body(group: &BotConfig, conv: &Conversation, key: &str, generation: i64, since: i64) -> Value {
     let (room, id, epoch) = (&conv.lane.chat, &conv.id, conv.epoch);
     json!({
-        "room": room, "conversation": id, "epoch": epoch, "turnKey": key, "since": since,
+        "room": room, "conversation": id, "epoch": epoch, "turnKey": key, "gen": generation, "since": since,
         "text": format!(
             "It is your turn in the Kith room \"{}\". Read what you missed: kith room read {room} --since {since}\n\
-             Then reply once: kith room post {room} --conversation {id} --epoch {epoch} --turn-key {key} \"your reply\"\n\
+             Then reply once: kith room post {room} --conversation {id} --epoch {epoch} --turn-key {key} --gen {generation} \"your reply\"\n\
              If you have nothing to add, post (pass). Run `kith room read` and `kith room post` only; this wake is for this turn alone.",
             group.name
         ),
@@ -1557,6 +1613,10 @@ mod tests {
             (Some(room.group.as_str()), turn["conversation"].as_str(), turn["epoch"].as_u64(), Some(key))
         );
         assert!(body["since"].is_i64() && body["text"].as_str().unwrap().contains("kith room read"));
+        // The wake and the turn name the bot's membership generation, which a post may name back.
+        let generation = room.hub.store.room_bot_point(&room.group, room.bg.as_str()).unwrap().seq;
+        assert_eq!((body["gen"].as_i64(), turn["gen"].as_i64()), (Some(generation), Some(generation)));
+        assert!(body["text"].as_str().unwrap().contains(&format!("--gen {generation}")));
         let said = body.to_string();
         assert!(!said.contains("pineapple"), "the wake carries no text of the room: {said}");
         // The bot answers and the turn completes.
@@ -1776,6 +1836,107 @@ mod tests {
         room.shutdown().await;
     }
 
+    /// Waits until agent `id` is running a turn.
+    async fn working(room: &Room, id: &str) {
+        let hub = room.hub.clone();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hub.bot_runtime(id).status != BotStatus::Working {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the agent starts");
+    }
+
+    #[tokio::test]
+    async fn a_bot_taken_out_and_put_back_cannot_post_or_ask_from_before_and_wakes_nobody() {
+        let room = Room::new();
+        let bot = room.join_bot(300, None);
+        let main = Lane::main(&room.group);
+        let before = room.hub.store.room_bot_point(&room.group, room.bg.as_str()).unwrap().seq;
+        // A conversation is open, its room turn held on `a`, while the bot is taken out and put back.
+        room.send("@a BLOCK hold", None).await;
+        working(&room, "a").await;
+        let conv = room.hub.store.open_conversation_of(&main).unwrap();
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b"]})).unwrap();
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b", room.bg.as_str()]})).unwrap();
+        let now = room.hub.store.room_bot_point(&room.group, room.bg.as_str()).unwrap().seq;
+        assert!(now > before, "putting it back is a new generation");
+        let left = room.hub.store.conversation(&conv.id).unwrap().left;
+        // What it composed before it was taken out names the old generation: refused, as if it were no member.
+        let stale_post = || {
+            crate::api::dispatch(
+                &room.hub,
+                &bot,
+                "botPost",
+                json!({"room": room.group, "conversation": conv.id, "epoch": conv.epoch, "gen": before,
+                       "text": "@b CHATTY look at this", "clientNonce": "old1"}),
+            )
+        };
+        assert_eq!(code_of(&stale_post().await.unwrap_err()), Some("notFound"));
+        // The same nonce under the stale generation is still notFound, never a replay.
+        assert_eq!(code_of(&stale_post().await.unwrap_err()), Some("notFound"));
+        let ask = crate::api::dispatch(
+            &room.hub,
+            &bot,
+            "botAsk",
+            json!({"room": room.group, "gen": before, "text": "@b CHATTY hello", "clientNonce": "old2"}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(code_of(&ask), Some("notFound"));
+        assert!(room.bot_entries().is_empty(), "nothing from before was stored");
+        assert_eq!(room.hub.store.conversation(&conv.id).unwrap().left, left, "nothing was charged");
+        std::fs::write(room.dir.join("a/release"), "").unwrap();
+        room.closed().await;
+        room.settle().await;
+        assert!(!room.dir.join("b/prompts.jsonl").exists(), "the old post woke nobody");
+        // Its read names the generation it has now, and a post under it lands.
+        let read = crate::api::dispatch(&room.hub, &bot, "botRoomRead", json!({"room": room.group})).await.unwrap();
+        assert_eq!(read["gen"].as_i64(), Some(now));
+        let fresh = crate::api::dispatch(
+            &room.hub,
+            &bot,
+            "botPost",
+            json!({"room": room.group, "conversation": conv.id, "epoch": conv.epoch, "gen": now,
+                   "text": "back again", "clientNonce": "new1"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(fresh["late"], false);
+        // No gen at all (an older client) is taken under the current one.
+        let plain = crate::api::dispatch(
+            &room.hub,
+            &bot,
+            "botPost",
+            json!({"room": room.group, "conversation": conv.id, "epoch": conv.epoch,
+                   "text": "no gen", "clientNonce": "new2"}),
+        )
+        .await
+        .unwrap();
+        assert!(plain["entryId"].is_string() && plain["duplicate"].is_null());
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_bot_taken_out_and_put_back_loses_its_place_in_the_queue() {
+        let room = Room::new();
+        let _bot = room.join_bot(1, None);
+        let mut events = room.hub.events.subscribe();
+        // `a` speaks first and holds the room; `b`, then the bot, wait behind it.
+        room.send("@a @b @Grok BLOCK hold", None).await;
+        working(&room, "a").await;
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b"]})).unwrap();
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b", room.bg.as_str()]})).unwrap();
+        std::fs::write(room.dir.join("a/release"), "").unwrap();
+        std::fs::write(room.dir.join("b/release"), "").unwrap();
+        room.closed().await;
+        room.settle().await;
+        let turns: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).filter(|v| v["type"] == "turn").collect();
+        assert!(turns.is_empty(), "the slot from before it was taken out was dropped: {turns:?}");
+        room.shutdown().await;
+    }
+
     #[tokio::test]
     async fn an_outside_bots_ask_is_one_turn_of_the_agent_it_names_and_opens_nothing() {
         let room = Room::new();
@@ -1854,6 +2015,7 @@ mod tests {
             round: 1,
             spoke: 0,
             turn_key: Some("key-before".into()),
+            turn_gen: None,
             woke: true,
             wait_until: None,
         };

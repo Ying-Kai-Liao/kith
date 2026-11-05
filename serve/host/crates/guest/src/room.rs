@@ -77,6 +77,7 @@ pub fn post_body(args: &RoomPostArgs, text: &str, nonce: &str) -> serde_json::Va
         conversation: args.conversation.clone(),
         epoch: i64::try_from(args.epoch).unwrap_or(i64::MAX),
         turn_key: args.turn_key.clone(),
+        r#gen: args.r#gen,
         text: text.to_string(),
         client_nonce: nonce.to_string(),
     })
@@ -108,9 +109,12 @@ async fn read(client: &mut Client<'_>, args: &RoomReadArgs, out: &Out) -> Result
     });
     let room: BotRoom = answer(client.call(method::BOT_ROOM_READ, body).await?)?;
     out.event(&json!({"type": "room", "room": room.room, "conversation": room.conversation, "epoch": room.epoch,
-                      "entries": room.entries, "cursor": room.cursor, "secrets": room.secrets}));
+                      "gen": room.r#gen, "entries": room.entries, "cursor": room.cursor, "secrets": room.secrets}));
     if !out.json {
         out.stdout(&format!("room {}\n", room.room));
+        if let Some(g) = room.r#gen {
+            out.stdout(&format!("gen {g}\n"));
+        }
         if let (Some(c), Some(e)) = (&room.conversation, room.epoch) {
             out.stdout(&format!("conversation {c} epoch {e}\n"));
         }
@@ -264,6 +268,8 @@ mod tests {
             json!({"room": "rm", "conversation": "cv", "epoch": 3, "turnKey": "k1", "text": "hi", "clientNonce": "n-1"})
         );
         assert!(post_body(&post_args(&["hi"]), "hi", "n").get("turnKey").is_none());
+        assert!(b.get("gen").is_none());
+        assert_eq!(post_body(&post_args(&["--gen", "42", "hi"]), "hi", "n")["gen"], 42);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "740fba2d9a3de43301f12e4d11e76982ce198aa9cfe40eb8913fffb16250b6f9";
+pub const CONTRACT_SHA256: &str = "bc3ef31542338898f9e8fcf31b6cd9580a454ab13313c47abbae43585f12d071";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1092,7 +1092,7 @@ pub struct BotPosted {
     pub duplicate: Option<bool>,
 }
 
-/// A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next.
+/// A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), the bot's membership generation gen (what a post or room ask names; it rises each time the bot is put back in the room), and the cursor to read from next.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct BotRoom {
@@ -1101,6 +1101,8 @@ pub struct BotRoom {
     pub conversation: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epoch: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#gen: Option<i64>,
     pub entries: Vec<BotEntry>,
     pub cursor: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1556,6 +1558,8 @@ pub struct BotAskParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub room: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#gen: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker: Option<String>,
     pub client_nonce: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1571,6 +1575,8 @@ pub struct BotPostParams {
     pub epoch: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#gen: Option<i64>,
     pub text: String,
     pub client_nonce: String,
 }
@@ -1714,9 +1720,9 @@ pub mod method {
     pub const BOT_STATUS: &str = "botStatus";
     /// A bot's new key shows the invite token from its link, which the cloud never saw; until then it can call nothing else. Proving twice is fine.
     pub const PROVE_BOT_INVITE: &str = "proveBotInvite";
-    /// Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room (a room this bot is a member of) turns the ask into one turn of the agent it @-mentions there: no conversation opens, the agent's reply wakes nobody, and an open conversation's budget is charged.
+    /// Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room (a room this bot is a member of) turns the ask into one turn of the agent it @-mentions there: no conversation opens, the agent's reply wakes nobody, and an open conversation's budget is charged. gen (from a room read or wake) other than the bot's current membership generation in the room is notFound.
     pub const BOT_ASK: &str = "botAsk";
-    /// Posts into a room the bot is a member of. conversation and epoch say which turn it answers; with the turnKey of the turn the room is waiting on it is the member's reply, without one it is an unprompted post (charged one turn; wakes only the members it @-mentions, only while the conversation is open with budget left). Anything else is kept as late and wakes nobody. clientNonce makes a retry post once; the same nonce with other text is nonceReused. A post never opens or tops up a budget. A room the bot is not in is notFound.
+    /// Posts into a room the bot is a member of. conversation and epoch say which turn it answers; with the turnKey of the turn the room is waiting on it is the member's reply, without one it is an unprompted post (charged one turn; wakes only the members it @-mentions, only while the conversation is open with budget left). Anything else is kept as late and wakes nobody. clientNonce makes a retry post once; the same nonce with other text is nonceReused. A post never opens or tops up a budget. A room the bot is not in, or a gen (from a room read or wake) other than its current membership generation there, is notFound.
     pub const BOT_POST: &str = "botPost";
     /// What a bot member may read of a room: its entries after the cursor, shaped as for a bot, with the newest conversation and epoch to post under. A room the bot is not in is notFound.
     pub const BOT_ROOM_READ: &str = "botRoomRead";
@@ -1823,7 +1829,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
         crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?"), ("room", "string?")], may_omit: &["duplicate", "room"] },
         crate::check::TypeSchema { name: "BotPosted", fields: &[("entryId", "string"), ("seq", "int"), ("turn", "int"), ("room", "string"), ("conversation", "string"), ("replied", "bool"), ("late", "bool"), ("lateWhy", "string?"), ("unprompted", "bool?"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
-        crate::check::TypeSchema { name: "BotRoom", fields: &[("room", "string"), ("conversation", "string?"), ("epoch", "int?"), ("entries", "[BotEntry]"), ("cursor", "int"), ("secrets", "[BotRoomSecret]?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotRoom", fields: &[("room", "string"), ("conversation", "string?"), ("epoch", "int?"), ("gen", "int?"), ("entries", "[BotEntry]"), ("cursor", "int"), ("secrets", "[BotRoomSecret]?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotRoomSecret", fields: &[("id", "string"), ("from", "string"), ("label", "string?"), ("expiresAt", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotSecret", fields: &[("id", "string"), ("room", "string"), ("from", "string"), ("label", "string?"), ("value", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotSender", fields: &[("botId", "string"), ("name", "string"), ("speaker", "string?")], may_omit: &[] },
@@ -1870,8 +1876,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "ProveInviteParams", fields: &[("inviteId", "string"), ("token", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotStatusParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "ProveBotInviteParams", fields: &[("inviteId", "string"), ("token", "string")], may_omit: &[] },
-        crate::check::TypeSchema { name: "BotAskParams", fields: &[("agent", "string?"), ("text", "string"), ("conversation", "string?"), ("ref", "string?"), ("room", "string?"), ("speaker", "string?"), ("clientNonce", "string"), ("noQueue", "bool?")], may_omit: &[] },
-        crate::check::TypeSchema { name: "BotPostParams", fields: &[("room", "string"), ("conversation", "string"), ("epoch", "int"), ("turnKey", "string?"), ("text", "string"), ("clientNonce", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotAskParams", fields: &[("agent", "string?"), ("text", "string"), ("conversation", "string?"), ("ref", "string?"), ("room", "string?"), ("gen", "int?"), ("speaker", "string?"), ("clientNonce", "string"), ("noQueue", "bool?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotPostParams", fields: &[("room", "string"), ("conversation", "string"), ("epoch", "int"), ("turnKey", "string?"), ("gen", "int?"), ("text", "string"), ("clientNonce", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotRoomReadParams", fields: &[("room", "string"), ("since", "int?"), ("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotSecretFetchParams", fields: &[("id", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotThreadParams", fields: &[("conversation", "string"), ("afterSeq", "int?"), ("limit", "int?")], may_omit: &[] },
