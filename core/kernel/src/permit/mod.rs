@@ -31,6 +31,7 @@ mod mcp;
 mod mcp_tests;
 mod proc;
 mod pyval;
+mod scrub;
 #[cfg(test)]
 mod tests;
 

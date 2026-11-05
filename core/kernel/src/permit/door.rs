@@ -11,6 +11,7 @@
 use super::Env;
 use super::decide::{allowed, decide, message_of};
 use super::proc::python;
+use super::scrub::guest_scrub;
 use serde_json::{Value, json};
 use std::path::Path;
 use std::time::Duration;
@@ -20,7 +21,7 @@ use std::time::Duration;
 pub(super) const CHECK: &str = r#"
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
-req = json.loads(sys.argv[2])
+req = json.load(sys.stdin)
 import kith_door
 from kith_paths import guest_scrub
 name, path, person, agent = req['door'], req['path'], req['person'], req['agent']
@@ -52,7 +53,7 @@ print(json.dumps(out))
 pub(super) const ACT: &str = r"
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
-req = json.loads(sys.argv[2])
+req = json.load(sys.stdin)
 import kith_door
 from kith_paths import guest_scrub
 name, path, person, agent = req['door'], req['path'], req['person'], req['agent']
@@ -110,6 +111,9 @@ pub fn run_door(a: &serde_json::Map<String, Value>, env: &Env, kernel: &Path) ->
     ) else {
         return "Doors are run from a guest's run only.".to_owned();
     };
+    // nothing of the guest's folders goes to kith-auth, npm, the door's supervisor or a card (`kith-permit` scrubs the same way)
+    let (env, _) = guest_scrub(env, kernel, person);
+    let env = &env;
     let mut req = json!({"door": name, "path": path, "person": person, "agent": agent});
     let Some(first) = step(env, kernel, CHECK, &req, CHECK_S) else {
         return BROKEN.to_owned();
@@ -118,6 +122,8 @@ pub fn run_door(a: &serde_json::Map<String, Value>, env: &Env, kernel: &Path) ->
         return text;
     }
     let real = first.get("real").and_then(Value::as_str).unwrap_or(path);
+    // the card showed this folder: the acts run on it, whatever the guest has done to the link since
+    req["path"] = Value::String(real.to_owned());
     if first.get("card") == Some(&Value::Bool(true)) {
         let d = decide(
             env,
