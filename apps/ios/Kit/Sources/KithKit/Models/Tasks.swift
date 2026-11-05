@@ -69,11 +69,10 @@ public enum Tasks {
         return root.createdAt
     }
 
-    /// Whether a task shows inline rather than as a card: while it works or waits on the user, and the newest one
-    /// until it has been idle for ten minutes. A choice the user made on this device wins.
-    public static func isOpen(_ status: TaskStatus, newest: Bool, lastAt: Int64, now: Int64, choice: Bool? = nil) -> Bool {
-        if let choice { return choice }
-        return status.isBusy || (newest && now - lastAt < idleMs)
+    /// Whether a task's card shows its whole thread: the user's choice on this device, else while it works (so it
+    /// folds when done).
+    public static func isOpen(_ status: TaskStatus, choice: Bool? = nil) -> Bool {
+        choice ?? (status == .working)
     }
 
     /// The main chat's order with tasks placed by their activity. A task keeps its root's place until it moves after
@@ -95,6 +94,127 @@ public enum Tasks {
     public static func title(_ root: Entry) -> String {
         let text = (root.data.text ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ")
         return text.isEmpty ? "Task" : text
+    }
+}
+
+/// What a folded task card hides: its last reply shows; the fold line counts the rest.
+public struct TaskFold: Equatable, Sendable {
+    /// The agent's newest final reply, shown under the fold line.
+    public var last: Entry?
+    /// Chat messages the fold hides (approval cards show on the card, so they aren't counted).
+    public var messages: Int
+    /// Tool steps the fold hides.
+    public var steps: Int
+}
+
+/// A card's head line: the status word (none for done), and where the task came from, or who holds it now.
+public struct TaskHead: Equatable, Sendable {
+    public var status: String?
+    public var origin: String?
+    /// Someone other than the app holds the thread: the origin slot shows them as a chip.
+    public var held: Bool
+}
+
+/// Where the chat's one box sends: a task a Reply picked, or a new task.
+public enum TaskTarget: Equatable, Sendable {
+    case task(String)
+    case new
+}
+
+/// Where the box sends now: `going` is the task the Continues pill names (picked, else the one the host would go on
+/// with); `into` is the thread the send carries (nil starts a new task); `picked` says the user chose it.
+public struct TaskDestination: Equatable, Sendable {
+    public var going: Entry?
+    public var picked: Bool
+    public var newTask: Bool
+    public var into: Entry? { newTask ? nil : going }
+}
+
+extension Tasks {
+    /// The fold of a task's thread: the last final reply, and what else is in it. `isStep` says which tool entries
+    /// count as steps (a tool that delivered a file is not one).
+    public static func fold(_ thread: [Entry], isStep: (Entry) -> Bool) -> TaskFold {
+        let last = thread.last { $0.kind == "agent" && $0.data.final == true }
+        var messages = 0, steps = 0
+        for e in thread where e.id != last?.id {
+            if e.kind == "tool" {
+                if isStep(e) { steps += 1 }
+            } else if e.isChat && e.kind != "permission" {
+                messages += 1
+            }
+        }
+        return TaskFold(last: last, messages: messages, steps: steps)
+    }
+
+    /// "2 messages · 2 steps", "1 step"; nil when the fold hides nothing.
+    public static func foldLine(messages: Int, steps: Int) -> String? {
+        var parts: [String] = []
+        if messages > 0 { parts.append("\(messages) message\(messages == 1 ? "" : "s")") }
+        if steps > 0 { parts.append("\(steps) step\(steps == 1 ? "" : "s")") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// The origin words a card's head shows; the app's own tasks show none.
+    public static func originLabel(_ origin: String?) -> String? {
+        switch ThreadOrigin(origin) {
+        case .app: nil
+        case .terminal: "Terminal"
+        case .telegram: "Telegram"
+        case .discord: "Discord"
+        case .slack: "Slack"
+        case .bot: "Bot"
+        case .other(let raw): raw.prefix(1).uppercased() + raw.dropFirst()
+        }
+    }
+
+    /// A card's head: status (none when done), origin, and the writer holding it when that isn't the app.
+    public static func head(_ status: TaskStatus, thread: ThreadSummary?, mac: String) -> TaskHead {
+        let word: String? = status == .done ? nil : status.label
+        if let thread, thread.isHeldElsewhere {
+            return TaskHead(status: word, origin: thread.isHeldByTerminal ? "In terminal · \(mac)" : "Open elsewhere", held: true)
+        }
+        return TaskHead(status: word, origin: originLabel(thread?.origin), held: false)
+    }
+
+    /// The task the box goes on with when nothing is picked, as the host routes a message with no thread: the newest
+    /// task while it works or for ten idle minutes. A terminal's own session is never gone on with by itself.
+    public static func continuing(bot: Bot, chat: [Entry], now: Int64) -> Entry? {
+        for e in chat.reversed() where e.isTask {
+            if e.data.thread?.isTerminalOrigin == true { continue }
+            return bot.isWorking(in: bot.id, thread: e.id) || now - lastAt(e) < idleMs ? e : nil
+        }
+        return nil
+    }
+
+    /// The task an entry belongs to: its thread, or itself when it is a task's first message.
+    public static func of(_ entry: Entry) -> String? {
+        entry.threadId ?? (entry.isTask ? entry.id : nil)
+    }
+
+    /// Where the box sends for a chat, given the target the user set (if any).
+    public static func destination(target: TaskTarget?, bot: Bot, chat: [Entry], now: Int64) -> TaskDestination {
+        var chosen: Entry?
+        if case .task(let id) = target { chosen = chat.first { $0.id == id && $0.isTask } }
+        let going = chosen ?? continuing(bot: bot, chat: chat, now: now)
+        return TaskDestination(going: going, picked: chosen != nil, newTask: target == .new)
+    }
+
+    /// Whether sending into this task takes it over from a terminal first: only a task the user picked (a Reply),
+    /// and only while the terminal is idle. A busy terminal, or a task the box went on with by itself, is sent to as
+    /// the host routes it (queued until the terminal lets go).
+    public static func takesOver(_ thread: ThreadSummary?, picked: Bool) -> Bool {
+        picked && thread?.isHeldByTerminal == true && thread?.isBusyInTerminal != true
+    }
+
+    /// Sends into a task, taking it over first when `takesOver` says so; the message goes only once the take-over
+    /// succeeded. nil when sent; else why the take-over failed, and nothing was sent (the caller keeps the text).
+    @MainActor public static func sendIn(_ thread: ThreadSummary?, picked: Bool, takeOver: () async throws -> Void,
+                              send: () async -> Void) async -> Error? {
+        if takesOver(thread, picked: picked) {
+            do { try await takeOver() } catch { return error }
+        }
+        await send()
+        return nil
     }
 }
 
