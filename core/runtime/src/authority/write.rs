@@ -649,6 +649,11 @@ pub(crate) fn bot_remove(auth: &mut Value, bid: &str) -> R<Vec<String>> {
     }
     tables(auth);
     if !is_bot(auth, bid) {
+        // A person is not "no such id": kith-auth's mirror treats "no bot" as already gone and stays quiet, which a person's
+        // row must not earn.
+        if people(auth).contains_key(bid) {
+            return die(format!("'{bid}' is a person, not a bot"));
+        }
         return die(format!("no bot '{bid}'"));
     }
     // shift_remove: a person leaving must not move the others (the first match of `canonical` and `owner` wins)

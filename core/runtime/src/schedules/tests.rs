@@ -506,3 +506,27 @@ fn slots_are_utc_instants_or_manual_and_states_are_checked_in_code() {
     assert!(!valid_fire_outcome("skipped:") && !valid_fire_outcome("fire"));
     assert!(valid_run_state("started") && !valid_run_state("weird"));
 }
+
+#[test]
+fn a_reader_gives_up_on_a_held_jobs_lock_and_says_so() {
+    use fs2::FileExt as _;
+    let (_t, m, p) = world();
+    let lock = m.join("sched/mel.jobs.lock");
+    std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+    let held = std::fs::File::create(&lock).unwrap();
+    held.lock_exclusive().unwrap();
+    let file = p.agents.join("mel/jobs.json");
+    let t0 = std::time::Instant::now();
+    let err = super::read_jobs_within(&m, "mel", &file, std::time::Duration::from_millis(150))
+        .unwrap_err();
+    assert!(t0.elapsed() >= std::time::Duration::from_millis(150));
+    assert!(
+        err.contains("mel.jobs.lock") && err.contains("held by a writer"),
+        "{err}"
+    );
+    // Let go, and the same read goes through.
+    held.unlock().unwrap();
+    let (hash, jobs) = super::read_jobs(&m, "mel", &file).unwrap();
+    assert_eq!(jobs.len(), 4);
+    assert_eq!(hash.len(), 64);
+}

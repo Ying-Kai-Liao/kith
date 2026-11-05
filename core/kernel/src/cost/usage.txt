@@ -1,0 +1,33 @@
+kith-cost — what Claude Code usage costs, at API prices, kept over time.
+
+  kith-cost [today|week|month|all]   totals, by day, by project and the top sessions (syncs first)
+  kith-cost agents [period]          kith agents side by side: cost, runs, cost per run, models (default: month)
+  kith-cost agent <name> [period]    one kith agent: by day, by version, by model and effort, its costliest runs
+  kith-cost people [period]          what each person's runs cost (KITH_PERSON; the owner's own runs as owner), by agent;
+                                   a bot's runs count on its owner's line, with a sub-line per bot
+  kith-cost spent <person> [agent]   this calendar month's cost of a person's runs, a bare number (bin/kith checks a
+                                   membership's budget= with it)
+  kith-cost session <id-prefix>      one session turn by turn, plus its subagents
+  kith-cost usage [period] --json    for the apps: total, agents vs your own sessions, one row per agent with its
+                                   month and its limit (period: today, week = 7 days, month = this calendar month)
+  kith-cost agent <name> [period] --json   one agent for the apps: days of this month, models, costliest runs, its
+                                   limit and a forecast in words
+  kith-cost limit <agent> [--json|--sh]    where the agent stands against its monthly limit (kith AGENT set limit N):
+                                   spent this calendar month, the limit, what happens at it, a forecast. bin/kith
+                                   (--sh) and the host (--json) read it; no limit answers at once, without a sync
+  kith-cost members <agent> --json   this calendar month per person on the agent (owner: your own runs), and each
+                                    person's budget= on it (kith-auth budgets)
+  kith-cost bots --json              this calendar month's cost of the Mac owner's bots together, per bot, and their
+                                   cap (kith-auth bots-cap)
+  kith-cost sync                     copy new usage from ~/.claude/projects into the ledger
+  kith-cost csv [since YYYY-MM-DD]   every request as CSV with its kith agent, for a spreadsheet
+  kith-cost tag                      (SessionStart hook in kith runs) record the session as a run of $KITH_AGENT
+  kith-cost record                   (adapters/harness.py) one run on another harness (codex, pi, ...) as a row
+
+The ledger (~/.kith/cost.db) keeps one row per API request, so it outlives Claude Code's transcript cleanup
+(30 days by default). Prices are list API prices per million tokens; on a subscription this is usage, not a bill.
+
+kith attribution: bin/kith runs `kith-cost tag` as a SessionStart hook, so each session it starts (including resumes and
+/clear) is recorded in `runs` with the agent, package version, model, effort and caller. A request belongs to a kith
+agent when its session is such a run, or when it was made by an `kith:<name>` subagent in any session; a helper agent
+called from inside a run counts for the helper.

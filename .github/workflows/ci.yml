@@ -287,6 +287,7 @@ jobs:
               Auth check|kernel/tests/kith-auth-check
               Auth lock check|kernel/tests/kith-auth-lock-check
               Auth revoke check|kernel/tests/kith-auth-revoke-check
+              Auth core mirror check (kith-auth person/bot --rm/--revoke against a fake core)|kernel/tests/kith-auth-core-mirror-check
               Helper MCP grants check|kernel/tests/kith-helper-mcp-check
               Cost bots check|kernel/tests/kith-cost-bots-check
               Call check|kernel/tests/kith-call-check
@@ -294,6 +295,7 @@ jobs:
               People check (kith people, kith invite, kith bot ls/invite/revoke/decide/auto-allow --json, against a stub host)|kernel/tests/kith-people-check
               Account check (kith account add/remove/list --json, the login command returned and not run)|kernel/tests/kith-account-check
               Accounts tombstone check (a tombstoned state.json refuses writes; kith-account exits 4)|kernel/tests/kith-accounts-tombstone-check
+              Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
               Grants check (connectors and skills as grants on an agent)|kernel/tests/kith-grants-check
           - shard: 3
             bun: true

@@ -212,7 +212,7 @@ host; with no server named, no one does).
   everyone shares `memory/shared/` (the craft, never a person). Their runs are denied the owner's memory and
   outputs and every other person's, by path; `kith-memory` searches only their part. Rename moves the folders;
   removal keeps them.
-- `kith doctor` checks the tables: rows and grants naming no one, missing agents, logins shared with everyone, free
+- `kith doctor` checks the tables: an owner who is also revoked (old data), rows and grants naming no one, missing agents, logins shared with everyone, free
   shells, the old Discord settings, and Reason Network wired into Claude Code (its daemon lists every Claude Code
   session, agent runs included, as one its team peers can prompt, past kith-auth). `kith auth people [ID]
 [--matrix]` shows everything: each person's accounts, owned profiles, the agents they reach and how, and the

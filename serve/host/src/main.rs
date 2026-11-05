@@ -493,6 +493,18 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
+    /// What Claude Code usage costs, the verbs the launch and the apps call (`kernel/bin/kith-cost`): `limit AGENT [--json|--sh]`,
+    /// `spent PERSON [AGENT]`, `usage [PERIOD] --json`, `agent NAME [PERIOD] --json`, `members AGENT`, `bots --json` and `sync`.
+    /// Prints what `kith-cost` prints, with its exit codes (2: a verb the core does not have yet). Not routed from `kith` yet.
+    // -h/--help belong to kith-cost's own usage text, so clap must not answer them.
+    #[command(disable_help_flag = true)]
+    Cost {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
     /// The writer claim of a Claude session and the session registry: `record`, `resolve`, `claim`, `terminal`, `proc`,
     /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release` and `holder` (not routed from `kith` yet).
     Threads {
@@ -835,6 +847,19 @@ fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let ctx = kith_kernel::secrets::Ctx::from_process(&kernel);
     let (verb, rest) = args.split_first().map_or(("", &[][..]), |(v, r)| (v.as_str(), r));
     let out = kith_kernel::secrets::run(&ctx, verb, rest);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
+}
+
+/// `kith kernel cost <verb ...>`: `kith-cost`'s `limit`, `spent` and the apps' `--json` views from the `kith-kernel` crate.
+fn print_cost(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let paths = kith_kernel::cost::Paths::from_process(&kernel);
+    let out = kith_kernel::cost::run(&paths, &kith_kernel::cost::Env::from_process(), args);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
@@ -1338,6 +1363,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Secrets { kernel, args } = cmd {
                 std::process::exit(print_secrets(kernel, &args));
             }
+            if let KernelCmd::Cost { kernel, args } = cmd {
+                std::process::exit(print_cost(kernel, &args));
+            }
             if let KernelCmd::Accounts { kernel, action } = cmd {
                 std::process::exit(print_accounts(kernel, action));
             }
@@ -1419,6 +1447,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Attach { .. }
                     | KernelCmd::CoreCall { .. }
                     | KernelCmd::Accounts { .. }
+                    | KernelCmd::Cost { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Pkg { .. }
