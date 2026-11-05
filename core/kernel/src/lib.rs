@@ -14,6 +14,9 @@ pub mod engines;
 pub mod launch;
 pub mod log;
 pub mod paths;
+// Unix only, like `cost` and `secrets`: it runs `kith-auth` through the secrets module's timeout helper.
+#[cfg(unix)]
+pub mod people;
 // Unix only: `resolve` clones with cp, sets modes and asks `kill(2)` whether a run is alive.
 #[cfg(unix)]
 pub mod pkg;
