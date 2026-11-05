@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"alpha\": {\n      \"paths\": [\n        \"~/work dir\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/other/": "<empty dir>\n",
   "state:home/work dir-two/": "<empty dir>\n",
   "state:home/work dir/inner/deep/": "<empty dir>\n",

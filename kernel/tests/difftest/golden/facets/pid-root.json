@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"homes\": \"~/Projects/p1\",\n  \"projects\": {\n    \"p1\": {\n      \"home\": \"~/Projects/p1\",\n      \"paths\": [\n        \"~/Projects/p1\"\n      ],\n      \"remotes\": []\n    },\n    \"p2\": {\n      \"home\": \"~/Projects/p2\",\n      \"paths\": [\n        \"~/Projects/p2\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/Projects/p1/": "<empty dir>\n",
   "state:home/Projects/p2/": "<empty dir>\n",
   "step0.exit": "0\n",

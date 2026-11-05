@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"acme\": {\n      \"home\": \"~/Clients/acme\",\n      \"paths\": [\n        \"~/Clients/acme\"\n      ],\n      \"remotes\": []\n    },\n    \"acme-api\": {\n      \"parent\": \"acme\",\n      \"paths\": [\n        \"~/code/api\",\n        \"~/Clients/acme/api\"\n      ],\n      \"remotes\": []\n    },\n    \"acme-api-v2\": {\n      \"parent\": \"acme-api\",\n      \"paths\": [],\n      \"remotes\": []\n    },\n    \"acme-web\": {\n      \"formerly\": \"old-web\",\n      \"home\": \"~/Clients/acme/web\",\n      \"parent\": \"acme\",\n      \"paths\": [\n        \"~/code/web\"\n      ],\n      \"remotes\": [\n        \"github.com/acme/web\"\n      ]\n    },\n    \"loopa\": {\n      \"parent\": \"loopb\",\n      \"paths\": [],\n      \"remotes\": []\n    },\n    \"loopb\": {\n      \"parent\": \"loopa\",\n      \"paths\": [],\n      \"remotes\": []\n    },\n    \"orphan\": {\n      \"parent\": \"missing\",\n      \"paths\": [\n        \"~/gone\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/afile": "x",
   "step0.exit": "1\n",
   "step0.stderr": "",

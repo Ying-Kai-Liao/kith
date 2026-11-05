@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"acme\": {\n      \"home\": \"~/Clients/acme\",\n      \"paths\": [\n        \"~/Clients/acme\"\n      ],\n      \"remotes\": []\n    },\n    \"acme-mobile\": {\n      \"home\": \"~/Clients/acme/acme-mobile\",\n      \"parent\": \"acme\",\n      \"paths\": [\n        \"~/code/mobile\"\n      ],\n      \"remotes\": []\n    },\n    \"acme-web\": {\n      \"home\": \"~/Clients/acme/acme-web\",\n      \"parent\": \"acme\",\n      \"paths\": [\n        \"~/code/web\"\n      ],\n      \"remotes\": []\n    },\n    \"solo\": {\n      \"home\": \"~/Documents/solo\",\n      \"paths\": [\n        \"~/Documents/solo\"\n      ],\n      \"remotes\": []\n    },\n    \"solo2\": {\n      \"home\": \"~/Clients/acme/solo2\",\n      \"parent\": \"acme\",\n      \"paths\": [\n        \"~/Clients/acme/solo2\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/Clients/acme/acme-mobile/": "<empty dir>\n",
   "state:home/Clients/acme/acme-web/": "<empty dir>\n",
   "state:home/Clients/acme/solo2/": "<empty dir>\n",

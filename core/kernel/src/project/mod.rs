@@ -48,6 +48,58 @@ pub fn is_guest(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
 /// Where a new project's home goes unless projects.json says "homes".
 const ROOT: &str = "~/Documents";
 
+/// The whole file, atomically (a reader never sees half of it): a temp file beside it, flushed to disk, then the swap, and
+/// on unix the directory flushed so the swap survives a crash too. `crash_before_rename` stops after the temp file is
+/// written, as a crash there would (tests only). A file that is already there keeps its permissions.
+fn write_atomic(file: &Path, data: &[u8], crash_before_rename: bool) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let dir = file.parent().unwrap_or(Path::new("."));
+    let tmp = dir.join(format!(
+        ".projects.json.{}-{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        if let Ok(m) = std::fs::metadata(file) {
+            f.set_permissions(m.permissions())?;
+        }
+        f.write_all(data)?;
+        f.sync_all()?;
+        drop(f);
+        if crash_before_rename {
+            return Err(std::io::Error::other("crash before the rename"));
+        }
+        std::fs::rename(&tmp, file)?;
+        // a directory cannot be opened on Windows
+        #[cfg(unix)]
+        std::fs::File::open(dir)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// The writers' lock (`projects.json.lock` in the state folder), held from reading the registry to writing it back so two
+/// registers at once both land. `kernel/bin/project-id` takes the same flock, so Python and Rust writers exclude each other.
+fn lock(state: &Path) -> std::io::Result<std::fs::File> {
+    use fs2::FileExt as _;
+    let l = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(false)
+        .create(true)
+        .open(state.join("projects.json.lock"))?;
+    l.lock_exclusive()?;
+    Ok(l)
+}
+
 impl Out {
     fn say(&mut self, line: impl std::fmt::Display) {
         let _ = writeln!(self.stdout, "{line}");
@@ -236,8 +288,12 @@ impl Run<'_> {
 
     fn save(&self) -> Result<(), String> {
         let text = pyjson::dumps_indent(&Value::Object(self.reg.clone())) + "\n";
-        std::fs::write(self.ctx.state.join("projects.json"), text)
-            .map_err(|e| format!("project-id: cannot write projects.json: {e}"))
+        write_atomic(
+            &self.ctx.state.join("projects.json"),
+            text.as_bytes(),
+            false,
+        )
+        .map_err(|e| format!("project-id: cannot write projects.json: {e}"))
     }
 
     /// `pid` and its parents, closest first; stops at a missing parent or a loop.
@@ -484,6 +540,23 @@ pub fn run(ctx: &Ctx, argv: &[String]) -> Out {
         return out.with_code(2);
     }
     let file = ctx.state.join("projects.json");
+    // The verbs that write; the lock is released when `_hold` drops (the file closes).
+    let writes = match argv.first().map(String::as_str) {
+        Some("--register") => true,
+        Some("--root") => argv.len() > 1,
+        _ => false,
+    };
+    let _hold = if writes {
+        match lock(&ctx.state) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                out.err(format!("project-id: cannot lock projects.json: {e}"));
+                return out.with_code(1);
+            }
+        }
+    } else {
+        None
+    };
     let reg = match std::fs::read_to_string(&file) {
         Ok(t) => match serde_json::from_str::<Value>(&t) {
             Ok(Value::Object(m)) if m.get("projects").is_none_or(Value::is_object) => m,
