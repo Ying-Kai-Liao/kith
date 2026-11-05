@@ -135,7 +135,7 @@ fn split_item(name: &str) -> Result<(&str, &str)> {
 }
 
 impl OsStore for KeychainStore {
-    fn get(&self, name: &str) -> Result<Option<String>> {
+    fn get(&self, name: &str) -> Result<Option<Zeroizing<String>>> {
         let (service, account) = split_item(name)?;
         match Keychain.read(service, account) {
             Item::Found(v) => Ok(Some(v)),
