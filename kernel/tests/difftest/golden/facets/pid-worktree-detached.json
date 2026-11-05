@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"projects\": {\n    \"delta\": {\n      \"paths\": [\n        \"~/main repo\"\n      ],\n      \"remotes\": [\n        \"example.com/team/main-repo\"\n      ]\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/detached/.git": "gitdir: <HOME>/main repo/.git/worktrees/detached\n",
   "state:home/detached/sub/": "<empty dir>\n",
   "state:home/main repo/.git/COMMIT_EDITMSG": "m\n",

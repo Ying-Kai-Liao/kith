@@ -1,6 +1,7 @@
 {
   "fakes": "",
   "state:home/.kith/projects.json": "{\n  \"note\": \"é\",\n  \"projects\": {\n    \"café\": {\n      \"paths\": [\n        \"~/Café dir\"\n      ],\n      \"remotes\": []\n    },\n    \"plain\": {\n      \"paths\": [\n        \"~/Café dir\"\n      ],\n      \"remotes\": []\n    }\n  }\n}\n",
+  "state:home/.kith/projects.json.lock": "",
   "state:home/Café dir/été/": "<empty dir>\n",
   "step0.exit": "0\n",
   "step0.stderr": "",
