@@ -211,6 +211,7 @@ KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
 SERVICES = KITH / 'services'
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+import kith_tombstone  # noqa: E402
 from kith_paths import guest_sandbox, guest_scrub, guest_tmp_remove, in_guest_folders, paths, sync_env  # noqa: E402  the one place that knows where kith's folders are
 STATE_ROOT, AGENTS = paths()['KITH_STATE'], paths()['KITH_AGENTS']  # <home>/state, <home>/agents
 
@@ -269,9 +270,11 @@ def load_auth(write=False):
     if write:
         lock_auth()
     try:
-        data = json.loads(AUTH.read_text())
+        data = json.loads(kith_tombstone.read_text(AUTH))
     except FileNotFoundError:
         data = {}
+    except kith_tombstone.Tombstoned as e:   # authority moved to the core: never answer from the note (fail closed)
+        die(str(e), 3)
     except ValueError as e:
         die(f'{AUTH}: invalid JSON ({e})')
     for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites', 'retired', 'once', 'agent_access'):
@@ -291,6 +294,10 @@ def save_auth(data):
             f.write(json.dumps(data, indent=2) + '\n')
             f.flush()
             os.fsync(f.fileno())
+        try:
+            kith_tombstone.check(AUTH)   # under the lock, last thing before the replace: a tombstone is never written over
+        except kith_tombstone.Tombstoned as e:
+            die(str(e), 3)
         os.replace(tmp, AUTH)
     except BaseException:
         try:

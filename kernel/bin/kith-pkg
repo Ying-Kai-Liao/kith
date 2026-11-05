@@ -92,6 +92,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 from kith_paths import paths  # noqa: E402  the one place that knows where kith's folders are
 import kith_settings  # noqa: E402
 import kith_accounts  # noqa: E402
+import kith_tombstone  # noqa: E402
 # The state folder and the agents folder, <home>/state and <home>/agents (lib/kith_paths.py). Each agent's role/ is a git
 # checkout (or a symlink into one, for an agent that lives in a folder of a bigger repo).
 STATE_ROOT, AGENTS = paths()['KITH_STATE'], paths()['KITH_AGENTS']
@@ -932,7 +933,9 @@ def auth_tables():
     """(profiles, grants) from auth.json, read only; empty when there is none."""
     f = Path(os.environ.get('KITH_AUTH') or paths()['KITH_SECRETS'] / 'auth.json')
     try:
-        auth = json.loads(f.read_text())
+        auth = kith_tombstone.load_json(f)
+    except kith_tombstone.Tombstoned:
+        raise   # authority moved to the core: not "no profiles, nothing granted"
     except (OSError, ValueError):
         auth = {}
     return auth.get('profiles') or {}, auth.get('grants') or {}
@@ -1669,4 +1672,8 @@ def run(cmd, rest, as_json, argv):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except kith_tombstone.Tombstoned as e:   # authority moved to the core (kith kernel cutover step authority)
+        print(f'kith-pkg: {e}', file=sys.stderr)
+        sys.exit(3)
