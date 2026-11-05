@@ -98,6 +98,7 @@ impl Shared {
     /// Runs the revoke order again for every removal whose record is still open (a crash, or an error mid-order). At
     /// core start and on the supervisor's pass; each pass re-reads every row, and a row goes only after its effect.
     /// The writers it would kill are ended by the holder's reconcile and `end_gone`; a failure is logged, not fatal.
+    #[cfg(unix)]
     pub(crate) fn replay_open_removals(&self) {
         #[allow(clippy::cast_possible_truncation)]
         let now = std::time::SystemTime::now()
@@ -112,6 +113,10 @@ impl Shared {
             Err(e) => log::note(&self.logs, &format!("daemon: revoke order: {e}")),
         }
     }
+
+    /// The revoke order (and the authority tables it reads) is unix-only for now.
+    #[cfg(not(unix))]
+    pub(crate) fn replay_open_removals(&self) {}
 
     /// Runs `f` on the core. The core is gone once the daemon has stopped.
     pub(crate) fn with_core<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R> {
