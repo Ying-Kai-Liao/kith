@@ -560,3 +560,104 @@ fn apply_that_cannot_use_the_file_goes_on_without_it() {
     assert_eq!(std::fs::read_to_string(f).unwrap(), r#"{"sandbox": {}}"#);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn a_whole_number_beyond_64_bits_gets_no_card_and_no_allow() {
+    let root = world("bigint");
+    let dir = root.join("r1");
+    let d = dir.to_str().unwrap();
+    // two different big integers read as the same f64, so they would share a one-shot key
+    let big = |n: &str| {
+        format!(
+            r#"{{"hook_event_name": "PreToolUse", "tool_name": "Mcp", "tool_input": {{"a": [{{"n": {n}}}]}}}}"#
+        )
+    };
+    let (a, b) = ("18446744073709551617", "18446744073709551619");
+    let key = |n: &str| {
+        let v: Value = serde_json::from_str(&big(n)).unwrap();
+        hooks::once_key("Mcp", &v["tool_input"])
+    };
+    assert_eq!(key(a), key(b));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(key(a)), "4000000000\n").unwrap();
+    assert_eq!(
+        go(&Env::default(), &["once", "--dir", d], &big(b)).stdout,
+        ""
+    );
+    assert!(dir.join(key(a)).exists());
+    // `denied` asks nobody and leaves no note (no socket exists: an attempt would be told, not skipped)
+    let sock = root.join("s");
+    let denied = big(a).replace("PreToolUse", "PermissionDenied").replace(
+        r#""tool_input""#,
+        r#""reason": "Auto mode blocked it", "tool_input""#,
+    );
+    let out = go(&owner_env(&sock), &["denied", "--dir", d], &denied);
+    assert_eq!(out.stdout, "");
+    assert!(!dir.join(format!("note-{}", key(a))).exists());
+    // a number that fits is still allowed
+    let small = big("9223372036854775807");
+    let v: Value = serde_json::from_str(&small).unwrap();
+    std::fs::write(
+        dir.join(hooks::once_key("Mcp", &v["tool_input"])),
+        "4000000000\n",
+    )
+    .unwrap();
+    assert!(
+        go(&Env::default(), &["once", "--dir", d], &small)
+            .stdout
+            .contains("allow")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_single_name_relative_dir_cleans_up_nothing() {
+    let root = std::fs::canonicalize(world("relclean")).unwrap();
+    let old = root.join("old-run");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::File::open(&old)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH)
+        .unwrap();
+    let before = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&root).unwrap();
+    let kept = hooks::keep_once(Path::new("r1"), "k", 4_000_000_000.0, false);
+    std::env::set_current_dir(before).unwrap();
+    kept.unwrap();
+    // Python's dirname('r1') is '' and listdir('') fails: the day-old folder next to it stays
+    assert!(old.is_dir());
+    assert!(root.join("r1/k").is_file());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn apply_with_no_home_adds_no_grants() {
+    let root = std::fs::canonicalize(world("apply-nohome")).unwrap();
+    let proj = root.join("proj");
+    std::fs::create_dir_all(proj.join("docs")).unwrap();
+    let file = root.join("s.json");
+    std::fs::write(&file, r#"{"sandbox": {"filesystem": {"denyRead": ["/"]}}}"#).unwrap();
+    let sock = root.join("s");
+    let reply: &'static str = Box::leak(
+        format!(
+            "{}\n",
+            json!({"ok": true, "grants": {"read": [proj.join("docs")], "write": [proj.join("docs")], "domains": ["example.com"]}})
+        )
+        .into_boxed_str(),
+    );
+    let server = socket_host(&sock, reply);
+    let mut env = Env::with(&[
+        ("KITH_RUN_TOKEN", "run-tok"),
+        ("KITH_RUN_SOCKET", sock.to_str().unwrap()),
+        ("KITH_STATE", root.join(".kith").to_str().unwrap()),
+    ]);
+    env.home = PathBuf::new();
+    let out = go(&env, &["apply", file.to_str().unwrap()], "");
+    server.join().unwrap();
+    assert_eq!(out.code, 0);
+    assert!(!out.stderr.contains("access given"), "{}", out.stderr);
+    let s: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert!(s["sandbox"]["filesystem"].get("allowRead").is_none());
+    assert!(s["sandbox"].get("network").is_none());
+    let _ = std::fs::remove_dir_all(root);
+}

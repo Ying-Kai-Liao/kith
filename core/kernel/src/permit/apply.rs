@@ -183,6 +183,11 @@ fn apply_grants(
     for name in ["deny", "allow", "additionalDirectories"] {
         list_of(perms, name)?;
     }
+    // no home to judge rule W against: add nothing (Python would ask the password database; the settings file's own
+    // denyWrite still holds)
+    if home.is_empty() {
+        return Ok(vec![]);
+    }
     let writes = grant("write");
     let mut done = vec![];
     for kind in ["read", "write"] {

@@ -369,7 +369,7 @@
     "-",
     "issue",
     "alpha",
-    "sess-\u00e9\u4e2d",
+    "sess-é中",
     "5"
    ]
   ],
@@ -3924,7 +3924,7 @@
    },
    {
     "write": "home/in/p5",
-    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Task\", \"tool_input\": {\"n\": 1, \"f\": 1.5, \"big\": 1e+20, \"small\": 1e-07, \"neg\": -0.0, \"flag\": true, \"none\": null, \"nested\": {\"b\": [1, {\"z\": 1, \"a\": [null, false]}], \"a\": {}}, \"empty\": []}}"
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Task\", \"tool_input\": {\"n\": 1, \"f\": 1.5, \"big\": 1e+15, \"small\": 1e-07, \"neg\": -0.0, \"flag\": true, \"none\": null, \"nested\": {\"b\": [1, {\"z\": 1, \"a\": [null, false]}], \"a\": {}}, \"empty\": []}}"
    },
    {
     "write": "home/in/p6",
@@ -3967,7 +3967,7 @@
     "text": "4000000000\n"
    },
    {
-    "write": "home/.kith/run/once/r1/eeb8a396747b178ae3ff59acda71d669d4948d14bbdd4e69c0aa242963be632b",
+    "write": "home/.kith/run/once/r1/b019c9666deeb919c8d917fd483658c86680aa56c9544ed2308c297931b5214a",
     "text": "4000000000\n"
    },
    {
@@ -4483,7 +4483,7 @@
    },
    {
     "write": "home/.kith/run/once/r1/note-f51d5d8e320d65565f9a2234191383289c3ff9f47aab1961e55cc645cd159f7b",
-    "text": "Auto mode blocked this. nein \u00fcber \u4e2d \"q\""
+    "text": "Auto mode blocked this. nein über 中 \"q\""
    },
    {
     "write": "home/.kith/run/once/r1/note-1cf0e4502e5bd7ac672b89f98317cd3f0d8f5464dab828afda65a1af20774864",
@@ -5453,7 +5453,7 @@
    },
    {
     "write": "home/unicode.json",
-    "text": "{\"sandbox\": {\"filesystem\": {}}, \"note\": \"caf\u00e9 \u4e2d \ud83d\ude00\", \"n\": 1.5, \"e\": 1e+20}"
+    "text": "{\"sandbox\": {\"filesystem\": {}}, \"note\": \"café 中 😀\", \"n\": 1.5, \"e\": 1e+20}"
    },
    {
     "write": "home/nofs-num.json",

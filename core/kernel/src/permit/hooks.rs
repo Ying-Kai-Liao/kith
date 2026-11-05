@@ -58,6 +58,22 @@ pub fn once_key(tool: &str, input: &Value) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// A whole number too big for i64/u64: without serde's arbitrary_precision it is read as an f64, so two different ones
+/// would hash to the same one-shot key. Such a call gets no card and no allow.
+fn has_big_int(v: &Value) -> bool {
+    match v {
+        Value::Number(n) => {
+            n.as_i64().is_none()
+                && n.as_u64().is_none()
+                && n.as_f64()
+                    .is_some_and(|f| f.fract() == 0.0 && f.abs() >= 9_223_372_036_854_775_808.0)
+        }
+        Value::Array(a) => a.iter().any(has_big_int),
+        Value::Object(o) => o.values().any(has_big_int),
+        _ => false,
+    }
+}
+
 /// The hook's JSON when it has a tool name and a tool input.
 pub fn hook_input(raw: &str) -> Option<Map<String, Value>> {
     let Value::Object(d) = serde_json::from_str::<Value>(raw).ok()? else {
@@ -98,12 +114,11 @@ pub fn keep_once(once_dir: &Path, key: &str, now: f64, short: bool) -> std::io::
 fn clean_up(once_dir: &Path, now: f64) -> std::io::Result<()> {
     let trimmed = once_dir.to_string_lossy();
     let trimmed = trimmed.trim_end_matches('/');
+    // a single-name relative DIR has no parent: Python's listdir('') fails there and nothing is deleted
     let parent = Path::new(trimmed).parent().unwrap_or(Path::new(""));
-    let parent = if parent.as_os_str().is_empty() {
-        Path::new(".")
-    } else {
-        parent
-    };
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
     let mine = crate::paths::realpath(once_dir);
     for e in fs::read_dir(parent)? {
         let sib = e?.path();
@@ -145,7 +160,7 @@ fn present(reply: Option<&Map<String, Value>>) -> Option<&Map<String, Value>> {
 /// The PermissionDenied hook's output (a JSON line, or '' for no opinion). A yes records a one-shot and invites the retry;
 /// anything else is told to the model on that retry (see `tell`).
 pub fn denied(raw: &str, once_dir: &Path, env: &Env) -> String {
-    let Some(d) = hook_input(raw) else {
+    let Some(d) = hook_input(raw).filter(|d| !has_big_int(&d["tool_input"])) else {
         return String::new();
     };
     let reason = match d.get("reason") {
@@ -234,7 +249,7 @@ pub fn denied(raw: &str, once_dir: &Path, env: &Env) -> String {
 /// The PreToolUse hook's output: allow (and use up the one-shot) when this exact call was approved; refuse it with the reason
 /// when `denied` left a note for its retry a moment ago; else ''.
 pub fn once(raw: &str, once_dir: &Path) -> String {
-    let Some(d) = hook_input(raw) else {
+    let Some(d) = hook_input(raw).filter(|d| !has_big_int(&d["tool_input"])) else {
         return String::new();
     };
     if d.get("hook_event_name").and_then(Value::as_str) != Some("PreToolUse") {
