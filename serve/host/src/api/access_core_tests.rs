@@ -71,6 +71,7 @@ impl Core {
     }
 
     /// The gate closes: the guard falls back to kith-auth.
+    #[allow(clippy::unused_self)] // kept a method so it reads next to `on`
     fn off(&self) {
         *TEST_CORE.lock().unwrap() = None;
     }

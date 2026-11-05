@@ -2279,7 +2279,7 @@ mod tests {
         hub.store.kv_set("test_core_authority", "1").unwrap();
         decide_in_core(&hub, "req_c", true, true, true).await.unwrap();
         assert!(hub.store.device(&b64(&[3; 32])).is_some());
-        assert!(ids_in_core(true).await.is_empty());
+        assert_eq!(ids_in_core(true).await, [] as [String; 0]);
     }
 
     #[tokio::test]
