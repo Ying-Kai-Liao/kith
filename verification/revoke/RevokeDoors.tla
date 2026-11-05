@@ -73,7 +73,8 @@ CONSTANTS
     Asks,               \* TRUE = P's delegations and the wakes their answers make are in the model
     NoAskSweep,         \* a revoke leaves P's open delegations running
     CoreSweep,          \* TRUE = the core's claim sweep (conversations::claims::revoke_person for P and B, M3-10d) is in
-                        \*   the model, and the asks are ended only after it (revoke_order.rs); FALSE = no claim sweep
+                        \*   the model, and the asks are ended only after it (revoke_order.rs); FALSE = no claim sweep. Triggered by a removal in the code;
+                        \*   for a suspend it is the design, pending Finding 1 (open before M2-23)
     AsksFirst,          \* the asks are ended before the claims are swept (the wrong order)
     SkipBots,           \* the claim sweep covers P's own claims only, not B's (the bot principal holds its own)
     NoWakeWithdraw,     \* a revoke leaves the wake owed to P's session
@@ -165,7 +166,9 @@ May(m, w) == IF w = "P" THEN MayP(m) ELSE MayB(m)
 \* door's start and a bot's reply (botThread) ask. With KITH_CORE_AUTHORITY=1 it asks the core's copy, but only while the
 \* gate is open: the gate latches the core's parity answer with auth.json's fingerprint, and any write of auth.json (a new
 \* inode) shuts it at once, so the host is back on kith-auth until the core has been told (core_selected). The model reads
-\* the parity in the same step as the check. The core's own answer is the same rule: a revoked person is refused before any row.
+\* the parity in the same step as the check. That is sound because fingerprint_of covers auth.json only and the core's revoked fact changes
+\* only through mirror_to_core after save_auth under the same flock. A core-only write (a hand-run core-call, or core-side writers once
+\* #875 lands) would leave the latch open and out of step for up to GATE_MAX_AGE, which the model does not have. The core's own answer is the same rule: a revoked person is refused before any row.
 GateOpen(m) == CoreGate /\ (CoreGateStale \/ crev[m] = revoked[m])
 GuardP(m) == IF GateOpen(m) THEN ~crev[m] /\ rows[m] # {} ELSE MayP(m)
 GuardB(m) == BotRow[m] /\ (BotIgnoresOwner \/ GuardP(m))
@@ -521,7 +524,8 @@ WakeStart(m) ==
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
     /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick>>
 \* The core's claim sweep (revoke_person, M3-10d): once the revoked fact is on m, P's live turns there, and B's unless
-\* SkipBots, are stopped. A later step than the revoke itself, as in the code (two transactions): the starts are already
+\* SkipBots, are stopped. A later step than the revoke itself (two transactions). For a removal this is the code; for a suspend it is the design, pending
+\* Finding 1 (open before M2-23: nothing calls the order for people.suspend). The starts are already
 \* refused by the fence, this stops the ones that began before it.
 SweptWho == IF SkipBots THEN {"P"} ELSE Who
 ClaimSweep(m) ==
