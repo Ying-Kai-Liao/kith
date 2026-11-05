@@ -1348,3 +1348,21 @@ fn a_builtin_agent_is_the_owners_alone_whatever_the_rows_say() {
         (true, "member".into())
     );
 }
+
+#[test]
+fn help_is_kith_auth_own_usage_on_stdout() {
+    let t = Tmp::new("help");
+    let c = ctx(&t);
+    // no auth.json: the help answer reads nothing
+    for flag in ["-h", "--help"] {
+        let o = run(&c, flag, &args(&[]));
+        assert_eq!(o.code, 0, "{flag}");
+        assert_eq!(o.stderr, "", "{flag}");
+        assert!(
+            o.stdout
+                .starts_with("kith-auth — which agent may use which shared service"),
+            "{flag}"
+        );
+    }
+    assert!(!t.0.join("secrets").exists(), "nothing was created or read");
+}
