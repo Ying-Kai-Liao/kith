@@ -293,7 +293,7 @@ fn mirrors(hub: &Hub) -> bool {
     #[cfg(not(test))]
     {
         let _ = hub;
-        crate::api::authority::opted_in()
+        crate::api::authority::mirrors_to_core()
     }
 }
 
