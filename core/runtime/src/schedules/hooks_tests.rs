@@ -23,6 +23,7 @@ use crate::conversations::claims;
 use crate::db::Core;
 use crate::error::Result;
 use crate::layout::Layout;
+use crate::schedules::{MAC_ID_FILE, mac_id};
 use crate::secrets::Envelope;
 use crate::secrets::keystore::MemoryKeyStore;
 use crate::tests::{machine, open_all, paths};
@@ -668,4 +669,41 @@ fn the_row_is_the_hosts_and_not_switched() {
         ),
         "{e}"
     );
+}
+
+#[test]
+fn a_delivery_for_a_job_of_another_mac_is_refused_before_the_key_and_writes_nothing() {
+    let mut theirs = hook("theirs");
+    theirs["mac"] = json!("0123456789abcdef0123456789abcdef");
+    let mut keyless = hook("keyless");
+    keyless["mac"] = json!("0123456789abcdef0123456789abcdef");
+    let mut r = rig_with(&json!([theirs, keyless]), &["theirs"]);
+    let id_file = r.p.machine.join(MAC_ID_FILE);
+    assert!(!id_file.exists());
+    // With a key, without one, and again: the same answer, nothing written, and no machine id made for a refusal.
+    for job in ["theirs", "keyless", "theirs"] {
+        let v = r.good(job, "d-1", "{}", NOW);
+        assert_eq!(
+            (v["outcome"].as_str(), v["code"].as_str()),
+            (Some("refused"), Some("not-here")),
+            "{v}"
+        );
+        assert_eq!(v["reason"], "routine is not on this Mac");
+    }
+    assert_eq!(r.n("SELECT count(*) FROM sched_fires"), 0);
+    assert_eq!(r.n("SELECT count(*) FROM turns"), 0);
+    assert!(!id_file.exists());
+}
+
+#[test]
+fn a_delivery_for_this_macs_job_or_an_unnamed_one_fires() {
+    let mut r = Rig::new();
+    let mine = mac_id(&r.p.machine).unwrap();
+    let mut ours = hook("ours");
+    ours["mac"] = json!(mine);
+    r.jobs(&json!([ours, hook("anyone")]));
+    r.set_key("ours", &key());
+    r.set_key("anyone", &key());
+    assert_eq!(r.good("ours", "d-1", "{}", NOW)["outcome"], "fired");
+    assert_eq!(r.good("anyone", "d-1", "{}", NOW)["outcome"], "fired");
 }

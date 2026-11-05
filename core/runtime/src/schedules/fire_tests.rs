@@ -1659,3 +1659,24 @@ fn a_job_row_without_first_seen_falls_back_to_the_watermark() {
     .unwrap();
     assert_eq!(super::sync::first_seen(conn, "mel", "raw").unwrap(), None);
 }
+
+#[test]
+fn run_now_refuses_a_job_of_another_mac_and_writes_nothing_while_mine_and_unnamed_fire() {
+    let mut r = Rig::new();
+    let mine = r.mac.clone();
+    let mut theirs = daily("theirs", "30 8 * * *");
+    theirs["mac"] = json!("0123456789abcdef0123456789abcdef");
+    let mut ours = daily("ours", "30 8 * * *");
+    ours["mac"] = json!(mine);
+    r.jobs("mel", &json!([theirs, ours, daily("anyone", "30 8 * * *")]));
+    let now = at(2026, 11, 3, 12, 0);
+    for _ in 0..2 {
+        let e = run_now(&mut r.core, &r.p, &r.ctx, "mel", "theirs", "k1", now).unwrap_err();
+        assert!(e.to_string().contains("is not on this Mac"), "{e}");
+    }
+    assert_eq!(r.n("SELECT count(*) FROM sched_fires"), 0);
+    assert_eq!(r.n("SELECT count(*) FROM turns"), 0);
+    assert_eq!(r.wm(), None);
+    assert_eq!(r.run_now("mel", "ours", "k1", now)["outcome"], "fired");
+    assert_eq!(r.run_now("mel", "anyone", "k1", now)["outcome"], "fired");
+}

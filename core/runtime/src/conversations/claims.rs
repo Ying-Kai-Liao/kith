@@ -365,6 +365,7 @@ pub(crate) fn cancel_fenced(
 /// transaction. The partial index `claims_one_writer` is the last word on a second writer. Refused until this
 /// generation's reconcile has committed (step 5).
 pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Claimed> {
+    refuse_direct_turn(req.kind, cfg!(test))?;
     let claimed = (|| {
         let generation = core.generation();
         let tx = core.claim_tx()?;
@@ -392,7 +393,19 @@ pub(crate) fn claim_in(
     req: &NewClaim<'_>,
     now: i64,
 ) -> Result<Claimed> {
+    refuse_direct_turn(req.kind, cfg!(test))?;
     claim_checked_in(tx, generation, req, now)?.map_err(|fence| fence.refusal(req))
+}
+
+/// A turn's claim chooses its account, so it is made by `accounts::failover::claim_next` (which calls
+/// [`claim_checked_in`] itself), never by [`claim`] or [`claim_in`]. Tests build claims directly (`direct_ok`).
+pub(super) fn refuse_direct_turn(kind: Kind, direct_ok: bool) -> Result<()> {
+    if kind == Kind::Turn && !direct_ok {
+        return Err(Error::BadParams(
+            "kith-core: a turn claim is made by claim_next, which picks its account".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// [`claim_in`] that hands back the [`Fence`] it refused on (`Ok(Err(fence))`) instead of an error, so the caller cancels
@@ -752,16 +765,24 @@ pub(crate) fn stop_in(
     Ok(kill)
 }
 
+/// The run an ask started, as the ask recorded it. `claim_id` is set for an ask made since the column existed and names
+/// the run's claim exactly; an older row has only the `pid`, and stop matches by that.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AskRun {
+    pub pid: Option<i64>,
+    pub claim_id: Option<i64>,
+}
+
 /// What a conversation's automated work stops (`kith ask --end` of the ask that runs it): its queued and parked turns are
 /// cancelled, and each live claim of kind `turn` goes through [`stop_in`] (the turn cancelled, the kill returned to be
 /// re-sent until the process is gone; an unspawned claim ends at once), and so does an `external` claim whose pid is the
-/// one the ask recorded (`ask_pid`: the ask's own `--direct` run). A person's writers are left alone: a queued take-over
+/// one the ask recorded (`ask`: the ask's own `--direct` run, by its claim id, or by its pid for an older ask). A person's writers are left alone: a queued take-over
 /// and a terminal or other external claim are what someone resumed to steer the thread, and the stop is what frees the
 /// writer for them. Safe to repeat: a second call finds nothing queued and answers an `ending` claim's kill again.
 pub(crate) fn stop_conversation_in(
     tx: &Transaction<'_>,
     conversation: &str,
-    ask_pid: Option<i64>,
+    ask: AskRun,
     reason: &str,
     now: i64,
 ) -> Result<Vec<Kill>> {
@@ -774,9 +795,10 @@ pub(crate) fn stop_conversation_in(
         let mut st = tx.prepare(
             "SELECT claim_id FROM claims
              WHERE conversation = ?1 AND state IN ('claimed', 'running', 'ending')
-               AND (kind = 'turn' OR (kind = 'external' AND pid = ?2))",
+               AND (kind = 'turn' OR (kind = 'external'
+                    AND CASE WHEN ?3 IS NOT NULL THEN claim_id = ?3 ELSE pid = ?2 END))",
         )?;
-        st.query_map(params![conversation, ask_pid], |r| r.get(0))?
+        st.query_map(params![conversation, ask.pid, ask.claim_id], |r| r.get(0))?
             .collect::<std::result::Result<_, _>>()?
     };
     let mut kills = Vec::new();
@@ -1304,4 +1326,35 @@ pub(crate) fn cancel_waiting_in(
 /// [`revoke_epoch`] inside a transaction.
 pub(crate) fn revoke_epoch_in(tx: &Transaction<'_>, person: &str) -> Result<i64> {
     epoch(tx, person)
+}
+
+/// Whether a terminal or another person's writer holds the conversation now (a live `terminal` or `external` claim): the
+/// reason a wake's turn waits as `terminal_live` and is never typed into the terminal (q217). A turn's own claim is not
+/// one: it is the busy path.
+pub(crate) fn person_writer_live_in(tx: &rusqlite::Connection, conversation: &str) -> Result<bool> {
+    let n: i64 = tx.query_row(
+        "SELECT count(*) FROM claims
+         WHERE conversation = ?1 AND kind IN ('terminal', 'external') AND state IN ('claimed', 'running', 'ending')",
+        [conversation],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
+/// Ends a waiting turn the way its requester's record ended: turn `turn_id`, while it is `queued` or `parked`, becomes
+/// `done` (`delivered`) or `cancelled`. A turn that has a claim is the claim's to finish and is left alone. True when it
+/// changed.
+pub(crate) fn end_waiting_turn_in(
+    tx: &rusqlite::Connection,
+    turn_id: i64,
+    delivered: bool,
+    now: i64,
+) -> Result<bool> {
+    let state = if delivered { "done" } else { "cancelled" };
+    let n = tx.execute(
+        "UPDATE turns SET state = ?3, parked_reason = NULL, parked_at = NULL, finished_at = ?2
+         WHERE id = ?1 AND state IN ('queued', 'parked')",
+        params![turn_id, now, state],
+    )?;
+    Ok(n > 0)
 }

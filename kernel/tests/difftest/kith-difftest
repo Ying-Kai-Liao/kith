@@ -69,8 +69,9 @@ def find_rust_bin():
                 return str(Path(t) / kind / 'kith')
     return ''
 TIMEOUT = 90
-# The VCS's binary internals hold commit times and hashes of them; refs, HEAD, config and logs are still compared.
-GIT_NOISE = [r'/\.git/(index|objects/)']
+# The VCS's binary internals hold commit times and hashes of them; hooks/*.sample and config vary with the runner's version
+# and OS (macOS adds ignorecase/precomposeunicode) and are never kith's state. Refs, HEAD, logs are still compared.
+GIT_NOISE = [r'/\.git/(index|objects/|hooks/|config$)']
 
 # What changes between two runs of the same line and means nothing. Order matters: longest shapes first.
 GENERIC = [

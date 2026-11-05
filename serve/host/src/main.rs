@@ -21,6 +21,7 @@ mod launch_cmd;
 mod limits;
 mod market;
 mod mcp;
+mod pkg_cmd;
 mod remote;
 mod rich_card;
 mod routines;
@@ -517,10 +518,32 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
+    /// `kith-pkg resolve`: the pinned package folder a run starts from (not routed from `kith` yet).
+    #[command(disable_help_flag = true)]
+    Pkg {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
     /// What a launch assembles, one piece at a time (not routed from `kith AGENT` yet).
     Launch {
         #[command(subcommand)]
         what: LaunchCmd,
+    },
+    /// kith's own settings, the command line of `kernel/lib/kith_settings.py`: `KEY [AGENT]`, `call_model`, `accounts`, `pin`,
+    /// `limit AGENT`, `delegation.chain_cost_cap_usd`, `cap MODE CAPS_FILE`, `reads-others CAPS_FILE` and the writes `set permission_mode|
+    /// call_model|at_limit [AGENT] VALUE`, `set limit AGENT N|none`, `set delegation.chain_cost_cap_usd N|none|default`. Prints what
+    /// `kith_settings.py` prints, with its exit codes. Not routed from `kith` yet.
+    // -h/--help belong to kith_settings.py's own usage text, so clap must not answer them.
+    #[command(disable_help_flag = true)]
+    Settings {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
     },
     /// Attaches this terminal to an agent's held terminal through the relay (M1-6): raw mode until detach or exit.
     /// The ticket (from `terminal.open`) is one line on stdin. Exit: the engine's code, 75 busy, 0 detached, 76 cut as too slow (attach again), 77 taken over, 78 holder lost, 1 otherwise.
@@ -856,6 +879,29 @@ fn print_cost(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
     let paths = kith_kernel::cost::Paths::from_process(&kernel);
     let out = kith_kernel::cost::run(&paths, &kith_kernel::cost::Env::from_process(), args);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
+}
+
+/// `kith kernel settings ARGS...`: what `kith_settings.py` prints, with its exit codes.
+fn print_settings(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use kith_kernel::accounts::{Ctx, System};
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let p = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env);
+    let system = System { kernel: kernel.clone() };
+    let ctx = Ctx {
+        machine: p.machine.clone(),
+        agents: p.agents.clone(),
+        kernel,
+        home,
+        claude_config_dir: std::env::var("CLAUDE_CONFIG_DIR").ok(),
+        out: &system,
+    };
+    let out = kith_kernel::settings::run(&ctx, kith_kernel::settings::Env::from_process(), args);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
@@ -1371,6 +1417,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
             }
+            if let KernelCmd::Pkg { kernel, args } = cmd {
+                std::process::exit(pkg_cmd::run(kernel, &args));
+            }
             through_core(|| -> Result<()> {
                 match cmd {
                     KernelCmd::Version => println!("{}", kith_kernel::version_json()),
@@ -1436,6 +1485,7 @@ async fn main() -> Result<()> {
                     KernelCmd::Launch { what: LaunchCmd::Whole(args) } => {
                         std::process::exit(launch_cmd::print_whole(&args));
                     }
+                    KernelCmd::Settings { kernel, args } => std::process::exit(print_settings(kernel, &args)),
                     KernelCmd::RunOnce { .. }
                     | KernelCmd::Attach { .. }
                     | KernelCmd::CoreCall { .. }
@@ -1443,6 +1493,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Cost { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
+                    | KernelCmd::Pkg { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
