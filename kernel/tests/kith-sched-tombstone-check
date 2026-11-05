@@ -33,7 +33,9 @@ refuses() { K "$@" >"$T/out" 2>&1 </dev/null; rc=$?; [[ $rc -eq 1 ]] && grep -q 
 printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a"}]\n' > "$J"
 printf '%s\n' "$NOTE" > "$S"
 NOTE=$(cat "$S")
-check "tick refuses a tombstoned state.json" "refuses tick"
+# Tick is the launchd job, once a minute: tombstoned it exits 0 with one quiet line, fires nothing, leaves the note.
+K tick >"$T/out" 2>&1 </dev/null; rc=$?
+check "tick on a tombstoned state.json exits 0 with one quiet line" "[[ $rc -eq 0 ]] && [[ \$(wc -l <'$T/out') -eq 1 ]] && grep -q 'moved to the Kith core' '$T/out' && ! grep -q Traceback '$T/out' && [[ \"\$(cat '$S')\" == \"\$NOTE\" ]]"
 check "ls refuses" "refuses ls"
 check "prune refuses" "refuses prune"
 check "--json says so as an error, exit 1" "K ls --json >'$T/out' 2>&1; rc=\$?; [[ \$rc -eq 1 ]] && grep -q '\"ok\": false' '$T/out' && grep -q 'kith rollback schedules' '$T/out' && [[ \"\$(cat '$S')\" == '$NOTE' ]]"

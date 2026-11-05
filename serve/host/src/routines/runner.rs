@@ -1,6 +1,7 @@
 //! The actor claims work only when it reaches the front of its queue. The durable
 //! outbox publishes results separately, so restarting never needs to rerun a task
 //! merely to deliver its result.
+use super::switch::Gate;
 use super::{
     Arc, Context, EntryKind, Hub, Lane, LockExt, Result, Routines, Run, Status, Store, Value, bail, cancel_run,
     default_timeout, json, new_run, now_ms,
@@ -17,6 +18,10 @@ impl Routines {
     /// An enabled clock schedule keeps the local daemon's machine awake between
     /// runs. Explicit system sleep or a closed laptop lid still suspends execution.
     pub fn keeps_awake(&self) -> bool {
+        // While the core owns the schedules the host cannot see which jobs are due, so it stays awake for all of them.
+        if self.gate() == Gate::Core {
+            return true;
+        }
         let s = self.state.locked();
         s.routines.iter().any(|r| !r.deleted && r.enabled && r.next_runs.iter().any(Option::is_some))
             || s.runs.iter().any(|r| r.status.active())
@@ -245,20 +250,46 @@ pub fn start(hub: &Arc<Hub>) {
             if hub.routines.stopping() {
                 break;
             }
-            if let Err(error) = tick(&hub) {
-                tracing::error!(error = format!("{error:#}"), "routine scheduler failed");
+            // The gate is a socket call to the core: off the async threads, like every other call to it.
+            let work = Arc::clone(&hub);
+            let core_tick = match tokio::task::spawn_blocking(move || tick(&work)).await {
+                Ok(Ok(due)) => due,
+                Ok(Err(error)) => {
+                    tracing::error!(error = format!("{error:#}"), "routine scheduler failed");
+                    false
+                }
+                Err(_) => false,
+            };
+            if core_tick {
+                // Not awaited: a slow core must not hold up publishing or the gate; `core_tick_due` lets one run at a time.
+                let work = Arc::clone(&hub);
+                tokio::task::spawn_blocking(move || work.routines.forward_tick());
             }
         }
     });
     *hub.routines.scheduler.locked() = Some(task);
 }
 
-fn tick(hub: &Arc<Hub>) -> Result<()> {
+/// One second of the runner. True when a `schedule.tick` is due: the core owns the schedules and it has been a minute
+/// (the caller then calls `forward_tick`).
+fn tick(hub: &Arc<Hub>) -> Result<bool> {
+    let gate = hub.routines.refresh_gate();
     hub.update_keep_awake();
+    // Runs the host started before a switch still finish and publish, whoever owns the schedules now.
     if let Err(error) = hub.routines.publish(hub) {
         tracing::error!(%error, "routine result publication will retry");
     }
-    hub.routines.schedule_due(&hub.store, now_ms())?;
+    match gate {
+        Gate::Own => hub.routines.schedule_due(&hub.store, now_ms())?,
+        // The core fires; and when the host cannot tell, nothing starts from serve.db.
+        Gate::Core => {}
+        Gate::Held(_) => return Ok(false),
+    }
+    dispatch(hub)?;
+    Ok(gate == Gate::Core && hub.routines.core_tick_due(now_ms()))
+}
+
+fn dispatch(hub: &Arc<Hub>) -> Result<()> {
     let pending: Vec<_> =
         hub.routines.state.locked().runs.iter().filter(|r| r.status == Status::Pending).cloned().collect();
     for run in pending {
@@ -309,6 +340,63 @@ mod tests {
         assert_eq!(state.routines[0].next_runs[0], Some(240_000));
         assert_eq!(state.runs.len(), 2);
         assert_eq!(state.runs.iter().filter(|r| r.status == Status::Pending).count(), 1);
+    }
+
+    fn due_routine(hub: &Hub) {
+        super::super::switch_tests::routine(hub, Some("mel"), &json!([{"type": "interval", "seconds": 60}]));
+        hub.routines
+            .change(&hub.store, |s| {
+                s.routines[0].next_runs = vec![Some(1)];
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn switched_the_host_fires_nothing_and_asks_the_core_for_one_tick_a_minute() {
+        use super::super::switch_tests::{hub, switched};
+        let hub = hub();
+        due_routine(&hub);
+        let fake = switched(&hub, Gate::Core);
+        assert!(tick(&hub).unwrap(), "the first second after the switch is due");
+        assert!(hub.routines.state.locked().runs.is_empty(), "the host's own scheduler fires nothing");
+        // A tick in flight is not queued behind: two overlapping asks make one tick.
+        assert!(!tick(&hub).unwrap());
+        hub.routines.forward_tick();
+        assert_eq!(fake.calls_of("schedule.tick").len(), 1);
+        // A minute has not passed since the claim, so a failed tick is not retried in a tight loop either.
+        assert!(!tick(&hub).unwrap());
+        assert!(hub.routines.state.locked().routines[0].next_runs[0] == Some(1), "serve.db is not read as live");
+    }
+
+    #[test]
+    fn a_failed_core_tick_is_logged_and_frees_the_next_one() {
+        use super::super::switch_tests::{hub, switched};
+        let hub = hub();
+        let fake = switched(&hub, Gate::Core);
+        fake.says(|_, _| crate::core_front::Answer::Down { why: "no core is running".into(), lost: false });
+        assert!(hub.routines.core_tick_due(100_000));
+        hub.routines.forward_tick();
+        assert!(!hub.routines.core_tick_due(100_001), "not before a minute has passed");
+        assert!(hub.routines.core_tick_due(160_000), "and then it is asked again");
+    }
+
+    #[test]
+    fn a_gate_the_host_cannot_read_fires_nothing_and_ticks_nothing() {
+        use super::super::switch_tests::{hub, switched};
+        let hub = hub();
+        due_routine(&hub);
+        let fake = switched(&hub, Gate::Held("the core cannot be asked".into()));
+        assert!(!tick(&hub).unwrap());
+        assert!(hub.routines.state.locked().runs.is_empty());
+        assert!(fake.calls.lock().unwrap().is_empty());
+        // The core answers again and says no: the host's own runner is back.
+        *fake.gate.lock().unwrap() = Gate::Own;
+        assert!(!tick(&hub).unwrap());
+        assert!(
+            hub.routines.state.locked().routines[0].next_runs[0] != Some(1),
+            "the due routine was advanced by the host's own scheduler"
+        );
     }
 
     #[test]
