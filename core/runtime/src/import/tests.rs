@@ -630,3 +630,122 @@ fn a_rerun_whose_sealing_keeps_failing_leaves_no_backup_and_no_log_row() {
     }
     assert_eq!((f.snapshots(), f.count("import_log")), (snaps, log));
 }
+
+// --- people.listPeople against `kith-auth people --json` ------------------------------------------------------------------
+
+/// Bots (one of a revoked person, one under an old id, a loop, one whose owner is gone), a revoked person, a person with
+/// an empty handles object, a row for a kernel agent, an `*` row, and handles with the `kith` link among them.
+fn people_fixture() -> String {
+    serde_json::to_string_pretty(&json!({
+        "people": {
+            "kai": {"name": "Kai", "owner": true, "handles": {"telegram": "1", "kith": "k1"}},
+            "sam": {"name": "Sam", "handles": {"slack": "U1"}, "was": ["sammy"], "provider": "telegram"},
+            "sam-b": {"bot_of": "sammy", "provider": "telegram"},
+            "mia": {"revoked": {"at": 1_700_000_000}, "handles": {}},
+            "mia-b": {"bot_of": "mia"},
+            "x1": {"bot_of": "x2"},
+            "x2": {"bot_of": "x1"},
+            "orphan": {"bot_of": "gone"},
+            "zed": {"name": "Zed", "lang": "fr", "tz": "Europe/Paris"}
+        },
+        "members": {
+            "house": {"sam": {"preset": "member"}, "*": {"mode": "default"}, "mia": {}},
+            "garden": {"*": {}, "sam-b": {"preset": "guest"}},
+            "scratch": {"sam": {}}
+        }
+    }))
+    .unwrap()
+}
+
+/// `kith-auth people --json` over the fixture's file, or `None` where there is no python3 to run it.
+fn python_people(f: &Fixture) -> Option<Value> {
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith-auth");
+    let out = std::process::Command::new("python3")
+        .arg(&script)
+        .args(["people", "--json"])
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH")?)
+        .env("HOME", &f.root)
+        .env("KITH_AUTH", &f.ctx.auth)
+        .env("KITH_HOME", f.root.join("kith"))
+        .env("KITH_AGENTS", &f.ctx.agents)
+        .output()
+        .ok()?;
+    assert!(
+        out.status.success(),
+        "kith-auth people --json failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Some(serde_json::from_slice(&out.stdout).unwrap())
+}
+
+fn core_people(f: &Fixture) -> Value {
+    let mut core = open_all(&f.layout);
+    let said =
+        crate::authority::call::call_with(&mut core, &f.ctx, "people.listPeople", &json!({}))
+            .unwrap();
+    said["rows"].clone()
+}
+
+#[test]
+fn the_cores_people_are_what_kith_auth_people_json_prints() {
+    let f = Fixture::new();
+    f.auth(&people_fixture());
+    f.import(&mut MemSink::default()).unwrap();
+    let ours = core_people(&f);
+    let ids: Vec<&str> = ours
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    // the owner first, then by id with each person's bots after them, an orphan, then the loop last
+    assert_eq!(
+        ids,
+        [
+            "kai", "mia", "mia-b", "orphan", "sam", "sam-b", "zed", "x1", "x2"
+        ]
+    );
+    let sam = &ours[4];
+    assert_eq!(sam["handles"], json!({"slack": "U1"}));
+    assert_eq!(
+        sam["agents"],
+        json!([{"agent": "garden", "role": "guest", "via": "everyone"},
+               {"agent": "house", "role": "member", "via": "own"}])
+    );
+    assert_eq!(ours[0]["kith"], "k1");
+    assert_eq!(ours[0]["handles"], json!({"telegram": "1"}));
+    assert_eq!(ours[1]["revoked_at"], 1_700_000_000);
+    assert_eq!(ours[2]["revoked"], true, "a bot of a revoked person");
+    if let Some(theirs) = python_people(&f) {
+        assert_eq!(ours, theirs);
+    } else {
+        // CI must not pass on the expectations alone: the parity with kith-auth is the point of the test.
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "no python3 in CI: the parity with `kith-auth people --json` was not compared"
+        );
+        eprintln!("no python3: compared with the expectations above only");
+    }
+}
+
+#[test]
+fn no_people_is_an_empty_list_and_a_database_from_before_handles_has_none() {
+    let f = Fixture::new();
+    f.auth("{}");
+    f.import(&mut MemSink::default()).unwrap();
+    assert_eq!(core_people(&f), json!([]));
+    let g = Fixture::new();
+    g.auth(&people_fixture());
+    g.import(&mut MemSink::default()).unwrap();
+    // what an import before m0015 left: the column exists (the migration ran) and is empty
+    open_all(&g.layout)
+        .conn()
+        .execute("UPDATE people SET handles = NULL", [])
+        .unwrap();
+    let rows = core_people(&g);
+    assert_eq!(rows[0]["kith"], "");
+    assert_eq!(rows[0]["handles"], json!({}));
+    assert_eq!(rows[0]["id"], "kai", "everything else is still answered");
+}

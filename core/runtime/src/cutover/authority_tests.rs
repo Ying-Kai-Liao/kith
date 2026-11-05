@@ -443,6 +443,28 @@ fn a_host_the_owner_stopped_keeping_stays_gone_after_a_rollback() {
 }
 
 #[test]
+fn handles_the_core_does_not_have_do_not_come_back_from_the_old_file() {
+    // an id freed and re-added: the old person's handles must not go to the new one on a rollback
+    let base =
+        json!({"people": {"sam": {"name": "Sam", "handles": {"telegram": "1", "kith": "k"}}}});
+    let snap = json!({"people": {"sam": {"name": "Sam"}}});
+    let once = authority::merge_back(Some(base), &snap);
+    assert!(once["people"]["sam"].get("handles").is_none());
+    let twice = authority::merge_back(Some(once.clone()), &snap);
+    assert_eq!(once, twice, "running it again gives the same file");
+}
+
+#[test]
+fn handles_the_core_changed_win_over_the_old_file() {
+    let base = json!({"people": {"sam": {"name": "Sam", "handles": {"telegram": "1"}}}});
+    let snap = json!({"people": {"sam": {"name": "Sam", "handles": {"slack": "U2"}}}});
+    let once = authority::merge_back(Some(base), &snap);
+    assert_eq!(once["people"]["sam"]["handles"], json!({"slack": "U2"}));
+    let twice = authority::merge_back(Some(once.clone()), &snap);
+    assert_eq!(once, twice);
+}
+
+#[test]
 fn import_will_not_read_a_tombstone_as_an_empty_file() {
     let (r, reg) = rig();
     step(&reg, &r.env, "authority", opts()).unwrap();

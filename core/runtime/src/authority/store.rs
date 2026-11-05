@@ -120,17 +120,18 @@ fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
         let (name, lang, tz) = (text(p, "name")?, text(p, "lang")?, text(p, "tz")?);
         let (bot_of, provider, was) = (text(p, "bot_of")?, text(p, "provider")?, json(p, "was"));
         let owner = i64::from(truthy(p.get("owner")));
+        let handles = json(p, "handles");
         if old.contains_key(id) {
             conn.execute(
                 "UPDATE people SET name = ?2, lang = ?3, tz = ?4, owner = ?5, bot_of = ?6, revoked = ?7, \
-                 revoked_at = ?8, was = ?9, provider = ?10 WHERE id = ?1",
-                params![id, name, lang, tz, owner, bot_of, i64::from(revoked), at, was, provider],
+                 revoked_at = ?8, was = ?9, provider = ?10, handles = ?11 WHERE id = ?1",
+                params![id, name, lang, tz, owner, bot_of, i64::from(revoked), at, was, provider, handles],
             )?;
         } else {
             conn.execute(
-                "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![id, name, lang, tz, owner, bot_of, i64::from(revoked), at, was, provider],
+                "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider, handles) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![id, name, lang, tz, owner, bot_of, i64::from(revoked), at, was, provider, handles],
             )?;
         }
     }

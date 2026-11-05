@@ -23,6 +23,7 @@ use crate::error::{Error, Result};
 pub(crate) mod call;
 #[cfg(test)]
 mod load;
+mod people_json;
 mod requests;
 mod revoke;
 mod store;
@@ -187,7 +188,7 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
     let mut people = Map::new();
     {
         let mut q = tx.prepare(
-            "SELECT id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider FROM people ORDER BY seq",
+            "SELECT id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider, handles FROM people ORDER BY seq",
         )?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -208,6 +209,7 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             }
             set(&mut p, "was", json(r, 8, "people.was")?);
             set(&mut p, "provider", text(r, 9)?.map(Value::String));
+            set(&mut p, "handles", json(r, 10, "people.handles")?);
             people.insert(r.get::<_, String>(0)?, Value::Object(p));
         }
     }
@@ -304,7 +306,20 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             agent_access.insert(r.get::<_, String>(0)?, Value::Object(row));
         }
     }
+    // store.rs writes people, memberships, presets, invites, retired, agent_access and the budget; it does not write the
+    // snapshot's `profiles` and `grants` (lane B's tables, read only for the checks below) or `handles_stale`.
     let mut auth = Map::new();
+    // Lane B's tables, in auth.json's shape, only for the checks that read who owns or is lent a login or holds a grant
+    // (`retired`, `person --rm --unused`). Left out when empty: nothing writes them until the secrets switch, and the
+    // rules read neither.
+    let profiles = read_profiles(tx)?;
+    if !profiles.is_empty() {
+        auth.insert("profiles".to_owned(), Value::Object(profiles));
+    }
+    let grants = read_grants(tx)?;
+    if !grants.is_empty() {
+        auth.insert("grants".to_owned(), Value::Object(grants));
+    }
     auth.insert("agent_access".to_owned(), Value::Object(agent_access));
     auth.insert("invites".to_owned(), Value::Object(invites));
     auth.insert("retired".to_owned(), Value::Object(retired));
@@ -322,6 +337,18 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             e => Err(e),
         })?;
+    // Set by m0015 on a database imported before `people.handles` existed; a re-import clears it. Only `person --rm
+    // --unused` reads it (a NULL handles may then hide a person's handles).
+    let stale = tx
+        .query_row(
+            "SELECT 1 FROM authority_settings WHERE key = 'handles_stale'",
+            [],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if stale {
+        auth.insert("handles_stale".to_owned(), Value::Bool(true));
+    }
     if let Some(cap) = cap {
         auth.insert(
             "owner_bots_budget".to_owned(),
@@ -329,4 +356,45 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
         );
     }
     Ok(Value::Object(auth))
+}
+
+/// `profiles` of auth.json from `secret_profiles`: `person` and `with` (the people it is lent to); the variables are not read.
+fn read_profiles(tx: &Connection) -> Result<Map<String, Value>> {
+    let mut out = Map::new();
+    let mut q = tx.prepare("SELECT profile, person, lent FROM secret_profiles ORDER BY profile")?;
+    let mut rows = q.query([])?;
+    while let Some(r) = rows.next()? {
+        let mut p = Map::new();
+        set(&mut p, "person", text(r, 1)?.map(Value::String));
+        set(&mut p, "with", json(r, 2, "secret_profiles.lent")?);
+        out.insert(r.get::<_, String>(0)?, Value::Object(p));
+    }
+    Ok(out)
+}
+
+/// `grants` of auth.json from `secret_grants`: agent (or `agent@person`) -> service -> profile. A list of profiles
+/// keeps its order; only the keys matter to the checks that read it.
+fn read_grants(tx: &Connection) -> Result<Map<String, Value>> {
+    let mut out = Map::new();
+    let mut q = tx.prepare(
+        "SELECT agent, service, profile FROM secret_grants ORDER BY agent, service, seq",
+    )?;
+    let mut rows = q.query([])?;
+    while let Some(r) = rows.next()? {
+        let (agent, service, profile): (String, String, String) = (r.get(0)?, r.get(1)?, r.get(2)?);
+        let Value::Object(by_service) = out
+            .entry(agent)
+            .or_insert_with(|| Value::Object(Map::new()))
+        else {
+            continue;
+        };
+        match by_service.get_mut(&service) {
+            None => {
+                by_service.insert(service, Value::String(profile));
+            }
+            Some(Value::Array(list)) => list.push(Value::String(profile)),
+            Some(first) => *first = Value::Array(vec![first.clone(), Value::String(profile)]),
+        }
+    }
+    Ok(out)
 }
