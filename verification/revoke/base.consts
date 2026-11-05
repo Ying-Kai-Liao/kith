@@ -40,3 +40,7 @@ CardNoWithdraw = FALSE
 CardUndoRevives = FALSE
 CoreGate = FALSE
 CoreGateStale = FALSE
+Switched = FALSE
+SwitchLag = FALSE
+CoreOnlyWrite = FALSE
+CoreSideShutsGate = FALSE
