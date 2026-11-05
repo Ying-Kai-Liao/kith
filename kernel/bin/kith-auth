@@ -2029,7 +2029,7 @@ def cmd_person(args):
         return rename(auth, pid, kv.pop('id'))
     if 'owner' in flags and auth['people'].get(pid, {}).get('bot_of'):
         die(f'{pid} is a bot: it can not be the owner')
-    if 'owner' in flags and auth['people'].get(canonical(auth, pid), {}).get('revoked'):
+    if 'owner' in flags and auth['people'].get(pid, {}).get('revoked'):
         # may() lets the owner through before it looks at revoked, so a revoked owner's bots would keep their rows' access
         die(f"{pid}'s access was removed: kith-auth person {pid} --unrevoke first")
     if '--rm' in flags and '--unused' in flags:
