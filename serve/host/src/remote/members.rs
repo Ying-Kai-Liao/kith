@@ -185,34 +185,42 @@ pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
 /// Kith account is listed gets the revoked state in kith-auth, and one revoked here whose account is no longer listed
 /// gets it cleared (undone on another Mac). A person with no Kith account is this Mac's alone and is left as it is.
 /// Runs before the memberships, so a membership the revoke cut finds its person already revoked (and keeps their handle
-/// and bots for the undo). Returns the people newly revoked here, whose running turns the caller stops. None (a cloud
-/// that predates revoking) changes nothing. An error fails the pull: this host stays out of sync rather than serve on
-/// access it could not apply (I2).
-pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Result<Revoked> {
-    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(Revoked::default()) };
-    let mut out = Revoked::default();
-    for p in auth_people(bin).await?.into_iter().filter(|p| !p.kith.is_empty() && !p.owner && p.bot_of.is_empty()) {
-        let revoked = listed.contains(&p.kith);
-        if revoked == p.revoked_at.is_some() {
-            continue;
+/// and bots for the undo). Every invited person's devices, memberships and open invites are then parked or given back to
+/// match their revoked state, flipped here or not, in the same hold of the kith-auth lock as the flip: what a failed
+/// pull or a race with the owner's own revoke left half done is put right by the next pull (architect's RevokePark
+/// model, fix). Returns the people newly revoked here, whose running turns the caller stops. None (a cloud that
+/// predates revoking) changes nothing. An error fails the pull: this host stays out of sync rather than serve on access
+/// it could not apply (I2).
+pub async fn apply_revoked(hub: &Hub, bin: Option<&Path>, listed: Option<&[String]>) -> Result<Vec<String>> {
+    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(vec![]) };
+    let mut cut = vec![];
+    let mut moved = false;
+    let applied: Result<()> = async {
+        let _w = crate::api::people::AUTH_WRITES.lock().await;
+        for p in auth_people(bin).await?.into_iter().filter(|p| !p.owner && p.bot_of.is_empty()) {
+            let mut revoked = p.revoked_at.is_some();
+            // A person with no Kith account is this Mac's alone: their state is left as it is, only parked to match.
+            if !p.kith.is_empty() && listed.contains(&p.kith) != revoked {
+                revoked = !revoked;
+                let flag = if revoked { "--revoke" } else { "--unrevoke" };
+                account::run(bin, &["person", &p.id, flag, "--local"])
+                    .await
+                    .with_context(|| format!("kith-auth person {} {flag}", p.id))?;
+                tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
+                if revoked {
+                    cut.push(p.id.clone());
+                }
+            }
+            moved |= crate::api::people::park(hub, &p.id, revoked);
         }
-        let flag = if revoked { "--revoke" } else { "--unrevoke" };
-        locked_run(bin, &["person", &p.id, flag, "--local"])
-            .await
-            .with_context(|| format!("kith-auth person {} {flag}", p.id))?;
-        tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
-        if revoked { out.cut.push(p.id) } else { out.restored.push(p.id) }
+        Ok(())
     }
-    Ok(out)
-}
-
-/// The people [`apply_revoked`] changed here.
-#[derive(Default)]
-pub struct Revoked {
-    /// Newly revoked: the caller cuts them off.
-    pub cut: Vec<String>,
-    /// Undone on another Mac: the caller gives back what the revoke kept.
-    pub restored: Vec<String>,
+    .await;
+    // Also when a later flip failed: what was parked before it already stopped granting.
+    if moved {
+        hub.auth_changed();
+    }
+    applied.map(|()| cut)
 }
 
 /// Whether `person` is revoked here (their own state). False when kith-auth can't say: the caller then does what it

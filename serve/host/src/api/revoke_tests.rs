@@ -185,6 +185,34 @@ async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
 }
 
 #[tokio::test]
+async fn every_pull_parks_or_gives_back_to_match_the_revoked_state_whatever_an_earlier_step_left() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let invite_id = r.hub.store.memberships().unwrap()[0].invite_id.clone();
+    let base = cloud::url(&r.hub.store).unwrap();
+    call(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap();
+    // RevokePark rp_broken: a pull un-revoked sam, then failed before giving back what the revoke parked. The cloud
+    // agrees sam is not revoked, so the flag needs no flip; the next pull still gives the phone back.
+    r.auth(&["person", "sam", "--unrevoke", "--local"]);
+    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "requests": [], "revoked": [],
+        "grants": [{"grantId": "grt_sam-phone-again", "deviceKey": "sam-phone", "userId": "user_sam"}],
+        "memberships": [{"membershipId": "mem_sam", "userId": "user_sam", "inviteId": invite_id}]}));
+    cloud::pull(&r.hub, &base).await.unwrap();
+    assert_eq!(r.hub.store.devices_of("sam").unwrap().len(), 1, "the phone a failed pull left parked is back");
+    assert_eq!(r.hub.store.suspended_of("sam").unwrap(), crate::store::Moved::default());
+
+    // RevokePark rp_broken_nofail: sam is revoked but a late restore gave the phone back. The flag needs no flip; the
+    // next pull parks the phone again.
+    r.auth(&["person", "sam", "--revoke", "--local"]);
+    r.set_cloud_state(
+        json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": ["user_sam"]}),
+    );
+    cloud::pull(&r.hub, &base).await.unwrap();
+    assert!(r.hub.store.devices_of("sam").unwrap().is_empty(), "a revoked person's phone grants nothing");
+    assert_eq!(r.hub.store.suspended_of("sam").unwrap().devices, 1, "and is parked for the undo, not deleted");
+}
+
+#[tokio::test]
 async fn a_revoke_applies_while_the_cloud_names_another_owner() {
     use crate::remote::crypto::{self, b64};
     let r = Rig::new().await;
