@@ -934,6 +934,12 @@
    [
     "terminal",
     "s-1"
+   ],
+   [
+    "-h"
+   ],
+   [
+    "--help"
    ]
   ],
   "stderr": false
