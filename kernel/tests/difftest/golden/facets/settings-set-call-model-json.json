@@ -1,0 +1,17 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{\n  \"agents\": {\n    \"a\": {\n      \"limit\": 4,\n      \"permission_mode\": \"plan\"\n    }\n  },\n  \"delegation\": {\n    \"chain_cost_cap_usd\": 9\n  },\n  \"plugins\": [\n    \"a@b\"\n  ]\n}\n",
+  "state:home/.kith/settings.json.lock": "",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agent\": \"a\",\n  \"changed\": true,\n  \"previous\": null,\n  \"setting\": \"call-model\",\n  \"value\": \"opus\"\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"agent\": \"a\",\n  \"changed\": false,\n  \"previous\": \"opus\",\n  \"setting\": \"call-model\",\n  \"value\": \"opus\"\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"agent\": \"a\",\n  \"changed\": true,\n  \"previous\": \"opus\",\n  \"setting\": \"call-model\",\n  \"value\": null\n}\n",
+  "step2.stderr": "",
+  "step3.exit": "1\n",
+  "step3.json": "{\n  \"error\": \"kith: call model 'bad' is not sonnet, haiku, opus, a claude-* model id, own or default\",\n  \"ok\": false\n}\n",
+  "step3.stderr": ""
+}

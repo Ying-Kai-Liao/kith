@@ -354,7 +354,7 @@ pub fn migrate_file(ctx: &Ctx<'_>) -> std::io::Result<bool> {
 }
 
 /// The whole file, atomically (a reader never sees half of it), with the permissions a plain write would give it.
-fn write(file: &Path, s: &Map) -> std::io::Result<()> {
+pub fn write(file: &Path, s: &Map) -> std::io::Result<()> {
     let dir = file.parent().unwrap_or(Path::new("."));
     let tmp = super::temp_in(dir, "settings.json.", ".tmp");
     let result = (|| {

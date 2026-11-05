@@ -1,0 +1,16 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{\n  \"agents\": {\n    \"a\": {\n      \"limit\": 4,\n      \"permission_mode\": \"plan\"\n    }\n  },\n  \"delegation\": {\n    \"chain_cost_cap_usd\": 9\n  },\n  \"plugins\": [\n    \"a@b\"\n  ]\n}\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "auto\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "sonnet\n",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "\n",
+  "step3.exit": "0\n",
+  "step3.stderr": "",
+  "step3.stdout": "\n"
+}
