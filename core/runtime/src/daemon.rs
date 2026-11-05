@@ -288,6 +288,12 @@ impl Shared {
                 return Ok(answer);
             }
         }
+        // The host's claim rows (M3-10f): the host's connection only (`check` above); claim transactions.
+        if crate::hostclaim::serves(method) {
+            let answer = self.with_core(|c| crate::hostclaim::call(c, method, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         // The wake queue (M3-7): nothing calls these until kith-wake is switched; the daemon runs no drain and fires no waiter.
         if crate::wake::serves(method) {
             let answer = self.with_core(|c| crate::wake::call(c, method, params))?;

@@ -10187,6 +10187,847 @@
           }
         }
       }
+    },
+    {
+      "name": "hostclaim.ensure",
+      "summary": "The conversation row for a session, made when it is missing (the host's terminal and turns name sessions the core may not have imported yet). Answers `{conversation}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "engine",
+          "summary": "The engine (claude).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "engine": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.epoch",
+      "summary": "The person's revoke epoch: read it before the may check and carry it into `claim`, `turn` or `enqueue`. Answers `{epoch}`.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The claim's principal.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.claim",
+      "summary": "A terminal or `external` writer claim (step 1). Refused when a writer holds the conversation. An `external` claim names its process. Answers `{claimId, generation}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kind",
+          "summary": "terminal or external.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The principal revoke sweeps by (empty: the owner).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` read before the may check.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The external run's process.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "That process's start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "holderInstance",
+          "summary": "The holder instance the spawn goes to.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "kind": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "holderInstance": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.enqueue",
+      "summary": "Queues a turn for a conversation (created when missing). Refused when the person was revoked after `revokeSeen`. Answers `{turn}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "engine",
+          "summary": "The engine.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "source",
+          "summary": "Who sent it (app, ask, wake, schedule ...).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The turn's principal.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "prompt",
+          "summary": "The prompt.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` read before the may check.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "deadline",
+          "summary": "Expire a waiting turn at this time (ms).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "engine": {
+            "kind": "caller"
+          },
+          "source": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "prompt": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          },
+          "deadline": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.turn",
+      "summary": "The claim for a queued or parked turn, through `claim_next` (it picks the account and starts the session row). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "turn",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The turn's principal.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` read before the may check.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cwd",
+          "summary": "The run's working folder.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "sessionId",
+          "summary": "The id for a NEW engine session row.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "holderInstance",
+          "summary": "The holder instance the spawn goes to.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "turn": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          },
+          "cwd": {
+            "kind": "caller"
+          },
+          "sessionId": {
+            "kind": "caller"
+          },
+          "holderInstance": {
+            "kind": "caller"
+          },
+          "kernel": {
+            "kind": "caller"
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.redeem",
+      "summary": "The claim's process started (step 3): `claimed` to `running` on this pid. Answers `{running, again}` or `{refused: <state>}`.",
+      "params": [
+        {
+          "name": "claimId",
+          "summary": "The claim.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "holderInstance",
+          "summary": "The holder instance.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "claimId": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "holderInstance": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.report",
+      "summary": "What the process said about its claim (step 4): `done`, `exit`, `busy` or `spawned`, with the JSON `body` (`pid`, `out_of_usage`, `started`). Answers `{stored, applied}`; an unknown claim `{unknown: true}`.",
+      "params": [
+        {
+          "name": "claimId",
+          "summary": "The claim.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "kind",
+          "summary": "done, exit, busy or spawned.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "body",
+          "summary": "JSON.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "claimId": {
+            "kind": "caller"
+          },
+          "kind": {
+            "kind": "caller"
+          },
+          "body": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.stop",
+      "summary": "Stops a live claim (a take-over, a Stop): the claim goes to `ending` and stays the writer until its process is gone (`hostclaim.settle`). Answers `{kill}` (pid and start stamp to signal) or `{kill: null}`.",
+      "params": [
+        {
+          "name": "claimId",
+          "summary": "The claim.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "reason",
+          "summary": "Why.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "requeue",
+          "summary": "Queue its turn again instead of cancelling it.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "claimId": {
+            "kind": "caller"
+          },
+          "reason": {
+            "kind": "caller"
+          },
+          "requeue": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.settle",
+      "summary": "Ends the `ending` claims whose process the core confirms gone. Answers `{ended: [claimId]}`.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {},
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.show",
+      "summary": "The conversation's writer, if any: `{claim: {claimId, state, kind, person, pid, started, holderInstance} | null}`; with `claimId`, that claim in whatever state it is.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "claimId",
+          "summary": "One claim.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "claimId": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.cancel",
+      "summary": "Cancels a turn that nothing runs yet (queued, parked, or claimed with no process): what a caller does after a refused claim it will not retry. Answers `{cancelled}`.",
+      "params": [
+        {
+          "name": "turn",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "reason",
+          "summary": "Why (logged).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "turn": {
+            "kind": "caller"
+          },
+          "reason": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.park",
+      "summary": "A queued turn waits (`lock_busy` or `terminal_live`). Answers `{parked}`.",
+      "params": [
+        {
+          "name": "turn",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "reason",
+          "summary": "lock_busy or terminal_live.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "turn": {
+            "kind": "caller"
+          },
+          "reason": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.unpark",
+      "summary": "Parked turns of the conversation go back to queued once nothing holds it. Answers `{turns}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "lockFree",
+          "summary": "The writer lock could be taken.",
+          "required": true,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "terminalLive",
+          "summary": "A terminal session is open.",
+          "required": true,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "lockFree": {
+            "kind": "caller"
+          },
+          "terminalLive": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
     }
   ],
   "components": {
