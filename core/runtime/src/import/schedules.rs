@@ -255,12 +255,11 @@ pub(crate) fn run_in(
     let mac = crate::schedules::mac_id(machine)?;
     // The lifetime lock for the whole step; this also brings the schema up to date, as `kith migrate` does.
     let mut owned;
-    let (core, own_lock) = match held {
-        Some(c) => (c, false),
-        None => {
-            owned = crate::start_with(layout, MIGRATIONS)?;
-            (&mut owned, true)
-        }
+    let (core, own_lock) = if let Some(c) = held {
+        (c, false)
+    } else {
+        owned = crate::start_with(layout, MIGRATIONS)?;
+        (&mut owned, true)
     };
     let (tick, new) = {
         let tx = core.claim_tx()?;
@@ -274,7 +273,8 @@ pub(crate) fn run_in(
     // Before the first write. Under the cutover the framework took its snapshot already (`own_lock` is false).
     let backup = if own_lock {
         let b = core.backup(layout, "pre-import")?;
-        rep.lines.push(format!("backup of core.db: {}", b.display()));
+        rep.lines
+            .push(format!("backup of core.db: {}", b.display()));
         rep.backup = Some(b.clone());
         b
     } else {

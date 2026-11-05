@@ -46,12 +46,12 @@ rm "$S"
 check "no state file reads as empty" "K ls house >'$T/out' 2>&1"
 
 # A routine the core fires has a trigger and no cron: not ours to list or tick.
-printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a"}, {"id": "r1", "task": "routine", "trigger": {"type": "interval", "every": 60}, "mac": "x"}]\n' > "$J"
+printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a"}, {"id": "r1", "task": "routine", "trigger": {"type": "interval", "every": 60}, "mac": "x"}, {"id": "both", "cron": "0 9 * * *", "task": "has both", "trigger": {"type": "interval", "every": 60}}, {"id": "neither", "cron": "0 10 * * *", "task": "plain"}]\n' > "$J"
 K ls house >"$T/out" 2>&1
 check "ls lists the cron job" "grep -q ' a ' '$T/out'"
 check "ls does not list (or crash on) the routine job" "! grep -q 'r1' '$T/out' && ! grep -q Traceback '$T/out'"
 K ls house --json >"$T/out" 2>&1
-check "ls --json lists one job" "[[ \"\$(python3 -c \"import json; print(len(json.load(open('$T/out'))['jobs']))\")\" == 1 ]]"
+check "ls --json lists the cron jobs, including one that also has a trigger" "[[ \"\$(python3 -c \"import json; print(len(json.load(open('$T/out'))['jobs']))\")\" == 3 ]]"
 K tick >"$T/out" 2>&1
 check "tick runs without a traceback beside a routine job" "! grep -q Traceback '$T/out'"
 

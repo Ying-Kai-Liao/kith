@@ -93,9 +93,9 @@ impl Schedules {
                 None => Envelope::os()?,
             });
         }
-        let envelope = guard
-            .as_mut()
-            .ok_or_else(|| Error::Io("cutover: schedules: the secrets envelope is unavailable".into()))?;
+        let envelope = guard.as_mut().ok_or_else(|| {
+            Error::Io("cutover: schedules: the secrets envelope is unavailable".into())
+        })?;
         f(envelope, core.conn())
     }
 }
@@ -236,9 +236,17 @@ fn routines_of(db: &Connection) -> Result<Vec<Value>> {
         .unwrap_or_default())
 }
 
-/// The kith agent that owns a bot: the `hq_agent` of its config. Outer `None`: no such bot; inner `None`: a host-native
-/// bot, which has no kith agent.
-fn agent_of(db: &Connection, bot: &str) -> Option<Option<String>> {
+/// Who owns a bot.
+enum Owner {
+    /// No such bot (or its config is not JSON).
+    Missing,
+    /// A host-native bot: no kith agent.
+    Native,
+    Agent(String),
+}
+
+/// The kith agent that owns a bot: the `hq_agent` of its config.
+fn agent_of(db: &Connection, bot: &str) -> Owner {
     let config: Option<String> = db
         .query_row(
             "SELECT config FROM bots WHERE id = ?1 AND deleted = 0",
@@ -248,12 +256,13 @@ fn agent_of(db: &Connection, bot: &str) -> Option<Option<String>> {
         .optional()
         .ok()
         .flatten();
-    let config = serde_json::from_str::<Value>(&config?).ok()?;
-    Some(
-        text(&config, "hq_agent")
-            .filter(|a| !a.is_empty())
-            .map(str::to_owned),
-    )
+    let Some(config) = config.and_then(|c| serde_json::from_str::<Value>(&c).ok()) else {
+        return Owner::Missing;
+    };
+    match text(&config, "hq_agent").filter(|a| !a.is_empty()) {
+        Some(a) => Owner::Agent(a.to_owned()),
+        None => Owner::Native,
+    }
 }
 
 /// What serve.db says, as jobs. `mac` goes into every job.
@@ -301,13 +310,13 @@ fn routine_rows(
     }
     let bot = text(r, "botId").unwrap_or_default();
     let agent = match agent_of(db, bot) {
-        None => return Err(format!("its bot {bot:?} no longer exists")),
-        Some(None) => {
+        Owner::Missing => return Err(format!("its bot {bot:?} no longer exists")),
+        Owner::Native => {
             return Err(format!(
                 "bot {bot:?} is a host-native bot with no kith agent; make it a kith agent first (C5)"
             ));
         }
-        Some(Some(a)) => a,
+        Owner::Agent(a) => a,
     };
     if !plain_name(&agent) || !agent_exists(paths, &agent) {
         return Err(format!("its agent {agent:?} is not on this Mac"));
@@ -455,13 +464,15 @@ enum Verdict {
 
 /// Whether a job is one this import made for `routine` (of `bot`).
 fn made_for(job: &Value, routine: &str, bot: &str) -> bool {
-    job.get("routine").is_some_and(|r| {
-        text(r, "id") == Some(routine) && text(r, "bot") == Some(bot)
-    })
+    job.get("routine")
+        .is_some_and(|r| text(r, "id") == Some(routine) && text(r, "bot") == Some(bot))
 }
 
 fn verdict(jobs: &[Value], row: &Row, mac: &str) -> Verdict {
-    let Some(at) = jobs.iter().position(|j| text(j, "id") == Some(row.job.as_str())) else {
+    let Some(at) = jobs
+        .iter()
+        .position(|j| text(j, "id") == Some(row.job.as_str()))
+    else {
         return Verdict::New;
     };
     let have = &jobs[at];
@@ -571,9 +582,7 @@ fn apply_agent(cx: &mut Apply<'_>, agent: &str, rows: &[&Row]) -> Result<()> {
                     .push(format!("{agent}/{}: job brought up to date", row.job));
             }
             Verdict::Same => cx.counts.same += 1,
-            Verdict::Refuse(why) => cx
-                .lines
-                .push(format!("refused {agent}/{}: {why}", row.job)),
+            Verdict::Refuse(why) => cx.lines.push(format!("refused {agent}/{}: {why}", row.job)),
         }
     }
     for &i in orphans(&jobs, cx.mac, &cx.plan.known).iter().rev() {
@@ -643,7 +652,11 @@ impl Module for Schedules {
         let paths = paths_of(env)?;
         let mac = if dry {
             let m = mac_peek(&env.machine);
-            if m.is_empty() { "<this Mac's id, made by the step>".to_owned() } else { m }
+            if m.is_empty() {
+                "<this Mac's id, made by the step>".to_owned()
+            } else {
+                m
+            }
         } else {
             crate::schedules::mac_id(&env.machine)?
         };
@@ -717,7 +730,8 @@ impl Module for Schedules {
                 lines.extend(self.put_key(core, row)?);
             }
             lines.extend(
-                crate::import::schedules::run_in(&env.layout, &env.machine, false, Some(core))?.lines,
+                crate::import::schedules::run_in(&env.layout, &env.machine, false, Some(core))?
+                    .lines,
             );
         } else {
             lines.extend(
@@ -763,9 +777,14 @@ impl Module for Schedules {
             for row in plan.rows.iter().filter(|r| r.agent == agent) {
                 match verdict(&jobs, row, &mac) {
                     Verdict::Same => {}
-                    Verdict::New => diffs.push(format!("{agent}/{}: a routine, not a job yet", row.job)),
+                    Verdict::New => {
+                        diffs.push(format!("{agent}/{}: a routine, not a job yet", row.job));
+                    }
                     Verdict::Update(_) => {
-                        diffs.push(format!("{agent}/{}: the job differs from its routine", row.job));
+                        diffs.push(format!(
+                            "{agent}/{}: the job differs from its routine",
+                            row.job
+                        ));
                     }
                     Verdict::Refuse(why) => diffs.push(format!("{agent}/{}: {why}", row.job)),
                 }
@@ -801,7 +820,9 @@ impl Module for Schedules {
             let mine = |jobs: &[Value]| -> Vec<usize> {
                 jobs.iter()
                     .enumerate()
-                    .filter(|(_, j)| j.get("routine").is_some() && text(j, "mac") == Some(mac.as_str()))
+                    .filter(|(_, j)| {
+                        j.get("routine").is_some() && text(j, "mac") == Some(mac.as_str())
+                    })
                     .map(|(i, _)| i)
                     .collect()
             };
@@ -827,10 +848,7 @@ impl Module for Schedules {
         }
         // The jobs are gone, so the keys they held are: `restore_secrets` already put them back in serve.db.
         for (agent, job) in &removed {
-            Envelope::delete(
-                core.conn(),
-                &crate::schedules::hook_key_name(agent, job),
-            )?;
+            Envelope::delete(core.conn(), &crate::schedules::hook_key_name(agent, job))?;
         }
         lines.push(format!(
             "schedules: removed {} imported job(s) from the agents' jobs.json",
@@ -927,7 +945,9 @@ impl Schedules {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| Error::Io(format!("cutover: schedules: serve.db is busy: {e}")))?;
         let raw: Option<String> = tx
-            .query_row("SELECT v FROM kv WHERE k = ?1", [ROUTINES_KEY], |r| r.get(0))
+            .query_row("SELECT v FROM kv WHERE k = ?1", [ROUTINES_KEY], |r| {
+                r.get(0)
+            })
             .optional()?;
         let mut lines = Vec::new();
         let Some(raw) = raw else {
@@ -935,8 +955,11 @@ impl Schedules {
                 "schedules: serve.db holds no routines; their jobs stay removed".into(),
             ]);
         };
-        let mut state: Value = serde_json::from_str(&raw)
-            .map_err(|e| Error::Refused(format!("cutover: schedules: serve.db's {ROUTINES_KEY}: {e}")))?;
+        let mut state: Value = serde_json::from_str(&raw).map_err(|e| {
+            Error::Refused(format!(
+                "cutover: schedules: serve.db's {ROUTINES_KEY}: {e}"
+            ))
+        })?;
         let mut changed = 0;
         let mut seen = BTreeSet::new();
         if let Some(list) = state.get_mut("routines").and_then(Value::as_array_mut) {
@@ -950,11 +973,11 @@ impl Schedules {
                 seen.insert(id);
                 let Some(o) = r.as_object_mut() else { continue };
                 let mut set = |k: &str, v: Value| {
-                    if o.get(k) != Some(&v) {
+                    if o.get(k) == Some(&v) {
+                        false
+                    } else {
                         o.insert(k.to_owned(), v);
                         true
-                    } else {
-                        false
                     }
                 };
                 let a = set("enabled", json!(enabled));
@@ -1015,7 +1038,7 @@ fn write_state_back(env: &Env, db: &Connection, mac: &str) -> Result<String> {
                 .to_string_lossy()
                 .starts_with("state.json.pre-cutover-")
         })
-        .max_by_key(|e| e.file_name())
+        .max_by_key(std::fs::DirEntry::file_name)
         .and_then(|e| std::fs::read(e.path()).ok())
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
     if let Some(Value::Object(o)) = kept {
@@ -1026,12 +1049,18 @@ fn write_state_back(env: &Env, db: &Connection, mac: &str) -> Result<String> {
         }
     }
     let wm: Option<i64> = db
-        .query_row("SELECT at FROM sched_watermark WHERE mac = ?1", [mac], |r| r.get(0))
+        .query_row(
+            "SELECT at FROM sched_watermark WHERE mac = ?1",
+            [mac],
+            |r| r.get(0),
+        )
         .optional()?;
     let tick = match wm.and_then(crate::schedules::local_minute) {
         Some(t) => Some(t),
         None => db
-            .query_row("SELECT tick FROM sched_tick WHERE mac = ?1", [mac], |r| r.get::<_, String>(0))
+            .query_row("SELECT tick FROM sched_tick WHERE mac = ?1", [mac], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()?,
     };
     if let Some(t) = tick {
@@ -1076,7 +1105,11 @@ fn write_state_back(env: &Env, db: &Connection, mac: &str) -> Result<String> {
     let io = |e: std::io::Error| Error::Io(format!("cutover: schedules: {}: {e}", file.display()));
     std::fs::create_dir_all(&dir).map_err(io)?;
     let tmp = dir.join("state.json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(&Value::Object(out)).unwrap_or_default()).map_err(io)?;
+    std::fs::write(
+        &tmp,
+        serde_json::to_string_pretty(&Value::Object(out)).unwrap_or_default(),
+    )
+    .map_err(io)?;
     std::fs::rename(&tmp, &file).map_err(io)?;
     Ok(format!(
         "schedules: wrote sched/state.json again (the last tick and {n} job(s)' last run)"

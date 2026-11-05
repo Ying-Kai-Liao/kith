@@ -361,7 +361,6 @@ fn read_jobs_within(
         let until = std::time::Instant::now() + wait;
         loop {
             match fs2::FileExt::try_lock_shared(l) {
-                Ok(()) => break,
                 // A writer has it: wait a moment, then say so. (Any other error is an odd filesystem: read without.)
                 Err(e) if e.kind() == fs2::lock_contended_error().kind() => {
                     if std::time::Instant::now() >= until {
@@ -373,7 +372,8 @@ fn read_jobs_within(
                     }
                     std::thread::sleep(std::time::Duration::from_millis(25));
                 }
-                Err(_) => break,
+                // Got it, or an odd filesystem that cannot lock: read without.
+                Ok(()) | Err(_) => break,
             }
         }
     }

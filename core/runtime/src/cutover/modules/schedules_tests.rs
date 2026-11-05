@@ -32,7 +32,12 @@ impl Module for Lifted {
     fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
         self.0.tombstones(env)
     }
-    fn import(&self, env: &Env, core: Option<&mut Core>, o: Opts) -> crate::error::Result<Vec<String>> {
+    fn import(
+        &self,
+        env: &Env,
+        core: Option<&mut Core>,
+        o: Opts,
+    ) -> crate::error::Result<Vec<String>> {
         self.0.import(env, core, o)
     }
     fn same_answer(&self, env: &Env, db: &Connection) -> crate::error::Result<Vec<String>> {
@@ -279,7 +284,10 @@ fn a_step_turns_routines_into_jobs_and_keys_and_the_sched_state_into_a_tombstone
     assert!(text.contains("same answer"), "{text}");
     assert!(!text.contains(SECRET), "a key is never printed");
     assert_eq!(
-        state::read(&w.env.layout, "schedules").unwrap().unwrap().phase,
+        state::read(&w.env.layout, "schedules")
+            .unwrap()
+            .unwrap()
+            .phase,
         state::Phase::Switched
     );
     // The jobs: kith-sched's own job is untouched; the routines follow it.
@@ -362,14 +370,14 @@ fn importing_again_changes_nothing_and_mints_no_new_key() {
     let key_row = stamp(&core);
     let again = m.import(&w.env, Some(&mut core), opts()).unwrap();
     let text = again.join("\n");
-    assert!(
-        text.contains("0 added, 0 updated, 3 unchanged"),
-        "{text}"
-    );
+    assert!(text.contains("0 added, 0 updated, 3 unchanged"), "{text}");
     assert!(!text.contains("webhook key stored"), "{text}");
     assert_eq!(std::fs::read(w.mel_jobs()).unwrap(), bytes);
     assert_eq!(stamp(&core), key_row, "the record was not written again");
-    assert!(m.same_answer(&w.env, core.conn()).unwrap().is_empty());
+    assert_eq!(
+        m.same_answer(&w.env, core.conn()).unwrap(),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -385,7 +393,9 @@ fn a_changed_routine_updates_its_own_job_and_a_deleted_one_takes_its_job_away() 
     w.set_serve_routines(&v);
     let diffs = reg[0].same_answer(&w.env, core.conn()).unwrap();
     assert!(
-        diffs.iter().any(|d| d.contains("r1") && d.contains("differs")),
+        diffs
+            .iter()
+            .any(|d| d.contains("r1") && d.contains("differs")),
         "{diffs:?}"
     );
     let out = reg[0]
@@ -429,7 +439,10 @@ fn a_routine_on_a_host_native_bot_is_refused_and_the_step_cannot_switch_with_it(
         .to_string();
     assert!(err.contains("NOT switched") && err.contains("r3"), "{err}");
     assert_eq!(
-        state::read(&w.env.layout, "schedules").unwrap().unwrap().phase,
+        state::read(&w.env.layout, "schedules")
+            .unwrap()
+            .unwrap()
+            .phase,
         state::Phase::Stepping
     );
     assert!(!tombstone::is_tombstone(&w.state_file()));
@@ -456,14 +469,18 @@ fn a_routine_on_a_host_native_bot_is_refused_and_the_step_cannot_switch_with_it(
         out.contains("make it a kith agent first") && out.contains("1 refused"),
         "{out}"
     );
-    assert!(w.secret(&crate::schedules::hook_key_name("mel", "r3")).is_none());
+    assert!(
+        w.secret(&crate::schedules::hook_key_name("mel", "r3"))
+            .is_none()
+    );
 }
 
 #[test]
 fn an_id_collision_refuses_that_routine_and_never_overwrites_the_job() {
     let w = world(false);
     // A job of the same id that is not r1's.
-    let mine = json!({"id": "r1", "cron": "5 5 * * *", "task": "somebody's own job", "person": "sam"});
+    let mine =
+        json!({"id": "r1", "cron": "5 5 * * *", "task": "somebody's own job", "person": "sam"});
     std::fs::write(
         w.mel_jobs(),
         serde_json::to_string_pretty(&json!([mine])).unwrap(),
@@ -475,7 +492,10 @@ fn an_id_collision_refuses_that_routine_and_never_overwrites_the_job() {
         .import(&w.env, Some(&mut core), opts())
         .unwrap()
         .join("\n");
-    assert!(out.contains("refused mel/r1") && out.contains("not this routine's"), "{out}");
+    assert!(
+        out.contains("refused mel/r1") && out.contains("not this routine's"),
+        "{out}"
+    );
     let jobs = w.jobs();
     assert_eq!(find(&jobs, "r1"), &mine, "left exactly as it was");
     // The other routine was not held up by it.
@@ -505,7 +525,10 @@ fn a_job_imported_on_another_mac_is_left_to_that_mac() {
         .join("\n");
     assert!(out.contains("another Mac"), "{out}");
     assert_eq!(find(&w.jobs(), "r1")["task"], "their copy");
-    assert_eq!(find(&w.jobs(), "r1")["mac"], "ffffffffffffffffffffffffffffffff");
+    assert_eq!(
+        find(&w.jobs(), "r1")["mac"],
+        "ffffffffffffffffffffffffffffffff"
+    );
 }
 
 #[test]
@@ -518,9 +541,15 @@ fn a_jobs_file_that_cannot_be_read_is_left_alone_and_said() {
         .import(&w.env, Some(&mut core), opts())
         .unwrap()
         .join("\n");
-    assert!(out.contains("refused mel") && out.contains("untouched"), "{out}");
+    assert!(
+        out.contains("refused mel") && out.contains("untouched"),
+        "{out}"
+    );
     assert_eq!(std::fs::read_to_string(w.mel_jobs()).unwrap(), "{not json");
-    assert!(!reg[0].same_answer(&w.env, core.conn()).unwrap().is_empty());
+    assert_ne!(
+        reg[0].same_answer(&w.env, core.conn()).unwrap(),
+        Vec::<String>::new()
+    );
 }
 
 // --- the switch, the tombstone and the way back ---------------------------------------------------------------------------
@@ -573,7 +602,10 @@ fn a_rollback_puts_keys_and_flags_back_removes_the_jobs_and_writes_the_state_aga
         .map(|j| j["id"].as_str().unwrap().to_owned())
         .collect();
     assert_eq!(ids, ["digest"]);
-    assert!(w.secret(&crate::schedules::hook_key_name("mel", "r2-1")).is_none());
+    assert!(
+        w.secret(&crate::schedules::hook_key_name("mel", "r2-1"))
+            .is_none()
+    );
     // kith-sched's file is back, with the last run from the core and the key the original had besides.
     assert!(!tombstone::is_tombstone(&w.state_file()));
     let s: Value = serde_json::from_slice(&std::fs::read(w.state_file()).unwrap()).unwrap();
@@ -592,7 +624,9 @@ fn a_routine_the_host_no_longer_has_is_not_brought_back_by_a_rollback() {
     let mut v = w.serve_routines();
     v["routines"].as_array_mut().unwrap().remove(0);
     w.set_serve_routines(&v);
-    let out = rollback(&reg, &w.env, "schedules", opts()).unwrap().join("\n");
+    let out = rollback(&reg, &w.env, "schedules", opts())
+        .unwrap()
+        .join("\n");
     assert!(out.contains("routine r1 is no longer in serve.db"), "{out}");
     assert_eq!(w.serve_routines()["routines"].as_array().unwrap().len(), 1);
 }

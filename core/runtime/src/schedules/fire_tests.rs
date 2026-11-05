@@ -1547,7 +1547,9 @@ fn jobs_that_all_fail_for_good_are_given_up_on_at_the_longer_limit() {
     assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 39)));
     for id in ["a", "b"] {
         assert!(
-            r.rows(id).iter().any(|(_, o)| o.starts_with("skipped:error: ")),
+            r.rows(id)
+                .iter()
+                .any(|(_, o)| o.starts_with("skipped:error: ")),
             "{id}: {:?}",
             r.rows(id)
         );
@@ -1614,10 +1616,7 @@ fn a_fire_row_with_an_unfinished_turn_is_not_pruned() {
     // Another, later slot, so the first is not the job's latest.
     put_fire(&r, "a", "2026-11-04T08:30:00Z", later, None);
     assert_eq!(prune_fires(&mut r.core, later).unwrap(), 0);
-    assert_eq!(
-        r.n("SELECT count(*) FROM sched_fires WHERE job = 'a'"),
-        2
-    );
+    assert_eq!(r.n("SELECT count(*) FROM sched_fires WHERE job = 'a'"), 2);
     r.finish_all();
     assert_eq!(prune_fires(&mut r.core, later).unwrap(), 1);
 }
@@ -1630,14 +1629,14 @@ fn a_job_that_names_another_mac_is_not_fired_here_and_one_that_names_this_mac_is
     theirs["mac"] = json!("0123456789abcdef0123456789abcdef");
     let mut ours = daily("ours", "30 8 * * *");
     ours["mac"] = json!(mine);
-    r.jobs(
-        "mel",
-        &json!([theirs, ours, daily("anyone", "30 8 * * *")]),
-    );
+    r.jobs("mel", &json!([theirs, ours, daily("anyone", "30 8 * * *")]));
     r.set_wm(at(2026, 11, 3, 8, 29));
     let rep = r.tick(at(2026, 11, 3, 8, 30));
     assert_eq!(fired(&rep), ["ours", "anyone"], "{rep}");
-    assert!(r.rows("theirs").is_empty(), "nothing is recorded for a job of another Mac");
+    assert!(
+        r.rows("theirs").is_empty(),
+        "nothing is recorded for a job of another Mac"
+    );
     assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 30)));
 }
 
