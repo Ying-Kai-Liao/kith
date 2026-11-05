@@ -9,7 +9,7 @@ use crate::{market, usage};
 use axum::body::Bytes;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{ConnectInfo, Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -214,23 +214,31 @@ async fn routine_hook(
     Path(id): Path<String>,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Json<Value>, Response> {
     use crate::routines::hooks::{MAX_BODY, Refused};
     if body.len() > MAX_BODY {
-        return Err(ApiError(StatusCode::PAYLOAD_TOO_LARGE, "event too large".into()));
+        return Err(ApiError(StatusCode::PAYLOAD_TOO_LARGE, "event too large".into()).into_response());
     }
     let headers =
         headers.iter().filter_map(|(k, v)| Some((k.as_str().to_owned(), v.to_str().ok()?.to_owned()))).collect();
     hub.routines.receive(&hub, &id, &headers, &body).map(Json).map_err(|e| {
         let status = match e {
             Refused::Unauthorized => StatusCode::UNAUTHORIZED,
-            Refused::Paused | Refused::Busy | Refused::NotHere => StatusCode::CONFLICT,
+            Refused::Paused | Refused::NotHere => StatusCode::CONFLICT,
             Refused::Invalid(_) => StatusCode::BAD_REQUEST,
-            Refused::Held => StatusCode::SERVICE_UNAVAILABLE,
+            // 409 reads as "do not retry"; a delivery refused only for now says when to come back.
+            Refused::Busy | Refused::Held => StatusCode::SERVICE_UNAVAILABLE,
         };
-        ApiError(status, e.to_string())
+        let mut response = ApiError(status, e.to_string()).into_response();
+        if e.retry() {
+            response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static(HOOK_RETRY_AFTER_SECS));
+        }
+        response
     })
 }
+
+/// Matches the cloud queue's `HOOK_RETRY_MIN_MS` (30 s).
+const HOOK_RETRY_AFTER_SECS: &str = "30";
 
 #[cfg(test)]
 mod tests {
@@ -257,6 +265,45 @@ mod tests {
         drop(ios);
         assert!(!hub.phone_connected(), "desktop streams do not hold phone alerts");
         drop(desktop);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_delivery_to_a_running_routine_is_told_to_retry_not_refused() {
+        let dir = std::env::temp_dir().join(format!("kith-hook-busy-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let hub = Hub::new(
+            crate::store::Store::open(&dir.join("t.db")).expect("store"),
+            "test".into(),
+            crate::remote::identity::Identity::load_or_create(&dir).expect("identity"),
+            "test".into(),
+            19222,
+        );
+        let cfg = json!({"id": "b1", "name": "B", "cwd": "/tmp", "backend": "custom", "command": "true"});
+        hub.store.save_bot(&serde_json::from_value(cfg).expect("bot")).expect("save bot");
+        let saved = hub
+            .routines
+            .save(&hub, "b1", &json!({"name": "R", "instruction": "x", "triggers": [{"type": "webhook"}]}))
+            .expect("routine");
+        let id = saved["routine"]["id"].as_str().expect("id").to_owned();
+        let key = hub.routines.credentials(&hub, "b1", &id, false).expect("credentials")["key"]
+            .as_str()
+            .expect("key")
+            .to_owned();
+        hub.routines.enqueue(&hub.store, "b1", &id, json!({"text": "first"}), None, false).expect("first run");
+        let post = |key: String| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {key}")).expect("header"));
+            routine_hook(State(hub.clone()), Path(id.clone()), headers, Bytes::from_static(b"{}"))
+        };
+
+        let busy = post(key.clone()).await.expect_err("the routine is running").into_response();
+        assert_eq!(busy.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(busy.headers().get(header::RETRY_AFTER).expect("Retry-After"), "30");
+
+        let wrong = post("wrong".into()).await.expect_err("bad key").into_response();
+        assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+        assert!(wrong.headers().get(header::RETRY_AFTER).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 
