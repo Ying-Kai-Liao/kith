@@ -62,6 +62,13 @@ out=$(A person tim --rm 2>&1)
 mig=$("$BIN" kernel core-migrate --authority 2>&1) || bad "setup: core-migrate --authority" "$mig"
 [[ $(n sam) == 1 && $(n sambot) == 1 ]] && ok "setup: sam and sambot are in the core" || bad "setup" "sam=$(n sam) sambot=$(n sambot): $mig"
 
+# 1b. a core that existed (marker) but whose file is gone, as after a restore: the warning, not silence
+mv "$CF" "$CF.saved"
+out=$(A person amy --revoke 2>&1)
+[[ $out == *"not updated"* ]] && ok "(1b) core lost (marker, no file): warned" || bad "(1b) warned" "$out"
+mv "$CF.saved" "$CF"
+A person amy --unrevoke >/dev/null 2>&1
+
 # 2. revoke, undo, remove with no daemon
 out=$(A person sam --revoke 2>&1)
 [[ $out != *"not updated"* ]] && ok "(2) revoke: no warning" || bad "(2) revoke warning" "$out"

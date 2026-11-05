@@ -954,11 +954,36 @@ mod embedded_authority {
         let (_t, m) = machine();
         let p = paths(&m);
         let out = call_authority_embedded(&p, "people.suspend", &json!({"id": "sam"})).unwrap();
-        assert!(matches!(out, EmbeddedCall::NoCore), "{out:?}");
+        assert!(matches!(out, EmbeddedCall::NoCore(_)), "{out:?}");
         assert!(
             !Layout::new(&m).db.exists(),
             "a read-only fallback never makes the core"
         );
+    }
+
+    #[test]
+    fn a_marker_with_no_core_db_is_not_nothing_to_do() {
+        let (_t, m) = machine();
+        let p = paths(&m);
+        let l = Layout::new(&m);
+        drop(open_all(&l));
+        std::fs::remove_file(&l.db).unwrap();
+        let out = call_authority_embedded(&p, "people.suspend", &json!({"id": "sam"}));
+        assert!(
+            !matches!(out, Ok(EmbeddedCall::NoCore(_) | EmbeddedCall::Answered(_))),
+            "a lost core must refuse, not pass silently: {out:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_core_db_with_no_marker_is_nothing_to_do() {
+        let (_t, m) = machine();
+        let l = Layout::new(&m);
+        std::fs::create_dir_all(&l.dir).unwrap();
+        std::fs::write(&l.db, b"").unwrap();
+        let out =
+            call_authority_embedded(&paths(&m), "people.suspend", &json!({"id": "sam"})).unwrap();
+        assert!(matches!(out, EmbeddedCall::NoCore(_)), "{out:?}");
     }
 
     #[test]

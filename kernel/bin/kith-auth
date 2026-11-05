@@ -2507,6 +2507,12 @@ def mirror_to_core(pid, action, already_ok=None):
                 may_have_applied = failed = True
                 break   # a hung core: the other ids would each wait their 4 s under auth.json.lock too
             if r.returncode == 0:
+                try:   # the core took the write but could not finish cutting off their runs
+                    pending = json.loads(r.stdout or '{}').get('revokePending')
+                except (ValueError, AttributeError):
+                    pending = None
+                if pending:
+                    print(f'warning: the core updated {one} but a part of the revoke is pending: {pending}', file=sys.stderr)
                 continue
             ok = already_ok(one) if callable(already_ok) else already_ok
             if ok and r.returncode == 4 and ok in (r.stderr or r.stdout):

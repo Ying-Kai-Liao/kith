@@ -238,8 +238,10 @@ pub enum EmbeddedCall {
     Answered(serde_json::Value),
     /// A daemon (or another embedded command) holds the lock: nothing ran; the caller asks the daemon.
     Busy,
-    /// There is no core.db yet (a fresh install): nothing ran, and there is nothing to keep in step.
-    NoCore,
+    /// There is no core yet (a fresh install: no core.db, or an empty one, and no marker): nothing ran, and there is
+    /// nothing to keep in step. A marker with no core.db is not this: the core existed and is lost (a restore), so the
+    /// open refuses and the caller warns.
+    NoCore(std::path::PathBuf),
 }
 
 /// Runs one owner `people.*` write (`people.suspend`, `people.undo`, `people.removePerson`, `people.removeBot`) inside an
@@ -258,8 +260,11 @@ pub fn call_authority_embedded(
         )));
     }
     call::check(kith_api::Principal::Owner, method, params)?;
-    if !Layout::new(&paths.machine).db.is_file() {
-        return Ok(EmbeddedCall::NoCore);
+    let layout = Layout::new(&paths.machine);
+    // A 0-byte file is what a failed first open leaves; with no marker it never held a core either.
+    let empty = std::fs::metadata(&layout.db).map_or(true, |m| m.len() == 0);
+    if empty && !layout.marker.exists() {
+        return Ok(EmbeddedCall::NoCore(layout.dir));
     }
     match open_embedded(paths)? {
         Embedded::Open(mut core) => {

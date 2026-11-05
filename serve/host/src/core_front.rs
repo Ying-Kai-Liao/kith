@@ -411,7 +411,8 @@ fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
                 println!("{answer}");
                 return 0;
             }
-            Ok(kith_core::EmbeddedCall::NoCore) => {
+            Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
+                eprintln!("no core db at {}: nothing to update", dir.display());
                 println!("{}", json!({"noCore": true}));
                 return 0;
             }
@@ -451,8 +452,9 @@ fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
     }
 }
 
-/// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered, 3 no daemon
-/// answers (nothing ran, the caller falls back), 4 refused, 5 lost after sending, 2 usage.
+/// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered (for the
+/// people.* writes with no daemon: ran in an embedded core, or `{"noCore":true}` when there is no core to update), 3 no
+/// daemon answers and nothing ran (the caller falls back), 4 refused, 5 lost after sending, 2 usage.
 pub fn core_call(method: &str, params_stdin: bool) -> i32 {
     if !CORE_CALL_METHODS.contains(&method) {
         eprintln!("core-call: {method} is not one of {}", CORE_CALL_METHODS.join(", "));
