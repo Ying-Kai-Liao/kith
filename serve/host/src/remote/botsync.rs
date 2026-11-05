@@ -4,11 +4,13 @@
 //! never admitted, and one that never shows the invite token (`proveBotInvite`) is dropped again after ten minutes.
 
 use crate::api::botguests;
+use crate::LockExt;
 use crate::hub::Hub;
 use crate::remote::crypto;
 use crate::store::{BotState, Device, DeviceSource, Scope, Store, now_ms};
 use kith_wire::cloud::path;
 use serde_json::json;
+use std::sync::Mutex;
 
 /// kv: cloud bot devices (`bd_...`) this host ended and the cloud has not yet confirmed as revoked (JSON array).
 const PENDING_REVOKES: &str = "bot_device_revokes";
@@ -111,7 +113,7 @@ fn admit(hub: &Hub, l: &Listed, now: i64) {
             tracing::warn!(error = format!("{e:#}"), bot = bot.bot_id, "couldn't remove a bot's old key");
         }
         if let Some(cloud) = &bot.cloud_device {
-            queue_device_revoke(&hub.store, cloud);
+            queue(&hub.store, PENDING_REVOKES, cloud);
         }
     }
     tracing::info!(bot = bot.bot_id, "a bot guest joined at the cloud");
@@ -153,34 +155,36 @@ fn list(store: &Store, key: &str) -> Vec<String> {
     store.kv_get(key).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
 }
 
-fn set_list(store: &Store, key: &str, ids: &[String]) {
-    let saved = serde_json::to_string(ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(key, &v));
+/// Changes a queue in one step: it is read again here, so an id queued while a retry was awaiting the cloud is kept,
+/// and no `.await` sits between the read and the write (same shape as cloud.rs `update_pending_revokes`).
+fn update_list(store: &Store, key: &str, change: impl FnOnce(&mut Vec<String>)) {
+    static WRITING: Mutex<()> = Mutex::new(());
+    let _one_at_a_time = WRITING.locked();
+    let mut ids = list(store, key);
+    change(&mut ids);
+    let saved = serde_json::to_string(&ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(key, &v));
     if let Err(e) = saved {
         tracing::warn!(error = format!("{e:#}"), "couldn't remember a bot revoke for the cloud");
     }
 }
 
-fn queue_device_revoke(store: &Store, id: &str) {
-    let mut ids = list(store, PENDING_REVOKES);
-    if !ids.iter().any(|i| i == id) {
-        ids.push(id.to_owned());
-        set_list(store, PENDING_REVOKES, &ids);
-    }
+fn queue(store: &Store, key: &str, id: &str) {
+    update_list(store, key, |ids| {
+        if !ids.iter().any(|i| i == id) {
+            ids.push(id.to_owned());
+        }
+    });
 }
 
 /// Tells the cloud a bot device ended here; a failure is retried on later pulls (local access is already gone).
 pub async fn revoke_device_in_cloud(hub: &Hub, cloud_device: &str) {
-    queue_device_revoke(&hub.store, cloud_device);
+    queue(&hub.store, PENDING_REVOKES, cloud_device);
     retry_revokes(hub).await;
 }
 
 /// Cancels a bot invite in the cloud that was never used.
 pub async fn revoke_invite_in_cloud(hub: &Hub, invite_id: &str) {
-    let mut ids = list(&hub.store, PENDING_INVITE_REVOKES);
-    if !ids.iter().any(|i| i == invite_id) {
-        ids.push(invite_id.to_owned());
-        set_list(&hub.store, PENDING_INVITE_REVOKES, &ids);
-    }
+    queue(&hub.store, PENDING_INVITE_REVOKES, invite_id);
     retry_revokes(hub).await;
 }
 
@@ -195,18 +199,91 @@ pub async fn retry_revokes(hub: &Hub) {
         if ids.is_empty() {
             continue;
         }
-        let mut left = vec![];
+        let mut confirmed = vec![];
         for id in ids {
             match super::cloud::post(hub, &path(&id), &json!({})).await {
-                Ok(_) => {}
+                Ok(_) => confirmed.push(id),
                 // Gone there already, or (an invite) accepted meanwhile: the device is what to revoke then.
-                Err(e) if super::cloud::refused_with(&e, 404) || super::cloud::refused_with(&e, 409) => {}
+                Err(e) if super::cloud::refused_with(&e, 404) || super::cloud::refused_with(&e, 409) => {
+                    confirmed.push(id);
+                }
                 Err(e) => {
                     tracing::warn!(error = format!("{e:#}"), id, "couldn't revoke a bot in the cloud");
-                    left.push(id);
                 }
             }
         }
-        set_list(&hub.store, key, &left);
+        // Only what the cloud confirmed leaves the queue: an id queued during the awaits above stays.
+        update_list(&hub.store, key, |ids| ids.retain(|i| !confirmed.contains(i)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+    use crate::remote::identity::Identity;
+    use axum::response::IntoResponse;
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    #[derive(Default)]
+    struct Gate {
+        entered: Notify,
+        release: Notify,
+        first: std::sync::atomic::AtomicBool,
+    }
+
+    /// A cloud that holds its first revoke call (device or invite) until released and refuses every other.
+    async fn gated_cloud(gate: Arc<Gate>) -> String {
+        use axum::extract::State as Ax;
+        use axum::http::StatusCode;
+        use std::sync::atomic::Ordering;
+        let hold = |Ax(g): Ax<Arc<Gate>>| async move {
+            if g.first.swap(true, Ordering::SeqCst) {
+                return (StatusCode::INTERNAL_SERVER_ERROR, "no").into_response();
+            }
+            g.entered.notify_one();
+            g.release.notified().await;
+            axum::Json(json!({})).into_response()
+        };
+        let app = axum::Router::new()
+            .route("/v1/host/bot-devices/{id}/revoke", axum::routing::post(hold))
+            .route("/v1/host/bot-invites/{id}/revoke", axum::routing::post(hold))
+            .with_state(gate);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    }
+
+    async fn queued_during_retry(key: &str) {
+        let dir = std::env::temp_dir().join(format!("kith-botsync-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("t.db")).unwrap();
+        let hub = Hub::new(store, "host".into(), Identity::load_or_create(&dir).unwrap(), "token".into(), 0);
+        let gate = Arc::new(Gate::default());
+        hub.store.kv_set("test_cloud_url", &gated_cloud(gate.clone()).await).unwrap();
+        queue(&hub.store, key, "a");
+
+        let retry = tokio::spawn({
+            let hub = hub.clone();
+            async move { retry_revokes(&hub).await }
+        });
+        gate.entered.notified().await;
+        queue(&hub.store, key, "b");
+        gate.release.notify_one();
+        retry.await.unwrap();
+
+        assert_eq!(list(&hub.store, key), ["b"], "the confirmed id is gone, the one queued meanwhile is not");
+    }
+
+    #[tokio::test]
+    async fn a_bot_device_queued_during_a_retry_is_kept() {
+        queued_during_retry(PENDING_REVOKES).await;
+    }
+
+    #[tokio::test]
+    async fn a_bot_invite_queued_during_a_retry_is_kept() {
+        queued_during_retry(PENDING_INVITE_REVOKES).await;
     }
 }
