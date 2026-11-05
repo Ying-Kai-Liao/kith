@@ -3,6 +3,7 @@
 # (which this asks where Java and the pinned tla2tools.jar are).
 #
 #   verification/revoke/run.sh                          every row of checks.tsv: variant x property, expected pass/fail
+#   verification/revoke/run.sh --smoke                       only the rows named in smoke.txt (CI when nothing the model covers changed)
 #   verification/revoke/run.sh --show VARIANT PROPERTY   TLC's full output (the counterexample) for one row
 #   verification/revoke/run.sh --list                   the rows
 #
@@ -38,11 +39,26 @@ verdict() {   # reads TLC output; prints pass | fail | error
   else echo error; fi
 }
 
+SMOKE=0; [[ ${1:-} == --smoke ]] && SMOKE=1
+
+# rows -> the checks.tsv rows to run: all of them, or with --smoke only those named in smoke.txt ("VARIANT PROPERTY" per line).
+rows() {
+  if [[ $SMOKE == 1 ]]; then
+    grep -v '^#' "$HERE/checks.tsv" | grep -v '^$' | awk -F'\t' 'NR==FNR { if ($0 !~ /^#|^$/) { split($0, w, " "); want[w[1] " " w[2]]=1 } next } (($1 " " $3) in want)' "$HERE/smoke.txt" -
+  else
+    grep -v '^#' "$HERE/checks.tsv" | grep -v '^$'
+  fi
+}
+
 case "${1:-}" in
   --list) grep -v '^#' "$HERE/checks.tsv"; exit 0 ;;
 esac
 
 { read -r JAVA; read -r JAR; } < <("$HERE/../threads/run.sh" --tools)
+
+if [[ $SMOKE == 1 ]]; then
+  [[ $(grep -vc '^#\|^$' "$HERE/smoke.txt") -eq $(rows | wc -l) ]] || { echo "run.sh: smoke.txt names a row that is not in checks.tsv" >&2; exit 2; }
+fi
 
 if [[ ${1:-} == --show ]]; then
   kind=$(awk -F'\t' -v v="$2" -v n="$3" '$1==v && $3==n {print $2}' "$HERE/checks.tsv" | head -1)
@@ -60,7 +76,7 @@ while IFS=$'\t' read -r v k p want; do
   [[ $got != error ]] || echo "run.sh: TLC gave no verdict for $v $p: $(grep -m1 -i 'error\|exception' <<<"$out")" >&2
   mark=""; [[ $got == "$want" ]] || { mark="<-- MISMATCH"; bad=1; }
   printf '%-26s %-24s %-5s %-5s %-9s %s\n' "$v" "$p" "$want" "$got" "${states:--}" "$mark"
-done < <(grep -v '^#' "$HERE/checks.tsv" | grep -v '^$')
-echo "$(grep -vc '^#\|^$' "$HERE/checks.tsv") rows in $(( $(date +%s) - start ))s"
+done < <(rows)
+echo "$(rows | wc -l) rows in $(( $(date +%s) - start ))s"
 if (( bad )); then echo "RESULT: differs from checks.tsv"; exit 1; fi
 echo "RESULT: every row as expected"

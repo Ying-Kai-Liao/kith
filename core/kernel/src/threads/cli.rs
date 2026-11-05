@@ -56,6 +56,9 @@ impl Out {
     }
 }
 
+/// `kith-sessions -h`: the Python's own usage text.
+const HELP: &str = include_str!("usage.txt");
+
 const USAGE: &str = "usage: kith kernel threads record | resolve AGENT THREAD [PID [oneshot]] | claim SID PID [PERSON [AGENT]] | \
 terminal SID PID [PERSON [AGENT]] | proc PID PERSON AGENT | sweep PERSON... | release PID | holder SID";
 
@@ -68,6 +71,14 @@ fn int(s: &str) -> Result<i64, String> {
 /// Runs one verb. `stdin` is read only by `record`.
 pub fn run(c: &Ctx, host: &dyn Host, args: &[String], stdin: &dyn Fn() -> String) -> Out {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    // `kith-sessions`' own usage text, on stderr with exit 1 (the Python's `sys.exit(__doc__)`).
+    if matches!(a.first().copied(), Some("-h" | "--help")) {
+        return Out {
+            stderr: HELP.to_owned(),
+            code: 1,
+            ..Out::default()
+        };
+    }
     let n = a.len();
     let opt = |i: usize| a.get(i).copied();
     let done =

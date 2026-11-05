@@ -3,6 +3,7 @@
 # tools, same cache as verification/threads/run.sh (which this asks where Java and the pinned tla2tools.jar are).
 #
 #   verification/writer-lock/run.sh                       the fast rows of checks.tsv: model x cfg, expected pass/fail
+#   verification/writer-lock/run.sh --smoke               only the fast rows named in smoke.txt (CI when nothing the model covers changed)
 #   verification/writer-lock/run.sh --all                 also the slow rows (a few of them run 15-30 min each)
 #   verification/writer-lock/run.sh --show MODULE CFG     TLC's full output (the counterexample) for one row
 #   verification/writer-lock/run.sh --list                the rows
@@ -59,10 +60,20 @@ if [[ ${1:-} == --show ]]; then
 fi
 
 all=0; [[ ${1:-} == --all ]] && all=1
+smoke=0; [[ ${1:-} == --smoke ]] && smoke=1
 jobs=$(( $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) > 4 ? 4 : $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) ))
 res=$(mktemp "${TMPDIR:-/tmp}/kith-verify-wl-res.XXXXXX")
 start=$(date +%s)
-rows() { grep -v '^#' "$HERE/checks.tsv" | grep -v '^$' | awk -F'\t' -v s="$1" '$5 == s'; }
+rows() {
+  if (( smoke )) && [[ $1 == fast ]]; then   # smoke.txt: one cfg name per line; a name not in checks.tsv is an error, not a skipped row
+    grep -v '^#' "$HERE/checks.tsv" | grep -v '^$' | awk -F'\t' -v s="$1" 'NR==FNR { if ($0 !~ /^#|^$/) want[$1]=1; next } $5 == s && ($2 in want)' "$HERE/smoke.txt" -
+  else
+    grep -v '^#' "$HERE/checks.tsv" | grep -v '^$' | awk -F'\t' -v s="$1" '$5 == s'
+  fi
+}
+if (( smoke )); then
+  [[ $(grep -vc '^#\|^$' "$HERE/smoke.txt") -eq $(rows fast | wc -l) ]] || { echo "run.sh: smoke.txt names a cfg that is not a fast row of checks.tsv" >&2; exit 2; }
+fi
 
 echo "tla2tools v1.7.4, java ($JAVA)"
 rows fast | tr '\t\n' '\0\0' | xargs -0 -n 5 -P "$jobs" "${BASH_SOURCE[0]}" --one >"$res" 2>&1 || true
