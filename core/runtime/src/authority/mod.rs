@@ -306,9 +306,9 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
             agent_access.insert(r.get::<_, String>(0)?, Value::Object(row));
         }
     }
-    // store.rs writes people, memberships, presets, invites, retired, agent_access and the budget; it does not write the
-    // snapshot's `profiles` and `grants` (lane B's tables, filled by the import and, for now, written by nothing else) or
-    // `handles_stale` / `secrets_stale`.
+    // store.rs writes people, memberships, presets, invites, retired, agent_access, the budget, and the snapshot's
+    // `grants` and `profiles` (person and `with` only, for `forget`); it does not write a profile's variables, `browser`,
+    // `handles_stale` or `secrets_stale`. Lane B's tables are filled by the import.
     let mut auth = Map::new();
     // Lane B's tables, in auth.json's shape: the checks that read who owns or is lent a login or holds a grant
     // (`retired`, `person --rm --unused`), and the rollback, which writes them back whole. Left out when empty; the
