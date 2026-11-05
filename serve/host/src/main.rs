@@ -1404,6 +1404,7 @@ async fn main() -> Result<()> {
             }
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
+            }
             if let KernelCmd::Pkg { kernel, args } = cmd {
                 std::process::exit(pkg_cmd::run(kernel, &args));
             }
