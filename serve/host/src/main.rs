@@ -503,7 +503,7 @@ enum KernelCmd {
     },
     /// The kith project of a directory, as `kernel/bin/project-id` answers it (not routed from `kith` yet; a guest run is
     /// refused here and stays with the Python, which asks the host over the run socket).
-    #[command(name = "project-id")]
+    #[command(name = "project-id", disable_help_flag = true)]
     ProjectId {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
