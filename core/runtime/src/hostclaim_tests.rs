@@ -349,3 +349,36 @@ fn show_names_the_holder_instance_so_a_restarted_host_can_end_its_own_stale_clai
     let shown = row(&mut core, "hostclaim.show", &json!({"claimId": other}));
     assert!(shown["claim"]["holderInstance"].is_null(), "{shown}");
 }
+
+#[test]
+fn a_claim_left_ending_by_a_stop_is_ended_by_done_and_the_turn_stays_cancelled() {
+    let (_t, mut core, _m) = world();
+    let pid = i64::from(std::process::id());
+    let (id, turn) = running_turn(&mut core, "s1");
+    // A stop (not a requeue) of a running turn claim: the process is alive, so the claim stays the writer as `ending`.
+    let stop = row(
+        &mut core,
+        "hostclaim.stop",
+        &json!({"claimId": id, "reason": "stopped by the user"}),
+    );
+    assert_eq!(stop["kill"]["pid"], pid, "{stop}");
+    let shown = row(&mut core, "hostclaim.show", &json!({"claimId": id}));
+    assert_eq!(shown["claim"]["state"], "ending", "{shown}");
+    assert_eq!(terminal(&mut core, "s1", "")["refused"], "held");
+    // The host's release reports `done` with the same pid: the claim ends; the turn is neither done nor queued again.
+    let rep = row(
+        &mut core,
+        "hostclaim.report",
+        &json!({"claimId": id, "kind": "done", "body": json!({"pid": pid}).to_string()}),
+    );
+    assert_eq!(rep["applied"], "done", "{rep}");
+    assert_eq!(
+        row(&mut core, "hostclaim.show", &json!({"claimId": id}))["claim"]["state"],
+        "ended"
+    );
+    assert_eq!(turn_state(&core, turn), "cancelled");
+    assert!(
+        terminal(&mut core, "s1", "")["claimId"].is_i64(),
+        "claimable again"
+    );
+}

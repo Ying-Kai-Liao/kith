@@ -744,14 +744,29 @@ pub(crate) fn record_procs(held: &[proto::Held]) -> Vec<RecordedProc> {
         .collect()
 }
 
+/// The serve host's instance name on its turn claims; no holder may say hello under it (see [`reconcile`]).
+pub(crate) const HOST_INSTANCE: &str = "kith-serve-host";
+
 /// Step 7: a hello that meets an instance other than the recorded one ends what the old one held, confirms it gone,
 /// and only then records the new instance. A record from M0a has no instance: nothing is ended on its account.
+///
+/// Instance ids and the host: the serve host names its own turn claims `kith-serve-host` (`HOST_INSTANCE` in
+/// `serve/host/src/terminal/core_claims.rs`) and, after a restart, ends any claim carrying that name as its own stale
+/// one. A holder that said hello under the same id would have its live claims ended by the host, so the hello is
+/// refused and nothing is recorded. Open: `claims::different_holder` (step 7 of the claims) is not run from this hello
+/// yet; the M3 holder owns that wiring, and until it lands only the process groups below are ended here. A record
+/// stored before this rule is not re-read as a refusal: only the hello is checked.
 pub(crate) fn reconcile(
     shared: &Shared,
     instance: &str,
     procs: &[RecordedProc],
     cfg: &HolderConfig,
 ) -> std::result::Result<(), Lost> {
+    if instance == HOST_INSTANCE {
+        return Err(Lost::Blocked(format!(
+            "the holder's instance id {instance:?} is the serve host's own claim name; not recorded"
+        )));
+    }
     let recorded = shared
         .with_core(|c| c.holder_record())
         .map_err(|e| Lost::Link(e.to_string()))?;
