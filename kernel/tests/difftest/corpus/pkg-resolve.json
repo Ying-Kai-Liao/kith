@@ -3,7 +3,6 @@
     "name": "pkg-resolve-usage",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -117,7 +116,6 @@
     "name": "pkg-resolve-one",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -266,7 +264,6 @@
     "name": "pkg-resolve-snapshot-contents",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -390,7 +387,6 @@
     "name": "pkg-resolve-several",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -509,7 +505,6 @@
     "name": "pkg-resolve-git",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -684,7 +679,6 @@
     "name": "pkg-resolve-pin",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -784,7 +778,6 @@
     "name": "pkg-resolve-editing",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -898,7 +891,6 @@
     "name": "pkg-resolve-fails-after-good",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -992,7 +984,6 @@
     "name": "pkg-resolve-problems",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -1395,7 +1386,6 @@
     "name": "pkg-resolve-snapshot-fails",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -1506,7 +1496,6 @@
     "name": "pkg-resolve-fetch",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -1736,7 +1725,6 @@
     "name": "pkg-resolve-gc",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
@@ -1825,7 +1813,6 @@
     "name": "pkg-resolve-no-network",
     "command": "pkg",
     "needs": "rust",
-    "unswitched": "kith kernel pkg is not built yet",
     "program": {
       "old": [
         "sh",
