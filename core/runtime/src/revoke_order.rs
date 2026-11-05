@@ -207,31 +207,6 @@ pub(crate) fn replay_open(core: &mut Core, now: i64) -> Result<(Vec<Kill>, Vec<S
     Ok((kill, failed))
 }
 
-pub(crate) fn has_person(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
-    core_has_row(conn, id)
-}
-
-/// `id` and the owners above it by `bot_of` (a loop stops at the repeat), read from `people`.
-pub(crate) fn lineage(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>> {
-    let mut out = vec![id.to_owned()];
-    let mut at = id.to_owned();
-    loop {
-        let up: Option<String> = conn
-            .query_row("SELECT bot_of FROM people WHERE id = ?1", [&at], |r| {
-                r.get(0)
-            })
-            .optional()?
-            .flatten();
-        match up {
-            Some(u) if !out.contains(&u) => {
-                out.push(u.clone());
-                at = u;
-            }
-            _ => return Ok(out),
-        }
-    }
-}
-
 fn core_has_row(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
     Ok(conn
         .query_row("SELECT 1 FROM people WHERE id = ?1", [id], |_| Ok(()))

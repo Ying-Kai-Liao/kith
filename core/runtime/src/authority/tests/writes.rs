@@ -1633,3 +1633,31 @@ fn a_newline_or_control_character_in_either_name_is_a_usage_refusal() {
             .is_none_or(serde_json::Map::is_empty)
     );
 }
+
+#[test]
+fn joining_and_lineage_are_read_from_the_snapshot_the_write_runs_on() {
+    let (_t, c) = machine();
+    let mut a = json!({"people": {
+        "mia": {"name": "Mia"},
+        "mia-b": {"bot_of": "mia"},
+        "mia-b2": {"bot_of": "mia-b"},
+    }});
+    // an edit of someone already in the snapshot is not joining; a new id is
+    let said = write_op("people.addPerson", &json!({"id": "mia"}), &c, &mut a, "").unwrap();
+    assert_eq!(said["joining"], json!(false));
+    let said = write_op("people.addPerson", &json!({"id": "zed"}), &c, &mut a, "").unwrap();
+    assert_eq!(said["joining"], json!(true));
+    let said = write_op(
+        "people.addBot",
+        &json!({"id": "zed-b", "of": "zed"}),
+        &c,
+        &mut a,
+        "",
+    )
+    .unwrap();
+    assert_eq!(said["joining"], json!(true));
+    // the line of owners is read before the row goes, from the same snapshot
+    let said = write_op("people.removeBot", &json!({"id": "mia-b2"}), &c, &mut a, "").unwrap();
+    assert_eq!(said["lineage"], json!(["mia-b2", "mia-b", "mia"]));
+    assert!(a["people"].get("mia-b2").is_none());
+}

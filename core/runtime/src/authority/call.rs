@@ -335,24 +335,16 @@ pub(crate) fn call_in(
             } else {
                 String::new()
             };
-            // Read before the write: whether an add names someone already in `people`, and the bot's line of owners.
-            let (known, lineage) = match word(params, "id") {
-                Some(id) => (
-                    crate::revoke_order::has_person(core.conn(), id)?,
-                    if m == "people.removeBot" {
-                        crate::revoke_order::lineage(core.conn(), id)?
-                    } else {
-                        Vec::new()
-                    },
-                ),
-                None => (false, Vec::new()),
-            };
             // A person cut off, removed or renamed takes their guest doors with it, in the same transaction (M2-14).
             let said = store::run_with(
                 core,
                 c,
                 |a| write_in(m, params, c, life, a, &fresh),
                 |tx, said| {
+                    // Read inside the transaction by `write_in` (not answers): whether an add names a new id, and the
+                    // bot's line of owners.
+                    let joining = take_flag(said, "joining");
+                    let lineage = take_lineage(said);
                     revoke::follow_in_doors(tx, m, params, said, c.now_ms)?;
                     revoke::follow_in_cards(tx, m, params, said)?;
                     // A removal drops the bots' rows: record the person and the bot set (possibly empty) in this
@@ -382,7 +374,7 @@ pub(crate) fn call_in(
                     // who is already in `people` is not joining). Nor can a rename or a bot removal move a name the
                     // order still has to find: the suspend row names no bots, the table walk finds them by `bot_of`.
                     let named = match m {
-                        "people.addPerson" | "people.addBot" if !known => word(params, "id")
+                        "people.addPerson" | "people.addBot" if joining => word(params, "id")
                             .map_or(Ok(None), |id| {
                                 crate::revoke_order::open_removal_naming(tx, id)
                             })?,
@@ -495,18 +487,23 @@ pub(super) fn write_in(
         )?)),
         "people.addBot" => {
             let kv = settings(params, &["name", "provider"]);
-            Ok(lines(write::bot_add(
+            let joining = !write::people(a).contains_key(need(params, "id")?);
+            let mut out = lines(write::bot_add(
                 a,
                 need(params, "id")?,
                 word(params, "of"),
                 &kv,
-            )?))
+            )?);
+            out["joining"] = json!(joining);
+            Ok(out)
         }
         "people.removeBot" => {
             // read before the row goes: a renamed bot's cards may still sit under its old ids
             let was = revoke::was_ids(a, need(params, "id")?);
+            let lineage = lineage_of(a, need(params, "id")?);
             let mut out = lines(write::bot_remove(a, need(params, "id")?)?);
             out["was"] = json!(was);
+            out["lineage"] = json!(lineage);
             Ok(out)
         }
         "people.agentAccess" => Ok(lines(write::agent_access(
@@ -547,13 +544,16 @@ pub(super) fn write_in(
         )?)),
         "people.addPerson" => {
             let kv = settings(params, &["name", "lang", "tz"]);
-            Ok(lines(revoke::person_set(
+            let joining = !write::people(a).contains_key(need(params, "id")?);
+            let mut out = lines(revoke::person_set(
                 a,
                 life,
                 need(params, "id")?,
                 &kv,
                 switch(params, "owner"),
-            )?))
+            )?);
+            out["joining"] = json!(joining);
+            Ok(out)
         }
         "people.renamePerson" => Ok(lines(revoke::person_rename(
             a,
@@ -591,6 +591,34 @@ pub(super) fn write_in(
             code: 2,
         }),
     }
+}
+
+/// `id` and the owners above it by `bot_of` (a loop stops at the repeat), read from the snapshot `auth`.
+fn lineage_of(auth: &Value, id: &str) -> Vec<String> {
+    let mut out = vec![id.to_owned()];
+    while let Some(up) = secrets::parent_of(auth, out.last().map_or("", String::as_str)) {
+        if out.contains(&up) {
+            break;
+        }
+        out.push(up);
+    }
+    out
+}
+
+/// Takes the in-transaction `joining` flag out of a write's answer, so it never reaches the caller.
+fn take_flag(said: &mut Value, key: &str) -> bool {
+    said.as_object_mut()
+        .and_then(|o| o.remove(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Takes the in-transaction `lineage` out of a write's answer.
+fn take_lineage(said: &mut Value) -> Vec<String> {
+    said.as_object_mut()
+        .and_then(|o| o.remove("lineage"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
 }
 
 /// The answer of a committed rename, with the folders that really moved and a note for each that did not.
