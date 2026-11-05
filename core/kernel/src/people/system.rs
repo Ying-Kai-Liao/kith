@@ -97,6 +97,10 @@ impl Backend for System {
             .map_err(|_| unreachable("UnicodeDecodeError"))?
             .trim()
             .to_owned();
+        // http.client refuses a header value with a line break before it sends anything.
+        if token.contains(['\r', '\n']) {
+            return Err(unreachable("ValueError"));
+        }
         let reply = post(
             &port,
             &format!("/api/{method}"),
@@ -104,7 +108,7 @@ impl Backend for System {
             &pyjson::dumps(body),
         )
         .map_err(|why| unreachable(&why))?;
-        if reply.status >= 400 {
+        if !(200..300).contains(&reply.status) {
             // `{"error": "..."}` says why; anything else is only the status.
             let why = serde_json::from_slice::<Value>(&reply.body)
                 .ok()

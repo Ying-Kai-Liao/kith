@@ -1,9 +1,10 @@
 //! `kith kernel people people|invite ...`: the command line of `kernel/bin/kith-people` in Rust. `people [ls]` and
-//! `people show` read who is invited from `kith-auth people --json` (the one reader of auth.json; when the authority
-//! moves into the core this is the place that changes: `Backend::people`), `invite add|ls|revoke` go through the running
-//! host's loopback API with the owner token (`system::host_call`, `kith_host.host_call`'s twin). Same stdout, stderr and
-//! exit codes (0 done, 1 refused / host unreachable / not found, 2 usage); the difftest golden `people.json` holds the
-//! Python's answers. `kith-people` stays Python until `people` is in `lib/core-switched.txt`.
+//! `people show` read who is invited from `kith-auth people --json` (the one reader of auth.json). The switch point is
+//! `kith-auth people --json` itself, which needs a core read verb (`id`, `name`, `owner`, `bot_of`, `root`, `revoked` / `cut_off`,
+//! `revoked_at` and the agent rows) rather than `Backend::people`; the M2 lane owns that verb. `invite add|ls|revoke` go
+//! through the running host's loopback API with the owner token (`system::host_call`, `kith_host.host_call`'s twin). Same
+//! stdout, stderr and exit codes (0 done, 1 refused / host unreachable / not found, 2 usage); the difftest golden
+//! `people.json` holds the Python's answers. `kith-people` stays Python until `people` is in `lib/core-switched.txt`.
 //!
 //! Never prints a token or hash: the host's invite list is scrubbed of `tokenHash`, `token_hash`, `token` and `proof` at
 //! any depth, and `invite add` prints only the app's own fields (the link is the one thing that carries a token, for the
@@ -255,16 +256,17 @@ fn view(p: &Value, bots: &[&Value]) -> R<Value> {
     let agents = |via: &str| -> R<Vec<Value>> {
         let mut rows = Vec::new();
         for a in array(get(p, "agents")) {
-            let (Some(agent), Some(role), Some(v)) = (a.get("agent"), a.get("role"), a.get("via"))
-            else {
-                return fail(
-                    "kith-auth people gave an agent with no agent, role or via",
-                    1,
-                );
+            // The Python reads `a['via']` on every row, but `agent` and `role` only on the rows it keeps.
+            let Some(v) = a.get("via") else {
+                return fail("kith-auth people gave an agent with no via", 1);
             };
-            if v.as_str() == Some(via) {
-                rows.push(json!({"agent": agent, "role": role}));
+            if v.as_str() != Some(via) {
+                continue;
             }
+            let (Some(agent), Some(role)) = (a.get("agent"), a.get("role")) else {
+                return fail("kith-auth people gave an agent with no agent or role", 1);
+            };
+            rows.push(json!({"agent": agent, "role": role}));
         }
         Ok(rows)
     };

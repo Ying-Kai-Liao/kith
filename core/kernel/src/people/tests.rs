@@ -61,7 +61,27 @@ fn ls_lists_invitees_only_with_their_bots() {
         o.stdout,
         "sam  Sam  ·  house=member  ·  bots: bot-s\nola (access removed)    ·  no agents\n"
     );
-    let j: Value = serde_json::from_str(&run_with(&f, "people --json").stdout).expect("json");
+    let raw = run_with(&f, "people --json").stdout;
+    // kith-difftest sorts keys, so the Python's key order is pinned here on the raw bytes.
+    let at = |k: &str| {
+        raw.find(&format!("\"{k}\": "))
+            .unwrap_or_else(|| panic!("{k} in {raw}"))
+    };
+    let keys = [
+        "id",
+        "name",
+        "revoked",
+        "revoked_at",
+        "agents",
+        "everyone_agents",
+        "bots",
+    ];
+    assert!(
+        raw.starts_with("{\"ok\": true, \"people\": [{\"id\": \"sam\""),
+        "{raw}"
+    );
+    assert!(keys.windows(2).all(|w| at(w[0]) < at(w[1])), "{raw}");
+    let j: Value = serde_json::from_str(&raw).expect("json");
     assert_eq!(j["people"][1]["revoked_at"], "2026-11-01");
     assert_eq!(j["people"][0]["everyone_agents"][0]["agent"], "garden");
 }
@@ -176,4 +196,22 @@ fn help_and_no_arguments() {
     let o = run_with(&f, "invite --help");
     assert_eq!(o.code, 0);
     assert!(o.stdout.starts_with("kith-people — the people you invited"));
+}
+
+#[test]
+fn a_row_the_python_skips_may_lack_agent_and_role() {
+    // Only `own` and `everyone` rows are read for agent and role; a row with another via is skipped.
+    let t = json!([{"id": "sam", "agents": [{"via": "temp"}, {"agent": "a", "role": "r", "via": "own"}]}]);
+    let f = Fake::new(t, Ok(json!({})));
+    assert_eq!(run_with(&f, "people ls").code, 0);
+    let bad = json!([{"id": "sam", "agents": [{"agent": "a", "via": "own"}]}]);
+    assert_eq!(
+        run_with(&Fake::new(bad, Ok(json!({}))), "people ls").code,
+        1
+    );
+    let novia = json!([{"id": "sam", "agents": [{"agent": "a", "role": "r"}]}]);
+    assert_eq!(
+        run_with(&Fake::new(novia, Ok(json!({}))), "people ls").code,
+        1
+    );
 }
