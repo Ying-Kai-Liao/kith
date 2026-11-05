@@ -39,8 +39,28 @@ pub async fn sync(hub: &Hub, listed: Option<&[Listed]>) {
 pub async fn apply(hub: &Hub, listed: &[Listed]) -> anyhow::Result<()> {
     let now = now_ms();
     for l in listed {
-        let known = hub.store.bot_guests()?.into_iter().any(|g| g.cloud_device.as_deref() == Some(&l.bot_device_id));
-        if known {
+        let bound = hub.store.bot_guests()?.into_iter().find(|g| g.cloud_device.as_deref() == Some(&l.bot_device_id));
+        if let Some(g) = bound {
+            // A bound device whose bot has ended relies on end_bot's queue entry, which is dropped if the kv write
+            // failed there; queue it again (it dedupes). A rotation's old device belongs to a live bot: left alone.
+            if !g.state.live() {
+                queue(&hub.store, PENDING_REVOKES, &l.bot_device_id);
+            }
+            continue;
+        }
+        // The cloud lists only this computer's devices, and invite ids are clash-checked across computers, so an invite
+        // this host doesn't know is one it lost (createBotInvite deletes it when the cloud's reply is lost) and an
+        // invite it closed (revoked, used, expired, or its bot ended) can still be accepted in the cloud first
+        // (`retry_revokes` drops the invite on a 409). Either way the device holds a slot, so it is ours to revoke.
+        let open = hub
+            .store
+            .bot_invite(&l.invite_id)
+            .is_some_and(|i| i.open(now) && hub.store.bot_guest(&i.bot_id).is_some_and(|g| g.state.live()));
+        if !open {
+            // Only queued: `pull` runs `retry_revokes` once at its end. Posting here would re-post both queues in full
+            // inside the first pull, which runs under the relay's 10 s STATE_WAIT (a timeout skips
+            // `sync_lease::pulled` and holds guests). The `pulling` lock is held across the awaits of a pull anyway.
+            queue(&hub.store, PENDING_REVOKES, &l.bot_device_id);
             continue;
         }
         admit(hub, l, now);
@@ -285,5 +305,149 @@ mod tests {
     #[tokio::test]
     async fn a_bot_invite_queued_during_a_retry_is_kept() {
         queued_during_retry(PENDING_INVITE_REVOKES).await;
+    }
+
+    /// A cloud that records every device revoke it is asked for.
+    async fn recording_cloud(calls: Arc<Mutex<Vec<String>>>) -> String {
+        use axum::extract::{Path, State as Ax};
+        let app = axum::Router::new()
+            .route(
+                "/v1/host/bot-devices/{id}/revoke",
+                axum::routing::post(|Ax(c): Ax<Arc<Mutex<Vec<String>>>>, Path(id): Path<String>| async move {
+                    c.lock().unwrap().push(id);
+                    axum::Json(json!({}))
+                }),
+            )
+            .with_state(calls);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    }
+
+    fn hub_with_cloud(base: &str) -> Arc<Hub> {
+        let dir = std::env::temp_dir().join(format!("kith-botsync-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("t.db")).unwrap();
+        let hub = Hub::new(store, "host".into(), Identity::load_or_create(&dir).unwrap(), "token".into(), 0);
+        hub.store.kv_set("test_cloud_url", base).unwrap();
+        hub
+    }
+
+    /// A live bot with one invite; `revoked` closes the invite as the owner would.
+    fn bot_with_invite(hub: &Hub, revoked: bool) {
+        let g = crate::store::BotGuest {
+            bot_id: "b1".into(),
+            person_id: "bot-00000001".into(),
+            owner_person: None,
+            name: "bot".into(),
+            provider: "x".into(),
+            agents: vec![],
+            state: BotState::Invited,
+            device_key: None,
+            cloud_device: None,
+            rate_per_hour: 60,
+            concurrent: 1,
+            turn_timeout_s: 60,
+            wake_profile: None,
+            created_at: 0,
+            joined_at: None,
+            decided_at: None,
+            decided_by: None,
+            last_seen_at: None,
+            revoked_at: None,
+            revoked_why: None,
+        };
+        hub.store.put_bot_guest(&g).unwrap();
+        let i = crate::store::BotInvite {
+            invite_id: "inv1".into(),
+            bot_id: "b1".into(),
+            token_hash: "h".into(),
+            created_at: 0,
+            expires_at: i64::MAX,
+            used_at: None,
+            revoked_at: None,
+        };
+        hub.store.put_bot_invite(&i).unwrap();
+        if revoked {
+            hub.store.revoke_bot_invite("inv1").unwrap();
+        }
+    }
+
+    fn device(invite: &str) -> Listed {
+        Listed {
+            bot_device_id: "bd_1".into(),
+            invite_id: invite.into(),
+            device_key: crypto::b64(&[7u8; 32]),
+            name: "bot".into(),
+            provider: None,
+            created_at: 0,
+        }
+    }
+
+    /// A bot that ended here: its device is bound and its revoke was lost from the queue.
+    fn ended_bound_bot(hub: &Hub) {
+        bot_with_invite(hub, false);
+        hub.store.bind_bot_device("b1", &crypto::b64(&[7u8; 32]), "bd_1", BotState::Joining).unwrap();
+        hub.store.end_bot_guest("b1", BotState::Revoked, "test", 1).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_device_on_an_invite_closed_here_is_queued_for_revoke_not_posted() {
+        let calls = Arc::default();
+        let hub = hub_with_cloud(&recording_cloud(Arc::clone(&calls)).await);
+        bot_with_invite(&hub, true);
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert!(calls.lock().unwrap().is_empty(), "apply posts nothing; pull's retry_revokes does");
+        assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"], "queued once");
+        assert!(hub.store.bot_guest("b1").unwrap().state.live(), "no local bot is ended");
+        retry_revokes(&hub).await;
+        assert_eq!(*calls.lock().unwrap(), ["bd_1"]);
+        assert_eq!(list(&hub.store, PENDING_REVOKES), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn a_device_on_an_invite_whose_bot_ended_is_queued() {
+        let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
+        bot_with_invite(&hub, false);
+        hub.store.end_bot_guest("b1", BotState::Revoked, "test", 1).unwrap();
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"]);
+    }
+
+    #[tokio::test]
+    async fn a_device_on_an_unknown_invite_is_queued_for_revoke() {
+        let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
+        bot_with_invite(&hub, true);
+        apply(&hub, &[device("lost-reply")]).await.unwrap();
+        assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"]);
+    }
+
+    #[tokio::test]
+    async fn a_bound_device_of_an_ended_bot_is_queued_again() {
+        let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
+        ended_bound_bot(&hub);
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"]);
+    }
+
+    #[tokio::test]
+    async fn a_bound_device_of_a_live_bot_is_left_alone() {
+        let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
+        bot_with_invite(&hub, false);
+        hub.store.bind_bot_device("b1", &crypto::b64(&[7u8; 32]), "bd_1", BotState::Joining).unwrap();
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert_eq!(list(&hub.store, PENDING_REVOKES), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn a_device_on_an_open_invite_is_admitted_not_revoked() {
+        let calls = Arc::default();
+        let hub = hub_with_cloud(&recording_cloud(Arc::clone(&calls)).await);
+        bot_with_invite(&hub, false);
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(hub.store.bot_guest("b1").unwrap().cloud_device.as_deref(), Some("bd_1"));
     }
 }
