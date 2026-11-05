@@ -1111,7 +1111,9 @@ mod stop {
         assert!(out["record"].get("claim_id").is_none(), "{out}");
         let stored: Option<i64> = core
             .conn()
-            .query_row("SELECT claim_id FROM asks WHERE id = 'n1'", [], |r| r.get(0))
+            .query_row("SELECT claim_id FROM asks WHERE id = 'n1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(stored, Some(55));
     }

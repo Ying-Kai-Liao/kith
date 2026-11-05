@@ -1327,3 +1327,59 @@ pub(crate) fn cancel_waiting_in(
 pub(crate) fn revoke_epoch_in(tx: &Transaction<'_>, person: &str) -> Result<i64> {
     epoch(tx, person)
 }
+
+/// [`enqueue_turn_in`] once per `marker`: a turn of this conversation and source whose prompt starts with `marker` (a wake
+/// turn's `[kith wake RUN]`) is that run's turn already, whatever state it is in, and its id comes back instead of a second
+/// one. For a caller whose own record of the request can be replayed (a wake `take` after an import ran again).
+pub(crate) fn enqueue_turn_once_in(
+    tx: &Transaction<'_>,
+    t: &NewTurn<'_>,
+    marker: &str,
+    now: i64,
+) -> Result<i64> {
+    check_turn(t)?;
+    let known: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM turns WHERE conversation = ?1 AND source = ?2 AND instr(prompt, ?3) = 1 ORDER BY id LIMIT 1",
+            params![t.conversation, t.source, marker],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match known {
+        Some(id) => Ok(id),
+        None => enqueue_turn_in(tx, t, now),
+    }
+}
+
+/// Whether a terminal or another person's writer holds the conversation now (a live `terminal` or `external` claim): the
+/// reason a wake's turn waits as `terminal_live` and is never typed into the terminal (q217). A turn's own claim is not
+/// one: it is the busy path.
+pub(crate) fn person_writer_live_in(tx: &rusqlite::Connection, conversation: &str) -> Result<bool> {
+    let n: i64 = tx.query_row(
+        "SELECT count(*) FROM claims
+         WHERE conversation = ?1 AND kind IN ('terminal', 'external') AND state IN ('claimed', 'running', 'ending')",
+        [conversation],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
+/// Ends a waiting turn the way its requester's record ended: the turn of this conversation and source whose prompt starts
+/// with `marker`, while it is `queued` or `parked`, becomes `done` (`delivered`) or `cancelled`. A turn that has a claim is
+/// the claim's to finish and is left alone. True when one changed.
+pub(crate) fn end_waiting_turn_in(
+    tx: &rusqlite::Connection,
+    conversation: &str,
+    source: &str,
+    marker: &str,
+    delivered: bool,
+    now: i64,
+) -> Result<bool> {
+    let state = if delivered { "done" } else { "cancelled" };
+    let n = tx.execute(
+        "UPDATE turns SET state = ?5, parked_reason = NULL, parked_at = NULL, finished_at = ?4
+         WHERE conversation = ?1 AND source = ?2 AND instr(prompt, ?3) = 1 AND state IN ('queued', 'parked')",
+        params![conversation, source, marker, now, state],
+    )?;
+    Ok(n > 0)
+}

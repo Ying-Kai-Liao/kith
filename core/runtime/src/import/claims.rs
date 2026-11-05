@@ -169,8 +169,7 @@ pub(crate) fn run(layout: &Layout, state: &Path, dry_run: bool) -> Result<Report
     Ok(rep)
 }
 
-/// [`run`] over an open core (a test holds one).
-#[cfg(test)]
+/// [`run`] over an open core (the cutover module holds one).
 pub(crate) fn run_in(core: &mut Core, state: &Path, dry_run: bool) -> Result<Report> {
     let (wanted, skipped) = read_files(state)?;
     let mut rep = Report {
@@ -184,6 +183,21 @@ pub(crate) fn run_in(core: &mut Core, state: &Path, dry_run: bool) -> Result<Rep
     }
     into(core, state, &wanted, &mut rep)?;
     Ok(rep)
+}
+
+/// The live claim files the core does not hold yet, a line each (empty = the same answer). Read-only.
+pub(crate) fn differences(state: &Path, conn: &Connection) -> Result<Vec<String>> {
+    let (wanted, _) = read_files(state)?;
+    let (add, _) = plan(conn, &wanted)?;
+    Ok(add
+        .iter()
+        .map(|w| {
+            format!(
+                "{}: a live claim file (pid {}), no claim row in the core",
+                w.sid, w.pid
+            )
+        })
+        .collect())
 }
 
 fn summarize(rep: &mut Report, conn: &Connection, wanted: &[Wanted]) -> Result<()> {
