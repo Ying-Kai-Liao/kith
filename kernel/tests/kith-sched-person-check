@@ -73,6 +73,17 @@ check "an owner's job: its own outbox (not the one it was started with), for the
 S run house kais >/dev/null 2>&1
 check "a job the owner added as a person runs for that person" "[ \"\$(ran kais)\" = kai ]"
 
+# kith-sched log: the last runs, and for one job the end of its log
+S run house mine > "$T/out" 2>&1; ran mine >/dev/null
+started=$(sed -n 's/^started → //p' "$T/out")
+check "run says where its log is, and writes it" "[ -s \"$started\" ] && grep -q 'house mine (run by hand)' \"$started\""
+S log > "$T/out" 2>&1; rc=$?
+check "log lists the last runs" "[ $rc -eq 0 ] && grep -q 'house/mine' $T/out && grep -q 'house/sams' $T/out"
+S log house mine > "$T/out" 2>&1; rc=$?
+check "log AGENT ID prints that job's last log" "[ $rc -eq 0 ] && grep -q 'house mine (run by hand)' $T/out && ! grep -q 'house/sams' $T/out"
+S log house/mine > "$T/out2" 2>&1
+check "log AGENT/ID prints the same" "cmp -s $T/out $T/out2"
+
 KITH_PERSON=ann S run house sams >/dev/null 2>&1
 check "another guest can't start it by hand" "[ -z \"\$(ran sams)\" ]"
 KITH_PERSON=ann S run house mine >/dev/null 2>&1
