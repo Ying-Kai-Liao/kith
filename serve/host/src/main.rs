@@ -485,6 +485,8 @@ enum KernelCmd {
     },
     /// Who may use which agent, and with what settings: the read half of `kith-auth` (`resolve`, `may`; a "just this once"
     /// helper grant is used up by `resolve --take-once`). Prints what `kith-auth` prints, with its exit codes.
+    // -h/--help belong to kith-auth's own usage text, so clap must not answer them.
+    #[command(disable_help_flag = true)]
     Secrets {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
@@ -507,6 +509,8 @@ enum KernelCmd {
     },
     /// The writer claim of a Claude session and the session registry: `record`, `resolve`, `claim`, `terminal`, `proc`,
     /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release` and `holder` (not routed from `kith` yet).
+    // -h/--help belong to kith-sessions' own usage text, so clap must not answer them.
+    #[command(disable_help_flag = true)]
     Threads {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
