@@ -3,6 +3,7 @@
     "name": "cutover-authority-import-and-same-answer",
     "command": "cutover",
     "needs": "rust",
+    "no_daemon": true,
     "ignore": ["/core/"],
     "normalize": [["core-pre-import-[0-9]+", "core-pre-import-<ts>"]],
     "program": {
@@ -31,6 +32,7 @@
     "name": "cutover-authority-owner-and-revoked-is-refused",
     "command": "cutover",
     "needs": "rust",
+    "no_daemon": true,
     "ignore": ["/core/"],
     "normalize": [["core-pre-import-[0-9]+", "core-pre-import-<ts>"]],
     "program": {
