@@ -83,7 +83,7 @@ broken-answer-after-end	PROPERTY	StoppedNeverWakes	fail
 broken-no-ask-sweep	PROPERTY	AsksEnded	fail
 broken-no-wake-withdraw	PROPERTY	WakesWithdrawn	fail
 asks	INVARIANT	NeverAnswerWake	fail
-# --- the core's revoke order (M3-10d, core/runtime/src/revoke_order.rs): claims of P and B swept, THEN the asks ended ---
+# --- the core's revoke order (M3-10d, core/runtime/src/revoke_order.rs): claims of P and B swept, THEN the asks ended. Code for a removal; for a suspend the design, pending Finding 1 (open before M2-23), so Swept, OrderKept and AsksEnded hold only conditionally until then ---
 core-order	INVARIANT	TypeOK	pass
 core-order	INVARIANT	OrderKept	pass
 core-order	PROPERTY	Swept	pass
@@ -121,3 +121,14 @@ broken-card-undo-revives	PROPERTY	CardsCut	fail
 broken-card-undo-revives	PROPERTY	CardNoResurrect	fail
 cards	INVARIANT	NeverCardUsed	fail
 cards	INVARIANT	NeverCardWithdrawn	fail
+# --- the core behind the host's guard (KITH_CORE_AUTHORITY=1, OFF in every deploy; M2-16/18a): kith-auth writes auth.json, then the core; the gate shuts on any write of auth.json ---
+core-gate	INVARIANT	TypeOK	pass
+core-gate	PROPERTY	R1	pass
+core-gate	PROPERTY	R5	pass
+core-gate	PROPERTY	R5c	pass
+core-gate	PROPERTY	R6	pass
+core-gate	PROPERTY	R6c	pass
+broken-core-gate-stale	PROPERTY	R1	fail
+broken-core-gate-stale	PROPERTY	R5	fail
+core-gate	INVARIANT	NeverCoreRevoked	fail
+core-gate	INVARIANT	NeverGateShut	fail

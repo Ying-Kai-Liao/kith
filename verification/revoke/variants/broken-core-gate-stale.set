@@ -1,0 +1,3 @@
+\* the gate stays open on a latched answer after auth.json changed: the core's copy, not yet told, answers for a revoke
+CoreGate = TRUE
+CoreGateStale = TRUE
