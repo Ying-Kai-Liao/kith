@@ -310,30 +310,47 @@ fn take_queues_the_runs_turn_in_the_conversations_lane_once() {
         prompt.starts_with(&format!("[kith wake {run}]")),
         "{prompt}"
     );
-    // The same run's turn is found again, not made twice (a replayed take, an import that ran again).
-    let tx = c.claim_tx().unwrap();
-    let again = crate::conversations::claims::enqueue_turn_once_in(
-        &tx,
-        &crate::conversations::claims::NewTurn {
-            conversation: "s1",
-            agent: "coder",
-            engine: "claude",
-            source: "wake",
-            person: "owner",
-            prompt: &prompt,
-            deadline: None,
-            revoke_seen: 0,
-        },
-        &format!("[kith wake {run}]"),
-        1,
-    )
-    .unwrap();
-    tx.commit().unwrap();
-    assert_eq!(again, 1);
-    assert_eq!(turns_of(&c, "s1").len(), 1);
+    // The link names the turn; it is what closing goes through, not the prompt (a changed prompt closes all the same).
+    let linked: i64 = c
+        .conn()
+        .query_row(
+            "SELECT turn_id FROM wake_turns WHERE run = ?1",
+            [&run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(linked, 1);
+    c.conn()
+        .execute("UPDATE turns SET prompt = 'edited'", [])
+        .unwrap();
     // Done: the turn the run carried is done with it.
     row(&mut c, &f, "wake.done", &json!({"run": run})).unwrap();
     assert_eq!(turns_of(&c, "s1")[0].0, "done");
+    let links: i64 = c
+        .conn()
+        .query_row("SELECT count(*) FROM wake_turns", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(links, 0, "the link goes with the run");
+}
+
+#[test]
+fn a_turn_that_looks_like_a_runs_note_is_not_closed_with_the_run() {
+    // A person typing the marker into a turn of the same conversation must not get it closed by a wake's end.
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    enqueue(&mut c, &f, "s1", "a", "host");
+    let took = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap();
+    let run = took["turn"]["run"].as_str().unwrap().to_owned();
+    c.conn()
+        .execute(
+            "INSERT INTO turns (conversation, person, source, prompt, state, queued_at)
+             VALUES ('s1', 'owner', 'app', ?1, 'queued', 1)",
+            [format!("[kith wake {run}] typed by hand")],
+        )
+        .unwrap();
+    row(&mut c, &f, "wake.done", &json!({"run": run})).unwrap();
+    let states: Vec<String> = turns_of(&c, "s1").into_iter().map(|t| t.0).collect();
+    assert_eq!(states, ["done", "queued"]);
 }
 
 #[test]

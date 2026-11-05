@@ -23,11 +23,6 @@ const SOURCE: &str = "wake";
 /// The engine of a wake turn for a conversation core.db has not seen yet (a host-door session is a Claude session).
 const DEFAULT_ENGINE: &str = "claude";
 
-/// The first line of a run's note, which is how its turn is found again.
-fn marker(run: &str) -> String {
-    format!("[kith wake {run}]")
-}
-
 #[allow(
     clippy::cast_possible_truncation,
     reason = "epoch seconds times a thousand fit an i64"
@@ -63,20 +58,34 @@ pub(crate) fn start_in(
         )
         .optional()?
         .unwrap_or_else(|| DEFAULT_ENGINE.to_owned());
-    let id = claims::enqueue_turn_once_in(
-        tx,
-        &NewTurn {
-            conversation: session,
-            agent,
-            engine: &engine,
-            source: SOURCE,
-            person,
-            prompt: text("note").unwrap_or_default(),
-            deadline: None,
-            revoke_seen: claims::revoke_epoch_in(tx, person)?,
-        },
-        &marker(run),
-        at,
+    // The run's turn is the one `wake_turns` links: a replayed take finds it instead of making a second.
+    let linked: Option<i64> = tx
+        .query_row(
+            "SELECT turn_id FROM wake_turns WHERE run = ?1",
+            [run],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let id = match linked {
+        Some(id) => id,
+        None => claims::enqueue_turn_in(
+            tx,
+            &NewTurn {
+                conversation: session,
+                agent,
+                engine: &engine,
+                source: SOURCE,
+                person,
+                prompt: text("note").unwrap_or_default(),
+                deadline: None,
+                revoke_seen: claims::revoke_epoch_in(tx, person)?,
+            },
+            at,
+        )?,
+    };
+    tx.execute(
+        "INSERT OR IGNORE INTO wake_turns (run, session, turn_id) VALUES (?1, ?2, ?3)",
+        rusqlite::params![run, session, id],
     )?;
     // The claim files are the writers until the switch (the Python's `writer_live`); the claim rows are what the core knows.
     let writer = sid.filter(|s| !s.is_empty()).unwrap_or(session);
@@ -107,7 +116,18 @@ pub(crate) fn close_gone_in(
         let delivered = after.answered.values().any(|a| {
             a.run.as_deref() == Some(&t.run) && !matches!(a.how.as_str(), "withdrawn" | "failed")
         });
-        claims::end_waiting_turn_in(tx, session, SOURCE, &marker(&t.run), delivered, ms(now))?;
+        // Through the link only; a run with no link (taken before the table) has no turn to close.
+        let linked: Option<i64> = tx
+            .query_row(
+                "SELECT turn_id FROM wake_turns WHERE run = ?1",
+                [&t.run],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(turn) = linked {
+            claims::end_waiting_turn_in(tx, turn, delivered, ms(now))?;
+            tx.execute("DELETE FROM wake_turns WHERE run = ?1", [&t.run])?;
+        }
     }
     Ok(())
 }

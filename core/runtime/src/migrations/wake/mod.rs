@@ -4,5 +4,6 @@
 use super::Migration;
 
 mod m0090_wake;
+mod m0091_wake_turns;
 
-pub(super) const STEPS: &[Migration] = &[m0090_wake::MIGRATION];
+pub(super) const STEPS: &[Migration] = &[m0090_wake::MIGRATION, m0091_wake_turns::MIGRATION];
