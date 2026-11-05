@@ -123,6 +123,45 @@ pub(super) const ROWS: &[Method] = &[
         &["people", "may"],
     ),
     people(
+        "people.resolve",
+        "What a run of an agent gets for a person (the kernel's `resolve`): whether it may run, their settings over the agent's, the domains the agent's package declares for every guest and the ones the owner kept, and `held`. With --take-once and --via, a launch refused only for want of a \"just this once\" grant is allowed by one and the grant is used up in the same transaction.",
+        &[
+            pos("agent", "string", true, "The agent."),
+            flag(
+                "person",
+                "string",
+                &["--person"],
+                "The person (default: the one the caller acts for).",
+            ),
+            flag(
+                "via",
+                "string",
+                &["--via"],
+                "The agent whose membership the run rides on (a helper call).",
+            ),
+            sw(
+                "takeOnce",
+                &["--take-once"],
+                "Count a \"just this once\" grant on the caller's row, and use it up when it lets the launch through.",
+            ),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "resolve"],
+    ),
+    people(
+        "people.bridgeHeld",
+        "Whether the channels hold this person now: kith serve serves anyone but the owner only while this Mac is in sync with the cloud (read from kith serve's cloud-sync file).",
+        &[
+            pos("person", "string", true, "The person."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "bridge-held"],
+    ),
+    people(
         "people.addBot",
         "Add a bot that belongs to a person (it is never more than its owner's).",
         &[

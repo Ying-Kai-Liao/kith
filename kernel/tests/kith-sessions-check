@@ -22,6 +22,7 @@ fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
 is() { [[ $2 == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
+stamp() { python3 "$KERNEL/lib/kith_procstart.py" "$1"; }
 field() { python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print("" if v is None else v)' "$1" "$2"; }
 
 hook() {   # hook <sid> <cwd> <source> [VAR=value ...] — the SessionStart hook, run from a child of a fake "claude" process
@@ -223,7 +224,7 @@ is "claim: first taker wins" "$(claimcli take cs-1 $C1)" taken
 is "claim: second taker refused, names the holder" "$(claimcli take cs-1 $C2)" "held $C1"
 is "claim file mode 0600" "$(claimcli mode cs-1)" 0o600
 is "claim holds the claimer's pid" "$(field $REG/cs-1.claim pid)" "$C1"
-[[ -n $(field $REG/cs-1.claim procStart) ]] && ok "claim has procStart" || bad "claim procStart"
+[[ $(field $REG/cs-1.claim procStart) == "$(stamp $C1)" && $(field $REG/cs-1.claim procStart) =~ ^(e[0-9]+|b[^:]+:[0-9]+)$ ]] && ok "claim has procStart (a stamp)" || bad "claim procStart" "$(field $REG/cs-1.claim procStart)"
 [[ -n $(field $REG/cs-1.claim at) ]] && ok "claim has at" || bad "claim at"
 is "no claim temp files left" "$(ls -A $REG | grep -c 'tmp$\|stale')" 0
 # the start time is the same text in any locale: a claim taken under zh_TW is live for a reader in C
@@ -233,11 +234,36 @@ is "claim read in another locale is live" "$(LC_ALL=zh_TW.UTF-8 claimcli take cs
 kill $C1 2>/dev/null; wait $C1 2>/dev/null
 is "claim of a dead claimer is stale: taken over" "$(claimcli take cs-1 $C2)" taken
 is "the new claimer owns it" "$(field $REG/cs-1.claim pid)" "$C2"
-python3 - "$REG/cs-1.claim" "$C2" <<'PY'
+python3 - "$REG/cs-1.claim" "$C2" "$(stamp $C2)" <<'PY'
 import json, sys
-json.dump({"pid": int(sys.argv[2]), "procStart": "Mon Jan  1 00:00:00 2001", "at": "x"}, open(sys.argv[1], "w"))
+# the same form as this system's stamp, another start: a pid reused after a crash
+other = sys.argv[3].split(':')[0] + ':1' if ':' in sys.argv[3] else 'e1'
+json.dump({"pid": int(sys.argv[2]), "procStart": other, "at": "x"}, open(sys.argv[1], "w"))
 PY
-is "claim of a reused pid (other procStart) is stale" "$(claimcli take cs-1 $C2)" taken
+is "claim of a reused pid (other procStart stamp) is stale" "$(claimcli take cs-1 $C2)" taken
+rm -f $REG/cs-1.claim
+python3 - "$REG/cs-1.claim" "$C1" "$C2" <<'PY'
+import json, sys
+json.dump({"pid": int(sys.argv[3]), "procStart": "Mon Jan  1 00:00:00 2001", "at": "x"}, open(sys.argv[1], "w"))
+PY
+is "claim with old lstart text that positively differs (a reused pid) is free" "$(claimcli take cs-1 $C1)" taken
+rm -f $REG/cs-1.claim
+# ps unreadable (a shim that prints nothing): the old text can't be told apart, so the claim is believed held, and nothing signals it
+mkdir -p "$T/nops"; printf '#!/bin/sh\nexit 1\n' > "$T/nops/ps"; chmod +x "$T/nops/ps"
+printf '{"pid":%s,"procStart":"Mon Jan  1 00:00:00 2001","at":"x","person":"p-old"}' "$C2" > "$REG/cs-1.claim"
+is "claim with old lstart text and an unreadable start: held" "$(PATH=$T/nops:$PATH claimcli take cs-1 $C1)" "held $C2"
+is "revoke sweep: old text, unreadable start: not signalled" "$(PATH=$T/nops:$PATH python3 "$SK" sweep p-old >/dev/null; kill -0 $C2 2>/dev/null && echo alive)" alive
+# the revoke sweep signals only a positive match: old text on a reused pid is left alone, a matching one is ended
+printf '{"pid":%s,"procStart":"Mon Jan  1 00:00:00 2001","at":"x","person":"p-old"}' "$C2" > "$REG/cs-1.claim"
+python3 "$SK" sweep p-old >/dev/null; sleep 0.3
+is "revoke sweep: old text on a reused live pid: not signalled" "$(kill -0 $C2 2>/dev/null && echo alive)" alive
+[[ -e $REG/cs-1.claim ]] && ok "revoke sweep: that claim is left" || bad "claim removed"
+sleep 300 & C3=$!
+lst=$(LC_ALL=C ps -o lstart= -p $C3)
+printf '{"pid":%s,"procStart":"%s","at":"x","person":"p-old"}' "$C3" "$lst" > "$REG/cs-1.claim"
+python3 "$SK" sweep p-old >/dev/null; sleep 0.3
+is "revoke sweep: old text that matches the process: ended" "$(kill -0 $C3 2>/dev/null && echo alive || echo ended)" ended
+rm -f $REG/cs-1.claim
 # a one-shot's claim carries the person it runs for (the revoke sweep finds it by that); the owner's has none
 python3 "$SK" claim cs-pers "$C1" guest-sam; is "claim: a person's one-shot names the person" "$(field $REG/cs-pers.claim person)" guest-sam
 is "claim: the one-shot kind is kept" "$(field $REG/cs-pers.claim kind)" oneshot
@@ -253,9 +279,9 @@ sleep 300 & C9=$!; python3 "$SK" proc "$C9" guest-sam money; kill $C9; wait $C9 
 rm -f $REG/cs-pers.claim $REG/cs-own.claim
 rm -f $REG/proc-*.claim
 # a second terminal --resume on a claimed session is refused, before anything starts
-python3 - "$REG/cs-2.claim" "$C2" <<'PY'
-import json, subprocess, sys
-ps = ' '.join(subprocess.run(['ps', '-o', 'lstart=', '-p', sys.argv[2]], capture_output=True, text=True, env={'LC_ALL': 'C'}).stdout.split())
+python3 - "$REG/cs-2.claim" "$C2" "$(stamp $C2)" <<'PY'
+import json, sys
+ps = sys.argv[3]
 json.dump({"pid": int(sys.argv[2]), "procStart": ps, "at": "x", "kind": "terminal"}, open(sys.argv[1], "w"))
 PY
 printf '{"cwd":"%s","type":"user"}\n' "$T/work/b" > "$CLAUDE_CONFIG_DIR/projects/p/cs-2.jsonl"
@@ -285,9 +311,9 @@ rm -f "$T/stub.out"; (cd "$T/work/b" && tty "$KERNEL/bin/kith" designer -c); err
 rm -f "$T/stub.out"; (cd "$T/work/b" && tty "$KERNEL/bin/kith" designer -r busy-sid); err=$(cat "$T/tty.out")
 [[ ! -e $T/stub.out && $err == *"answering in that thread"* ]] && ok "-r <id> on an app session: refused while the app is replying" || bad "-r app busy" "$err"
 # the host ending a terminal holds <sid>.takeover.claim: a resume waits
-python3 - "$REG/cs-2.takeover.claim" "$C2" <<'PY'
-import json, subprocess, sys
-ps = ' '.join(subprocess.run(['ps', '-o', 'lstart=', '-p', sys.argv[2]], capture_output=True, text=True, env={'LC_ALL': 'C'}).stdout.split())
+python3 - "$REG/cs-2.takeover.claim" "$C2" "$(stamp $C2)" <<'PY'
+import json, sys
+ps = sys.argv[3]
 json.dump({"pid": int(sys.argv[2]), "procStart": ps, "at": "x", "kind": "app", "takeover": True}, open(sys.argv[1], "w"))
 PY
 rm -f $REG/cs-2.claim
@@ -330,9 +356,9 @@ printf '{"cwd":"%s","type":"user"}\n' "$T/work/b" > "$CLAUDE_CONFIG_DIR/projects
 is "host down: raw session id resumes" "$rc" 0
 is "host down: in the transcript's cwd" "$(sed -n 1p $T/stub.out)" "$T/work/b"
 sleep 300 & HC=$!
-python3 - "$REG/raw-sid.claim" "$HC" <<'PY'
-import json, subprocess, sys
-ps = ' '.join(subprocess.run(['ps', '-o', 'lstart=', '-p', sys.argv[2]], capture_output=True, text=True, env={'LC_ALL': 'C'}).stdout.split())
+python3 - "$REG/raw-sid.claim" "$HC" "$(stamp $HC)" <<'PY'
+import json, sys
+ps = sys.argv[3]
 json.dump({"pid": int(sys.argv[2]), "procStart": ps, "at": "x"}, open(sys.argv[1], "w"))
 PY
 err=$(cd "$T/work/a" && "$KERNEL/bin/kith" designer --resume raw-sid 2>&1 >/dev/null); rc=$?
@@ -471,7 +497,7 @@ is "fresh one-shot: ended, the claim is stale (free)" "$(claimcli take "$osid" $
 # nothing gives an exec'd one-shot's claim back: the next claim taken removes stale ones, live ones stay
 sleep 30 & live=$!; sh -c 'exit 0' & dead=$!; wait $dead
 printf '{"pid":%s,"procStart":"x","at":"x","kind":"oneshot"}' "$dead" > "$REG/stale-1.claim"
-printf '{"pid":%s,"procStart":"%s","at":"x","kind":"oneshot"}' "$live" "$(LC_ALL=C ps -o lstart= -p $live | xargs)" > "$REG/live-1.claim"
+printf '{"pid":%s,"procStart":"%s","at":"x","kind":"oneshot"}' "$live" "$(stamp $live)" > "$REG/live-1.claim"
 (cd "$T/work/a" && STUB_OUT=$T/fresh-p.out "$KERNEL/bin/kith" designer "prune" >/dev/null 2>&1)
 is "a stale claim is removed by the next claim, a live one kept" "$([[ -e $REG/stale-1.claim ]] && echo stale)/$([[ -e $REG/live-1.claim ]] && echo live)" /live
 kill $live 2>/dev/null; wait $live 2>/dev/null
@@ -480,7 +506,7 @@ kill $live 2>/dev/null; wait $live 2>/dev/null
 is "given --session-id: claimed before claude started" "$(sed -n 5p "$T/fresh-g.out")" oneshot:self
 is "given --session-id: kept, none added" "$(sid_of "$T/fresh-g.out")/$(sed -n 2p "$T/fresh-g.out" | tr ' ' '\n' | grep -c -x -- --session-id)" given-1/1
 sleep 30 & holder=$!
-printf '{"pid":%s,"procStart":"%s","at":"x","kind":"app"}' "$holder" "$(LC_ALL=C ps -o lstart= -p $holder | xargs)" > "$REG/given-2.claim"
+printf '{"pid":%s,"procStart":"%s","at":"x","kind":"app"}' "$holder" "$(stamp $holder)" > "$REG/given-2.claim"
 rm -f "$T/fresh-h.out"
 out=$(cd "$T/work/a" && KITH_CLAUDE_ARGS="--session-id given-2" STUB_OUT=$T/fresh-h.out KITH_CLAIM_WAIT=0 "$KERNEL/bin/kith" designer "x" 2>&1); rc=$?
 [[ $rc == 1 && $out == *"held by app"* && ! -e $T/fresh-h.out ]] && ok "given --session-id held by the host: refused" || bad "given held" "$rc $out"
@@ -513,7 +539,7 @@ touch "$T/proc2.go"; wait $OBG
 (cd "$T/work/a" && KITH_RESUME=os1 STUB_SID=os1 STUB_OUT=$T/os-d.out "$KERNEL/bin/kith" designer "third" >/dev/null 2>&1); is "one-shot resume: stale claim replaced" "$?" 0
 # another writer's live claim (the host's app turn, a terminal) holds the session: refused, never written over
 sleep 30 & holder=$!
-printf '{"pid":%s,"procStart":"%s","at":"x","kind":"app"}' "$holder" "$(LC_ALL=C ps -o lstart= -p $holder | xargs)" > "$REG/os3.claim"
+printf '{"pid":%s,"procStart":"%s","at":"x","kind":"app"}' "$holder" "$(stamp $holder)" > "$REG/os3.claim"
 out=$(cd "$T/work/a" && KITH_RESUME=os3 STUB_OUT=$T/os-e.out KITH_CLAIM_WAIT=0 "$KERNEL/bin/kith" designer "x" 2>&1); is "one-shot resume: host's claim holds" "$?" 1
 [[ $out == *"held by app (pid $holder)"* ]] && ok "one-shot resume: names the host's claim" || bad "host claim message" "$out"
 kill $holder 2>/dev/null; wait $holder 2>/dev/null

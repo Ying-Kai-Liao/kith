@@ -29,7 +29,7 @@ use kith_kernel::paths::Paths;
 use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest as _, Sha256};
 
-use crate::db::MIGRATIONS;
+use crate::db::{Core, MIGRATIONS};
 use crate::error::Result;
 use crate::layout::Layout;
 
@@ -69,8 +69,18 @@ fn now_secs() -> i64 {
 
 /// `kith migrate --accounts`: copies the accounts' state file into core.db (see the module doc).
 pub fn migrate_accounts(paths: &Paths, opts: AccountsOptions) -> Result<AccountsReport> {
-    let layout = Layout::new(&paths.machine);
-    let snap = kith_kernel::accounts::snapshot(&paths.machine);
+    import_accounts(&paths.machine, opts, None)
+}
+
+/// [`migrate_accounts`] for the cutover module (`cutover/modules/accounts.rs`), which already holds the core's lifetime
+/// lock: a real run writes through that core instead of taking the lock again.
+pub(crate) fn import_accounts(
+    machine: &Path,
+    opts: AccountsOptions,
+    held: Option<&mut Core>,
+) -> Result<AccountsReport> {
+    let layout = Layout::new(machine);
+    let snap = kith_kernel::accounts::snapshot(machine);
     let file = snap.file.clone();
     let bytes = snap.bytes.clone();
     let mut rep = AccountsReport {
@@ -141,7 +151,15 @@ pub fn migrate_accounts(paths: &Paths, opts: AccountsOptions) -> Result<Accounts
         return Ok(rep);
     }
     drop(readable);
-    real(&layout, &file, bytes.as_deref(), &desired, keep, &mut rep)?;
+    real(
+        &layout,
+        &file,
+        bytes.as_deref(),
+        &desired,
+        keep,
+        held,
+        &mut rep,
+    )?;
     Ok(rep)
 }
 
@@ -160,11 +178,18 @@ fn real(
     bytes: Option<&[u8]>,
     desired: &serde_json::Map<String, serde_json::Value>,
     keep: bool,
+    held: Option<&mut Core>,
     rep: &mut AccountsReport,
 ) -> Result<()> {
     let n = desired.len();
     // The lifetime lock for the whole step; this also brings the schema up to date, as `kith migrate` does.
-    let mut core = crate::start_with(layout, MIGRATIONS)?;
+    let mut taken;
+    let core = if let Some(c) = held {
+        c
+    } else {
+        taken = crate::start_with(layout, MIGRATIONS)?;
+        &mut taken
+    };
     let held = crate::accounts::read_all(core.conn())?;
     if keep && !held.is_empty() {
         rep.lines.push(format!(

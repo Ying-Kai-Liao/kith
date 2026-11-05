@@ -767,6 +767,23 @@ impl<'a> Rules<'a> {
         }
     }
 
+    /// `agent_domains`: the hosts every guest of `agent` may reach, whoever they are: the ones its package declares
+    /// (`guest_domains:` in capabilities.yaml, the owner's consent at install) and the ones the owner kept for everyone
+    /// on a card (`agent_access`). Plain host names only.
+    fn agent_domains(&self, agent: &str) -> Vec<String> {
+        let mut all = jobs::guest_domains(&self.c.package_dir(agent).join("capabilities.yaml"));
+        if let Some(kept) = get(get(get(self.auth, "agent_access"), agent), "domains").as_array() {
+            all.extend(kept.iter().filter_map(Value::as_str).map(str::to_owned));
+        }
+        let mut out: Vec<String> = Vec::new();
+        for d in all {
+            if jobs::valid_domain(&d) && !out.contains(&d) {
+                out.push(d);
+            }
+        }
+        out
+    }
+
     /// `with_jobs`: the run's access with its ticked jobs' domains added, its doors and the names of its ticks, all from
     /// the person's own row of pkg.
     fn with_jobs(
@@ -774,10 +791,12 @@ impl<'a> Rules<'a> {
         pkg: &str,
         person: &str,
         mut access: Map<String, Value>,
+        agent: &str,
     ) -> Map<String, Value> {
         let granted = self.job_grants(pkg, person);
         let mut domains: Vec<Value> = arr(access.get("domains").unwrap_or(&NULL)).to_vec();
         domains.extend(granted[0].iter().cloned());
+        domains.extend(self.agent_domains(agent).into_iter().map(Value::String));
         access.insert("domains".to_owned(), Value::Array(dedupe(domains)));
         let mut names: Vec<String> = Vec::new();
         if let Some(ticks) = ticks(self.auth, pkg, person)
@@ -886,7 +905,7 @@ impl<'a> Rules<'a> {
             "trusted".to_owned(),
             (truthy(get(row, "trusted")) || truthy(get(&p, "trusted"))).into(),
         );
-        out.extend(self.with_jobs(pkg, person, access_of(row)));
+        out.extend(self.with_jobs(pkg, person, access_of(row), agent));
         let asked = if truthy(get(row, "mode")) {
             get(row, "mode")
         } else {
@@ -989,7 +1008,7 @@ impl<'a> Rules<'a> {
         out.insert("budget".to_owned(), budget);
         out.insert("budget_agent".to_owned(), budget_agent);
         out.insert("was".to_owned(), Value::Array(dedupe(was)));
-        let grants = self.with_jobs(pkg, bot, access_of(row));
+        let grants = self.with_jobs(pkg, bot, access_of(row), agent);
         out.extend(self.owner_cut(agent, bot, grants, via, Some(&pr))?);
         Ok(out)
     }
@@ -1088,6 +1107,37 @@ pub fn take_once(auth: &mut Value, person: &str, agent: &str, via: Option<&str>)
         return false;
     };
     left.shift_remove(agent).is_some()
+}
+
+/// `resolve --take-once` in one place for the CLI and the core: ask again counting a "just this once" grant, and use the
+/// grant up in this same step when it let the launch through. The caller holds the auth lock and saves when the second
+/// part is true.
+pub fn resolve_taking_once(
+    c: &Ctx,
+    auth: &mut Value,
+    agent: &str,
+    person: &str,
+    via: &str,
+) -> Result<(Map<String, Value>, bool), Die> {
+    let rules = Rules::new(c, auth);
+    let mut res = rules.resolve(agent, person, Some(via), true)?;
+    let (allowed, who) = (
+        res.get("allowed") == Some(&Value::Bool(true)),
+        res.get("person")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    );
+    drop(rules);
+    if allowed && take_once(auth, &who, agent, Some(via)) {
+        let why = format!(
+            "{} (just this once)",
+            res.get("why").and_then(Value::as_str).unwrap_or_default()
+        );
+        res.insert("why".to_owned(), why.into());
+        return Ok((res, true));
+    }
+    Ok((res, false))
 }
 
 // --- the command line ---------------------------------------------------------------------------------------------------
@@ -1204,20 +1254,11 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
             // the check of revoke and access, so a removal between the card and the launch still wins
             drop(rules);
             let mut locked = load_auth_locked(c)?;
-            let rules = Rules::new(c, &locked.auth);
-            res = rules.resolve(agent, &person, via, true)?;
-            let (allowed, who) = (
-                res["allowed"] == Value::Bool(true),
-                res["person"].as_str().unwrap_or_default().to_owned(),
-            );
-            drop(rules);
-            if allowed && take_once(&mut locked.auth, &who, agent, via) {
+            let (r, spent) =
+                resolve_taking_once(c, &mut locked.auth, agent, &person, via.unwrap_or_default())?;
+            res = r;
+            if spent {
                 save_auth(c, &locked)?;
-                let why = format!(
-                    "{} (just this once)",
-                    res["why"].as_str().unwrap_or_default()
-                );
-                res.insert("why".to_owned(), why.into());
             }
         }
         // held: as in `who`, this Mac is out of sync with the Kith cloud and person isn't the owner

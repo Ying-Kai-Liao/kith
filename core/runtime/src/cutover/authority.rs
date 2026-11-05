@@ -30,9 +30,8 @@
 //!   (test `forget_also_clears_grants_and_profiles`, ignored until then).
 //! - `people.removePerson --unused` and the `retired` check: `handles`, `agent@<id>` grants and owned profiles must be
 //!   checked in the same transaction (core.db has no `handles` column and no lane B tables yet).
-//! - `kith-auth agent-access ... [--rm]` writes only auth.json: the core has no writer for `agent_access` (m0013). A file
-//!   that keeps domains there is refused by the import and shows as a difference in `same_answer`, so it blocks the
-//!   gate until the rules learn `agent_domains`; the verb stays on Python.
+//! - `kith-auth agent-access ... [--rm]` writes only auth.json: the import keeps the `agent_access` table and the rules
+//!   read it (m0013), but no core method writes it, so the verb stays on Python until one does.
 //!
 //! These do not change what the gate (`may_serve`) serves, which is the READ side (`may`, `resolve`, the request guard);
 //! they are why `export_back` takes `profiles` and `grants` from the old copy and not from the core.

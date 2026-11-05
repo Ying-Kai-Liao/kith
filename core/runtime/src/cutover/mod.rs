@@ -1,6 +1,7 @@
 //! The cutover framework (M3-10a): ONE module-keyed way to move a part of Kith from its Python store to core.db, check it
 //! answers the same, make the move one-way for the old readers, and go back. M3's lanes and M2's `authority` plug into it;
-//! the registry holds `authority` (M2-18a, `authority.rs`; the switch stays OFF), the tests use a fake one.
+//! the framework's own tests use a fake module; the real ones are in [`modules`] (S1: `accounts`, `transcripts`) and
+//! `authority` (M2-18a, `authority.rs`; the switch stays OFF).
 //!
 //! # A module
 //! A [`Module`] is a name plus six hooks: `import` (idempotent; `--dry-run` gets no core; `--force`), `same_answer`
@@ -13,7 +14,8 @@
 //! knows which switch to look at).
 //!
 //! # Operations (all idempotent, all under core.db's lifetime lock, so two shells or a daemon refuse instead of racing)
-//! - `step`: refuse unless dependencies are switched; `VACUUM INTO` snapshot (recorded, reused on resume); record
+//! - `step`: refuse when the module says it is not ready (`step_refusal`, before anything is written) or unless dependencies
+//!   are switched; take the old store's writer lock (`source_lock`, held to the end); `VACUUM INTO` snapshot (recorded, reused on resume); record
 //!   `stepping`; `import`; `same_answer` must be empty or the step fails and stays `stepping` (Python is still the writer;
 //!   re-run to resume, or roll back); write the marker (`marker.rs`); record `switched`; put the tombstones. The tombstone comes AFTER the record so a
 //!   crash between them is repaired by running `step` again (the import cannot be re-run once its sources are gone, and
@@ -45,6 +47,7 @@ pub(crate) mod authority;
 #[cfg(test)]
 mod authority_tests;
 pub(crate) mod marker;
+pub(crate) mod modules;
 pub(crate) mod same_answer;
 pub(crate) mod secrets_back;
 pub(crate) mod state;
@@ -62,6 +65,15 @@ pub(crate) struct Env {
     /// Where the caller's auth.json and agent folders are, for the modules whose sources live there (`authority`). The
     /// daemon takes it from the request (the `home`, `kernel` and `env` the caller sends, as `people.*` does).
     pub ctx: Option<kith_kernel::secrets::Ctx>,
+    /// `$KITH_STATE` (the session registry lives below it) and the home folder, for the modules that read more than the
+    /// machine folder (transcripts). `new` leaves them empty: a module that needs them says so.
+    pub state: Option<PathBuf>,
+    pub home: PathBuf,
+    /// The folders (agents, state ...), for the modules that read agents' files (schedules). `new` leaves them empty.
+    pub paths: Option<kith_kernel::paths::Paths>,
+    /// The host's `serve.db`, when it is not where the host keeps it (`$KITH_SERVE_DB`, `$KITH_SERVE_HOME`, else
+    /// `<home>/.kith/serve/serve.db`): the schedules module reads the routines from it.
+    pub serve_db: Option<PathBuf>,
 }
 
 impl Env {
@@ -70,6 +82,19 @@ impl Env {
             machine: machine.to_path_buf(),
             layout: Layout::new(machine),
             ctx: None,
+            state: None,
+            home: machine.to_path_buf(),
+            paths: None,
+            serve_db: None,
+        }
+    }
+
+    pub(crate) fn with_paths(paths: &kith_kernel::paths::Paths) -> Self {
+        Self {
+            state: Some(paths.state.clone()),
+            home: paths.home.clone(),
+            paths: Some(paths.clone()),
+            ..Self::new(&paths.machine)
         }
     }
 
@@ -121,11 +146,37 @@ pub(crate) trait Module {
     fn guards_claims(&self) -> bool {
         true
     }
+    /// Why `step` must refuse right now (one line), checked before anything is read or written, so a refused step leaves no
+    /// snapshot, record, marker or tombstone. Default: never. A module whose readers or writers are not all in the core yet
+    /// says so here instead of switching.
+    fn step_refusal(&self, _env: &Env) -> Option<String> {
+        None
+    }
+    /// Whether `step --dry-run` still runs while `step_refusal` refuses (it reads and writes nothing, so a module that
+    /// wants its import looked at before its lane exists says yes). A real step stays refused. Default: no.
+    fn dry_run_despite_refusal(&self) -> bool {
+        false
+    }
+    /// The lock the old store's own writers take, held by `step` from the import through the tombstone: a write between
+    /// the two would be lost, and a writer that checked the file before the tombstone and renames after it would put the
+    /// old file back over the note. Waits for a writer, or fails with a clear error; the lock is let go when the step ends.
+    fn source_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
+        Ok(None)
+    }
 }
 
-/// The registered modules: `authority` (M2-18a, switch off); the M3 lanes join at their switch (M3-10 b..g).
+/// What [`Module::source_lock`] holds; dropping it lets the lock go.
+pub(crate) type SourceLock = Box<dyn std::any::Any>;
+
+/// The registered modules, in switch order (S1 here, then M4-5a's schedules; S2 claims+turns, S4 wake, S3 asks and S5 failover plug in after them,
+/// and M2's `authority`, M2-18a: registered, switch off). Registered is not switched: nothing steps a module but `kith migrate step`.
 pub(crate) fn registry() -> Vec<Box<dyn Module>> {
-    vec![Box::new(authority::AuthorityModule::real())]
+    vec![
+        Box::new(modules::accounts::Accounts),
+        Box::new(modules::transcripts::Transcripts),
+        Box::new(modules::schedules::Schedules::new()),
+        Box::new(authority::AuthorityModule::real()),
+    ]
 }
 
 fn now_secs() -> i64 {
@@ -167,6 +218,11 @@ pub(crate) fn step(
     opts: Opts,
 ) -> Result<Vec<String>> {
     let m = find(reg, name)?;
+    if let Some(why) = m.step_refusal(env)
+        && !(opts.dry_run && m.dry_run_despite_refusal())
+    {
+        return Err(Error::Refused(format!("cutover: {name}: {why}")));
+    }
     let cur = state::read(&env.layout, name)?;
     let mut lines = Vec::new();
     if cur.as_ref().is_some_and(|s| s.phase == Phase::RollingBack) {
@@ -190,6 +246,8 @@ pub(crate) fn step(
         return Ok(lines);
     }
     let mut core = lock(env)?;
+    // Held to the end of the step: the import, the check, the marker, the record and the tombstones.
+    let _source = m.source_lock(env)?;
     let mut snapshot = cur.as_ref().and_then(|s| s.snapshot.clone());
     // A finished switch whose record was lost: every tombstone names this module and the core holds the marker. The
     // sources are gone, so there is nothing to import; the record is written again and that is all.
@@ -409,15 +467,14 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
         .get("module")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| Error::BadParams("cutover.mayServe: module is required".into()))?;
-    let machine = core.folders().map(|p| p.machine.clone()).ok_or_else(|| {
+    let folders = core.folders().ok_or_else(|| {
         Error::NotServed("kith-core: this core was opened without its folders".into())
     })?;
-    // The caller's view of the folders (`home`, `kernel`, `env` of the params, as `people.*` reads them): a module whose
-    // sources are the caller's own files (auth.json) is asked about those, not the daemon's.
-    let (folders, kernel) = core.folders_for(params)?;
+    // The caller's view of the folders (`home`, `kernel`, `env` of the params, as `people.*` reads them) goes in the ctx:
+    // a module whose sources are the caller's own files (auth.json) is asked about those; the marker stays the daemon's.
     serve_json(
         &registry(),
-        &Env::new(&machine).with_ctx(crate::authority::call::ctx_from(&folders, kernel)),
+        &Env::with_paths(folders).with_ctx(crate::authority::call::ctx_of(core, params)?),
         core.conn(),
         name,
         opt_in_env(name),
@@ -428,12 +485,12 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
 /// `kith kernel cutover ...`: `step MODULE [--dry-run] [--force]`, `rollback MODULE [--force]`, `status`, `check MODULE`,
 /// `modules`.
 pub(crate) fn run(
-    folders: &kith_kernel::paths::Paths,
+    paths: &kith_kernel::paths::Paths,
     kernel: &std::path::Path,
     args: &[String],
 ) -> Result<Vec<String>> {
-    let env = Env::new(&folders.machine).with_ctx(crate::authority::call::ctx_from(
-        folders,
+    let env = Env::with_paths(paths).with_ctx(crate::authority::call::ctx_from(
+        paths,
         kernel.to_path_buf(),
     ));
     run_with(&registry(), &env, args)

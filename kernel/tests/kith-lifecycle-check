@@ -120,9 +120,9 @@ is "before 54 minutes: nothing" "$(python3 "$LC" sweep --session s-early)" ""
 fx s-held 55 150000 "$Q"
 sleep 60 &
 holder=$!
-python3 - "$REG/s-held.claim" "$holder" <<'PY'
-import json, os, subprocess, sys
-start = ' '.join(subprocess.run(['ps', '-o', 'lstart=', '-p', sys.argv[2]], capture_output=True, text=True, env={**os.environ, 'LC_ALL': 'C'}).stdout.split())
+python3 - "$REG/s-held.claim" "$holder" "$(python3 "$KERNEL/lib/kith_procstart.py" $holder)" <<'PY'
+import json, os, sys
+start = sys.argv[3]
 json.dump({'pid': int(sys.argv[2]), 'procStart': start, 'kind': 'terminal'}, open(sys.argv[1], 'w'))
 PY
 n=$(calls)

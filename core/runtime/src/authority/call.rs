@@ -5,6 +5,7 @@
 //! `people.list` and `people.invites` answer `{"rows": [...]}` instead, and `people.invite` also names the `code`.
 
 use std::io::Read as _;
+use std::path::{Path, PathBuf};
 
 use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
 use serde_json::{Value, json};
@@ -24,6 +25,8 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.revoke"
             | "people.list"
             | "people.may"
+            | "people.resolve"
+            | "people.bridgeHeld"
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
@@ -46,12 +49,40 @@ pub(crate) fn serves(method: &str) -> bool {
     )
 }
 
-pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
-    let (folders, kernel) = core.folders_for(params)?;
-    Ok(ctx_from(&folders, kernel))
+/// Where kith serve keeps `cloud-sync.json` for this caller: its `KITH_SERVE_DIR`, else `<its home>/.kith/serve`
+/// (what `kernel/bin/kith-serve` does). Not `<machine>/serve`: the machine folder is not always `~/.kith`, and a wrong
+/// guess reads "never linked", which stops an out-of-sync Mac holding guests. Worked out before the transaction, so no
+/// `kith-serve` process runs under the write lock.
+fn serve_dir_of(params: &Value, home: &Path) -> PathBuf {
+    let caller_env = params.get("home").is_some() || params.get("env").is_some();
+    let given = if caller_env {
+        params
+            .get("env")
+            .and_then(Value::as_object)
+            .and_then(|e| e.get("KITH_SERVE_DIR"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    } else {
+        std::env::var("KITH_SERVE_DIR").ok()
+    };
+    given
+        .filter(|d| !d.is_empty())
+        .map_or_else(|| home.join(".kith/serve"), PathBuf::from)
 }
 
-/// The rules' context over a caller's folders (also the cutover module's, which has no params to read them from).
+pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
+    let (folders, kernel) = core.folders_for(params)?;
+    let home = params
+        .get("home")
+        .and_then(Value::as_str)
+        .map_or_else(kith_kernel::paths::process_home, PathBuf::from);
+    let mut ctx = ctx_from(&folders, kernel);
+    ctx.serve = ServeDir::Fixed(serve_dir_of(params, &home));
+    Ok(ctx)
+}
+
+/// The rules' context over a caller's folders (also the cutover module's, which has no params to read them from; its
+/// serve folder is the machine's, `ctx_of` sets the caller's).
 pub(crate) fn ctx_from(folders: &kith_kernel::paths::Paths, kernel: std::path::PathBuf) -> Ctx {
     Ctx {
         auth: folders.secrets.join("auth.json"),
@@ -117,6 +148,49 @@ fn new_code() -> Result<String> {
     Ok(b.iter()
         .map(|x| char::from(ALPHABET[usize::from(*x) % ALPHABET.len()]))
         .collect())
+}
+
+/// `kith-auth resolve AGENT [--person P] [--via V] [--take-once]` (M2-1b): what a run gets, and `held`. With `takeOnce`
+/// and `via`, a refused launch is asked again counting a "just this once" grant, and the grant is used up in the SAME
+/// transaction that decided, so two launches cannot both ride one grant, and a removal between the card and the launch
+/// still wins. Not while held: the caller asks again until in sync, and the grant goes to the launch that runs.
+fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
+    let agent = need(params, "agent").map_err(|d| store::refusal(&d))?;
+    let via = word(params, "via").filter(|v| !v.is_empty());
+    let take = switch(params, "takeOnce") && via.is_some();
+    let person_of = |rules: &Rules| {
+        word(params, "person")
+            .filter(|p| !p.is_empty())
+            .map_or_else(|| rules.acting(), str::to_owned)
+    };
+    let asked = |a: &Value| -> std::result::Result<_, Die> {
+        let rules = Rules::new(c, a);
+        let person = person_of(&rules);
+        let res = rules.resolve(agent, &person, via, false)?;
+        let held = rules.bridge_held(&person);
+        let wants = take && res.get("allowed") == Some(&Value::Bool(false)) && !held;
+        Ok((res, held, wants))
+    };
+    let (res, held, wants) = store::read(core, |a| asked(a))?.map_err(|d| store::refusal(&d))?;
+    if !wants {
+        return Ok(answer(res, held));
+    }
+    let (res, held) = store::run(core, c, |a| {
+        let (mut res, held, wants) = asked(a)?;
+        if !wants {
+            return Ok((res, held));
+        }
+        let person = person_of(&Rules::new(c, a));
+        let via = via.unwrap_or_default();
+        (res, _) = secrets::resolve_taking_once(c, a, agent, &person, via)?;
+        Ok((res, held))
+    })?;
+    Ok(answer(res, held))
+}
+
+fn answer(mut res: serde_json::Map<String, Value>, held: bool) -> Value {
+    res.insert("held".to_owned(), held.into());
+    Value::Object(res)
 }
 
 /// Answers a `people.*` method over this core, as the caller's view (`kernel`, `home`, `env` in the params) sees the
@@ -203,6 +277,16 @@ pub(crate) fn call_in(
                 expires_at: int("expiresAt"),
             };
             requests::file(core, c, &new, word(params, "code"))
+        }
+        "people.resolve" => resolve(core, c, params),
+        // `kith-auth`'s `bridge_held`: the host's channels hold a person other than the owner while this Mac is out of
+        // sync with the cloud. The answer is the cloud-sync file's, not a table of core.db.
+        "people.bridgeHeld" => {
+            let person = need(params, "person").map_err(|d| store::refusal(&d))?;
+            store::read(
+                core,
+                |a| json!({ "held": Rules::new(c, a).bridge_held(person) }),
+            )
         }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         "people.botsCap" if word(params, "amount").is_none() => {
