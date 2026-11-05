@@ -193,7 +193,7 @@ pub struct AuthAgent {
 }
 
 pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {
-    let out = account::run(bin, &["people", "--json"]).await?;
+    let out = crate::api::authority::run_auth(bin, &["people", "--json"]).await?;
     serde_json::from_str(&out).context("reading kith-auth people --json")
 }
 

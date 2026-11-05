@@ -220,8 +220,15 @@ pub enum Selected {
 }
 
 impl Selected {
+    #[cfg(test)]
     pub fn from_env() -> Self {
-        if core_selected() { Self::Core(Arc::new(CoreData::from_process())) } else { Self::Host }
+        if guard_on_core() { Self::Core(Arc::new(CoreData::from_process())) } else { Self::Host }
+    }
+
+    /// The answer for this moment: a live event asks again so a gate that closes mid-stream (a file-only write) or a
+    /// switch that lands moves the next event, not the next stream (M2-18 gate 10).
+    pub fn now() -> Self {
+        if guard_on_core() { Self::Core(process_core()) } else { Self::Host }
     }
 
     pub fn is_core(&self) -> bool {
@@ -248,8 +255,57 @@ impl Selected {
 /// Whether the opt-in is set AND the core's gate (`cutover.mayServe` for `authority`, asked as the Host) says it may serve.
 /// The variable alone is not enough (M2-18a): while the core has not imported auth.json, or auth.json changed in a way
 /// the core has not, the host stays on kith-auth. Until the first answer (the daemon starts beside the host) it is off.
+///
+/// A SWITCHED host (auth.json holds the core's tombstone, [`switched`]) needs neither: the core is the only store, so it
+/// answers, and a core that does not answer gives no access. It never falls back to the tombstone through kith-auth.
 pub fn core_selected() -> bool {
-    opted_in() && gate_open(&fingerprint_of(auth_path()))
+    switched() || (opted_in() && gate_open(&fingerprint_of(auth_path())))
+}
+
+/// Whether authority has moved to the core: auth.json is a tombstone (`kith migrate step authority`; the way back,
+/// `kith rollback authority`, puts the file back). Read from the file kith-auth reads, so the host and kith-auth agree on
+/// which side is the truth; cached by the file's fingerprint, so a call costs one stat.
+pub fn switched() -> bool {
+    #[cfg(test)]
+    {
+        TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()
+            && TEST_SWITCHED.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(not(test))]
+    {
+        switched_at(auth_path())
+    }
+}
+
+/// A test says the host is switched while it holds `TEST_CORE` (read only then, like `TEST_GATE_SHUT`).
+#[cfg(test)]
+pub static TEST_SWITCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg_attr(test, allow(dead_code))]
+fn switched_at(auth: &Path) -> bool {
+    static SEEN: Mutex<Option<(String, bool)>> = Mutex::new(None);
+    let fingerprint = fingerprint_of(auth);
+    let mut seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((fp, yes)) = seen.as_ref()
+        && *fp == fingerprint
+    {
+        return *yes;
+    }
+    let yes = tombstoned(auth);
+    *seen = Some((fingerprint, yes));
+    yes
+}
+
+/// Whether the file holds a tombstone (`kith_tombstone.py`: a JSON object with `kith_tombstone`). Missing or unreadable is
+/// not one: the unswitched rules stay.
+fn tombstoned(auth: &Path) -> bool {
+    use std::io::Read as _;
+    let mut text = String::new();
+    let Ok(f) = std::fs::File::open(auth) else { return false };
+    if f.take(65536).read_to_string(&mut text).is_err() || !text.contains("\"kith_tombstone\"") {
+        return false;
+    }
+    serde_json::from_str::<Value>(&text).is_ok_and(|v| v.as_object().is_some_and(|o| o.contains_key("kith_tombstone")))
 }
 
 pub fn opted_in() -> bool {
@@ -364,7 +420,8 @@ fn ask_gate(core: &CoreData) -> (bool, Option<String>) {
 /// `KITH_CORE_AUTHORITY=1` at host start: from now on the gate is asked every [`GATE_EVERY`] on a thread of its own and
 /// the answer is kept with auth.json's fingerprint. Without the variable nothing runs and the host is on kith-auth.
 pub fn start_gate() {
-    if !opted_in() {
+    // A switched host asks too (no variable needed): its latch is read only while unswitched, but keeps the log honest.
+    if !opted_in() && !switched() {
         return;
     }
     let spawned = std::thread::Builder::new().name("authority-gate".into()).spawn(|| {
@@ -404,7 +461,7 @@ pub fn start_gate() {
 pub fn guard_on_core() -> bool {
     #[cfg(test)]
     if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
-        return !TEST_GATE_SHUT.load(std::sync::atomic::Ordering::SeqCst);
+        return switched() || !TEST_GATE_SHUT.load(std::sync::atomic::Ordering::SeqCst);
     }
     core_selected()
 }
@@ -424,7 +481,7 @@ pub fn mirrors_to_core() -> bool {
     if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
         return true;
     }
-    opted_in()
+    opted_in() || switched()
 }
 
 /// The core refused the call itself: the rules said no (its words, without the `authority: ` the core puts in front).
@@ -478,6 +535,83 @@ pub async fn owner_call(method: &'static str, mut params: Value, repeatable: boo
     }
 }
 
+/// What a kith-auth call comes to in the core: the `people.*` method and its params, or None for a call the core has no
+/// method for (a switched host refuses those; it never runs kith-auth on a tombstone).
+fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
+    let settings = |from: usize, keys: &[&str]| -> Option<Value> {
+        let mut m = serde_json::Map::new();
+        for a in &args[from..] {
+            let (k, v) = a.split_once('=')?;
+            keys.contains(&k).then(|| m.insert(k.to_owned(), v.into()))?;
+        }
+        Some(Value::Object(m))
+    };
+    Some(match args {
+        ["people", "--json" | _] => ("people.listPeople", json!({})),
+        ["retired", id] => ("people.retired", json!({"id": id})),
+        ["member", agent, person, "--rm"] => ("people.revoke", json!({"person": person, "agent": agent})),
+        ["member", agent, person, ..] => {
+            let mut p = settings(3, &["preset", "mode", "budget", "deny", "model"])?;
+            p["person"] = (*person).into();
+            p["agent"] = (*agent).into();
+            ("people.grant", p)
+        }
+        ["bot", id, "--rm"] => ("people.removeBot", json!({"id": id})),
+        ["bot", id, "--of", owner, ..] => {
+            let mut p = settings(4, &["name", "provider"])?;
+            p["id"] = (*id).into();
+            p["of"] = (*owner).into();
+            ("people.addBot", p)
+        }
+        ["person", id, "--rm", "--unused"] => ("people.removePerson", json!({"id": id, "unused": true})),
+        ["person", id, "--revoke", "--local"] => ("people.suspend", json!({"id": id})),
+        ["person", id, "--unrevoke", "--local"] => ("people.undo", json!({"id": id})),
+        ["person", id, "--clear-temp"] => ("people.clearTemp", json!({"id": id})),
+        ["person", id, ..] => {
+            let mut p = settings(2, &["name", "lang", "tz"])?;
+            p["id"] = (*id).into();
+            ("people.addPerson", p)
+        }
+        _ => return None,
+    })
+}
+
+/// The host's kith-auth calls for people, members and bots (`people.rs`, `botguests.rs`): kith-auth while the host is not
+/// switched (as it was), the matching `people.*` method of the core once it is ([`switched`]). A switched host whose core
+/// does not answer gets an error and nothing is written another way.
+pub(crate) async fn run_auth(bin: &Path, args: &[&str]) -> anyhow::Result<String> {
+    run_auth_noted(bin, args).await.map(|(out, _)| out)
+}
+
+/// [`run_auth`] with what kith-auth said on stderr (nothing from the core: its copy is the only one, so no copy can miss).
+pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<(String, String)> {
+    if !switched() {
+        return crate::remote::account::run_noted(bin, args).await;
+    }
+    let Some((method, params)) = core_form(args) else {
+        anyhow::bail!("`kith-auth {}` has no core method: authority is on the core", args.join(" "));
+    };
+    // A read repeats harmlessly; a write is never sent twice.
+    let read = matches!(method, "people.listPeople" | "people.retired");
+    let said = owner_call(method, params, read).await?;
+    // `kith-auth people X` and `retired X` answer by their exit code.
+    let rows = said["rows"].as_array();
+    match (method, args) {
+        ("people.listPeople", ["people", id]) => {
+            if !rows.is_some_and(|r| r.iter().any(|p| p["id"] == *id)) {
+                anyhow::bail!("no person `{id}`");
+            }
+            Ok((String::new(), String::new()))
+        }
+        ("people.listPeople", _) => Ok((serde_json::to_string(&said["rows"])?, String::new())),
+        ("people.retired", _) if said["retired"] != true => anyhow::bail!("`{}` is not retired", args[1]),
+        _ => Ok((
+            said["lines"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"),
+            String::new(),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod gate_tests {
     use super::*;
@@ -497,6 +631,24 @@ mod gate_tests {
         assert_eq!(read_gate(Some(&json!({"ok": true, "warning": null}))), (true, None));
         let (open, line) = read_gate(Some(&json!({"ok": true, "warning": "WARNING x"})));
         assert!(open && line.as_deref() == Some("WARNING x"));
+    }
+
+    #[test]
+    fn a_tombstone_in_auth_json_means_switched_and_a_rollback_undoes_it() {
+        let dir = std::env::temp_dir().join(format!("kith-switched-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let auth = dir.join("auth.json");
+        assert!(!switched_at(&auth), "a missing file is not a tombstone");
+        std::fs::write(&auth, r#"{"people": {}, "mentions": "kith_tombstone"}"#).unwrap();
+        assert!(!switched_at(&auth), "the word alone is not the key");
+        std::fs::write(&auth, r#"{"kith_tombstone": 1, "module": "authority", "rollback": "kith rollback authority"}"#)
+            .unwrap();
+        assert!(switched_at(&auth));
+        // The way back puts the file back (a new inode, as kith-auth writes it).
+        std::fs::remove_file(&auth).unwrap();
+        std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
+        assert!(!switched_at(&auth));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
