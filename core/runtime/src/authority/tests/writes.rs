@@ -60,6 +60,8 @@ impl Rig {
             "invites",
             "retired",
             "agent_access",
+            "secret_grants",
+            "secret_profiles",
         ] {
             self.core
                 .conn()
@@ -1393,10 +1395,52 @@ fn a_helper_once_grant_and_the_far_future_survive_a_write_beside_them() {
 }
 
 #[test]
-#[ignore = "lane B: grants and profiles are not core.db tables yet; M2-18 must not switch addBot/removeBot before this passes"]
 fn forget_also_clears_grants_and_profiles() {
     // Python's `forget` drops the `agent@<id>` grants of a removed bot and its id from profiles' `with`.
-    panic!("not implemented: the tables of lane B");
+    let mut rig = Rig::new(&base());
+    rig.lines("people.grant", &grant("bot-a", "house", &json!({})))
+        .unwrap();
+    let db = |sql: &str| rig.core.conn().execute(sql, []).unwrap();
+    db(
+        "INSERT INTO secret_grants VALUES ('house@bot-a', 'gh', 'p1', 0), ('house@bot-a', 'gh', 'p2', 1), \
+        ('house@amy', 'gh', 'p1', 0), ('house', 'gh', 'p1', 0), ('house', 'web', 'p3', 0), ('house', 'web', 'p4', 1)",
+    );
+    db(
+        "INSERT INTO secret_profiles VALUES ('p1', 'kai', '[\"bot-a\",\"amy\"]', NULL), \
+        ('p2', 'kai', '[\"bot-a\"]', NULL), ('p3', 'bot-a', NULL, 'br'), ('p4', 'kai', '[\"amy\"]', NULL)",
+    );
+    rig.lines("people.removeBot", &json!({"id": "bot-a"}))
+        .unwrap();
+    let t = rig.tables();
+    assert_eq!(
+        t["grants"],
+        json!({"house@amy": {"gh": "p1"}, "house": {"gh": "p1", "web": ["p3", "p4"]}}),
+        "{t}"
+    );
+    assert_eq!(t["profiles"]["p1"]["with"], json!(["amy"]));
+    assert!(t["profiles"]["p2"].get("with").is_none(), "{t}");
+    assert_eq!(
+        t["profiles"]["p3"]["person"], "bot-a",
+        "an owned profile stays"
+    );
+    assert_eq!(t["profiles"]["p4"]["with"], json!(["amy"]));
+    let browser: Option<String> = rig
+        .core
+        .conn()
+        .query_row(
+            "SELECT browser FROM secret_profiles WHERE profile = 'p3'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(browser.as_deref(), Some("br"));
+    // forgetting again changes nothing
+    let before = t.clone();
+    assert!(
+        rig.lines("people.removeBot", &json!({"id": "bot-a"}))
+            .is_err()
+    );
+    assert_eq!(rig.tables(), before);
 }
 
 #[test]
