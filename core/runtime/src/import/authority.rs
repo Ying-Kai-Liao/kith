@@ -8,6 +8,7 @@
 //! |   `owner` (truthy: true, or a non-empty obj)|   `owner` 0/1                                        |
 //! |   `revoked` (truthy), `revoked.at`          |   `revoked` 0/1, `revoked_at`                        |
 //! |   `was`                                     |   `was` (JSON text)                                  |
+//! |   `handles` (an object, `kith` in it)      |   `handles` (JSON text, the file's order)             |
 //! | `members.<agent>.<person>`                  | `memberships (agent, person)`; a `null` row is REFUSED (it means no row and no `*` fallback) |
 //! |   `preset` `mode` `model` `budget`          |   text columns                                       |
 //! |   `trusted`                                 |   `trusted` 0/1                                      |
@@ -26,8 +27,8 @@
 //!   the envelope (`items.rs`); the profile table, the grants and the plaintext values `env` keeps in auth.json move with
 //!   kith-auth itself (M2-18). The decision reads none of them.
 //! - `once`: one-time secrets that live at most an hour; they are not worth a copy.
-//! - a person's `handles`, `root`, `kith`, `agents`: channel and cloud links the host and `kith-people` keep; the decision
-//!   reads none of them.
+//! - a person's `root`, `kith` (it is in `handles`), `agents`: derived by `kith-auth people --json`; the decision reads
+//!   none of them. (`handles` is kept since m0015: `people.listPeople`, `retired` and `--rm --unused` read it.)
 //! - any other key, at any level: not read by the decision, so not copied.
 //!
 //! Not imported here at all: cards (PR #711) and access requests (M2-3).
@@ -39,7 +40,7 @@ use crate::error::{Error, Result};
 
 /// Keys of a person that are imported; the rest are listed as left behind.
 const PERSON_KEYS: &[&str] = &[
-    "name", "lang", "tz", "owner", "bot_of", "revoked", "was", "provider",
+    "name", "lang", "tz", "owner", "bot_of", "revoked", "was", "provider", "handles",
 ];
 const MEMBER_KEYS: &[&str] = &[
     "preset",
@@ -107,6 +108,15 @@ fn json(row: &Value, key: &str) -> Option<String> {
     }
 }
 
+/// A person's `handles`: an object (JSON text) or absent; any other type refuses the file.
+fn handles(row: &Value, what: &str) -> Result<Option<String>> {
+    match row.get("handles") {
+        None | Some(Value::Null) => Ok(None),
+        Some(h @ Value::Object(_)) => Ok(Some(h.to_string())),
+        Some(_) => Err(bad(&format!("{what}.handles"), "is not an object")),
+    }
+}
+
 /// Python's truth for the flags kith-auth tests with `if p.get('owner')`: a missing, null, false or empty value is no.
 fn truthy(v: Option<&Value>, what: &str) -> Result<bool> {
     match v {
@@ -169,8 +179,8 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value) -> Result<()> {
             ),
         };
         conn.execute(
-            "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider, handles) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 id,
                 text(p, "name", &what)?,
@@ -182,6 +192,7 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value) -> Result<()> {
                 at,
                 json(p, "was"),
                 text(p, "provider", &what)?,
+                handles(p, &what)?,
             ],
         )?;
     }

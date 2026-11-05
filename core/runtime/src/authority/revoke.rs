@@ -122,7 +122,7 @@ pub(super) fn retired(auth: &Value, life: &Life, pid: &str, left: bool) -> Optio
             kept.join(", ")
         ));
     }
-    // TODO(lane B): `profiles` is not a core.db table, so this finds nothing yet; a reused id could inherit logins.
+    // `profiles` is read from `secret_profiles` (see `read_profiles`); it is empty until the secrets switch writes it.
     let mut owned: Vec<&str> = auth
         .get("profiles")
         .and_then(Value::as_object)
@@ -423,9 +423,9 @@ pub(crate) fn person_remove_unused(auth: &mut Value, life: &Life, pid: &str) -> 
     check_id(pid)?;
     tables(auth);
     need_person(auth, pid)?;
-    // TODO(lane B): kith-auth also refuses a person who has `handles` (core.db has no such column yet), `agent@<id>`
-    // grants or owned/shared profiles; none of those tables are here. Until they are checked in this transaction,
-    // `--rm --unused` must not be switched (see docs/plans/one-bot-model.md).
+    // `handles` (people.handles, m0015), `agent@<id>` grants and owned or lent profiles (the lane B tables, as
+    // `read_grants` and `read_profiles` give them) are checked here in the same transaction, as `remove_unused` does.
+    // A database imported before m0015 has no handles until it is imported again.
     let p = people(auth).get(pid).cloned().unwrap_or(Value::Null);
     let mut has: Vec<String> = ["owner", "bot_of", "handles", "was", "revoked"]
         .into_iter()
@@ -442,12 +442,34 @@ pub(crate) fn person_remove_unused(auth: &mut Value, life: &Life, pid: &str) -> 
     if member {
         has.push("memberships".to_owned());
     }
+    let granted = auth
+        .get("grants")
+        .and_then(Value::as_object)
+        .is_some_and(|g| {
+            g.keys()
+                .any(|k| k.rsplit_once('@').is_some_and(|(_, who)| who == pid))
+        });
+    if granted {
+        has.push("grants".to_owned());
+    }
     let invited = auth
         .get("invites")
         .and_then(Value::as_object)
         .is_some_and(|m| m.values().any(|i| str_of(i, "person") == Some(pid)));
     if invited {
         has.push("invites".to_owned());
+    }
+    let in_profiles = auth
+        .get("profiles")
+        .and_then(Value::as_object)
+        .is_some_and(|ps| {
+            ps.values().any(|prof| {
+                str_of(prof, "person") == Some(pid)
+                    || words(prof.get("with")).iter().any(|w| w == pid)
+            })
+        });
+    if in_profiles {
+        has.push("profiles".to_owned());
     }
     has.extend(kept_labels(life, pid));
     if !has.is_empty() {
