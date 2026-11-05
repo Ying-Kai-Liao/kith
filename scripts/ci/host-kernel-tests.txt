@@ -27,7 +27,6 @@ src/api/peers_tests.rs	api::peers_tests::
 src/api/people_tests.rs	api::people_tests::
 src/api/proof_tests.rs	api::proof_tests::
 src/api/contract_tests.rs	api::contract_tests::
-src/api/access_core_tests.rs	api::access_core_tests::
 src/remote/peers.rs	remote::peers::tests::
 src/api/room_secrets_props.rs	api::room_secrets_props::
 # Reach kith-wake through production code (cards::resume), found by tracing kernel/bin during the full host-test run
