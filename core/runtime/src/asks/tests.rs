@@ -626,7 +626,10 @@ fn open_refuses_a_claim_id_that_is_not_the_asks_own_run() {
              INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, pid_started, created_at, claimed_at, running_at)
                VALUES (1, 'c1', 1, 'external', 'running', 'owner', 777, 'e777', 1, 1, 1);
              INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, pid_started, created_at, claimed_at, running_at)
-               VALUES (2, 'c2', 1, 'external', 'running', 'kai', 777, 'e777', 1, 1, 1);",
+               VALUES (2, 'c2', 1, 'external', 'running', 'kai', 777, 'e777', 1, 1, 1);
+             INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('c3', 'x', 'claude', 1, 1);
+             INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, pid_started, created_at, claimed_at, running_at)
+               VALUES (3, 'c3', 1, 'external', 'running', '', 779, 'e779', 1, 1, 1);",
         )
         .unwrap();
     let open = |core: &mut Core, id: &str, conv: &str, pid: i64, claim: i64| {
@@ -643,6 +646,8 @@ fn open_refuses_a_claim_id_that_is_not_the_asks_own_run() {
     };
     // The owner's own run: fits.
     open(&mut core, "good", "c1", 777, 1).unwrap();
+    // An imported owner claim stores person "": still the owner's.
+    open(&mut core, "good2", "c3", 779, 3).unwrap();
     // Another conversation's claim, a pid that is not the ask's, another person's claim, an unknown id.
     for (id, conv, pid, claim) in [
         ("b1", "c2", 777, 1),
@@ -660,7 +665,7 @@ fn open_refuses_a_claim_id_that_is_not_the_asks_own_run() {
         .conn()
         .query_row("SELECT count(*) FROM asks", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(n, 1);
+    assert_eq!(n, 2);
 }
 
 // --- the import --------------------------------------------------------------------------------------------------------

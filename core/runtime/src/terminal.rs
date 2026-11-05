@@ -382,6 +382,9 @@ pub(crate) struct SpawnReq {
     pub reply: SyncSender<Placed>,
 }
 
+/// A stuck lock's claim whose end is owed: the claim and the stub's pid with the start time read when it was found stuck.
+pub(crate) type OwedEnd = (i64, Option<(u32, String)>);
+
 /// Terminals as the daemon keeps them: the queue to the supervisor, whether the link is up, the stub, the tickets.
 pub(crate) struct Terminals {
     link_up: AtomicBool,
@@ -392,9 +395,9 @@ pub(crate) struct Terminals {
     stub: Mutex<Option<PathBuf>>,
     /// Ends that did not finish, with their rounds so far and when to send the kill again.
     retries: Mutex<Vec<(HeldId, u32, Instant)>>,
-    /// Claims of stuck locks (`LockStuck`) whose end the core could not write yet, with the stub's pid: tried again until it
+    /// Claims of stuck locks (`LockStuck`) whose end the core could not write yet, with the stub's pid and the start time read when it was found stuck: tried again until it
     /// goes through, so a `claimed` claim never waits for a core restart (nothing else ends a claimed turn claim).
-    owed_claim_ends: Mutex<Vec<(i64, Option<u32>)>>,
+    owed_claim_ends: Mutex<Vec<OwedEnd>>,
     pub(crate) tickets: Arc<Tickets>,
     /// The attach relay: which held terminals there are and who is attached to them.
     pub(crate) relay: Arc<Relay>,
@@ -500,18 +503,18 @@ impl Terminals {
     }
 
     /// Keeps the end of a stuck lock's claim owed (one entry per claim).
-    pub(crate) fn owe_claim_end(&self, claim: i64, pid: Option<u32>) {
+    pub(crate) fn owe_claim_end(&self, claim: i64, proc: Option<(u32, String)>) {
         let mut list = self
             .owed_claim_ends
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !list.iter().any(|(c, _)| *c == claim) {
-            list.push((claim, pid));
+            list.push((claim, proc));
         }
     }
 
     /// The claim ends still owed, taken out of the list (the caller puts back what it could not write).
-    pub(crate) fn take_owed_claim_ends(&self) -> Vec<(i64, Option<u32>)> {
+    pub(crate) fn take_owed_claim_ends(&self) -> Vec<OwedEnd> {
         std::mem::take(
             &mut *self
                 .owed_claim_ends

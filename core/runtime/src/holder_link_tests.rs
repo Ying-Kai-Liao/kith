@@ -713,7 +713,7 @@ fn a_lock_stuck_turn_ends_its_claim_once() {
     // The stub's process is known to the supervisor but was never reported: the pid is recorded first, so the claim
     // goes to `ending` with a kill to send instead of ending with the lock possibly held.
     let (named, named_turn) = rig.claimed("conv-s3");
-    let kill = end_stuck_claim(&rig.core, named, Some(std::process::id()))
+    let kill = end_stuck_claim(&rig.core, named, Some((std::process::id(), "e1")))
         .unwrap()
         .unwrap();
     assert_eq!(kill.pid, Some(std::process::id()));
@@ -725,11 +725,12 @@ fn a_lock_stuck_turn_ends_its_claim_once() {
         rig.row("SELECT state FROM turns WHERE id = ?1", named_turn),
         "queued"
     );
-    // Again: the same kill, nothing written twice.
-    assert!(
-        end_stuck_claim(&rig.core, named, Some(std::process::id()))
-            .unwrap()
-            .is_some()
-    );
+    assert_eq!(kill.started.as_deref(), Some("e1"));
+    // Again, as a retry would, with a start time that changed (the pid was reused): the same kill for the same process,
+    // the stranger's start is never recorded.
+    let again = end_stuck_claim(&rig.core, named, Some((std::process::id(), "e2")))
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.started.as_deref(), Some("e1"));
     rig.finish(&[]);
 }

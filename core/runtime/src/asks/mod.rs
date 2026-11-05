@@ -448,13 +448,21 @@ pub(crate) fn open_in(
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
-        let person = get("KITH_PERSON").unwrap_or_else(|| "owner".to_owned());
+        // An imported owner `--direct` claim stores person "": the owner is "owner" and "" alike.
+        let own = |p: &str| {
+            if p.is_empty() {
+                "owner".to_owned()
+            } else {
+                p.to_owned()
+            }
+        };
+        let person = own(&get("KITH_PERSON").unwrap_or_default());
         let fits = ours.is_some_and(|(kind, conv, pid, who)| {
             kind == "external"
                 && o.conversation == Some(conv.as_str())
                 && o.pid.is_some()
                 && pid == o.pid
-                && who == person
+                && own(&who) == person
         });
         if !fits {
             return Err(Error::Refused(format!(
