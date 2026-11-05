@@ -1,8 +1,10 @@
 //! The `schedules` module (M4-5a, the core side): the host's routines become jobs in the owning agent's `jobs.json`, run
 //! with the state `kith-sched` kept, and the core's fire (M4-3, M4-4) becomes the one scheduler.
 //!
-//! Shipped OFF: `step` refuses until the host's routines runner and webhook listener send their work to the core (M4-5b),
-//! so registering this module changes nothing. `step --dry-run` and `check` work now.
+//! Shipped OFF: registering this module changes nothing; only `kith migrate step schedules` (a deliberate act, never
+//! automatic) switches it. M4-5b landed: once switched, the host's routines runner and webhook listener forward their work
+//! to the core. The host reads that gate when it starts, so `step` and `rollback` both refuse while the host runs (stop
+//! it, step or roll back, start it). `step --dry-run` and `check` work any time.
 //!
 //! # What moves
 //! - **Routines**: serve.db's kv row `routines.v1` (the host's `Routine`: bot, name, instruction, triggers, enabled,
@@ -13,7 +15,7 @@
 //!     from 1, in the routine's order). Derived from the routine and nothing else, so a re-import finds its own jobs.
 //!   - The job: `id`, `task` (the instruction), `name`, `trigger` (the kernel's `Trigger`: cron in its zone, interval,
 //!     once, webhook, event), `paused` (when the routine is disabled), `mac` (this Mac's id: the fire runs the job here
-//!     and nowhere else, so a jobs.json that syncs between Macs fires on exactly one), and `routine` (where it came
+//!     and nowhere else, so a jobs.json that syncs between Macs fires its timed triggers on exactly one), and `routine` (where it came
 //!     from: routine id, bot, trigger number, timeout). No `cron` field, which is how `kith-sched` knows it is not its own.
 //!   - Idempotent: a job of the same id that this import made on this Mac is brought up to date (a re-import of an
 //!     unchanged routine writes nothing); a job of that id that is not this routine's is a collision and that routine is
@@ -35,7 +37,9 @@
 //!   then the jobs this import made on this Mac are removed from the agents' jobs.json, their key records are deleted, and
 //!   `state.json` is written again (the last tick and each job's last run from the core, beside whatever other keys the
 //!   original had) over the tombstone. A routine deleted from serve.db since is not brought back (said, not guessed). The
-//!   host keeps routines in memory: restart it after a rollback so it reads them again.
+//!   host keeps routines in memory and saves them over serve.db's `routines.v1`, so a rollback refuses while the host
+//!   runs (`live`; `--force` overrides it like any live reason): stop the host first, roll back, start it.
+//!   Jobs made on another Mac stay (their `mac` is not this one's); `check` names them.
 //! - `live`: scheduled turns that have not finished.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -142,6 +146,54 @@ fn serve_db_of(env: &Env) -> PathBuf {
             PathBuf::from,
         )
         .join("serve.db")
+}
+
+/// Whether a host holds `host.lock` in its data folder (the folder of serve.db): an advisory lock the OS drops with the
+/// process, so a stale file or a reused pid never reads as running. Read-only: the file is never created. Anything but
+/// "no file" or "lock free" counts as running (the conservative answer; `rollback --force` still goes through).
+fn host_running(env: &Env) -> bool {
+    let Some(dir) = serve_db_of(env).parent().map(Path::to_path_buf) else {
+        return false;
+    };
+    let file = match std::fs::File::open(dir.join("host.lock")) {
+        Ok(f) => f,
+        Err(e) => return e.kind() != std::io::ErrorKind::NotFound,
+    };
+    match fs2::FileExt::try_lock_shared(&file) {
+        Ok(()) => {
+            let _ = fs2::FileExt::unlock(&file);
+            false
+        }
+        Err(_) => true,
+    }
+}
+
+/// Routine jobs in the agents' files that another Mac made: a rollback here leaves them, and a reinstalled Mac has a new
+/// id, so its old jobs never fire. Informational (not a same-answer difference). Jobs without `mac` are never listed.
+fn other_mac_notes(env: &Env) -> Vec<String> {
+    let Some(paths) = env.paths.as_ref() else {
+        return Vec::new();
+    };
+    let mac = mac_peek(&env.machine);
+    if mac.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for agent in agent_names(paths) {
+        let file = crate::schedules::jobs_file(paths, &agent);
+        let Ok((_, jobs)) = crate::schedules::read_jobs(&env.machine, &agent, &file) else {
+            continue;
+        };
+        for j in jobs.iter().filter(|j| j.get("routine").is_some()) {
+            if let Some(m) = text(j, "mac").filter(|m| !m.is_empty() && *m != mac) {
+                out.push(format!(
+                    "{agent}/{}: made on another Mac ({m}): rollback here leaves it; if this Mac was reinstalled, remove it by hand",
+                    text(j, "id").unwrap_or_default()
+                ));
+            }
+        }
+    }
+    out
 }
 
 fn paths_of(env: &Env) -> Result<&Paths> {
@@ -260,7 +312,11 @@ fn agent_of(db: &Connection, bot: &str) -> Owner {
     let Some(config) = config.and_then(|c| serde_json::from_str::<Value>(&c).ok()) else {
         return Owner::Missing;
     };
-    match text(&config, "hq_agent").filter(|a| !a.is_empty()) {
+    // The host's BotConfig serializes camelCase (`hqAgent`); `hq_agent` is read too, for rows written by hand.
+    match text(&config, "hqAgent")
+        .filter(|a| !a.is_empty())
+        .or_else(|| text(&config, "hq_agent").filter(|a| !a.is_empty()))
+    {
         Some(a) => Owner::Agent(a.to_owned()),
         None => Owner::Native,
     }
@@ -618,15 +674,17 @@ impl Module for Schedules {
         vec![env.machine.join("sched").join("state.json")]
     }
 
-    fn step_refusal(&self, _env: &Env) -> Option<String> {
-        // After the step `kith-sched` stops (its state is a note) and the core's fire is the only scheduler, but the
-        // host's routines runner still runs every routine from serve.db's `routines.v1` (it sends `Cmd::Routine`), and
-        // its webhook listener answers from the host's own keys. A step now would run each routine twice, or stop
-        // the schedules that have no other runner. The plan gates the step on the host runner switch (M4-5b).
-        Some(
-            "not stepped: the host's routines runner and webhook listener still run the routines themselves; step schedules only after they send their work to the core (M4-5b). `step schedules --dry-run` and `check schedules` work now"
-                .into(),
-        )
+    fn step_refusal(&self, env: &Env) -> Option<String> {
+        // The host reads the switch when it starts. A running host started before the step would keep running every
+        // routine from serve.db next to the core's fire, so each would run twice.
+        host_running(env).then(|| {
+            "not stepped: the host is running and reads the schedules switch only when it starts; stop the host, step schedules, start the host. `step schedules --dry-run` and `check schedules` work while it runs"
+                .into()
+        })
+    }
+
+    fn check_notes(&self, env: &Env) -> Vec<String> {
+        other_mac_notes(env)
     }
 
     fn dry_run_despite_refusal(&self) -> bool {
@@ -638,18 +696,26 @@ impl Module for Schedules {
         false
     }
 
-    fn live(&self, _env: &Env, core: &Core) -> Result<Vec<String>> {
+    fn live(&self, env: &Env, core: &Core) -> Result<Vec<String>> {
+        let mut out = Vec::new();
+        // The running host saves its in-memory routines over serve.db's `routines.v1`, undoing the keys and flags the
+        // rollback puts back there.
+        if host_running(env) {
+            out.push(
+                "the host is running and would save its routines over the ones put back; stop the host first (then roll back, then start it)"
+                    .into(),
+            );
+        }
         let n: i64 = core.conn().query_row(
             "SELECT COUNT(DISTINCT t.id) FROM sched_fires f JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER)
              WHERE f.turn_id IS NOT NULL AND t.state IN ('queued', 'parked', 'claimed', 'running')",
             [],
             |r| r.get(0),
         )?;
-        Ok(if n > 0 {
-            vec![format!("{n} scheduled turn(s) have not finished")]
-        } else {
-            Vec::new()
-        })
+        if n > 0 {
+            out.push(format!("{n} scheduled turn(s) have not finished"));
+        }
+        Ok(out)
     }
 
     fn import(&self, env: &Env, core: Option<&mut Core>, opts: Opts) -> Result<Vec<String>> {
@@ -869,6 +935,7 @@ impl Module for Schedules {
         // The jobs are gone, so the keys they held are: `restore_secrets` already put them back in serve.db. By prefix, not
         // by the jobs removed just now: after a crash and a re-run those jobs are already gone, and their records must not
         // be stranded.
+        // Only this import writes these records; narrow the prefix if another writer ever appears.
         let prefix = "routine-webhook/";
         let mut dropped = 0;
         for name in Envelope::list(core.conn())? {
@@ -884,9 +951,8 @@ impl Module for Schedules {
             removed.len()
         ));
         lines.push(write_state_back(env, core.conn(), &mac)?);
-        lines.push(
-            "restart the host so it reads its routines again (it keeps them in memory)".into(),
-        );
+        lines
+            .push("start the host so it reads its routines again (it keeps them in memory)".into());
         Ok(lines)
     }
 
