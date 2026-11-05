@@ -2510,7 +2510,9 @@ def revoke_person(pid, revoke, local):
     auth = load_auth(write=local or not cloud_sync()['linked'])
     pid = canonical(auth, pid)
     need_person(auth, pid)
-    if is_owner(auth, pid):
+    # Only the revoke is refused: undo can widen nothing (may() already gives the owner everything) and it is the way
+    # out for an owner who was revoked before this refusal existed (kith doctor says so).
+    if revoke and is_owner(auth, pid):
         die(f'{pid} is the owner: the owner can not be revoked')
     if auth['people'][pid].get('bot_of'):
         die(f'{pid} is a bot: revoke its owner {root_of(auth, pid)} (its bots go dormant), or remove it '
