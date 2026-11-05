@@ -623,10 +623,10 @@ fn open_refuses_a_claim_id_that_is_not_the_asks_own_run() {
         .execute_batch(
             "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('c1', 'x', 'claude', 1, 1);
              INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('c2', 'x', 'claude', 1, 1);
-             INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, created_at, claimed_at, running_at)
-               VALUES (1, 'c1', 1, 'external', 'running', 'owner', 777, 1, 1, 1);
-             INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, created_at, claimed_at, running_at)
-               VALUES (2, 'c2', 1, 'external', 'running', 'kai', 777, 1, 1, 1);",
+             INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, pid_started, created_at, claimed_at, running_at)
+               VALUES (1, 'c1', 1, 'external', 'running', 'owner', 777, 'e777', 1, 1, 1);
+             INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, pid_started, created_at, claimed_at, running_at)
+               VALUES (2, 'c2', 1, 'external', 'running', 'kai', 777, 'e777', 1, 1, 1);",
         )
         .unwrap();
     let open = |core: &mut Core, id: &str, conv: &str, pid: i64, claim: i64| {
@@ -1156,12 +1156,16 @@ mod stop {
     fn open_records_the_claim_id_and_the_record_does_not_show_it() {
         let t = Tree::new();
         let mut core = t.core();
+        reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
+        turn(&mut core, "conv-n");
+        let id = take_over(&mut core, "conv-n", Kind::External, Some((777, "e777")));
+        // take_over claims for "kai"; the ask's caller is that person.
         let out = call(
             &mut core,
             "ask.open",
             &with(
-                &t.params(&json!({})),
-                &json!({"id": "n1", "asked": "x", "claimId": 55}),
+                &t.params(&json!({"KITH_PERSON": "kai"})),
+                &json!({"id": "n1", "asked": "x", "claimId": id, "pid": 777, "conversation": "conv-n"}),
             ),
         )
         .unwrap();
@@ -1172,7 +1176,7 @@ mod stop {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(stored, Some(55));
+        assert_eq!(stored, Some(id));
     }
 
     #[test]
