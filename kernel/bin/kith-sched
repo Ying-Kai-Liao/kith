@@ -647,13 +647,6 @@ def main_json(argv):
 
 
 def main(argv):
-    try:
-        return _main(argv)
-    except kith_tombstone.Tombstoned as e:   # the schedule state moved to the core (kith migrate step schedules)
-        sys.exit('kith-sched: %s' % e)
-
-
-def _main(argv):
     if '--json' in argv and argv[:1] != ['tick']:
         return main_json([a for a in argv if a != '--json'])
     if not argv or argv[0] in ('-h', '--help'):
@@ -729,4 +722,7 @@ def _main(argv):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except kith_tombstone.Tombstoned as e:   # the schedule state moved to the core (kith migrate step schedules)
+        sys.exit('kith-sched: %s' % e)
