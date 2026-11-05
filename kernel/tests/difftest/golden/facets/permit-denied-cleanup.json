@@ -1,0 +1,11 @@
+{
+  "fakes": "host-sock {\"autoMode\": {\"reason\": \"Auto mode blocked: it looks dangerous\"}, \"input\": {\"command\": \"a\"}, \"method\": \"requestPermission\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\n",
+  "state:home/.kith/run/once/new-run/y": "4\n",
+  "state:home/.kith/run/once/plain-old-file": "5\n",
+  "state:home/.kith/run/once/r1/3d4820932a2a052f98497ad290af8f3d1b084850cdc25709a40694b048423c54": "<EPOCH>\n",
+  "state:home/.kith/run/once/r1/fresh-file": "2\n",
+  "state:home/serve/token": "fake-serve-token\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"PermissionDenied\",\n    \"retry\": true\n  }\n}\n",
+  "step0.stderr": ""
+}

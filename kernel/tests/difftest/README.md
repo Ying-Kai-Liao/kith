@@ -179,6 +179,36 @@ made. Case names differ by more than case (the facet files are named after them 
 Not covered: a settings value the Python crashes on (`KEY AGENT` of a list that holds a non-string prints a traceback there, a short line
 and exit 1 here), a caps file that is not UTF-8, a JSON text only Python reads (`NaN`, `Infinity`: the Rust reader treats the file as unusable).
 
+### Permit (M5-5, slice 1)
+
+`golden/permit.json` (also in `corpus/`) freezes the four command-line verbs of `kernel/bin/kith-permit`: `issue AGENT SESSION PID`
+(the ask token from the host's loopback API), `denied --dir DIR` and `once --dir DIR` (the auto-mode hooks and their one-shots) and
+`apply SETTINGS_FILE` (the access a guest's launch adds, `kith_guard.apply_grants`). The stdio MCP server and its tools are the next
+slice. The cases are `needs: rust` with `program` set (`sh w.sh py KERNEL` against `sh w.sh rs BIN KERNEL`, which runs
+`kernel/bin/kith-permit` or `{BIN} kernel permit --kernel {KERNEL}`), not `unswitched`: only the switch (a `permit` line in
+`lib/core-switched.txt`) is not made.
+
+How it is made hermetic:
+
+- **The host.** `w.sh` (written by the case's setup) takes `MODE STDIN VERB ARGS...` per line and starts `fh.py` first: `ask:NAME` /
+  `run:NAME` is a Unix socket (`KITH_ASK_SOCKET` / `KITH_RUN_SOCKET`) that answers `replies/NAME` with one line and hangs up (a name
+  with no file: it hangs up without a word), `http:NAME` is the loopback API on a free port (`KITH_SERVE_PORT`; the file's first line
+  is the HTTP status, the rest the body), `deadask` / `deadrun` / `deadhttp` point at a place nobody listens. Every request the stand-in
+  reads goes to the fake log (`host-sock ...` / `host-http ...` with the serve token's header, the JSON sorted), so the request body
+  each side sent is compared too. Tokens in the cases are made-up words.
+- **STDIN.** A name in `in/` (the hook payloads), or `-`.
+- **One-shots written by Python.** `permit-once-python-keys` writes its files under the names the Python `once_key` gives (the generator
+  imported the Python function), so the Rust `once` is checked against hashes Python made: key order, `description` of Bash only,
+  non-ASCII (`ensure_ascii=False`), floats, big numbers, nested lists. File times in the cases that need an old file are set with `touch -t`.
+- **Not recorded** (platform-dependent or not Python's text): the host-down path that restarts the launchd job (it only runs on macOS:
+  `permit-issue-down-restart-fails` records the refusal with a `launchctl` that fails, which reads the same on Linux; the sequence
+  `print` -> `bootstrap` -> `kickstart -k` and the wait for the port are a Rust unit test with a fake `launchctl`), `issue` with a
+  pid that is no number (Python dies with a traceback; Rust prints its last line), a payload that is not UTF-8, and a command line
+  that is no verb but has MCP messages on stdin (Python serves them; Rust exits 2 until the server is ported).
+- **Settings files of an odd shape.** `permissions.deny` that is a string, `filesystem` that is a list and so on make Python raise
+  inside `apply_grants`; the cases record its message (`could not add the granted access (...)`) for the ones named in
+  `permit-apply-settings-files`.
+
 ## Per-command summary
 
 `--summary FILE` (`-` for stdout) writes `{"commands": {"<command>": {"green": bool, "cases": {"<case>": "same" |

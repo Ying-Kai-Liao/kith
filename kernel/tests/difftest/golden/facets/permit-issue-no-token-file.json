@@ -1,0 +1,7 @@
+{
+  "fakes": "host-http  auth=None type=None body=(not json)\n",
+  "state:home/serve/token": "fake-serve-token\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: no approval cards for this run (the Kith host gave no ask token); asks are refused\n",
+  "step0.stdout": ""
+}
