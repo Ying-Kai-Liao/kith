@@ -261,11 +261,19 @@ py k` against `sh w.sh rs BIN k`), not `unswitched`: only the `permit` line in `
 
 Where the Rust differs from the Python (none is in the golden; `intended.json` needed no entry): a message whose `params` /
 `arguments` is no object makes Python die with a traceback (exit 1); the Rust prints the last line (`AttributeError: ...`) and
-exits 1. Python text mode splits a line on a lone `\r`; the Rust does not. `NaN` / `Infinity` in a message parse in Python only. A Python helper
-that fails (scrubbing, a door) is a short message here where Python would raise. A killed (`-9`) server leaves a running door's
-supervisor behind in Rust (the helper `python3`, which stops the door itself within 0.5 s when its parent is gone); in Python the
-sweep ends it. Cards of the door tool are asked with this process's environment, not the guest-scrubbed copy (it differs only if a
-credential variable names a path in the guest's writable folders).
+exits 1. `NaN` / `Infinity` in a message parse in Python only. A lone surrogate escape (`"\ud800"`) parses in Python; serde refuses it,
+so the reply is a parse error with id null and the caller's own id is never answered. An integer above `u64` is echoed back as a float.
+Bytes on stdin that are no UTF-8 end Python with a traceback (`UnicodeDecodeError`); the Rust decodes them lossily and goes on. A
+`ValueError` raised inside a tool becomes a `-32700` reply in Python (`kith-permit`'s catch around the call); the Rust has none to
+raise. None of the four was made identical: each needs a hand-written JSON reader (or serde's `arbitrary_precision`, which every
+crate of the workspace would share), for input a Claude Code client does not send. A lone `\r` is not a difference: Python's stdin
+splits lines on `\n` only, and `mcp-stdin-lone-cr` pins that for both sides (two objects joined by `\r` are one parse error; `\r\n`
+and a trailing `\r` are whitespace). A Python helper that fails (scrubbing, a door) is a short message here where Python would raise.
+A killed (`-9`) server leaves a running door's supervisor behind in Rust for at most 0.5 s (the helper `python3`, which stops the door
+itself when its parent is gone; `kernel/tests/kith-guest-door-check` kills a Rust server mid-door and waits for it); in Python the
+sweep ends it. The door's cards, its helper calls and the `python3` lookup use the guest-scrubbed environment, as `kith-permit` does
+(`permit/scrub.rs` is `kith_paths.guest_scrub`). The Python helpers get their request on stdin, so the unscrubbed report is never on
+an argv.
 
 ## Per-command summary
 
