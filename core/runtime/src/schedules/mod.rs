@@ -222,6 +222,29 @@ fn make_mac_id(machine: &Path, path: &Path) -> Result<()> {
     }
 }
 
+/// Whether a job names a Mac other than `mine` (an imported routine, in a jobs.json that syncs between Macs). One
+/// notion for the tick, deliveries and run-now; a job with no `mac` (made by hand) is every Mac's.
+pub(crate) fn names_other_mac(def: &Value, mine: &str) -> bool {
+    def.get("mac")
+        .and_then(Value::as_str)
+        .is_some_and(|only| only != mine)
+}
+
+/// [`names_other_mac`] for a refusal path: this Mac's id is only read, never made. Where none was ever made, no job that
+/// carries a `mac` is this Mac's.
+pub(crate) fn not_on_this_mac(def: &Value, machine: &Path) -> Result<bool> {
+    let Some(only) = def.get("mac").and_then(Value::as_str) else {
+        return Ok(false);
+    };
+    let path = machine.join(MAC_ID_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(text) if text.trim().is_empty() => Ok(true),
+        Ok(text) => Ok(valid_mac_id(&path, text.trim())? != only),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(e) => Err(Error::Io(format!("{}: {e}", path.display()))),
+    }
+}
+
 fn valid_mac_id(path: &Path, id: &str) -> Result<String> {
     if id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
         Ok(id.to_owned())
