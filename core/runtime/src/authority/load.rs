@@ -36,8 +36,8 @@ fn truthy(v: Option<&Value>) -> bool {
     }
 }
 
-/// Loads the tables of authority. Fields of auth.json it does not keep (profiles, grants, env, once; a person's handles,
-/// root, kith, agents) are not loaded.
+/// Loads the tables of authority. Fields of auth.json it does not keep (profiles, grants, env, once; a person's root,
+/// kith, agents) are not loaded.
 pub(super) fn load(conn: &Connection, auth: &Value) {
     if let Some(people) = auth.get("people").and_then(Value::as_object) {
         for (id, p) in people {
@@ -47,8 +47,8 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                 .and_then(|r| r.get("at"))
                 .and_then(Value::as_i64);
             conn.execute(
-                "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider, handles) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     id,
                     s(p, "name"),
@@ -60,6 +60,7 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                     at,
                     j(p, "was"),
                     s(p, "provider"),
+                    j(p, "handles"),
                 ],
             )
             .expect("insert person");

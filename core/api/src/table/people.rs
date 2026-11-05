@@ -111,6 +111,12 @@ pub(super) const ROWS: &[Method] = &[
         &["people", "access"],
     ),
     people(
+        "people.listPeople",
+        "Every person the owner knows, as of the last import, as `kith-auth people --json` lists them: the owner first, then everyone by id with each person's bots after them. Each has the id, name, owner flag, the person a bot belongs to (`bot_of`) and the person at the top (`root`), whether their access is removed (`revoked`, `revoked_at`), the cloud link (`kith`), the other accounts (`handles`) and the agents they have a row for (`agents`: agent, role, via). People imported before handles were kept have none until imported again.",
+        &[KERNEL, HOME, ENV],
+        &["people", "who"],
+    ),
+    people(
         "people.may",
         "Whether a person may use an agent right now, and why (the kernel's `may`: a removed access beats every row, then their own, then everyone's), with whether they are the owner and the preset they hold.",
         &[
