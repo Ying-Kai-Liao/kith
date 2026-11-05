@@ -675,7 +675,7 @@ fn a_rollback_puts_keys_and_flags_back_removes_the_jobs_and_writes_the_state_aga
     let out = rollback(&reg, &w.env, "schedules", opts()).unwrap();
     let text = out.join("\n");
     assert!(text.contains("rolled back"), "{text}");
-    assert!(text.contains("restart the host"), "{text}");
+    assert!(text.contains("start the host"), "{text}");
     assert!(!text.contains(SECRET));
     assert!(state::read(&w.env.layout, "schedules").unwrap().is_none());
     // The routines on the host: its key and its flags are the core's; what the host owns is left alone.
