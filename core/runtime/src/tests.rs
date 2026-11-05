@@ -228,11 +228,15 @@ fn a_stale_generation_is_refused_and_claim_ids_survive_a_restart() {
     let (_t, m) = machine();
     let l = Layout::new(&m);
     let mut a = open(&l);
+    let ids;
     {
         let tx = a.claim_tx().expect("current generation");
-        assert_eq!(crate::Core::next_claim_id(&tx).expect("id"), 1);
-        assert_eq!(crate::Core::next_claim_id(&tx).expect("id"), 2);
+        // The first id of a fresh db is above the epoch-ms ids older cores sent the holder (the counter is seeded once).
+        let first = crate::Core::next_claim_id(&tx).expect("id");
+        assert!(first > 1_000_000_000_000, "{first}");
+        assert_eq!(crate::Core::next_claim_id(&tx).expect("id"), first + 1);
         tx.commit().expect("commit");
+        ids = first + 1;
     }
     // A newer core takes over (here: another connection stands in for it), bumping the generation.
     let other = rusqlite::Connection::open(&l.db).expect("second connection");
@@ -250,7 +254,7 @@ fn a_stale_generation_is_refused_and_claim_ids_survive_a_restart() {
     let tx = b.claim_tx().expect("new core");
     assert_eq!(
         crate::Core::next_claim_id(&tx).expect("id"),
-        3,
+        ids + 1,
         "the counter is durable: no id is reused"
     );
 }

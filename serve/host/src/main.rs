@@ -21,6 +21,7 @@ mod launch_cmd;
 mod limits;
 mod market;
 mod mcp;
+mod pkg_cmd;
 mod remote;
 mod rich_card;
 mod routines;
@@ -521,6 +522,15 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// `kith-pkg resolve`: the pinned package folder a run starts from (not routed from `kith` yet).
+    #[command(disable_help_flag = true)]
+    Pkg {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
     /// What a launch assembles, one piece at a time (not routed from `kith AGENT` yet).
@@ -1394,6 +1404,8 @@ async fn main() -> Result<()> {
             }
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
+            if let KernelCmd::Pkg { kernel, args } = cmd {
+                std::process::exit(pkg_cmd::run(kernel, &args));
             }
             through_core(|| -> Result<()> {
                 match cmd {
@@ -1468,6 +1480,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::ProjectId { .. }
+                    | KernelCmd::Pkg { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
