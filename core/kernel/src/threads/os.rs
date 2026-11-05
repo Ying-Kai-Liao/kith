@@ -22,9 +22,13 @@ pub fn pid_runs(pid: i64) -> bool {
 /// `os.kill(pid, 0)` for any pid, as `kith-pkg` asks it of the pids in a snapshot's `.runs`: zero and negative ones name a
 /// process group. Alive (or not ours to signal) is true; no such process is false.
 pub fn pid_probe(pid: i64) -> bool {
-    let Ok(p) = libc::pid_t::try_from(pid) else { return false };
+    let Ok(p) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
     // SAFETY: signal 0 only checks; nothing is sent.
-    unsafe { libc::kill(p, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
+    unsafe {
+        libc::kill(p, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
 }
 
 /// Whether a signal to the process would be allowed (`os.kill(pid, 0)` without an error): `live_pid` in kith-sessions

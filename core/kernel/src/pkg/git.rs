@@ -52,7 +52,10 @@ pub fn run(mut cmd: Command, limit: Duration) -> R<Ran> {
                 let _ = child.wait();
                 return Err(PyErr::new(
                     Kind::Timeout,
-                    format!("Command '{shown}' timed out after {} seconds", limit.as_secs()),
+                    format!(
+                        "Command '{shown}' timed out after {} seconds",
+                        limit.as_secs()
+                    ),
                 ));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(5)),
@@ -74,7 +77,10 @@ pub fn run(mut cmd: Command, limit: Duration) -> R<Ran> {
 /// `git(home, *args)`: `git -C home args...` without a prompt for credentials, two minutes at most.
 pub fn git(home: &Path, args: &[&str]) -> R<Ran> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(home).args(args).env("GIT_TERMINAL_PROMPT", "0");
+    cmd.arg("-C")
+        .arg(home)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0");
     run(cmd, Duration::from_secs(120))
 }
 

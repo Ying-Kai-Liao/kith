@@ -82,12 +82,13 @@ fn is_name(s: &str) -> bool {
 
 fn is_repo(s: &str) -> bool {
     let part = |p: &str| !p.is_empty() && p.chars().all(|c| is_word(c) || c == '.' || c == '-');
-    s.split_once('/')
-        .is_some_and(|(a, b)| part(a) && part(b))
+    s.split_once('/').is_some_and(|(a, b)| part(a) && part(b))
 }
 
 fn is_sha(s: &str) -> bool {
-    s.len() == 40 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == 40
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn value_err(msg: String) -> PyErr {
@@ -126,7 +127,10 @@ pub fn external_skills(home: &Path) -> R<Vec<(String, Value)>> {
     let Value::Object(top) = &data else {
         return Err(no_attr(&data, "get"));
     };
-    let skills = top.get("skills").cloned().unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    let skills = top
+        .get("skills")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
     let Value::Object(skills) = skills else {
         return Err(no_attr(&skills, "items"));
     };
@@ -252,7 +256,9 @@ pub fn problems(ctx: &Ctx, home: &Path) -> R<Vec<String>> {
     for skill in skill_refs(&front.body) {
         let skill = skill.strip_prefix("skills/").unwrap_or(&skill);
         if !is_file(&home.join("skills").join(skill)) {
-            out.push(format!("agent.md names skills/{skill}, which does not exist"));
+            out.push(format!(
+                "agent.md names skills/{skill}, which does not exist"
+            ));
         }
     }
     for svc in needs(home)? {

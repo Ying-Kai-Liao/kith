@@ -6,7 +6,13 @@ use std::fmt::Write as _;
 /// The hex digest of `data`.
 #[allow(clippy::many_single_char_names)]
 pub fn hex(data: &[u8]) -> String {
-    let mut h: [u32; 5] = [0x6745_2301, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476, 0xc3d2_e1f0];
+    let mut h: [u32; 5] = [
+        0x6745_2301,
+        0xefcd_ab89,
+        0x98ba_dcfe,
+        0x1032_5476,
+        0xc3d2_e1f0,
+    ];
     let mut msg = data.to_vec();
     msg.push(0x80);
     while msg.len() % 64 != 56 {

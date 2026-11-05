@@ -39,7 +39,9 @@ pub fn run(ctx: &Ctx, args: &[String]) -> Out {
     };
     if cmd != "resolve" {
         return Out {
-            stderr: format!("kith kernel pkg: {cmd} is not in the core yet (kernel/bin/kith-pkg answers it)\n{USAGE}\n"),
+            stderr: format!(
+                "kith kernel pkg: {cmd} is not in the core yet (kernel/bin/kith-pkg answers it)\n{USAGE}\n"
+            ),
             code: 2,
             ..Out::default()
         };
@@ -87,7 +89,10 @@ pub fn run(ctx: &Ctx, args: &[String]) -> Out {
         if !note.is_empty() && !as_json {
             out.stderr.push_str(&format!("kith: {name}: {note}\n"));
         }
-        found.insert(name.clone(), json!({"dir": dir, "version": version, "note": note}));
+        found.insert(
+            name.clone(),
+            json!({"dir": dir, "version": version, "note": note}),
+        );
         dirs.push(dir);
     }
     out.stdout = if as_json {

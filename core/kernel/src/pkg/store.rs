@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::git::run;
 use super::problems::{needs, read};
-use super::py::{R, is_dir, py_int, rmtree, mtime, now, os_err, read_text, strip, write_text};
+use super::py::{R, is_dir, mtime, now, os_err, py_int, read_text, rmtree, strip, write_text};
 use super::text::frontmatter;
 use super::{Ctx, KEEP, SKIP, STATE, life, name_of, package_files};
 use crate::secrets::pyjson;
@@ -22,7 +22,10 @@ use crate::threads::os::pid_probe;
 pub fn pointers(ctx: &Ctx, agent: &str) -> R<(PathBuf, PathBuf)> {
     let d = ctx.store.join(".pointers");
     fs::create_dir_all(&d).map_err(|e| os_err(&e, &d))?;
-    Ok((d.join(format!("{agent}.good")), d.join(format!("{agent}.pin"))))
+    Ok((
+        d.join(format!("{agent}.good")),
+        d.join(format!("{agent}.pin")),
+    ))
 }
 
 /// `write_atomic(p, text)`.
@@ -114,7 +117,8 @@ fn link_same(src: &Path, old: &Path, target: &Path) -> bool {
             a.modified()?.duration_since(std::time::UNIX_EPOCH),
             b.modified()?.duration_since(std::time::UNIX_EPOCH),
         );
-        let same = a.len() == b.len() && matches!((sa, sb), (Ok(x), Ok(y)) if x.as_secs() == y.as_secs());
+        let same =
+            a.len() == b.len() && matches!((sa, sb), (Ok(x), Ok(y)) if x.as_secs() == y.as_secs());
         if !same {
             return Ok(false);
         }
@@ -169,7 +173,10 @@ fn lock_files(dir: &Path) -> R<()> {
                 lock_files(&p)?;
             }
         } else {
-            let mode = fs::metadata(&p).map_err(|e| os_err(&e, &p))?.permissions().mode();
+            let mode = fs::metadata(&p)
+                .map_err(|e| os_err(&e, &p))?
+                .permissions()
+                .mode();
             let to = if mode & 0o111 != 0 { 0o555 } else { 0o444 };
             fs::set_permissions(&p, fs::Permissions::from_mode(to)).map_err(|e| os_err(&e, &p))?;
         }
@@ -214,7 +221,10 @@ pub fn snapshot(ctx: &Ctx, agent: &str, home: &Path, version: &str) -> R<PathBuf
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(|e| os_err(&e, parent))?;
             }
-            if !prev.as_ref().is_some_and(|d| link_same(&p, &d.join(rel), &target)) {
+            if !prev
+                .as_ref()
+                .is_some_and(|d| link_same(&p, &d.join(rel), &target))
+            {
                 copy2(&p, &target)?;
             }
         }
@@ -230,11 +240,17 @@ pub fn snapshot(ctx: &Ctx, agent: &str, home: &Path, version: &str) -> R<PathBuf
             Err(e) => return Err(os_err(&e, &tmp.join(name))),
         }
     }
-    write_text(&tmp.join("prompt.md"), &format!("{}\n\n{protocol}", strip(&body)))?;
+    write_text(
+        &tmp.join("prompt.md"),
+        &format!("{}\n\n{protocol}", strip(&body)),
+    )?;
     if !super::py::exists(&tmp.join("settings.json")) {
         write_text(&tmp.join("settings.json"), "{}\n")?;
     }
-    write_text(&tmp.join(".home"), &format!("{}\n", life(ctx, agent).display()))?;
+    write_text(
+        &tmp.join(".home"),
+        &format!("{}\n", life(ctx, agent).display()),
+    )?;
     let meta = json!({
         "agent": agent,
         "version": version,

@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::Ctx;
 use super::git::run;
 use super::problems::{external_skills, read, source_line};
 use super::py::{Kind, PyErr, R, is_file, os_err, rmtree, strip, write_text};
-use super::Ctx;
 
 /// The skills of one `(repo, ref)`: `(name, path in the repo)`.
 type Group = ((String, String), Vec<(String, String)>);
@@ -34,7 +34,10 @@ impl TempDir {
                 Err(e) => return Err(os_err(&e, &p)),
             }
         }
-        Err(PyErr::new(Kind::Os, "[Errno 17] File exists: 'kith-fetch-'"))
+        Err(PyErr::new(
+            Kind::Os,
+            "[Errno 17] File exists: 'kith-fetch-'",
+        ))
     }
 }
 
@@ -80,7 +83,11 @@ fn field<'a>(src: &'a Value, key: &str) -> &'a str {
 /// The path a linked skill has in its repo: `path.strip('/') or '.'`.
 fn path_of(src: &Value) -> String {
     let p = field(src, "path").trim_matches('/');
-    if p.is_empty() { ".".to_owned() } else { p.to_owned() }
+    if p.is_empty() {
+        ".".to_owned()
+    } else {
+        p.to_owned()
+    }
 }
 
 /// Fetches what is missing (or every linked skill, with `force`) and returns the names fetched, sorted.
@@ -113,14 +120,26 @@ pub fn fetch(ctx: &Ctx, home: &Path, force: bool) -> R<Vec<String>> {
             vec!["remote".into(), "add".into(), "origin".into(), url],
         ];
         if !whole {
-            let mut s = vec!["sparse-checkout".to_owned(), "set".into(), "--no-cone".into()];
+            let mut s = vec![
+                "sparse-checkout".to_owned(),
+                "set".into(),
+                "--no-cone".into(),
+            ];
             s.extend(sparse);
             steps.push(s);
         }
         steps.push(
-            ["fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", reference]
-                .map(String::from)
-                .to_vec(),
+            [
+                "fetch",
+                "-q",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                "origin",
+                reference,
+            ]
+            .map(String::from)
+            .to_vec(),
         );
         steps.push(vec!["checkout".into(), "-q".into(), "FETCH_HEAD".into()]);
         for step in &steps {
@@ -173,7 +192,9 @@ pub fn fetch(ctx: &Ctx, home: &Path, force: bool) -> R<Vec<String>> {
         names.sort_unstable();
         let text = format!(
             "# third-party skills fetched from skills.json (kith-pkg fetch); not committed\n{}",
-            names.iter().fold(String::new(), |acc, n| acc + &format!("/{n}/\n"))
+            names
+                .iter()
+                .fold(String::new(), |acc, n| acc + &format!("/{n}/\n"))
         );
         if read(&ignore)? != strip(&text) {
             write_text(&ignore, &text)?;

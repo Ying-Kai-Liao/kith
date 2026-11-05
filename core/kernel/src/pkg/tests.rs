@@ -9,9 +9,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use super::cli;
 use super::py::{read_text, repr, strip};
 use super::resolve::resolve;
-use super::text::{
-    frontmatter, has_needs, needs_list, placeholders, skill_refs, split_needs,
-};
+use super::text::{frontmatter, has_needs, needs_list, placeholders, skill_refs, split_needs};
 use super::{Ctx, fingerprint, sha1};
 
 static N: AtomicU32 = AtomicU32::new(0);
@@ -68,32 +66,75 @@ fn resolved(ctx: &Ctx, agent: &str) -> (PathBuf, String) {
 
 fn set_mtime(p: &Path, secs: u64, nanos: u32) {
     let f = fs::File::options().write(true).open(p).unwrap();
-    f.set_modified(UNIX_EPOCH + Duration::new(secs, nanos)).unwrap();
+    f.set_modified(UNIX_EPOCH + Duration::new(secs, nanos))
+        .unwrap();
 }
 
 #[test]
 fn sha1_is_sha1() {
     assert_eq!(sha1::hex(b""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
-    assert_eq!(sha1::hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+    assert_eq!(
+        sha1::hex(b"abc"),
+        "a9993e364706816aba3e25717850c26c9cd0d89d"
+    );
     assert_eq!(
         sha1::hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
         "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
     );
     // 56 bytes: the length no longer fits in the block that holds the padding byte; 64 and 1000: whole and many blocks
-    assert_eq!(sha1::hex(&[b'a'; 56]), "c2db330f6083854c99d4b5bfb6e8f29f201be699");
-    assert_eq!(sha1::hex(&[b'a'; 64]), "0098ba824b5c16427bd7a1122a5a442a25ec644d");
-    assert_eq!(sha1::hex(&[b'a'; 1000]), "291e9a6c66994949b57ba5e650361e98fc36b1ba");
+    assert_eq!(
+        sha1::hex(&[b'a'; 56]),
+        "c2db330f6083854c99d4b5bfb6e8f29f201be699"
+    );
+    assert_eq!(
+        sha1::hex(&[b'a'; 64]),
+        "0098ba824b5c16427bd7a1122a5a442a25ec644d"
+    );
+    assert_eq!(
+        sha1::hex(&[b'a'; 1000]),
+        "291e9a6c66994949b57ba5e650361e98fc36b1ba"
+    );
 }
 
 const VECTOR_FILES: [(&str, &str, u64, u32); 10] = [
-    ("agents/echo/role/agent.md", "---\nname: echo\ndescription: d\n---\nhi\n", 1_700_000_000, 123_456_789),
-    ("agents/echo/role/notes.md", "notes \u{e9}\n", 1_700_000_001, 0),
+    (
+        "agents/echo/role/agent.md",
+        "---\nname: echo\ndescription: d\n---\nhi\n",
+        1_700_000_000,
+        123_456_789,
+    ),
+    (
+        "agents/echo/role/notes.md",
+        "notes \u{e9}\n",
+        1_700_000_001,
+        0,
+    ),
     ("agents/echo/role/sub/x.txt", "x", 1_600_000_000, 1),
-    ("agents/echo/role/sub/.DS_Store", "skipped", 1_700_000_002, 0),
+    (
+        "agents/echo/role/sub/.DS_Store",
+        "skipped",
+        1_700_000_002,
+        0,
+    ),
     ("agents/echo/role/memory/m.md", "state", 1_700_000_003, 0),
-    ("agents/echo/role/sub/memory/keep.md", "nested memory is package", 1_700_000_004, 0),
-    ("agents/echo/role/node_modules/n.js", "skipped", 1_700_000_005, 0),
-    ("agents/plain/agent.md", "---\nname: plain\ndescription: d\n---\nhi\n", 1_700_000_006, 0),
+    (
+        "agents/echo/role/sub/memory/keep.md",
+        "nested memory is package",
+        1_700_000_004,
+        0,
+    ),
+    (
+        "agents/echo/role/node_modules/n.js",
+        "skipped",
+        1_700_000_005,
+        0,
+    ),
+    (
+        "agents/plain/agent.md",
+        "---\nname: plain\ndescription: d\n---\nhi\n",
+        1_700_000_006,
+        0,
+    ),
     ("agents/plain/z.txt", "zz", 1_700_000_007, 0),
     ("kernel/PROTOCOL.md", "# protocol\n", 1_700_000_008, 0),
 ];
@@ -224,7 +265,9 @@ fn paths_are_spelled_as_pythons_path_spells_them() {
 
 #[test]
 fn frontmatter_reads_fields_the_way_the_regex_does() {
-    let f = frontmatter("---\nname: x\ndescription:\nname: next line is the value\neffort:   \n---\nbody\n");
+    let f = frontmatter(
+        "---\nname: x\ndescription:\nname: next line is the value\neffort:   \n---\nbody\n",
+    );
     // `\s*` runs over the newline: an empty value takes the next line
     assert_eq!(f.get("description"), Some("name: next line is the value"));
     assert_eq!(f.get("name"), Some("x"));
@@ -247,14 +290,24 @@ fn read_text_reads_lines_as_python_does() {
     assert_eq!(read_text(&t.0.join("a.md")).unwrap(), "one\ntwo\nthree\n");
     fs::write(t.0.join("b.md"), [0xff, 0xfe]).unwrap();
     let e = read_text(&t.0.join("b.md")).unwrap_err();
-    assert_eq!(e.msg, "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte");
+    assert_eq!(
+        e.msg,
+        "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
+    );
     let e = read_text(&t.0.join("gone.md")).unwrap_err();
-    assert!(e.msg.starts_with("[Errno 2] No such file or directory: '"), "{}", e.msg);
+    assert!(
+        e.msg.starts_with("[Errno 2] No such file or directory: '"),
+        "{}",
+        e.msg
+    );
 }
 
 #[test]
 fn small_regexes() {
-    assert_eq!(needs_list("a\nneeds:\n  [x , y,\n z]\n"), Some("x , y,\n z"));
+    assert_eq!(
+        needs_list("a\nneeds:\n  [x , y,\n z]\n"),
+        Some("x , y,\n z")
+    );
     assert_eq!(needs_list("needs:\n  - a\n"), None);
     assert!(has_needs("x\nneeds:\n  - a\n"));
     assert!(!has_needs("  needs: [a]\n"));
@@ -280,19 +333,39 @@ fn resolve_snapshots_once_and_follows_edits() {
     let (dir, note) = resolved(&ctx, "echo");
     assert_eq!(note, "");
     assert!(dir.starts_with(&ctx.store), "{dir:?}");
-    assert!(dir.file_name().unwrap().to_string_lossy().starts_with("echo@"));
-    assert_eq!(fs::read_to_string(dir.join("prompt.md")).unwrap(), "You are echo.\n\n# protocol\n");
-    assert_eq!(fs::read_to_string(dir.join("settings.json")).unwrap(), "{}\n");
+    assert!(
+        dir.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("echo@")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("prompt.md")).unwrap(),
+        "You are echo.\n\n# protocol\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("settings.json")).unwrap(),
+        "{}\n"
+    );
     assert!(!dir.join("memory").exists());
     assert_eq!(
         fs::read_to_string(dir.join(".home")).unwrap(),
         format!("{}\n", t.0.join("agents/echo").display())
     );
-    let meta: serde_json::Value = serde_json::from_str(&fs::read_to_string(dir.join(".meta.json")).unwrap()).unwrap();
+    let meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join(".meta.json")).unwrap()).unwrap();
     assert_eq!(meta["agent"], "echo");
     assert!(meta["made"].is_f64());
     let good = fs::read_to_string(ctx.store.join(".pointers/echo.good")).unwrap();
-    assert_eq!(good.trim(), dir.file_name().unwrap().to_string_lossy().split_once('@').unwrap().1);
+    assert_eq!(
+        good.trim(),
+        dir.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .split_once('@')
+            .unwrap()
+            .1
+    );
     // nothing changed: the same version
     assert_eq!(resolved(&ctx, "echo").0, dir);
     // an edit is a new version, and the old one stays (recent)
@@ -309,17 +382,33 @@ fn resolve_keeps_the_last_good_version_when_edits_fail_checks() {
     t.agent("echo");
     let ctx = t.ctx();
     let (good, _) = resolved(&ctx, "echo");
-    t.put("agents/echo/role/agent.md", "---\nname: echo\n---\nno description\n");
+    t.put(
+        "agents/echo/role/agent.md",
+        "---\nname: echo\n---\nno description\n",
+    );
     let (dir, note) = resolved(&ctx, "echo");
     assert_eq!(dir, good);
-    let v = good.file_name().unwrap().to_string_lossy().split_once('@').unwrap().1.to_owned();
-    assert_eq!(note, format!("latest edits fail checks, running {v}: agent.md: frontmatter has no description"));
+    let v = good
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .split_once('@')
+        .unwrap()
+        .1
+        .to_owned();
+    assert_eq!(
+        note,
+        format!("latest edits fail checks, running {v}: agent.md: frontmatter has no description")
+    );
 }
 
 #[test]
 fn resolve_with_no_good_version_runs_unchecked_edits() {
     let t = Tmp::new();
-    t.put("agents/odd/role/agent.md", "---\nname: odd\ndescription: d\neffort: extreme\nmodel: bad model!\n---\n{{NOPE}}\n");
+    t.put(
+        "agents/odd/role/agent.md",
+        "---\nname: odd\ndescription: d\neffort: extreme\nmodel: bad model!\n---\n{{NOPE}}\n",
+    );
     let ctx = t.ctx();
     let (dir, note) = resolved(&ctx, "odd");
     assert_eq!(
@@ -330,7 +419,10 @@ fn resolve_with_no_good_version_runs_unchecked_edits() {
     assert!(dir.join(".unchecked").is_file());
     // the second run knows it is the same unchecked version
     let (again, note) = resolved(&ctx, "odd");
-    assert_eq!((again, note.as_str()), (dir, "no good version yet, running unchecked edits"));
+    assert_eq!(
+        (again, note.as_str()),
+        (dir, "no good version yet, running unchecked edits")
+    );
     assert!(!ctx.store.join(".pointers/odd.good").exists());
 }
 
@@ -340,17 +432,33 @@ fn pins_and_editing_markers() {
     t.agent("echo");
     let ctx = t.ctx();
     let (dir, _) = resolved(&ctx, "echo");
-    let v = dir.file_name().unwrap().to_string_lossy().split_once('@').unwrap().1.to_owned();
+    let v = dir
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .split_once('@')
+        .unwrap()
+        .1
+        .to_owned();
     t.put("agents/echo/role/notes.md", "edit");
     t.put("agents/echo/role/.editing", "");
-    assert_eq!(resolved(&ctx, "echo"), (dir.clone(), format!("being edited (.editing), running {v}")));
+    assert_eq!(
+        resolved(&ctx, "echo"),
+        (dir.clone(), format!("being edited (.editing), running {v}"))
+    );
     // an hour-old marker holds nothing back
     set_mtime(&t.0.join("agents/echo/role/.editing"), 1_577_836_800, 0);
     let (newer, note) = resolved(&ctx, "echo");
     assert_eq!(note, "");
     assert_ne!(newer, dir);
     fs::write(ctx.store.join(".pointers/echo.pin"), format!("{v}\n")).unwrap();
-    assert_eq!(resolved(&ctx, "echo"), (dir, format!("pinned to {v} (kith unpin echo to follow edits)")));
+    assert_eq!(
+        resolved(&ctx, "echo"),
+        (
+            dir,
+            format!("pinned to {v} (kith unpin echo to follow edits)")
+        )
+    );
     // a pin to a version that is gone is ignored
     fs::write(ctx.store.join(".pointers/echo.pin"), "0123456789\n").unwrap();
     assert_eq!(resolved(&ctx, "echo").0, newer);
@@ -361,11 +469,22 @@ fn gc_keeps_good_pinned_newest_recent_and_running() {
     let t = Tmp::new();
     t.agent("echo");
     let ctx = t.ctx();
-    for (name, made) in [("old1", 1.0e9), ("old2", 1.0e9 + 1.0), ("old3", 1.0e9 + 2.0), ("old4", 1.0e9 + 3.0)] {
-        t.put(&format!("state/store/echo@{name}/.meta.json"), &format!("{{\"made\": {made}}}"));
+    for (name, made) in [
+        ("old1", 1.0e9),
+        ("old2", 1.0e9 + 1.0),
+        ("old3", 1.0e9 + 2.0),
+        ("old4", 1.0e9 + 3.0),
+    ] {
+        t.put(
+            &format!("state/store/echo@{name}/.meta.json"),
+            &format!("{{\"made\": {made}}}"),
+        );
     }
     // a live run (this test's own pid) holds old3; a dead one's record is cleared
-    t.put(&format!("state/store/echo@old3/.runs/{}.live", std::process::id()), "");
+    t.put(
+        &format!("state/store/echo@old3/.runs/{}.live", std::process::id()),
+        "",
+    );
     t.put("state/store/echo@old1/.runs/999999.dead", "");
     resolved(&ctx, "echo");
     let left: Vec<String> = {
@@ -389,7 +508,10 @@ fn the_cli_prints_what_the_python_printed() {
     let ctx = t.ctx();
     let args = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
     let out = cli::run(&ctx, &args(&["resolve"]));
-    assert_eq!((out.code, out.stderr.as_str()), (2, "kith-pkg: resolve <agent>|--all\n"));
+    assert_eq!(
+        (out.code, out.stderr.as_str()),
+        (2, "kith-pkg: resolve <agent>|--all\n")
+    );
     let out = cli::run(&ctx, &args(&["resolve", "ghost", "--json"]));
     assert_eq!((out.code, out.stdout.as_str()), (1, ""));
     assert_eq!(out.stderr, "kith-pkg: no agent 'ghost' (kith-pkg list)\n");
@@ -399,14 +521,21 @@ fn the_cli_prints_what_the_python_printed() {
     assert_eq!(out.code, 0);
     let dirs: Vec<&str> = out.stdout.lines().collect();
     assert_eq!(dirs.len(), 2);
-    assert!(dirs[0].contains("/alpha@") && dirs[1].contains("/echo@"), "{dirs:?}");
+    assert!(
+        dirs[0].contains("/alpha@") && dirs[1].contains("/echo@"),
+        "{dirs:?}"
+    );
     let out = cli::run(&ctx, &args(&["resolve", "echo", "--json"]));
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
     assert_eq!(v["echo"]["note"], "");
     assert_eq!(v["echo"]["dir"], dirs[1]);
     assert_eq!(v["echo"]["version"].as_str().unwrap().len(), 10);
     // key order and separators are json.dumps's
-    assert!(out.stdout.starts_with("{\"echo\": {\"dir\": \""), "{}", out.stdout);
+    assert!(
+        out.stdout.starts_with("{\"echo\": {\"dir\": \""),
+        "{}",
+        out.stdout
+    );
     let out = cli::run(&ctx, &args(&["versions", "echo"]));
     assert_eq!(out.code, 2);
 }
@@ -417,7 +546,10 @@ fn a_snapshot_that_throws_runs_the_live_folder() {
     t.agent("echo");
     std::os::unix::fs::symlink("nowhere.md", t.0.join("agents/echo/role/gone.md")).unwrap();
     let ctx = t.ctx();
-    let out = cli::run(&ctx, &["resolve".to_owned(), "echo".to_owned(), "--json".to_owned()]);
+    let out = cli::run(
+        &ctx,
+        &["resolve".to_owned(), "echo".to_owned(), "--json".to_owned()],
+    );
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
     let live = t.0.join("agents/echo/role");
     assert_eq!(v["echo"]["dir"], live.to_string_lossy().as_ref());

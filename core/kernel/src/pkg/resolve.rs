@@ -38,7 +38,10 @@ pub fn resolve(ctx: &Ctx, agent: &str, err: &mut String) -> R<Resolved> {
     }
     // first run after install, or a changed pin: download what skills.json links
     if let Err(e) = fetch(ctx, &home, false) {
-        if matches!(e.kind, Kind::Runtime | Kind::Value | Kind::Os | Kind::Timeout) {
+        if matches!(
+            e.kind,
+            Kind::Runtime | Kind::Value | Kind::Os | Kind::Timeout
+        ) {
             // the checks below then fail and the last good version runs
             err.push_str(&format!("kith: {agent}: {e}\n"));
         } else {
@@ -50,7 +53,10 @@ pub fn resolve(ctx: &Ctx, agent: &str, err: &mut String) -> R<Resolved> {
     if is_dir(&dir) {
         running(&dir); // clears records of finished runs
         if exists(&dir.join(".unchecked")) {
-            return Ok((dir, "no good version yet, running unchecked edits".to_owned()));
+            return Ok((
+                dir,
+                "no good version yet, running unchecked edits".to_owned(),
+            ));
         }
         write_atomic(&good, &version)?;
         gc(ctx, agent)?;

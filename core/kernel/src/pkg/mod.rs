@@ -192,7 +192,10 @@ pub fn fingerprint(ctx: &Ctx, home: &Path) -> R<String> {
     let labelled = files
         .iter()
         .map(|p| (p.as_path(), p.strip_prefix(home).unwrap_or(p)))
-        .chain(std::iter::once((protocol.as_path(), Path::new("PROTOCOL.md"))));
+        .chain(std::iter::once((
+            protocol.as_path(),
+            Path::new("PROTOCOL.md"),
+        )));
     let mut entries = vec![];
     for (p, label) in labelled {
         let st = fs::metadata(p).map_err(|e| os_err(&e, p))?;

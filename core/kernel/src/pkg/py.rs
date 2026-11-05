@@ -66,10 +66,7 @@ pub fn os_err(e: &io::Error, path: &Path) -> PyErr {
         .rsplit_once(" (os error ")
         .map_or(text.as_str(), |(r, _)| r);
     let msg = match e.raw_os_error() {
-        Some(n) => format!(
-            "[Errno {n}] {reason}: {}",
-            repr(&path.to_string_lossy())
-        ),
+        Some(n) => format!("[Errno {n}] {reason}: {}", repr(&path.to_string_lossy())),
         None => reason.to_owned(),
     };
     PyErr::new(Kind::Os, msg)
