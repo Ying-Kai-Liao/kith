@@ -106,6 +106,11 @@ fn original() -> Value {
 }
 
 fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
+    rig_full(limit, false)
+}
+
+/// `refuse`: the module as the real one is, with the step refused until M2-18 lifts it.
+fn rig_full(limit: Option<usize>, refuse: bool) -> (Rig, Vec<Box<dyn Module>>) {
     let (t, m) = machine();
     let root = t.path().to_path_buf();
     std::fs::create_dir_all(&m).unwrap();
@@ -142,7 +147,9 @@ fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
             puts: puts.clone(),
         }),
         limit,
-    );
+    )
+    .waiting(std::time::Duration::from_millis(300));
+    let module = if refuse { module.refusing() } else { module };
     let rig = Rig {
         env: Env::new(&m).with_ctx(ctx),
         dir: t,
@@ -326,7 +333,7 @@ fn fingerprint_follows_the_vault_rows_and_the_serve_db() {
     std::fs::create_dir_all(&serve).unwrap();
     let s = Connection::open(serve.join("serve.db")).unwrap();
     s.execute_batch(
-        "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT); INSERT INTO kv VALUES ('vault:v1:a', 'x');",
+        "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT); INSERT INTO kv VALUES ('slot', 'vault:v1:x');",
     )
     .unwrap();
     drop(s);
@@ -633,4 +640,205 @@ fn a_rollback_writes_auth_json_private_and_keeps_a_newer_keychain_value() {
         assert_eq!(mode & 0o777, 0o600);
     }
     assert!(!r.auth().with_extension("restore.tmp").exists());
+}
+
+// --- M2-18 step guard: the refusal, the lock with its sha check, the vault rows ---------------------------------------
+
+#[test]
+fn a_real_step_is_refused_with_the_open_gates_and_auth_json_is_untouched() {
+    let (r, reg) = rig_full(None, true);
+    let before = std::fs::read(r.auth()).unwrap();
+    for _ in 0..2 {
+        let e = step(&reg, &r.env, "authority", opts())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("M2-18 gates are open") && e.contains("revoke bridge"),
+            "{e}"
+        );
+    }
+    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    assert!(
+        phase(&r.env, "authority").is_none(),
+        "no record was written"
+    );
+}
+
+#[test]
+fn a_dry_run_and_check_still_work_while_the_step_is_refused() {
+    let (r, reg) = rig_full(None, true);
+    let dry = Opts {
+        dry_run: true,
+        ..opts()
+    };
+    let lines = step(&reg, &r.env, "authority", dry).expect("dry run");
+    assert!(said(&lines, "nothing was changed"), "{lines:?}");
+    drop(crate::start_with(&r.env.layout, MIGRATIONS).unwrap());
+    let out = check(&reg, &r.env, "authority").expect("check");
+    assert!(!out.is_empty(), "{out:?}");
+    assert!(!tombstone::is_tombstone(&r.auth()));
+}
+
+/// Wraps a module and writes to auth.json between the import and the tombstone (inside `same_answer`).
+struct WriteInBetween(Box<dyn Module>, PathBuf);
+
+impl Module for WriteInBetween {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
+        self.0.tombstones(env)
+    }
+    fn import(&self, env: &Env, core: Option<&mut Core>, o: Opts) -> Result<Vec<String>> {
+        self.0.import(env, core, o)
+    }
+    fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
+        let out = self.0.same_answer(env, db);
+        let mut v: Value = serde_json::from_slice(&std::fs::read(&self.1).unwrap()).unwrap();
+        v["people"]["sam"]["revoked"] = json!({"at": 1});
+        std::fs::write(&self.1, v.to_string()).unwrap();
+        out
+    }
+    fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
+        self.0.export_back(env, core)
+    }
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        self.0.source_lock(env)
+    }
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        self.0.before_tombstone(env)
+    }
+    fn digest(&self, env: &Env, db: &Connection) -> Result<String> {
+        self.0.digest(env, db)
+    }
+}
+
+#[test]
+fn a_write_between_the_import_and_the_tombstone_refuses_and_leaves_auth_json() {
+    let (r, mut reg) = rig();
+    let inner = reg.remove(0);
+    let reg: Vec<Box<dyn Module>> = vec![Box::new(WriteInBetween(inner, r.auth()))];
+    let e = step(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("auth.json changed during the step"), "{e}");
+    assert!(
+        !tombstone::is_tombstone(&r.auth()),
+        "auth.json is still the file"
+    );
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(
+        v["people"]["sam"]["revoked"]["at"], 1,
+        "the late write is kept"
+    );
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Stepping));
+}
+
+#[test]
+fn the_step_holds_the_writers_lock_from_the_import_through_the_tombstone() {
+    use fs2::FileExt as _;
+    let (r, reg) = rig();
+    let lock = r.auth().with_file_name("auth.json.lock");
+    {
+        let held = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&lock)
+            .unwrap();
+        held.lock_exclusive().unwrap();
+        // A writer holds it: the step waits a bounded time, then refuses and changes nothing.
+        let e = step(&reg, &r.env, "authority", opts())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("auth.json.lock is held"), "{e}");
+        assert!(!tombstone::is_tombstone(&r.auth()));
+        assert!(phase(&r.env, "authority").is_none());
+    }
+    step(&reg, &r.env, "authority", opts()).expect("step");
+    assert!(tombstone::is_tombstone(&r.auth()));
+    let f = std::fs::File::open(&lock).unwrap();
+    f.try_lock_exclusive().expect("the step let the lock go");
+}
+
+#[test]
+fn export_back_waits_for_the_lock_and_refuses_when_it_is_not_let_go() {
+    use fs2::FileExt as _;
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    let lock = r.auth().with_file_name("auth.json.lock");
+    let held = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&lock)
+        .unwrap();
+    held.lock_exclusive().unwrap();
+    let e = rollback(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("auth.json.lock is held"), "{e}");
+    assert!(
+        tombstone::is_tombstone(&r.auth()),
+        "the file was not written"
+    );
+    // A holder that lets go within the wait: the rollback goes through.
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(held);
+    });
+    rollback(&reg, &r.env, "authority", opts()).expect("rollback after the lock was let go");
+    t.join().unwrap();
+    assert!(!tombstone::is_tombstone(&r.auth()));
+}
+
+fn serve_with(r: &Rig, rows: &[(&str, &str)]) {
+    let serve = r.dir.path().join("serve");
+    std::fs::create_dir_all(&serve).unwrap();
+    let s = Connection::open(serve.join("serve.db")).unwrap();
+    s.execute_batch("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
+        .unwrap();
+    for (k, v) in rows {
+        s.execute("INSERT OR REPLACE INTO kv VALUES (?1, ?2)", [k, v])
+            .unwrap();
+    }
+}
+
+#[test]
+fn unmoved_vault_rows_make_step_and_check_refuse_until_the_slots_are_sealed() {
+    let (r, reg) = rig();
+    drop(crate::start_with(&r.env.layout, MIGRATIONS).unwrap());
+    // A plaintext row is not an old record; the two `vault:v1:` ones are.
+    serve_with(
+        &r,
+        &[
+            ("router.key", "vault:v1:AAAA"),
+            ("slack.token", "vault:v1:BBBB"),
+            ("setting", "plain"),
+        ],
+    );
+    let before = std::fs::read(r.auth()).unwrap();
+    let e = step(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("2 credential record(s)") && e.contains("unlock the vault in the app first"),
+        "{e}"
+    );
+    let e = check(&reg, &r.env, "authority").unwrap_err().to_string();
+    assert!(e.contains("unlock the vault in the app first"), "{e}");
+    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+    assert!(
+        phase(&r.env, "authority").is_none(),
+        "refused before any record"
+    );
+    // The host moves the slots at its unlock and leaves the old rows: the envelope has them, so they no longer count.
+    for name in ["router.key", "slack.token"] {
+        r.db()
+            .execute(
+                "INSERT INTO secret_records (name, key_id, nonce, ciphertext, created_at, updated_at) VALUES (?1, 'k', zeroblob(24), x'00', 0, 0)",
+                [name],
+            )
+            .unwrap();
+    }
+    step(&reg, &r.env, "authority", opts()).expect("step once the rows have moved");
+    assert!(tombstone::is_tombstone(&r.auth()));
 }

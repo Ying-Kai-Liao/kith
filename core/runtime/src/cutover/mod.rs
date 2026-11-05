@@ -172,6 +172,12 @@ pub(crate) trait Module {
     fn source_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
         Ok(None)
     }
+    /// Runs under the source lock, just before the tombstones are put: a module that recorded what its import read
+    /// refuses here when a source changed since (a writer that does not take the lock), so the step never tombstones a
+    /// file it did not import. Default: nothing to check.
+    fn before_tombstone(&self, _env: &Env) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// What [`Module::source_lock`] holds; dropping it lets the lock go.
@@ -310,6 +316,8 @@ pub(crate) fn step(
             )));
         }
         lines.push(format!("{name}: same answer as the old store"));
+        // Before the marker and the switched record: a refusal here leaves the module stepping, so a rerun imports again.
+        m.before_tombstone(env)?;
         let digest = m.digest(env, core.conn())?;
         marker::write(&mut core, name, at, &digest)?;
         state::write(
