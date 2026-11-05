@@ -11,11 +11,9 @@
 //! person's rows. All of that must read back as it was.
 //!
 //! Left out of this step, with who needs them:
-//! - Read by the access decision in `kith-auth` but NOT yet here: top-level `agent_access` (the domains the owner kept
-//!   for every guest of an agent; Python `resolve` -> `with_jobs` -> `agent_domains` adds them, plus the package's
-//!   `guest_domains`, to `access.domains`). A later lane A step adds that table. `kith_kernel::secrets::with_jobs`
-//!   does not add either yet, so `Rules::resolve` already differs from Python there: a follow-up for the rules, not
-//!   for these tables.
+//! - Read by the access decision in `kith-auth` but NOT in this step: top-level `agent_access` (the domains the owner
+//!   kept for every guest of an agent). Step 13 (`m0013_agent_access`) adds that table, and the rules add its domains
+//!   and the package's `guest_domains` to `access.domains` as Python's `with_jobs` does.
 //! - Not read by the decision: `profiles`, `grants`, `env` (secrets, lane B), `invites` (access requests, M2-3),
 //!   `retired` and `once` (written by M2-2), and a person's `handles`, `root`, `provider`, `kith`, `agents` (channel
 //!   and cloud links that `kith-people` lists and the host keeps). `revoked` is kept as a flag and its time

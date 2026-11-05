@@ -142,6 +142,25 @@ impl Shared {
         Ok(read)
     }
 
+    /// Whether the webhook key record of the `schedule.fire` params' job exists. Bad params answer `false`: the call
+    /// itself refuses them.
+    #[cfg(unix)]
+    fn hook_key_exists(&self, params: &Value) -> Result<bool> {
+        let word = |k: &str| params.get(k).and_then(Value::as_str);
+        let (Some(agent), Some(job)) = (word("agent"), word("id")) else {
+            return Ok(false);
+        };
+        let name = crate::schedules::hook_key_name(agent, job);
+        self.with_core(|c| {
+            let has: Option<i64> = rusqlite::OptionalExtension::optional(c.conn().query_row(
+                "SELECT 1 FROM secret_records WHERE name = ?1",
+                [&name],
+                |r| r.get(0),
+            ))?;
+            Ok(has.is_some())
+        })
+    }
+
     pub(crate) fn set_holder(&self, f: impl FnOnce(&mut HolderState)) {
         f(&mut self
             .holder
@@ -180,7 +199,10 @@ impl Shared {
             return Ok(answer);
         }
         // The envelope's rows that need the master key read it first, outside the core lock (see `secrets::preload`).
-        if matches!(method, "secrets.open" | "secrets.get" | "secrets.put") {
+        if matches!(
+            method,
+            "secrets.open" | "secrets.get" | "secrets.put" | "secrets.serviceKeys"
+        ) {
             crate::call::check(who, method, params)?;
             let key = self.master_key()?;
             let answer = self.with_core(|c| {
@@ -275,8 +297,21 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::schedules::serves_write(method) {
-                crate::call::check(Principal::Owner, method, params)?;
-                let answer = self.with_core(|c| crate::schedules::call_write(c, method, params))?;
+                // `dispatch` checked the row for `who`: `schedule.fire` is the host's, the others the owner's. The webhook
+                // key is a secret record, so its master key is read first, outside the core lock (like `secrets.get`).
+                // Only when the job's key record exists: a delivery from the internet must not reach the OS key store
+                // (and wait on a locked one) while no key was ever written (see `hooks::key_of`).
+                let key = if method == "schedule.fire" && self.hook_key_exists(params)? {
+                    self.master_key()?
+                } else {
+                    None
+                };
+                let answer = self.with_core(|c| {
+                    if let Some(key) = key {
+                        crate::secrets::adopt(&c.secrets, key)?;
+                    }
+                    crate::schedules::call_write(c, method, params)
+                })?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }

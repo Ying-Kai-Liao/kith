@@ -139,24 +139,11 @@ pub(crate) fn recorded_holder(layout: &Layout) -> Option<Holder> {
     read_holder(layout)
 }
 
-/// The start time of a process as `ps` prints it in the C locale (Linux and macOS); `None` where there is no `ps`.
-/// macOS reads it natively (the kernel's own record, no `ps` to start; same text); elsewhere `ps` answers.
-/// This is the text `core.holder` and the Python kernel's claims carry. The gate, card claims, doors and conversation
-/// claims compare epoch start times instead (`kith_kernel::procstart`, `gate::holder_alive`): local-time text moves with
-/// the time zone. TODO(windows): there is no text start time there (the holder line keeps it empty).
+/// The start stamp of a process (`kith_kernel::procstart`: `e<ms>` or `b<boot id>:<ticks>`), the string every other record
+/// of a start carries now; `None` where it can't be read. `core.holder` held `ps -o lstart=` text before: a reader of
+/// an old line sees an unknown start (never a different process).
 pub(crate) fn process_start(pid: u32) -> Option<String> {
-    #[cfg(unix)]
-    if let Some(started) = kith_kernel::threads::native_proc_start(pid) {
-        return Some(started);
-    }
-    let out = std::process::Command::new("ps")
-        .env("LC_ALL", "C")
-        .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    let squeezed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    (!squeezed.is_empty()).then_some(squeezed)
+    kith_kernel::procstart::start_stamp(pid)
 }
 
 impl Drop for Lifetime {

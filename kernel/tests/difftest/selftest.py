@@ -142,12 +142,22 @@ class SelfTest(unittest.TestCase):
             del os.environ['KITH_HOME']
         self.assertEqual(failed, [], out)
 
+    def test_mask_keys_mask_a_leading_zero_clock_string(self):
+        """Deterministic stand-in for the %N clock: one side's value starts with 0, the other's does not. The file must stay
+        valid JSON (a bare 012345678 is not), so mask_keys apply and the two sides are equal."""
+        def sh(clock):
+            return ['/bin/sh', '-c', 'mkdir -p "$HOME/w"; echo "{\\"n\\": 1, \\"at\\": \\"%s\\"}" > "$HOME/w/a.json"' % clock, 'sh']
+        case = {'name': 'zero', 'run': [['x']], 'mask_keys': ['at']}
+        out = io.StringIO()
+        failed, _, _ = D.run_all([case], {'default': {}, 'old': sh('012345678'), 'new': sh('987654321')}, [], jobs=1, out=out)
+        self.assertEqual(failed, [], out.getvalue())
+
     def test_mask_keys_and_masked_file_names(self):
         """mask_keys: a case's own meaningless values (a clock, a pid) are masked in JSON; normalize_paths: a file named by
         an id the program makes up is one facet whatever the id, and two files with one masked name are an error."""
         def sh(script):
             return ['/bin/sh', '-c', script, 'sh']
-        prog = sh('id=$(date +%N)$$; mkdir -p "$HOME/w"; echo "{\\"n\\": 1, \\"at\\": $(date +%N), \\"pid\\": $$}" > "$HOME/w/id$id.json"')
+        prog = sh('id=$(date +%N)$$; mkdir -p "$HOME/w"; echo "{\\"n\\": 1, \\"at\\": \\"$(date +%N)\\", \\"pid\\": $$}" > "$HOME/w/id$id.json"')
         base = {'name': 'mask', 'run': [['x']], 'normalize': [['id\\d+', 'ID']]}
         both = {'default': {}, 'old': prog, 'new': prog}
         out = io.StringIO()

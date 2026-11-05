@@ -131,6 +131,15 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
             .expect("insert retired");
         }
     }
+    if let Some(access) = auth.get("agent_access").and_then(Value::as_object) {
+        for (agent, r) in access {
+            conn.execute(
+                "INSERT INTO agent_access (agent, domains, since, by) VALUES (?1, ?2, ?3, ?4)",
+                params![agent, j(r, "domains"), j(r, "since"), j(r, "by")],
+            )
+            .expect("insert agent_access");
+        }
+    }
     if let Some(cap) = auth.get("owner_bots_budget") {
         conn.execute(
             "INSERT INTO authority_settings (key, value) VALUES ('owner_bots_budget', ?1)",

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# kith-procstart-check — kernel/lib/kith_procstart.py, the Python side of core/procstart: a start is a stamp (`e<ms>` on
+# macOS, `b<boot id>:<ticks>` on Linux), compared with plain equality; old `ps -o lstart=` text or another form is an unknown
+# start (the same process, never a dead one). The Rust reading of the same pid is checked in core/procstart/tests/parity.rs.
+#
+#   kernel/tests/kith-procstart-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+
+python3 -I - "$KERNEL/lib" <<'PY' || fail=1
+import os, subprocess, sys, time
+sys.path.insert(0, sys.argv[1])
+import kith_procstart as ps
+
+bad = 0
+def check(name, cond, detail=''):
+    global bad
+    print(('ok   ' if cond else 'FAIL ') + name + ('' if cond else f': {detail}'))
+    bad += not cond
+
+linux = sys.platform.startswith('linux')
+me = ps.start_stamp(os.getpid())
+check('this process has a stamp of this system\'s form', bool(me) and me[0] == ('b' if linux else 'e') and ps.is_stamp(me), me)
+check('the stamp is stable across calls', ps.start_stamp(os.getpid()) == me)
+
+child = subprocess.Popen(['sleep', '30'])
+try:
+    a = ps.start_stamp(child.pid)
+    time.sleep(0.05)
+    check('a child has a stamp, stable, and not its parent\'s', bool(a) and a == ps.start_stamp(child.pid) and a != me, a)
+    check('probe: alive', ps.probe(child.pid) == (ps.ALIVE, a), ps.probe(child.pid))
+    check('running: the recorded stamp', ps.running(child.pid, a))
+    check('running: old lstart text is an unknown start, alive', ps.running(child.pid, 'Mon Jan  1 00:00:00 2001'))
+    check('running: nothing recorded', ps.running(child.pid, None) and ps.running(child.pid, ''))
+    other = (a.split(':')[0] + ':1') if ':' in a else 'e1'
+    check('running: another stamp of the same form is a reused pid', not ps.running(child.pid, other))
+    check('running: the other form is unknown, alive', ps.running(child.pid, 'e1' if linux else 'bboot:1'))
+finally:
+    child.kill()
+    child.wait()
+check('a reaped child is gone', ps.probe(child.pid) == (ps.GONE, None) and not ps.running(child.pid, a))
+
+# a zombie (ended, not yet reaped) is gone: nothing runs
+z = subprocess.Popen(['sh', '-c', 'exit 0'])
+for _ in range(100):
+    if ps.probe(z.pid)[0] == ps.GONE:
+        break
+    time.sleep(0.02)
+check('a zombie is gone', ps.probe(z.pid)[0] == ps.GONE and ps.start_stamp(z.pid) is None, ps.probe(z.pid))
+z.wait()
+
+check('pid 0, a negative pid and junk are gone, never a process group', all(ps.probe(p) == (ps.GONE, None) for p in (0, -1, None, 'x')))
+
+# same_process: the rules of core/procstart
+check('same_process: equal stamps', ps.same_process('e5', 'e5') and ps.same_process('bx:7', 'bx:7'))
+check('same_process: different start, or another boot, is a different process',
+      not ps.same_process('e5', 'e6') and not ps.same_process('bx:7', 'bx:8') and not ps.same_process('bx:7', 'by:7'))
+check('same_process: another form, old text or nothing cannot be told apart: yes',
+      all(ps.same_process(r, c) for r, c in [('e5', 'bx:7'), ('bx:7', 'e5'), ('Mon Jan  1 00:00:00 2001', 'e5'), ('', 'e5'), (None, 'e5')]))
+check('comparable: only two stamps of one form', ps.comparable('e5', 'e6') and not ps.comparable('e5', 'bx:7') and not ps.comparable('', 'e5')
+      and not ps.comparable('Mon Jan  1 00:00:00 2001', 'Mon Jan  1 00:00:00 2001'))
+check('is_stamp', ps.is_stamp('e5') and ps.is_stamp('bx:7') and not ps.is_stamp('e') and not ps.is_stamp('b:7') and not ps.is_stamp('bx:') and not ps.is_stamp('x'))
+
+# Linux /proc/<pid>/stat: the command holds spaces and parentheses; field 22 is 123456 (the same line as the Rust test)
+STAT = '4242 (my (odd) cmd) S 1 4242 4242 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 1 0 123456 1000000 200 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0'
+check('linux stat: state and starttime after the last )', ps.parse_linux_stat(STAT) == ('S', 123456), ps.parse_linux_stat(STAT))
+check('linux stat: a zombie', ps.parse_linux_stat(STAT.replace(') S ', ') Z '))[0] == 'Z')
+check('linux stat: garbage', ps.parse_linux_stat('garbage') is None and ps.parse_linux_stat('1 (x) S 1 2') is None)
+check('boot stamp', ps.boot_stamp('6f1c2d3e-0000-4000-8000-0123456789ab\n', 123456) == 'b6f1c2d3e-0000-4000-8000-0123456789ab:123456')
+sys.exit(1 if bad else 0)
+PY
+
+# the command line: the stamp, or nothing and exit 1
+me=$(python3 "$KERNEL/lib/kith_procstart.py" $$) && [[ -n $me ]] && ok "cli: prints the stamp of a pid" || bad "cli stamp" "$me"
+out=$(python3 "$KERNEL/lib/kith_procstart.py" 99999999); rc=$?
+[[ -z $out && $rc == 1 ]] && ok "cli: a pid nobody has prints nothing, exits 1" || bad "cli gone" "$rc $out"
+
+[[ $fail == 0 ]] && echo "kith-procstart-check: all passed" || { echo "kith-procstart-check: FAILED"; exit 1; }
