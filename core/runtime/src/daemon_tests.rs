@@ -748,6 +748,11 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
     assert_eq!(recorded().instance.as_deref(), Some("one"));
     assert!(alive(held_pid) && alive(stranger_pid));
 
+    // 1b. The serve host's own claim name is refused at the hello and nothing is recorded.
+    crate::holder_link::reconcile(&d.shared, crate::holder_link::HOST_INSTANCE, &[], &cfg)
+        .expect_err("the host's name");
+    assert_eq!(recorded().instance.as_deref(), Some("one"));
+
     // 2. The same instance again: nothing to do.
     crate::holder_link::reconcile(&d.shared, "one", &[], &cfg).expect("same");
     assert!(alive(held_pid));
