@@ -44,7 +44,7 @@
 //!
 //! Not imported here at all: cards (PR #711) and access requests (M2-3).
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Map, Value};
 
 use crate::error::{Error, Result};
@@ -605,6 +605,28 @@ pub(super) fn record_removals(conn: &Connection, auth: &Value, now_ms: f64) -> R
         crate::revoke_order::record_removal(conn, id, bots, now_ms)?;
     }
     Ok(found.into_iter().map(|(id, _)| id).collect())
+}
+
+/// Writes the open record for each person the file has suspended and core.db holds as not suspended (a missed suspend
+/// mirror), in the caller's transaction, before `clear()`. A person new to core.db is not recorded: nothing of theirs is
+/// in the core to sweep. Returns the ids.
+pub(super) fn record_suspends(conn: &Connection, auth: &Value, now_ms: f64) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for (id, p) in table(auth, "people")?.into_iter().flatten() {
+        if !truthy(p.get("revoked"), &format!("people.{id}.revoked"))? {
+            continue;
+        }
+        let held: Option<i64> = conn
+            .query_row("SELECT revoked FROM people WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        if held == Some(0) {
+            crate::revoke_order::record_suspend(conn, id, now_ms)?;
+            out.push(id.clone());
+        }
+    }
+    Ok(out)
 }
 
 /// Empties the tables `insert_all` fills (a forced re-import). `authority_settings` keeps any key it does not own.

@@ -1535,3 +1535,29 @@ fn a_renamed_person_is_not_revoked_as_if_removed() {
     assert_eq!(ask_state(&f, "a-sam"), "open");
     assert_eq!(f.count("open_removals"), 0);
 }
+
+#[test]
+fn a_person_the_file_has_suspended_and_core_db_has_not_gets_the_order_from_the_reimport() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-mia", "mia");
+    ask_of(&f, "a-bot", "mia-bot");
+    ask_of(&f, "a-sam", "sam");
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the removal of mia")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(ask_state(&f, "a-mia"), "stopped");
+    assert_eq!(ask_state(&f, "a-bot"), "stopped");
+    assert_eq!(ask_state(&f, "a-sam"), "open");
+    assert_eq!(f.count("open_removals"), 0);
+}

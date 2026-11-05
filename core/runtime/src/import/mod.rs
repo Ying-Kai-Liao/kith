@@ -471,6 +471,7 @@ fn real(
             #[allow(clippy::cast_precision_loss)]
             let now_ms = now_secs() as f64 * 1000.0;
             removed = authority::record_removals(&tx, auth, now_ms)?;
+            removed.extend(authority::record_suspends(&tx, auth, now_ms)?);
             authority::clear(&tx)?;
         }
         authority::insert_all(&tx, auth, &services_of(ctx, layout))?;

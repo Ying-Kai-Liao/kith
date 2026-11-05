@@ -361,6 +361,11 @@ pub(crate) fn call_in(
                             .collect();
                         crate::revoke_order::record_removal(tx, id, &bots, c.now_ms)?;
                     }
+                    // A suspension keeps the rows, so its record names no bots (the table walk finds them); it
+                    // means "suspended, order not finished" all the same.
+                    if let Some(id) = said.get("suspendedPerson").and_then(Value::as_str) {
+                        crate::revoke_order::record_suspend(tx, id, c.now_ms)?;
+                    }
                     // An id an open removal names can not join again until its order has run.
                     if matches!(m, "people.addPerson" | "people.addBot")
                         && let Some(id) = word(params, "id")
@@ -376,13 +381,14 @@ pub(crate) fn call_in(
             // The removal is committed: run the revoke order now. An error leaves the record, and the replay at start
             // and on the supervisor's pass runs it again, so the removal itself still stands.
             let mut said = said;
-            let removed = said
-                .as_object_mut()
-                .and_then(|o| o.remove("removedPerson"))
-                .and_then(|v| v.as_str().map(str::to_owned));
+            let removed = said.as_object_mut().and_then(|o| {
+                let gone = o.remove("removedPerson");
+                let held = o.remove("suspendedPerson");
+                gone.or(held).and_then(|v| v.as_str().map(str::to_owned))
+            });
             if let Some(id) = removed.as_deref() {
                 #[allow(clippy::cast_possible_truncation)]
-                match crate::revoke_order::revoke_everywhere(core, id, &[], c.now_ms as i64) {
+                match crate::revoke_order::run_open(core, id, c.now_ms as i64) {
                     Ok(out) if !out.kill.is_empty() => {
                         said["kill"] = out
                             .kill
@@ -546,6 +552,8 @@ pub(super) fn write_in(
             let mut out = lines(said);
             if method == "people.suspend" {
                 out["was"] = json!(revoke::was_ids(a, need(params, "id")?));
+                // keyed on the suspension (the canonical id), for the record and the order after the commit
+                out["suspendedPerson"] = json!(ids.first());
             }
             out["ids"] = json!(ids);
             Ok(out)
