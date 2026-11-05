@@ -154,6 +154,29 @@ use crate::layout::Layout;
 use crate::start_with;
 use crate::tests::machine;
 
+/// The built holder and stub, resolved once: tests that start together would otherwise each run the cargo build that
+/// makes a missing binary, and one that looks while another is writing it finds nothing.
+fn bins() -> &'static (PathBuf, PathBuf) {
+    static BINS: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
+    BINS.get_or_init(|| (holder_bin(), stub_bin()))
+}
+
+/// Starts (or finds) the holder in `holder_dir` and connects, retrying until it answers: on a loaded machine the
+/// holder's socket can be a moment behind `ensure`. Each test has its own folder, so nothing is shared.
+fn connect_when_ready(holder_dir: &std::path::Path) -> Client {
+    let end = std::time::Instant::now() + WAIT;
+    loop {
+        let tried = launch::ensure(&bins().0, holder_dir, SECRET, Duration::from_secs(120))
+            .map_err(|e| e.to_string())
+            .and_then(|()| Client::connect(holder_dir, SECRET, 1).map_err(|e| format!("{e:?}")));
+        match tried {
+            Ok(c) => return c,
+            Err(e) if std::time::Instant::now() >= end => panic!("the holder never came up: {e}"),
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
 struct Rig {
     _dir: tempfile::TempDir,
     _machine: tempfile::TempDir,
@@ -167,14 +190,13 @@ impl Rig {
     fn new() -> Rig {
         let dir = sandbox();
         let holder_dir = dir.path().join("h");
-        launch::ensure(&holder_bin(), &holder_dir, SECRET, Duration::from_secs(120)).unwrap();
-        let c = Client::connect(&holder_dir, SECRET, 1).unwrap();
+        let c = connect_when_ready(&holder_dir);
         let (machine_dir, m) = machine();
         let mut core = start_with(&Layout::new(&m), MIGRATIONS).unwrap();
         claims::reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
         Rig {
             locks: dir.path().join("locks"),
-            stub: stub_bin(),
+            stub: bins().1.clone(),
             _dir: dir,
             _machine: machine_dir,
             c,
@@ -459,4 +481,73 @@ fn forget_drops_a_recorded_process_and_asked_twice_changes_nothing() {
         serde_json::json!({"forgot": false})
     );
     assert!(forget_proc(&mut core, &serde_json::json!({})).is_err());
+}
+
+// --- the kill that is sent again, and the groups a blocked pass ended ---------------------------------------------------
+
+/// `end_held` is done only when the holder says the tree is gone, and only then is the process acked. One that has not
+/// finished (no tries left, or the link broke under it) is `false`, the process is still the holder's, and the end goes
+/// back in the queue to be sent again (Claims4 finding 4, row `c4-nokillresend`).
+#[test]
+fn an_end_that_is_not_finished_is_sent_again_and_acked_only_when_gone() {
+    let mut rig = Rig::new();
+    let (claim, _) = rig.claimed("conv-e");
+    let (held, _) = rig.warm("conv-e", claim);
+    let relay = crate::attach::Relay::new();
+    assert!(
+        !super::end_held_within(&mut rig.c, &relay, &held, 0),
+        "no kill sent, not done"
+    );
+    let listed = |c: &mut Client| c.list().unwrap().iter().any(|h| h.id == held.id);
+    assert!(
+        listed(&mut rig.c),
+        "not acked, so the holder still lists it"
+    );
+    // The request goes back in the queue, and the supervisor reads it as the next work.
+    let terminals = crate::terminal::Terminals::new();
+    terminals.requeue_end(held.clone());
+    assert!(matches!(
+        terminals.next(Duration::from_millis(100)),
+        Some(crate::terminal::Req::End(h)) if h == held
+    ));
+    // Asked again with tries, it ends and is acked.
+    let mut done = false;
+    for _ in 0..20 {
+        if super::end_held(&mut rig.c, &relay, &held) {
+            done = true;
+            break;
+        }
+    }
+    assert!(done);
+    assert!(!listed(&mut rig.c), "acked once gone");
+    // A link that breaks under the end leaves it unfinished.
+    let _ = rig.c.send(proto::SHUTDOWN, 0, &[]);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!super::end_held_within(&mut rig.c, &relay, &held, 3));
+}
+
+/// A pass that ends some groups and cannot tell another process from a stranger returns the blocked reason, and the
+/// groups it did end are in the notes (`reconcile` logs them before it returns `Lost::Blocked`).
+#[test]
+fn a_blocked_pass_still_notes_the_groups_it_ended() {
+    let mut rig = Rig::new();
+    let (c1, _) = rig.claimed("conv-g1");
+    let (h1, _) = rig.warm("conv-g1", c1);
+    let (c2, _) = rig.claimed("conv-g2");
+    let (h2, _) = rig.warm("conv-g2", c2);
+    let held = rig.c.list().unwrap();
+    let mut recorded = super::record_procs(&held);
+    assert_eq!(recorded.len(), 2, "{recorded:?}");
+    let (a, b) = (recorded[0].pid, recorded[1].pid);
+    // The second one's start is in the old form: it cannot be told from a stranger, so it blocks.
+    recorded[1].started = "Tue Nov  3 10:00:00 2026".into();
+    let mut notes = Vec::new();
+    let out = super::end_groups(&mut notes, &recorded, Duration::from_secs(10));
+    let stuck = out.unwrap_err();
+    assert!(stuck.contains(&format!("pid {b} is running")), "{stuck}");
+    assert!(
+        notes.contains(&format!("holder: ended the process group of pid {a}")),
+        "{notes:?}"
+    );
+    rig.finish(&[&h1, &h2]);
 }

@@ -563,8 +563,13 @@ pub(crate) static LATE_ENDS: std::sync::atomic::AtomicU64 = std::sync::atomic::A
 /// is then sent again (the caller puts the end back in the queue), never given up on and never acked while a process of
 /// the tree may be alive (Claims4 finding 4, row `c4-nokillresend`).
 fn end_held(client: &mut Client, relay: &Relay, held: &proto::HeldId) -> bool {
+    end_held_within(client, relay, held, 40)
+}
+
+/// [`end_held`] with the number of kills it may send before it gives the end back to its caller.
+fn end_held_within(client: &mut Client, relay: &Relay, held: &proto::HeldId, tries: u32) -> bool {
     relay.forget(held);
-    for _ in 0..40 {
+    for _ in 0..tries {
         match client.kill(held) {
             Ok(proto::KillState::Killing) => std::thread::sleep(Duration::from_millis(50)),
             Ok(_) => {
