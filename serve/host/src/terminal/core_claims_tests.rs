@@ -30,6 +30,7 @@ pub(in crate::terminal) struct FakeClaim {
     pub person: String,
     pub pid: Option<u64>,
     pub started: Option<String>,
+    #[allow(dead_code, reason = "kept for reading a failing test")]
     pub turn: Option<i64>,
 }
 
@@ -48,6 +49,7 @@ pub(in crate::terminal) struct World {
 
 #[derive(Clone)]
 pub(in crate::terminal) struct FakeCore {
+    #[allow(dead_code, reason = "kept for reading a failing test")]
     pub folders: Paths,
     pub world: Arc<Mutex<World>>,
 }

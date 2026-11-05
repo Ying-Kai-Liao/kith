@@ -109,7 +109,7 @@ fn claim_of(v: &Value) -> Claim {
 /// The core's live claim on `sid` (claimed, running or ending), as the row shows it.
 fn live(f: &Paths, sid: &str) -> std::io::Result<Option<Value>> {
     let shown = row(f, "hostclaim.show", &json!({"conversation": sid}))?;
-    Ok(Some(shown["claim"].clone()).filter(|c| c.is_object()))
+    Ok(Some(shown["claim"].clone()).filter(Value::is_object))
 }
 
 /// [`live`] after `settle`: a holder that crashed with its claim still `running` is ended by the core once its pid is
@@ -139,6 +139,7 @@ pub(super) fn holder(f: &Paths, sid: &str) -> Option<Claim> {
 }
 
 /// `claim::take_as` through the core. `cwd` is the run's folder for a turn's session row.
+#[allow(clippy::too_many_arguments, reason = "take_as's inputs and the folder")]
 pub(super) fn take_as(
     f: &Paths,
     state: &Path,
