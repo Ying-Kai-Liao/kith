@@ -1429,6 +1429,57 @@
   ]
  },
  {
+  "name": "pid-malformed-projects",
+  "command": "project-id",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/project-id"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "project-id",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/p"
+   },
+   {
+    "write": "home/.kith/projects.json",
+    "text": "{not json"
+   }
+  ],
+  "run": [
+   [
+    "--list"
+   ],
+   [
+    "{HOME}/p"
+   ],
+   [
+    "--info",
+    "x"
+   ],
+   [
+    "--register",
+    "ok",
+    "{HOME}/p"
+   ]
+  ],
+  "unswitched": "intended difference: a malformed projects.json is one stderr line, exit 1 in Rust; the Python dies with a traceback (stdout and exit code are the same)"
+ },
+ {
   "name": "pid-guest-branch-stays-python",
   "command": "project-id",
   "needs": "rust",
