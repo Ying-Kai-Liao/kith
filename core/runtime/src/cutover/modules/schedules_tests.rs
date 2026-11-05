@@ -672,7 +672,8 @@ fn registered_but_never_stepped_the_module_changes_nothing() {
     assert_eq!(
         crate::cutover::status(&registry(), &w.env)
             .unwrap()
-            .last()
+            .iter()
+            .find(|l| l.starts_with("schedules:"))
             .unwrap(),
         "schedules: not switched"
     );

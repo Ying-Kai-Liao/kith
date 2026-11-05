@@ -1,7 +1,8 @@
-//! M2-17: the owner's `setPersonAccess` with `KITH_CORE_AUTHORITY` on and off, against a real kith-auth and a real core
-//! daemon. On: the ticks are `people.grant` / `people.revoke` in the core, kith-auth's file is not written, a grant made
-//! in the core shows in the host's listing, and a core that can't be reached is an error. Off: kith-auth as before and
-//! the core untouched.
+//! M2-17 / M2-18a: the owner's `setPersonAccess` with `KITH_CORE_AUTHORITY` on and off, against a real kith-auth and a
+//! real core daemon. On: kith-auth is written first (auth.json is the truth until the switch) and the ticks are then
+//! mirrored as `people.grant` / `people.revoke` in the core; a grant made in the core shows in the host's listing; a core
+//! that can't be reached only misses the mirror. A core-only change would close the gate and let a revoked person back
+//! in, so none is made. Off: kith-auth as before and the core untouched.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -10,6 +11,7 @@ use super::authority_props::{Tmp, folders};
 use super::devices::Caller;
 use super::dispatch;
 use super::rig::Rig;
+use super::roles;
 use crate::remote::members::{self, Listed};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -68,6 +70,12 @@ impl Core {
         *TEST_CORE.lock().unwrap() = Some(self.data.clone());
     }
 
+    /// The gate closes: the guard falls back to kith-auth.
+    #[allow(clippy::unused_self)] // kept a method so it reads next to `on`
+    fn off(&self) {
+        *TEST_CORE.lock().unwrap() = None;
+    }
+
     /// What the core says sam holds by their own row: (agent, preset).
     fn rows(&self) -> Vec<(String, String)> {
         let list = self.ask("people.list", json!({"person": "sam"})).expect("list");
@@ -94,16 +102,17 @@ impl Drop for Core {
 }
 
 #[tokio::test]
-async fn with_the_switch_on_the_ticks_go_to_the_core_and_kith_auth_is_not_written() {
+async fn with_the_switch_on_kith_auth_is_written_first_and_the_core_is_told_after() {
     let r = Rig::new().await;
     joined(&r).await;
     let core = Core::start(&r);
     core.on();
 
     let out = call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member"}})).await.unwrap();
-    assert_eq!(core.rows(), [("money".to_owned(), "member".to_owned())]);
+    assert_eq!(core.rows(), [("money".to_owned(), "member".to_owned())], "the core has the grant");
     assert_eq!(out["person"]["agents"], json!({"money": "member"}), "the answer has its old shape");
-    assert!(r.allowed("sam", "house"), "kith-auth still has what the invite gave: it was not written");
+    assert!(!r.allowed("sam", "house"), "kith-auth took house away: the file is written");
+    assert!(r.allowed("sam", "money"));
 
     // Sent twice, the same.
     let again = call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member"}})).await.unwrap();
@@ -117,25 +126,43 @@ async fn with_the_switch_on_the_ticks_go_to_the_core_and_kith_auth_is_not_writte
     assert_eq!(sam["agents"], json!({"house": "guest", "money": "member"}), "{sam}");
     members::refresh_mirror(&r.hub).await;
     assert_eq!(r.hub.store.person("sam").unwrap().agents.len(), 2);
+    core.ask("people.revoke", json!({"person": "sam", "agent": "house"})).unwrap();
 
-    // Unticking takes the rows away in the core; kith-auth is still not written.
+    // Unticking takes the rows away in the file and in the core.
     let none = call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {}})).await.unwrap();
     assert_eq!(none["person"]["agents"], json!({}));
     assert_eq!(core.rows(), Vec::<(String, String)>::new());
-    assert!(r.allowed("sam", "house"));
+    assert!(!r.allowed("sam", "house") && !r.allowed("sam", "money"));
 }
 
 #[tokio::test]
-async fn with_the_switch_on_a_core_that_cannot_be_reached_is_an_error_and_nothing_is_written() {
+async fn with_the_switch_on_a_core_that_cannot_be_reached_only_misses_the_mirror() {
     let r = Rig::new().await;
     joined(&r).await;
     let mut core = Core::start(&r);
     core.on();
     core.stop();
 
-    let err = call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member"}})).await.unwrap_err();
-    assert!(format!("{err:#}").contains("isn't answering"), "{err:#}");
-    assert!(r.allowed("sam", "house") && r.allowed("sam", "money"), "no silent fallback wrote kith-auth");
+    // kith-auth is the truth and was written; the core is behind, which closes the gate (not tested here) and is logged.
+    call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member"}})).await.unwrap();
+    assert!(!r.allowed("sam", "house"), "the file took house away");
+    assert!(r.allowed("sam", "money"));
+}
+
+#[tokio::test]
+async fn a_revoke_through_the_host_cannot_be_undone_by_the_gate_closing() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+
+    call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member"}})).await.unwrap();
+    // The core moved, so the gate closes within seconds and the guard asks kith-auth. Sam is refused there too: the
+    // revoke was made in the file first. (A core-only revoke would leave `house` in the file and let them back in.)
+    core.off();
+    assert!(!roles::may_use("sam", "house").await, "kith-auth no longer has the row");
+    assert!(roles::may_use("sam", "money").await);
+    assert!(!r.allowed("sam", "house"));
 }
 
 #[tokio::test]

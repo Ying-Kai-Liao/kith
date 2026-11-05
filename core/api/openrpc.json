@@ -7180,7 +7180,7 @@
         {
           "name": "person",
           "summary": "Whom the run is for (kith-auth's acting()): their own grant (agent@person) comes first, and another person's profile is refused unless lent, the owner's runs included. Only \"\" skips the check.",
-          "required": false,
+          "required": true,
           "schema": {
             "type": "string"
           }

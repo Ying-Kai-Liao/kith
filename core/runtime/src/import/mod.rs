@@ -59,7 +59,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use crate::db::{self, MIGRATIONS};
+use crate::db::{self, Core, MIGRATIONS};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 use crate::{AuthorityOptions, AuthorityReport};
@@ -231,6 +231,19 @@ pub(crate) fn run(
     source: &dyn ItemSource,
     sink: &mut dyn SecretSink,
 ) -> Result<AuthorityReport> {
+    run_in(layout, ctx, opts, source, sink, None)
+}
+
+/// [`run`] inside a core the caller already holds the lifetime lock of (the cutover framework's `step`). `None` takes
+/// the lock for the step, as `kith migrate --authority` does.
+pub(crate) fn run_in(
+    layout: &Layout,
+    ctx: &Ctx,
+    opts: AuthorityOptions,
+    source: &dyn ItemSource,
+    sink: &mut dyn SecretSink,
+    held: Option<&mut Core>,
+) -> Result<AuthorityReport> {
     let mut rep = AuthorityReport {
         dry_run: opts.dry_run,
         ..AuthorityReport::default()
@@ -264,7 +277,7 @@ pub(crate) fn run(
         dry(layout, opts, &desired, &scratch, &refs, sink, &mut rep)?;
     } else {
         real(
-            layout, ctx, opts, &auth, &sha, &desired, &scratch, &refs, source, sink, &mut rep,
+            layout, ctx, opts, &auth, &sha, &desired, &scratch, &refs, source, sink, held, &mut rep,
         )?;
     }
     Ok(rep)
@@ -355,11 +368,18 @@ fn real(
     refs: &[Reference],
     source: &dyn ItemSource,
     sink: &mut dyn SecretSink,
+    held: Option<&mut Core>,
     rep: &mut AuthorityReport,
 ) -> Result<()> {
     let counts = authority::counts(scratch)?;
     // The lifetime lock for the whole step; this also brings the schema up to date, as `kith migrate` does.
-    let mut core = crate::start_with(layout, MIGRATIONS)?;
+    let mut own;
+    let core = if let Some(c) = held {
+        c
+    } else {
+        own = crate::start_with(layout, MIGRATIONS)?;
+        &mut own
+    };
     let (state, have) = {
         let tx = core.claim_tx()?;
         let state = rows_state(&crate::authority::snapshot(&copy_out(&tx)?)?, desired);
@@ -449,4 +469,84 @@ fn real(
         "done. core.db is a copy: kith-auth and the host still decide from auth.json (the cutover is a later step)".into(),
     );
     Ok(())
+}
+
+/// The people the file says, as a plain map from id to the facts a revoke, a bot or a rename hangs on.
+fn facts(snapshot: &Value) -> std::collections::BTreeMap<String, Value> {
+    snapshot
+        .get("people")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(id, p)| {
+            let get = |k: &str| p.get(k).cloned().unwrap_or(Value::Null);
+            // The time of a revoke is when it was written (the file and the core write it apart), not a fact to compare.
+            let revoked = p.get("revoked").is_some_and(|r| r != &Value::Bool(false));
+            (
+                id.clone(),
+                serde_json::json!({
+                    "owner": get("owner"),
+                    "revoked": revoked,
+                    "bot_of": get("bot_of"),
+                    "was": get("was"),
+                }),
+            )
+        })
+        .collect()
+}
+
+/// The M2-18 same-answer check of the authority module: the differences between auth.json (what `kith-auth` still
+/// decides from) and core.db, empty when the core answers what the file answers.
+///
+/// Two layers. First the facts a decision hangs on, compared row by row so the line names the person: who is revoked,
+/// who is a bot of whom, every `was` and `retired` entry, who is the owner and the order of people (it decides which
+/// row `owner()` and `canonical()` take). Then `check.rs`: for every person x agent x via, `Rules` over the file and
+/// `Authority` over core.db give the same `may`, `resolve`, `resolve_bot` and `cut_off`. A file the import would refuse
+/// (an owner who is also revoked, a domain the rules cannot keep) is a difference too: it cannot have been imported.
+pub(crate) fn same_answer(ctx: &Ctx, conn: &Connection) -> Result<Vec<String>> {
+    let auth = match read_source(&ctx.auth) {
+        Ok(Some((auth, _))) => auth,
+        // No file: the old store answers nothing, so only an empty core agrees.
+        Ok(None) => serde_json::json!({}),
+        Err(Error::Refused(why)) => return Ok(vec![why]),
+        Err(e) => return Err(e),
+    };
+    if let Err(Error::Refused(why)) = authority::refuse_what_it_cannot_keep(&auth) {
+        return Ok(vec![why]);
+    }
+    let want = crate::authority::snapshot(&scratch_db(&auth)?)?;
+    let have = crate::authority::snapshot(conn)?;
+    let (want_people, have_people) = (facts(&want), facts(&have));
+    let mut out = Vec::new();
+    for (id, w) in &want_people {
+        match have_people.get(id) {
+            None => out.push(format!("person {id}: in auth.json, not in core.db")),
+            Some(h) if h != w => out.push(format!("person {id}: auth.json {w}, core.db {h}")),
+            Some(_) => {}
+        }
+    }
+    for id in have_people.keys().filter(|k| !want_people.contains_key(*k)) {
+        out.push(format!("person {id}: in core.db, not in auth.json"));
+    }
+    if people_order(&want) != people_order(&have) {
+        out.push(
+            "people are in a different order (the first owner and the first row of an id win)"
+                .into(),
+        );
+    }
+    let retired = |v: &Value| -> std::collections::BTreeSet<String> {
+        v.get("retired")
+            .and_then(Value::as_object)
+            .map(|o| o.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+    let (rw, rh) = (retired(&want), retired(&have));
+    for id in rw.difference(&rh) {
+        out.push(format!("retired {id}: in auth.json, not in core.db"));
+    }
+    for id in rh.difference(&rw) {
+        out.push(format!("retired {id}: in core.db, not in auth.json"));
+    }
+    out.extend(check::diffs(&auth, conn, ctx)?);
+    Ok(out)
 }
