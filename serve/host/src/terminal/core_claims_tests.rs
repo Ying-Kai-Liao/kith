@@ -102,7 +102,7 @@ impl FakeCore {
     }
 
     /// A host restart: the adapter's memory of its claims is gone, the core's rows are not.
-    pub fn restart(&self, state: &std::path::Path) {
+    pub fn restart(state: &std::path::Path) {
         super::mine().lock().unwrap().retain(|(s, _), _| s != state);
     }
 

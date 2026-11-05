@@ -286,7 +286,7 @@ async fn a_host_restart_between_the_take_and_the_release_does_not_wedge_the_sess
         // The host dies: its file claim goes with the process (nobody gave it back here, so drop it), the core row stays.
         let _ = std::fs::remove_file(claim::path(&r.state(), "s1", false));
         core.world.lock().unwrap().claims[0].state = stale_state.into();
-        core.restart(&r.state());
+        FakeCore::restart(&r.state());
         // The new host takes the session again: the stale claim is ours by what the core stores.
         let next = r.sleeper();
         let taken = claim::take_as(&r.state(), "s1", kind, next, false, person, None);
