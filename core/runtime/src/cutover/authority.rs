@@ -28,8 +28,9 @@
 //! - `people.addBot` / `people.removeBot`: the same transaction must clear the removed id's `agent@<id>` grants and its
 //!   place in profiles' `with` (Python `forget`), else a bot handed over by remove-and-re-add gets its old logins back
 //!   (test `forget_also_clears_grants_and_profiles`, ignored until then).
-//! - `people.removePerson --unused` and the `retired` check: `handles`, `agent@<id>` grants and owned profiles must be
-//!   checked in the same transaction (core.db has no `handles` column and no lane B tables yet).
+//! - `people.removePerson --unused` and the `retired` check: `handles` are kept in core.db now (m0015) and checked, but
+//!   `agent@<id>` grants and owned profiles are read from `secret_grants` / `secret_profiles`, which are empty until lane
+//!   B's import fills them (nothing writes them yet). They must not be switched before that.
 //! - `kith-auth agent-access ... [--rm]`: `people.agentAccess` writes the `agent_access` table (and `merge_back` takes it
 //!   from the core), but only the write half is ported: the listing (`agent-access <agent> [--json]`, with the
 //!   package-declared hosts) has no core row, and the CLI words differ (`domain <host>` there, positional here), so the
@@ -58,9 +59,10 @@ use crate::import::items::{Item, ItemSource, Keychain, OsEnvelope, SecretSink};
 use crate::secrets::{Envelope, keystore};
 
 /// The person keys the core holds (the import's list): `export_back` takes them from core.db and everything else a person
-/// has from the old copy.
+/// has from the old copy. `handles` is one: if the core's row has none, the old copy's must not come back, or an id that
+/// was freed and re-added would give the old person's telegram/slack/kith handles to the new one.
 const PERSON_KEYS: &[&str] = &[
-    "name", "lang", "tz", "owner", "bot_of", "revoked", "was", "provider",
+    "name", "lang", "tz", "owner", "bot_of", "revoked", "was", "provider", "handles",
 ];
 const MEMBER_KEYS: &[&str] = &[
     "preset",

@@ -945,3 +945,32 @@ fn a_removed_persons_id_is_not_free_while_they_still_own_a_profile() {
         "a removed 'lee' still owns github/lee: give the new person another id (e.g. lee-2)"
     );
 }
+
+#[test]
+fn a_database_imported_before_handles_cannot_say_a_person_is_unused() {
+    let mut rig = Rig::new(&world());
+    rig.lines("people.addPerson", &id("hal")).unwrap();
+    // what m0015 leaves on a database that already had people
+    rig.core
+        .conn()
+        .execute(
+            "INSERT INTO authority_settings (key, value) VALUES ('handles_stale', '1')",
+            [],
+        )
+        .unwrap();
+    let said = refused(
+        &mut rig,
+        "people.removePerson",
+        &json!({"id": "hal", "unused": true}),
+    );
+    assert!(said.contains("import again first"), "{said}");
+    rig.core
+        .conn()
+        .execute(
+            "DELETE FROM authority_settings WHERE key = 'handles_stale'",
+            [],
+        )
+        .unwrap();
+    rig.lines("people.removePerson", &json!({"id": "hal", "unused": true}))
+        .unwrap();
+}

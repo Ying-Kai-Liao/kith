@@ -105,11 +105,16 @@ fn agent_rows(auth: &Value, c: &Ctx, person: &str) -> Vec<Value> {
         }
         out.push(json!({
             "agent": agent,
-            "role": str_of(row, "preset").unwrap_or("guest"),
+            "role": field(row, "preset", "guest"),
             "via": via,
         }));
     }
     out
+}
+
+/// Python's `row.get(key, default)`: a key that is there with a null prints null, only a missing key takes the default.
+fn field(row: &Value, key: &str, default: &str) -> Value {
+    row.get(key).cloned().unwrap_or_else(|| json!(default))
 }
 
 /// The array `kith-auth people --json` prints.
@@ -130,10 +135,10 @@ pub(super) fn people_json(auth: &Value, c: &Ctx) -> Value {
             .collect();
         out.push(json!({
             "id": pid,
-            "name": str_of(p, "name").unwrap_or(""),
+            "name": field(p, "name", ""),
             "owner": truthy(p.get("owner")),
             "bot_of": secrets::parent_of(auth, &pid).unwrap_or_default(),
-            "provider": str_of(p, "provider").unwrap_or(""),
+            "provider": field(p, "provider", ""),
             "root": root_of(auth, &pid),
             "revoked": secrets::cut_off(auth, &pid),
             "revoked_at": p.get("revoked").and_then(|r| r.get("at")).cloned().unwrap_or(Value::Null),
@@ -143,4 +148,40 @@ pub(super) fn people_json(auth: &Value, c: &Ctx) -> Value {
         }));
     }
     Value::Array(out)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use kith_kernel::secrets::{Ctx, Sandbox, ServeDir};
+    use serde_json::json;
+
+    use super::people_json;
+
+    // The core's tables cannot hold a null (an imported null is stored as NULL and read back as missing), so this is
+    // checked on the rule itself; the parity test in import/tests.rs covers the missing-key defaults.
+    #[test]
+    fn a_null_name_provider_or_preset_prints_null_and_a_missing_one_the_default() {
+        let root = tempfile::tempdir().unwrap();
+        let c = Ctx {
+            auth: root.path().join("secrets/auth.json"),
+            agents: root.path().join("agents"),
+            kernel: root.path().join("kernel"),
+            person: None,
+            now_ms: 0.0,
+            sandbox: Sandbox::Fixed(false),
+            serve: ServeDir::Fixed(root.path().join("serve")),
+        };
+        let auth = json!({
+            "people": {"a": {"name": null, "provider": null}, "b": {}},
+            "members": {"house": {"a": {"preset": null}, "b": {}}}
+        });
+        let rows = people_json(&auth, &c);
+        assert_eq!(rows[0]["name"], json!(null));
+        assert_eq!(rows[0]["provider"], json!(null));
+        assert_eq!(rows[0]["agents"][0]["role"], json!(null));
+        assert_eq!(rows[1]["name"], "");
+        assert_eq!(rows[1]["provider"], "");
+        assert_eq!(rows[1]["agents"][0]["role"], "guest");
+    }
 }

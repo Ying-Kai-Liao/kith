@@ -718,9 +718,15 @@ fn the_cores_people_are_what_kith_auth_people_json_prints() {
     assert_eq!(ours[0]["handles"], json!({"telegram": "1"}));
     assert_eq!(ours[1]["revoked_at"], 1_700_000_000);
     assert_eq!(ours[2]["revoked"], true, "a bot of a revoked person");
-    match python_people(&f) {
-        Some(theirs) => assert_eq!(ours, theirs),
-        None => eprintln!("no python3: compared with the expectations above only"),
+    if let Some(theirs) = python_people(&f) {
+        assert_eq!(ours, theirs);
+    } else {
+        // CI must not pass on the expectations alone: the parity with kith-auth is the point of the test.
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "no python3 in CI: the parity with `kith-auth people --json` was not compared"
+        );
+        eprintln!("no python3: compared with the expectations above only");
     }
 }
 

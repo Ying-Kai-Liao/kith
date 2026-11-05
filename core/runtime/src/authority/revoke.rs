@@ -122,7 +122,8 @@ pub(super) fn retired(auth: &Value, life: &Life, pid: &str, left: bool) -> Optio
             kept.join(", ")
         ));
     }
-    // `profiles` is read from `secret_profiles` (see `read_profiles`); it is empty until the secrets switch writes it.
+    // `profiles` is read from `secret_profiles` (see `read_profiles`); nothing writes that table until lane B's import
+    // does, so this finds nothing yet and a reused id could inherit logins: `retired` must not be switched before then.
     let mut owned: Vec<&str> = auth
         .get("profiles")
         .and_then(Value::as_object)
@@ -423,9 +424,15 @@ pub(crate) fn person_remove_unused(auth: &mut Value, life: &Life, pid: &str) -> 
     check_id(pid)?;
     tables(auth);
     need_person(auth, pid)?;
+    if truthy(auth.get("handles_stale")) {
+        return die(format!(
+            "cannot check '{pid}' for handles: this database was imported before people.handles existed; import again first"
+        ));
+    }
     // `handles` (people.handles, m0015), `agent@<id>` grants and owned or lent profiles (the lane B tables, as
     // `read_grants` and `read_profiles` give them) are checked here in the same transaction, as `remove_unused` does.
-    // A database imported before m0015 has no handles until it is imported again.
+    // `secret_grants` and `secret_profiles` stay empty until lane B's import fills them (nothing writes them yet), so
+    // `--rm --unused` must not be switched before then (see docs/plans/one-bot-model.md).
     let p = people(auth).get(pid).cloned().unwrap_or(Value::Null);
     let mut has: Vec<String> = ["owner", "bot_of", "handles", "was", "revoked"]
         .into_iter()

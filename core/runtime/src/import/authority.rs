@@ -300,7 +300,7 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value) -> Result<()> {
 pub(super) fn clear(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "DELETE FROM people; DELETE FROM memberships; DELETE FROM presets; DELETE FROM invites; DELETE FROM retired; DELETE FROM agent_access; \
-         DELETE FROM authority_settings WHERE key = 'owner_bots_budget';",
+         DELETE FROM authority_settings WHERE key IN ('owner_bots_budget', 'handles_stale');",
     )?;
     Ok(())
 }
