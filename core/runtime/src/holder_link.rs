@@ -30,7 +30,9 @@ use crate::daemon::Shared;
 use crate::db::{Core, HolderRecord, RecordedProc};
 use crate::error::Result;
 use crate::layout::Layout;
-use crate::terminal::{Placed, Req, STUB_BUSY, SpawnReq, TurnDone, TurnOp, TurnReq};
+use crate::terminal::{
+    END_STUCK_ROUNDS, Placed, Req, STUB_BUSY, SpawnReq, TurnDone, TurnOp, TurnReq,
+};
 use crate::{log, perms};
 
 pub(crate) struct HolderConfig {
@@ -108,6 +110,10 @@ pub(crate) struct HolderState {
     pub error: Option<String>,
     pub binary: Option<PathBuf>,
     pub procs: usize,
+    /// The pids of the processes the connected holder lists (this machine's; empty for a command link).
+    pub pids: Vec<u32>,
+    /// Ends that have not finished: kills the core keeps sending (`kith doctor` says so past a few rounds).
+    pub ending: usize,
 }
 
 fn find_exe(cfg: &HolderConfig) -> Option<PathBuf> {
@@ -237,6 +243,7 @@ fn fail(shared: &Shared, last: &mut String, state: &'static str, why: &str) {
         h.state = state;
         h.error = Some(why.to_owned());
         h.procs = 0;
+        h.pids.clear();
     });
 }
 
@@ -424,6 +431,7 @@ fn connected(
         h.tied_to_starter = tied;
         h.error = None;
         h.procs = count;
+        h.pids = procs.iter().map(|p| p.pid).collect();
     });
     log::note(
         &shared.logs,
@@ -445,19 +453,21 @@ fn connected(
             Some(Req::Spawn(req)) => {
                 serve_spawn(&mut client, relay, &req, &mut seen)?;
                 for held in seen.unfinished.drain(..) {
-                    shared.terminals.requeue_end(held);
+                    shared.terminals.requeue_end(held, 0);
                 }
             }
             Some(Req::End(held)) => {
                 // Until the holder says the tree is gone the kill goes again (Claims4 finding 4): the request goes
                 // back to the queue, and a link that broke under it keeps it for the next connection.
                 if !end_held(&mut client, relay, &held) {
-                    shared.terminals.requeue_end(held);
+                    shared.terminals.requeue_end(held, 0);
+                    shared.set_holder(|h| h.ending = shared.terminals.ending());
                 }
             }
             Some(Req::Turn(req)) => serve_turn(shared, &mut client, &seen, &req),
             None => {}
         }
+        resend_ends(shared, &mut client, relay);
         let pause = if busy { PUMP_WAIT } else { Duration::ZERO };
         pump(&mut client, relay, shared, &mut seen, pause)?;
         if shared.stopping() {
@@ -479,11 +489,39 @@ fn connected(
         let now = record_procs(&held);
         if now != known {
             reconcile(shared, &instance, &now, cfg)?;
-            shared.set_holder(|h| h.procs = now.len());
+            shared.set_holder(|h| {
+                h.procs = now.len();
+                h.pids = now.iter().map(|p| p.pid).collect();
+            });
             known = now;
         }
     }
     Ok(())
+}
+
+/// Sends again the kills whose wait is over. One that is still not gone goes back with one more round; past
+/// [`END_STUCK_ROUNDS`] the core log says so once, and `holder.ending` (in `kith doctor`) counts it.
+fn resend_ends(shared: &Shared, client: &mut Client, relay: &Relay) {
+    let due = shared.terminals.due_ends();
+    if due.is_empty() {
+        return;
+    }
+    for (held, rounds) in due {
+        if end_held(client, relay, &held) {
+            continue;
+        }
+        let rounds = shared.terminals.requeue_end(held.clone(), rounds);
+        if rounds == END_STUCK_ROUNDS {
+            log::note(
+                &shared.logs,
+                &format!(
+                    "holder: process {} of instance {} is still not gone after {rounds} rounds of kills; the core keeps sending them",
+                    held.id, held.instance
+                ),
+            );
+        }
+    }
+    shared.set_holder(|h| h.ending = shared.terminals.ending());
 }
 
 /// How long the supervisor waits for the holder's next frame while viewers are attached.
@@ -1063,6 +1101,9 @@ pub(crate) enum TurnStep {
     Refused(String),
     /// No answer, or the core.db write failed: asking again is safe (a take is `Locked` again for the same claim).
     Lost(String),
+    /// The lock was taken, the claim could not be run, and giving the lock back failed too: the stub may still hold the
+    /// conversation. The supervisor writes it to the core log; the caller ends the claim, which ends the process.
+    LockStuck(String),
 }
 
 /// `claimed -> running` for a warm process (runtime-design section 4, step 3): the resident stub takes the conversation's
@@ -1093,12 +1134,23 @@ pub(crate) fn begin_turn(
             {
                 Ok(Redeemed::Running { again }) => TurnStep::Running { again },
                 Ok(Redeemed::Refused(state)) => {
-                    give_lock_back(client, held, key, claim);
-                    TurnStep::Refused(state)
+                    if give_lock_back(client, held, key, claim) {
+                        TurnStep::Refused(state)
+                    } else {
+                        TurnStep::LockStuck(format!("redeem refused ({state})"))
+                    }
                 }
-                // The write failed: the lock stays and the claim is still `claimed`, so a retried begin is the same
-                // take again and the same redeem again.
-                Err(e) => TurnStep::Lost(e.to_string()),
+                // The write failed. The lock is given back all the same: nothing guarantees a retry (the claim may be
+                // stopped or revoked meanwhile), and a lock held for a claim that is not running locks the conversation
+                // until the stub dies. A retried begin is a new take of the same claim, which the holder answers
+                // `Locked` again, unless the release went through; then it is refused, and the caller ends the claim.
+                Err(e) => {
+                    if give_lock_back(client, held, key, claim) {
+                        TurnStep::Lost(e.to_string())
+                    } else {
+                        TurnStep::LockStuck(format!("redeem failed ({e})"))
+                    }
+                }
             }
         }
         TurnLock::Busy => {
@@ -1149,23 +1201,54 @@ fn lock_went_with_stub(why: &str) -> bool {
 }
 
 /// Releases a lock whose claim could not be redeemed. A lost answer asks again (a repeated release is `NotHeld`).
-fn give_lock_back(client: &mut Client, held: &proto::HeldId, key: &str, claim: u64) {
-    for _ in 0..3 {
-        if release_turn_lock(client, held, key, claim).is_ok() {
-            return;
-        }
+fn give_lock_back(client: &mut Client, held: &proto::HeldId, key: &str, claim: u64) -> bool {
+    (0..3).any(|_| release_turn_lock(client, held, key, claim).is_ok())
+}
+
+/// The process and conversation a turn step runs against. They come from what the core recorded when the holder listed
+/// the process, never from the caller: a request for another conversation's key, or for a claim older than the one the
+/// process was spawned for, is refused (a warm process serves later claims of its conversation, so a newer claim is fine).
+fn turn_target(
+    recorded: Option<(u64, u32, String)>,
+    key: &str,
+    claim: i64,
+) -> std::result::Result<(u32, String), TurnStep> {
+    let Some((spawned, pid, conv)) = recorded else {
+        return Err(TurnStep::Refused(
+            "the holder does not list that process".into(),
+        ));
+    };
+    if conv != key {
+        return Err(TurnStep::Refused(format!(
+            "that process is conversation {conv}'s, not {key}'s"
+        )));
     }
+    if u64::try_from(claim).is_ok_and(|c| c < spawned) {
+        return Err(TurnStep::Refused(
+            "that claim is older than the process's own".into(),
+        ));
+    }
+    Ok((pid, conv))
 }
 
 /// Runs one turn step the caller queued.
 fn serve_turn(shared: &Shared, client: &mut Client, seen: &Known, req: &TurnReq) {
-    let step = match seen.of(req.held.id) {
-        None => TurnStep::Refused("the holder does not list that process".into()),
-        Some((_, pid, _)) => match req.op {
-            TurnOp::Begin => begin_turn(client, shared, &req.held, &req.key, req.claim, pid),
-            TurnOp::Finish => finish_turn(client, &req.held, &req.key, req.claim),
+    let step = match turn_target(seen.of(req.held.id), &req.key, req.claim) {
+        Err(refused) => refused,
+        Ok((pid, conv)) => match req.op {
+            TurnOp::Begin => begin_turn(client, shared, &req.held, &conv, req.claim, pid),
+            TurnOp::Finish => finish_turn(client, &req.held, &conv, req.claim),
         },
     };
+    if let TurnStep::LockStuck(why) = &step {
+        log::note(
+            &shared.logs,
+            &format!(
+                "holder: the lock of {} may still be held by process {} ({why}); end its claim to end the process",
+                req.key, req.held.id
+            ),
+        );
+    }
     let _ = req.reply.send(TurnDone(step));
 }
 
@@ -1176,6 +1259,8 @@ fn serve_turn(shared: &Shared, client: &mut Client, seen: &Known, req: &TurnReq)
 pub(crate) fn forget_proc(
     core: &mut Core,
     params: &serde_json::Value,
+    blocked: bool,
+    live: &[u32],
 ) -> Result<serde_json::Value> {
     let pid = params
         .get("pid")
@@ -1184,6 +1269,13 @@ pub(crate) fn forget_proc(
         .ok_or_else(|| {
             crate::error::Error::BadParams("kith-core: holder.forget needs a pid".into())
         })?;
+    // A process the connected holder still lists is its own: forgetting it would leave the next reconcile unable to end
+    // it. Only a holder the core calls `blocked` (it cannot tell its old processes from strangers) may have any dropped.
+    if live.contains(&pid) && !blocked {
+        return Err(crate::error::Error::Refused(format!(
+            "kith-core: pid {pid} is a process the holder lists now; holder.forget is for a blocked holder's old processes"
+        )));
+    }
     let mut record = core.holder_record()?;
     let before = record.procs.len();
     record.procs.retain(|p| p.pid != pid);

@@ -470,17 +470,17 @@ fn forget_drops_a_recorded_process_and_asked_twice_changes_nothing() {
     };
     core.save_holder_record(&rec).unwrap();
     assert_eq!(
-        forget_proc(&mut core, &serde_json::json!({"pid": 11})).unwrap(),
+        forget_proc(&mut core, &serde_json::json!({"pid": 11}), false, &[]).unwrap(),
         serde_json::json!({"forgot": true})
     );
     let after = core.holder_record().unwrap();
     assert_eq!(after.instance.as_deref(), Some("i1"));
     assert_eq!(after.procs.iter().map(|p| p.pid).collect::<Vec<_>>(), [12]);
     assert_eq!(
-        forget_proc(&mut core, &serde_json::json!({"pid": 11})).unwrap(),
+        forget_proc(&mut core, &serde_json::json!({"pid": 11}), false, &[]).unwrap(),
         serde_json::json!({"forgot": false})
     );
-    assert!(forget_proc(&mut core, &serde_json::json!({})).is_err());
+    assert!(forget_proc(&mut core, &serde_json::json!({}), false, &[]).is_err());
 }
 
 // --- the kill that is sent again, and the groups a blocked pass ended ---------------------------------------------------
@@ -503,13 +503,15 @@ fn an_end_that_is_not_finished_is_sent_again_and_acked_only_when_gone() {
         listed(&mut rig.c),
         "not acked, so the holder still lists it"
     );
-    // The request goes back in the queue, and the supervisor reads it as the next work.
+    // The request waits a growing time and then comes up again; the wait is not skipped.
     let terminals = crate::terminal::Terminals::new();
-    terminals.requeue_end(held.clone());
-    assert!(matches!(
-        terminals.next(Duration::from_millis(100)),
-        Some(crate::terminal::Req::End(h)) if h == held
-    ));
+    assert_eq!(terminals.requeue_end(held.clone(), 0), 1);
+    assert_eq!(terminals.ending(), 1);
+    assert!(terminals.due_ends().is_empty(), "not before its wait");
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(terminals.due_ends(), vec![(held.clone(), 1)]);
+    assert_eq!(terminals.ending(), 0);
+    assert_eq!(terminals.requeue_end(held.clone(), 1), 2, "rounds count up");
     // Asked again with tries, it ends and is acked.
     let mut done = false;
     for _ in 0..20 {
@@ -550,4 +552,105 @@ fn a_blocked_pass_still_notes_the_groups_it_ended() {
         "{notes:?}"
     );
     rig.finish(&[&h1, &h2]);
+}
+
+#[test]
+fn forget_refuses_a_process_the_live_holder_lists_unless_the_holder_is_blocked() {
+    let (_t, m) = machine();
+    let mut core = start_with(&Layout::new(&m), MIGRATIONS).unwrap();
+    core.save_holder_record(&crate::db::HolderRecord {
+        instance: Some("i1".into()),
+        procs: vec![RecordedProc {
+            pid: 21,
+            started: "e1".into(),
+            conv: "c".into(),
+        }],
+    })
+    .unwrap();
+    let pid = serde_json::json!({"pid": 21});
+    assert!(forget_proc(&mut core, &pid, false, &[21]).is_err());
+    assert_eq!(
+        core.holder_record().unwrap().procs.len(),
+        1,
+        "nothing dropped"
+    );
+    assert_eq!(
+        forget_proc(&mut core, &pid, true, &[21]).unwrap(),
+        serde_json::json!({"forgot": true})
+    );
+}
+
+#[test]
+fn only_the_owner_may_forget_a_holder_process() {
+    let p = serde_json::json!({"pid": 21});
+    assert!(crate::call::check(kith_api::Principal::Owner, "holder.forget", &p).is_ok());
+    for who in [
+        kith_api::Principal::Member,
+        kith_api::Principal::Bot,
+        kith_api::Principal::RunToken,
+    ] {
+        assert!(
+            matches!(
+                crate::call::check(who, "holder.forget", &p),
+                Err(crate::error::Error::NotAllowed(_))
+            ),
+            "refused for another principal"
+        );
+    }
+}
+
+#[test]
+fn a_turn_step_runs_only_against_the_recorded_conversation_and_not_an_older_claim() {
+    use super::turn_target;
+    let seen = Some((10, 77, "conv-a".to_string()));
+    assert_eq!(
+        turn_target(seen.clone(), "conv-a", 10).unwrap(),
+        (77, "conv-a".into())
+    );
+    assert!(
+        turn_target(seen.clone(), "conv-a", 12).is_ok(),
+        "a later turn of the same process"
+    );
+    assert!(matches!(
+        turn_target(seen.clone(), "conv-b", 12),
+        Err(TurnStep::Refused(_))
+    ));
+    assert!(matches!(
+        turn_target(seen, "conv-a", 9),
+        Err(TurnStep::Refused(_))
+    ));
+    assert!(matches!(
+        turn_target(None, "conv-a", 12),
+        Err(TurnStep::Refused(_))
+    ));
+}
+
+/// A core.db error after the take gives the lock back too: nothing guarantees a retry, and a lock held for a claim that
+/// is not running locks the conversation until the stub dies.
+#[test]
+fn a_redeem_error_after_the_take_gives_the_lock_back() {
+    let mut rig = Rig::new();
+    let (claim, _) = rig.claimed("conv-k");
+    let (held, pid) = rig.warm("conv-k", claim);
+    // A newer core took over: every claim transaction of this one is refused (`StaleGeneration`).
+    rig.core
+        .lock()
+        .unwrap()
+        .conn()
+        .execute(
+            "UPDATE counters SET value = value + 1 WHERE name = 'generation'",
+            [],
+        )
+        .unwrap();
+    let step = begin_turn(&mut rig.c, &rig.core, &held, "conv-k", claim, pid);
+    assert!(matches!(step, TurnStep::Lost(_)), "{step:?}");
+    let next = take_turn_lock(
+        &mut rig.c,
+        &held,
+        "conv-k",
+        u64::try_from(claim).unwrap() + 1,
+    )
+    .unwrap();
+    assert_eq!(next.result, TurnLock::Locked, "given back: {next:?}");
+    rig.finish(&[&held]);
 }

@@ -129,6 +129,11 @@ const SPAWN_WAIT: Duration = Duration::from_secs(20);
 const ANSWER_WAIT: Duration = Duration::from_secs(SPAWN_WAIT.as_secs() + 15);
 /// How long the core watches a new process for the stub's "busy" exit (code 75) before it calls the terminal open.
 const BUSY_WAIT: Duration = Duration::from_millis(600);
+/// The wait before the first re-send of a kill that did not finish, and its most.
+const END_BACKOFF: Duration = Duration::from_millis(500);
+const END_BACKOFF_MAX: Duration = Duration::from_secs(10);
+/// The round at which an end that will not finish is written to the core log and shown by `kith doctor`.
+pub(crate) const END_STUCK_ROUNDS: u32 = 6;
 /// The stub's exit code for "a writer already holds this key" (core/stub).
 pub(crate) const STUB_BUSY: i32 = 75;
 
@@ -385,6 +390,8 @@ pub(crate) struct Terminals {
     queue: Sender<Req>,
     inbox: Mutex<Receiver<Req>>,
     stub: Mutex<Option<PathBuf>>,
+    /// Ends that did not finish, with their rounds so far and when to send the kill again.
+    retries: Mutex<Vec<(HeldId, u32, Instant)>>,
     pub(crate) tickets: Arc<Tickets>,
     /// The attach relay: which held terminals there are and who is attached to them.
     pub(crate) relay: Arc<Relay>,
@@ -405,6 +412,7 @@ impl Terminals {
             queue,
             inbox: Mutex::new(inbox),
             stub: Mutex::new(None),
+            retries: Mutex::new(Vec::new()),
             tickets: Arc::default(),
             relay: Arc::new(Relay::new()),
             #[cfg(test)]
@@ -468,9 +476,38 @@ impl Terminals {
         self.tickets.redeem(ticket)
     }
 
-    /// Puts an end back in the queue: the kill goes again until the holder says the tree is gone.
-    pub(crate) fn requeue_end(&self, held: HeldId) {
-        let _ = self.queue.send(Req::End(held));
+    /// An end that is not finished: the kill goes again until the holder says the tree is gone, but after a wait that
+    /// grows with every round (half a second a round, ten at most), so a tree that will not die cannot keep the
+    /// supervisor out of its pump and its other requests. `rounds` is how many rounds it has had; the new count comes
+    /// back.
+    pub(crate) fn requeue_end(&self, held: HeldId, rounds: u32) -> u32 {
+        let rounds = rounds.saturating_add(1);
+        let wait = END_BACKOFF.saturating_mul(rounds).min(END_BACKOFF_MAX);
+        self.retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((held, rounds, Instant::now() + wait));
+        rounds
+    }
+
+    /// The ends whose wait is over, taken out of the list (a supervisor that finds one still unfinished puts it back).
+    pub(crate) fn due_ends(&self) -> Vec<(HeldId, u32)> {
+        let mut list = self
+            .retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        let (due, wait): (Vec<_>, Vec<_>) = list.drain(..).partition(|(_, _, at)| *at <= now);
+        *list = wait;
+        due.into_iter().map(|(h, r, _)| (h, r)).collect()
+    }
+
+    /// How many ends are waiting for another round (kept for `kith doctor`).
+    pub(crate) fn ending(&self) -> usize {
+        self.retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     /// Runs a warm turn's lock step in the supervisor and waits for its answer. A link that is down answers `Lost` (the
@@ -868,6 +905,7 @@ struct Wire {
 fn wire_claim(shared: &Shared, session: &str) -> Result<Wire> {
     let now = now_ms();
     shared.with_core(|core| {
+        seed_claim_counter(core, now)?;
         let seen = claims::revoke_epoch(core, OWNER)?;
         let req = NewClaim {
             conversation: session,
@@ -893,6 +931,47 @@ fn wire_claim(shared: &Shared, session: &str) -> Result<Wire> {
             Err(e) => Err(e),
         }
     })
+}
+
+/// `meta` key: the claim counter was moved above the epoch-ms ids older cores sent the holder.
+#[cfg(unix)]
+const SEEDED: &str = "claim_counter_seeded_ms";
+
+/// Until this core, a terminal's spawn carried epoch milliseconds, and a holder that outlived the old core keeps the
+/// highest claim it saw per conversation and answers every lower one `Stale` for ever. So the first time this core
+/// opens a terminal it moves `counters.claim_id` up to the clock, once (a marker in `meta`); the ids then go on from
+/// there, one at a time. No row is rewritten and no migration is needed: the counter only has to be higher than any
+/// claim id there is.
+#[cfg(unix)]
+fn seed_claim_counter(core: &mut Core, now: i64) -> Result<()> {
+    let tx = core.claim_tx()?;
+    let done: Option<String> = tx
+        .query_row("SELECT value FROM meta WHERE key = ?1", [SEEDED], |r| {
+            r.get(0)
+        })
+        .ok();
+    if done.is_none() {
+        tx.execute(
+            "UPDATE counters SET value = MAX(value, ?1) WHERE name = 'claim_id'",
+            [now],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            rusqlite::params![SEEDED, now.to_string()],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Tests: the id the spawn would carry for a session that is no conversation (the fallback), seeding included.
+#[cfg(all(test, unix))]
+pub(crate) fn wire_claim_for_test(core: &mut Core, now: i64) -> Result<i64> {
+    seed_claim_counter(core, now)?;
+    let tx = core.claim_tx()?;
+    let id = Core::next_claim_id(&tx)?;
+    tx.commit()?;
+    Ok(id)
 }
 
 struct OpenParams {

@@ -681,6 +681,48 @@ echo $$ > "$lock/$key.pid"
         );
     }
 
+    /// The claim counter starts at 0, and older cores sent the holder epoch milliseconds: a holder that outlived one
+    /// answers every lower claim `Stale`. The first terminal of this core moves the counter up to the clock, once.
+    #[test]
+    fn the_first_terminal_moves_the_claim_counter_above_the_epoch_ms_ids_once() {
+        let rig = Rig::new(RUNNING);
+        let now = crate::holder_link::now_ms();
+        let wire = |rig: &Rig| {
+            rig.d
+                .shared()
+                .with_core(|c| {
+                    let w = super::super::wire_claim_for_test(c, now)?;
+                    Ok(w)
+                })
+                .unwrap()
+        };
+        let first = wire(&rig);
+        assert!(first >= now, "{first} < {now}");
+        assert_eq!(wire(&rig), first + 1, "then one at a time, not re-seeded");
+        // Another core's later ids stay above too: the marker keeps a lower clock from moving it back.
+        assert_eq!(wire(&rig), first + 2);
+    }
+
+    /// A refused core.db claim (the session is no core conversation) never refuses the terminal, and no row is made.
+    #[test]
+    fn a_refused_core_claim_still_opens_the_terminal_with_a_counter_id_and_no_row() {
+        let rig = Rig::new(RUNNING);
+        let a = answered(open(&rig.m, "sess-f", &["sh", "-c", "sleep 2"], &plain()));
+        assert_eq!(a["status"], "open", "{a}");
+        assert_eq!(
+            scalar(&rig, "SELECT CAST(COUNT(*) AS TEXT) FROM claims"),
+            "0"
+        );
+        // The counter was used and seeded.
+        let counter: i64 = scalar(
+            &rig,
+            "SELECT CAST(value AS TEXT) FROM counters WHERE name = 'claim_id'",
+        )
+        .parse()
+        .unwrap();
+        assert!(counter > 1_000_000_000_000, "{counter}");
+    }
+
     #[test]
     fn a_stub_that_says_busy_gives_the_claim_back() {
         let rig = Rig::new("exit 75");

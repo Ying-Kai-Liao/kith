@@ -181,7 +181,14 @@ impl Shared {
             return Ok(answer);
         }
         if method == "holder.forget" {
-            let answer = self.with_core(|c| holder_link::forget_proc(c, params))?;
+            let (blocked, live) = {
+                let h = self
+                    .holder
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                (h.state == "blocked", h.pids.clone())
+            };
+            let answer = self.with_core(|c| holder_link::forget_proc(c, params, blocked, &live))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
@@ -349,6 +356,7 @@ fn holder_json(h: &HolderState) -> Value {
         "pid": h.pid,
         "tied_to_starter": h.tied_to_starter,
         "processes": h.procs,
+        "ending": h.ending,
         "binary": h.binary,
         "error": h.error,
     })
