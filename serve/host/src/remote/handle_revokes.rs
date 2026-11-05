@@ -44,8 +44,22 @@ fn valid(handle: &str) -> bool {
         })
 }
 
-/// The owner revoked or restored a person known only by handle, here: stamped, kept, and sent to the paired computers.
-pub fn changed(hub: &Arc<Hub>, who: &AuthPerson, revoked: bool) {
+/// One writer of a handle-only person's revoked state and its stamp at a time, from the read of kith-auth to the stamp:
+/// every exchange and the owner's own change. Without it an exchange decides on a stale read and keeps a stamp that
+/// disagrees with kith-auth for good (architect's HandleExchange model, fix A).
+static EXCHANGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The owner revoked or restored `who`, a person known only by handle, here: kith-auth's state, then the stamp, under
+/// the exchange lock.
+pub async fn owner_change(hub: &Arc<Hub>, bin: &std::path::Path, who: &AuthPerson, revoked: bool) -> Result<()> {
+    let _one = EXCHANGE.lock().await;
+    local_revoke(hub, bin, &who.id, revoked).await?;
+    changed(hub, who, revoked);
+    Ok(())
+}
+
+/// Stamps the owner's change of a person known only by handle, keeps it, and sends it to the paired computers.
+fn changed(hub: &Arc<Hub>, who: &AuthPerson, revoked: bool) {
     for handle in handles_of(who) {
         // Newer than what is kept even if this clock runs behind it, or the write is ignored and the other computers
         // never hear of the change.
@@ -70,7 +84,8 @@ pub fn changed(hub: &Arc<Hub>, who: &AuthPerson, revoked: bool) {
 pub async fn exchange_in(hub: &Arc<Hub>, sent: Vec<HandleRevoke>) -> Result<Vec<HandleRevoke>> {
     // Without kith-auth nothing can be applied, so nothing is kept: the sender asks again.
     let Some(bin) = account::bin().await else { return hub.store.handle_revokes() };
-    let people = super::members::auth_people(&bin).await?;
+    let _one = EXCHANGE.lock().await;
+    let mut people = super::members::auth_people(&bin).await?;
     // A stamp from the future would win over every real change after it.
     let latest = now_ms() + SKEW_MS;
     for entry in sent.into_iter().filter(|e| valid(&e.handle) && e.at <= latest) {
@@ -83,16 +98,22 @@ pub async fn exchange_in(hub: &Arc<Hub>, sent: Vec<HandleRevoke>) -> Result<Vec<
         if entry.at <= known {
             continue;
         }
-        for p in mine.into_iter().filter(|p| p.revoked_at.is_some() != entry.revoked) {
+        let apply: Vec<String> =
+            mine.into_iter().filter(|p| p.revoked_at.is_some() != entry.revoked).map(|p| p.id.clone()).collect();
+        for id in &apply {
             tracing::info!(
-                person = p.id,
+                person = id,
                 revoked = entry.revoked,
                 "another of the owner's computers (Mac link) changed this person"
             );
-            local_revoke(hub, &bin, &p.id, entry.revoked).await?;
+            local_revoke(hub, &bin, id, entry.revoked).await?;
         }
         // Kept once applied: a failed apply leaves the stamp unkept, so the next exchange tries again.
         hub.store.put_handle_revoke(&entry)?;
+        if !apply.is_empty() {
+            // The next entry (another handle of the same person) decides from kith-auth as it is now.
+            people = super::members::auth_people(&bin).await?;
+        }
     }
     hub.store.handle_revokes()
 }
