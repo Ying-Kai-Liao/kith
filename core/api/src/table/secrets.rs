@@ -78,7 +78,7 @@ pub(super) const ROWS: &[Method] = &[
                 "[string]",
                 "The variables the service declares as secrets (the core has no service specs). None declared: the grant and person rule still apply and the profile is returned, but no key is read.",
             ),
-            caller(
+            caller_required(
                 "person",
                 "string",
                 "Whom the run is for (kith-auth's acting()): their own grant (agent@person) comes first, and another person's profile is refused unless lent, the owner's runs included. Only \"\" skips the check.",
