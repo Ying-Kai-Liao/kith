@@ -201,6 +201,37 @@ fn the_owner_a_bot_and_nobody_cannot_be_suspended() {
 }
 
 #[test]
+fn undo_on_an_owner_who_was_revoked_by_old_data_clears_it_and_the_revoke_stays_refused() {
+    let mut auth = world();
+    auth["people"]["kai"]["revoked"] = json!({"at": 1});
+    let mut rig = Rig::new(&auth);
+    assert_eq!(
+        refused(&mut rig, "people.suspend", &id("kai")),
+        "kai is the owner: the owner can not be revoked"
+    );
+    let said = rig.lines("people.undo", &id("kai")).unwrap();
+    assert!(
+        said[0].starts_with("kai: access back as it was"),
+        "{said:?}"
+    );
+    let t = rig.tables();
+    assert!(t["people"]["kai"].get("revoked").is_none());
+    assert_eq!(t["people"]["kai"]["owner"], json!(true));
+    // nothing else moved: undo widens nothing
+    let mut want = world();
+    want["people"]["kai"]["revoked"] = json!(null);
+    want["people"]["kai"]
+        .as_object_mut()
+        .unwrap()
+        .remove("revoked");
+    assert_eq!(t["people"], want["people"]);
+    // an owner who is not revoked: undo changes nothing
+    let before = rig.tables();
+    rig.lines("people.undo", &id("kai")).unwrap();
+    assert_eq!(rig.tables(), before);
+}
+
+#[test]
 fn while_suspended_the_owner_can_take_a_row_away_but_not_give_one_and_undo_keeps_the_change() {
     let mut rig = Rig::new(&world());
     rig.lines("people.suspend", &id("sam")).unwrap();

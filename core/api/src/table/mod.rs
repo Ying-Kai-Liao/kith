@@ -94,7 +94,7 @@ const PARTS: &[&[Method]] = &[
     children::ROWS,
     // M3-9a: account state and `pick`, read only.
     accounts::ROWS,
-    // M3-10b3: the holder's record in core.db.
+    // M3-10b3: the holder's record in the core.
     holder::ROWS,
 ];
 

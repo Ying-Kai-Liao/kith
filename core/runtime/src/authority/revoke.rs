@@ -489,7 +489,8 @@ pub(crate) fn person_suspend(
     tables(auth);
     let pid = secrets::canonical(auth, pid);
     need_person(auth, &pid)?;
-    if secrets::is_owner(auth, &pid) {
+    // Only the revoke is refused: undo widens nothing (the owner has everything) and clears an old owner-and-revoked row.
+    if revoke && secrets::is_owner(auth, &pid) {
         return die(format!("{pid} is the owner: the owner can not be revoked"));
     }
     if is_bot(auth, &pid) {

@@ -1,4 +1,4 @@
-//! The holder's record in core.db (M3-10b3). Experimental, owner only, not in `released.json`.
+//! The holder's record in the core (M3-10b3). Experimental, owner only, not in `released.json`.
 //!
 //! The core notes the processes the holder lists (`meta.holder_procs`: pid, start stamp, conversation) so that, when a
 //! new holder instance meets an old one's record, it ends only the processes it can tell from a stranger's. A record
@@ -10,7 +10,7 @@ use super::build::*;
 
 pub(super) const ROWS: &[Method] = &[row(
     "holder.forget",
-    "Drops a process from the holder record in core.db (for a `blocked` holder whose old process cannot be told from a stranger). Nothing is signalled. Answers `{forgot}`: whether the pid was in the record; asked again it is false.",
+    "Drops a process from the holder record (for a `blocked` holder whose old process cannot be told from a stranger). Nothing is signalled. Answers `{forgot}`: whether the pid was in the record; asked again it is false.",
     &[pos("pid", "int", true, "The recorded process's pid.")],
     "json",
     &["holder", "forget"],
