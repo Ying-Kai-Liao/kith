@@ -72,6 +72,19 @@ files with one masked name are an error), and `unswitched` (text saying why the 
 with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
 red until the verb exists. The Python replay always runs every case.
 
+### project-id (M5-2)
+
+`golden/project-id.json` (also in `corpus/`) freezes `kernel/bin/project-id` before `kith kernel project-id` replaces it: 19 cases of the
+bare form (git and non-git folders, paths with spaces and non-ASCII names, symlinks to a folder and to a repo, a remote written five
+ways, a worktree and a detached HEAD, nested aliases with the longest winning, a remote beating a path), `--list`, `--info`,
+`--children [--all]`, `--where`, `--root`, `--register` (parent, home, bare `--home`, existing entries keeping their fields) and
+its usage errors, with loops and a missing parent in the seeded `projects.json`. They run the Python as `program.old` and
+`kith kernel project-id` as `program.new`, so the Rust side is compared without the verb being switched (no `core-switched.txt` line).
+A malformed `projects.json` (`pid-malformed-projects`) is `unswitched` too: Python tracebacks, Rust prints one stderr line, both exit 1; JSON that Python accepts and serde rejects (`NaN`, `Infinity`) falls under the same difference (an intended difference; the golden replay does not read intended.json).
+Not ported: the guest branch (`KITH_RUN_TOKEN` and `KITH_RUN_SOCKET` set: the host answers over the run socket). The core refuses there
+with exit 2, so `pid-guest-branch-stays-python` is `unswitched` (Python replay only). Whoever switches the verb keeps guest calls on
+Python (`runauth.rs` `project_args` and the run-tokens property tests ask the Python).
+
 ### Package resolve (M5-3)
 
 `golden/pkg-resolve.json` freezes `kith-pkg resolve` (the launch path: `bin/kith` asks it for the pinned package dir) as the Python
