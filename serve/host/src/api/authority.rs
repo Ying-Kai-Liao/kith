@@ -400,9 +400,25 @@ pub fn start_gate() {
 pub fn guard_on_core() -> bool {
     #[cfg(test)]
     if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
-        return true;
+        return !TEST_GATE_SHUT.load(std::sync::atomic::Ordering::SeqCst);
     }
     core_selected()
+}
+
+/// A test shuts the gate while its core stays up and opted in (what a write by kith-auth does for up to `GATE_EVERY`).
+#[cfg(test)]
+pub static TEST_GATE_SHUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a write to kith-auth is mirrored to the core: the opt-in (`KITH_CORE_AUTHORITY=1`), not the gate. The first
+/// write moves the fingerprint and closes the gate for up to `GATE_EVERY`, so a second change in that window would
+/// skip the mirror and leave the gate closed until `core-migrate --force`. A mirror into a core that differs only
+/// brings it closer to the file. Also on while a test has given the guard a core (`TEST_CORE`).
+pub fn mirrors_to_core() -> bool {
+    #[cfg(test)]
+    if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
+        return true;
+    }
+    opted_in()
 }
 
 /// The core refused the call itself: the rules said no (its words, without the `authority: ` the core puts in front).

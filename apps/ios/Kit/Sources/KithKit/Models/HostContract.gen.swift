@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "dcf2c9f6f7731c0787e76c2f7f47923ef67acab12089707b2eb1e34b1fdb6c6e"
+    public static let sha256 = "dedcd2fcbc69c81987fed8b235c6f2b63ae5c0c78a9e1b659f14946005148647"
 }
 
 extension HostContract {
@@ -864,12 +864,14 @@ extension HostContract {
         }
     }
 
-    /// revoked is false when it already was.
+    /// revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host.
     public struct Revoked: Codable, Hashable, Sendable {
         public var revoked: Bool
+        public var coreUpdated: Bool?
 
-        public init(revoked: Bool) {
+        public init(revoked: Bool, coreUpdated: Bool? = nil) {
             self.revoked = revoked
+            self.coreUpdated = coreUpdated
         }
     }
 

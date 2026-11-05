@@ -37,8 +37,9 @@
 //! they are why `export_back` takes `profiles` and `grants` from the old copy and not from the core.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use kith_kernel::secrets::Ctx;
 use rusqlite::Connection;
@@ -47,7 +48,7 @@ use sha2::{Digest as _, Sha256};
 use zeroize::{Zeroize as _, Zeroizing};
 
 use super::secrets_back::{self, OsStore};
-use super::{Env, Module, Opts, tombstone};
+use super::{Env, Module, Opts, SourceLock, tombstone};
 use crate::AuthorityOptions;
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -163,7 +164,118 @@ impl OsStore for KeychainStore {
     }
 }
 
+/// How long a step or a rollback waits for `auth.json.lock` (a `kith-auth` command holds it for milliseconds).
+const LOCK_WAIT: Duration = Duration::from_secs(30);
+
+/// The old vault's records in serve.db's `kv` table: the value starts with this (the key is the slot's name).
+const OLD_VAULT_PREFIX: &str = "vault:v1:";
+
+/// Why a step is refused until M2-18 lifts it (the architect's gate list for #793: 1, 2, 4-8).
+const STEP_REFUSAL: &str = "not stepped: the M2-18 gates are open: kith-auth does not read the tombstone or answer from the core, and the host does not decide from the gate once switched (1, 2); addBot/removeBot and removePerson --unused do not clear grants, profiles and handles in one transaction (4, 5); no core writer for agent_access, profiles, grants or env (6, 7); the revoke bridge (8). `step authority --dry-run` and `check authority` work now";
+
+/// `auth.json.lock`, held (flock, exclusive): the lock `kith-auth` and `kith_kernel::secrets` take for a read-modify-write.
+/// Dropping it lets the lock go.
+struct AuthLock(#[allow(dead_code, reason = "held for its flock")] std::fs::File);
+
+fn hold_auth_lock(auth: &Path, wait: Duration) -> Result<AuthLock> {
+    use fs2::FileExt as _;
+    let io = |e: std::io::Error| Error::Io(format!("authority: {}: {e}", auth.display()));
+    if let Some(parent) = auth.parent() {
+        std::fs::create_dir_all(parent).map_err(io)?;
+    }
+    let mut name = auth.file_name().unwrap_or_default().to_os_string();
+    name.push(".lock");
+    let file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(auth.with_file_name(name))
+        .map_err(io)?;
+    let deadline = Instant::now() + wait;
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => return Ok(AuthLock(file)),
+            Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                if Instant::now() >= deadline {
+                    return Err(Error::Refused(format!(
+                        "authority: auth.json.lock is held by another writer (a kith-auth command?) for more than {} s; nothing was changed, run it again",
+                        wait.as_secs().max(1)
+                    )));
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(e) => return Err(io(e)),
+        }
+    }
+}
+
+/// The SHA-256 of the file's bytes; "missing" when it does not exist.
+fn sha_of(path: &Path) -> Result<String> {
+    use std::fmt::Write as _;
+    match std::fs::read(path) {
+        Ok(b) => Ok(Sha256::digest(&b).iter().fold(String::new(), |mut s, x| {
+            let _ = write!(s, "{x:02x}");
+            s
+        })),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("missing".to_owned()),
+        Err(e) => Err(Error::Io(format!("authority: {}: {e}", path.display()))),
+    }
+}
+
+const CHANGED: &str =
+    "authority: auth.json changed during the step; nothing was tombstoned. Run it again";
+
+/// The slots of serve.db's old vault records that the core's envelope does not hold yet. The host moves them at its first
+/// unlock (M2-7) and leaves the old rows in place, so a row counts only while its slot is missing from the envelope; an
+/// old-format record whose key cannot be read stays unmoved for good. `None`: there is no serve.db (or no `kv` table).
+fn unmoved_vault_rows(ctx: &Ctx, core: &Connection) -> Result<Option<Vec<String>>> {
+    let db = serve_db(ctx);
+    if !db.exists() {
+        return Ok(None);
+    }
+    let io = |e: rusqlite::Error| {
+        Error::Refused(format!(
+            "authority: serve.db cannot be read to look for credential records that have not moved: {e}"
+        ))
+    };
+    let serve =
+        Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(io)?;
+    serve.busy_timeout(Duration::from_secs(2)).map_err(io)?;
+    let slots: Vec<String> =
+        match serve.prepare("SELECT k FROM kv WHERE substr(v, 1, length(?1)) = ?1 ORDER BY k") {
+            Ok(mut st) => st
+                .query_map([OLD_VAULT_PREFIX], |r| r.get(0))
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<String>>>())
+                .map_err(io)?,
+            Err(rusqlite::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => {
+                return Ok(None);
+            }
+            Err(e) => return Err(io(e)),
+        };
+    let sealed: BTreeSet<String> = Envelope::list(core)?.into_iter().collect();
+    Ok(Some(
+        slots.into_iter().filter(|s| !sealed.contains(s)).collect(),
+    ))
+}
+
+/// Refuses while serve.db holds old vault records the envelope lacks: the import does not carry them, and a switch over
+/// them would leave the host's credentials behind.
+fn refuse_unmoved_vault(ctx: &Ctx, core: &Connection) -> Result<()> {
+    match unmoved_vault_rows(ctx, core)? {
+        Some(rows) if !rows.is_empty() => Err(Error::Refused(format!(
+            "authority: serve.db still holds {} credential record(s) that have not moved into the core's vault; unlock the vault in the app first",
+            rows.len()
+        ))),
+        _ => Ok(()),
+    }
+}
+
 pub(crate) struct AuthorityModule {
+    /// False in the real module: `step` refuses until M2-18 lifts it. The tests build a lifted one to run the inner step.
+    lifted: bool,
+    /// How long to wait for `auth.json.lock`.
+    lock_wait: Duration,
+    /// What the import read: auth.json's sha, checked again just before the tombstone. (`None` outside a step.)
+    imported: RefCell<Option<String>>,
     /// Where `import` reads the Keychain items the profiles name.
     source: Box<dyn ItemSource>,
     /// Where `import` seals them.
@@ -178,13 +290,29 @@ pub(crate) struct AuthorityModule {
 
 impl AuthorityModule {
     pub(crate) fn real() -> Self {
-        Self::with(
-            Box::new(Keychain),
-            Box::new(OsEnvelope::default()),
-            Box::new(EnvelopeVault::default()),
-            Box::new(KeychainStore),
-            None,
-        )
+        Self {
+            lifted: false,
+            ..Self::with(
+                Box::new(Keychain),
+                Box::new(OsEnvelope::default()),
+                Box::new(EnvelopeVault::default()),
+                Box::new(KeychainStore),
+                None,
+            )
+        }
+    }
+
+    /// The same module with the step refusal back (tests of the refusal).
+    #[cfg(test)]
+    pub(crate) fn refusing(mut self) -> Self {
+        self.lifted = false;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn waiting(mut self, wait: Duration) -> Self {
+        self.lock_wait = wait;
+        self
     }
 
     pub(crate) fn with(
@@ -195,6 +323,9 @@ impl AuthorityModule {
         limit: Option<usize>,
     ) -> Self {
         Self {
+            lifted: true,
+            lock_wait: LOCK_WAIT,
+            imported: RefCell::new(None),
             source,
             sink: RefCell::new(sink),
             vault: RefCell::new(vault),
@@ -360,6 +491,42 @@ impl Module for AuthorityModule {
         env.ctx.iter().map(|c| c.auth.clone()).collect()
     }
 
+    fn step_refusal(&self, _env: &Env) -> Option<String> {
+        (!self.lifted).then(|| STEP_REFUSAL.to_owned())
+    }
+
+    fn dry_run_despite_refusal(&self) -> bool {
+        true
+    }
+
+    /// `auth.json.lock` from before the import reads the file until the tombstone is in place. The vault rows are looked
+    /// at under it, before the framework writes a snapshot or a record.
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        let ctx = ctx(env)?;
+        let held = hold_auth_lock(&ctx.auth, self.lock_wait)?;
+        if !tombstone::is_tombstone(&ctx.auth) {
+            let db = Connection::open_with_flags(
+                &env.layout.db,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .map_err(|e| Error::Io(format!("authority: core.db cannot be read: {e}")))?;
+            refuse_unmoved_vault(ctx, &db)?;
+        }
+        *self.imported.borrow_mut() = None;
+        Ok(Some(Box::new(held)))
+    }
+
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        let Some(want) = self.imported.borrow_mut().take() else {
+            return Ok(());
+        };
+        if sha_of(&ctx(env)?.auth)? == want {
+            Ok(())
+        } else {
+            Err(Error::Refused(CHANGED.into()))
+        }
+    }
+
     fn import(&self, env: &Env, core: Option<&mut Core>, opts: Opts) -> Result<Vec<String>> {
         let ctx = ctx(env)?;
         if tombstone::is_tombstone(&ctx.auth) {
@@ -368,6 +535,12 @@ impl Module for AuthorityModule {
                 ctx.auth.display()
             )));
         }
+        // Recorded only for a real step (under the source lock); a file that moves while it is read is not imported.
+        let before = if core.is_some() {
+            Some(sha_of(&ctx.auth)?)
+        } else {
+            None
+        };
         let rep = crate::import::run_in(
             &env.layout,
             ctx,
@@ -379,6 +552,12 @@ impl Module for AuthorityModule {
             &mut **self.sink.borrow_mut(),
             core,
         )?;
+        if let Some(before) = before {
+            if sha_of(&ctx.auth)? != before {
+                return Err(Error::Refused(CHANGED.into()));
+            }
+            *self.imported.borrow_mut() = Some(before);
+        }
         Ok(rep.lines)
     }
 
@@ -390,11 +569,15 @@ impl Module for AuthorityModule {
                 ctx.auth.display()
             )]);
         }
+        refuse_unmoved_vault(ctx, db)?;
         crate::import::same_answer(ctx, db)
     }
 
     fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
         let ctx = ctx(env)?;
+        // The writers' lock: a `kith-auth` command that is mid-write finishes first, and none starts a read-modify-write
+        // on the file while it is replaced.
+        let _lock = hold_auth_lock(&ctx.auth, self.lock_wait)?;
         let snap = crate::authority::snapshot(core.conn())?;
         // A file that is already a real auth.json (a rollback run again after it wrote) keeps its other keys; else the
         // copy the tombstone kept.
@@ -525,21 +708,17 @@ impl Module for AuthorityModule {
     /// one read of small tables per ask, which the 2 s poll can afford.
     fn fingerprint(&self, env: &Env, db: &Connection) -> Result<String> {
         let core = self.digest(env, db)?;
-        let db = serve_db(ctx(env)?);
-        let wal = PathBuf::from(format!("{}-wal", db.display()));
-        let vault_rows =
-            Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .and_then(|c| {
-                    c.query_row(
-                        "SELECT COUNT(*) FROM kv WHERE k LIKE 'vault:v1:%'",
-                        [],
-                        |r| r.get::<_, i64>(0),
-                    )
-                })
-                .map_or_else(|_| "novault".to_owned(), |n| n.to_string());
+        let serve = serve_db(ctx(env)?);
+        let wal = PathBuf::from(format!("{}-wal", serve.display()));
+        // The rows the envelope lacks: a slot the host moves changes the number, so a cached `ok` cannot outlive it.
+        let vault_rows = match unmoved_vault_rows(ctx(env)?, db) {
+            Ok(Some(rows)) => rows.len().to_string(),
+            Ok(None) => "novault".to_owned(),
+            Err(_) => "unreadable".to_owned(),
+        };
         Ok(format!(
             "{}{}vault:{vault_rows};core:{core}",
-            stat_line(&db),
+            stat_line(&serve),
             stat_line(&wal)
         ))
     }

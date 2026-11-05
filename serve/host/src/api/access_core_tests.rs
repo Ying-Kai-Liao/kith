@@ -87,6 +87,12 @@ impl Core {
             .collect()
     }
 
+    /// The gate is closed (a write by kith-auth moved auth.json a moment ago) while the opt-in stands.
+    #[allow(clippy::unused_self)] // kept a method so it reads next to `on`
+    fn shut_gate(&self) {
+        crate::api::authority::TEST_GATE_SHUT.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     fn stop(&mut self) {
         if let Some(d) = self.daemon.take() {
             d.stop();
@@ -96,6 +102,7 @@ impl Core {
 
 impl Drop for Core {
     fn drop(&mut self) {
+        crate::api::authority::TEST_GATE_SHUT.store(false, std::sync::atomic::Ordering::SeqCst);
         *TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.stop();
     }
@@ -133,6 +140,27 @@ async fn with_the_switch_on_kith_auth_is_written_first_and_the_core_is_told_afte
     assert_eq!(none["person"]["agents"], json!({}));
     assert_eq!(core.rows(), Vec::<(String, String)>::new());
     assert!(!r.allowed("sam", "house") && !r.allowed("sam", "money"));
+}
+
+#[tokio::test]
+async fn a_second_change_while_the_gate_is_closed_still_reaches_the_core() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member"}})).await.unwrap();
+
+    // The first write closed the gate for up to 2 s; the opt-in stands, so the second is mirrored all the same.
+    core.shut_gate();
+    assert!(!super::authority::guard_on_core());
+    call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member", "house": "guest"}}))
+        .await
+        .unwrap();
+    let mut rows = core.rows();
+    rows.sort();
+    assert_eq!(rows, [("house".to_owned(), "guest".to_owned()), ("money".to_owned(), "member".to_owned())]);
+    call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member"}})).await.unwrap();
+    assert_eq!(core.rows(), [("money".to_owned(), "member".to_owned())], "an unticked row goes there too");
 }
 
 #[tokio::test]
