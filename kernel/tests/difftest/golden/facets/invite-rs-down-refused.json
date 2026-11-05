@@ -1,0 +1,15 @@
+{
+  "fakes": "",
+  "state:kith/agents/garden/role/agent.md": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n",
+  "state:kith/agents/house/role/agent.md": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n",
+  "state:kith/state/": "<empty dir>\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: kith serve is not reachable (URLError)\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.json": "{\n  \"error\": \"kith serve is not reachable (URLError)\",\n  \"ok\": false\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "1\n",
+  "step2.stderr": "kith: kith serve is not reachable (URLError)\n",
+  "step2.stdout": ""
+}
