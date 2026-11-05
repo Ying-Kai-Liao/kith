@@ -506,11 +506,22 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
 pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<bool> {
     let core_updated = {
         let _w = AUTH_WRITES.lock().await;
-        let (_, said) = super::authority::run_auth_noted(
+        let said = super::authority::run_auth_noted(
             bin,
             &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"],
         )
-        .await?;
+        .await;
+        let said = match said {
+            Ok((_, said)) => said,
+            Err(e) => {
+                // Switched, the core is the only store: a revoke it didn't take must still stop what runs (the host's
+                // half is fail-closed), and the owner is told to run it again.
+                if revoke && super::authority::switched() {
+                    cut_off(hub, id).await;
+                }
+                return Err(e);
+            }
+        };
         account::note_stderr(id, &said);
         !account::core_missed(&said)
     };

@@ -268,23 +268,44 @@ pub fn core_selected() -> bool {
 pub fn switched() -> bool {
     #[cfg(test)]
     {
-        TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()
-            && TEST_SWITCHED.load(std::sync::atomic::Ordering::SeqCst)
+        if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none() {
+            return false;
+        }
+        let file = TEST_AUTH_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        file.is_some_and(|f| switched_at(&f))
     }
     #[cfg(not(test))]
     {
-        switched_at(auth_path())
+        // Every live event of every stream asks: the answer is kept for one gate period, like the gate's own latch.
+        static AT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        static YES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        static START: OnceLock<Instant> = OnceLock::new();
+        use std::sync::atomic::Ordering::Relaxed;
+        // +1 so a stored 0 means "never asked".
+        let now = u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX - 1) + 1;
+        let at = AT_MS.load(Relaxed);
+        if at != 0 && now.saturating_sub(at) < u64::try_from(GATE_EVERY.as_millis()).unwrap_or(2000) {
+            return YES.load(Relaxed);
+        }
+        let yes = switched_at(auth_path());
+        YES.store(yes, Relaxed);
+        AT_MS.store(now, Relaxed);
+        yes
     }
 }
 
-/// A test says the host is switched while it holds `TEST_CORE` (read only then, like `TEST_GATE_SHUT`).
+/// A test points the host at an auth.json of its own (a real tombstone file, or none) while it holds `TEST_CORE`; read
+/// only then, like `TEST_GATE_SHUT`.
 #[cfg(test)]
-pub static TEST_SWITCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static TEST_AUTH_FILE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-#[cfg_attr(test, allow(dead_code))]
 fn switched_at(auth: &Path) -> bool {
     static SEEN: Mutex<Option<(String, bool)>> = Mutex::new(None);
     let fingerprint = fingerprint_of(auth);
+    // A file that can't be statted is read each time (cheap, and the answer differs by why).
+    if fingerprint == "none" {
+        return tombstoned(auth);
+    }
     let mut seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some((fp, yes)) = seen.as_ref()
         && *fp == fingerprint
@@ -296,13 +317,20 @@ fn switched_at(auth: &Path) -> bool {
     yes
 }
 
-/// Whether the file holds a tombstone (`kith_tombstone.py`: a JSON object with `kith_tombstone`). Missing or unreadable is
-/// not one: the unswitched rules stay.
+/// Whether the file holds a tombstone (`kith_tombstone.py`: a JSON object with `kith_tombstone`). Only a missing file is
+/// "not one" (the unswitched rules stay). A file that exists but can't be opened or read (permissions, I/O, not UTF-8)
+/// counts as switched: it fails closed, as kith-auth's `load_auth` refuses a file it can't read.
 fn tombstoned(auth: &Path) -> bool {
     use std::io::Read as _;
     let mut text = String::new();
-    let Ok(f) = std::fs::File::open(auth) else { return false };
-    if f.take(65536).read_to_string(&mut text).is_err() || !text.contains("\"kith_tombstone\"") {
+    let f = match std::fs::File::open(auth) {
+        Ok(f) => f,
+        Err(e) => return e.kind() != std::io::ErrorKind::NotFound,
+    };
+    if f.take(65536).read_to_string(&mut text).is_err() {
+        return true;
+    }
+    if !text.contains("\"kith_tombstone\"") {
         return false;
     }
     serde_json::from_str::<Value>(&text).is_ok_and(|v| v.as_object().is_some_and(|o| o.contains_key("kith_tombstone")))
@@ -580,6 +608,10 @@ fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
 /// switched (as it was), the matching `people.*` method of the core once it is ([`switched`]). A switched host whose core
 /// does not answer gets an error and nothing is written another way.
 pub(crate) async fn run_auth(bin: &Path, args: &[&str]) -> anyhow::Result<String> {
+    if !switched() {
+        // Today's call, with its stderr warning logged.
+        return crate::remote::account::run(bin, args).await;
+    }
     run_auth_noted(bin, args).await.map(|(out, _)| out)
 }
 
@@ -597,6 +629,7 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
     // `kith-auth people X` and `retired X` answer by their exit code.
     let rows = said["rows"].as_array();
     match (method, args) {
+        ("people.listPeople", ["people", "--json"]) => Ok((serde_json::to_string(&said["rows"])?, String::new())),
         ("people.listPeople", ["people", id]) => {
             if !rows.is_some_and(|r| r.iter().any(|p| p["id"] == *id)) {
                 anyhow::bail!("no person `{id}`");

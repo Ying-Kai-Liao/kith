@@ -61,7 +61,15 @@ async fn forget_removed(hub: &Hub, bin: &Path) {
 
 /// A kith-auth change that rewrites auth.json, one writer at a time with the owner's own changes (`AUTH_WRITES`).
 /// Callers here never hold the lock.
-async fn locked_run(bin: &Path, args: &[&str]) -> Result<String> {
+pub(crate) async fn locked_run(bin: &Path, args: &[&str]) -> Result<String> {
+    // The core has no method for a person's chat handle (`handle`): a switched host says so and does not run kith-auth on
+    // the tombstone. Open gate: switched joins and end_access can't set or clear the kith handle.
+    if crate::api::authority::switched() {
+        anyhow::bail!(
+            "`kith-auth {}` has no core method (handle bind/unbind): authority is on the core",
+            args.join(" ")
+        );
+    }
     let _w = crate::api::people::AUTH_WRITES.lock().await;
     account::run(bin, args).await
 }
@@ -298,7 +306,7 @@ pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Res
         // per person, because kith-auth exits 0 for it.
         let said = {
             let _w = crate::api::people::AUTH_WRITES.lock().await;
-            account::run_noted(bin, &["person", &p.id, flag, "--local"]).await
+            crate::api::authority::run_auth_noted(bin, &["person", &p.id, flag, "--local"]).await
         }
         .with_context(|| format!("kith-auth person {} {flag}", p.id))?
         .1;

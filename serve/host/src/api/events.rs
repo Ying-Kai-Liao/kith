@@ -147,6 +147,8 @@ pub fn events_stream(
                 })),
                 Ok(v) if !local && v["type"].as_str().is_some_and(|t| LOCAL_EVENTS.contains(&t)) => None,
                 Ok(v) => {
+                    // An event already in flight when the gate flips is decided by the core (at most CORE_WAIT
+                    // after the flip); the next one is asked afresh.
                     let access = Selected::now();
                     if access.is_core() {
                         // The core's answer is a socket round trip: off the async threads, and no longer than a few

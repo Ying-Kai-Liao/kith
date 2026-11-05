@@ -36,7 +36,7 @@ async fn joined(r: &Rig) {
 
 /// A core daemon beside the rig's kith-auth, with the owner and `sam`. `on()` makes it the host's authority.
 struct Core {
-    _tmp: Tmp,
+    tmp: Tmp,
     daemon: Option<crate::core_front::TestDaemon>,
     data: Arc<CoreData>,
 }
@@ -53,7 +53,7 @@ impl Core {
             env.as_object().unwrap().clone(),
         ));
         let daemon = crate::core_front::serve_for_test(&data.folders);
-        let core = Self { _tmp: tmp, daemon: Some(daemon), data };
+        let core = Self { tmp, daemon: Some(daemon), data };
         core.ask("people.addPerson", json!({"id": "kai", "owner": true})).expect("owner");
         core.ask("people.addPerson", json!({"id": "sam"})).expect("sam");
         core
@@ -94,9 +94,11 @@ impl Core {
     }
 
     /// auth.json is a tombstone: the core is the only store, with or without the env.
-    #[allow(clippy::unused_self)] // kept a method so it reads next to `on`
     fn switched(&self) {
-        crate::api::authority::TEST_SWITCHED.store(true, std::sync::atomic::Ordering::SeqCst);
+        let auth = self.tmp.path().join("auth.json");
+        std::fs::write(&auth, r#"{"kith_tombstone": 1, "module": "authority", "rollback": "kith rollback authority"}"#)
+            .unwrap();
+        *crate::api::authority::TEST_AUTH_FILE.lock().unwrap() = Some(auth);
     }
 
     fn stop(&mut self) {
@@ -109,7 +111,7 @@ impl Core {
 impl Drop for Core {
     fn drop(&mut self) {
         crate::api::authority::TEST_GATE_SHUT.store(false, std::sync::atomic::Ordering::SeqCst);
-        crate::api::authority::TEST_SWITCHED.store(false, std::sync::atomic::Ordering::SeqCst);
+        *crate::api::authority::TEST_AUTH_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         *TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.stop();
     }
@@ -337,4 +339,64 @@ async fn unswitched_the_gate_decides_and_kith_auth_is_written() {
     super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
     assert!(!r.allowed("sam", "house"), "kith-auth was written");
     assert_eq!(core.rows(), Vec::<(String, String)>::new(), "the core was not");
+}
+
+#[tokio::test]
+async fn a_switched_host_reads_the_people_from_the_core_and_revokes_there() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    sam_only_in_the_core(&r, &core);
+    core.on();
+    core.switched();
+    // `auth_people` parses the core's rows like kith-auth's.
+    let people = members::auth_people(&r.bin).await.unwrap();
+    assert!(people.iter().any(|p| p.id == "sam" && !p.owner), "{people:?}");
+    assert!(people.iter().any(|p| p.id == "kai" && p.owner));
+    // A cloud revoke (`apply_revoked`) goes the same way as the owner's: people.suspend, kith-auth untouched.
+    super::people::local_revoke(&r.hub, &r.bin, "sam", true).await.unwrap();
+    let said = core.ask("people.may", json!({"person": "sam", "agent": "house"})).unwrap();
+    assert_eq!(said["allowed"], false, "the core revoked them: {said}");
+    assert!(r.allowed("sam", "house"), "kith-auth was not asked");
+    super::people::local_revoke(&r.hub, &r.bin, "sam", false).await.unwrap();
+    let said = core.ask("people.may", json!({"person": "sam", "agent": "house"})).unwrap();
+    assert_eq!(said["allowed"], true);
+    let none = members::apply_revoked(Some(&r.bin), Some(&[])).await.unwrap();
+    assert_eq!(none.cut.len() + none.restored.len(), 0);
+    // The chat handle has no core method: refused, never run on the tombstone.
+    let e = members::locked_run(&r.bin, &["handle", "sam", "kith", "user_x"]).await.unwrap_err();
+    assert!(format!("{e:#}").contains("no core method"), "{e:#}");
+}
+
+#[tokio::test]
+async fn a_switched_revoke_with_the_core_down_still_cuts_the_person_off_here() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let mut core = Core::start(&r);
+    core.on();
+    core.switched();
+    core.stop();
+    assert!(super::people::local_revoke(&r.hub, &r.bin, "sam", true).await.is_err());
+    assert!(r.hub.store.suspended_people().unwrap().contains(&"sam".to_owned()), "cut_off ran");
+}
+
+#[tokio::test]
+async fn a_tombstone_file_is_what_switches_the_host_and_taking_it_away_switches_back() {
+    let r = Rig::new().await;
+    let core = Core::start(&r);
+    core.on();
+    assert!(!super::authority::switched());
+    core.switched();
+    assert!(super::authority::switched() && super::authority::guard_on_core());
+    // The way back (`kith rollback authority`) puts a plain file back: unswitched at once.
+    let auth = crate::api::authority::TEST_AUTH_FILE.lock().unwrap().clone().unwrap();
+    std::fs::remove_file(&auth).unwrap();
+    std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
+    assert!(!super::authority::switched());
+    // An auth.json that exists but can't be read is not "not a tombstone": it fails closed.
+    std::fs::remove_file(&auth).unwrap();
+    std::fs::create_dir(&auth).unwrap();
+    assert!(super::authority::switched());
+    std::fs::remove_dir(&auth).unwrap();
+    assert!(!super::authority::switched(), "missing is the unswitched rules");
 }
