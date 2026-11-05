@@ -89,7 +89,7 @@ member's door runs and the sweep does stop one; `NeverBotDoorRuns` and `NeverBot
 
 | Step in the code | Code | Model action |
 |---|---|---|
-| deny a revoked person before any row, `*` included | `kernel/bin/kith-auth` `may()` (calls `cut_off` right after the owner check) | `MayP` (guard of every start) |
+| deny a revoked person before any row, `*` included | `kernel/bin/kith-auth` `may()` (reads the person's own `revoked` flag; bots are cut through `may(parent)`). Assumes the owner is never revoked, kept by two writes: `revoke_person` refuses the owner, and `person`/`addPerson` refuses to promote a revoked person | `MayP` (guard of every start) |
 | a bot is allowed only on its own row and its owner's live may() | `kith-auth` `bot_may` (via `may(parent)`, so a revoked owner's bot is refused) | `MayB` |
 | set / clear the revoked state, rows untouched | `kith-auth` `cmd_person` -> `revoke_person` (`--local`: the host's writer) | local part of `AppRevoke`/`CliRevoke`, `CloudDeliver` |
 | terminal revoke/undo on a linked Mac goes through kith serve, refused when it can't reach the cloud | `kith-auth` `revoke_person` -> `host_call('revokePerson')`; host `api/people.rs` `revoke_person`: cloud POST first, then kith-auth `--local` | `CliRevoke`/`CliUndo` with `CliNeedsCloud = TRUE` (no outbox) |
