@@ -14,6 +14,9 @@ pub mod engines;
 pub mod launch;
 pub mod log;
 pub mod paths;
+// Unix only: `resolve` clones with cp, sets modes and asks `kill(2)` whether a run is alive.
+#[cfg(unix)]
+pub mod pkg;
 pub mod procstart;
 pub mod schedule;
 #[cfg(unix)]
@@ -34,6 +37,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "engines",
         "launch",
         "paths",
+        "pkg",
         "threads",
     ]
 } else {
@@ -53,7 +57,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","launch","paths","threads"]}"#
+            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","launch","paths","pkg","threads"]}"#
         );
     }
 }
