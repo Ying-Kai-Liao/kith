@@ -1,0 +1,22 @@
+{
+  "fakes": "",
+  "state:home/w.sh": "#!/bin/sh\n# runs the program against the stand-in host; \"@calls\" prints what the host was asked (never the token)\nD=\"$HOME/../fakehost\"\nfor a in \"$@\"; do if [ \"$a\" = \"@calls\" ]; then cat \"$D/calls.log\" 2>/dev/null; exit 0; fi; done\nKITH_SERVE_DIR=\"$D\" KITH_SERVE_PORT=\"$(cat \"$D/port\")\" exec \"$@\"\n",
+  "state:kith/agents/garden/role/agent.md": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n",
+  "state:kith/agents/house/role/agent.md": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n",
+  "state:kith/state/": "<empty dir>\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: bad token\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.json": "{\n  \"error\": \"bad token\",\n  \"ok\": false\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "1\n",
+  "step2.stderr": "kith: bad token\n",
+  "step2.stdout": "",
+  "step3.exit": "1\n",
+  "step3.json": "{\n  \"error\": \"bad token\",\n  \"ok\": false\n}\n",
+  "step3.stderr": "",
+  "step4.exit": "0\n",
+  "step4.stderr": "",
+  "step4.stdout": "invites {} (refused: bad token)\ninvites {} (refused: bad token)\ncreateInvite {\"agents\": {\"house\": \"guest\"}, \"name\": \"Sam\"} (refused: bad token)\nrevokeInvite {\"inviteId\": \"inv_1\"} (refused: bad token)\n"
+}

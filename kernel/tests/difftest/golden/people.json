@@ -263,5 +263,1194 @@
     "--json"
    ]
   ]
+ },
+ {
+  "name": "people-rs-empty",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "people",
+    "ls"
+   ],
+   [
+    "people",
+    "ls",
+    "--json"
+   ],
+   [
+    "people"
+   ],
+   [
+    "people",
+    "show",
+    "sam"
+   ],
+   [
+    "people",
+    "show",
+    "sam",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "people-rs-table",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "person",
+     "kai",
+     "name=Kai",
+     "owner"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "person",
+     "sam",
+     "name=Sam"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "person",
+     "ola",
+     "name=Ola"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "person",
+     "eve",
+     "name=Eve"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "member",
+     "house",
+     "sam",
+     "preset=member"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "member",
+     "garden",
+     "sam"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "member",
+     "house",
+     "ola"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "member",
+     "house",
+     "*"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "bot",
+     "bot-s",
+     "--of",
+     "sam",
+     "name=Scout"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "member",
+     "house",
+     "bot-s"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "bot",
+     "bot-e",
+     "--of",
+     "eve",
+     "name=Echo"
+    ]
+   },
+   {
+    "run": [
+     "python3",
+     "{KERNEL}/bin/kith-auth",
+     "person",
+     "ola",
+     "--revoke",
+     "--local"
+    ]
+   }
+  ],
+  "run": [
+   [
+    "people",
+    "ls"
+   ],
+   [
+    "people",
+    "ls",
+    "--json"
+   ],
+   [
+    "people"
+   ],
+   [
+    "people",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "sam"
+   ],
+   [
+    "people",
+    "show",
+    "sam",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "ola",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "ola"
+   ],
+   [
+    "people",
+    "show",
+    "eve"
+   ],
+   [
+    "people",
+    "show",
+    "eve",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "kai"
+   ],
+   [
+    "people",
+    "show",
+    "kai",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "bot-s",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "nobody"
+   ],
+   [
+    "people",
+    "show",
+    "nobody",
+    "--json"
+   ]
+  ],
+  "mask_keys": [
+   "revoked_at",
+   "at"
+  ]
+ },
+ {
+  "name": "people-rs-old-rows",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "home/auth.json",
+    "text": "{\"people\": {\"kai\": {\"owner\": true}, \"old\": {}, \"older\": {\"name\": null, \"revoked\": 0, \"agents\": []}}, \"memberships\": {\"house\": {\"old\": {}}}}"
+   }
+  ],
+  "run": [
+   [
+    "people",
+    "ls"
+   ],
+   [
+    "people",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "old"
+   ],
+   [
+    "people",
+    "show",
+    "older",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "people-rs-auth-broken",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "home/auth.json",
+    "text": "{not json"
+   }
+  ],
+  "run": [
+   [
+    "people",
+    "ls"
+   ],
+   [
+    "people",
+    "ls",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "sam"
+   ]
+  ]
+ },
+ {
+  "name": "people-rs-auth-dir-missing",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/no/such/dir/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "people",
+    "ls"
+   ],
+   [
+    "people",
+    "ls",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "invite-rs-up-add",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "fakehost/token",
+    "text": "fake-owner-secret\n"
+   },
+   {
+    "write": "fakehost/server.py",
+    "text": "\"\"\"A stand-in for kith serve's loopback API, for the difftest cases of kith-people (invite add|ls|revoke). Binds an\nephemeral port, writes it to DIR/port, logs every call to DIR/calls.log (never the token), and exits when DIR/port is\nremoved (the runner deletes the case's folder when it is done).\"\"\"\nimport json\nimport os\nimport select\nimport sys\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\n\nDIR = sys.argv[1]\nTOKEN = open(os.path.join(DIR, 'token')).read().strip()\nREVOKED = set()\nMADE = []\n\n\ndef answer(method, body):\n    \"\"\"-> (status, raw bytes)\"\"\"\n    if method == 'createInvite':\n        name = body.get('name') or ''\n        if name == 'Boom':\n            return 409, json.dumps({'error': 'name taken: Boom'})\n        if name == 'Teapot':\n            return 500, 'oops, not json'\n        if name == 'Blank':\n            return 400, json.dumps({'error': ''})\n        if name == 'Nothing':\n            return 200, 'null'\n        if name == 'Broken':\n            return 200, '{not json'\n        n = len(MADE) + 1\n        MADE.append(body)\n        return 200, json.dumps({\n            'inviteId': f'inv_{n}', 'personId': body.get('personId') or 'p-' + name.lower(),\n            'link': f'https://kith.example/join/inv_{n}', 'expiresAt': 1793900000 + n,\n            'tokenHash': 'SECRET-HASH', 'token': 'SECRET-TOKEN', 'agents': body.get('agents')})\n    if method == 'invites':\n        return 200, json.dumps({'invites': [\n            {'inviteId': 'inv_1', 'personId': 'sam', 'agents': {'house': 'member', 'garden': 'guest'}, 'expiresAt': 1793900001,\n             'tokenHash': 'SECRET-HASH', 'link': {'proof': 'SECRET-PROOF', 'url': 'https://kith.example/join/inv_1'},\n             'history': [{'token_hash': 'SECRET-HASH-2', 'at': 1}]},\n            {'inviteId': 'inv_2', 'personId': 'ola', 'agents': {'house': 'guest'}, 'usedAt': 1793800000, 'revokedAt': 1793800500},\n            {'inviteId': 'inv_3', 'personId': 'bo', 'agents': {}, 'revokedAt': 1793800600},\n            {'inviteId': 'inv_4', 'personId': 'cy'}]})\n    if method == 'revokeInvite':\n        iid = body.get('inviteId')\n        if iid == 'inv_err':\n            return 404, json.dumps({'error': 'no such invite'})\n        if iid == 'inv_1' and iid not in REVOKED:\n            REVOKED.add(iid)\n            return 200, json.dumps({'revoked': True})\n        return 200, json.dumps({'revoked': False})\n    return 404, json.dumps({'error': f'no such method {method}'})\n\n\nclass H(BaseHTTPRequestHandler):\n    def log_message(self, *a):\n        pass\n\n    def do_POST(self):\n        raw = self.rfile.read(int(self.headers.get('Content-Length') or 0))\n        method = self.path.removeprefix('/api/')\n        body = json.loads(raw or b'{}')\n        ok = self.headers.get('Authorization') == f'Bearer {TOKEN}'\n        with open(os.path.join(DIR, 'calls.log'), 'a') as f:\n            f.write(f'{method} {json.dumps(body, sort_keys=True)}{\"\" if ok else \" (refused: bad token)\"}\\n')\n        status, text = answer(method, body) if ok else (401, json.dumps({'error': 'bad token'}))\n        data = text.encode()\n        self.send_response(status)\n        self.send_header('Content-Type', 'application/json')\n        self.send_header('Content-Length', str(len(data)))\n        self.end_headers()\n        self.wfile.write(data)\n\n\nsrv = HTTPServer(('127.0.0.1', 0), H)\nwith open(os.path.join(DIR, 'port.tmp'), 'w') as f:\n    f.write(str(srv.server_address[1]))\nos.rename(os.path.join(DIR, 'port.tmp'), os.path.join(DIR, 'port'))\nwhile os.path.exists(os.path.join(DIR, 'port')):\n    if select.select([srv.socket], [], [], 0.3)[0]:\n        srv.handle_request()\n"
+   },
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# runs the program against the stand-in host; \"@calls\" prints what the host was asked (never the token)\nD=\"$HOME/../fakehost\"\nfor a in \"$@\"; do if [ \"$a\" = \"@calls\" ]; then cat \"$D/calls.log\" 2>/dev/null; exit 0; fi; done\nKITH_SERVE_DIR=\"$D\" KITH_SERVE_PORT=\"$(cat \"$D/port\")\" exec \"$@\"\n"
+   },
+   {
+    "run": [
+     "sh",
+     "-c",
+     "python3 \"$HOME/../fakehost/server.py\" \"$HOME/../fakehost\" </dev/null >/dev/null 2>&1 & i=0; while [ ! -s \"$HOME/../fakehost/port\" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; test -s \"$HOME/../fakehost/port\""
+    ]
+   }
+  ],
+  "run": [
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house=member",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "add",
+    "Rex",
+    "--agent",
+    "house=member",
+    "--agent",
+    "garden=guest",
+    "--agent",
+    "house=guest",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "--person",
+    "sam",
+    "--agent",
+    "garden"
+   ],
+   [
+    "invite",
+    "add",
+    "Ignored",
+    "--person",
+    "ola",
+    "--agent",
+    "house=member",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Boom",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "add",
+    "Boom",
+    "--agent",
+    "house",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Teapot",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "add",
+    "Blank",
+    "--agent",
+    "house",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Nothing",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "add",
+    "Nothing",
+    "--agent",
+    "house",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Broken",
+    "--agent",
+    "house"
+   ],
+   [
+    "@calls"
+   ]
+  ]
+ },
+ {
+  "name": "invite-rs-up-ls-revoke",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "fakehost/token",
+    "text": "fake-owner-secret\n"
+   },
+   {
+    "write": "fakehost/server.py",
+    "text": "\"\"\"A stand-in for kith serve's loopback API, for the difftest cases of kith-people (invite add|ls|revoke). Binds an\nephemeral port, writes it to DIR/port, logs every call to DIR/calls.log (never the token), and exits when DIR/port is\nremoved (the runner deletes the case's folder when it is done).\"\"\"\nimport json\nimport os\nimport select\nimport sys\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\n\nDIR = sys.argv[1]\nTOKEN = open(os.path.join(DIR, 'token')).read().strip()\nREVOKED = set()\nMADE = []\n\n\ndef answer(method, body):\n    \"\"\"-> (status, raw bytes)\"\"\"\n    if method == 'createInvite':\n        name = body.get('name') or ''\n        if name == 'Boom':\n            return 409, json.dumps({'error': 'name taken: Boom'})\n        if name == 'Teapot':\n            return 500, 'oops, not json'\n        if name == 'Blank':\n            return 400, json.dumps({'error': ''})\n        if name == 'Nothing':\n            return 200, 'null'\n        if name == 'Broken':\n            return 200, '{not json'\n        n = len(MADE) + 1\n        MADE.append(body)\n        return 200, json.dumps({\n            'inviteId': f'inv_{n}', 'personId': body.get('personId') or 'p-' + name.lower(),\n            'link': f'https://kith.example/join/inv_{n}', 'expiresAt': 1793900000 + n,\n            'tokenHash': 'SECRET-HASH', 'token': 'SECRET-TOKEN', 'agents': body.get('agents')})\n    if method == 'invites':\n        return 200, json.dumps({'invites': [\n            {'inviteId': 'inv_1', 'personId': 'sam', 'agents': {'house': 'member', 'garden': 'guest'}, 'expiresAt': 1793900001,\n             'tokenHash': 'SECRET-HASH', 'link': {'proof': 'SECRET-PROOF', 'url': 'https://kith.example/join/inv_1'},\n             'history': [{'token_hash': 'SECRET-HASH-2', 'at': 1}]},\n            {'inviteId': 'inv_2', 'personId': 'ola', 'agents': {'house': 'guest'}, 'usedAt': 1793800000, 'revokedAt': 1793800500},\n            {'inviteId': 'inv_3', 'personId': 'bo', 'agents': {}, 'revokedAt': 1793800600},\n            {'inviteId': 'inv_4', 'personId': 'cy'}]})\n    if method == 'revokeInvite':\n        iid = body.get('inviteId')\n        if iid == 'inv_err':\n            return 404, json.dumps({'error': 'no such invite'})\n        if iid == 'inv_1' and iid not in REVOKED:\n            REVOKED.add(iid)\n            return 200, json.dumps({'revoked': True})\n        return 200, json.dumps({'revoked': False})\n    return 404, json.dumps({'error': f'no such method {method}'})\n\n\nclass H(BaseHTTPRequestHandler):\n    def log_message(self, *a):\n        pass\n\n    def do_POST(self):\n        raw = self.rfile.read(int(self.headers.get('Content-Length') or 0))\n        method = self.path.removeprefix('/api/')\n        body = json.loads(raw or b'{}')\n        ok = self.headers.get('Authorization') == f'Bearer {TOKEN}'\n        with open(os.path.join(DIR, 'calls.log'), 'a') as f:\n            f.write(f'{method} {json.dumps(body, sort_keys=True)}{\"\" if ok else \" (refused: bad token)\"}\\n')\n        status, text = answer(method, body) if ok else (401, json.dumps({'error': 'bad token'}))\n        data = text.encode()\n        self.send_response(status)\n        self.send_header('Content-Type', 'application/json')\n        self.send_header('Content-Length', str(len(data)))\n        self.end_headers()\n        self.wfile.write(data)\n\n\nsrv = HTTPServer(('127.0.0.1', 0), H)\nwith open(os.path.join(DIR, 'port.tmp'), 'w') as f:\n    f.write(str(srv.server_address[1]))\nos.rename(os.path.join(DIR, 'port.tmp'), os.path.join(DIR, 'port'))\nwhile os.path.exists(os.path.join(DIR, 'port')):\n    if select.select([srv.socket], [], [], 0.3)[0]:\n        srv.handle_request()\n"
+   },
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# runs the program against the stand-in host; \"@calls\" prints what the host was asked (never the token)\nD=\"$HOME/../fakehost\"\nfor a in \"$@\"; do if [ \"$a\" = \"@calls\" ]; then cat \"$D/calls.log\" 2>/dev/null; exit 0; fi; done\nKITH_SERVE_DIR=\"$D\" KITH_SERVE_PORT=\"$(cat \"$D/port\")\" exec \"$@\"\n"
+   },
+   {
+    "run": [
+     "sh",
+     "-c",
+     "python3 \"$HOME/../fakehost/server.py\" \"$HOME/../fakehost\" </dev/null >/dev/null 2>&1 & i=0; while [ ! -s \"$HOME/../fakehost/port\" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; test -s \"$HOME/../fakehost/port\""
+    ]
+   }
+  ],
+  "run": [
+   [
+    "invite",
+    "ls"
+   ],
+   [
+    "invite",
+    "ls",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_1"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_1",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_1"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_9",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_err"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_err",
+    "--json"
+   ],
+   [
+    "@calls"
+   ]
+  ]
+ },
+ {
+  "name": "invite-rs-bad-token",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "fakehost/token",
+    "text": "fake-owner-secret\n"
+   },
+   {
+    "write": "fakehost/server.py",
+    "text": "\"\"\"A stand-in for kith serve's loopback API, for the difftest cases of kith-people (invite add|ls|revoke). Binds an\nephemeral port, writes it to DIR/port, logs every call to DIR/calls.log (never the token), and exits when DIR/port is\nremoved (the runner deletes the case's folder when it is done).\"\"\"\nimport json\nimport os\nimport select\nimport sys\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\n\nDIR = sys.argv[1]\nTOKEN = open(os.path.join(DIR, 'token')).read().strip()\nREVOKED = set()\nMADE = []\n\n\ndef answer(method, body):\n    \"\"\"-> (status, raw bytes)\"\"\"\n    if method == 'createInvite':\n        name = body.get('name') or ''\n        if name == 'Boom':\n            return 409, json.dumps({'error': 'name taken: Boom'})\n        if name == 'Teapot':\n            return 500, 'oops, not json'\n        if name == 'Blank':\n            return 400, json.dumps({'error': ''})\n        if name == 'Nothing':\n            return 200, 'null'\n        if name == 'Broken':\n            return 200, '{not json'\n        n = len(MADE) + 1\n        MADE.append(body)\n        return 200, json.dumps({\n            'inviteId': f'inv_{n}', 'personId': body.get('personId') or 'p-' + name.lower(),\n            'link': f'https://kith.example/join/inv_{n}', 'expiresAt': 1793900000 + n,\n            'tokenHash': 'SECRET-HASH', 'token': 'SECRET-TOKEN', 'agents': body.get('agents')})\n    if method == 'invites':\n        return 200, json.dumps({'invites': [\n            {'inviteId': 'inv_1', 'personId': 'sam', 'agents': {'house': 'member', 'garden': 'guest'}, 'expiresAt': 1793900001,\n             'tokenHash': 'SECRET-HASH', 'link': {'proof': 'SECRET-PROOF', 'url': 'https://kith.example/join/inv_1'},\n             'history': [{'token_hash': 'SECRET-HASH-2', 'at': 1}]},\n            {'inviteId': 'inv_2', 'personId': 'ola', 'agents': {'house': 'guest'}, 'usedAt': 1793800000, 'revokedAt': 1793800500},\n            {'inviteId': 'inv_3', 'personId': 'bo', 'agents': {}, 'revokedAt': 1793800600},\n            {'inviteId': 'inv_4', 'personId': 'cy'}]})\n    if method == 'revokeInvite':\n        iid = body.get('inviteId')\n        if iid == 'inv_err':\n            return 404, json.dumps({'error': 'no such invite'})\n        if iid == 'inv_1' and iid not in REVOKED:\n            REVOKED.add(iid)\n            return 200, json.dumps({'revoked': True})\n        return 200, json.dumps({'revoked': False})\n    return 404, json.dumps({'error': f'no such method {method}'})\n\n\nclass H(BaseHTTPRequestHandler):\n    def log_message(self, *a):\n        pass\n\n    def do_POST(self):\n        raw = self.rfile.read(int(self.headers.get('Content-Length') or 0))\n        method = self.path.removeprefix('/api/')\n        body = json.loads(raw or b'{}')\n        ok = self.headers.get('Authorization') == f'Bearer {TOKEN}'\n        with open(os.path.join(DIR, 'calls.log'), 'a') as f:\n            f.write(f'{method} {json.dumps(body, sort_keys=True)}{\"\" if ok else \" (refused: bad token)\"}\\n')\n        status, text = answer(method, body) if ok else (401, json.dumps({'error': 'bad token'}))\n        data = text.encode()\n        self.send_response(status)\n        self.send_header('Content-Type', 'application/json')\n        self.send_header('Content-Length', str(len(data)))\n        self.end_headers()\n        self.wfile.write(data)\n\n\nsrv = HTTPServer(('127.0.0.1', 0), H)\nwith open(os.path.join(DIR, 'port.tmp'), 'w') as f:\n    f.write(str(srv.server_address[1]))\nos.rename(os.path.join(DIR, 'port.tmp'), os.path.join(DIR, 'port'))\nwhile os.path.exists(os.path.join(DIR, 'port')):\n    if select.select([srv.socket], [], [], 0.3)[0]:\n        srv.handle_request()\n"
+   },
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# runs the program against the stand-in host; \"@calls\" prints what the host was asked (never the token)\nD=\"$HOME/../fakehost\"\nfor a in \"$@\"; do if [ \"$a\" = \"@calls\" ]; then cat \"$D/calls.log\" 2>/dev/null; exit 0; fi; done\nKITH_SERVE_DIR=\"$D\" KITH_SERVE_PORT=\"$(cat \"$D/port\")\" exec \"$@\"\n"
+   },
+   {
+    "run": [
+     "sh",
+     "-c",
+     "python3 \"$HOME/../fakehost/server.py\" \"$HOME/../fakehost\" </dev/null >/dev/null 2>&1 & i=0; while [ ! -s \"$HOME/../fakehost/port\" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; test -s \"$HOME/../fakehost/port\""
+    ]
+   },
+   {
+    "write": "fakehost/token",
+    "text": "another-owner-secret\n"
+   }
+  ],
+  "run": [
+   [
+    "invite",
+    "ls"
+   ],
+   [
+    "invite",
+    "ls",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_1",
+    "--json"
+   ],
+   [
+    "@calls"
+   ]
+  ]
+ },
+ {
+  "name": "invite-rs-down-no-token",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_SERVE_DIR": "{HOME}/nohost",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house=member",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "ls"
+   ],
+   [
+    "invite",
+    "ls",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_1"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_1",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "invite-rs-down-refused",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_SERVE_DIR": "{HOME}/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "home/serve/token",
+    "text": "fake-owner-secret\n"
+   }
+  ],
+  "run": [
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "ls",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_1"
+   ]
+  ],
+  "ignore": [
+   "serve/token"
+  ]
+ },
+ {
+  "name": "people-rs-usage",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "people",
+    "ls",
+    "extra"
+   ],
+   [
+    "people",
+    "ls",
+    "extra",
+    "--json"
+   ],
+   [
+    "people",
+    "show"
+   ],
+   [
+    "people",
+    "show",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "a",
+    "b"
+   ],
+   [
+    "people",
+    "bogus"
+   ],
+   [
+    "people",
+    "--bogus"
+   ],
+   [
+    "people",
+    "--bogus",
+    "--json"
+   ],
+   [
+    "invite"
+   ],
+   [
+    "invite",
+    "--json"
+   ],
+   [
+    "invite",
+    "bogus"
+   ],
+   [
+    "invite",
+    "add"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam"
+   ],
+   [
+    "invite",
+    "add",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house=admin",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "House"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "-x"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house=member=x"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "Ann",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--person"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--bogus",
+    "x"
+   ],
+   [
+    "invite",
+    "add",
+    "--agent",
+    "house",
+    "--person",
+    ""
+   ],
+   [
+    "invite",
+    "ls",
+    "extra"
+   ],
+   [
+    "invite",
+    "ls",
+    "--bogus"
+   ],
+   [
+    "invite",
+    "revoke"
+   ],
+   [
+    "invite",
+    "revoke",
+    "a",
+    "b",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "people-rs-help",
+  "command": "people",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-people"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "people",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_AUTH": "{HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "-h"
+   ],
+   [
+    "--help"
+   ],
+   [
+    "people",
+    "--help"
+   ],
+   [
+    "invite",
+    "-h"
+   ],
+   [
+    "invite",
+    "add",
+    "--help"
+   ],
+   []
+  ]
  }
 ]
