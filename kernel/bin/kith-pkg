@@ -1539,6 +1539,8 @@ def main(argv):
             return run(cmd, rest, as_json, argv)
         except SystemExit:
             raise
+        except kith_tombstone.Tombstoned as e:   # the rollback line, exit 3, like the plain path in __main__
+            die(str(e), 3)
         except Exception as e:
             die(f'{type(e).__name__}: {e}')
     run(cmd, rest, as_json, argv)
@@ -1675,5 +1677,4 @@ if __name__ == '__main__':
     try:
         main(sys.argv[1:])
     except kith_tombstone.Tombstoned as e:   # authority moved to the core (kith kernel cutover step authority)
-        print(f'kith-pkg: {e}', file=sys.stderr)
-        sys.exit(3)
+        die(str(e), 3)   # the JSON error object under --json, else the stderr line
