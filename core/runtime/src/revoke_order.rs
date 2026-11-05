@@ -169,6 +169,16 @@ pub(crate) fn run_open(core: &mut Core, person: &str, now: i64) -> Result<Everyw
         })
         .optional()?
         == Some(0);
+    // The owner can not be revoked, so a row for them (an old file that marks the owner revoked) would replay forever:
+    // drop it, with a line in the log and no error.
+    if is_owner(core.conn(), person)? {
+        eprintln!(
+            "kith-core: revoke: dropping the open record of {person}: the owner can not be revoked"
+        );
+        core.conn()
+            .execute("DELETE FROM open_removals WHERE person = ?1", [person])?;
+        return Ok(Everywhere::default());
+    }
     if unrevoked && recorded_bots(core.conn(), person)?.is_empty() {
         core.conn()
             .execute("DELETE FROM open_removals WHERE person = ?1", [person])?;
@@ -195,6 +205,31 @@ pub(crate) fn replay_open(core: &mut Core, now: i64) -> Result<(Vec<Kill>, Vec<S
         }
     }
     Ok((kill, failed))
+}
+
+pub(crate) fn has_person(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
+    core_has_row(conn, id)
+}
+
+/// `id` and the owners above it by `bot_of` (a loop stops at the repeat), read from `people`.
+pub(crate) fn lineage(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>> {
+    let mut out = vec![id.to_owned()];
+    let mut at = id.to_owned();
+    loop {
+        let up: Option<String> = conn
+            .query_row("SELECT bot_of FROM people WHERE id = ?1", [&at], |r| {
+                r.get(0)
+            })
+            .optional()?
+            .flatten();
+        match up {
+            Some(u) if !out.contains(&u) => {
+                out.push(u.clone());
+                at = u;
+            }
+            _ => return Ok(out),
+        }
+    }
 }
 
 fn core_has_row(conn: &rusqlite::Connection, id: &str) -> Result<bool> {

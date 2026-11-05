@@ -335,6 +335,18 @@ pub(crate) fn call_in(
             } else {
                 String::new()
             };
+            // Read before the write: whether an add names someone already in `people`, and the bot's line of owners.
+            let (known, lineage) = match word(params, "id") {
+                Some(id) => (
+                    crate::revoke_order::has_person(core.conn(), id)?,
+                    if m == "people.removeBot" {
+                        crate::revoke_order::lineage(core.conn(), id)?
+                    } else {
+                        Vec::new()
+                    },
+                ),
+                None => (false, Vec::new()),
+            };
             // A person cut off, removed or renamed takes their guest doors with it, in the same transaction (M2-14).
             let said = store::run_with(
                 core,
@@ -366,11 +378,27 @@ pub(crate) fn call_in(
                     if let Some(id) = said.get("suspendedPerson").and_then(Value::as_str) {
                         crate::revoke_order::record_suspend(tx, id, c.now_ms)?;
                     }
-                    // An id an open removal names can not join again until its order has run.
-                    if matches!(m, "people.addPerson" | "people.addBot")
-                        && let Some(id) = word(params, "id")
-                        && let Some(of) = crate::revoke_order::open_removal_naming(tx, id)?
-                    {
+                    // An id an open removal names can not join again until its order has run (an edit of someone
+                    // who is already in `people` is not joining). Nor can a rename or a bot removal move a name the
+                    // order still has to find: the suspend row names no bots, the table walk finds them by `bot_of`.
+                    let named = match m {
+                        "people.addPerson" | "people.addBot" if !known => word(params, "id")
+                            .map_or(Ok(None), |id| {
+                                crate::revoke_order::open_removal_naming(tx, id)
+                            })?,
+                        "people.renamePerson" => word(params, "id").map_or(Ok(None), |id| {
+                            crate::revoke_order::open_removal_naming(tx, id)
+                        })?,
+                        "people.removeBot" => {
+                            let mut hit = None;
+                            for x in &lineage {
+                                hit = hit.or(crate::revoke_order::open_removal_naming(tx, x)?);
+                            }
+                            hit
+                        }
+                        _ => None,
+                    };
+                    if let Some(of) = named {
                         return Err(Error::Refused(format!(
                             "authority: finishing the revoke of {of} first, retry"
                         )));

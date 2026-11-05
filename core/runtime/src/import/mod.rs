@@ -308,11 +308,24 @@ pub(crate) fn run_in(
 /// `open_removals` and the core's replay (at start, and on the supervisor's pass) runs it again. The writers it would
 /// kill are not sent here: no daemon runs while the import holds the lock, and the holder's reconcile ends those
 /// writers (their claims are already `ending`).
-fn replay_removals(core: &mut Core, removed: &[String], rep: &mut AuthorityReport) {
-    rep.lines.push(format!(
-        "authority: recorded the removal of {} (gone from the file); running the revoke order (its kills are dropped: no daemon runs while the import holds the lock, and the holder's reconcile ends those writers)",
-        removed.join(", ")
-    ));
+fn replay_removals(
+    core: &mut Core,
+    removed: &[String],
+    suspended: &[String],
+    rep: &mut AuthorityReport,
+) {
+    if !removed.is_empty() {
+        rep.lines.push(format!(
+            "authority: recorded the removal of {} (gone from the file); running the revoke order (its kills are dropped: no daemon runs while the import holds the lock, and the holder's reconcile ends those writers)",
+            removed.join(", ")
+        ));
+    }
+    if !suspended.is_empty() {
+        rep.lines.push(format!(
+            "authority: recorded the suspension of {} (revoked in the file, not in core.db); running the revoke order (its kills are dropped, as above)",
+            suspended.join(", ")
+        ));
+    }
     match crate::revoke_order::replay_open(core, now_secs().saturating_mul(1000)) {
         Ok((_, failed)) => {
             for f in failed {
@@ -378,6 +391,11 @@ fn dry(
                     rep.lines.push(format!(
                         "authority: would record the removal of {id} (and {} bot(s)) and run the revoke order",
                         bots.len()
+                    ));
+                }
+                for id in authority::suspends(c, auth)? {
+                    rep.lines.push(format!(
+                        "authority: would record the suspension of {id} and run the revoke order"
                     ));
                 }
             }
@@ -461,6 +479,7 @@ fn real(
         let _ = crate::revoke_order::replay_open(core, now_secs().saturating_mul(1000));
     }
     let mut removed: Vec<String> = Vec::new();
+    let mut suspended: Vec<String> = Vec::new();
     let tx = core.claim_tx()?;
     if state == Rows::Same {
         rep.lines
@@ -471,7 +490,7 @@ fn real(
             #[allow(clippy::cast_precision_loss)]
             let now_ms = now_secs() as f64 * 1000.0;
             removed = authority::record_removals(&tx, auth, now_ms)?;
-            removed.extend(authority::record_suspends(&tx, auth, now_ms)?);
+            suspended = authority::record_suspends(&tx, auth, now_ms)?;
             authority::clear(&tx)?;
         }
         authority::insert_all(&tx, auth, &services_of(ctx, layout))?;
@@ -529,8 +548,8 @@ fn real(
     )?;
     tx.commit()?;
     rep.changed = true;
-    if !removed.is_empty() {
-        replay_removals(core, &removed, rep);
+    if !removed.is_empty() || !suspended.is_empty() {
+        replay_removals(core, &removed, &suspended, rep);
     }
     rep.lines.push(
         "done. core.db is a copy: kith-auth and the host still decide from auth.json (the cutover is a later step)".into(),
