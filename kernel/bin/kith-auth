@@ -2472,12 +2472,13 @@ def sweep_kernel(persons):
 # guard (M2-18) covers a miss. With no daemon running `kith kernel core-call` runs the same write in an embedded core (the
 # stopgap before M2-23: a revoke made here always reaches a core that exists); exit 3 now means nothing could run it.
 MIRROR_METHOD = {'suspend': 'people.suspend', 'undo': 'people.undo', 'remove': 'people.removePerson',
-                 'remove-bot': 'people.removeBot'}
+                 'remove-bot': 'people.removeBot', 'member-rm': 'people.revoke'}
 # The warnings name the core's file, which only core/runtime may spell out in source (kith-core-boundary-check): it is
 # joined here so the printed line is exact.
 CORE_FILE = 'core' + '.db'
 TELL_AGAIN = '(run it again once kith serve is running)'   # safe: the first `at` is kept and the core is called again
-MIRROR_DONE = {'suspend': 'revoked', 'undo': 'unrevoked', 'remove': 'removed', 'remove-bot': 'removed'}
+MIRROR_DONE = {'suspend': 'revoked', 'undo': 'unrevoked', 'remove': 'removed', 'remove-bot': 'removed',
+             'member-rm': 'removed'}
 # The wait happens under auth.json.lock (and the host's AUTH_WRITES), so a dead core must cost seconds, not the ~25 s the
 # 10 s-per-candidate program probe plus a 15 s call used to: the probe gets MIRROR_PROBE_SECS in all, the call CORE_CALL_SECS.
 MIRROR_PROBE_SECS = 4
@@ -2492,11 +2493,12 @@ def mirror_warning(action, may_have_applied):
     return f'{MIRROR_DONE[action]} in auth.json; {CORE_FILE} {state} {TELL_AGAIN}'
 
 
-def mirror_to_core(pid, action, already_ok=None):
+def mirror_to_core(pid, action, already_ok=None, extra=None):
     """After auth.json is written: tell the core, once. On any failure say so on stderr and return (exit stays 0).
     pid: one id, or a list (a renamed bot: the core may know it under any of its old ids; each is sent, one line at most).
     already_ok: the core's refusal text that means it is already where auth.json is (a bot it never imported), so no line;
-    a callable gets the id and returns that text."""
+    a callable gets the id and returns that text.
+    extra: params that replace `id` (a membership removal names a person and agents, not one id)."""
     ids = [pid] if isinstance(pid, str) else list(pid)
     may_have_applied = failed = False
     try:
@@ -2505,7 +2507,7 @@ def mirror_to_core(pid, action, already_ok=None):
         if not bin_:
             failed = True
         for one in ids if bin_ else []:
-            params = {'id': one, 'kernel': str(KITH), 'home': str(Path.home()),
+            params = {**(extra or {'id': one}), 'kernel': str(KITH), 'home': str(Path.home()),
                       'env': {k: os.environ[k] for k in MIRROR_ENV if os.environ.get(k)}}
             try:
                 r = subprocess.run([bin_, 'kernel', 'core-call', MIRROR_METHOD[action], '--params-stdin'],
@@ -2844,6 +2846,8 @@ def cmd_member(args):
               + (f', budget ${r["budget"]}/month' if r.get('budget') else '')
               + (' (a free shell on this Mac: trusted)' if r['mode'] in FREE_SHELL else ''))
     save_auth(auth)
+    if '--rm' in flags and names:   # a repeat is harmless there: the core's revoke takes nothing twice and refuses no one
+        mirror_to_core(pid, 'member-rm', extra={'person': pid, 'agent': ','.join(names)})
 
 
 def cmd_bot(args):
