@@ -100,10 +100,15 @@ impl Core {
 
     /// auth.json is a tombstone: the core is the only store, with or without the env.
     pub(super) fn switched(&self) {
-        let auth = self.tmp.path().join("auth.json");
-        std::fs::write(&auth, r#"{"kith_tombstone": 1, "module": "authority", "rollback": "kith rollback authority"}"#)
+        self.switched_over(&self.tmp.path().join("auth.json"));
+    }
+
+    /// The tombstone is the file `auth` (the one kith-auth reads in the rig), so anything that still runs kith-auth finds it.
+    #[allow(clippy::unused_self)] // kept a method so it reads next to `switched`
+    pub(super) fn switched_over(&self, auth: &std::path::Path) {
+        std::fs::write(auth, r#"{"kith_tombstone": 1, "module": "authority", "rollback": "kith rollback authority"}"#)
             .unwrap();
-        *crate::api::authority::TEST_AUTH_FILE.lock().unwrap() = Some(auth);
+        *crate::api::authority::TEST_AUTH_FILE.lock().unwrap() = Some(auth.to_path_buf());
     }
 
     pub(super) fn stop(&mut self) {

@@ -174,6 +174,17 @@ pub async fn person_of(bin: &Path, who: &Principal) -> Result<String> {
 }
 
 async fn who_owner(bin: &Path) -> Result<String> {
+    // A switched host has no auth.json to ask: `kith-auth who` exits 3 on the tombstone. The owner is the core's owner row.
+    if crate::api::authority::switched() {
+        let rows = crate::api::authority::run_auth(bin, &["people", "--json"]).await?;
+        let people: Vec<Value> = serde_json::from_str(&rows)?;
+        return people
+            .iter()
+            .find(|p| p["owner"] == true)
+            .and_then(|p| p["id"].as_str())
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow!("the core has no owner person yet"));
+    }
     who(bin, "-")
         .await
         .owner_id

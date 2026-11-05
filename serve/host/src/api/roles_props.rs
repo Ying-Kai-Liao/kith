@@ -326,9 +326,29 @@ impl World {
             core.ask("people.addPerson", json!({"id": p})).expect("person");
         }
         core.on();
-        core.switched();
+        // The tombstone is the file kith-auth would read, and kith-auth is a stand-in that logs every call and fails.
+        core.switched_over(&w.dir.join("auth.json"));
+        let bin = w.dir.join("kith-auth-logging");
+        std::fs::write(
+            &bin,
+            format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", w.dir.join("kith-auth-calls").display()),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        *TEST_BIN.lock().unwrap() = Some(bin);
+        assert!(super::authority::switched(), "the world is not switched");
         w.core = Some(core);
         w
+    }
+
+    /// What a switched host asked kith-auth: nothing.
+    fn assert_kith_auth_untouched(&self) {
+        let calls = std::fs::read_to_string(self.dir.join("kith-auth-calls")).unwrap_or_default();
+        assert!(calls.is_empty(), "a switched host ran kith-auth: {calls}");
+        assert!(super::authority::switched(), "the host is not switched");
     }
 
     fn write_grants(&self, grants: &[[Ans; 2]; 2]) {
@@ -858,6 +878,9 @@ fn never_past_their_grant(switched: bool) {
             Ok(())
         })
         .unwrap();
+    if switched {
+        w.assert_kith_auth_untouched();
+    }
 }
 
 /// A plain card (no tool named, kind fetch, no approver stored, no card-store row) for the hand-written cases.
@@ -967,6 +990,9 @@ fn a_granted_member_uses_their_own_chat(switched: bool) {
     assert!(go("send", json!({"botId": ids.bots[0]})).is_err(), "a revoked grant still sends");
     assert!(go("history", json!({"botId": ids.bots[1]})).is_err(), "a revoked grant still reads");
     assert!(answer(6).is_err(), "a revoked member still answers the card naming them");
+    if switched {
+        w.assert_kith_auth_untouched();
+    }
 }
 
 /// (21) What a card names is judged once, when it opens (`access::tool_in_grants`): a person can answer it only when it
@@ -1115,8 +1141,12 @@ fn the_core_answers_fail_closed_on_a_switched_host() {
         "setPersonAccess",
         json!({"personId": "p1", "agents": {"a1": "member"}}),
     ));
-    assert!(rolled.is_err(), "a grant with the core down must fail, not fall back to kith-auth");
+    assert!(
+        rolled.err().is_some_and(|e| e.is::<super::authority::CoreDown>()),
+        "a grant with the core down must fail with CoreDown, not fall back to kith-auth"
+    );
     assert_eq!(tomb(), before, "nothing is written to the tombstone");
+    w.assert_kith_auth_untouched();
 }
 
 // ---- events ----
