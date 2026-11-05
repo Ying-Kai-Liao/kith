@@ -672,8 +672,6 @@
       ]
     ],
     "ignore": [
-      "/\\.git/hooks/",
-      "/\\.git/config$",
       "/store/[^/]*@[0-9a-f]{10}/"
     ]
   },
