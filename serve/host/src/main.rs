@@ -21,6 +21,7 @@ mod launch_cmd;
 mod limits;
 mod market;
 mod mcp;
+mod pkg_cmd;
 mod remote;
 mod rich_card;
 mod routines;
@@ -511,6 +512,15 @@ enum KernelCmd {
     // -h/--help belong to kith-sessions' own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Threads {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
+    /// `kith-pkg resolve`: the pinned package folder a run starts from (not routed from `kith` yet).
+    #[command(disable_help_flag = true)]
+    Pkg {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
@@ -1369,6 +1379,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
             }
+            if let KernelCmd::Pkg { kernel, args } = cmd {
+                std::process::exit(pkg_cmd::run(kernel, &args));
+            }
             through_core(|| -> Result<()> {
                 match cmd {
                     KernelCmd::Version => println!("{}", kith_kernel::version_json()),
@@ -1441,6 +1454,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Cost { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
+                    | KernelCmd::Pkg { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
