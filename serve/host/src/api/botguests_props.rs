@@ -895,8 +895,9 @@ fn a_switched_host_never_runs_kith_auth() {
         }
         state.check_all().await.unwrap();
         // botAsk and myBots.
-        let ask = json!({"agent": "house", "text": "hi", "clientNonce": "slice"});
-        state.call(&state.bots[1].caller, "botAsk", ask).await.unwrap();
+        // check_all asked as every bot and recorded that this one was served; a second ask here would race its still
+        // running turns (the per-bot limit of two) on a slow runner.
+        assert!(state.bots[1].served, "the bot is served while the core is up");
         state.step(&Op::MyBots { actor: 1 }).await.unwrap();
         state.step(&Op::MyBots { actor: 0 }).await.unwrap();
         // setPersonAccess, a bot's revoke by its owner and by Kai, a person's removal.
@@ -951,9 +952,8 @@ fn a_switched_host_with_the_core_down_refuses_every_bot_call() {
         }
         state.check_all().await.unwrap();
         // The core is up: Sam's bot is served.
-        let ask = json!({"agent": "house", "text": "hi", "clientNonce": "up"});
-        let res = state.call(&state.bots[1].caller, "botAsk", ask).await;
-        assert!(res.is_ok(), "the bot is served while the core is up: {res:?}");
+        // check_all asked as the bot and recorded the answer; asking again here would meet its running turns.
+        assert!(state.bots[1].served, "the bot is served while the core is up");
     });
     state.core.as_mut().unwrap().stop();
     rt.block_on(async {
