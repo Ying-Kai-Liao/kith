@@ -13,7 +13,9 @@
 //! core step down.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
