@@ -1400,3 +1400,111 @@ fn an_invite_with_minutes_out_of_range_is_a_usage_refusal() {
     .unwrap_err();
     assert!(matches!(e, Error::BadParams(_)), "{e}");
 }
+
+// --- agent access -------------------------------------------------------------------------------------------------
+
+fn access(agent: &str, domain: &str, remove: bool) -> Value {
+    json!({"agent": agent, "domain": domain, "remove": remove})
+}
+
+#[test]
+fn a_kept_domain_is_added_once_removed_and_reaches_every_guest() {
+    let mut rig = Rig::new(&base());
+    rig.lines("people.grant", &grant("sam", "house", &json!({})))
+        .unwrap();
+    assert_eq!(
+        rig.lines(
+            "people.agentAccess",
+            &access("house", "api.example.com", false)
+        )
+        .unwrap(),
+        ["every guest of house may reach api.example.com beyond the box"]
+    );
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "api.example.com", false),
+    )
+    .unwrap();
+    let t = rig.tables();
+    let row = &t["agent_access"]["house"];
+    assert_eq!(row["domains"], json!(["api.example.com"]), "{t}");
+    assert_eq!(row["by"], json!({"api.example.com": null}));
+    assert!(row["since"]["api.example.com"].as_i64().unwrap() > 0);
+    let r = Authority::new(rig.core.conn(), &rig.c)
+        .resolve("house", "sam", None, false)
+        .unwrap();
+    assert!(
+        r["access"]["domains"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("api.example.com")),
+        "{r:?}"
+    );
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", false),
+    )
+    .unwrap();
+    let gone = rig
+        .lines(
+            "people.agentAccess",
+            &access("house", "api.example.com", true),
+        )
+        .unwrap();
+    assert_eq!(
+        gone,
+        ["api.example.com is no longer kept for everyone house is shared with"]
+    );
+    let t = rig.tables();
+    assert_eq!(
+        t["agent_access"]["house"]["domains"],
+        json!(["b.example.com"])
+    );
+    assert!(
+        t["agent_access"]["house"]["since"]
+            .get("api.example.com")
+            .is_none()
+    );
+    // the last one takes the agent's row with it; a repeat and an unknown agent change nothing
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", true),
+    )
+    .unwrap();
+    rig.lines(
+        "people.agentAccess",
+        &access("house", "b.example.com", true),
+    )
+    .unwrap();
+    rig.lines(
+        "people.agentAccess",
+        &access("ghost", "x.example.com", true),
+    )
+    .unwrap();
+    assert!(rig.tables()["agent_access"].as_object().unwrap().is_empty());
+}
+
+#[test]
+fn a_kept_domain_must_be_a_plain_host_and_the_agent_a_name() {
+    let mut rig = Rig::new(&base());
+    for bad in [
+        "*.example.com",
+        "10.0.0.1",
+        "example.com:80",
+        "localhost",
+        "",
+    ] {
+        let e = rig
+            .lines("people.agentAccess", &access("house", bad, false))
+            .unwrap_err();
+        assert!(e.contains("is not a plain host name"), "{bad}: {e}");
+    }
+    let e = rig
+        .lines(
+            "people.agentAccess",
+            &access("../x", "a.example.com", false),
+        )
+        .unwrap_err();
+    assert!(e.contains("agent-access <agent>"), "{e}");
+    assert!(rig.tables()["agent_access"].as_object().unwrap().is_empty());
+}

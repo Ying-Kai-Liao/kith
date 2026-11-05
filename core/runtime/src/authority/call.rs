@@ -42,6 +42,7 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.undo"
             | "people.clearTemp"
             | "people.retired"
+            | "people.agentAccess"
             | "people.requests"
             | "people.approve"
             | "people.deny"
@@ -453,6 +454,13 @@ pub(super) fn write_in(
             out["was"] = json!(was);
             Ok(out)
         }
+        "people.agentAccess" => Ok(lines(write::agent_access(
+            a,
+            c,
+            need(params, "agent")?,
+            need(params, "domain")?,
+            switch(params, "remove"),
+        )?)),
         "people.botsCap" => Ok(lines(write::bots_cap(a, need(params, "amount")?)?)),
         "people.invite" => {
             let said = write::invite_create(

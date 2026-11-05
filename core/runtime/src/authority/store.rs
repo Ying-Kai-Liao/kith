@@ -223,6 +223,20 @@ fn store(conn: &Connection, before: &Value, after: &Value) -> Result<()> {
         }
     }
 
+    // same row shape as `load` makes from auth.json
+    let (old, new) = (table(before, "agent_access"), table(after, "agent_access"));
+    for agent in old.keys().filter(|k| !new.contains_key(*k)) {
+        conn.execute("DELETE FROM agent_access WHERE agent = ?1", [agent])?;
+    }
+    for (agent, r) in new {
+        if old.get(agent) != Some(r) {
+            conn.execute(
+                "INSERT OR REPLACE INTO agent_access (agent, domains, since, by) VALUES (?1, ?2, ?3, ?4)",
+                params![agent, json(r, "domains"), json(r, "since"), json(r, "by")],
+            )?;
+        }
+    }
+
     match (
         before.get("owner_bots_budget"),
         after.get("owner_bots_budget"),

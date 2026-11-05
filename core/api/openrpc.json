@@ -6277,6 +6277,109 @@
       }
     },
     {
+      "name": "people.agentAccess",
+      "summary": "Keep (or, with --rm, stop keeping) a host every guest of the agent may reach, invited people and bot guests, never the owner. Kept on the agent, not on a person's row, so it needs no membership. A host that is not a plain name (a wildcard, an address, a port) is refused; removing one that is not kept changes nothing.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "domain",
+          "summary": "The host name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Stop keeping it.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "agent-access"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "domain": {
+            "kind": "positional"
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "people.requests",
       "summary": "The devices asking this computer for access, waiting for the owner (with the code to compare once the device has shown it).",
       "params": [
