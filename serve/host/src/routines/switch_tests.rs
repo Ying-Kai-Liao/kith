@@ -180,6 +180,7 @@ fn a_delivery_goes_to_the_core_with_the_raw_headers_and_body_and_its_answers_kee
         refused(json!({"outcome": "refused", "code": "invalid", "reason": "bad event"})),
         Refused::Invalid("bad event".into())
     );
+    assert_eq!(refused(json!({"outcome": "refused", "code": "not-here", "reason": "r"})), Refused::NotHere);
     assert_eq!(refused(json!({"outcome": "busy", "retry": true})), Refused::Busy);
     fake.says(answer(json!({"outcome": "ping"})));
     assert_eq!(hub.routines.receive(&hub, &id, &h, b"{}").unwrap(), json!({"ping": true}));

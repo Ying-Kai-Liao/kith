@@ -224,7 +224,7 @@ async fn routine_hook(
     hub.routines.receive(&hub, &id, &headers, &body).map(Json).map_err(|e| {
         let status = match e {
             Refused::Unauthorized => StatusCode::UNAUTHORIZED,
-            Refused::Paused | Refused::Busy => StatusCode::CONFLICT,
+            Refused::Paused | Refused::Busy | Refused::NotHere => StatusCode::CONFLICT,
             Refused::Invalid(_) => StatusCode::BAD_REQUEST,
             Refused::Held => StatusCode::SERVICE_UNAVAILABLE,
         };

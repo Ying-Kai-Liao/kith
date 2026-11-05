@@ -231,6 +231,7 @@ impl Routines {
                     return Err(match v["code"].as_str().unwrap_or_default() {
                         "unauthorized" => Refused::Unauthorized,
                         "paused" => Refused::Paused,
+                        "not-here" => Refused::NotHere,
                         _ => Refused::Invalid(reason()),
                     });
                 }
