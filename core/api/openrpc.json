@@ -9641,7 +9641,7 @@
         },
         {
           "name": "bots",
-          "summary": "Bots of the person (the whole transitive set) read before an authority removal deleted their rows; the bots still in `people.bot_of` are added.",
+          "summary": "Bots of the person read before an authority removal deleted their rows; a removal also records them (`open_removals`), and the bots still in `people.bot_of` are added. Refused: the owner, and a name in `people` whose `bot_of` chain does not lead to the person; a name with no row and no record is ignored.",
           "required": false,
           "schema": {
             "type": "array",
@@ -9961,6 +9961,45 @@
             "spellings": [
               "--deep"
             ]
+          }
+        }
+      }
+    },
+    {
+      "name": "holder.forget",
+      "summary": "Drops a process from the holder record (for a `blocked` holder whose old process cannot be told from a stranger). Nothing is signalled. Answers `{forgot}`: whether the pid was in the record; asked again it is false.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The recorded process's pid.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "holder",
+          "forget"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "positional"
           }
         }
       }

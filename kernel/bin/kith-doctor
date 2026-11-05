@@ -514,10 +514,13 @@ def core():
         if state == 'connected':
             ok(f'holder: instance {h.get("instance")}, pid {h.get("pid")}, {h.get("processes")} process(es)'
                + (' (tied to the daemon\'s job: it ends with it)' if h.get('tied_to_starter') else ''))
+            if h.get('ending'):
+                warn(f'holder: {h.get("ending")} process(es) the core is ending are not gone yet; it keeps sending the kill (see the core log)')
         elif state == 'absent':
             note('holder: no kith-holder program beside kith (nothing uses a holder before M1)')
         elif state == 'blocked':
-            warn(f'holder: blocked: {h.get("error")} (the daemon retries slowly and signals nothing)')
+            warn(f'holder: blocked: {h.get("error")} (the daemon retries slowly and signals nothing). '
+                 'If that process is not the holder\'s any more, drop it from the record: kith holder forget <pid>')
         elif state in ('unreachable',):
             warn(f'holder: {h.get("error")} (the daemon retries; nothing uses a holder before M1)')
         else:

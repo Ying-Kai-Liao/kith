@@ -67,7 +67,9 @@ fn claim_ok(claim: &str) -> bool {
 }
 
 /// Serves the channel until it closes (or a write to it fails). `on_taken` runs after each new lock is taken
-/// and before `locked` is answered (the holder record, the run-token redeem); an `Err` frees the lock and answers `error`. When the channel ends the held lock is kept for the life of the process
+/// and before `locked` is answered (the holder record, the run-token redeem); an `Err` frees the lock and answers `error`.
+/// It runs on the serving thread with the lock held, so it does in-process I/O only: it never forks, execs or spawns
+/// (the stub's `redeem_run_token` is checked for that, and `tests/resident.rs` runs a hook under the lock). When the channel ends the held lock is kept for the life of the process
 /// (the caller exits only after the engine does), never dropped here.
 pub fn serve(
     folder: &Path,
