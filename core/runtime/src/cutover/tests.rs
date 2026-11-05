@@ -113,8 +113,10 @@ impl Module for Fake {
 struct FileStore(PathBuf);
 
 impl secrets_back::OsStore for FileStore {
-    fn get(&self, name: &str) -> Result<Option<String>> {
-        Ok(std::fs::read_to_string(self.0.join(name.replace('#', "_"))).ok())
+    fn get(&self, name: &str) -> Result<Option<zeroize::Zeroizing<String>>> {
+        Ok(std::fs::read_to_string(self.0.join(name.replace('#', "_")))
+            .ok()
+            .map(zeroize::Zeroizing::new))
     }
     fn put(&mut self, name: &str, value: &str) -> Result<()> {
         std::fs::create_dir_all(&self.0).map_err(|e| Error::Io(e.to_string()))?;
@@ -303,7 +305,8 @@ fn a_rollback_exports_the_core_back_keeps_later_writes_and_writes_the_secret_bac
     assert_eq!(
         secrets_back::read_back(&store, "fake-secret")
             .unwrap()
-            .as_deref(),
+            .as_ref()
+            .map(|v| v.as_str()),
         Some("s3cret"),
         "the secret came back through the split path (limit 8, value 6: plain)"
     );

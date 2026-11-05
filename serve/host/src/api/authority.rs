@@ -31,13 +31,13 @@
 //! person's shared projects (`store.person(..).projects`: the host's, not an access grant), and the member / bot /
 //! unproven method lists (the contract).
 //!
-//! M2-17 puts the owner's side on the same switch: `api/people.rs setPersonAccess` sends `people.grant` / `people.revoke`
-//! ([`owner_call`]; kith-auth is not written), the listing of people reads the membership rows from `people.list`
+//! M2-17 puts the owner's side on the same switch: `api/people.rs setPersonAccess` writes kith-auth first (auth.json is
+//! the truth until the switch, M2-18a) and then mirrors `people.grant` / `people.revoke` ([`owner_call`]), the listing of people reads the membership rows from `people.list`
 //! (`members::auth_people_now`, also what the 10-second mirror reads), and `api/remote.rs accessRequests` /
 //! `decideAccessRequest` use `people.requests|approve|deny` (`cloud::decide_in_core`, which stores exactly the device the
-//! core answered). The host files each request it holds with `people.fileRequest` on every pull. All of it fails CLOSED:
-//! a core that can't be reached is an error to the app ([`CoreDown`]), never a write to kith-auth or an answer from the
-//! host's copy.
+//! core answered). The host files each request it holds with `people.fileRequest` on every pull. The reads and the request
+//! decisions fail CLOSED: a core that can't be reached is an error to the app ([`CoreDown`]), never an answer from the
+//! host's copy. The owner's writes do not need the core: a mirror that fails is logged, and only closes the gate.
 
 use super::roles;
 use crate::store::Store;
@@ -248,7 +248,7 @@ pub fn core_selected() -> bool {
     opted_in() && gate_open(&fingerprint_of(auth_path()))
 }
 
-fn opted_in() -> bool {
+pub fn opted_in() -> bool {
     std::env::var(SWITCH).is_ok_and(|v| v == "1")
 }
 

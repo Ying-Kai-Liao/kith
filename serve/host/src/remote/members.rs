@@ -198,7 +198,7 @@ pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {
 }
 
 /// [`auth_people`] as the owner's access stands now. With `KITH_CORE_AUTHORITY=1` the core holds the membership rows
-/// (M2-17: `setPersonAccess` writes them there, kith-auth's file no longer changes), so each person's `agents` come from
+/// (M2-17), so each person's `agents` come from
 /// `people.list` and kith-auth only says who the people are. A core that can't be asked is an error, never a list that
 /// reads as the old file.
 pub async fn auth_people_now(bin: &Path) -> Result<Vec<AuthPerson>> {
@@ -276,11 +276,6 @@ pub fn start_mirror(hub: &std::sync::Arc<Hub>) {
 /// The kith-auth person `id`, or None when there is no such person.
 pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
     Ok(auth_people(bin).await?.into_iter().find(|p| p.id == id))
-}
-
-/// [`auth_person`] as the owner's access stands now (see [`auth_people_now`]).
-pub async fn auth_person_now(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
-    Ok(auth_people_now(bin).await?.into_iter().find(|p| p.id == id))
 }
 
 /// Applies the cloud's list of accounts this computer's owner revoked, on any of their Macs (R6): a person here whose

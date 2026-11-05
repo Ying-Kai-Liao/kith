@@ -63,8 +63,8 @@ struct MemOs {
 }
 
 impl OsStore for MemOs {
-    fn get(&self, name: &str) -> Result<Option<String>> {
-        Ok(self.items.borrow().get(name).cloned())
+    fn get(&self, name: &str) -> Result<Option<Zeroizing<String>>> {
+        Ok(self.items.borrow().get(name).cloned().map(Zeroizing::new))
     }
     fn put(&mut self, name: &str, value: &str) -> Result<()> {
         self.puts.set(self.puts.get() + 1);
@@ -575,6 +575,19 @@ fn the_import_runs_under_the_lock_the_framework_holds_and_does_not_take_it_again
         crate::start_with(&r.env.layout, MIGRATIONS).is_err(),
         "and the lock is still ours afterwards"
     );
+}
+
+#[test]
+fn a_rollback_names_an_item_the_keychain_no_longer_holds() {
+    let (r, reg) = rig_with(None);
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    r.vault
+        .borrow_mut()
+        .insert("keychain:svc#gone".into(), "s3cr3t-val".into());
+    let lines = rollback(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(said(&lines, "secret restored: keychain:svc#gone"), "{lines:?}");
+    assert_eq!(r.os.borrow()["keychain:svc#gone"], "s3cr3t-val");
+    assert!(!lines.iter().any(|l| l.contains("s3cr3t-val")), "names only");
 }
 
 #[test]

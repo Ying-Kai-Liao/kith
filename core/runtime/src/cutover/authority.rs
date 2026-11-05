@@ -139,7 +139,7 @@ impl OsStore for KeychainStore {
     fn get(&self, name: &str) -> Result<Option<String>> {
         let (service, account) = split_item(name)?;
         match Keychain.read(service, account) {
-            Item::Found(v) => Ok(Some(v.to_string())),
+            Item::Found(v) => Ok(Some(v)),
             Item::Missing => Ok(None),
             Item::Unavailable(why) => Err(Error::Io(format!("authority: {name}: {why}"))),
         }
@@ -154,7 +154,7 @@ impl OsStore for KeychainStore {
         let (service, account) = split_item(name)?;
         keystore::put_generic_password(service, account, value)?;
         // `security -i` says nothing about a failure: the item has to read back as what was written.
-        if self.get(name)?.as_deref() == Some(value) {
+        if self.get(name)?.is_some_and(|v| v.as_str() == value) {
             Ok(())
         } else {
             Err(Error::Io(format!(
@@ -457,6 +457,13 @@ impl Module for AuthorityModule {
         Ok(lines)
     }
 
+    /// Writes the sealed `keychain:` records back to the Keychain. An item that holds a different value than the sealed
+    /// one is kept, because the Keychain may have moved on since the import (a key rotated after the step). That is
+    /// right only while the import is the one writer of `keychain:` envelope records (checked: `import/items.rs`; nothing
+    /// else in core/runtime, the host or kith-auth writes one). A core-side secret writer (the secrets lane) would break
+    /// the rule: its newer envelope value would lose to an older Keychain one. Whoever adds one must change this step.
+    /// An item that the Keychain no longer holds is written back, and named (as `kept` is): "read back none" cannot
+    /// tell deleted after the step from never there.
     fn restore_secrets(&self, _env: &Env, core: &mut Core) -> Result<Vec<String>> {
         let records = self.vault.borrow_mut().keychain_records(core.conn())?;
         if records.is_empty() {
@@ -477,6 +484,7 @@ impl Module for AuthorityModule {
         // The Keychain may have moved on since the import sealed its copy (a key rotated after the step): an item that
         // holds a different value is kept as it is. Only its NAME is reported.
         let mut kept = Vec::new();
+        let mut returned = Vec::new();
         let mut items: BTreeMap<String, String> = BTreeMap::new();
         for (name, value) in records {
             match secrets_back::read_back(&**os, &name)? {
@@ -485,7 +493,12 @@ impl Module for AuthorityModule {
                         "secret kept: {name} (the Keychain holds a different value than the sealed one; left as it is)"
                     ));
                 }
-                _ => {
+                found => {
+                    if found.is_none() {
+                        returned.push(format!(
+                            "secret restored: {name} (the Keychain no longer holds it; written back from the sealed copy)"
+                        ));
+                    }
                     items.insert(name, value.to_string());
                 }
             }
@@ -494,6 +507,7 @@ impl Module for AuthorityModule {
         items.values_mut().for_each(String::zeroize);
         let mut lines = done?;
         lines.extend(kept);
+        lines.extend(returned);
         Ok(lines)
     }
 

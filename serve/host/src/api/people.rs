@@ -376,8 +376,9 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         if changed_agents {
             let want = roles_of(&b["agents"])?;
             // What kith-auth says they hold by their own row, whoever made it (the owner may have added one with the
-            // CLI): a read that fails stops here, before anything is changed.
-            let held: Vec<String> = crate::remote::members::auth_person_now(&bin, id)
+            // CLI): a read that fails stops here, before anything is changed. The file, not the core: until the
+            // switch auth.json is the truth and the core a copy of it.
+            let held: Vec<String> = crate::remote::members::auth_person(&bin, id)
                 .await
                 .context("couldn't read what kith-auth says they hold")?
                 .ok_or_else(|| anyhow!("`{id}` isn't a person in kith-auth"))?
@@ -387,17 +388,17 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
                 .map(|r| r.agent)
                 .collect();
             let mut made = person.made.clone();
-            // With KITH_CORE_AUTHORITY=1 the owner's change is the core's (M2-17): kith-auth is not written at all, and
-            // a core that can't be reached stops the change here.
+            // With KITH_CORE_AUTHORITY=1 the core is told after kith-auth, the order of kith-auth's own `mirror_to_core`
+            // (M2-18a): the file is the truth until the switch, so a change that reached only the core would close the
+            // gate and send the guard back to a file that never got it (a revoke undone). A mirror that fails is
+            // logged: the file has the change, and the gate only closes until `core-migrate` imports it.
             let on_core = super::authority::guard_on_core();
             for (agent, role) in &want {
                 let had = roles::may_use(id, agent).await;
-                let given = if on_core {
-                    core_grant(id, agent, role, !had).await
-                } else {
-                    grant(&bin, id, agent, role, !had).await
-                };
-                given.with_context(|| format!("giving {id} {agent}"))?;
+                grant(&bin, id, agent, role, !had).await.with_context(|| format!("giving {id} {agent}"))?;
+                if on_core && let Err(e) = core_grant(id, agent, role, !had).await {
+                    tracing::warn!(error = format!("{e:#}"), person = id, agent, "couldn't mirror a grant to the core");
+                }
                 if !had && !made.contains(agent) {
                     made.push(agent.clone());
                 }
@@ -406,20 +407,23 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
             // (say the agent's folder is gone) must not stop the rest: it is reported, and the row stays in `made`
             // so a later change tries again.
             for agent in held.iter().filter(|a| !want.contains_key(*a)) {
-                let taken = if on_core {
-                    core_revoke(id, agent).await
-                } else {
-                    account::run(&bin, &["member", agent, id, "--rm"]).await.map(drop)
-                };
-                match taken {
-                    Ok(()) => made.retain(|m| m != agent),
-                    // A core that can't be asked is no "agent folder is gone": the change fails, as a grant does.
-                    Err(e) if e.downcast_ref::<super::authority::CoreDown>().is_some() => return Err(e),
+                match account::run(&bin, &["member", agent, id, "--rm"]).await {
+                    Ok(_) => {
+                        made.retain(|m| m != agent);
+                        if on_core && let Err(e) = core_revoke(id, agent).await {
+                            tracing::warn!(
+                                error = format!("{e:#}"),
+                                person = id,
+                                agent,
+                                "couldn't mirror a revoke to the core"
+                            );
+                        }
+                    }
                     Err(e) => warnings.push(format!("couldn't take {agent} away from {id}: {e:#}")),
                 }
             }
             // The copy follows kith-auth, not what was asked: a row that wouldn't go still shows.
-            match crate::remote::members::auth_people_now(&bin).await {
+            match crate::remote::members::auth_people(&bin).await {
                 Ok(auth) => crate::remote::members::mirror_agents(&hub.store, &auth),
                 Err(e) => {
                     warnings.push(format!("couldn't read kith-auth after the change: {e:#}"));
