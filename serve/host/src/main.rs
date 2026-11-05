@@ -527,6 +527,17 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
+    /// `kernel/bin/kith-permit`'s command-line verbs: `issue AGENT SESSION PID`, `denied --dir DIR`, `once --dir DIR` and
+    /// `apply SETTINGS_FILE`. Prints what `kith-permit` prints, with its exit codes (2: the stdio MCP server, which has no Rust
+    /// side yet). Not routed from `kith` yet.
+    #[command(disable_help_flag = true)]
+    Permit {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
     /// What a launch assembles, one piece at a time (not routed from `kith AGENT` yet).
     Launch {
         #[command(subcommand)]
@@ -879,6 +890,19 @@ fn print_cost(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
     let paths = kith_kernel::cost::Paths::from_process(&kernel);
     let out = kith_kernel::cost::run(&paths, &kith_kernel::cost::Env::from_process(), args);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
+}
+
+/// `kith kernel permit ARGS...`: what `kith-permit`'s verbs print, with its exit codes. The hooks read their payload from stdin.
+fn print_permit(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let env = kith_kernel::permit::Env::from_process();
+    let out = kith_kernel::permit::run(&env, &kernel, args, &mut std::io::stdin().lock());
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
@@ -1420,6 +1444,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Pkg { kernel, args } = cmd {
                 std::process::exit(pkg_cmd::run(kernel, &args));
             }
+            if let KernelCmd::Permit { kernel, args } = cmd {
+                std::process::exit(print_permit(kernel, &args));
+            }
             through_core(|| -> Result<()> {
                 match cmd {
                     KernelCmd::Version => println!("{}", kith_kernel::version_json()),
@@ -1494,6 +1521,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Pkg { .. }
+                    | KernelCmd::Permit { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
