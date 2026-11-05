@@ -1385,7 +1385,7 @@ fn a_tombstone_is_refused_by_every_read_and_never_written_over() {
     assert_eq!(load_auth(&c).unwrap_err(), want);
     let out = run(&c, "may", &args(&["kai", "house"]));
     assert_eq!(out.code, 3);
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.stdout, "");
     // the note appears after a locked load: the save under the lock still refuses and leaves the bytes
     std::fs::write(&c.auth, "{}").unwrap();
     let locked = load_auth_locked(&c).unwrap();
@@ -1395,7 +1395,11 @@ fn a_tombstone_is_refused_by_every_read_and_never_written_over() {
     let left: Vec<_> = std::fs::read_dir(c.auth.parent().unwrap())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with(".tmp"))
+        .filter(|n| {
+            n.rsplit('.')
+                .next()
+                .is_some_and(|e| e.eq_ignore_ascii_case("tmp"))
+        })
         .collect();
     assert!(left.is_empty(), "{left:?}");
 }
