@@ -135,6 +135,22 @@ Bug included on the host side, fixed by #765 (main, `0f1d5968`): `30 1 * * *` in
 reading of 01:30), so a missed fire left a due time in the past. The host now answers 06:30Z (never at or before `after`); the
 fixture was re-recorded for that, and the `advance` row that showed the bug changed with it. M4's Trigger must keep the same rule.
 
+### Cost (M5-1)
+
+`golden/cost.json` (also in `corpus/`) freezes the verbs of `kith-cost` that the launch and the apps call: `limit` (text, `--json`,
+`--sh`), `spent`, `usage --json`, `agent NAME --json`, `members`, `bots --json`, `sync`, and the usage text. The cases are
+`needs: rust` with `program` set (`kernel/bin/kith-cost` against `{BIN} kernel cost --kernel {KERNEL}`), not `unswitched`: the Rust side exists, only
+the switch (a `cost` line in `lib/core-switched.txt`) is not made. Ledgers are built from transcripts (`home/.claude/projects/**`, with
+subagent `.meta.json`), a hand-written `cost.db`, the bridge's `state.json`, an extra Claude account, `settings.json` limits and an `auth.json`.
+
+**The clock.** `kith-cost` takes `KITH_COST_NOW` (ISO local time or epoch seconds; unset it reads the clock) for the calendar month, the
+periods, the forecast and the limit's month. Cases pin it with `TZ`, including Sydney across the daylight-saving start (a month's midnight keeps
+the offset of "now", as the Python does), New York, Lord Howe, December and February. `tag` and `record` keep the real clock.
+
+Not covered (no Rust side yet, `kith kernel cost` exits 2): `today|week|month|all`, `agents`, `agent NAME` as text, `people`, `session`, `csv`,
+and the hooks `tag` / `record`. A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
+that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`).
+
 ## Per-command summary
 
 `--summary FILE` (`-` for stdout) writes `{"commands": {"<command>": {"green": bool, "cases": {"<case>": "same" |

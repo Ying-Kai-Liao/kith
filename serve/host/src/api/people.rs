@@ -463,7 +463,13 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
         .await?
         .ok_or_else(|| anyhow!("`{id}` isn't a person on this computer"))?;
     if who.owner {
-        bail!("You can't revoke yourself.");
+        if revoke {
+            bail!("You can't revoke yourself.");
+        }
+        // Undo on the owner clears old data (an owner who was also revoked). It stays on this Mac: the cloud never holds
+        // the owner (apply_revoked skips them), so there is nothing to post and no other computer to tell.
+        let core_updated = local_revoke(hub, &bin, id, false).await?;
+        return Ok(json!({"revoked": false, "everywhere": false, "coreUpdated": core_updated}));
     }
     if !who.bot_of.is_empty() {
         bail!("`{id}` is a bot of {}'s; revoke {} and it goes quiet with them.", who.bot_of, who.bot_of);
