@@ -324,7 +324,9 @@ pub fn read_auth(path: &Path) -> R<Value> {
 /// `kith_tombstone.Tombstoned`: auth.json is a cutover note (`kith kernel cutover step authority`), the authority moved
 /// to the core. Nothing here answers from it or writes over it; exit 3 like the other tombstoned tools.
 fn tombstone_die(path: &Path, data: &Value) -> Option<Die> {
-    let note = data.as_object().filter(|o| o.contains_key("kith_tombstone"))?;
+    let note = data
+        .as_object()
+        .filter(|o| o.contains_key("kith_tombstone"))?;
     let module = note.get("module").and_then(Value::as_str).unwrap_or("?");
     let rollback = note
         .get("rollback")
@@ -435,13 +437,15 @@ pub fn save_auth(c: &Ctx, held: &Locked) -> R<()> {
         .inspect_err(|_| {
             let _ = std::fs::remove_file(&tmp);
         })
-        .map_err(|e| match e.get_ref().and_then(|i| i.downcast_ref::<Tombstoned>()) {
-            Some(Tombstoned(d)) => Die {
-                msg: d.msg.clone(),
-                code: d.code,
+        .map_err(
+            |e| match e.get_ref().and_then(|i| i.downcast_ref::<Tombstoned>()) {
+                Some(Tombstoned(d)) => Die {
+                    msg: d.msg.clone(),
+                    code: d.code,
+                },
+                None => fail(e),
             },
-            None => fail(e),
-        })
+        )
 }
 
 /// A tombstone seen by `save_auth` inside its write closure, carried out as an io error.
