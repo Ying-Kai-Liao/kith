@@ -98,6 +98,13 @@ pub async fn granted_agents(hub: &Hub, person: &str) -> Vec<Value> {
 /// The owner's name in kith-auth, for "Waiting for <owner>"; None when it has none (or can't be asked).
 pub async fn owner_name(agent: &str) -> Option<String> {
     let bin = account::bin().await?;
+    // A switched host has no auth.json to ask (kith-auth exits 3 on the tombstone): the owner's row in the core has the name.
+    if super::authority::switched() {
+        let rows = super::authority::run_auth(&bin, &["people", "--json"]).await.ok()?;
+        let people: Vec<Value> = serde_json::from_str(&rows).ok()?;
+        let owner = people.iter().find(|p| p["owner"] == true)?;
+        return owner["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned);
+    }
     // No person: kith-auth answers for the owner.
     let out = crate::channels::hq::output(&bin, &["resolve", agent]).await?;
     let v: Value = serde_json::from_slice(&out.stdout).ok()?;
