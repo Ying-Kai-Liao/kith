@@ -341,3 +341,32 @@ fn a_call_without_a_home_resolves_the_serve_folder_from_the_process_home() {
         given.path()
     );
 }
+
+/// With `$HOME` unset the process has no home to find the serve folder in: refused, never the relative `.kith/serve`
+/// (no `cloud-sync.json` there reads "never linked", which fails open). A home the caller names still wins.
+#[test]
+fn an_unset_home_is_refused_not_a_relative_serve_folder() {
+    use super::super::call::home_of;
+    assert!(
+        home_of(&json!({"env": {}}), None).is_err(),
+        "no home at all"
+    );
+    assert!(
+        home_of(&json!({"env": {}}), Some(std::path::PathBuf::new())).is_err(),
+        "an empty home"
+    );
+    assert!(
+        home_of(&json!({"home": ""}), None).is_err(),
+        "an empty home given"
+    );
+    assert!(
+        home_of(&json!({"home": "rel/home"}), None).is_err(),
+        "a relative home given"
+    );
+    let abs = std::env::temp_dir();
+    assert_eq!(
+        home_of(&json!({"env": {}}), Some(abs.clone())).unwrap(),
+        abs
+    );
+    assert_eq!(home_of(&json!({"home": abs}), None).unwrap(), abs);
+}
