@@ -315,9 +315,11 @@ pub(crate) fn call_in(
                     revoke::follow_in_cards(tx, m, params, said)?;
                     // A removal drops the bots' rows: record the person and the bot set (possibly empty) in this
                     // transaction, so a crash before the order has run loses nothing (it runs again at start).
-                    if m == "people.removePerson"
-                        && let Some(id) = word(params, "id")
-                    {
+                    let removed = said
+                        .get("removedPerson")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    if let Some(id) = removed.as_deref() {
                         let bots: Vec<String> = said
                             .get("ids")
                             .and_then(Value::as_array)
@@ -344,9 +346,11 @@ pub(crate) fn call_in(
             // The removal is committed: run the revoke order now. An error leaves the record, and the replay at start
             // and on the supervisor's pass runs it again, so the removal itself still stands.
             let mut said = said;
-            if m == "people.removePerson"
-                && let Some(id) = word(params, "id")
-            {
+            let removed = said
+                .as_object_mut()
+                .and_then(|o| o.remove("removedPerson"))
+                .and_then(|v| v.as_str().map(str::to_owned));
+            if let Some(id) = removed.as_deref() {
                 #[allow(clippy::cast_possible_truncation)]
                 match crate::revoke_order::revoke_everywhere(core, id, &[], c.now_ms as i64) {
                     Ok(out) if !out.kill.is_empty() => {
@@ -493,6 +497,8 @@ pub(super) fn write_in(
             let was = revoke::was_ids(a, need(params, "id")?);
             let (said, ids) = revoke::person_remove(a, life, c, need(params, "id")?)?;
             let mut out = lines(said);
+            // What the write did, for the record and the order below: keyed on the removal, not on the method name.
+            out["removedPerson"] = json!(need(params, "id")?);
             out["ids"] = json!(ids);
             out["was"] = json!(was);
             Ok(out)
