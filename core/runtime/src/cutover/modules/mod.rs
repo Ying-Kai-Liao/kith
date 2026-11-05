@@ -8,10 +8,13 @@
 //! `meta.accounts_core_writes` flag, which nothing sets).
 
 //!
+//! S2 (M3-10c): [`claims`], the live writer claim files; registered for its import, never stepped (the Python writes them).
+//!
 //! M4-5a: [`schedules`], the host's routines and `kith-sched`'s state. It does have secrets (the webhook keys), which it
 //! writes into the envelope itself and puts back into serve.db at a rollback; see its doc.
 
 pub(crate) mod accounts;
+pub(crate) mod claims;
 pub(crate) mod schedules;
 #[cfg(test)]
 mod schedules_tests;

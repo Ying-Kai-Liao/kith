@@ -1,0 +1,11 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{\n  \"agents\": {\n    \"a\": {\n      \"limit\": 4,\n      \"permission_mode\": \"plan\"\n    }\n  },\n  \"delegation\": {\n    \"chain_cost_cap_usd\": 9\n  },\n  \"plugins\": [\n    \"a@b\"\n  ]\n}\n",
+  "state:home/.kith/settings.json.lock": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: permission_mode 'nope' is not one of default, acceptEdits, plan, auto, bypassPermissions\n",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "plan\n"
+}

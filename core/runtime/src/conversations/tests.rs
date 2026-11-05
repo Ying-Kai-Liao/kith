@@ -1248,3 +1248,13 @@ fn a_claim_on_a_fresh_db_gets_an_id_above_the_clock_and_the_next_follows() {
     let (id2, _) = take(&mut c, "c2");
     assert_eq!(id2, id + 1);
 }
+
+#[test]
+fn a_turn_claim_is_not_made_by_the_plain_claim_calls_in_production() {
+    use super::claims::refuse_direct_turn;
+    // Production passes false (cfg!(test) is false there): only claim_next may start a turn claim.
+    assert!(refuse_direct_turn(Kind::Turn, false).is_err());
+    assert!(refuse_direct_turn(Kind::Terminal, false).is_ok());
+    assert!(refuse_direct_turn(Kind::External, false).is_ok());
+    assert!(refuse_direct_turn(Kind::Turn, true).is_ok());
+}

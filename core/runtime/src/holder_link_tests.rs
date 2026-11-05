@@ -147,7 +147,7 @@ fn the_cores_take_and_release_return_typed_answers_with_the_claim() {
 
 use std::sync::Mutex;
 
-use super::{TurnStep, begin_turn, exit_body, finish_turn, forget_proc};
+use super::{TurnStep, begin_turn, end_stuck_claim, exit_body, finish_turn, forget_proc};
 use crate::conversations::claims::{self, Kind, NewClaim};
 use crate::db::{Core, MIGRATIONS, RecordedProc};
 use crate::layout::Layout;
@@ -656,4 +656,58 @@ fn a_redeem_error_after_the_take_gives_the_lock_back() {
     .unwrap();
     assert_eq!(next.result, TurnLock::Locked, "given back: {next:?}");
     rig.finish(&[&held]);
+}
+
+/// A `LockStuck` turn's claim is ended through the claims API: it never stays `claimed` (which would keep the
+/// conversation's one writer slot for a process nobody drives), its turn is queued again, and the process's end is the
+/// kill the claim answers. A second `LockStuck` for the same claim changes nothing.
+#[test]
+fn a_lock_stuck_turn_ends_its_claim_once() {
+    let rig = Rig::new();
+    let (claim, turn) = rig.claimed("conv-s");
+    // The holder reported the spawn: the claim names a process, so ending it is a kill to send.
+    let mut core = rig.core.lock().unwrap();
+    claims::report(
+        &mut core,
+        claim,
+        "spawned",
+        r#"{"pid":4242,"started":"e1"}"#,
+        20,
+    )
+    .unwrap();
+    drop(core);
+    let kill = end_stuck_claim(&rig.core, claim).unwrap().unwrap();
+    assert_eq!(kill.pid, Some(4242));
+    assert_eq!(
+        rig.row("SELECT state FROM claims WHERE claim_id = ?1", claim),
+        "ending"
+    );
+    assert_eq!(
+        rig.row("SELECT end_reason FROM claims WHERE claim_id = ?1", claim),
+        "lock_stuck"
+    );
+    assert_eq!(
+        rig.row("SELECT state FROM turns WHERE id = ?1", turn),
+        "queued"
+    );
+    // Again: the kill is answered again, nothing is written twice.
+    assert!(end_stuck_claim(&rig.core, claim).unwrap().is_some());
+    assert_eq!(
+        rig.row("SELECT state FROM turns WHERE id = ?1", turn),
+        "queued"
+    );
+
+    // A claim with no process recorded ends at once (nothing can be writing), and a repeat is a no-op.
+    let (bare, bare_turn) = rig.claimed("conv-s2");
+    assert!(end_stuck_claim(&rig.core, bare).unwrap().is_none());
+    assert!(end_stuck_claim(&rig.core, bare).unwrap().is_none());
+    assert_eq!(
+        rig.row("SELECT state FROM claims WHERE claim_id = ?1", bare),
+        "ended"
+    );
+    assert_eq!(
+        rig.row("SELECT state FROM turns WHERE id = ?1", bare_turn),
+        "queued"
+    );
+    rig.finish(&[]);
 }

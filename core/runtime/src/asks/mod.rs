@@ -37,7 +37,7 @@ const BRIEF_MAX: usize = 2000;
 
 const COLS: &str = "id, chain, parent, reply_session, hop, cross_hops, crossed, asked, caller_agent, caller_person, \
 caller_via, conversation, cost, cost_base, cap_usd, state, at_ms, answered_ms, capped_ms, cap_card_ms, ended_ms, pid, \
-pid_at_ms, brief, done, delivered, woke_answer, extra";
+pid_at_ms, brief, done, delivered, woke_answer, extra, claim_id";
 
 /// One row of `asks`: the record of one `kith ask`.
 #[derive(Clone, Debug, PartialEq)]
@@ -72,6 +72,9 @@ pub(crate) struct Ask {
     pub woke_answer: bool,
     /// Every other key of an imported record, so nothing it held is lost.
     pub extra: Option<Map<String, Value>>,
+    /// The claim the ask's run started (code-only link to the conversations lane, no foreign key). Not part of the
+    /// record `kith ask` prints. NULL for a row from before the column: stop then matches the run by `pid`.
+    pub claim_id: Option<i64>,
 }
 
 const STATES: [&str; 4] = ["open", "answered", "capped", "stopped"];
@@ -172,6 +175,7 @@ impl Ask {
             delivered: take_flag(&mut rest, "delivered"),
             woke_answer: take_flag(&mut rest, "woke_answer"),
             extra: None,
+            claim_id: None,
         };
         Some(Self {
             extra: (!rest.is_empty()).then_some(rest),
@@ -276,6 +280,7 @@ impl Ask {
             delivered: r.get::<_, i64>(25)? != 0,
             woke_answer: r.get::<_, i64>(26)? != 0,
             extra: extra.and_then(|t| serde_json::from_str(&t).ok()),
+            claim_id: r.get(28)?,
         })
     }
 
@@ -284,7 +289,7 @@ impl Ask {
         conn.execute(
             &format!(
                 "INSERT OR REPLACE INTO asks ({COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
-                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)"
+                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)"
             ),
             params![
                 self.id,
@@ -317,6 +322,7 @@ impl Ask {
                 self.extra
                     .as_ref()
                     .map(|e| Value::Object(e.clone()).to_string()),
+                self.claim_id,
             ],
         )?;
         Ok(())
@@ -358,6 +364,8 @@ pub(crate) struct Open<'a> {
     pub pid: Option<i64>,
     /// The asked agent's session of a `--bg` run, when it already has one.
     pub conversation: Option<&'a str>,
+    /// The claim the run started, when it already has one (stop and kill then match by it, not by `pid`).
+    pub claim_id: Option<i64>,
 }
 
 /// Opens ask `o.id`: the cap check and the insert as one transaction (`open_record` under the box lock). `env` is the
@@ -461,6 +469,7 @@ pub(crate) fn open_in(
         delivered: false,
         woke_answer: false,
         extra: None,
+        claim_id: o.claim_id,
     };
     ask.put(tx)?;
     Ok(json!({"decision": decision, "record": Value::Object(ask.to_reg())}))
@@ -610,7 +619,7 @@ pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<En
         }
         hit.extend(more);
     }
-    let mut conversations: Vec<(String, Option<i64>)> = Vec::new();
+    let mut conversations: Vec<(String, claims::AskRun)> = Vec::new();
     for mut a in asks.iter().filter(|a| hit.contains(a.id.as_str())).cloned() {
         // A delivered or answered ask is history: its record and its caller's wakes stay, but its run stops and the
         // record is marked ended, so nothing opens under it or starts its conversation again.
@@ -630,14 +639,20 @@ pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<En
         }
         owed.extend(a.conversation.clone());
         if let Some(c) = a.conversation {
-            conversations.push((c, a.pid));
+            conversations.push((
+                c,
+                claims::AskRun {
+                    pid: a.pid,
+                    claim_id: a.claim_id,
+                },
+            ));
         }
     }
-    for (c, pid) in conversations.iter().filter(|(c, _)| !c.is_empty()) {
+    for (c, run) in conversations.iter().filter(|(c, _)| !c.is_empty()) {
         out.kill.extend(claims::stop_conversation_in(
             &tx,
             c,
-            *pid,
+            *run,
             "ask stopped",
             now,
         )?);

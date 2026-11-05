@@ -1,0 +1,17 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{\n  \"account_cross_harness\": 1\n}\n",
+  "state:home/.kith/settings.json.lock": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: <HOME>/.kith/settings.json: account_cross_harness is not true or false\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.json": "{\n  \"error\": \"kith: <HOME>/.kith/settings.json: account_cross_harness is not true or false\",\n  \"ok\": false\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "1\n",
+  "step2.stderr": "kith: <HOME>/.kith/settings.json: account_cross_harness is not true or false\n",
+  "step2.stdout": "",
+  "step3.exit": "1\n",
+  "step3.stderr": "kith: <HOME>/.kith/settings.json: account_cross_harness is not true or false\n",
+  "step3.stdout": ""
+}

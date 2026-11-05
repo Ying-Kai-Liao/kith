@@ -25,6 +25,8 @@ pub mod schedule;
 #[cfg(unix)]
 pub mod secrets;
 #[cfg(unix)]
+pub mod settings;
+#[cfg(unix)]
 pub mod threads;
 
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
