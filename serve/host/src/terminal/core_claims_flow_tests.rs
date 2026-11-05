@@ -209,3 +209,49 @@ async fn a_take_over_that_the_core_never_ends_promotes_nothing() {
     let again = claim::take_as(&r.state(), "s1", Kind::Bot, r.sleeper(), false, Some("bot-sam"), None).unwrap();
     assert!(again.is_err(), "and a new claim is refused while it is ending");
 }
+
+#[tokio::test]
+async fn a_release_the_core_never_heard_does_not_turn_the_next_turn_into_a_claimless_one() {
+    for (case, same_pid) in [("the warm agent's own pid", true), ("another host pid", false)] {
+        let r = Rig::new();
+        let core = FakeCore::start(&r.state());
+        let pid = r.sleeper();
+        assert!(
+            claim::take_as(&r.state(), "s1", Kind::Bot, pid, false, Some("bot-sam"), None).unwrap().is_ok(),
+            "{case}"
+        );
+        // The turn ends while the core is down: the file goes, the core's claim stays `running`.
+        core.world.lock().unwrap().down = true;
+        claim::release(&r.state(), "s1", pid, false);
+        core.world.lock().unwrap().down = false;
+        assert_eq!(core.claim_state(1), "running", "{case}");
+        assert!(!claim::path(&r.state(), "s1", false).exists(), "{case}");
+        // The next turn: the stale claim is ended as `done` and the claim made again; it is a real claim, not a claimless run.
+        let next = if same_pid { pid } else { r.sleeper() };
+        let taken = claim::take_as(&r.state(), "s1", Kind::Bot, next, false, Some("bot-sam"), None);
+        assert!(matches!(taken, Ok(Ok(()))), "{case}: {taken:?}");
+        assert_eq!(core.claim_state(1), "ended", "{case}");
+        assert_eq!(core.claim_state(2), "running", "{case}");
+        assert_eq!(core.turn_states()[0], "done", "{case}: the stale turn is finished, never requeued");
+        // The file is held throughout: a kernel-style taker is refused.
+        assert_eq!(claim::read(&claim::path(&r.state(), "s1", false)).map(|c| c.pid), Some(next), "{case}");
+        let other = r.sleeper();
+        let refused = claim::take(&r.state(), "s1", Kind::Terminal, other, false).unwrap();
+        assert_eq!(refused.unwrap_err().0.pid, next, "{case}");
+        claim::release(&r.state(), "s1", next, false);
+        assert_eq!(core.claim_state(2), "ended", "{case}");
+    }
+}
+
+#[tokio::test]
+async fn a_claim_only_the_core_knows_still_refuses_the_turn() {
+    let r = Rig::new();
+    let core = FakeCore::start(&r.state());
+    let theirs = r.sleeper();
+    core.hold("s1", "external", theirs);
+    let pid = r.sleeper();
+    let held = claim::take_as(&r.state(), "s1", Kind::Bot, pid, false, Some("bot-sam"), None).unwrap().unwrap_err();
+    assert_eq!(held.0.pid, theirs);
+    assert_eq!(core.claim_state(1), "running", "not ours: left alone");
+    assert!(!claim::path(&r.state(), "s1", false).exists(), "and the file is given back");
+}

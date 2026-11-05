@@ -34,6 +34,10 @@
 //!   `holder()` checks of `cards/resume.rs` and a second take-over see it), the core claim is stopped (`ending`, still the
 //!   writer), the terminal is signalled, and only a claim the core shows `ended` (the process confirmed gone) lets the host
 //!   go on.
+//! - **A claim of ours whose end the core never heard is ended, not read as another writer.** The adapter remembers the core
+//!   claim each session holds until its end report went through. If `release` failed (core down, reply lost), the claim stays
+//!   `running` on the warm agent's pid; the next take finds it held, sees it is ours (same pid or another host pid), reports
+//!   it `done` and makes the claim again, once. A core claim we don't know still refuses, on any pid.
 //! - **A refused turn is cancelled by the caller.** The turn row is the claim's vehicle; whatever refuses its claim
 //!   (held, revoked, a stale epoch, a failed redeem, no account left), the adapter cancels it with `hostclaim.cancel`
 //!   instead of leaving it queued. (A stopped ask's turn the core cancels itself.) A redeem whose reply was lost is checked
@@ -60,7 +64,7 @@
 
 use super::claim::{Claim, Held, Kind};
 use super::registry::{pid_runs, proc_start};
-use crate::core_front::{Answer, call_host};
+use crate::core_front::{Answer, call_host_claims};
 use kith_kernel::paths::Paths;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -95,6 +99,27 @@ fn registry() -> &'static Mutex<HashMap<PathBuf, Paths>> {
     R.get_or_init(Mutex::default)
 }
 
+/// The core claim each (state folder, session) of this process holds, until its end report went through. A release the core
+/// never heard (down, lost reply) leaves its claim `running` on the warm agent's pid; the next take of the session finds it
+/// here and ends it, instead of reading it as another writer.
+fn mine() -> &'static Mutex<HashMap<(PathBuf, String), i64>> {
+    static M: OnceLock<Mutex<HashMap<(PathBuf, String), i64>>> = OnceLock::new();
+    M.get_or_init(Mutex::default)
+}
+
+fn remember(f: &Paths, sid: &str, id: i64) {
+    mine().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert((f.state.clone(), sid.to_owned()), id);
+}
+
+fn forget(f: &Paths, sid: &str) {
+    mine().lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&(f.state.clone(), sid.to_owned()));
+}
+
+fn is_mine(f: &Paths, sid: &str, id: i64) -> bool {
+    mine().lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&(f.state.clone(), sid.to_owned()))
+        == Some(&id)
+}
+
 /// Whether the process was started with the flag on.
 pub fn flag_on() -> bool {
     std::env::var(FLAG).is_ok_and(|v| v == "1")
@@ -120,10 +145,10 @@ fn row(f: &Paths, method: &str, params: &Value) -> std::io::Result<Value> {
     #[cfg(test)]
     let answer = match tests::fake_for(f) {
         Some(fake) => fake(method, params),
-        None => call_host(f, method, params),
+        None => call_host_claims(f, method, params),
     };
     #[cfg(not(test))]
-    let answer = call_host(f, method, params);
+    let answer = call_host_claims(f, method, params);
     match answer {
         Answer::Done(v) => Ok(v),
         Answer::Refused(said) => Err(failed(said)),
@@ -199,7 +224,8 @@ pub(super) fn take_as(
     let person = owner_or(person);
     let agent = agent.unwrap_or("kith");
     row(f, "hostclaim.ensure", &json!({"conversation": sid, "agent": agent, "engine": "claude"}))?;
-    for attempt in 0..2 {
+    let mut reclaimed = false;
+    for attempt in 0..3 {
         let seen = row(f, "hostclaim.epoch", &json!({"person": person}))?["epoch"].clone();
         let refused = match kind {
             Kind::Terminal | Kind::Oneshot => {
@@ -209,13 +235,17 @@ pub(super) fn take_as(
                     &json!({"conversation": sid, "kind": "external", "person": person, "revokeSeen": seen,
                             "pid": pid, "started": started}),
                 )?;
-                if v["claimId"].is_i64() {
+                if let Some(id) = v["claimId"].as_i64() {
+                    remember(f, sid, id);
                     return Ok(Ok(()));
                 }
                 v
             }
             Kind::App | Kind::Bot => match turn_claim(f, sid, kind, pid, &started, person, agent, cwd, &seen)? {
-                Ok(()) => return Ok(Ok(())),
+                Ok(id) => {
+                    remember(f, sid, id);
+                    return Ok(Ok(()));
+                }
                 Err(refused) => refused,
             },
             Kind::Starting | Kind::Other => return Err(failed("this kind of claim is the core's own")),
@@ -225,7 +255,24 @@ pub(super) fn take_as(
             if attempt == 0 && live_settled(f, sid)?.is_none() {
                 continue;
             }
-            let c = live(f, sid)?.map_or_else(
+            let shown = live(f, sid)?;
+            // Our own claim whose end report never reached the core (the file claim is ours, taken under its lock, so no live
+            // turn of this host can own it): ended as `release` would have, and the claim made again, once. Any other core
+            // claim (one only the core knows) still refuses, on any pid: the core is not guessed at.
+            if let Some(c) = &shown
+                && !reclaimed
+                && c["claimId"].as_i64().is_some_and(|id| is_mine(f, sid, id))
+            {
+                tracing::warn!(
+                    sid,
+                    "ending a claim of ours that was never reported: the last turn's end didn't reach the core"
+                );
+                if end_report(f, sid, c).is_ok() {
+                    reclaimed = true;
+                    continue;
+                }
+            }
+            let c = shown.map_or_else(
                 || Claim {
                     pid: 0,
                     proc_start: None,
@@ -261,7 +308,7 @@ fn turn_claim(
     agent: &str,
     cwd: Option<&str>,
     seen: &Value,
-) -> std::io::Result<Result<(), Value>> {
+) -> std::io::Result<Result<i64, Value>> {
     let source = if kind == Kind::Bot { "bot" } else { "app" };
     let q = row(
         f,
@@ -307,7 +354,7 @@ fn turn_claim(
             if shown
                 .is_some_and(|s| s["claim"]["state"] == "running" && s["claim"]["pid"].as_u64() == Some(u64::from(pid)))
             {
-                return Ok(Ok(()));
+                return Ok(Ok(id));
             }
             // A claimed claim with no pid is never settled (gone needs a pid): cancelling the turn ends it.
             cancel("redeem failed");
@@ -315,7 +362,7 @@ fn turn_claim(
         }
     };
     if red["running"] == true {
-        return Ok(Ok(()));
+        return Ok(Ok(id));
     }
     // Not redeemable (the claim was revoked or ended in between): the claim goes and so does the turn.
     let _ = row(f, "hostclaim.stop", &json!({"claimId": id, "reason": "not redeemed"}));
@@ -329,14 +376,19 @@ pub(super) fn release(f: &Paths, sid: &str, pid: u32) {
     if c["pid"].as_u64() != Some(u64::from(pid)) {
         return;
     }
-    let Some(id) = c["claimId"].as_i64() else { return };
-    // A host turn ends `done` (the core never requeues it: the host retries on its own); `exit` is an external claim's end.
-    let kind = if c["kind"] == "turn" { "done" } else { "exit" };
-    if let Err(error) =
-        row(f, "hostclaim.report", &json!({"claimId": id, "kind": kind, "body": json!({"pid": pid}).to_string()}))
-    {
-        tracing::warn!(%error, sid, "couldn't report a claim's exit to the core");
+    if let Err(error) = end_report(f, sid, &c) {
+        tracing::warn!(%error, sid, "couldn't report a claim's end to the core");
     }
+}
+
+/// The end report of the live claim `c`. A host turn ends `done` (the core never requeues it: the host retries on its own);
+/// `exit` is an external claim's end. The claim stays remembered as ours until the report went through.
+fn end_report(f: &Paths, sid: &str, c: &Value) -> std::io::Result<()> {
+    let Some(id) = c["claimId"].as_i64() else { return Ok(()) };
+    let kind = if c["kind"] == "turn" { "done" } else { "exit" };
+    row(f, "hostclaim.report", &json!({"claimId": id, "kind": kind, "body": json!({"pid": c["pid"]}).to_string()}))?;
+    forget(f, sid);
+    Ok(())
 }
 
 /// The core's terminal or external claim on `sid` that a take-over would stop, if any.
