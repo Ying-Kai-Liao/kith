@@ -83,7 +83,7 @@ pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
 
 /// The rules' context over a caller's folders (also the cutover module's, which has no params to read them from; its
 /// serve folder is the machine's, `ctx_of` sets the caller's).
-pub(crate) fn ctx_from(folders: &kith_kernel::paths::Paths, kernel: std::path::PathBuf) -> Ctx {
+pub(crate) fn ctx_from(folders: &kith_kernel::paths::Paths, kernel: PathBuf) -> Ctx {
     Ctx {
         auth: folders.secrets.join("auth.json"),
         agents: folders.agents.clone(),
