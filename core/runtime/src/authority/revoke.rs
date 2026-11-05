@@ -39,6 +39,8 @@ pub(crate) struct Life {
     pub(crate) agents: PathBuf,
     pub(crate) state: PathBuf,
     pub(crate) machine: PathBuf,
+    /// The kernel folder, whose `services/` says which logins are personal.
+    pub(crate) kernel: PathBuf,
 }
 
 impl Life {
@@ -53,6 +55,7 @@ impl Life {
             agents: c.agents.clone(),
             state: home.join("state"),
             machine: home.join("machine"),
+            kernel: c.kernel.clone(),
         }
     }
 }
@@ -236,7 +239,7 @@ pub(crate) fn person_set(
     if owner {
         let was = secrets::owner(auth);
         if let Some(was) = was.clone().filter(|w| w != pid) {
-            let pinned = pin_owner_profiles(auth, &was);
+            let pinned = kept_logins(auth, life, &was)?;
             if !pinned.is_empty() {
                 out.push(format!(
                     "kept {was}'s: {} (kith-auth owner <profile> {pid} to hand one over)",
@@ -253,10 +256,6 @@ pub(crate) fn person_set(
             }
         }
         entry(table(auth, "people"), pid).insert("owner".to_owned(), true.into());
-        if was.is_none() {
-            // with no owner named yet "the owner" owned them; the one now named does
-            repoint_profiles(auth, NO_OWNER, pid);
-        }
     }
     let shown: Vec<String> = people(auth)
         .get(pid)
@@ -279,9 +278,6 @@ pub(crate) fn person_set(
     Ok(out)
 }
 
-/// What the import stores as the owner of a profile while no owner is named (`owner_of` answers it the same).
-const NO_OWNER: &str = "the owner";
-
 /// Every profile owned by `from` is owned by `to`; the profiles' names, sorted.
 fn repoint_profiles(auth: &mut Value, from: &str, to: &str) -> Vec<String> {
     let mut moved = Vec::new();
@@ -298,11 +294,55 @@ fn repoint_profiles(auth: &mut Value, from: &str, to: &str) -> Vec<String> {
     moved
 }
 
-/// The owner changes: kith-auth pins the profiles that were the old owner's by default to them. The core stores that
-/// default as a person (the import works `owner_of` out once, `m0021`), so only a profile still held for "the owner"
-/// is left to pin.
-fn pin_owner_profiles(auth: &mut Value, was: &str) -> Vec<String> {
-    repoint_profiles(auth, NO_OWNER, was)
+/// The owner changes: the logins that stay the old owner's, for the line kith-auth prints. The import already stored
+/// each default login as its owner's id, so they are the personal-service profiles held for `was`. A profile typed
+/// as `the owner` belongs to nobody, as in Python (`owner_of` pins only what had no `person`).
+fn kept_logins(auth: &Value, life: &Life, was: &str) -> R<Vec<String>> {
+    let mut out = Vec::new();
+    let profiles = auth.get("profiles").and_then(Value::as_object);
+    for (name, prof) in profiles.into_iter().flatten() {
+        if str_of(prof, "person") == Some(was)
+            && personal(life, name.split('/').next().unwrap_or(name))?
+        {
+            out.push(name.clone());
+        }
+    }
+    out.sort_unstable();
+    Ok(out)
+}
+
+/// `kith-auth`'s `personal(svc)`, read from the kernel's `services/` then this Mac's; a spec that cannot be read is
+/// refused, as the import refuses it.
+fn personal(life: &Life, svc: &str) -> R<bool> {
+    if svc.is_empty() || svc.contains(['/', '\\']) || svc == ".." || svc == "." {
+        return Ok(false);
+    }
+    for dir in [life.kernel.join("services"), life.machine.join("services")] {
+        let path = dir.join(format!("{svc}.json"));
+        if !path.is_file() {
+            continue;
+        }
+        let spec: Option<Value> = std::fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .filter(Value::is_object);
+        let Some(spec) = spec else {
+            return die(format!("the service spec of {svc} cannot be read"));
+        };
+        return Ok(match spec.get("personal") {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::Null) => false,
+            Some(Value::String(t)) => !t.is_empty(),
+            Some(Value::Number(n)) => n.as_f64() != Some(0.0),
+            Some(Value::Array(l)) => !l.is_empty(),
+            Some(Value::Object(m)) => !m.is_empty(),
+            None => matches!(
+                spec.get("kind").and_then(Value::as_str),
+                Some("login" | "browser")
+            ),
+        });
+    }
+    Ok(false)
 }
 
 /// `rename`: a person's new id, carried through every table that names them. The old id stays in `was`, so what

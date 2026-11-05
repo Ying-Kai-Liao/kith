@@ -1255,24 +1255,63 @@ fn a_renamed_owner_or_bot_takes_its_grants_and_logins_along() {
     assert_eq!(profiles["github/kai"]["with"], json!(["bot-z"]));
 }
 
+/// Two service specs in the rig's kernel: a Chrome login is personal, an API key is not.
+fn write_services(rig: &Rig) {
+    let d = rig.c.kernel.join("services");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("chrome-agent.json"), r#"{"kind": "login"}"#).unwrap();
+    std::fs::write(d.join("notion.json"), r#"{"kind": "api"}"#).unwrap();
+}
+
 #[test]
 fn a_new_owner_keeps_the_old_owners_default_logins() {
-    // The import stores a default login as its owner's id; one stored while no owner was named is `the owner`.
+    // The import stores a default login as its owner's id, so the old owner's personal logins are the ones held for them.
     let mut a = world();
     a["profiles"] = json!({
         "chrome-agent/kai": {"person": "kai"},
-        "chrome-agent/default": {"person": "the owner"},
+        "chrome-agent/default": {"person": "kai"},
+        "notion/kai": {"person": "kai"},
         "github/shared": {},
     });
     let mut rig = Rig::new(&a);
+    write_services(&rig);
     seed_secrets(&rig, &a);
-    rig.lines("people.addPerson", &json!({"id": "amy", "owner": true}))
+    let lines = rig
+        .lines("people.addPerson", &json!({"id": "amy", "owner": true}))
         .unwrap();
+    assert_eq!(
+        lines[0],
+        "kept kai's: chrome-agent/default, chrome-agent/kai (kith-auth owner <profile> amy to hand one over)"
+    );
     let t = rig.tables();
     assert_eq!(t["profiles"]["chrome-agent/kai"]["person"], "kai");
     assert_eq!(t["profiles"]["chrome-agent/default"]["person"], "kai");
+    assert_eq!(t["profiles"]["notion/kai"]["person"], "kai");
     assert!(t["profiles"]["github/shared"].get("person").is_none());
-    // with no owner named yet, "the owner" is whoever is named
+    // changing the owner again: amy's logins (none yet) are not kai's, so no kept line
+    let again = rig
+        .lines("people.addPerson", &json!({"id": "kai", "owner": true}))
+        .unwrap();
+    assert!(again.iter().all(|l| !l.starts_with("kept ")), "{again:?}");
+}
+
+#[test]
+fn a_login_typed_as_the_owner_stays_unowned() {
+    // As in Python, "the owner" typed by hand belongs to nobody: the next owner does not get it, and no kept line.
+    let mut a = world();
+    a["profiles"] = json!({"chrome-agent/default": {"person": "the owner"}});
+    let mut rig = Rig::new(&a);
+    write_services(&rig);
+    seed_secrets(&rig, &a);
+    let lines = rig
+        .lines("people.addPerson", &json!({"id": "amy", "owner": true}))
+        .unwrap();
+    assert!(lines.iter().all(|l| !l.starts_with("kept ")), "{lines:?}");
+    assert_eq!(
+        rig.tables()["profiles"]["chrome-agent/default"]["person"],
+        "the owner"
+    );
+    // with no owner named yet, it is the same
     let mut b = world();
     b["people"]["kai"] = json!({});
     b["profiles"] = json!({"chrome-agent/default": {"person": "the owner"}});
@@ -1282,12 +1321,22 @@ fn a_new_owner_keeps_the_old_owners_default_logins() {
         .unwrap();
     assert_eq!(
         rig.tables()["profiles"]["chrome-agent/default"]["person"],
-        "amy"
+        "the owner"
     );
 }
 
 /// `kith-auth person <old> id=<new>` over a file holding `auth`, or `None` where there is no python3.
 fn python_rename(auth: &Value, old: &str, new: &str) -> Option<Value> {
+    python_person(auth, &[old, &format!("id={new}")], None).map(|(auth, _)| auth)
+}
+
+/// `kith-auth person ARGS` over a file holding `auth` (with `kernel` as its kernel folder, for the service specs):
+/// the file after, and what it printed. `None` where there is no python3.
+fn python_person(
+    auth: &Value,
+    args: &[&str],
+    kernel: Option<&std::path::Path>,
+) -> Option<(Value, String)> {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("auth.json");
     let mut auth = auth.clone();
@@ -1303,13 +1352,15 @@ fn python_rename(auth: &Value, old: &str, new: &str) -> Option<Value> {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith-auth");
     let out = std::process::Command::new("python3")
         .arg(&script)
-        .args(["person", old, &format!("id={new}")])
+        .arg("person")
+        .args(args)
         .env_clear()
         .env("PATH", std::env::var_os("PATH")?)
         .env("HOME", dir.path())
         .env("KITH_AUTH", &file)
         .env("KITH_HOME", dir.path().join("kith"))
         .env("KITH_AGENTS", dir.path().join("agents"))
+        .envs(kernel.map(|k| ("KITH_ROOT", k)))
         .output()
         .ok()?;
     assert!(
@@ -1317,7 +1368,10 @@ fn python_rename(auth: &Value, old: &str, new: &str) -> Option<Value> {
         "kith-auth person failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    Some(serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap())
+    Some((
+        serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    ))
 }
 
 #[test]
@@ -1328,6 +1382,8 @@ fn the_secrets_after_a_rename_are_what_kith_auth_leaves() {
     a["grants"]["a@b@sam"] = json!({"github": "github/sam"});
     a["grants"]["sam@x"] = json!({"github": "github/sam"});
     a["profiles"]["github/none"] = json!({});
+    // the new name already lent the profile too: the list keeps one of them
+    a["profiles"]["github/amy"]["with"] = json!(["sam", "anna"]);
     let Some(py) = python_rename(&a, "sam", "anna") else {
         assert!(
             std::env::var_os("CI").is_none(),
@@ -1361,4 +1417,50 @@ fn the_secrets_after_a_rename_are_what_kith_auth_leaves() {
         Value::Object(o)
     };
     assert_eq!(narrow(&profiles), narrow(&py["profiles"]));
+}
+
+#[test]
+fn the_owner_change_is_what_kith_auth_leaves() {
+    // Python's input holds the default logins unmarked; the import stores them as the owner's id.
+    let mut py_in = world();
+    py_in["profiles"] = json!({
+        "chrome-agent/default": {},
+        "chrome-agent/amy": {"person": "amy"},
+        "notion/kai": {},
+        "github/shared": {"person": "*"},
+    });
+    let mut core_in = py_in.clone();
+    core_in["profiles"]["chrome-agent/default"] = json!({"person": "kai"});
+    let mut rig = Rig::new(&core_in);
+    write_services(&rig);
+    let Some((py, printed)) = python_person(&py_in, &["amy", "owner"], Some(&rig.c.kernel)) else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "no python3 in CI: the owner change was not compared with kith-auth"
+        );
+        eprintln!("no python3: owner change not compared with kith-auth");
+        return;
+    };
+    seed_secrets(&rig, &core_in);
+    let lines = rig
+        .lines("people.addPerson", &json!({"id": "amy", "owner": true}))
+        .unwrap();
+    let kept = |text: &str| {
+        text.lines()
+            .find(|l| l.starts_with("kept "))
+            .map(str::to_owned)
+    };
+    assert!(kept(&printed).is_some());
+    assert_eq!(kept(&printed), lines.iter().find_map(|l| kept(l)));
+    let persons = |p: &Value| -> Vec<(String, Option<String>)> {
+        let mut v: Vec<_> = p
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(n, v)| (n.clone(), v["person"].as_str().map(str::to_owned)))
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(persons(&rig.tables()["profiles"]), persons(&py["profiles"]));
 }
