@@ -5,7 +5,7 @@
 //! - S5: requests for one session merge into one item and one turn.
 //! - W2: a request leaves the queue only when its turn ends (`commit`), never when the turn starts (`start_turn`).
 //! - W3: a turn starts only on a session nobody holds; what comes in meanwhile merges into the next turn. (`take` does not
-//!   check the hold: the host does and answers `back --held`; in the core the hold becomes a parked turn, M3-10.)
+//!   check the hold: the host does and answers `back --held`; in the core the hold is a parked `terminal_live` turn, `turns.rs`.)
 //! - A turn whose holder died either reached the session (its marker is in the transcript: answered) or did not (owed
 //!   again): `recover`.
 //!
@@ -366,7 +366,7 @@ pub(crate) fn recover_all(st: &mut State, out: &dyn Outside, tr: &dyn Transcript
 
 /// The host starts a host-door turn for `holder` (its own pid): the first owed session, or `session`. A session a live
 /// writer holds is still offered, as the Python does: the host asks the terminal's claim next and answers `back --held`.
-/// Once `take` creates the turn through the conversations lane, that hold is a parked `terminal_live` turn (q217).
+/// `call.rs` also creates the run's turn through the conversations lane, and that hold is a parked `terminal_live` turn (q217).
 pub(crate) fn take(
     st: &mut State,
     out: &dyn Outside,

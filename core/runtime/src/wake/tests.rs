@@ -227,8 +227,8 @@ fn a_request_leaves_the_queue_only_when_its_turn_ends() {
 
 #[test]
 fn take_offers_a_session_a_live_writer_holds_and_back_held_pauses_it() {
-    // As the Python's take: the host asks the terminal's claim next and answers `back --held` (resume.rs). The hold is a
-    // parked `terminal_live` turn once take creates the turn through M3-2 (q217), not a silent skip here.
+    // As the Python's take: the host asks the terminal's claim next and answers `back --held` (resume.rs). The hold is also
+    // a parked `terminal_live` turn in the conversations lane (q217; see the turn tests below), not a silent skip.
     let (t, _l, mut c) = core();
     let f = Fake::new(&t.path().join("state"));
     std::fs::create_dir_all(t.path().join("state/live/terminal")).unwrap();
@@ -255,6 +255,160 @@ fn take_offers_a_session_a_live_writer_holds_and_back_held_pauses_it() {
         "paused, so the next take does not offer it at once"
     );
     assert!(row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap()["turn"].is_null());
+}
+
+fn turns_of(c: &Core, conv: &str) -> Vec<(String, Option<String>, String)> {
+    let mut st = c
+        .conn()
+        .prepare(
+            "SELECT state, parked_reason, source FROM turns WHERE conversation = ?1 ORDER BY id",
+        )
+        .unwrap();
+    st.query_map([conv], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+fn terminal_claim(c: &Core, conv: &str) -> i64 {
+    c.conn()
+        .execute(
+            "INSERT OR IGNORE INTO conversations (id, agent, engine, created_at, updated_at) VALUES (?1, 'coder', 'claude', 1, 1)",
+            [conv],
+        )
+        .unwrap();
+    c.conn()
+        .execute(
+            "INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, created_at, claimed_at, running_at)
+             VALUES (7, ?1, 1, 'terminal', 'running', 'owner', 1, 1, 1, 1)",
+            [conv],
+        )
+        .unwrap();
+    7
+}
+
+#[test]
+fn take_queues_the_runs_turn_in_the_conversations_lane_once() {
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    enqueue(&mut c, &f, "s1", "a", "host");
+    let took = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap();
+    let run = took["turn"]["run"].as_str().unwrap().to_owned();
+    assert_eq!(
+        turns_of(&c, "s1"),
+        [("queued".to_owned(), None, "wake".to_owned())]
+    );
+    let prompt: String = c
+        .conn()
+        .query_row(
+            "SELECT prompt FROM turns WHERE conversation = 's1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        prompt.starts_with(&format!("[kith wake {run}]")),
+        "{prompt}"
+    );
+    // The link names the turn; it is what closing goes through, not the prompt (a changed prompt closes all the same).
+    let linked: i64 = c
+        .conn()
+        .query_row(
+            "SELECT turn_id FROM wake_turns WHERE run = ?1",
+            [&run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(linked, 1);
+    c.conn()
+        .execute("UPDATE turns SET prompt = 'edited'", [])
+        .unwrap();
+    // Done: the turn the run carried is done with it.
+    row(&mut c, &f, "wake.done", &json!({"run": run})).unwrap();
+    assert_eq!(turns_of(&c, "s1")[0].0, "done");
+    let links: i64 = c
+        .conn()
+        .query_row("SELECT count(*) FROM wake_turns", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(links, 0, "the link goes with the run");
+}
+
+#[test]
+fn a_turn_that_looks_like_a_runs_note_is_not_closed_with_the_run() {
+    // A person typing the marker into a turn of the same conversation must not get it closed by a wake's end.
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    enqueue(&mut c, &f, "s1", "a", "host");
+    let took = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap();
+    let run = took["turn"]["run"].as_str().unwrap().to_owned();
+    c.conn()
+        .execute(
+            "INSERT INTO turns (conversation, person, source, prompt, state, queued_at)
+             VALUES ('s1', 'owner', 'app', ?1, 'queued', 1)",
+            [format!("[kith wake {run}] typed by hand")],
+        )
+        .unwrap();
+    row(&mut c, &f, "wake.done", &json!({"run": run})).unwrap();
+    let states: Vec<String> = turns_of(&c, "s1").into_iter().map(|t| t.0).collect();
+    assert_eq!(states, ["done", "queued"]);
+}
+
+#[test]
+fn a_session_a_terminal_holds_gets_a_parked_turn_that_waits_for_the_terminal_to_end() {
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    let claim = terminal_claim(&c, "s1");
+    enqueue(&mut c, &f, "s1", "a", "host");
+    let took = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap();
+    assert_eq!(
+        took["turn"]["ids"],
+        json!(["a"]),
+        "the answer is the Python's"
+    );
+    assert_eq!(
+        turns_of(&c, "s1"),
+        [(
+            "parked".to_owned(),
+            Some("terminal_live".to_owned()),
+            "wake".to_owned()
+        )]
+    );
+    // While the terminal lives, the level-triggered wake leaves it parked ...
+    let woke = crate::conversations::claims::unpark_ready(&mut c, "s1", true, true, 5).unwrap();
+    assert_eq!(woke.len(), 0);
+    // ... and queues it once the terminal's claim has ended.
+    c.conn()
+        .execute(
+            "UPDATE claims SET state = 'ended', ended_at = 2 WHERE claim_id = ?1",
+            [claim],
+        )
+        .unwrap();
+    let woke = crate::conversations::claims::unpark_ready(&mut c, "s1", true, false, 5).unwrap();
+    assert_eq!(woke.len(), 1);
+    assert_eq!(turns_of(&c, "s1")[0].0, "queued");
+}
+
+#[test]
+fn a_claim_file_writer_parks_the_turn_too_and_a_given_back_run_cancels_its_turn() {
+    // Until the switch the claim files are the writers (the Python's writer_live).
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    std::fs::create_dir_all(t.path().join("state/live/terminal")).unwrap();
+    std::fs::write(
+        t.path().join("state/live/terminal/s1.claim"),
+        r#"{"pid": 1}"#,
+    )
+    .unwrap();
+    enqueue(&mut c, &f, "s1", "a", "host");
+    let took = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap();
+    let run = took["turn"]["run"].as_str().unwrap().to_owned();
+    assert_eq!(turns_of(&c, "s1")[0].1.as_deref(), Some("terminal_live"));
+    row(&mut c, &f, "wake.back", &json!({"run": run, "held": true})).unwrap();
+    assert_eq!(
+        turns_of(&c, "s1")[0].0,
+        "cancelled",
+        "the next take makes a new run and a new turn"
+    );
 }
 
 fn answered_rows(c: &Core) -> i64 {
