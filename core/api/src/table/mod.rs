@@ -30,6 +30,7 @@ mod contract;
 mod conversations;
 mod doors;
 mod gate;
+mod holder;
 mod import;
 mod json_forms;
 mod json_forms_more;
@@ -93,6 +94,8 @@ const PARTS: &[&[Method]] = &[
     children::ROWS,
     // M3-9a: account state and `pick`, read only.
     accounts::ROWS,
+    // M3-10b3: the holder's record in core.db.
+    holder::ROWS,
 ];
 
 const LEN: usize = {

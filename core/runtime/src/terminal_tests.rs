@@ -621,6 +621,66 @@ echo $$ > "$lock/$key.pid"
         d.stop();
     }
 
+    /// One scalar from core.db, read through the daemon's own core.
+    fn scalar(rig: &Rig, sql: &str) -> String {
+        rig.d
+            .shared()
+            .with_core(|c| Ok(c.conn().query_row(sql, [], |r| r.get::<_, String>(0))?))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_core_conversations_terminal_is_a_claim_row_and_its_exit_ends_it() {
+        let rig = Rig::new(RUNNING);
+        rig.d
+            .shared()
+            .with_core(|c| {
+                c.conn().execute(
+                    "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('sess-c', 'a', 'claude', 1, 1)",
+                    [],
+                )?;
+                crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+                Ok(())
+            })
+            .unwrap();
+        let a = answered(open(
+            &rig.m,
+            "sess-c",
+            &["sh", "-c", "sleep 2"],
+            &json!({"PATH": std::env::var("PATH").unwrap_or_default()}),
+        ));
+        assert_eq!(a["status"], "open", "{a}");
+        // The spawn's claim is the row's, redeemed on the stub's pid.
+        assert_eq!(
+            scalar(
+                &rig,
+                "SELECT state || ':' || kind FROM claims WHERE conversation = 'sess-c'"
+            ),
+            "running:terminal"
+        );
+        assert_eq!(
+            scalar(
+                &rig,
+                "SELECT CAST(pid AS TEXT) FROM claims WHERE conversation = 'sess-c'"
+            ),
+            a["pid"].to_string()
+        );
+        // The holder's exit for that claim ends the row.
+        until("the claim to end", || {
+            scalar(
+                &rig,
+                "SELECT state FROM claims WHERE conversation = 'sess-c'",
+            ) == "ended"
+        });
+        assert_eq!(
+            scalar(
+                &rig,
+                "SELECT end_reason FROM claims WHERE conversation = 'sess-c'"
+            ),
+            "exit"
+        );
+    }
+
     #[test]
     fn a_stub_that_says_busy_gives_the_claim_back() {
         let rig = Rig::new("exit 75");

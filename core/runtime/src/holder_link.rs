@@ -12,6 +12,7 @@
 //! frame is only ever a failed connection: generation authority stays in core.db, so a fake holder cannot make a
 //! core step down.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -22,11 +23,12 @@ use kith_holder::{launch, proto};
 use kith_kernel::procstart;
 
 use crate::attach::Relay;
+use crate::conversations::claims::{self, Redeemed};
 use crate::daemon::Shared;
-use crate::db::{HolderRecord, RecordedProc};
+use crate::db::{Core, HolderRecord, RecordedProc};
 use crate::error::Result;
 use crate::layout::Layout;
-use crate::terminal::{Placed, Req, STUB_BUSY, SpawnReq};
+use crate::terminal::{Placed, Req, STUB_BUSY, SpawnReq, TurnDone, TurnOp, TurnReq};
 use crate::{log, perms};
 
 pub(crate) struct HolderConfig {
@@ -399,6 +401,15 @@ fn connected(
         reconcile(shared, &instance, &procs, cfg)?;
     }
     // Before the state says connected: whoever waits for that state may call terminal.open at once.
+    // What the core keeps of each held process (its claim, pid and conversation), so an exit the holder reports can be
+    // told to the claim it ended, including one that happened while this core was down (the welcome lists it).
+    let mut seen = Known::default();
+    seen.note_all(&client.welcome.procs);
+    for h in client.welcome.procs.iter().filter(|h| h.exit.is_some()) {
+        if let Some(exit) = &h.exit {
+            report_exit(shared, h.claim, h.pid, exit);
+        }
+    }
     shared
         .terminals
         .relay
@@ -429,12 +440,24 @@ fn connected(
             cfg.poll.min(Duration::from_millis(100))
         };
         match shared.terminals.next(wait) {
-            Some(Req::Spawn(req)) => serve_spawn(&mut client, relay, &req)?,
-            Some(Req::End(held)) => end_held(&mut client, relay, &held),
+            Some(Req::Spawn(req)) => {
+                serve_spawn(&mut client, relay, &req, &mut seen)?;
+                for held in seen.unfinished.drain(..) {
+                    shared.terminals.requeue_end(held);
+                }
+            }
+            Some(Req::End(held)) => {
+                // Until the holder says the tree is gone the kill goes again (Claims4 finding 4): the request goes
+                // back to the queue, and a link that broke under it keeps it for the next connection.
+                if !end_held(&mut client, relay, &held) {
+                    shared.terminals.requeue_end(held);
+                }
+            }
+            Some(Req::Turn(req)) => serve_turn(shared, &mut client, &seen, &req),
             None => {}
         }
         let pause = if busy { PUMP_WAIT } else { Duration::ZERO };
-        pump(&mut client, relay, &instance, &shared.logs, pause)?;
+        pump(&mut client, relay, shared, &mut seen, pause)?;
         if shared.stopping() {
             break;
         }
@@ -450,6 +473,7 @@ fn connected(
             shared.set_holder(|h| h.procs = live);
             continue;
         }
+        seen.note_all(&held);
         let now = record_procs(&held);
         if now != known {
             reconcile(shared, &instance, &now, cfg)?;
@@ -471,10 +495,11 @@ const PUMP_BATCH: usize = 512;
 fn pump(
     client: &mut Client,
     relay: &Relay,
-    instance: &str,
-    logs: &Path,
+    shared: &Shared,
+    seen: &mut Known,
     first_wait: Duration,
 ) -> std::result::Result<(), String> {
+    let (instance, logs) = (client.welcome.instance.clone(), shared.logs.as_path());
     let mut wait = first_wait;
     for _ in 0..PUMP_BATCH {
         let Some((kind, id, payload)) = client.take(wait, |f| {
@@ -491,7 +516,13 @@ fn pump(
             proto::EXITED => {
                 // An exit the relay does not know (or cannot read) is acked all the same, so the holder forgets it.
                 let known = match serde_json::from_slice::<proto::Exit>(&payload) {
-                    Ok(exit) => relay.exited(id, &exit),
+                    Ok(exit) => {
+                        // The claim hears of it before the relay does: a claim never outlives the process it names.
+                        if let Some((claim, pid, _)) = seen.of(id) {
+                            report_exit(shared, claim, pid, &exit);
+                        }
+                        relay.exited(id, &exit)
+                    }
                     Err(e) => {
                         log::note(
                             logs,
@@ -502,7 +533,7 @@ fn pump(
                 };
                 if !known {
                     let held = proto::HeldId {
-                        instance: instance.to_owned(),
+                        instance: instance.clone(),
                         id,
                     };
                     client
@@ -528,17 +559,22 @@ fn pump(
 pub(crate) static LATE_ENDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Ends a held process the core no longer wants (kill until the holder says its group is gone, then ack so it forgets
-/// it). A broken link is the supervisor's to find on its next turn.
-fn end_held(client: &mut Client, relay: &Relay, held: &proto::HeldId) {
+/// it). False when it is not done: the holder still said `killing` after the tries, or the link broke under it. The kill
+/// is then sent again (the caller puts the end back in the queue), never given up on and never acked while a process of
+/// the tree may be alive (Claims4 finding 4, row `c4-nokillresend`).
+fn end_held(client: &mut Client, relay: &Relay, held: &proto::HeldId) -> bool {
     relay.forget(held);
     for _ in 0..40 {
         match client.kill(held) {
             Ok(proto::KillState::Killing) => std::thread::sleep(Duration::from_millis(50)),
-            Ok(_) => break,
-            Err(_) => return,
+            Ok(_) => {
+                let _ = client.ack(held);
+                return true;
+            }
+            Err(_) => return false,
         }
     }
-    let _ = client.ack(held);
+    false
 }
 
 /// Puts one spawn to the holder and tells the caller what came of it. `Err` is a broken link (the caller was told).
@@ -546,6 +582,7 @@ fn serve_spawn(
     client: &mut Client,
     relay: &Relay,
     req: &SpawnReq,
+    seen: &mut Known,
 ) -> std::result::Result<(), String> {
     if Instant::now() >= req.deadline {
         let _ = req
@@ -581,6 +618,8 @@ fn serve_spawn(
                 if let Placed::Started { held, pid } = &placed {
                     // Listed before the caller hears of it, so its ticket never meets an unknown terminal.
                     relay.register(held, &spec.conv, &req.agent, *pid, (spec.cols, spec.rows));
+                    seen.procs
+                        .insert(held.id, (spec.claim, *pid, spec.conv.clone()));
                 }
                 placed
             }
@@ -597,7 +636,9 @@ fn serve_spawn(
     if let Err(mpsc::SendError(Placed::Started { held, .. })) = req.reply.send(placed) {
         #[cfg(test)]
         LATE_ENDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        end_held(client, relay, &held);
+        if !end_held(client, relay, &held) {
+            seen.unfinished.push(held);
+        }
     }
     Ok(())
 }
@@ -667,6 +708,11 @@ pub(crate) fn reconcile(
         // reason goes out once, through the supervisor's one-line-per-message failure note.
         let mut notes = Vec::new();
         if let Err(stuck) = end_groups(&mut notes, &stale, cfg.kill_wait) {
+            // What was ended on the way is logged all the same: the groups signalled before one would not end are
+            // gone, and the log is where anyone looks for what the core did to processes.
+            for n in notes {
+                log::note(&shared.logs, &n);
+            }
             return Err(Lost::Blocked(format!(
                 "processes of the old holder instance {old} are still running and not ended: {stuck}; not recording the new instance yet"
             )));
@@ -740,6 +786,7 @@ fn end_groups(
         }
     }
     if !mine.is_empty() {
+        let signalled = mine.clone();
         for pid in &mine {
             signal_group(*pid, "TERM");
         }
@@ -767,6 +814,9 @@ fn end_groups(
                 forced = true;
             }
             std::thread::sleep(Duration::from_millis(50));
+        }
+        for pid in signalled.into_iter().filter(|pid| !mine.contains(pid)) {
+            notes.push(format!("holder: ended the process group of pid {pid}"));
         }
     }
     if stuck.is_empty() {
@@ -841,11 +891,10 @@ pub(crate) struct Answered<T> {
 /// Asks the holder to take conversation lock `key` for `claim` through the resident stub of the warm process `held`.
 ///
 /// This only sends the request and returns the typed answer. It does not read or write claims, turns or reports:
-/// those rows belong to the claim transactions of M3-2, and M3-5 calls this from the `claimed -> running` step
-/// (a `Busy` there ends the claim and parks the turn) and `release_turn_lock` from the turn's end. An `Err` is a
+/// [`begin_turn`] calls this from the `claimed -> running` step (a `Busy` there ends the claim and parks the turn) and
+/// [`finish_turn`] calls `release_turn_lock` from the turn's end. An `Err` is a
 /// broken or silent link; the take may still have happened, and asking again is safe (the same claim is `Locked`
 /// again).
-#[allow(dead_code, reason = "first caller is the claim transitions of M3-5")]
 pub(crate) fn take_turn_lock(
     client: &mut Client,
     held: &proto::HeldId,
@@ -867,7 +916,6 @@ pub(crate) fn take_turn_lock(
 
 /// Releases the lock `take_turn_lock` took, at the turn's end. Like the take, it touches no claim, turn or report
 /// row. A release asked again is `NotHeld`, which is fine; a lost answer only delays.
-#[allow(dead_code, reason = "first caller is the claim transitions of M3-5")]
 pub(crate) fn release_turn_lock(
     client: &mut Client,
     held: &proto::HeldId,
@@ -885,6 +933,258 @@ pub(crate) fn release_turn_lock(
         claim: a.claim,
         result,
     })
+}
+
+// --- A warm turn's claim: lock, redeem, report (M3-10b3) -------------------------------------------------------------
+
+/// Where the turn steps reach core.db. The holder round trips (up to seconds) must not run under the core's lock, so the
+/// steps ask for the core only around their own transactions.
+pub(crate) trait CoreAccess {
+    fn with<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R>;
+}
+
+impl CoreAccess for Shared {
+    fn with<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R> {
+        self.with_core(f)
+    }
+}
+
+#[cfg(test)]
+impl CoreAccess for std::sync::Mutex<Core> {
+    fn with<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R> {
+        f(&mut self
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+}
+
+/// Milliseconds since the epoch, the clock of the claim rows.
+pub(crate) fn now_ms() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis()),
+    )
+    .unwrap_or(i64::MAX)
+}
+
+/// What the core keeps of each process the holder lists, by the holder's id for it: the claim it was spawned for, its
+/// pid and its conversation.
+#[derive(Default)]
+pub(crate) struct Known {
+    procs: HashMap<u32, (u64, u32, String)>,
+    /// Ends that did not finish in a spawn's late path; the supervisor puts them back in the queue.
+    unfinished: Vec<proto::HeldId>,
+}
+
+impl Known {
+    fn note_all(&mut self, held: &[proto::Held]) {
+        for h in held {
+            self.procs.insert(h.id, (h.claim, h.pid, h.conv.clone()));
+        }
+    }
+
+    fn of(&self, id: u32) -> Option<(u64, u32, String)> {
+        self.procs.get(&id).cloned()
+    }
+}
+
+/// The body of an exit report: the process it names (the claim's rule is by pid: one that names another pid changes
+/// nothing, one that names none moves the claim to `ending`) and how it ended. `out_of_usage` is the stub's or the
+/// engine's word that the account ran out (`accounts::failover`): the holder's own exit never says it.
+pub(crate) fn exit_body(
+    pid: Option<u32>,
+    exit: Option<&proto::Exit>,
+    out_of_usage: bool,
+    why: Option<&str>,
+) -> String {
+    let mut body = serde_json::json!({"out_of_usage": out_of_usage});
+    if let Some(pid) = pid {
+        body["pid"] = pid.into();
+    }
+    if let Some(e) = exit {
+        body["code"] = e.code.into();
+        body["signal"] = e.signal.into();
+        body["lapsed"] = e.lapsed.into();
+        if let Some(err) = &e.error {
+            body["error"] = err.clone().into();
+        }
+    }
+    if let Some(why) = why {
+        body["why"] = why.into();
+    }
+    body.to_string()
+}
+
+/// A holder exit for the claim the process was spawned for. A claim id the core does not know (a terminal started
+/// before claims, a process of another core) is stored nowhere and changes nothing. A failure is logged, never raised: the
+/// exit stays in the holder until acked and the next listing offers it again.
+fn report_exit(shared: &Shared, claim: u64, pid: u32, exit: &proto::Exit) {
+    let Ok(claim) = i64::try_from(claim) else {
+        return;
+    };
+    let body = exit_body(Some(pid), Some(exit), false, None);
+    if let Err(e) = shared.with_core(|c| claims::report(c, claim, "exit", &body, now_ms())) {
+        log::note(
+            &shared.logs,
+            &format!("holder: could not report the exit of pid {pid} for claim {claim}: {e}"),
+        );
+    }
+}
+
+/// How the process `pid` started, as the system says now (empty when it cannot be read: a later kill then treats it as
+/// unknown).
+pub(crate) fn start_of(pid: u32) -> String {
+    match procstart::probe(pid) {
+        procstart::Probe::Alive(Some(start)) => start,
+        _ => String::new(),
+    }
+}
+
+/// What came of starting a warm turn or finishing it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TurnStep {
+    /// The lock is held and the claim is `running` on the process (`again`: it already was, a retried begin).
+    Running { again: bool },
+    /// The turn is over and the lock is not held (released, or it went with the stub).
+    Finished,
+    /// Another writer holds the conversation: the claim ended and its turn is parked as `lock_busy`.
+    Busy,
+    /// The process or its stub is gone: its exit was reported, which ends the claim.
+    Gone(String),
+    /// Nothing was changed for this reason (a claim that is not `claimed`, a stale or released claim, an unknown process).
+    Refused(String),
+    /// No answer, or the core.db write failed: asking again is safe (a take is `Locked` again for the same claim).
+    Lost(String),
+}
+
+/// `claimed -> running` for a warm process (runtime-design section 4, step 3): the resident stub takes the conversation's
+/// lock for `claim_id`, then the redeem CAS runs in core.db. A redeem that fails after the lock was taken gives the lock
+/// back; a `Busy` ends the claim and parks the turn; a take that never answers is asked again, never given up on with
+/// the lock possibly held. `pid` is the process whose stub holds the lock.
+pub(crate) fn begin_turn(
+    client: &mut Client,
+    core: &impl CoreAccess,
+    held: &proto::HeldId,
+    key: &str,
+    claim_id: i64,
+    pid: u32,
+) -> TurnStep {
+    let Ok(claim) = u64::try_from(claim_id) else {
+        return TurnStep::Refused("not a claim id".into());
+    };
+    let took = match take_turn_lock(client, held, key, claim) {
+        Ok(a) if a.claim == claim => a.result,
+        Ok(a) => return TurnStep::Lost(format!("the answer was for claim {}", a.claim)),
+        Err(e) => return TurnStep::Lost(e.to_string()),
+    };
+    match took {
+        TurnLock::Locked => {
+            let started = start_of(pid);
+            match core
+                .with(|c| claims::redeem(c, claim_id, pid, &started, &held.instance, now_ms()))
+            {
+                Ok(Redeemed::Running { again }) => TurnStep::Running { again },
+                Ok(Redeemed::Refused(state)) => {
+                    give_lock_back(client, held, key, claim);
+                    TurnStep::Refused(state)
+                }
+                // The write failed: the lock stays and the claim is still `claimed`, so a retried begin is the same
+                // take again and the same redeem again.
+                Err(e) => TurnStep::Lost(e.to_string()),
+            }
+        }
+        TurnLock::Busy => {
+            let body = exit_body(Some(pid), None, false, None);
+            match core.with(|c| claims::report(c, claim_id, "busy", &body, now_ms())) {
+                Ok(_) => TurnStep::Busy,
+                Err(e) => TurnStep::Lost(e.to_string()),
+            }
+        }
+        TurnLock::Error(why) if lock_went_with_stub(&why) => {
+            let body = exit_body(Some(pid), None, false, Some(&why));
+            match core.with(|c| claims::report(c, claim_id, "exit", &body, now_ms())) {
+                Ok(_) => TurnStep::Gone(why),
+                Err(e) => TurnStep::Lost(e.to_string()),
+            }
+        }
+        TurnLock::Error(why) => TurnStep::Refused(why),
+    }
+}
+
+/// The turn's end: the lock is released (never taken again for this claim; the holder refuses a take after it).
+/// Touches no claim row: the turn's `done` is the exit or done report's, not the lock's.
+pub(crate) fn finish_turn(
+    client: &mut Client,
+    held: &proto::HeldId,
+    key: &str,
+    claim_id: i64,
+) -> TurnStep {
+    let Ok(claim) = u64::try_from(claim_id) else {
+        return TurnStep::Refused("not a claim id".into());
+    };
+    match release_turn_lock(client, held, key, claim) {
+        Ok(a) if a.claim != claim => {
+            TurnStep::Lost(format!("the answer was for claim {}", a.claim))
+        }
+        Ok(a) => match a.result {
+            TurnRelease::Released | TurnRelease::NotHeld => TurnStep::Finished,
+            TurnRelease::Error(why) if lock_went_with_stub(&why) => TurnStep::Finished,
+            TurnRelease::Error(why) => TurnStep::Lost(why),
+        },
+        Err(e) => TurnStep::Lost(e.to_string()),
+    }
+}
+
+/// The holder's reasons that mean the process or its stub is not there to hold a lock any more.
+fn lock_went_with_stub(why: &str) -> bool {
+    matches!(why, "stub-gone" | "gone" | "exited")
+}
+
+/// Releases a lock whose claim could not be redeemed. A lost answer asks again (a repeated release is `NotHeld`).
+fn give_lock_back(client: &mut Client, held: &proto::HeldId, key: &str, claim: u64) {
+    for _ in 0..3 {
+        if release_turn_lock(client, held, key, claim).is_ok() {
+            return;
+        }
+    }
+}
+
+/// Runs one turn step the caller queued.
+fn serve_turn(shared: &Shared, client: &mut Client, seen: &Known, req: &TurnReq) {
+    let step = match seen.of(req.held.id) {
+        None => TurnStep::Refused("the holder does not list that process".into()),
+        Some((_, pid, _)) => match req.op {
+            TurnOp::Begin => begin_turn(client, shared, &req.held, &req.key, req.claim, pid),
+            TurnOp::Finish => finish_turn(client, &req.held, &req.key, req.claim),
+        },
+    };
+    let _ = req.reply.send(TurnDone(step));
+}
+
+/// `holder.forget <pid>` (the owner's): drops one process from the holder record in core.db, for a `blocked` holder whose
+/// old process the core cannot tell from a stranger (a start in the old `ps` form, or one that cannot be read). Nothing is
+/// signalled. The next hello no longer waits for that pid. Asked again, or for a pid that is not recorded, it changes
+/// nothing and answers `forgot: false`.
+pub(crate) fn forget_proc(
+    core: &mut Core,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let pid = params
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|p| u32::try_from(p).ok())
+        .ok_or_else(|| {
+            crate::error::Error::BadParams("kith-core: holder.forget needs a pid".into())
+        })?;
+    let mut record = core.holder_record()?;
+    let before = record.procs.len();
+    record.procs.retain(|p| p.pid != pid);
+    let forgot = record.procs.len() != before;
+    if forgot {
+        core.save_holder_record(&record)?;
+    }
+    Ok(serde_json::json!({"forgot": forgot}))
 }
 
 #[cfg(all(test, unix))]

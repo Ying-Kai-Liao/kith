@@ -180,6 +180,11 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        if method == "holder.forget" {
+            let answer = self.with_core(|c| holder_link::forget_proc(c, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         // The envelope's rows that need the master key read it first, outside the core lock (see `secrets::preload`).
         if matches!(
             method,

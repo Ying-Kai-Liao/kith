@@ -492,7 +492,8 @@ def core():
         elif state == 'absent':
             note('holder: no kith-holder program beside kith (nothing uses a holder before M1)')
         elif state == 'blocked':
-            warn(f'holder: blocked: {h.get("error")} (the daemon retries slowly and signals nothing)')
+            warn(f'holder: blocked: {h.get("error")} (the daemon retries slowly and signals nothing). '
+                 'If that process is not the holder\'s any more, drop it from the record: kith holder forget <pid>')
         elif state in ('unreachable',):
             warn(f'holder: {h.get("error")} (the daemon retries; nothing uses a holder before M1)')
         else:

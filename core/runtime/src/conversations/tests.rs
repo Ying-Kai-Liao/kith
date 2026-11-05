@@ -1008,6 +1008,29 @@ fn a_report_with_no_pid_moves_a_claim_with_a_recorded_pid_to_ending_and_end_gone
     assert_eq!(state(&c, id2), "ended");
 }
 
+/// The body the holder link sends for a process's exit (`holder_link::exit_body`): the pid, how it ended and
+/// `out_of_usage: false`. It follows the pid rules of any report, and a repeat of it changes nothing.
+#[test]
+fn the_holder_links_exit_body_ends_the_claim_of_its_pid_only() {
+    let (_t, mut c) = open();
+    let (id, turn) = running(&mut c, "c1", 100);
+    let body = |pid: u32| {
+        format!(r#"{{"out_of_usage":false,"pid":{pid},"code":0,"signal":null,"lapsed":false}}"#)
+    };
+    report(&mut c, id, "exit", &body(101), 30).expect("another process");
+    assert_eq!(state(&c, id), "running", "a respawn's exit ends nothing");
+    report(&mut c, id, "exit", &body(100), 31).expect("its own");
+    assert_eq!(state(&c, id), "ended");
+    assert_eq!(turn_state(&c, turn), "queued", "the turn goes back");
+    report(&mut c, id, "exit", &body(100), 32).expect("repeat");
+    assert_eq!(state(&c, id), "ended");
+    assert_eq!(
+        count(&c, "SELECT COUNT(*) FROM reports WHERE kind = 'exit'"),
+        2,
+        "one report per process, a repeat is the same one"
+    );
+}
+
 #[test]
 fn a_report_with_no_pid_on_a_claim_with_no_pid_ends_a_claimed_one_only() {
     let (_t, mut c) = open();
