@@ -63,6 +63,20 @@ pub(super) const fn caller(name: &'static str, ty: &'static str, summary: &'stat
         summary,
     }
 }
+/// A [`caller`] the core refuses to run without; the contract says so.
+pub(super) const fn caller_required(
+    name: &'static str,
+    ty: &'static str,
+    summary: &'static str,
+) -> Param {
+    Param {
+        name,
+        ty,
+        required: true,
+        arg: Arg::Caller,
+        summary,
+    }
+}
 pub(super) const fn rest(name: &'static str, summary: &'static str) -> Param {
     Param {
         name,
