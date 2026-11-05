@@ -1,4 +1,4 @@
-//! A scripted stand-in for the core's `hostclaim.*` rows (their semantics are tested on a real core.db in
+//! A scripted stand-in for the core's `hostclaim.*` rows (their semantics are tested on a real core in
 //! `core/runtime/src/hostclaim_tests.rs`), so the host adapter's sequences can be tested without a holder: which rows it
 //! calls in which order, and what it does with a refusal.
 

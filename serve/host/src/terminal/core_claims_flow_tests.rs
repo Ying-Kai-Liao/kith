@@ -1,5 +1,5 @@
 //! The claims through the core (M3-10f), against a scripted core (`core_claims_tests.rs`); the rows' own rules are tested on a
-//! real core.db in `core/runtime/src/hostclaim_tests.rs`. A child of `tests.rs`, which owns the `Rig`.
+//! real core in `core/runtime/src/hostclaim_tests.rs`. A child of `tests.rs`, which owns the `Rig`.
 
 use super::*;
 use crate::terminal::claim::{self, Kind};
