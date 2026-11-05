@@ -1494,16 +1494,9 @@ fn restarts_inside_one_minute_count_as_one_failing_tick() {
     assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 29)));
 }
 
-#[test]
-fn failures_with_nothing_else_going_through_are_not_counted_when_other_jobs_are_due() {
-    let mut r = Rig::new();
-    r.jobs(
-        "mel",
-        &json!([daily("a", "30 8 * * *"), daily("b", "30 8 * * *")]),
-    );
-    r.set_wm(at(2026, 11, 3, 8, 29));
-    // Everything fails: it may be the core (a keychain that is locked), so nobody is given up on.
-    for m in 30..36 {
+/// Every enqueue of every tick fails.
+fn all_fail(r: &mut Rig, minutes: std::ops::Range<u32>) {
+    for m in minutes {
         tick(&mut r.core, &r.p, &r.ctx, at(2026, 11, 3, 8, m), &|s| {
             if s == Step::Enqueue {
                 return Err(Error::Io("injected".into()));
@@ -1512,16 +1505,140 @@ fn failures_with_nothing_else_going_through_are_not_counted_when_other_jobs_are_
         })
         .unwrap();
     }
+}
+
+#[test]
+fn a_tick_where_every_due_job_fails_is_counted_with_a_longer_limit() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([daily("a", "30 8 * * *"), daily("b", "30 8 * * *")]),
+    );
+    r.set_wm(at(2026, 11, 3, 8, 29));
+    // Everything fails: it may be the core (a keychain that is locked), so nobody is given up on at the usual limit ...
+    all_fail(&mut r, 30..36);
     assert_eq!(
-        r.n("SELECT sum(fail_count) FROM sched_jobs"),
-        0,
-        "never counted"
+        r.n("SELECT min(fail_count) FROM sched_jobs"),
+        6,
+        "each failing tick is counted for each job"
     );
     assert!(r.rows("a").is_empty() && r.rows("b").is_empty());
     assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 29)));
-    // The core recovers: both fire for the slot they never lost.
+    // ... so the core recovers and both fire for the slot they never lost.
     let rep = r.tick(at(2026, 11, 3, 8, 36));
     assert_eq!(fired(&rep).len(), 2, "{rep}");
+    assert_eq!(r.n("SELECT sum(fail_count) FROM sched_jobs"), 0);
+}
+
+#[test]
+fn jobs_that_all_fail_for_good_are_given_up_on_at_the_longer_limit() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([daily("a", "30 8 * * *"), daily("b", "30 8 * * *")]),
+    );
+    let start = at(2026, 11, 3, 8, 29);
+    r.set_wm(start);
+    all_fail(&mut r, 30..39);
+    assert_eq!(r.wm(), Some(start), "nine ticks: still held");
+    assert!(r.rows("a").is_empty() && r.rows("b").is_empty());
+    all_fail(&mut r, 39..40);
+    // The tenth: each job gets its skipped:error row and the watermark is free to move.
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 39)));
+    for id in ["a", "b"] {
+        assert!(
+            r.rows(id).iter().any(|(_, o)| o.starts_with("skipped:error: ")),
+            "{id}: {:?}",
+            r.rows(id)
+        );
+    }
+}
+
+fn put_fire(r: &Rig, job: &str, slot: &str, at_ms: i64, turn: Option<&str>) {
+    r.core
+        .conn()
+        .execute(
+            "INSERT INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES ('mel', ?1, ?2, 'fired', ?3, ?4)",
+            rusqlite::params![job, slot, turn, at_ms],
+        )
+        .unwrap();
+}
+
+#[test]
+fn old_fire_rows_are_pruned_but_deliveries_and_the_interval_anchor_stay() {
+    use super::fire::{DELIVERIES_KEEP_MS, FIRES_KEEP_MS, prune_fires};
+    let mut r = Rig::new();
+    let now = at(2026, 11, 20, 8, 0);
+    let old = now - FIRES_KEEP_MS - 1;
+    let older = now - DELIVERIES_KEEP_MS - 1;
+    put_fire(&r, "iv", "2026-10-01T08:00:00Z", old, None);
+    put_fire(&r, "iv", "2026-10-01T09:00:00Z", old, None); // the latest timed slot of iv: the anchor
+    put_fire(&r, "cr", "2026-10-01T08:00:00Z", old, None);
+    put_fire(&r, "cr", "2026-10-02T08:00:00Z", old, None);
+    put_fire(&r, "cr", "manual:m1", old, None);
+    put_fire(&r, "cr", "event:dold", old, None); // a delivery younger than the delivery limit
+    put_fire(&r, "cr", "event:dolder", older, None);
+    put_fire(&r, "cr", "event:n1-abc", old, None); // a delivery with no id: no dedupe to keep
+    put_fire(&r, "cr", "2026-10-03T08:00:00Z", now - 1000, None); // recent
+    let n = prune_fires(&mut r.core, now).unwrap();
+    let left = |job: &str| -> Vec<String> {
+        let mut st = r
+            .core
+            .conn()
+            .prepare("SELECT slot FROM sched_fires WHERE job = ?1 ORDER BY slot")
+            .unwrap();
+        st.query_map([job], |x| x.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(left("iv"), ["2026-10-01T09:00:00Z"]);
+    assert_eq!(
+        left("cr"),
+        ["2026-10-03T08:00:00Z", "event:dold"],
+        "the latest slot is the recent one; the delivery younger than 60 days stays"
+    );
+    assert_eq!(n, 6, "{n}");
+}
+
+#[test]
+fn a_fire_row_with_an_unfinished_turn_is_not_pruned() {
+    use super::fire::{FIRES_KEEP_MS, prune_fires};
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("a", "30 8 * * *")]));
+    r.set_wm(at(2026, 11, 3, 8, 29));
+    let rep = r.tick(at(2026, 11, 3, 8, 30));
+    assert_eq!(fired(&rep), ["a"], "{rep}");
+    // The turn is queued: pausing the job must still find it through the row.
+    let later = at(2026, 11, 3, 8, 30) + FIRES_KEEP_MS + 1000;
+    // Another, later slot, so the first is not the job's latest.
+    put_fire(&r, "a", "2026-11-04T08:30:00Z", later, None);
+    assert_eq!(prune_fires(&mut r.core, later).unwrap(), 0);
+    assert_eq!(
+        r.n("SELECT count(*) FROM sched_fires WHERE job = 'a'"),
+        2
+    );
+    r.finish_all();
+    assert_eq!(prune_fires(&mut r.core, later).unwrap(), 1);
+}
+
+#[test]
+fn a_job_that_names_another_mac_is_not_fired_here_and_one_that_names_this_mac_is() {
+    let mut r = Rig::new();
+    let mine = r.mac.clone();
+    let mut theirs = daily("theirs", "30 8 * * *");
+    theirs["mac"] = json!("0123456789abcdef0123456789abcdef");
+    let mut ours = daily("ours", "30 8 * * *");
+    ours["mac"] = json!(mine);
+    r.jobs(
+        "mel",
+        &json!([theirs, ours, daily("anyone", "30 8 * * *")]),
+    );
+    r.set_wm(at(2026, 11, 3, 8, 29));
+    let rep = r.tick(at(2026, 11, 3, 8, 30));
+    assert_eq!(fired(&rep), ["ours", "anyone"], "{rep}");
+    assert!(r.rows("theirs").is_empty(), "nothing is recorded for a job of another Mac");
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 30)));
 }
 
 #[test]

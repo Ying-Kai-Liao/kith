@@ -580,13 +580,19 @@ fn counts_from(
 /// new slot every tick), at most once per tick minute, and kept in the job's row so a restart keeps it.
 const STUCK_TICKS: i64 = 3;
 
+/// The limit when NOTHING went through a tick that had more than one job due: it may be the core and not the jobs (a
+/// locked keychain, a database that cannot be written), so the jobs get more minutes to recover before each is given up
+/// on. It is still a limit: with none, jobs that all fail for good would hold the watermark for ever and every tick would
+/// plan from further back (the "all due jobs fail" follow-up #777 left).
+const STUCK_TICKS_ALL: i64 = 10;
+
 /// A fire of this job failed this tick. Returns whether the job is given up on: at [`STUCK_TICKS`] failing ticks in a row
 /// (and on every failing tick after, until a fire goes through) the tick's slot gets a `skipped:error: <why>` row and so
 /// does the missed span the failed fire rolled back, so the watermark can pass with a row for every slot it passes. When
 /// not, the caller holds the watermark. Own transaction: the failed fire rolled back with everything it wrote.
 ///
-/// `counted` is false when the error may be the core's and not the job's (nothing else went through this tick and other
-/// jobs were due): the failure is then not counted and nothing is given up.
+/// `limit` is how many failing ticks in a row give up on the job: [`STUCK_TICKS`], or [`STUCK_TICKS_ALL`] when the error
+/// may be the core's (nothing else went through this tick and other jobs were due). Every failing tick is counted.
 fn note_failure(
     core: &mut Core,
     agent: &str,
@@ -594,11 +600,8 @@ fn note_failure(
     w: &Work,
     why: &str,
     now: i64,
-    counted: bool,
+    limit: i64,
 ) -> Result<bool> {
-    if !counted {
-        return Ok(false);
-    }
     // The slot to give up on: the fire's, else the end of the missed span it carried.
     let slot = w
         .slot
@@ -630,7 +633,7 @@ fn note_failure(
         "UPDATE sched_jobs SET fail_minute = ?3, fail_count = ?4 WHERE agent = ?1 AND job = ?2",
         params![agent, job, minute, count],
     )?;
-    let given_up = count >= STUCK_TICKS;
+    let given_up = count >= limit;
     if given_up {
         if let Some(m) = &w.missed {
             tx.execute(
@@ -663,6 +666,34 @@ fn clear_failure(core: &mut Core, agent: &str, job: &str) -> Result<()> {
         tx.commit()?;
     }
     Ok(())
+}
+
+/// How long a decided slot is kept. A slot is only ever looked up for the clock minute (or delivery) it names, and the
+/// watermark has long passed it, so a row older than this decides nothing. Ordinary rows: two weeks, a run's page lists
+/// the latest twenty.
+pub(super) const FIRES_KEEP_MS: i64 = 14 * 24 * 3_600_000;
+/// A delivery (`event:d<hash of the sender's id>`) is kept longer: the dedupe is the row, and a sender may redeliver (a
+/// GitHub "redeliver" button, a retry queue) days after the first, which must not fire a second time.
+pub(super) const DELIVERIES_KEEP_MS: i64 = 60 * 24 * 3_600_000;
+
+/// Prunes `sched_fires`: rows decided before [`FIRES_KEEP_MS`] ago (deliveries: [`DELIVERIES_KEEP_MS`]), except
+/// - a job's latest timed slot, which an interval counts from (`sync::last_timed_slot`), and
+/// - a row whose turn has not finished: pausing or removing the job finds that turn through it (`sync::unfinished_in`).
+///
+/// Answers how many rows went. One statement, so a crash leaves the rows or takes them, never half a decision.
+pub(super) fn prune_fires(core: &mut Core, now: i64) -> Result<usize> {
+    let n = core.conn().execute(
+        "DELETE FROM sched_fires AS f
+         WHERE (f.at < ?1 AND f.slot NOT LIKE 'event:d%' OR f.at < ?2)
+           AND NOT (f.slot NOT LIKE 'manual:%' AND f.slot NOT LIKE 'event:%'
+                    AND f.slot = (SELECT max(g.slot) FROM sched_fires g
+                                  WHERE g.agent = f.agent AND g.job = f.job
+                                    AND g.slot NOT LIKE 'manual:%' AND g.slot NOT LIKE 'event:%'))
+           AND NOT EXISTS (SELECT 1 FROM turns t WHERE f.turn_id IS NOT NULL AND t.id = CAST(f.turn_id AS INTEGER)
+                           AND t.state IN ('queued', 'parked', 'claimed', 'running'))",
+        params![now - FIRES_KEEP_MS, now - DELIVERIES_KEEP_MS],
+    )?;
+    Ok(n)
 }
 
 /// `schedule.tick`: every job that is due at `now`, fired as above, then the watermark moved (in the last fire's
@@ -709,6 +740,15 @@ pub(super) fn tick(
     for (ai, a) in agents.iter().enumerate() {
         for def in &a.jobs {
             let id = sync::job_id(def);
+            // A job that names a Mac (an imported routine, in a jobs.json that syncs between Macs) is due on that Mac and
+            // on no other: nothing is planned, counted or recorded here for it.
+            if def
+                .get("mac")
+                .and_then(Value::as_str)
+                .is_some_and(|only| only != mac)
+            {
+                continue;
+            }
             let trigger = match sync::trigger_of(def) {
                 Ok(t) => t,
                 Err(e) => {
@@ -808,15 +848,19 @@ pub(super) fn tick(
             }
         }
     }
-    // A failure counts toward giving up when the job is likely the fault: something else went through this tick, or it
-    // was the only job due. Otherwise it may be the core (a locked keychain, a file that cannot be read now) and a retry
-    // decides again, as before.
-    let counted = went_through || work.len() == 1;
+    // Every failing tick counts. Whether the job is likely the fault decides only how soon it is given up on: something
+    // else went through this tick, or it was the only job due, is the job's own failure; otherwise it may be the core,
+    // and a retry gets longer to decide again.
+    let limit = if went_through || work.len() == 1 {
+        STUCK_TICKS
+    } else {
+        STUCK_TICKS_ALL
+    };
     let had_failures = !failed.is_empty();
     for (i, why) in failed {
         let w = &work[i];
         let a = &agents[w.agent];
-        match note_failure(core, &a.agent, &w.job, w, &why, now, counted) {
+        match note_failure(core, &a.agent, &w.job, w, &why, now, limit) {
             Ok(true) => {}
             Ok(false) => blocked = true,
             Err(e) => {
@@ -831,6 +875,12 @@ pub(super) fn tick(
         let seen = watermark_in(&tx, &mac)?;
         advance_in(&tx, &mac, nowf, seen, now)?;
         tx.commit()?;
+    }
+    // Housekeeping once an hour; a failure of it is said, never a failure of the tick.
+    if (nowf / TICK_MS) % 60 == 0
+        && let Err(e) = prune_fires(core, now)
+    {
+        problems.push(json!({"error": format!("pruning sched_fires: {e}")}));
     }
     Ok(json!({
         "now": nowf,

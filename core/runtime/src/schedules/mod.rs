@@ -92,7 +92,7 @@ impl Rule for TriggerRule {
 }
 
 /// The local minute `YYYY-MM-DDTHH:MM` of an instant, as `kith-sched` prints it.
-fn local_minute(ms: i64) -> Option<String> {
+pub(crate) fn local_minute(ms: i64) -> Option<String> {
     chrono::DateTime::from_timestamp_millis(ms).map(|t| {
         t.with_timezone(&chrono::Local)
             .format("%Y-%m-%dT%H:%M")
@@ -334,18 +334,48 @@ pub(crate) fn jobs_file(paths: &Paths, agent: &str) -> PathBuf {
     }
 }
 
+/// How long a read waits for `kith-sched` (or a routine import) to finish writing a jobs.json. A writer holds the lock
+/// for the length of one file replace, so this is generous; past it the reader says so, where it used to wait for ever.
+const READ_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The jobs in `file` (none when there is no file) and the hash of the text they were read from, read under the shared
 /// side of kith-sched's `<agent>.jobs.lock` when that lock file exists. Never creates the lock: a reader leaves nothing
-/// behind. The fire compares the hash with the index's (`sync`).
+/// behind. The fire compares the hash with the index's (`sync`). Waits at most [`READ_LOCK_WAIT`] for a writer.
 pub(crate) fn read_jobs(
     machine: &Path,
     agent: &str,
     file: &Path,
 ) -> std::result::Result<(String, Vec<Value>), String> {
-    let lock = std::fs::File::open(machine.join("sched").join(format!("{agent}.jobs.lock"))).ok();
+    read_jobs_within(machine, agent, file, READ_LOCK_WAIT)
+}
+
+fn read_jobs_within(
+    machine: &Path,
+    agent: &str,
+    file: &Path,
+    wait: std::time::Duration,
+) -> std::result::Result<(String, Vec<Value>), String> {
+    let lock_path = machine.join("sched").join(format!("{agent}.jobs.lock"));
+    let lock = std::fs::File::open(&lock_path).ok();
     if let Some(l) = &lock {
-        // A writer holds it for a moment; a lock that cannot be taken (an odd filesystem) is read without.
-        let _ = fs2::FileExt::lock_shared(l);
+        let until = std::time::Instant::now() + wait;
+        loop {
+            match fs2::FileExt::try_lock_shared(l) {
+                Ok(()) => break,
+                // A writer has it: wait a moment, then say so. (Any other error is an odd filesystem: read without.)
+                Err(e) if e.kind() == fs2::lock_contended_error().kind() => {
+                    if std::time::Instant::now() >= until {
+                        return Err(format!(
+                            "{} is held by a writer (kith-sched or a routine import) for more than {}s; try again",
+                            lock_path.display(),
+                            wait.as_secs().max(1)
+                        ));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(_) => break,
+            }
+        }
     }
     let text = match std::fs::read_to_string(file) {
         Ok(t) => t,

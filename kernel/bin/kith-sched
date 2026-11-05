@@ -46,6 +46,7 @@ KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_launchd  # noqa: E402
 import kith_runenv  # noqa: E402
+import kith_tombstone  # noqa: E402
 from kith_paths import paths, launcher, job_installed, retire_old_job, stable_kernel  # noqa: E402  the one place that knows where kith's folders are
 STATE = paths()['KITH_STATE']
 MACHINE = paths()['KITH_MACHINE'] / 'sched'  # last tick, last run per job
@@ -190,10 +191,15 @@ def editing(agent):
 def all_jobs():
     for a in agents():
         for j in load(a):
+            if 'trigger' in j and 'cron' not in j:   # a routine the Kith core fires (kith migrate), not a cron job of ours
+                continue
             yield a, j
 
 
 def machine():
+    # Moved to the Kith core (`kith migrate step schedules`): state.json is a note, and carrying on as if it were empty
+    # would start every job again. Tombstoned is not caught below (it is an OSError): kith-sched stops with its message.
+    kith_tombstone.check(MACHINE / 'state.json')
     try:
         return json.loads((MACHINE / 'state.json').read_text())
     except (OSError, ValueError):
@@ -202,6 +208,7 @@ def machine():
 
 def save_machine(s):
     MACHINE.mkdir(parents=True, exist_ok=True)
+    kith_tombstone.check(MACHINE / 'state.json')   # the last stop before the rename would replace the note
     tmp = MACHINE / 'state.json.tmp'
     tmp.write_text(json.dumps(s, indent=1))
     tmp.replace(MACHINE / 'state.json')
@@ -640,6 +647,13 @@ def main_json(argv):
 
 
 def main(argv):
+    try:
+        return _main(argv)
+    except kith_tombstone.Tombstoned as e:   # the schedule state moved to the core (kith migrate step schedules)
+        sys.exit('kith-sched: %s' % e)
+
+
+def _main(argv):
     if '--json' in argv and argv[:1] != ['tick']:
         return main_json([a for a in argv if a != '--json'])
     if not argv or argv[0] in ('-h', '--help'):

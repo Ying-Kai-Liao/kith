@@ -673,7 +673,11 @@ fn the_cli_words_parse() {
     // The real registry: the S1 modules, none of them switched.
     assert_eq!(
         run(&crate::tests::paths(&env.machine), &a(&["status"])).unwrap(),
-        vec!["accounts: not switched", "transcripts: not switched"]
+        vec![
+            "accounts: not switched",
+            "transcripts: not switched",
+            "schedules: not switched"
+        ]
     );
 }
 
