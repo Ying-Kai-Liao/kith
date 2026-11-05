@@ -495,6 +495,8 @@ enum KernelCmd {
     /// What Claude Code usage costs, the verbs the launch and the apps call (`kernel/bin/kith-cost`): `limit AGENT [--json|--sh]`,
     /// `spent PERSON [AGENT]`, `usage [PERIOD] --json`, `agent NAME [PERIOD] --json`, `members AGENT`, `bots --json` and `sync`.
     /// Prints what `kith-cost` prints, with its exit codes (2: a verb the core does not have yet). Not routed from `kith` yet.
+    // -h/--help belong to kith-cost's own usage text, so clap must not answer them.
+    #[command(disable_help_flag = true)]
     Cost {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
