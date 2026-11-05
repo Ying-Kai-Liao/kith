@@ -77,11 +77,12 @@ fn claim_json(c: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "person": c.get::<_, Option<String>>(4)?.unwrap_or_default(),
         "pid": c.get::<_, Option<i64>>(5)?,
         "started": c.get::<_, Option<String>>(6)?,
+        // Which holder the claim went to: the host tells its own claims from another instance's by it, not by memory.
+        "holderInstance": c.get::<_, Option<String>>(7)?,
     }))
 }
 
-const SHOW: &str =
-    "SELECT claim_id, conversation, state, kind, person, pid, pid_started FROM claims";
+const SHOW: &str = "SELECT claim_id, conversation, state, kind, person, pid, pid_started, holder_instance FROM claims";
 
 pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     call_at(core, method, params, now_ms())

@@ -34,10 +34,14 @@
 //!   `holder()` checks of `cards/resume.rs` and a second take-over see it), the core claim is stopped (`ending`, still the
 //!   writer), the terminal is signalled, and only a claim the core shows `ended` (the process confirmed gone) lets the host
 //!   go on.
-//! - **A claim of ours whose end the core never heard is ended, not read as another writer.** The adapter remembers the core
-//!   claim each session holds until its end report went through. If `release` failed (core down, reply lost), the claim stays
-//!   `running` on the warm agent's pid; the next take finds it held, sees it is ours (same pid or another host pid), reports
-//!   it `done` and makes the claim again, once. A core claim we don't know still refuses, on any pid.
+//! - **A claim of ours whose end the core never heard is ended, not read as another writer.** Ours is what the core stores:
+//!   every claim the host makes names [`HOST_INSTANCE`] (`holderInstance` in `hostclaim.show`), so it holds across a host
+//!   restart or crash, when nothing is left in memory. If `release` failed or the host died, the claim stays live
+//!   (`running` on the warm agent's pid, or `ending`); the next take, which holds the claim file under its lock (so no live
+//!   turn of this host can own it), finds the core claim held, sees its instance is ours, reports it `done` (`exit` for an
+//!   external claim) and makes the claim again, once. A claim of another instance, or the kernel's (no instance), still
+//!   refuses, on any pid. Two takes after a restart are serialized by the file lock: the second never reaches the core while
+//!   the first holds the file. The in-memory list only names a claim of ours that shows no instance.
 //! - **A refused turn is cancelled by the caller.** The turn row is the claim's vehicle; whatever refuses its claim
 //!   (held, revoked, a stale epoch, a failed redeem, no account left), the adapter cancels it with `hostclaim.cancel`
 //!   instead of leaving it queued. (A stopped ask's turn the core cancels itself.) A redeem whose reply was lost is checked
@@ -233,7 +237,7 @@ pub(super) fn take_as(
                     f,
                     "hostclaim.claim",
                     &json!({"conversation": sid, "kind": "external", "person": person, "revokeSeen": seen,
-                            "pid": pid, "started": started}),
+                            "pid": pid, "started": started, "holderInstance": HOST_INSTANCE}),
                 )?;
                 if let Some(id) = v["claimId"].as_i64() {
                     remember(f, sid, id);
@@ -257,11 +261,13 @@ pub(super) fn take_as(
             }
             let shown = live(f, sid)?;
             // Our own claim whose end report never reached the core (the file claim is ours, taken under its lock, so no live
-            // turn of this host can own it): ended as `release` would have, and the claim made again, once. Any other core
-            // claim (one only the core knows) still refuses, on any pid: the core is not guessed at.
+            // turn of this host can own it): ended as `release` would have, and the claim made again, once. "Ours" is what the
+            // core stores (the holder instance this host redeems under), so it holds across a host restart, when the list in
+            // memory is empty; the list still names a claim of ours that shows no instance. Any other core claim (another
+            // instance's, the kernel's) still refuses, on any pid: the core is not guessed at.
             if let Some(c) = &shown
                 && !reclaimed
-                && c["claimId"].as_i64().is_some_and(|id| is_mine(f, sid, id))
+                && (c["holderInstance"] == HOST_INSTANCE || c["claimId"].as_i64().is_some_and(|id| is_mine(f, sid, id)))
             {
                 tracing::warn!(
                     sid,

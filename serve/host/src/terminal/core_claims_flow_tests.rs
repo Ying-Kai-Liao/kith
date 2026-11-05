@@ -255,3 +255,54 @@ async fn a_claim_only_the_core_knows_still_refuses_the_turn() {
     assert_eq!(core.claim_state(1), "running", "not ours: left alone");
     assert!(!claim::path(&r.state(), "s1", false).exists(), "and the file is given back");
 }
+
+#[tokio::test]
+async fn a_claim_of_another_host_instance_still_refuses_the_turn() {
+    let r = Rig::new();
+    let core = FakeCore::start(&r.state());
+    let theirs = r.sleeper();
+    core.hold_as("s1", "turn", theirs, Some("another-host"));
+    let pid = r.sleeper();
+    let held = claim::take_as(&r.state(), "s1", Kind::Bot, pid, false, Some("bot-sam"), None).unwrap().unwrap_err();
+    assert_eq!(held.0.pid, theirs);
+    assert_eq!(core.claim_state(1), "running", "another instance's claim is left alone");
+    assert!(!claim::path(&r.state(), "s1", false).exists(), "and the file is given back");
+}
+
+#[tokio::test]
+async fn a_host_restart_between_the_take_and_the_release_does_not_wedge_the_session() {
+    // A turn claim, an external claim, and a claim left `ending` by a take-over the host never saw through.
+    for (case, kind, stale_state) in [
+        ("turn", Kind::Bot, "running"),
+        ("app turn", Kind::App, "running"),
+        ("external", Kind::Oneshot, "claimed"),
+        ("ending", Kind::Bot, "ending"),
+    ] {
+        let r = Rig::new();
+        let core = FakeCore::start(&r.state());
+        let pid = r.sleeper();
+        let person = (kind == Kind::Bot).then_some("bot-sam");
+        assert!(claim::take_as(&r.state(), "s1", kind, pid, false, person, None).unwrap().is_ok(), "{case}");
+        // The host dies: its file claim goes with the process (nobody gave it back here, so drop it), the core row stays.
+        let _ = std::fs::remove_file(claim::path(&r.state(), "s1", false));
+        core.world.lock().unwrap().claims[0].state = stale_state.into();
+        core.restart(&r.state());
+        // The new host takes the session again: the stale claim is ours by what the core stores.
+        let next = r.sleeper();
+        let taken = claim::take_as(&r.state(), "s1", kind, next, false, person, None);
+        assert!(matches!(taken, Ok(Ok(()))), "{case}: {taken:?}");
+        assert_eq!(core.claim_state(1), "ended", "{case}");
+        // An external claim is made with its process, so it is not redeemed.
+        let now = if kind == Kind::Oneshot { "claimed" } else { "running" };
+        assert_eq!(core.claim_state(2), now, "{case}");
+        if kind != Kind::Oneshot {
+            assert_eq!(core.turn_states()[0], "done", "{case}: the old turn is finished, never requeued");
+        }
+        // The file is held, and a kernel-style taker is refused.
+        let other = r.sleeper();
+        let refused = claim::take(&r.state(), "s1", Kind::Terminal, other, false).unwrap();
+        assert_eq!(refused.unwrap_err().0.pid, next, "{case}");
+        claim::release(&r.state(), "s1", next, false);
+        assert_eq!(core.claim_state(2), "ended", "{case}");
+    }
+}

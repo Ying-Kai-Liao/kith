@@ -10836,7 +10836,7 @@
     },
     {
       "name": "hostclaim.show",
-      "summary": "The conversation's writer, if any: `{claim: {claimId, state, kind, person, pid, started} | null}`; with `claimId`, that claim in whatever state it is.",
+      "summary": "The conversation's writer, if any: `{claim: {claimId, state, kind, person, pid, started, holderInstance} | null}`; with `claimId`, that claim in whatever state it is.",
       "params": [
         {
           "name": "conversation",

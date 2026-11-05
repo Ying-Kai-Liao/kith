@@ -181,7 +181,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.show",
-        "The conversation's writer, if any: `{claim: {claimId, state, kind, person, pid, started} | null}`; with `claimId`, that claim in whatever state it is.",
+        "The conversation's writer, if any: `{claim: {claimId, state, kind, person, pid, started, holderInstance} | null}`; with `claimId`, that claim in whatever state it is.",
         &[
             opt("conversation", "string", "The session id."),
             opt("claimId", "int", "One claim."),

@@ -128,13 +128,7 @@ fn host_row_is_repeatable(method: &str) -> bool {
 /// [`call_as_host`] that keeps what the core said: a refusal's words and "no daemon" are told apart (the claim adapter,
 /// M3-10f, must not read a core that was not there as a claim that was refused, nor the other way round).
 pub fn call_host_claims(folders: &Paths, method: &str, params: &Value) -> Answer {
-    match kith_core::reach_as_host(folders, method, params, host_row_is_repeatable(method)) {
-        kith_core::Reached::Answered(v) => Answer::Done(v),
-        kith_core::Reached::Refused(e) => Answer::Refused(e.to_string()),
-        kith_core::Reached::NoDaemon => Answer::Down { why: "no core is running".to_owned(), lost: false },
-        kith_core::Reached::Mismatch(note) => Answer::Down { why: note, lost: false },
-        kith_core::Reached::Lost(why) => Answer::Down { why, lost: true },
-    }
+    answer_of(kith_core::reach_as_host(folders, method, params, host_row_is_repeatable(method)))
 }
 
 /// One row the daemon takes from the host alone (the sync-lease writes, M2-10b), called on a connection that proves the

@@ -31,6 +31,8 @@ pub(in crate::terminal) struct FakeClaim {
     pub pid: Option<u64>,
     pub started: Option<String>,
     pub turn: Option<i64>,
+    /// The holder instance the claim went to (set by the claim or the redeem, as the real core does).
+    pub holder_instance: Option<String>,
 }
 
 #[derive(Default)]
@@ -99,8 +101,18 @@ impl FakeCore {
         self.world.lock().unwrap().turns.iter().map(|t| t.1.clone()).collect()
     }
 
+    /// A host restart: the adapter's memory of its claims is gone, the core's rows are not.
+    pub fn restart(&self, state: &std::path::Path) {
+        super::mine().lock().unwrap().retain(|(s, _), _| s != state);
+    }
+
     /// A claim the core already holds (a terminal's), running on `pid`.
     pub fn hold(&self, conversation: &str, kind: &str, pid: u32) -> i64 {
+        self.hold_as(conversation, kind, pid, None)
+    }
+
+    /// [`Self::hold`] for a claim that went to the holder instance `instance`.
+    pub fn hold_as(&self, conversation: &str, kind: &str, pid: u32, instance: Option<&str>) -> i64 {
         let started = super::proc_start(pid);
         let mut w = self.world.lock().unwrap();
         let id = i64::try_from(w.claims.len()).unwrap() + 1;
@@ -113,6 +125,7 @@ impl FakeCore {
             pid: Some(u64::from(pid)),
             started,
             turn: None,
+            holder_instance: instance.map(str::to_owned),
         });
         id
     }
@@ -122,7 +135,7 @@ const LIVE: [&str; 3] = ["claimed", "running", "ending"];
 
 fn shown(c: &FakeClaim) -> Value {
     json!({"claimId": c.id, "conversation": c.conversation, "state": c.state, "kind": c.kind,
-           "person": c.person, "pid": c.pid, "started": c.started})
+           "person": c.person, "pid": c.pid, "started": c.started, "holderInstance": c.holder_instance})
 }
 
 fn refused(kind: &str) -> Answer {
@@ -161,6 +174,7 @@ fn answer(w: &mut World, method: &str, p: &Value) -> Answer {
                 pid: p["pid"].as_u64(),
                 started: p["started"].as_str().map(str::to_owned),
                 turn: None,
+                holder_instance: p["holderInstance"].as_str().map(str::to_owned),
             });
             json!({"claimId": n, "generation": 1})
         }
@@ -190,6 +204,7 @@ fn answer(w: &mut World, method: &str, p: &Value) -> Answer {
                 pid: None,
                 started: None,
                 turn: Some(turn),
+                holder_instance: p["holderInstance"].as_str().map(str::to_owned),
             });
             w.turns.iter_mut().filter(|t| t.0 == turn).for_each(|t| t.1 = "claimed".into());
             json!({"status": "claimed", "claimId": n, "generation": 1, "account": "main", "fresh": false})
@@ -199,6 +214,7 @@ fn answer(w: &mut World, method: &str, p: &Value) -> Answer {
                 c.state = "running".into();
                 c.pid = p["pid"].as_u64();
                 c.started = p["started"].as_str().map(str::to_owned);
+                c.holder_instance = p["holderInstance"].as_str().map(str::to_owned);
                 json!({"running": true, "again": false})
             }
             None => json!({"refused": "unknown"}),

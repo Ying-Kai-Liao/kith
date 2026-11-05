@@ -315,3 +315,37 @@ fn a_host_turn_that_ends_done_is_not_requeued_but_an_exit_requeues_it() {
     );
     assert_eq!(turn_state(&core, turn), "queued");
 }
+
+#[test]
+fn show_names_the_holder_instance_so_a_restarted_host_can_end_its_own_stale_claim() {
+    let (_t, mut core, _m) = world();
+    // A host turn claim is left `running` (the host died before it reported). The host that comes up with no memory reads
+    // the instance from `show`, ends the claim as a finished turn, and the conversation can be claimed again.
+    let (id, turn) = running_turn(&mut core, "s1");
+    let shown = row(&mut core, "hostclaim.show", &json!({"conversation": "s1"}));
+    assert_eq!(
+        shown["claim"]["holderInstance"], "kith-serve-host",
+        "{shown}"
+    );
+    assert_eq!(shown["claim"]["claimId"], id);
+    assert!(
+        terminal(&mut core, "s1", "").get("refused").is_some(),
+        "held until it is ended"
+    );
+    let rep = row(
+        &mut core,
+        "hostclaim.report",
+        &json!({"claimId": id, "kind": "done", "body": json!({"pid": shown["claim"]["pid"]}).to_string()}),
+    );
+    assert_eq!(rep["applied"], "done", "{rep}");
+    assert_eq!(turn_state(&core, turn), "done", "not requeued");
+    assert!(
+        terminal(&mut core, "s1", "")["claimId"].is_i64(),
+        "and claimed again"
+    );
+    // A claim of the kernel's (no instance) shows none, so the host never reads it as its own.
+    ensure(&mut core, "s2");
+    let other = terminal(&mut core, "s2", "")["claimId"].as_i64().unwrap();
+    let shown = row(&mut core, "hostclaim.show", &json!({"claimId": other}));
+    assert!(shown["claim"]["holderInstance"].is_null(), "{shown}");
+}
