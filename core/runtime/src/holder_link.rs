@@ -1238,12 +1238,20 @@ fn turn_target(
 }
 
 /// A `LockStuck` turn's end: the claim is stopped (its turn goes back to the queue), so the claim row never stays
-/// `claimed` while its process may hold the conversation. Repeating it changes nothing: a claim that is not live is left
-/// alone. The process itself is ended by the kill the caller queues for the holder.
+/// `claimed` while its process may hold the conversation. The process the stub is known by is recorded on the claim
+/// first (a `spawned` report; a claim that already names a process keeps it): a `claimed` claim with no pid would end
+/// at once with nothing to kill while the stub still holds the lock. With the pid the claim goes to `ending` and
+/// answers the kill, which the caller keeps sending until the process is gone. Repeating it changes nothing: a claim
+/// that is not live is left alone.
 pub(crate) fn end_stuck_claim(
     core: &impl CoreAccess,
     claim_id: i64,
+    pid: Option<u32>,
 ) -> Result<Option<claims::Kill>> {
+    if let Some(pid) = pid {
+        let body = serde_json::json!({"pid": pid, "started": start_of(pid)}).to_string();
+        core.with(|c| claims::report(c, claim_id, "spawned", &body, now_ms()))?;
+    }
     core.with(|c| claims::stop(c, claim_id, "lock_stuck", true, now_ms()))
 }
 
@@ -1264,16 +1272,30 @@ fn serve_turn(shared: &Shared, client: &mut Client, seen: &Known, req: &TurnReq)
                 req.key, req.held.id
             ),
         );
-        match end_stuck_claim(shared, req.claim) {
-            // The claim's end is the process's end: the holder is asked to kill it, and asked again until it is gone.
-            Ok(_) => {
-                shared.terminals.requeue_end(req.held.clone(), 0);
+        let pid = seen.of(req.held.id).map(|(_, pid, _)| pid);
+        // The process is killed whatever the core says: the lock is held until it dies. A core write that failed is
+        // tried again (a few times here; the claim is then left to the reconcile pass, which ends the claims of
+        // processes the holder no longer lists).
+        let mut ended = None;
+        for _ in 0..3 {
+            let r = end_stuck_claim(shared, req.claim, pid);
+            let ok = r.is_ok();
+            ended = Some(r);
+            if ok {
+                break;
             }
-            Err(e) => log::note(
-                &shared.logs,
-                &format!("holder: could not end claim {}: {e}", req.claim),
-            ),
         }
+        if let Some(Err(e)) = ended {
+            log::note(
+                &shared.logs,
+                &format!(
+                    "holder: could not end claim {}: {e}; killing process {} all the same",
+                    req.claim, req.held.id
+                ),
+            );
+        }
+        // The claim's end is the process's end: the holder is asked to kill it, and asked again until it is gone.
+        shared.terminals.requeue_end(req.held.clone(), 0);
     }
     let _ = req.reply.send(TurnDone(step));
 }

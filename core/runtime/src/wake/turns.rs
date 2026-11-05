@@ -1,8 +1,8 @@
 //! A wake's turn in the conversations lane (M3-10c, runtime-design section 4).
 //!
 //! `take` marks what a session is owed as carried by a run (queue.rs); here the same step writes the run's turn through the
-//! claims API (`source = 'wake'`, the prompt is the `[kith wake RUN]` note). The turn is found again by that marker, so a
-//! take that is replayed makes no second turn for the run. A session a terminal (or another person's writer) holds gets the
+//! claims API (`source = 'wake'`, the prompt is the `[kith wake RUN]` note). The turn is found again through the
+//! `wake_turns` link (run to turn), so a take that is replayed makes no second turn for the run. A session a terminal (or another person's writer) holds gets the
 //! turn parked as `terminal_live`: it waits for the session to end and is never typed into the terminal (q217), and
 //! `claims::unpark_ready` queues it once the terminal's claim has ended.
 //!

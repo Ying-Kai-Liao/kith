@@ -676,7 +676,7 @@ fn a_lock_stuck_turn_ends_its_claim_once() {
     )
     .unwrap();
     drop(core);
-    let kill = end_stuck_claim(&rig.core, claim).unwrap().unwrap();
+    let kill = end_stuck_claim(&rig.core, claim, None).unwrap().unwrap();
     assert_eq!(kill.pid, Some(4242));
     assert_eq!(
         rig.row("SELECT state FROM claims WHERE claim_id = ?1", claim),
@@ -691,7 +691,7 @@ fn a_lock_stuck_turn_ends_its_claim_once() {
         "queued"
     );
     // Again: the kill is answered again, nothing is written twice.
-    assert!(end_stuck_claim(&rig.core, claim).unwrap().is_some());
+    assert!(end_stuck_claim(&rig.core, claim, None).unwrap().is_some());
     assert_eq!(
         rig.row("SELECT state FROM turns WHERE id = ?1", turn),
         "queued"
@@ -699,8 +699,8 @@ fn a_lock_stuck_turn_ends_its_claim_once() {
 
     // A claim with no process recorded ends at once (nothing can be writing), and a repeat is a no-op.
     let (bare, bare_turn) = rig.claimed("conv-s2");
-    assert!(end_stuck_claim(&rig.core, bare).unwrap().is_none());
-    assert!(end_stuck_claim(&rig.core, bare).unwrap().is_none());
+    assert!(end_stuck_claim(&rig.core, bare, None).unwrap().is_none());
+    assert!(end_stuck_claim(&rig.core, bare, None).unwrap().is_none());
     assert_eq!(
         rig.row("SELECT state FROM claims WHERE claim_id = ?1", bare),
         "ended"
@@ -708,6 +708,28 @@ fn a_lock_stuck_turn_ends_its_claim_once() {
     assert_eq!(
         rig.row("SELECT state FROM turns WHERE id = ?1", bare_turn),
         "queued"
+    );
+
+    // The stub's process is known to the supervisor but was never reported: the pid is recorded first, so the claim
+    // goes to `ending` with a kill to send instead of ending with the lock possibly held.
+    let (named, named_turn) = rig.claimed("conv-s3");
+    let kill = end_stuck_claim(&rig.core, named, Some(std::process::id()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(kill.pid, Some(std::process::id()));
+    assert_eq!(
+        rig.row("SELECT state FROM claims WHERE claim_id = ?1", named),
+        "ending"
+    );
+    assert_eq!(
+        rig.row("SELECT state FROM turns WHERE id = ?1", named_turn),
+        "queued"
+    );
+    // Again: the same kill, nothing written twice.
+    assert!(
+        end_stuck_claim(&rig.core, named, Some(std::process::id()))
+            .unwrap()
+            .is_some()
     );
     rig.finish(&[]);
 }

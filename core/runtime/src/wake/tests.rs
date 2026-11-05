@@ -908,3 +908,34 @@ mod import {
         assert_eq!(st.items["s1"].format, 1);
     }
 }
+
+/// The Python `kith-wake take` has no conversations lane, so it starts a session whatever agent core.db has for it. Here a
+/// session that is another agent's conversation is refused and the take rolls back whole (no run is marked, no turn is
+/// made): a conversation has one agent, and a turn for the wrong one must not be queued. Intended difference; the cost is
+/// that such an item blocks an unnamed take until it is withdrawn, while `--session` takes the others.
+#[test]
+fn a_take_for_another_agents_conversation_is_refused_and_rolled_back() {
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    c.conn()
+        .execute(
+            "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('s2', 'other', 'claude', 1, 1)",
+            [],
+        )
+        .unwrap();
+    enqueue(&mut c, &f, "s2", "a", "host");
+    enqueue(&mut c, &f, "s1", "b", "host");
+    let err = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap_err();
+    assert!(err.to_string().contains("belongs to other"), "{err}");
+    assert!(state(&mut c).items["s2"].turn.is_none(), "no run marked");
+    assert_eq!(turns_of(&c, "s2").len(), 0);
+    let took = row(
+        &mut c,
+        &f,
+        "wake.take",
+        &json!({"holder": 1, "session": "s1"}),
+    )
+    .unwrap();
+    assert_eq!(took["turn"]["session"], "s1");
+    assert_eq!(turns_of(&c, "s1").len(), 1);
+}
