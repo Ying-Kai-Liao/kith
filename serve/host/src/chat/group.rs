@@ -126,6 +126,12 @@ pub fn membership_gen(store: &Store, room: &str, bot_id: &str) -> Option<i64> {
     is_room_member(store, room, bot_id).then(|| store.room_bot_point(room, bot_id)).flatten().map(|p| p.seq)
 }
 
+/// The generation a bot's turn runs under: its current one, and only when the turn was queued in that same one. A turn
+/// with no generation recorded (a row from before they were, or the bot was no member when it was queued) never runs.
+fn turn_generation(now: Option<i64>, queued: Option<i64>) -> Option<i64> {
+    now.filter(|g| queued == Some(*g))
+}
+
 fn turns() -> std::sync::MutexGuard<'static, BTreeMap<String, BotTurn>> {
     BOT_TURNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -551,7 +557,7 @@ async fn bot_turn(
         // was queued passes, and one taken out from here on has its turn cancelled by the edit.
         let _members = membership_lock();
         let now = membership_gen(&hub.store, &conv.lane.chat, &guest.bot_id);
-        let Some(generation) = now.filter(|g| conv.queue.turn_gen.is_none_or(|t| t == *g)) else {
+        let Some(generation) = turn_generation(now, conv.queue.turn_gen) else {
             return Ok(None);
         };
         turns().insert(
@@ -704,7 +710,7 @@ fn wake_body(group: &BotConfig, conv: &Conversation, key: &str, generation: i64,
         "room": room, "conversation": id, "epoch": epoch, "turnKey": key, "gen": generation, "since": since,
         "text": format!(
             "It is your turn in the Kith room \"{}\". Read what you missed: kith room read {room} --since {since}\n\
-             Then reply once: kith room post {room} --conversation {id} --epoch {epoch} --turn-key {key} --gen {generation} \"your reply\"\n\
+             Then reply once: kith room post {room} --conversation {id} --epoch {epoch} --turn-key {key} \"your reply\"\n\
              If you have nothing to add, post (pass). Run `kith room read` and `kith room post` only; this wake is for this turn alone.",
             group.name
         ),
@@ -1616,7 +1622,8 @@ mod tests {
         // The wake and the turn name the bot's membership generation, which a post may name back.
         let generation = room.hub.store.room_bot_point(&room.group, room.bg.as_str()).unwrap().seq;
         assert_eq!((body["gen"].as_i64(), turn["gen"].as_i64()), (Some(generation), Some(generation)));
-        assert!(body["text"].as_str().unwrap().contains(&format!("--gen {generation}")));
+        // ... but the text never tells a guest to pass it: guests already installed reject a flag they don't know.
+        assert!(!body["text"].as_str().unwrap().contains("--gen"));
         let said = body.to_string();
         assert!(!said.contains("pineapple"), "the wake carries no text of the room: {said}");
         // The bot answers and the turn completes.
@@ -1918,6 +1925,56 @@ mod tests {
         room.shutdown().await;
     }
 
+    #[test]
+    fn a_turn_runs_only_in_the_generation_it_was_queued_in() {
+        assert_eq!(turn_generation(Some(5), Some(5)), Some(5));
+        assert_eq!(turn_generation(Some(9), Some(5)), None, "put back since");
+        assert_eq!(turn_generation(None, Some(5)), None, "taken out");
+        assert_eq!(turn_generation(Some(5), None), None, "no generation recorded: it never runs");
+    }
+
+    #[tokio::test]
+    async fn a_reply_without_a_gen_from_before_the_removal_is_refused_after_a_put_back() {
+        let room = Room::new();
+        let bot = room.join_bot(300, None);
+        let main = Lane::main(&room.group);
+        let mut events = room.hub.events.subscribe();
+        room.send("@Grok what do you think?", None).await;
+        let turn = next_turn(&mut events).await;
+        let key = turn["turnKey"].as_str().unwrap().to_owned();
+        let conv = room.hub.store.open_conversation_of(&main).unwrap();
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b"]})).unwrap();
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b", room.bg.as_str()]})).unwrap();
+        // An older guest names no gen: the turn it answers was cancelled, so its reply completes nothing and wakes nobody.
+        let old = room.bot_post(&bot, &conv.id, conv.epoch, Some(&key), "@b CHATTY late", "old-guest").await;
+        if let Ok(v) = &old {
+            assert_eq!(v["replied"], false, "no wait takes the old turn's reply");
+        }
+        room.closed().await;
+        room.settle().await;
+        assert!(!room.dir.join("b/prompts.jsonl").exists(), "the old reply woke nobody");
+
+        // While a stale key is still the lane's current one, it is refused outright, with or without a gen.
+        room.send("@a BLOCK hold", None).await;
+        working(&room, "a").await;
+        let open = room.hub.store.open_conversation_of(&main).unwrap();
+        let now = room.hub.store.room_bot_point(&room.group, room.bg.as_str()).unwrap().seq;
+        let left = open.left;
+        for (i, queued) in [Some(now - 1), None].into_iter().enumerate() {
+            let mut queue = open.queue.clone();
+            queue.turn_key = Some("kq".into());
+            queue.turn_gen = queued;
+            assert!(room.hub.store.save_queue(&open.id, &queue).unwrap());
+            let err = room.bot_post(&bot, &open.id, open.epoch, Some("kq"), "hi", &format!("q{i}")).await;
+            assert_eq!(code_of(&err.unwrap_err()), Some("notFound"));
+        }
+        assert_eq!(room.hub.store.conversation(&open.id).unwrap().left, left, "nothing was charged");
+        std::fs::write(room.dir.join("a/release"), "").unwrap();
+        room.closed().await;
+        room.settle().await;
+        room.shutdown().await;
+    }
+
     #[tokio::test]
     async fn a_bot_taken_out_and_put_back_loses_its_place_in_the_queue() {
         let room = Room::new();
@@ -2015,7 +2072,7 @@ mod tests {
             round: 1,
             spoke: 0,
             turn_key: Some("key-before".into()),
-            turn_gen: None,
+            turn_gen: membership_gen(&room.hub.store, &room.group, room.bg.as_str()),
             woke: true,
             wait_until: None,
         };

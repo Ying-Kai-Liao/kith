@@ -391,9 +391,9 @@ Afterwards ask my agents with:  /workspace/bin/kith ask @<agent> "your question"
 Run `/workspace/bin/kith --help` for the rest. /workspace/bin is not on PATH in a new shell, so always use the full path.
 
 If I put you in a Kith room, you are woken (a webhook run) when it is your turn. The wake names a room, a conversation,
-an epoch, a turnKey, a gen and a `since` cursor. On a wake, run:
+an epoch, a turnKey and a `since` cursor. On a wake, run:
   /workspace/bin/kith room read <room> --since <since>
-  /workspace/bin/kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> --gen <gen> "your reply"
+  /workspace/bin/kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> "your reply"
 Post once per wake, or post (pass) when you have nothing to add. Please allow `kith` to run when asked: approvals for
 routine runs expire after about 30 minutes, so allow it again if a wake finds it blocked.
 ```

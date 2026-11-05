@@ -287,9 +287,9 @@ fn share_text(link: &str, agents: &[String]) -> String {
          Run `/workspace/bin/kith --help` for the rest. /workspace/bin is not on PATH in a new shell, so always use the \
          full path.\n\n\
          If I put you in a Kith room, you are woken (a webhook run) when it is your turn. The wake names a room, a \
-         conversation, an epoch, a turnKey, a gen and a `since` cursor. On a wake, run:\n  \
+         conversation, an epoch, a turnKey and a `since` cursor. On a wake, run:\n  \
          /workspace/bin/kith room read <room> --since <since>\n  \
-         /workspace/bin/kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> --gen <gen> \"your reply\"\n\
+         /workspace/bin/kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> \"your reply\"\n\
          Post once per wake, or post (pass) when you have nothing to add. Please allow `kith` to run when asked: \
          approvals for routine runs expire after about 30 minutes, so allow it again if a wake finds it blocked.\n"
     )
@@ -1247,6 +1247,11 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
             Code::RateLimited,
             format!("This bot has posted {} times in the last hour. Try again in a few minutes.", bot.rate_per_hour),
         ));
+    }
+    // The turn this key belongs to was queued in another generation (or none was recorded): a reply from before the bot
+    // was taken out, even from a client that names no `gen`.
+    if turn_key.is_some_and(|k| conv.queue.turn_key.as_deref() == Some(k)) && conv.queue.turn_gen != Some(generation) {
+        return Err(missing());
     }
     let lane = conv.lane.clone();
     let current = epoch == conv.epoch && crate::chat::group::current(&hub.store, &lane, conv.epoch);

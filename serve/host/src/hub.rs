@@ -308,6 +308,9 @@ impl Hub {
         crate::agent::own_memory::settle(&mut cfg, &row.config, patch);
         let default_moved = !cfg.is_group() && folder::default_of(&cfg) != folder::default_of(&row.config);
         {
+            // A room's member list changes under the membership lock, so a bot's post or ask is checked and lands
+            // entirely before the edit or entirely after it (always membership, then emit).
+            let _members = crate::chat::group::membership_lock();
             let _g = self.emit_lock.locked();
             self.store.save_bot(&cfg)?;
         }
@@ -360,6 +363,7 @@ impl Hub {
             if !row.deleted && group.is_group() && group.members.iter().any(|m| m == id) {
                 group.members.retain(|m| m != id);
                 {
+                    let _members = crate::chat::group::membership_lock();
                     let _g = self.emit_lock.locked();
                     self.store.save_bot(&group)?;
                 }
