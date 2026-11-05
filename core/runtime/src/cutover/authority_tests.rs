@@ -684,7 +684,10 @@ fn a_real_step_is_refused_with_the_open_gates_and_auth_json_is_untouched() {
             .unwrap_err()
             .to_string();
         assert!(
-            e.contains("M2-18 gates are open") && e.contains("revoke bridge"),
+            e.contains("M2-18 gates are open")
+                && e.contains("revoke bridge")
+                && e.contains("'already switched' branch")
+                && e.contains("people --json"),
             "{e}"
         );
     }
@@ -792,6 +795,72 @@ fn the_step_holds_the_writers_lock_from_the_import_through_the_tombstone() {
     f.try_lock_exclusive().expect("the step let the lock go");
 }
 
+/// Wraps a module and, at each point between the import and the tombstone, tries the writers' lock from a second open
+/// file: it must be contended all along.
+struct ProbeLock(Box<dyn Module>, PathBuf);
+
+impl ProbeLock {
+    fn held(&self) {
+        use fs2::FileExt as _;
+        let f = std::fs::File::open(self.1.with_file_name("auth.json.lock")).unwrap();
+        assert!(f.try_lock_exclusive().is_err(), "the lock was let go");
+    }
+}
+
+impl Module for ProbeLock {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
+        self.0.tombstones(env)
+    }
+    fn import(&self, env: &Env, core: Option<&mut Core>, o: Opts) -> Result<Vec<String>> {
+        let out = self.0.import(env, core, o);
+        self.held();
+        out
+    }
+    fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
+        self.held();
+        self.0.same_answer(env, db)
+    }
+    fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
+        self.held();
+        self.0.export_back(env, core)
+    }
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        self.0.source_lock(env)
+    }
+    fn rollback_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        self.0.rollback_lock(env)
+    }
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        self.held();
+        self.0.before_tombstone(env)
+    }
+    fn digest(&self, env: &Env, db: &Connection) -> Result<String> {
+        self.0.digest(env, db)
+    }
+}
+
+#[test]
+fn the_lock_is_held_throughout_the_step_and_the_rollback() {
+    let (r, mut reg) = rig();
+    let inner = reg.remove(0);
+    let reg: Vec<Box<dyn Module>> = vec![Box::new(ProbeLock(inner, r.auth()))];
+    step(&reg, &r.env, "authority", opts()).expect("step");
+    rollback(&reg, &r.env, "authority", opts()).expect("rollback");
+}
+
+#[test]
+fn a_lifted_step_that_recorded_no_sha_does_not_tombstone() {
+    let (r, reg) = rig();
+    let e = reg[0].before_tombstone(&r.env).unwrap_err().to_string();
+    assert!(e.contains("did not record auth.json's sha"), "{e}");
+    // The unlifted module is never in a real step, so it has nothing to check.
+    let (r, reg) = rig_full(None, true);
+    reg[0].before_tombstone(&r.env).expect("not lifted");
+}
+
 #[test]
 fn export_back_waits_for_the_lock_and_refuses_when_it_is_not_let_go() {
     use fs2::FileExt as _;
@@ -811,6 +880,8 @@ fn export_back_waits_for_the_lock_and_refuses_when_it_is_not_let_go() {
         tombstone::is_tombstone(&r.auth()),
         "the file was not written"
     );
+    // The lock is taken before the rolling-back record, so the refusal wrote nothing.
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
     // A holder that lets go within the wait: the rollback goes through.
     let t = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -851,7 +922,10 @@ fn unmoved_vault_rows_make_step_and_check_refuse_until_the_slots_are_sealed() {
         .unwrap_err()
         .to_string();
     assert!(
-        e.contains("2 credential record(s)") && e.contains("unlock the vault in the app first"),
+        e.contains("2 credential record(s)")
+            && e.contains("router.key, slack.token")
+            && e.contains("unlock the vault in the app first")
+            && e.contains("remove that credential in the app"),
         "{e}"
     );
     let e = check(&reg, &r.env, "authority").unwrap_err().to_string();
