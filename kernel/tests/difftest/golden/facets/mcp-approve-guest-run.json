@@ -1,0 +1,12 @@
+{
+  "fakes": "host-sock {\"input\": {\"command\": \"ls \\\"$HOME/caf\\u00e9\\\"\", \"description\": \"list\", \"f\": 1.5, \"n\": 3, \"nested\": {\"a\": \"\\u00fc\", \"z\": [1, null, true]}}, \"method\": \"requestPermission\", \"token\": \"run-tok-1\", \"tool\": \"Bash\"}\nhost-sock {\"input\": {\"command\": \"ls \\\"$HOME/caf\\u00e9\\\"\", \"description\": \"list\", \"f\": 1.5, \"n\": 3, \"nested\": {\"a\": \"\\u00fc\", \"z\": [1, null, true]}}, \"method\": \"requestPermission\", \"token\": \"run-tok-1\", \"tool\": \"Bash\"}\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"result\": {\n    \"content\": [\n      {\n        \"text\": \"{\\\"behavior\\\": \\\"allow\\\", \\\"updatedInput\\\": {\\\"command\\\": \\\"ls \\\\\\\"$HOME/caf\\\\u00e9\\\\\\\"\\\", \\\"description\\\": \\\"list\\\", \\\"n\\\": 3, \\\"f\\\": 1.5, \\\"nested\\\": {\\\"z\\\": [1, null, true], \\\"a\\\": \\\"\\\\u00fc\\\"}}}\",\n        \"type\": \"text\"\n      }\n    ]\n  }\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"result\": {\n    \"content\": [\n      {\n        \"text\": \"{\\\"behavior\\\": \\\"deny\\\", \\\"message\\\": \\\"Not today\\\"}\",\n        \"type\": \"text\"\n      }\n    ]\n  }\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"result\": {\n    \"content\": [\n      {\n        \"text\": \"{\\\"behavior\\\": \\\"deny\\\", \\\"message\\\": \\\"Could not reach the approval service, so the action was refused. End your turn and say what you needed.\\\"}\",\n        \"type\": \"text\"\n      }\n    ]\n  }\n}\n",
+  "step2.stderr": ""
+}

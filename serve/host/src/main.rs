@@ -551,8 +551,8 @@ enum KernelCmd {
         args: Vec<String>,
     },
     /// `kernel/bin/kith-permit`'s command-line verbs: `issue AGENT SESSION PID`, `denied --dir DIR`, `once --dir DIR` and
-    /// `apply SETTINGS_FILE`. Prints what `kith-permit` prints, with its exit codes (2: the stdio MCP server, which has no Rust
-    /// side yet). Not routed from `kith` yet.
+    /// `apply SETTINGS_FILE`; any other line is the stdio MCP server (`approve`, `request_access`, `request_secret`, `report_bug`,
+    /// `ask_helper`, `run_door`). Prints what `kith-permit` prints, with its exit codes. Not routed from `kith` yet.
     #[command(disable_help_flag = true)]
     Permit {
         /// The kernel folder (default: the one this program finds).
@@ -926,6 +926,10 @@ fn print_permit(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let home = kith_kernel::paths::process_home();
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
     let env = kith_kernel::permit::Env::from_process();
+    if !kith_kernel::permit::is_verb(args) {
+        // the stdio MCP server answers line by line, so it writes to the terminal itself
+        return kith_kernel::permit::serve_stdio(&env, &kernel);
+    }
     let out = kith_kernel::permit::run(&env, &kernel, args, &mut std::io::stdin().lock());
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);

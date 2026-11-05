@@ -132,7 +132,17 @@ fn a_line_that_is_no_verb_is_the_mcp_server() {
     ] {
         assert_eq!(go(&env, a, ""), Out::default(), "{a:?}");
         assert_eq!(go(&env, a, "\n  \n"), Out::default(), "{a:?}");
-        assert_eq!(go(&env, a, "{\"jsonrpc\": \"2.0\"}\n").code, 2, "{a:?}");
+        // a message with no id is a notification: nothing is answered
+        assert_eq!(
+            go(&env, a, "{\"jsonrpc\": \"2.0\"}\n"),
+            Out::default(),
+            "{a:?}"
+        );
+        assert_eq!(
+            go(&env, a, "{\"id\": 1, \"method\": \"ping\"}\n").stdout,
+            "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {}}\n",
+            "{a:?}"
+        );
     }
 }
 

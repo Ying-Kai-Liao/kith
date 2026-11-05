@@ -1,0 +1,6 @@
+{
+  "fakes": "host-sock {\"input\": {\"command\": \"ls \\\"$HOME/caf\\u00e9\\\"\", \"description\": \"list\", \"f\": 1.5, \"n\": 3, \"nested\": {\"a\": \"\\u00fc\", \"z\": [1, null, true]}}, \"method\": \"requestPermission\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"result\": {\n    \"content\": [\n      {\n        \"text\": \"{\\\"behavior\\\": \\\"deny\\\", \\\"message\\\": \\\"waiting on kai, end your turn\\\"}\",\n        \"type\": \"text\"\n      }\n    ]\n  }\n}\n",
+  "step0.stderr": ""
+}
