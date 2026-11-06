@@ -165,9 +165,21 @@ pub(crate) fn supervise(shared: &Arc<Shared>, layout: &Layout, cfg: &HolderConfi
     shared.terminals.set_stub(cfg.stub.clone());
     shared.terminals.set_remote(cfg.command.is_some());
     while !shared.stopping() {
+        // Read before the holder is asked (and before it is started): a claim opened after this is newer than anything
+        // its welcome can list, and `different_holder` leaves it alone. Read in `connected`, after the welcome, a claim
+        // taken between the holder composing its welcome and that read would be ended as unlisted.
+        let high_water = match shared.with_core(|c| claims::claim_high_water(c)) {
+            Ok(h) => h,
+            Err(e) => {
+                // Not a holder failure, and a core.db that fails here fails on every try: back off, don't reconnect.
+                fail(shared, &mut last_error, "blocked", &e.to_string());
+                sleep_unless_stopped(shared, cfg.retry_max);
+                continue;
+            }
+        };
         match connect(shared, layout, cfg) {
             Ok(client) => {
-                let ended = connected(shared, client, cfg);
+                let ended = connected(shared, client, high_water, cfg);
                 // Attached clients are told the link is gone; terminals asked for while it was down are answered, not
                 // left to run late.
                 shared.terminals.relay.link_lost();
@@ -381,6 +393,7 @@ fn start_renewing(
 fn connected(
     shared: &Arc<Shared>,
     mut client: Client,
+    high_water: i64,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), Lost> {
     // First thing after the welcome: a deadline left over from before this link must not lapse while we reconcile.
@@ -388,10 +401,6 @@ fn connected(
     // A holder reached through a command runs on another machine: its pids mean nothing here, so no start time is
     // read and no process group is ended on this machine's account, and the local holder's record is left alone.
     let remote = cfg.command.is_some();
-    // Claims opened after this are newer than the welcome's list and may simply be missing from it.
-    let high_water = shared
-        .with_core(|c| claims::claim_high_water(c))
-        .map_err(|e| Lost::Link(e.to_string()))?;
     let procs = if remote {
         Vec::new()
     } else {
@@ -494,7 +503,9 @@ fn connected(
         seen.note_all(&held);
         let now = record_procs(&held);
         if now != known {
-            // Same instance as the record: the claims are not looked at, the list is for the signature's sake.
+            // Same instance as the record: the claims are not looked at, the list is for the signature's sake, and
+            // `high_water` (read before this connection's hello) is never used: only a new instance reaches
+            // `different_holder`.
             reconcile(
                 shared,
                 &instance,
@@ -779,7 +790,9 @@ pub(crate) const HOST_INSTANCE: &str = claims::HOST_INSTANCE;
 /// The claims: once the old instance's process groups are confirmed gone, `claims::different_holder` ends the old
 /// instance's claims the new one does not list (`listed`, read at `high_water` before the holder was asked). It never
 /// touches the host's claims ([`HOST_INSTANCE`]). If a group would not end, the claims are left as they are: that process
-/// may still hold the writer lock, and the next hello looks again. The pass is idempotent: after it nothing is left
+/// may still hold the writer lock, and the next hello looks again. A `running` claim whose process was alive but not in
+/// the record goes to `ending`; its group is ended here too (pid and start stamp matched, as for the record), and a
+/// group that will not end is only logged: `end_gone` ends the claim once the pid is gone. The pass is idempotent: after it nothing is left
 /// under the old instance, and the record then names the new one, so a repeated hello does not come back here.
 pub(crate) fn reconcile(
     shared: &Shared,
@@ -828,9 +841,11 @@ pub(crate) fn reconcile(
         for n in notes {
             log::note(&shared.logs, &n);
         }
+        // A core.db that fails here fails again on the next hello: back off like a blocked pass, not a link loss that
+        // resets the delay to `retry_min`.
         let released = shared
             .with_core(|c| claims::different_holder(c, instance, listed, &[], high_water, now_ms()))
-            .map_err(|e| Lost::Link(e.to_string()))?;
+            .map_err(|e| Lost::Blocked(format!("ending the old instance's claims failed: {e}")))?;
         if !released.ended.is_empty() || !released.kill.is_empty() {
             log::note(
                 &shared.logs,
@@ -840,6 +855,36 @@ pub(crate) fn reconcile(
                     released.kill.len()
                 ),
             );
+        }
+        // A process of the old instance that was alive but missing from the record has its claim `ending` now, and
+        // nothing else would signal it: end its group the same way, matched by pid and start stamp (a reused pid is
+        // left alone, as above). A group that will not end is logged, not a block: the claim stays `ending` and
+        // `end_gone` ends it once the pid is gone.
+        let stray: Vec<RecordedProc> = released
+            .kill
+            .iter()
+            .filter_map(|k| Some((k.pid?, k.started.clone()?)))
+            .filter(|(pid, _)| !stale.iter().any(|p| p.pid == *pid))
+            .map(|(pid, started)| RecordedProc {
+                pid,
+                started,
+                conv: String::new(),
+            })
+            .collect();
+        if !stray.is_empty() {
+            let mut notes = Vec::new();
+            let result = end_groups(&mut notes, &stray, cfg.kill_wait);
+            for n in notes {
+                log::note(&shared.logs, &n);
+            }
+            if let Err(stuck) = result {
+                log::note(
+                    &shared.logs,
+                    &format!(
+                        "holder: claims of the old instance {old} still wait for their process: {stuck}"
+                    ),
+                );
+            }
         }
     }
     if recorded.instance.as_deref() != Some(instance) || recorded.procs != procs {

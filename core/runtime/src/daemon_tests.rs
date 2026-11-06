@@ -1029,6 +1029,165 @@ fn a_hello_under_a_new_instance_ends_the_old_instances_claims_but_not_the_hosts(
     assert_eq!(state(host), "claimed");
 }
 
+/// Takes `conv` as a claim of `instance` (a turn queued for it first), the way the tests above do.
+#[cfg(unix)]
+fn take_claim(d: &Daemon, conv: &str, instance: &str) -> i64 {
+    use crate::conversations::claims::{Kind, NewClaim, claim};
+    d.shared
+        .with_core(|c| {
+            c.conn().execute(
+                "INSERT OR IGNORE INTO conversations (id, agent, engine, created_at, updated_at) VALUES (?1, 'a', 'claude', 1, 1)",
+                [conv],
+            )?;
+            c.conn().execute(
+                "INSERT INTO turns (conversation, person, source, state, queued_at) VALUES (?1, 'sam', 'app', 'queued', 1)",
+                [conv],
+            )?;
+            let turn = c.conn().last_insert_rowid();
+            let req = NewClaim {
+                conversation: conv,
+                kind: Kind::Turn,
+                person: "sam",
+                turn: Some(turn),
+                holder_instance: Some(instance),
+                account: None,
+                process: None,
+                revoke_seen: 0,
+            };
+            Ok(claim(c, &req, 10)?.claim_id)
+        })
+        .expect("claim")
+}
+
+#[cfg(unix)]
+fn claim_state(d: &Daemon, id: i64) -> String {
+    d.shared
+        .with_core(|c| {
+            Ok(c.conn()
+                .query_row("SELECT state FROM claims WHERE claim_id = ?1", [id], |r| {
+                    r.get(0)
+                })?)
+        })
+        .expect("state")
+}
+
+/// Opens the generation's claims (another test may have), so `claim` is allowed.
+#[cfg(unix)]
+fn open_claims(d: &Daemon) {
+    let _ = d
+        .shared
+        .with_core(|c| crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1));
+}
+
+/// A group of the old instance that will not end blocks the whole pass: its claims are not touched and the record
+/// keeps the old instance, so the next hello looks again.
+#[cfg(unix)]
+#[test]
+fn a_stuck_old_group_leaves_the_claims_and_the_record_alone() {
+    use crate::db::{HolderRecord, RecordedProc};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig {
+        kill_wait: Duration::from_millis(500),
+        ..HolderConfig::default()
+    };
+    open_claims(&d);
+    let running = take_claim(&d, "a", "one");
+    let claimed = take_claim(&d, "b", "one");
+    let (stuck_pid, _) = leader();
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, running, 4242, "e4242", "one", 20)?;
+            // A live session leader whose recorded start is in the old form cannot be told from a stranger: stuck.
+            c.save_holder_record(&HolderRecord {
+                instance: Some("one".into()),
+                procs: vec![RecordedProc {
+                    pid: stuck_pid,
+                    started: "Thu Jan  1 00:00:00 1970".into(),
+                    conv: "a".into(),
+                }],
+            })
+        })
+        .expect("record");
+    let err = crate::holder_link::reconcile(&d.shared, "two", &[], &[], i64::MAX, &cfg)
+        .expect_err("stuck");
+    assert!(matches!(err, crate::holder_link::Lost::Blocked(_)));
+    assert_eq!(claim_state(&d, running), "running");
+    assert_eq!(claim_state(&d, claimed), "claimed");
+    let rec = d.shared.with_core(|c| c.holder_record()).expect("record");
+    assert_eq!(rec.instance.as_deref(), Some("one"));
+    assert_eq!(rec.procs.len(), 1);
+    assert!(alive(stuck_pid), "nothing was signalled");
+    signal(stuck_pid, "KILL");
+}
+
+/// A claim taken after the high-water mark was read is not in the holder's list and is not the old instance's to lose.
+#[cfg(unix)]
+#[test]
+fn a_hello_leaves_a_claim_newer_than_its_high_water_mark() {
+    use crate::db::HolderRecord;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig::default();
+    open_claims(&d);
+    let older = take_claim(&d, "a", "one");
+    let mark = d
+        .shared
+        .with_core(|c| crate::conversations::claims::claim_high_water(c))
+        .expect("mark");
+    let newer = take_claim(&d, "b", "one");
+    d.shared
+        .with_core(|c| {
+            c.save_holder_record(&HolderRecord {
+                instance: Some("one".into()),
+                procs: Vec::new(),
+            })
+        })
+        .expect("record");
+    crate::holder_link::reconcile(&d.shared, "two", &[], &[], mark, &cfg).expect("hello");
+    assert_eq!(claim_state(&d, older), "ended");
+    assert_eq!(claim_state(&d, newer), "claimed");
+}
+
+/// A running claim of the old instance whose process is alive but not in the record goes to `ending`, its group is
+/// signalled (matched by pid and start), and `end_gone` then ends the claim.
+#[cfg(unix)]
+#[test]
+fn a_running_claim_of_the_old_instance_is_signalled_and_ended_once_its_pid_is_gone() {
+    use crate::db::HolderRecord;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig {
+        kill_wait: Duration::from_secs(10),
+        ..HolderConfig::default()
+    };
+    open_claims(&d);
+    let (pid, start) = leader();
+    let id = take_claim(&d, "a", "one");
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, id, pid, &start, "one", 20)?;
+            c.save_holder_record(&HolderRecord {
+                instance: Some("one".into()),
+                procs: Vec::new(),
+            })
+        })
+        .expect("record");
+    assert!(alive(pid));
+    crate::holder_link::reconcile(&d.shared, "two", &[], &[], i64::MAX, &cfg).expect("hello");
+    assert!(!alive(pid), "the process missing from the record was ended");
+    assert_eq!(claim_state(&d, id), "ending", "only end_gone ends it");
+    let ended = d
+        .shared
+        .with_core(|c| crate::conversations::claims::end_gone(c, &crate::gate::System, 40))
+        .expect("end_gone");
+    assert_eq!(ended, vec![id]);
+    assert_eq!(claim_state(&d, id), "ended");
+}
+
 /// A pid the holder listed that has exited before the start is read is not recorded: with no start it could be a
 /// stranger's by the time the instance changes. One that is there is recorded with the stamp it has now.
 #[cfg(unix)]
