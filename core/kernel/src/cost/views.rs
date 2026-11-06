@@ -559,13 +559,103 @@ pub fn members(c: &Connection, p: &Paths, now: &Now, agent: &str) -> R<String> {
             Ok((r.get(0)?, r.get(1)?))
         })?
         .collect::<R<_>>()?;
-    let budgets = kith_auth(p, &["budgets", agent, "--json"]).unwrap_or_else(|| json!({}));
+    // An unreadable budget is not "nobody has one": the answer says so (`budgetsError`), as the Python does.
+    let (budgets, error) = match read_budgets(p, agent) {
+        Some(b) => (b, false),
+        None => (json!({}), true),
+    };
     let people: Map<String, Value> = rows
         .into_iter()
         .map(|(who, x)| (who, Py::or_zero(x).round(4).value()))
         .collect();
-    let out = json!({"agent": agent, "month": period_label(now, "month"), "people": people, "budgets": budgets});
+    let mut out = json!({"agent": agent, "month": period_label(now, "month"), "people": people, "budgets": budgets});
+    if error {
+        out["budgetsError"] = json!("can't read budgets");
+    }
     Ok(format!("{}\n", crate::secrets::pyjson::dumps(&out)))
+}
+
+/// `read_budgets` of `kith-cost`: each person's budget on the agent, from `kith-auth budgets`; from the core once
+/// auth.json is its tombstone (kith-auth exits 3 there). `None` when neither can be read.
+fn read_budgets(p: &Paths, agent: &str) -> Option<Value> {
+    let mut cmd = Command::new(p.kernel.join("bin").join("kith-auth"));
+    cmd.args(["budgets", agent, "--json"]);
+    let (code, out) = run_code(cmd, None, Wait::from_secs(20))?;
+    match code {
+        0 => return serde_json::from_str(&out).ok(),
+        3 => {}
+        _ => return None,
+    }
+    // The program that asks the core: KITH_BIN (the router names the one it checked), else this one.
+    let bin = crate::paths::process_env("KITH_BIN")
+        .map(std::path::PathBuf::from)
+        .filter(|b| b.is_file())
+        .or_else(|| std::env::current_exe().ok())?;
+    let mut env = Map::new();
+    for k in [
+        "KITH_STATE",
+        "HQ_STATE",
+        "KITH_HOME",
+        "HQ_HOME",
+        "KITH_AGENTS",
+        "HQ_AGENTS",
+    ] {
+        if let Some(v) = crate::paths::process_env(k) {
+            env.insert(k.to_owned(), Value::from(v));
+        }
+    }
+    let params = json!({"agent": agent, "kernel": p.kernel, "home": p.home, "env": env});
+    let mut cmd = Command::new(bin);
+    cmd.args(["kernel", "core-call", "people.budgets", "--params-stdin"]);
+    let (code, out) = run_code(cmd, Some(params.to_string()), Wait::from_secs(20))?;
+    if code != 0 {
+        return None;
+    }
+    let budgets = serde_json::from_str::<Value>(&out)
+        .ok()?
+        .get("budgets")?
+        .clone();
+    budgets.is_object().then_some(budgets)
+}
+
+/// Runs `cmd` with `input` on stdin; its exit code and stdout, `None` when it can't start or outlives `limit` (killed).
+fn run_code(mut cmd: Command, input: Option<String>, limit: Wait) -> Option<(i32, String)> {
+    use std::io::{Read as _, Write as _};
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    if let (Some(text), Some(mut si)) = (input, child.stdin.take()) {
+        std::thread::spawn(move || {
+            let _ = si.write_all(text.as_bytes());
+        });
+    }
+    let mut so = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = so.read_to_string(&mut s);
+        s
+    });
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) if start.elapsed() < limit => std::thread::sleep(Wait::from_millis(5)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    Some((status.code()?, reader.join().ok()?))
 }
 
 /// `bots --json`: the Mac owner's bots this calendar month, all agents, against their cap together. `None` when

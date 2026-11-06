@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# kith-cost-switch-check — the `cost` switch (kernel/lib/core-switched.txt): the verbs the core ports (limit, spent, sync,
+# usage --json, agent NAME --json, members, bots --json) are answered by the Rust core when the line is there, by the Python
+# when KITH_CORE=python or the line is gone; tag, record, the text reports and a bare `kith cost` stay Python. Which side
+# answered is read from a stub standing in for kernel/bin/kith-cost in a copy of the kernel folder: it logs its call and
+# runs the real script. Also the launch's budget checks on both paths (the bash script and `--launch-json`): the owner, a
+# member under and over a budget, a bot guest, a guest whose budget is NaN, inf or text (refused, as the Python), and
+# `members` when the budgets can't be read (budgetsError, never "no budget").
+# Needs the Rust program: KITH_DIFFTEST_BIN=/path/to/kith (without one the check says so and exits 0).
+#
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-cost-switch-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+REAL=${KITH_DIFFTEST_BIN:-}
+if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN)"; exit 0; fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-cost-switch-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_AUTH=$T/auth.json TZ=UTC
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CORE KITH_BIN HQ_HOME KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_HOME KITH_STORE KITH_PERSON_WAS
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+mkdir -p "$HOME" "$T/state" "$T/bin" "$T/work"
+export KITH_STATE=$T/state KITH_HOME=$T/kith
+A=$KITH_HOME/agents/echo/role
+mkdir -p "$A"
+printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$A/agent.md"
+git -C "$A" init -q && git -C "$A" commit -qm init --allow-empty
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.300 (Claude Code)"; exit 0; }\necho claude "$@"\n' > "$T/bin/claude"
+chmod +x "$T/bin/claude"
+export PATH=$T/bin:$PATH
+
+# A copy of the kernel folder whose kith-cost logs what it is asked, then runs the original.
+cp -R "$KERNEL" "$T/k"
+LOG=$T/calls
+mv "$T/k/bin/kith-cost" "$T/k/bin/kith-cost.real"
+printf '#!/bin/sh\necho "kith-cost $*" >> "%s"\nexec "%s" "$@"\n' "$LOG" "$T/k/bin/kith-cost.real" > "$T/k/bin/kith-cost"
+chmod +x "$T/k/bin/kith-cost"
+KITH=$T/k/bin/kith
+export KITH_BIN=$REAL
+
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+calls() { grep -c "^kith-cost $1" "$LOG" 2>/dev/null || true; }
+reset() { rm -f "$LOG"; touch "$LOG"; }
+AUTH() { python3 "$T/k/bin/kith-auth" "$@"; }
+SW=$T/k/lib/core-switched.txt
+cp "$SW" "$T/switched.keep"
+grep -q '^cost	cost$' "$SW" || { echo "FAIL core-switched.txt has no cost line"; exit 1; }
+
+AUTH person kai owner >/dev/null; AUTH person sam >/dev/null; AUTH person eve >/dev/null
+AUTH bot bot-s --of sam name=Scout >/dev/null
+AUTH member echo sam budget=5 >/dev/null
+AUTH member echo eve budget=5 >/dev/null
+AUTH member echo bot-s >/dev/null
+
+# The ledger: the owner and sam spent a little this month; eve spent past her budget; bot-s spends from sam.
+"$KERNEL/bin/kith-cost" sync >/dev/null 2>&1
+M=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()["KITH_MACHINE"])' "$KERNEL/lib")
+python3 - "$M/cost.db" <<'PY'
+import datetime as dt, sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+for i, (person, cost) in enumerate([(None, 1.0), ('sam', 2.0), ('eve', 9.0), ('bot-s', 0.5)]):
+    c.execute("insert into runs (session, agent, person) values (?, 'echo', ?)", (f's{i}', person))
+    c.execute("insert into req values (?, ?, ?, 'p', 'm', 'main', '1', 0, 0, 0, 0, ?)", (f'r{i}', f's{i}', now, cost))
+c.commit()
+PY
+
+# 1. The ported verbs: the core answers, kith-cost is not run. 2. KITH_CORE=python: it is, with the same answer.
+for line in "spent sam echo" "limit echo --sh" "members echo" "usage --json" "agent echo --json" "bots --json" "sync"; do
+  reset; "$KITH" cost $line > "$T/rust.out" 2>/dev/null; rrc=$?
+  check "switched: kith cost $line is the core's" "[ \"\$(calls '')\" = 0 ] && [ $rrc = 0 ]"
+  reset; KITH_CORE=python "$KITH" cost $line > "$T/py.out" 2>/dev/null
+  check "KITH_CORE=python: kith cost $line is Python's" "[ \"\$(calls '')\" -ge 1 ]"
+  case $line in
+    "spent sam echo"|"limit echo --sh"|"members echo") check "same answer either way: kith cost $line" "cmp -s '$T/rust.out' '$T/py.out'" ;;
+  esac
+done
+
+# 2b. A limit set and spent past (the owner kai spent $1 on echo): the two `limit echo --sh` outputs are the same bytes, and
+# the launch holds on both paths (at-limit hold), so the core's limit read is judged on a real "over", not on "no limit".
+"$KITH" echo set limit 0.5 >/dev/null 2>&1; "$KITH" echo set at-limit hold >/dev/null 2>&1
+reset; "$KITH" cost limit echo --sh > "$T/rust.out" 2>/dev/null
+check "limit set and over: the core answers, l_over=1" "[ \"\$(calls '')\" = 0 ] && grep -q 'l_over=1' '$T/rust.out'"
+reset; KITH_CORE=python "$KITH" cost limit echo --sh > "$T/py.out" 2>/dev/null
+check "limit set and over: same bytes either way" "[ \"\$(calls '')\" -ge 1 ] && cmp -s '$T/rust.out' '$T/py.out'"
+"$KITH" echo set limit 0 >/dev/null 2>&1
+
+# 3. tag and record, the text reports and a bare `kith cost` stay Python with the line on.
+for line in "tag x" "record" "people month" "month" ""; do
+  reset; "$KITH" cost $line >/dev/null 2>&1 </dev/null
+  check "switched: kith cost ${line:-<bare>} still reaches kith-cost" "[ \"\$(calls '')\" -ge 1 ]"
+done
+
+# 4. Rollback: the line gone, kith-cost is asked again.
+grep -v '^cost	' "$T/switched.keep" > "$SW"
+reset; "$KITH" cost spent sam echo >/dev/null 2>&1
+check "cost line removed: kith cost spent is Python's" "[ \"\$(calls 'spent')\" = 1 ]"
+cp "$T/switched.keep" "$SW"
+
+# 5. The launch's budget check on both paths: "rust" is `kith echo --launch-json` through the core's launch, "bash" the same
+# with the `launch` line gone, so the script's own checks run (and reach kith-cost through the same router).
+launch() { # PATH PERSON [ENV=VAL...] → $T/l.rc, $T/l.err
+  local path=$1 who=$2; shift 2
+  [ "$path" = bash ] && grep -v '^launch	' "$T/switched.keep" > "$SW"
+  (cd "$T/work" && env KITH_PERSON=$who "$@" "$KITH" echo --launch-json >"$T/l.out" 2>"$T/l.err"); echo $? > "$T/l.rc"
+  cp "$T/switched.keep" "$SW"
+}
+for path in rust bash; do
+  reset; launch $path kai X=1
+  check "$path path: the owner runs" "[ \"\$(cat '$T/l.rc')\" = 0 ]"
+  check "$path path: the owner's limit came from the core" "[ \"\$(calls 'limit')\" = 0 ]"
+  reset; launch $path sam X=1
+  check "$path path: a member under the budget runs, its spend from the core" "[ \"\$(cat '$T/l.rc')\" = 0 ] && [ \"\$(calls 'spent')\" = 0 ]"
+  reset; launch $path eve X=1
+  check "$path path: a member over the budget is refused" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q 'has used' '$T/l.err'"
+  reset; launch $path bot-s X=1
+  check "$path path: a bot guest under its owner's budget runs" "[ \"\$(cat '$T/l.rc')\" = 0 ]"
+  "$KITH" echo set limit 0.5 >/dev/null 2>&1
+  reset; launch $path kai X=1
+  "$KITH" echo set limit 0 >/dev/null 2>&1
+  check "$path path: the owner over the agent's limit (hold) is held" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q 'held until you raise the limit' '$T/l.err'"
+  reset; launch $path eve KITH_CORE=python
+  check "$path path, KITH_CORE=python: the member over the budget is refused, kith-cost asked" "[ \"\$(cat '$T/l.rc')\" = 3 ] && [ \"\$(calls 'spent')\" -ge 1 ]"
+done
+
+# 5b. A renamed person: zed spent past the budget under the old id, then became zoe. The ledger still says zed, so zoe is
+# refused on both paths (KITH_PERSON_WAS carries the old id to the spend).
+AUTH person zed >/dev/null; AUTH member echo zed budget=5 >/dev/null
+python3 - "$M/cost.db" <<'PY'
+import datetime as dt, sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+c.execute("insert into runs (session, agent, person) values ('sz', 'echo', 'zed')")
+c.execute("insert into req values ('rz', 'sz', ?, 'p', 'm', 'main', '1', 0, 0, 0, 0, 9.0)", (now,))
+c.commit()
+PY
+AUTH person zed id=zoe >/dev/null
+for path in rust bash; do
+  reset; launch $path zoe X=1
+  check "$path path: a renamed member whose old id spent past the budget is refused" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q 'has used' '$T/l.err'"
+done
+
+# 6. A NaN, inf or text budget refuses a guest's run, switched or not (the limit that can't be read is not "no limit").
+cp "$T/auth.json" "$T/auth.keep"
+for bad in nan inf abc; do
+  python3 - "$T/auth.json" "$bad" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1]))
+a['members']['echo']['sam']['budget'] = sys.argv[2]
+json.dump(a, open(sys.argv[1], 'w'))
+PY
+  for path in rust bash; do
+    launch $path sam X=1
+    check "$path path: a '$bad' budget refuses the guest" "[ \"\$(cat '$T/l.rc')\" = 3 ]"
+  done
+done
+cp "$T/auth.keep" "$T/auth.json"
+
+# 7. `members` when the budgets can't be read says so (budgetsError) instead of "no budget", on either side.
+"$KITH" cost members echo > "$T/m.out" 2>/dev/null
+check "members: sam's budget is there and there is no budgetsError" "grep -q '\"sam\": 5' '$T/m.out' && ! grep -q budgetsError '$T/m.out'"
+mv "$T/k/bin/kith-auth" "$T/k/bin/kith-auth.real"
+printf '#!/bin/sh\nexit 1\n' > "$T/k/bin/kith-auth"; chmod +x "$T/k/bin/kith-auth"
+"$KITH" cost members echo > "$T/m2.out" 2>/dev/null
+KITH_CORE=python "$KITH" cost members echo > "$T/m3.out" 2>/dev/null
+check "members: kith-auth broken gives budgetsError, as the Python does" "grep -q budgetsError '$T/m2.out' && grep -q budgetsError '$T/m3.out'"
+mv "$T/k/bin/kith-auth.real" "$T/k/bin/kith-auth"
+
+echo
+if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails check(s) failed"; exit 1; fi

@@ -2351,6 +2351,10 @@
    {
     "write": "home/in/d-numsession",
     "text": "{\"hook_event_name\": \"PermissionDenied\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"c\"}, \"reason\": \"Auto mode blocked: it looks dangerous\", \"session_id\": 12}"
+   },
+   {
+    "write": "home/replies/consume-yes",
+    "text": "{\"ok\": true, \"allowed\": true}\n"
    }
   ],
   "run": [
@@ -2362,14 +2366,14 @@
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p-bash-other-description",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p-bash-other-description",
     "once",
     "--dir",
@@ -2383,14 +2387,14 @@
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p-read",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p-read",
     "once",
     "--dir",
@@ -2833,6 +2837,10 @@
    {
     "write": "home/in/pnv1",
     "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"nv 1\"}}"
+   },
+   {
+    "write": "home/replies/consume-yes",
+    "text": "{\"ok\": true, \"allowed\": true}\n"
    }
   ],
   "run": [
@@ -2886,21 +2894,21 @@
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "pnv0",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "pnv0",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "pnv1",
     "once",
     "--dir",
@@ -3887,7 +3895,9 @@
    "KITH_STATE": "{HOME}/.kith",
    "KITH_AUTH": "{HOME}/auth.json",
    "KITH_SERVE_DIR": "{HOME}/serve",
-   "TZ": "UTC"
+   "TZ": "UTC",
+   "KITH_ASK_TOKEN": "ask-tok-1",
+   "KITH_ASK_ID": null
   },
   "setup": [
    {
@@ -3989,158 +3999,162 @@
    {
     "write": "home/.kith/run/once/r1/7fe23a1f1cecea741fa79dabdbe464b4aa790b30c118896dea90a601b106073d",
     "text": "4000000000\n"
+   },
+   {
+    "write": "home/replies/consume-yes",
+    "text": "{\"ok\": true, \"allowed\": true}\n"
    }
   ],
   "run": [
    [
-    "none",
+    "ask:consume-yes",
     "p0",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p0",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p1",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p1",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p2",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p2",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p3",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p3",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p4",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p4",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p5",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p5",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p6",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p6",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p7",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p7",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p8",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p8",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p9",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "p9",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "reordered",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "reordered",
     "once",
     "--dir",
@@ -4175,7 +4189,9 @@
    "KITH_STATE": "{HOME}/.kith",
    "KITH_AUTH": "{HOME}/auth.json",
    "KITH_SERVE_DIR": "{HOME}/serve",
-   "TZ": "UTC"
+   "TZ": "UTC",
+   "KITH_ASK_TOKEN": "ask-tok-1",
+   "KITH_ASK_ID": null
   },
   "setup": [
    {
@@ -4264,130 +4280,134 @@
    },
    {
     "mkdir": "home/.kith/run/once/r1/b483a1b5ea03de65c9fdab41e64eb2d068e00c56496bc330af4444d191d92c6d"
+   },
+   {
+    "write": "home/replies/consume-yes",
+    "text": "{\"ok\": true, \"allowed\": true}\n"
    }
   ],
   "run": [
    [
-    "none",
+    "ask:consume-yes",
     "short-fresh",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "short-fresh",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "short-expired",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "short-expired",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "short-nan",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "short-nan",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "empty",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "empty",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "garbage",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "garbage",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "extra-words",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "extra-words",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "short-extra",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "short-extra",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "two",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "two",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "is-a-dir",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "no-dir",
     "once",
     "--dir",
@@ -4422,7 +4442,9 @@
    "KITH_STATE": "{HOME}/.kith",
    "KITH_AUTH": "{HOME}/auth.json",
    "KITH_SERVE_DIR": "{HOME}/serve",
-   "TZ": "UTC"
+   "TZ": "UTC",
+   "KITH_ASK_TOKEN": "ask-tok-1",
+   "KITH_ASK_ID": null
   },
   "setup": [
    {
@@ -4492,33 +4514,260 @@
    {
     "write": "home/.kith/run/once/r1/1cf0e4502e5bd7ac672b89f98317cd3f0d8f5464dab828afda65a1af20774864",
     "text": "4000000000\n"
+   },
+   {
+    "write": "home/replies/consume-yes",
+    "text": "{\"ok\": true, \"allowed\": true}\n"
+   }
+  ],
+  "run": [
+   [
+    "ask:consume-yes",
+    "fresh",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "fresh",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "stale",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "stale",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "empty",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "empty",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "unicode",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "unicode",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "both",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "both",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:consume-yes",
+    "wrong-event",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|fh\\.py|lc|replies/|in/)"
+  ]
+ },
+ {
+  "name": "permit-once-host-no",
+  "command": "permit",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_SERVE_DIR": "{HOME}/serve",
+   "TZ": "UTC",
+   "KITH_ASK_TOKEN": "ask-tok-1"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-permit with a stand-in for the host: w.sh SIDE... MODE STDIN VERB ARGS...\n#   SIDE  py KERNEL | rs BIN KERNEL\n#   MODE  none | ask:NAME | run:NAME (a socket answering replies/NAME; no such file: it hangs up) | deadask | deadrun\n#         http:NAME (the loopback API; KITH_SERVE_PORT is its port) | deadhttp (a port nothing listens on)\n#   STDIN a file in in/, or - for none\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nmode=$1; in=$2; shift 2\ndir=$(mktemp -d /tmp/kp.XXXXXX)\npid=\nwait_ready() { n=0; while [ ! -s \"$dir/ready\" ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; }\ncase $mode in\n  ask:*|run:*)\n    pid=$(python3 fh.py unix \"$dir/s\" \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!); wait_ready\n    if [ \"${mode%%:*}\" = ask ]; then export KITH_ASK_SOCKET=\"$dir/s\"; else export KITH_RUN_SOCKET=\"$dir/s\"; fi ;;\n  http:*)\n    pid=$(python3 fh.py http - \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!); wait_ready; KITH_SERVE_PORT=$(cat \"$dir/ready\"); export KITH_SERVE_PORT ;;\n  deadask) export KITH_ASK_SOCKET=\"$dir/none\" ;;\n  deadrun) export KITH_RUN_SOCKET=\"$dir/none\" ;;\n  deadhttp) export KITH_SERVE_PORT=1 ;;\nesac\nif [ \"$side\" = py ]; then\n  if [ \"$in\" = - ]; then python3 \"$kernel/bin/kith-permit\" \"$@\" </dev/null; else python3 \"$kernel/bin/kith-permit\" \"$@\" < \"in/$in\"; fi\nelse\n  if [ \"$in\" = - ]; then \"$bin\" kernel permit --kernel \"$kernel\" \"$@\" </dev/null; else \"$bin\" kernel permit --kernel \"$kernel\" \"$@\" < \"in/$in\"; fi\nfi\nrc=$?\n[ -n \"$pid\" ] && kill $pid 2>/dev/null\nrm -rf \"$dir\"\nexit $rc\n"
+   },
+   {
+    "write": "home/fh.py",
+    "text": "import json, os, socket, sys\nkind, where, replyf, ready = sys.argv[1:5]\nlog = os.environ.get('DIFFTEST_FAKELOG')\nraw = open(replyf, 'rb').read() if os.path.exists(replyf) else None\n\n\ndef note(s):\n    if log:\n        with open(log, 'a') as f:\n            f.write(s + '\\n')\n\n\nif kind == 'unix':\n    srv = socket.socket(socket.AF_UNIX)\n    srv.bind(where)\n    srv.listen(5)\n    open(ready, 'w').write('1')\n    while True:\n        c, _ = srv.accept()\n        buf = b''\n        while not buf.endswith(b'\\n'):\n            d = c.recv(65536)\n            if not d:\n                break\n            buf += d\n        try:\n            note('host-sock ' + json.dumps(json.loads(buf.decode()), sort_keys=True))\n        except Exception:\n            note('host-sock (not json)')\n        if raw is not None:\n            c.sendall(raw)\n        c.close()\nelse:\n    srv = socket.socket()\n    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n    srv.bind(('127.0.0.1', 0))\n    srv.listen(5)\n    open(ready, 'w').write(str(srv.getsockname()[1]))\n    while True:\n        c, _ = srv.accept()\n        head = b''\n        while b'\\r\\n\\r\\n' not in head:\n            d = c.recv(65536)\n            if not d:\n                break\n            head += d\n        if not head:\n            c.close()\n            continue\n        h, _, body = head.partition(b'\\r\\n\\r\\n')\n        lines = h.decode().split('\\r\\n')\n        hdr = {l.split(':', 1)[0].lower(): l.split(':', 1)[1].strip() for l in lines[1:] if ':' in l}\n        n = int(hdr.get('content-length', '0'))\n        while len(body) < n:\n            body += c.recv(65536)\n        try:\n            shown = json.dumps(json.loads(body), sort_keys=True)\n        except Exception:\n            shown = '(not json)'\n        note('host-http %s auth=%s type=%s body=%s' % (lines[0].split(' HTTP')[0], hdr.get('authorization'), hdr.get('content-type'), shown))\n        status, _, payload = (raw or b'500\\n').partition(b'\\n')\n        c.sendall(b'HTTP/1.0 ' + status + b' X\\r\\nContent-Type: application/json\\r\\nContent-Length: ' + str(len(payload)).encode() + b'\\r\\n\\r\\n' + payload)\n        c.close()\n"
+   },
+   {
+    "write": "home/serve/token",
+    "text": "fake-serve-token\n"
+   },
+   {
+    "write": "home/in/empty",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"empty\"}}"
+   },
+   {
+    "write": "home/in/two",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"two\"}}"
+   },
+   {
+    "write": "home/replies/no",
+    "text": "{\"ok\": true, \"allowed\": false}\n"
+   },
+   {
+    "write": "home/replies/err",
+    "text": "{\"ok\": false, \"error\": \"not authorized\"}\n"
+   },
+   {
+    "write": "home/replies/allowed-only",
+    "text": "{\"allowed\": true}\n"
+   },
+   {
+    "write": "home/replies/ok-not-true",
+    "text": "{\"ok\": 1, \"allowed\": true}\n"
+   },
+   {
+    "write": "home/replies/allowed-not-true",
+    "text": "{\"ok\": true, \"allowed\": 1}\n"
+   },
+   {
+    "write": "home/replies/garbage",
+    "text": "not json\n"
+   },
+   {
+    "write": "home/replies/empty",
+    "text": "{}\n"
+   },
+   {
+    "write": "home/.kith/run/once/r1/c55756ea447e3839b9b3edc9aa49222944f6eb4d91e73c716bd3801518706079",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/.kith/run/once/r1/a1ff9a84f3f607b0a3e9e1f185ce7924cce39736ea21729f3512af5b9db1d66d",
+    "text": "4000000000\n"
+   }
+  ],
+  "run": [
+   [
+    "ask:no",
+    "two",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:err",
+    "empty",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|fh\\.py|lc|replies/|in/)"
+  ]
+ },
+ {
+  "name": "permit-once-no-host",
+  "command": "permit",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_SERVE_DIR": "{HOME}/serve",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-permit with a stand-in for the host: w.sh SIDE... MODE STDIN VERB ARGS...\n#   SIDE  py KERNEL | rs BIN KERNEL\n#   MODE  none | ask:NAME | run:NAME (a socket answering replies/NAME; no such file: it hangs up) | deadask | deadrun\n#         http:NAME (the loopback API; KITH_SERVE_PORT is its port) | deadhttp (a port nothing listens on)\n#   STDIN a file in in/, or - for none\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nmode=$1; in=$2; shift 2\ndir=$(mktemp -d /tmp/kp.XXXXXX)\npid=\nwait_ready() { n=0; while [ ! -s \"$dir/ready\" ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; }\ncase $mode in\n  ask:*|run:*)\n    pid=$(python3 fh.py unix \"$dir/s\" \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!); wait_ready\n    if [ \"${mode%%:*}\" = ask ]; then export KITH_ASK_SOCKET=\"$dir/s\"; else export KITH_RUN_SOCKET=\"$dir/s\"; fi ;;\n  http:*)\n    pid=$(python3 fh.py http - \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!); wait_ready; KITH_SERVE_PORT=$(cat \"$dir/ready\"); export KITH_SERVE_PORT ;;\n  deadask) export KITH_ASK_SOCKET=\"$dir/none\" ;;\n  deadrun) export KITH_RUN_SOCKET=\"$dir/none\" ;;\n  deadhttp) export KITH_SERVE_PORT=1 ;;\nesac\nif [ \"$side\" = py ]; then\n  if [ \"$in\" = - ]; then python3 \"$kernel/bin/kith-permit\" \"$@\" </dev/null; else python3 \"$kernel/bin/kith-permit\" \"$@\" < \"in/$in\"; fi\nelse\n  if [ \"$in\" = - ]; then \"$bin\" kernel permit --kernel \"$kernel\" \"$@\" </dev/null; else \"$bin\" kernel permit --kernel \"$kernel\" \"$@\" < \"in/$in\"; fi\nfi\nrc=$?\n[ -n \"$pid\" ] && kill $pid 2>/dev/null\nrm -rf \"$dir\"\nexit $rc\n"
+   },
+   {
+    "write": "home/fh.py",
+    "text": "import json, os, socket, sys\nkind, where, replyf, ready = sys.argv[1:5]\nlog = os.environ.get('DIFFTEST_FAKELOG')\nraw = open(replyf, 'rb').read() if os.path.exists(replyf) else None\n\n\ndef note(s):\n    if log:\n        with open(log, 'a') as f:\n            f.write(s + '\\n')\n\n\nif kind == 'unix':\n    srv = socket.socket(socket.AF_UNIX)\n    srv.bind(where)\n    srv.listen(5)\n    open(ready, 'w').write('1')\n    while True:\n        c, _ = srv.accept()\n        buf = b''\n        while not buf.endswith(b'\\n'):\n            d = c.recv(65536)\n            if not d:\n                break\n            buf += d\n        try:\n            note('host-sock ' + json.dumps(json.loads(buf.decode()), sort_keys=True))\n        except Exception:\n            note('host-sock (not json)')\n        if raw is not None:\n            c.sendall(raw)\n        c.close()\nelse:\n    srv = socket.socket()\n    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n    srv.bind(('127.0.0.1', 0))\n    srv.listen(5)\n    open(ready, 'w').write(str(srv.getsockname()[1]))\n    while True:\n        c, _ = srv.accept()\n        head = b''\n        while b'\\r\\n\\r\\n' not in head:\n            d = c.recv(65536)\n            if not d:\n                break\n            head += d\n        if not head:\n            c.close()\n            continue\n        h, _, body = head.partition(b'\\r\\n\\r\\n')\n        lines = h.decode().split('\\r\\n')\n        hdr = {l.split(':', 1)[0].lower(): l.split(':', 1)[1].strip() for l in lines[1:] if ':' in l}\n        n = int(hdr.get('content-length', '0'))\n        while len(body) < n:\n            body += c.recv(65536)\n        try:\n            shown = json.dumps(json.loads(body), sort_keys=True)\n        except Exception:\n            shown = '(not json)'\n        note('host-http %s auth=%s type=%s body=%s' % (lines[0].split(' HTTP')[0], hdr.get('authorization'), hdr.get('content-type'), shown))\n        status, _, payload = (raw or b'500\\n').partition(b'\\n')\n        c.sendall(b'HTTP/1.0 ' + status + b' X\\r\\nContent-Type: application/json\\r\\nContent-Length: ' + str(len(payload)).encode() + b'\\r\\n\\r\\n' + payload)\n        c.close()\n"
+   },
+   {
+    "write": "home/serve/token",
+    "text": "fake-serve-token\n"
+   },
+   {
+    "write": "home/in/empty",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"empty\"}}"
+   },
+   {
+    "write": "home/in/two",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"two\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/c55756ea447e3839b9b3edc9aa49222944f6eb4d91e73c716bd3801518706079",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/.kith/run/once/r1/a1ff9a84f3f607b0a3e9e1f185ce7924cce39736ea21729f3512af5b9db1d66d",
+    "text": "4000000000\n"
    }
   ],
   "run": [
    [
     "none",
-    "fresh",
-    "once",
-    "--dir",
-    "{HOME}/.kith/run/once/r1"
-   ],
-   [
-    "none",
-    "fresh",
-    "once",
-    "--dir",
-    "{HOME}/.kith/run/once/r1"
-   ],
-   [
-    "none",
-    "stale",
-    "once",
-    "--dir",
-    "{HOME}/.kith/run/once/r1"
-   ],
-   [
-    "none",
-    "stale",
+    "two",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
@@ -4529,45 +4778,241 @@
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|fh\\.py|lc|replies/|in/)"
+  ]
+ },
+ {
+  "name": "permit-once-token-no-socket",
+  "command": "permit",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_SERVE_DIR": "{HOME}/serve",
+   "TZ": "UTC",
+   "KITH_ASK_TOKEN": "ask-tok-1"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-permit with a stand-in for the host: w.sh SIDE... MODE STDIN VERB ARGS...\n#   SIDE  py KERNEL | rs BIN KERNEL\n#   MODE  none | ask:NAME | run:NAME (a socket answering replies/NAME; no such file: it hangs up) | deadask | deadrun\n#         http:NAME (the loopback API; KITH_SERVE_PORT is its port) | deadhttp (a port nothing listens on)\n#   STDIN a file in in/, or - for none\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nmode=$1; in=$2; shift 2\ndir=$(mktemp -d /tmp/kp.XXXXXX)\npid=\nwait_ready() { n=0; while [ ! -s \"$dir/ready\" ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; }\ncase $mode in\n  ask:*|run:*)\n    pid=$(python3 fh.py unix \"$dir/s\" \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!); wait_ready\n    if [ \"${mode%%:*}\" = ask ]; then export KITH_ASK_SOCKET=\"$dir/s\"; else export KITH_RUN_SOCKET=\"$dir/s\"; fi ;;\n  http:*)\n    pid=$(python3 fh.py http - \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!); wait_ready; KITH_SERVE_PORT=$(cat \"$dir/ready\"); export KITH_SERVE_PORT ;;\n  deadask) export KITH_ASK_SOCKET=\"$dir/none\" ;;\n  deadrun) export KITH_RUN_SOCKET=\"$dir/none\" ;;\n  deadhttp) export KITH_SERVE_PORT=1 ;;\nesac\nif [ \"$side\" = py ]; then\n  if [ \"$in\" = - ]; then python3 \"$kernel/bin/kith-permit\" \"$@\" </dev/null; else python3 \"$kernel/bin/kith-permit\" \"$@\" < \"in/$in\"; fi\nelse\n  if [ \"$in\" = - ]; then \"$bin\" kernel permit --kernel \"$kernel\" \"$@\" </dev/null; else \"$bin\" kernel permit --kernel \"$kernel\" \"$@\" < \"in/$in\"; fi\nfi\nrc=$?\n[ -n \"$pid\" ] && kill $pid 2>/dev/null\nrm -rf \"$dir\"\nexit $rc\n"
+   },
+   {
+    "write": "home/fh.py",
+    "text": "import json, os, socket, sys\nkind, where, replyf, ready = sys.argv[1:5]\nlog = os.environ.get('DIFFTEST_FAKELOG')\nraw = open(replyf, 'rb').read() if os.path.exists(replyf) else None\n\n\ndef note(s):\n    if log:\n        with open(log, 'a') as f:\n            f.write(s + '\\n')\n\n\nif kind == 'unix':\n    srv = socket.socket(socket.AF_UNIX)\n    srv.bind(where)\n    srv.listen(5)\n    open(ready, 'w').write('1')\n    while True:\n        c, _ = srv.accept()\n        buf = b''\n        while not buf.endswith(b'\\n'):\n            d = c.recv(65536)\n            if not d:\n                break\n            buf += d\n        try:\n            note('host-sock ' + json.dumps(json.loads(buf.decode()), sort_keys=True))\n        except Exception:\n            note('host-sock (not json)')\n        if raw is not None:\n            c.sendall(raw)\n        c.close()\nelse:\n    srv = socket.socket()\n    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n    srv.bind(('127.0.0.1', 0))\n    srv.listen(5)\n    open(ready, 'w').write(str(srv.getsockname()[1]))\n    while True:\n        c, _ = srv.accept()\n        head = b''\n        while b'\\r\\n\\r\\n' not in head:\n            d = c.recv(65536)\n            if not d:\n                break\n            head += d\n        if not head:\n            c.close()\n            continue\n        h, _, body = head.partition(b'\\r\\n\\r\\n')\n        lines = h.decode().split('\\r\\n')\n        hdr = {l.split(':', 1)[0].lower(): l.split(':', 1)[1].strip() for l in lines[1:] if ':' in l}\n        n = int(hdr.get('content-length', '0'))\n        while len(body) < n:\n            body += c.recv(65536)\n        try:\n            shown = json.dumps(json.loads(body), sort_keys=True)\n        except Exception:\n            shown = '(not json)'\n        note('host-http %s auth=%s type=%s body=%s' % (lines[0].split(' HTTP')[0], hdr.get('authorization'), hdr.get('content-type'), shown))\n        status, _, payload = (raw or b'500\\n').partition(b'\\n')\n        c.sendall(b'HTTP/1.0 ' + status + b' X\\r\\nContent-Type: application/json\\r\\nContent-Length: ' + str(len(payload)).encode() + b'\\r\\n\\r\\n' + payload)\n        c.close()\n"
+   },
+   {
+    "write": "home/serve/token",
+    "text": "fake-serve-token\n"
+   },
+   {
+    "write": "home/in/empty",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"empty\"}}"
+   },
+   {
+    "write": "home/in/two",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"two\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/c55756ea447e3839b9b3edc9aa49222944f6eb4d91e73c716bd3801518706079",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/.kith/run/once/r1/a1ff9a84f3f607b0a3e9e1f185ce7924cce39736ea21729f3512af5b9db1d66d",
+    "text": "4000000000\n"
+   }
+  ],
+  "run": [
+   [
+    "deadask",
+    "two",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "deadask",
+    "empty",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|fh\\.py|lc|replies/|in/)"
+  ]
+ },
+ {
+  "name": "permit-once-host-odd",
+  "command": "permit",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_SERVE_DIR": "{HOME}/serve",
+   "TZ": "UTC",
+   "KITH_ASK_TOKEN": "ask-tok-1"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-permit with a stand-in for the host: w.sh SIDE... MODE STDIN VERB ARGS...\n#   SIDE  py KERNEL | rs BIN KERNEL\n#   MODE  none | ask:NAME | run:NAME (a socket answering replies/NAME; no such file: it hangs up) | deadask | deadrun\n#         http:NAME (the loopback API; KITH_SERVE_PORT is its port) | deadhttp (a port nothing listens on)\n#   STDIN a file in in/, or - for none\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nmode=$1; in=$2; shift 2\ndir=$(mktemp -d /tmp/kp.XXXXXX)\npid=\nwait_ready() { n=0; while [ ! -s \"$dir/ready\" ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; }\ncase $mode in\n  ask:*|run:*)\n    pid=$(python3 fh.py unix \"$dir/s\" \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!); wait_ready\n    if [ \"${mode%%:*}\" = ask ]; then export KITH_ASK_SOCKET=\"$dir/s\"; else export KITH_RUN_SOCKET=\"$dir/s\"; fi ;;\n  http:*)\n    pid=$(python3 fh.py http - \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!); wait_ready; KITH_SERVE_PORT=$(cat \"$dir/ready\"); export KITH_SERVE_PORT ;;\n  deadask) export KITH_ASK_SOCKET=\"$dir/none\" ;;\n  deadrun) export KITH_RUN_SOCKET=\"$dir/none\" ;;\n  deadhttp) export KITH_SERVE_PORT=1 ;;\nesac\nif [ \"$side\" = py ]; then\n  if [ \"$in\" = - ]; then python3 \"$kernel/bin/kith-permit\" \"$@\" </dev/null; else python3 \"$kernel/bin/kith-permit\" \"$@\" < \"in/$in\"; fi\nelse\n  if [ \"$in\" = - ]; then \"$bin\" kernel permit --kernel \"$kernel\" \"$@\" </dev/null; else \"$bin\" kernel permit --kernel \"$kernel\" \"$@\" < \"in/$in\"; fi\nfi\nrc=$?\n[ -n \"$pid\" ] && kill $pid 2>/dev/null\nrm -rf \"$dir\"\nexit $rc\n"
+   },
+   {
+    "write": "home/fh.py",
+    "text": "import json, os, socket, sys\nkind, where, replyf, ready = sys.argv[1:5]\nlog = os.environ.get('DIFFTEST_FAKELOG')\nraw = open(replyf, 'rb').read() if os.path.exists(replyf) else None\n\n\ndef note(s):\n    if log:\n        with open(log, 'a') as f:\n            f.write(s + '\\n')\n\n\nif kind == 'unix':\n    srv = socket.socket(socket.AF_UNIX)\n    srv.bind(where)\n    srv.listen(5)\n    open(ready, 'w').write('1')\n    while True:\n        c, _ = srv.accept()\n        buf = b''\n        while not buf.endswith(b'\\n'):\n            d = c.recv(65536)\n            if not d:\n                break\n            buf += d\n        try:\n            note('host-sock ' + json.dumps(json.loads(buf.decode()), sort_keys=True))\n        except Exception:\n            note('host-sock (not json)')\n        if raw is not None:\n            c.sendall(raw)\n        c.close()\nelse:\n    srv = socket.socket()\n    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n    srv.bind(('127.0.0.1', 0))\n    srv.listen(5)\n    open(ready, 'w').write(str(srv.getsockname()[1]))\n    while True:\n        c, _ = srv.accept()\n        head = b''\n        while b'\\r\\n\\r\\n' not in head:\n            d = c.recv(65536)\n            if not d:\n                break\n            head += d\n        if not head:\n            c.close()\n            continue\n        h, _, body = head.partition(b'\\r\\n\\r\\n')\n        lines = h.decode().split('\\r\\n')\n        hdr = {l.split(':', 1)[0].lower(): l.split(':', 1)[1].strip() for l in lines[1:] if ':' in l}\n        n = int(hdr.get('content-length', '0'))\n        while len(body) < n:\n            body += c.recv(65536)\n        try:\n            shown = json.dumps(json.loads(body), sort_keys=True)\n        except Exception:\n            shown = '(not json)'\n        note('host-http %s auth=%s type=%s body=%s' % (lines[0].split(' HTTP')[0], hdr.get('authorization'), hdr.get('content-type'), shown))\n        status, _, payload = (raw or b'500\\n').partition(b'\\n')\n        c.sendall(b'HTTP/1.0 ' + status + b' X\\r\\nContent-Type: application/json\\r\\nContent-Length: ' + str(len(payload)).encode() + b'\\r\\n\\r\\n' + payload)\n        c.close()\n"
+   },
+   {
+    "write": "home/serve/token",
+    "text": "fake-serve-token\n"
+   },
+   {
+    "write": "home/in/empty",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"empty\"}}"
+   },
+   {
+    "write": "home/in/two",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"two\"}}"
+   },
+   {
+    "write": "home/replies/allowed-only",
+    "text": "{\"allowed\": true}\n"
+   },
+   {
+    "write": "home/replies/ok-not-true",
+    "text": "{\"ok\": 1, \"allowed\": true}\n"
+   },
+   {
+    "write": "home/replies/allowed-not-true",
+    "text": "{\"ok\": true, \"allowed\": 1}\n"
+   },
+   {
+    "write": "home/replies/garbage",
+    "text": "not json\n"
+   },
+   {
+    "write": "home/replies/empty",
+    "text": "{}\n"
+   },
+   {
+    "write": "home/replies/list",
+    "text": "[true]\n"
+   },
+   {
+    "write": "home/.kith/run/once/r1/c55756ea447e3839b9b3edc9aa49222944f6eb4d91e73c716bd3801518706079",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/.kith/run/once/r1/a1ff9a84f3f607b0a3e9e1f185ce7924cce39736ea21729f3512af5b9db1d66d",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/in/h3",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"h3\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/e415ae1548f200c0d0c87da2427d3a55bed8df8d66d021d4a28f2b8c3dd19467",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/in/h4",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"h4\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/ef096cfb1298cbc2fbffd109815d181441374a58a0d2a1cc4730117885c137af",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/in/h5",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"h5\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/0f88ecef10fc6a8e4808048a7333298ddc7a17cf3322924894cdc48d600c74ad",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/in/h6",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"h6\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/4d3f71fb7409e9bf538790365f10798f71bc3e0204400f873ea0e13d817f94b6",
+    "text": "4000000000\n"
+   }
+  ],
+  "run": [
+   [
+    "ask:allowed-only",
+    "two",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:ok-not-true",
     "empty",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
-    "unicode",
+    "ask:allowed-not-true",
+    "h3",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
-    "unicode",
+    "ask:garbage",
+    "h4",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
-    "both",
+    "ask:empty",
+    "h5",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
-    "both",
-    "once",
-    "--dir",
-    "{HOME}/.kith/run/once/r1"
-   ],
-   [
-    "none",
-    "wrong-event",
+    "ask:list",
+    "h6",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"

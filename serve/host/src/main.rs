@@ -553,6 +553,15 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (not routed from the launch yet; the hook JSON is on stdin).
+    #[command(name = "room-ledger", disable_help_flag = true)]
+    RoomLedger {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// `kith-pkg resolve`: the pinned package folder a run starts from (routed from `kith` while `pkg` is switched).
     #[command(disable_help_flag = true)]
     Pkg {
@@ -996,6 +1005,17 @@ fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
     out.code
+}
+
+fn room_ledger_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let state = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state;
+    kith_kernel::room_ledger::run(
+        &kith_kernel::room_ledger::Ctx::from_process(state),
+        args,
+        &mut std::io::stdin().lock(),
+    )
 }
 
 /// `kith kernel people people|invite ARGS...`: what `kith-people` prints, with its exit codes.
@@ -1567,6 +1587,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
             }
+            if let KernelCmd::RoomLedger { kernel, args } = cmd {
+                std::process::exit(room_ledger_cmd(kernel, &args));
+            }
             if let KernelCmd::Pkg { kernel, args } = cmd {
                 std::process::exit(pkg_cmd::run(kernel, &args));
             }
@@ -1648,6 +1671,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::ProjectId { .. }
+                    | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }
                     | KernelCmd::Permit { .. }
                     | KernelCmd::AccountState { .. }

@@ -177,7 +177,8 @@ the offset of "now", as the Python does), New York, Lord Howe, December and Febr
 
 Not covered (no Rust side yet, `kith kernel cost` exits 2): `today|week|month|all`, `agents`, `agent NAME` as text, `people`, `session`, `csv`,
 and the hooks `tag` / `record`. A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
-that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`).
+that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`). This is the one intended
+difference of the `cost` switch (`kernel/lib/core-switched.txt`, `kernel/tests/kith-cost-switch-check`): the Python raises, the core does not.
 
 ### Settings (M5-4)
 
@@ -275,6 +276,29 @@ itself when its parent is gone; `kernel/tests/kith-guest-door-check` kills a Rus
 sweep ends it. The door's cards, its helper calls and the `python3` lookup use the guest-scrubbed environment, as `kith-permit` does
 (`permit/scrub.rs` is `kith_paths.guest_scrub`). The Python helpers get their request on stdin, so the unscrubbed report is never on
 an argv.
+
+### Room ledger (M5-7)
+
+`golden/room-ledger.json` (also in `corpus/`) freezes `kernel/bin/kith-room-ledger pre|post --agent A --home DIR`, the
+Pre/PostToolUse hook for Write, Edit and MultiEdit (11 cases): the argument shapes it silently ignores, `post` (first write, narrowing,
+another room, no room, messy member lists, owner flags, a channel run, a guest run with `KITH_RUN_TOKEN` set, which the hook does not
+treat differently), `pre` and `post` in pairs (pre twice, post without pre, an entry already there, a directory, links), which paths count
+(outside `memory/`, `rooms/<id>` only, bad ids, `..`, links in and out, a `memory` that is itself a link, a relative or empty path, a
+NUL), the hook JSON on stdin (empty, not JSON, not an object, a `tool_input` of any type, truncated, two documents, duplicate keys,
+escapes), ledgers as they are found (missing, empty, corrupt, not an object, entries that are not lists, lists `sorted()` cannot sort,
+`ledger.lock` or the ledger itself being a folder, the ledger folder being a file), the state folder (a file, or derived from the
+home), homes and agents (missing home, `.`, `""`, trailing slash, ids), and eight hooks at once on one ledger (the lock).
+The cases are `needs: rust` with `program` set (`sh w.sh py KERNEL` against `sh w.sh rs BIN KERNEL`, which runs the Python or
+`kith kernel room-ledger --kernel KERNEL`), not `unswitched`: the Rust side exists, only the switch (a `room-ledger` line in
+`lib/core-switched.txt`; the hook is registered in `launch/settings.rs`) is not made. `w.sh`: the second word of a run line is a file
+in `e/` of `KEY=VALUE` lines exported first (`-` for none) and the third a file in `in/` for stdin (`par`: eight runs at once on
+`in/p1..p8`). Every run exits 0 and prints nothing, so the facts are the files: the ledger (parsed, so key order and spacing are not
+compared; the unit tests of `core/kernel/src/room_ledger` hold the exact bytes), its `.lock`, and the leftovers (`.tmpPID`, ignored).
+
+Where the Rust differs from the Python (not in the golden): JSON only Python reads (`NaN`, `Infinity`, an integer past 64 bits
+in a ledger or in the hook input: the Rust treats the document as unreadable, so a ledger holding one starts over and a hook input
+holding one records nothing); a stdin that is not UTF-8 (Python decodes with the locale's error handler); a path that is not UTF-8.
+How `sorted()` fails on a list of lists is checked pairwise here, where the Python only meets the pairs its sort compares.
 
 ## Per-command summary
 

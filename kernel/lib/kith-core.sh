@@ -64,6 +64,27 @@ kith_core_exec() {
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"
 }
 
+# kith_cost_ported ARGS...   succeeds when `kith-cost ARGS` is a line the Rust core answers (core/kernel/src/cost/mod.rs `run`):
+# limit AGENT, sync, spent PERSON, usage --json, agent NAME --json, members AGENT, bots --json. Every other line (tag and record,
+# which write the ledger, the text reports, a bare `kith cost`, -h) is Python's, so `cost` in core-switched.txt moves exactly these.
+kith_cost_ported() {
+  local a json=0
+  for a in "$@"; do [[ $a == --json ]] && json=1; done
+  case ${1:-} in
+    limit|spent|members) [[ $# -ge 2 ]] ;;
+    sync) return 0 ;;
+    usage|bots) [[ $json == 1 ]] ;;
+    agent) [[ $# -ge 2 && $json == 1 ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+# kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the line is one it answers, else the Python.
+# A subshell, because kith_core_exec execs; `KITH_PERSON_WAS=.. kith_cost ..` reaches whichever answers.
+kith_cost() {
+  ( if kith_cost_ported "$@"; then kith_core_exec cost --kernel "$KITH" "$@" || :; fi; exec "$KITH/bin/kith-cost" "$@" )
+}
+
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag
 # loop of bin/kith: a flag with a value skips it, `--`, a word or a task that starts with a dash ends the flags).
 kith_launch_json_flag() {

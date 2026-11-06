@@ -27,6 +27,9 @@ pub mod procstart;
 // Unix only: it writes projects.json through `secrets::pyjson`.
 #[cfg(unix)]
 pub mod project;
+// Unix only: flock and mode(2), like `project`.
+#[cfg(unix)]
+pub mod room_ledger;
 pub mod schedule;
 #[cfg(unix)]
 pub mod secrets;
@@ -45,6 +48,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "account-state",
         "accounts",
         "acp",
+        "cost",
         "delegation",
         "engines",
         "launch",
@@ -78,7 +82,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account-state","accounts","acp","delegation","engines","launch","paths","pkg","project","settings","threads"]}"#
+            r#"{"abi":1,"modules":["account-state","accounts","acp","cost","delegation","engines","launch","paths","pkg","project","settings","threads"]}"#
         );
     }
 }

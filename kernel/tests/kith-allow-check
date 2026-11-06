@@ -209,6 +209,11 @@ cat > "$T/host.py" <<'PY'
 import json, os, socket, sys
 sock, reply, log = sys.argv[1:4]
 srv = socket.socket(socket.AF_UNIX); srv.bind(sock); srv.listen(5)
+yes = set()   # what the host holds for a retry: a card's yes, used up by consumeOnce
+def key(req):
+    ti = dict(req['input'])
+    if req['tool'] == 'Bash': ti.pop('description', None)
+    return json.dumps([req['tool'], ti], sort_keys=True)
 while True:
     c, _ = srv.accept()
     buf = b''
@@ -217,7 +222,15 @@ while True:
         if not x: break
         buf += x
     open(log, 'a').write(buf.decode())
-    c.sendall(open(reply, 'rb').read() + b'\n'); c.close()
+    out = open(reply, 'rb').read().rstrip(b'\n')
+    try:
+        req = json.loads(buf.decode())
+        if req['method'] == 'consumeOnce':
+            out = json.dumps({'ok': True, 'allowed': key(req) in yes}).encode(); yes.discard(key(req))
+        elif req.get('autoMode') and json.loads(out).get('behavior') == 'allow':
+            yes.add(key(req))
+    except (ValueError, KeyError, AttributeError): pass
+    c.sendall(out + b'\n'); c.close()
 PY
 SOCK=/tmp/kith-allow-check.$$.sock
 python3 "$T/host.py" "$SOCK" "$T/reply" "$T/seen" & PIDS+=($!)
@@ -239,6 +252,20 @@ out=$(once 'git push origin main' 'worded differently')
 is "the same call is allowed, whatever the description" "$(js "d['hookSpecificOutput']['permissionDecision']" <<< "$out")" "allow"
 is "...once" "$(once 'git push origin main')" ""
 is "...and the folder is empty again" "$(ls "$ONCE" | wc -l | tr -d ' ')" "0"
+forge() { # forge COMMAND: the one-shot file `denied` writes, made by hand
+  local k; k=$(python3 -c 'import hashlib,json,sys; print(hashlib.sha256(json.dumps(["Bash", {"command": sys.argv[1]}], sort_keys=True, ensure_ascii=False).encode()).hexdigest())' "$1")
+  mkdir -p "$ONCE"; date +%s > "$ONCE/$k"
+}
+forge 'git push --force'
+is "a one-shot file written by hand allows nothing: the host holds no yes for it" "$(once 'git push --force')" ""
+is "...and the file is used up" "$(ls "$ONCE" | wc -l | tr -d ' ')" "0"
+hook PermissionDenied '[Data Exfiltration]' 'git push origin main' | "$PERMIT" denied --dir "$ONCE" > /dev/null
+is "after a card yes the retry is allowed" "$(once 'git push origin main' | js "d['hookSpecificOutput']['permissionDecision']")" "allow"
+forge 'git push origin main'
+is "...but not a second time, even with the file put back" "$(once 'git push origin main')" ""
+hook PermissionDenied '[Data Exfiltration]' 'git push origin main' | "$PERMIT" denied --dir "$ONCE" > /dev/null
+is "...and a real hint without the ask token allows nothing" "$(hook PreToolUse x 'git push origin main' | env -u KITH_ASK_TOKEN "$PERMIT" once --dir "$ONCE")" ""
+rm -rf "$ONCE"
 reason_of() { js "d['hookSpecificOutput']['permissionDecision'] + ': ' + d['hookSpecificOutput']['permissionDecisionReason']"; }
 echo '{"ok":true,"behavior":"deny","message":"The approver said no."}' > "$T/reply"
 out=$(hook PermissionDenied '[Data Exfiltration]' 'ls a' | "$PERMIT" denied --dir "$ONCE")
