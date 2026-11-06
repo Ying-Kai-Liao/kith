@@ -277,6 +277,35 @@ pub fn call_authority_embedded(
     }
 }
 
+/// Runs one owner `account.*` call (`state`, `rows`, `pick`, and the writers `out`, `clear`, `usage`, `started`) inside an
+/// embedded core, for the kernel verbs that find no daemon once `accounts` is switched (accounts-s1). The same door as the
+/// daemon's: the method must exist and be open to the owner, and the lock is the one lock. Never creates a core.db and never
+/// migrates one.
+#[cfg(unix)]
+pub fn call_account_embedded(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<EmbeddedCall, Error> {
+    if !accounts::call::serves(method) {
+        return Err(Error::NoSuchMethod(format!(
+            "kith-core: {method} is not an account method"
+        )));
+    }
+    call::check(kith_api::Principal::Owner, method, params)?;
+    let layout = Layout::new(&paths.machine);
+    let empty = std::fs::metadata(&layout.db).map_or(true, |m| m.len() == 0);
+    if empty && !layout.marker.exists() {
+        return Ok(EmbeddedCall::NoCore(layout.dir));
+    }
+    match open_embedded(paths)? {
+        Embedded::Open(core) => core
+            .account_call(method, params)
+            .map(EmbeddedCall::Answered),
+        Embedded::DaemonRunning { .. } => Ok(EmbeddedCall::Busy),
+    }
+}
+
 /// Points the kernel's notes (a lock or write it could not do and carried on) at the core log for the rest of this
 /// process: a kernel verb that does not go through the core (`kernel accounts`) calls this itself.
 pub fn route_kernel_notes(paths: &Paths) {

@@ -78,7 +78,7 @@ fn dedup(ids: Vec<String>) -> Vec<String> {
 }
 
 /// A usage reading as the row shows it (`usage_json`), `null` when there is none or it is damaged.
-fn usage_json(e: Option<&Value>, now: f64) -> Value {
+pub(super) fn usage_json(e: Option<&Value>, now: f64) -> Value {
     let reading = || -> Option<Value> {
         let u = e?.get("usage")?.as_object().filter(|u| !u.is_empty())?;
         let read_at = u.get("read_at")?;
@@ -109,13 +109,9 @@ fn opt(v: Option<&str>) -> Value {
     v.map_or(Value::Null, |s| Value::String(s.to_owned()))
 }
 
-/// One row per account (the contract of `kith account list --json`, an array of); with an agent, `in_set`/`order` are that
-/// agent's static order (pin first) and `candidate` is its place in `pick`.
-pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Map> {
-    rows_from(ctx, s, agent, deep, now, &state::FileState)
-}
-
-/// [`rows`] over a state source (the file by default, the core's database in the core).
+/// One row per account (the contract of `kith account list --json`, an array of), over a state source (the file, or the
+/// core's database in the core); with an agent, `in_set`/`order` are that agent's static order (pin first) and `candidate` is
+/// its place in `pick`.
 pub fn rows_from(
     ctx: &Ctx<'_>,
     s: &Map,
@@ -361,8 +357,13 @@ fn usage_text(r: &Map) -> String {
 /// `kith account list [--agent A] [--json]`: every account, whether it is in the set (and its place), ready / out until a
 /// time / signed out (and the command that fixes it), last usage, pins.
 pub fn list(ctx: &Ctx<'_>, json: bool, agent: &str) -> String {
+    list_over(ctx, json, agent, &state::FileState)
+}
+
+/// [`list`] over a given state source.
+pub fn list_over(ctx: &Ctx<'_>, json: bool, agent: &str, src: &dyn state::StateSource) -> String {
     let s = settings::read(ctx);
-    let rows = rows(ctx, &s, agent, true, clock::now());
+    let rows = rows_from(ctx, &s, agent, true, clock::now(), src);
     if json {
         return pyjson::dumps(&Value::Array(rows.into_iter().map(Value::Object).collect())) + "\n";
     }
