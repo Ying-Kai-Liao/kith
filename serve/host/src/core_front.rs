@@ -628,6 +628,15 @@ pub fn print_status(json: bool) {
             status["holder"]["tied_to_starter"]
         );
     }
+    if status["claims"].is_object() {
+        let n = |k: &str| status["claims"][k].as_i64().unwrap_or(0);
+        println!(
+            "claims: {} claimed, {} running, {} ending (stopped, process group not yet gone)",
+            n("claimed"),
+            n("running"),
+            n("ending")
+        );
+    }
 }
 
 #[cfg(test)]
