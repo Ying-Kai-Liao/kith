@@ -394,23 +394,50 @@ fn a_file_in_the_once_dir_is_a_hint_and_the_host_has_the_yes() {
     let forge = |c: &str| std::fs::write(dir.join(key(c)), "4000000000\n").unwrap();
     // no token, no socket: never allowed, and the file is used up all the same
     forge("a");
-    assert_eq!(go(&Env::default(), &["once", "--dir", d], &pre_payload("a")).stdout, "");
+    assert_eq!(
+        go(&Env::default(), &["once", "--dir", d], &pre_payload("a")).stdout,
+        ""
+    );
     assert!(!dir.join(key("a")).exists());
     // a token with no host behind it
     forge("b");
-    assert_eq!(go(&owner_env(&root.join("nowhere")), &["once", "--dir", d], &pre_payload("b")).stdout, "");
+    assert_eq!(
+        go(
+            &owner_env(&root.join("nowhere")),
+            &["once", "--dir", d],
+            &pre_payload("b")
+        )
+        .stdout,
+        ""
+    );
     // a host that holds no yes for it
     let host = root.join("h");
-    let consumer = socket_host_n(&host, vec![NO, "{\"ok\": false, \"error\": \"not authorized\"}\n", "nonsense\n"]);
+    let consumer = socket_host_n(
+        &host,
+        vec![
+            NO,
+            "{\"ok\": false, \"error\": \"not authorized\"}\n",
+            "nonsense\n",
+        ],
+    );
     for c in ["c", "d", "e"] {
         forge(c);
-        assert_eq!(go(&owner_env(&host), &["once", "--dir", d], &pre_payload(c)).stdout, "");
+        assert_eq!(
+            go(&owner_env(&host), &["once", "--dir", d], &pre_payload(c)).stdout,
+            ""
+        );
     }
     assert_eq!(consumer.join().unwrap().len(), 3);
     // a guest's token is not the owner's pair: the host is not asked
     forge("f");
-    let guest = Env::with(&[("KITH_RUN_TOKEN", "g"), ("KITH_RUN_SOCKET", host.to_str().unwrap())]);
-    assert_eq!(go(&guest, &["once", "--dir", d], &pre_payload("f")).stdout, "");
+    let guest = Env::with(&[
+        ("KITH_RUN_TOKEN", "g"),
+        ("KITH_RUN_SOCKET", host.to_str().unwrap()),
+    ]);
+    assert_eq!(
+        go(&guest, &["once", "--dir", d], &pre_payload("f")).stdout,
+        ""
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

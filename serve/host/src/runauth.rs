@@ -1395,7 +1395,11 @@ mod tests {
         assert_eq!(handle_request(&t, &line, peer(5)).await, Response::refused("not authorized"));
         let owner = ask_identity("echo", "s1", None);
         let token = t.insert_ask(owner.clone(), 5, Duration::from_secs(60)).unwrap();
-        t.keep_once(&owner.run_id, kith_kernel::permit::host_once_key("Bash", &json!({"command": "ls"})).unwrap(), false);
+        t.keep_once(
+            &owner.run_id,
+            kith_kernel::permit::host_once_key("Bash", &json!({"command": "ls"})).unwrap(),
+            false,
+        );
         // a neighbour process holding the token gets nothing, and does not use the yes up
         assert!(authorize(&t, &consume_line(&token, "ls"), peer(6)).is_err());
         assert_eq!(allowed(&handle_request(&t, &consume_line(&token, "ls"), peer(5)).await), Some(true));

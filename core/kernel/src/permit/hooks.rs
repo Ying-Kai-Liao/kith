@@ -71,7 +71,8 @@ const CONSUME_WAIT_S: u64 = 4;
 /// may be one: the yes lives in the host, so a file the run wrote itself allows nothing. No token, no socket, no answer:
 /// no.
 fn host_allows(env: &Env, tool: &str, input: &Value) -> bool {
-    let (Some(token), Some(socket)) = (env.get("KITH_ASK_TOKEN"), env.get("KITH_ASK_SOCKET")) else {
+    let (Some(token), Some(socket)) = (env.get("KITH_ASK_TOKEN"), env.get("KITH_ASK_SOCKET"))
+    else {
         return false;
     };
     // only the owner's pair is used, never a guest's
@@ -79,7 +80,12 @@ fn host_allows(env: &Env, tool: &str, input: &Value) -> bool {
     let mut body = Map::new();
     body.insert("tool".to_owned(), json!(tool));
     body.insert("input".to_owned(), input.clone());
-    let reply = call_host(&asker, "consumeOnce", &body, Duration::from_secs(CONSUME_WAIT_S));
+    let reply = call_host(
+        &asker,
+        "consumeOnce",
+        &body,
+        Duration::from_secs(CONSUME_WAIT_S),
+    );
     reply.is_some_and(|r| {
         r.get("ok") == Some(&Value::Bool(true)) && r.get("allowed") == Some(&Value::Bool(true))
     })
