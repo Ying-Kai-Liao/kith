@@ -4,16 +4,11 @@
 //! through the core's `account.*` rows (the daemon when one runs, else an embedded core), so nothing in this program reads
 //! the tombstone and nothing writes over it.
 
-use std::time::{Duration, Instant};
-
 use kith_kernel::accounts::{Change, Store};
 use kith_kernel::paths::Paths;
 use serde_json::{Value, json};
 
 type Map = serde_json::Map<String, Value>;
-
-/// How long a call waits for a core that is starting, or that another command holds (a launch's mark takes milliseconds).
-const WAIT: Duration = Duration::from_secs(8);
 
 /// Whether the `accounts` module has moved to the core on this Mac: its switch file says anything but `stepping`
 /// (`kith_cutover_refuse` in `kernel/lib/kith-core.sh` reads it the same way: a rollback in progress counts as moved).
@@ -66,38 +61,7 @@ impl Store for CoreStore {
     }
 }
 
-/// One owner call. A read may be sent again when the connection breaks; a write never is, so a lost answer is an error that
-/// says the write may have happened.
+/// One owner call, through the front door (`core_front`, the only file here that names the core).
 fn call(folders: &Paths, method: &str, params: &Value, read: bool) -> Result<Value, String> {
-    let started = Instant::now();
-    loop {
-        match kith_core::reach(folders, method, params, read) {
-            kith_core::Reached::Answered(v) => return Ok(v),
-            kith_core::Reached::Refused(e) => return Err(e.to_string()),
-            kith_core::Reached::Mismatch(note) => return Err(note),
-            kith_core::Reached::Lost(why) => {
-                return Err(format!(
-                    "the connection to the core ended: {why}{}",
-                    if read { "" } else { " (the change may have been made)" }
-                ));
-            }
-            kith_core::Reached::NoDaemon => {}
-        }
-        #[cfg(unix)]
-        match kith_core::call_account_embedded(folders, method, params) {
-            Ok(kith_core::EmbeddedCall::Answered(v)) => return Ok(v),
-            Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
-                return Err(format!("accounts moved to the core, but there is no core database at {}", dir.display()));
-            }
-            Ok(kith_core::EmbeddedCall::Busy) => {}
-            Err(e) => return Err(e.to_string()),
-        }
-        if cfg!(not(unix)) {
-            return Err("the core is not available on this system".to_owned());
-        }
-        if started.elapsed() >= WAIT {
-            return Err("accounts moved to the core, but no core answers and another command holds it".to_owned());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    crate::core_front::account_call(folders, method, params, read)
 }

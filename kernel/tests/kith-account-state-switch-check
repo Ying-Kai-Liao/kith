@@ -89,7 +89,8 @@ check "program without the module: Python answers" "! grep -q '^kernel account-s
 reset
 KITH_CORE=python "$KITH" account out claude:work --until $FAR --reason before > /dev/null
 "$REAL" kernel core-migrate > "$T/out" 2>&1
-check "the core is made" "[ -s '$MACHINE/core/core.db' ]"
+DBF=$(ls "$MACHINE"/core/*.db 2>/dev/null | head -1)   # the core's database file, found rather than named
+check "the core is made" "[ -s '$DBF' ]"
 "$REAL" kernel cutover step accounts > "$T/out" 2>&1
 check "step accounts: no refusal, a tombstone" "grep -q 'kith_tombstone' '$S'"
 reset_log() { rm -f "$LOG"; touch "$LOG"; }
@@ -126,14 +127,14 @@ check "accounts-json reads the core" "python3 -c 'import json,sys; d=json.load(o
 check "the tombstone is still untouched" "grep -q 'kith_tombstone' '$S' && [ ! -e '$S.corrupt' ]"
 
 # A core that refuses (its database unreadable): every reader stops, none shows the accounts as ready.
-mv "$MACHINE/core/core.db" "$T/core.db.keep"; printf "junk" > "$MACHINE/core/core.db"
+mv "$DBF" "$T/db.keep"; printf "junk" > "$DBF"
 KITH_BIN=$W "$KITH" account list --json > "$T/out" 2>&1; rc=$?
 check "list with the core refusing: exit 1, no rows" "[ $rc = 1 ] && ! grep -q ready '$T/out'"
 KITH_BIN=$W python3 "$KERNEL/lib/kith_accounts.py" accounts-json echo "$KITH_HOME/agents/echo/role/agent.md" > "$T/out" 2>&1; rc=$?
 check "accounts-json with the core refusing: exit 4" "[ $rc = 4 ]"
 KITH_BIN=$W python3 "$KERNEL/lib/kith_accounts.py" main-env echo "$KITH_HOME/agents/echo/role/agent.md" --state > "$T/out" 2>&1; rc=$?
 check "main-env --state with the core refusing: exit 4" "[ $rc = 4 ]"
-rm -f "$MACHINE/core/core.db"*; mv "$T/core.db.keep" "$MACHINE/core/core.db"
+rm -f "$DBF"*; mv "$T/db.keep" "$DBF"
 
 # No program: Python fails closed, never reads the note.
 KITH_BIN=$T/bin/kith-old KITH_CORE=python "$KITH" account list > "$T/out" 2>&1
