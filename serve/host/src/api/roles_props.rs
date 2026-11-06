@@ -898,14 +898,33 @@ fn entry(bot: usize, permission: bool, author: usize, secret: usize) -> EntrySpe
 /// The M2 follow-up: on a switched host a terminal-added person, imported into the core, has no host row, and
 /// `setPersonAccess` refuses to revoke them ("isn't someone you invited") although the core holds their grant.
 #[test]
-#[ignore = "known gap, M2 follow-up: setPersonAccess needs a host row (people.rs invited_person) that an imported person lacks"]
 fn set_person_access_reaches_a_core_person_with_no_host_row() {
     let w = World::switched();
     w.write_grants(&[[Ans::Member, Ans::Denied(false)], [Ans::Denied(false), Ans::Denied(false)]]);
     assert!(w.hub.store.person(PEOPLE[0]).is_none());
-    let body = json!({"personId": PEOPLE[0], "agents": {}});
-    w.rt.block_on(super::dispatch(&w.hub, &super::devices::Caller::Local, "setPersonAccess", body))
-        .expect("the owner can take away an imported person's access");
+    let set = |id: &str| {
+        let body = json!({"personId": id, "agents": {}});
+        w.rt.block_on(super::dispatch(&w.hub, &super::devices::Caller::Local, "setPersonAccess", body))
+    };
+    set(PEOPLE[0]).expect("the owner can take away an imported person's access");
+    assert!(w.hub.store.person(PEOPLE[0]).is_some(), "the host row was made");
+    let core = w.core.as_ref().unwrap();
+    let said = core.ask("people.may", json!({"person": PEOPLE[0], "agent": AGENTS[0]})).unwrap();
+    assert_eq!(said["allowed"], false, "the core no longer grants it: {said}");
+    // A second call finds the row and changes nothing about it.
+    set(PEOPLE[0]).expect("a repeat works");
+    assert_eq!(w.hub.store.people().unwrap().iter().filter(|p| p.person_id == PEOPLE[0]).count(), 1);
+    // The owner, a bot and a revoked person are refused, and get no host row.
+    core.ask("people.addPerson", json!({"id": "kai", "owner": true})).expect("owner");
+    core.ask("people.addBot", json!({"id": "botx", "of": PEOPLE[1]})).expect("bot");
+    core.ask("people.suspend", json!({"id": PEOPLE[1]})).expect("suspend");
+    core.ask("people.addPerson", json!({"id": "gone"})).expect("person");
+    core.ask("people.suspend", json!({"id": "gone"})).expect("suspend");
+    for id in ["kai", "botx", "gone", "nobody"] {
+        let e = set(id).expect_err(id);
+        assert!(format!("{e:#}").contains("isn't someone you invited"), "{id}: {e:#}");
+        assert!(w.hub.store.person(id).is_none(), "{id} got a host row");
+    }
 }
 
 /// Soundness alone passes a guard that refuses everything: these calls must get through.
