@@ -1,5 +1,5 @@
 //! `kith kernel pkg <verb>`: `kernel/bin/kith-pkg resolve` (the pinned package folder a run starts from) from the `kith-kernel`
-//! crate. Not routed from `kith` yet: the launch still asks the Python (`KITH_CORE=python` is the rollback either way).
+//! crate. The launch asks it (in-process in the Rust launch, through the router in `kernel/bin/kith`) while `pkg` is in `lib/core-switched.txt`; `KITH_CORE=python` is the rollback.
 
 use std::io::Write as _;
 use std::path::PathBuf;

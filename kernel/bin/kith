@@ -439,7 +439,10 @@ shared=$home/memory/shared
 
 # The pinned package (prompt.md = agent.md body + PROTOCOL.md). If versioning itself breaks, run the live folder
 # rather than not at all.
-pkg=$("$KITH/bin/kith-pkg" resolve "$agent") && [[ -f $pkg/prompt.md ]] \
+# `resolve` is the Rust core's when `pkg` is switched (lib/core-switched.txt); kith_core_exec returns otherwise (or with
+# KITH_CORE=python) and the Python answers. The rest of kith-pkg stays Python.
+. "$KITH/lib/kith-core.sh"
+pkg=$({ kith_core_exec pkg --kernel "$KITH" resolve "$agent" || "$KITH/bin/kith-pkg" resolve "$agent"; }) && [[ -f $pkg/prompt.md ]] \
   || { echo "kith: $agent: package snapshot failed; running the live folder" >&2; pkg=$src_pkg; }
 export KITH_AGENT=$agent KITH_AGENT_DIR=$pkg KITH_AGENT_HOME=$home KITH_AGENT_VERSION=${pkg##*@}
 [[ $pkg == "$src_pkg" ]] && KITH_AGENT_VERSION=live
@@ -567,18 +570,21 @@ if [[ $p_owner == 1 ]] && lim=$("$KITH/bin/kith-cost" limit "$agent" --sh 2>/dev
   fi
 fi
 # Launch-time lookups are the kernel's own, whoever the run is for: a guest token in the environment would narrow them.
+# They are the Rust core's when `project-id` is switched. A guest's own calls never come through here (the token is dropped
+# above): they reach bin/project-id, which asks the host over the run socket and which the core does not replace.
+project_id() { ( unset KITH_RUN_TOKEN; kith_core_exec project-id --kernel "$KITH" "$@" || true; exec "$KITH/bin/project-id" "$@" ); }
 if [[ -n $project ]]; then
-  env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \
-    || { echo "kith: unknown project '$project'. Known: $(env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --list | cut -f1 | cut -d' ' -f1 | tr '\n' ' ')" >&2
+  project_id --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \
+    || { echo "kith: unknown project '$project'. Known: $(project_id --list | cut -f1 | cut -d' ' -f1 | tr '\n' ' ')" >&2
          echo "    register one with: $KITH/bin/project-id --register $project [dir]" >&2; exit 1; }
 else
-  project=$(env -u KITH_RUN_TOKEN "$KITH/bin/project-id" || true)
+  project=$(project_id || true)
 fi
 
 # The project's parents (closest first) and the home folders along the chain (bin/project-id --info).
-info=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --info "$project" || true)
+info=$([[ -n $project ]] && project_id --info "$project" || true)
 parents=$(printf '%s\n' "$info" | tail -n +2 | cut -f1 | paste -sd' ' -)
-held=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --children "$project" --all || true)
+held=$([[ -n $project ]] && project_id --children "$project" --all || true)
 
 # Body without frontmatter, then long-term memory: the load filter of docs/memory-context.md (lib/kith_facets.py, the
 # same one the host's runs get through KITH_ROOM). The owner's run: about them, the agent's memory, then the shared part
