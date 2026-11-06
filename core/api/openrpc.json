@@ -4432,6 +4432,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4513,6 +4521,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -4563,6 +4574,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4601,6 +4620,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -4652,6 +4674,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4697,6 +4727,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -4731,6 +4764,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4763,6 +4804,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -4814,6 +4858,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4852,6 +4904,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -4919,6 +4974,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4973,6 +5036,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5015,6 +5081,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5050,6 +5124,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5117,6 +5194,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5172,6 +5257,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5214,6 +5302,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5250,6 +5346,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5293,6 +5392,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5328,6 +5435,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5379,6 +5489,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5421,6 +5539,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5455,6 +5576,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5487,6 +5616,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5530,6 +5662,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5565,6 +5705,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5632,6 +5775,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5686,6 +5837,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5728,6 +5882,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5763,6 +5925,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5838,6 +6003,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5899,6 +6072,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5949,6 +6125,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5988,6 +6172,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6039,6 +6226,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6082,6 +6277,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -6124,6 +6322,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6159,6 +6365,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6202,6 +6411,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6237,6 +6454,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6280,6 +6500,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6316,6 +6544,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6359,6 +6590,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6394,6 +6633,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6453,6 +6695,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6497,6 +6747,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6548,6 +6801,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6592,6 +6853,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6699,6 +6963,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6783,6 +7055,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -6841,6 +7116,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6888,6 +7171,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6947,6 +7233,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6994,6 +7288,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }

@@ -268,6 +268,30 @@ pub fn core_selected() -> bool {
 pub fn switched() -> bool {
     #[cfg(test)]
     {
+        // A test can pin the read answer to a stale one, as the 2 s cache is right after a rollback or a switch.
+        if let Some(stale) = *TEST_STALE_SWITCHED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
+            return stale;
+        }
+        switched_now()
+    }
+    #[cfg(not(test))]
+    {
+        static CACHE: SwitchCache = SwitchCache::new();
+        // Every live event of every stream asks: the answer is kept for one gate period, like the gate's own latch.
+        static START: OnceLock<Instant> = OnceLock::new();
+        let now = u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX - 1);
+        CACHE.get(now, switched_now)
+    }
+}
+
+/// [`switched`] from a fresh look at auth.json (one stat; `switched_at` keeps the parse by fingerprint). Every WRITE
+/// routed by [`run_auth`] and its callers asks this, never the cached answer: right after `kith rollback authority` the
+/// cache still says "switched" for up to [`GATE_EVERY`], so a revoke would go to the core only and the plain file the
+/// host is back on would never get it (a Mac with no cloud link never heals). A stale "unswitched" is no better: kith-auth
+/// would be run on the tombstone. A stale read is harmless: it goes to the core, which still holds the revoke.
+pub fn switched_now() -> bool {
+    #[cfg(test)]
+    {
         if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none() {
             return false;
         }
@@ -275,24 +299,40 @@ pub fn switched() -> bool {
         file.is_some_and(|f| switched_at(&f))
     }
     #[cfg(not(test))]
-    {
-        // Every live event of every stream asks: the answer is kept for one gate period, like the gate's own latch.
-        static AT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        static YES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        static START: OnceLock<Instant> = OnceLock::new();
+    switched_at(auth_path())
+}
+
+/// The read answer of [`switched`], kept for [`GATE_EVERY`]. Lock-free: `at_ms` is 0 until the first answer.
+#[cfg_attr(test, allow(dead_code))]
+struct SwitchCache {
+    at_ms: std::sync::atomic::AtomicU64,
+    yes: std::sync::atomic::AtomicBool,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+impl SwitchCache {
+    const fn new() -> Self {
+        Self { at_ms: std::sync::atomic::AtomicU64::new(0), yes: std::sync::atomic::AtomicBool::new(false) }
+    }
+
+    fn get(&self, now_ms: u64, ask: impl FnOnce() -> bool) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
         // +1 so a stored 0 means "never asked".
-        let now = u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX - 1) + 1;
-        let at = AT_MS.load(Relaxed);
+        let now = now_ms + 1;
+        let at = self.at_ms.load(Relaxed);
         if at != 0 && now.saturating_sub(at) < u64::try_from(GATE_EVERY.as_millis()).unwrap_or(2000) {
-            return YES.load(Relaxed);
+            return self.yes.load(Relaxed);
         }
-        let yes = switched_at(auth_path());
-        YES.store(yes, Relaxed);
-        AT_MS.store(now, Relaxed);
+        let yes = ask();
+        self.yes.store(yes, Relaxed);
+        self.at_ms.store(now, Relaxed);
         yes
     }
 }
+
+/// A test pins what the cached [`switched`] answers (writes ignore it, [`switched_now`]).
+#[cfg(test)]
+pub static TEST_STALE_SWITCHED: Mutex<Option<bool>> = Mutex::new(None);
 
 /// A test points the host at an auth.json of its own (a real tombstone file, or none) while it holds `TEST_CORE`; read
 /// only then, like `TEST_GATE_SHUT`.
@@ -565,7 +605,7 @@ pub async fn owner_call(method: &'static str, mut params: Value, repeatable: boo
 
 /// What a kith-auth call comes to in the core: the `people.*` method and its params, or None for a call the core has no
 /// method for (a switched host refuses those; it never runs kith-auth on a tombstone).
-fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
+fn core_form(args: &[&str]) -> Option<(CoreMethod, Value)> {
     let settings = |from: usize, keys: &[&str]| -> Option<Value> {
         let mut m = serde_json::Map::new();
         for a in &args[from..] {
@@ -575,40 +615,93 @@ fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
         Some(Value::Object(m))
     };
     Some(match args {
-        ["people", "--json" | _] => ("people.listPeople", json!({})),
-        ["retired", id] => ("people.retired", json!({"id": id})),
-        ["member", agent, person, "--rm"] => ("people.revoke", json!({"person": person, "agent": agent})),
+        ["people", "--json" | _] => (CoreMethod::ListPeople, json!({})),
+        ["retired", id] => (CoreMethod::Retired, json!({"id": id})),
+        ["member", agent, person, "--rm"] => (CoreMethod::Revoke, json!({"person": person, "agent": agent})),
         ["member", agent, person, ..] => {
             let mut p = settings(3, &["preset", "mode", "budget", "deny", "model"])?;
             p["person"] = (*person).into();
             p["agent"] = (*agent).into();
-            ("people.grant", p)
+            (CoreMethod::Grant, p)
         }
-        ["bot", id, "--rm"] => ("people.removeBot", json!({"id": id})),
+        ["bot", id, "--rm"] => (CoreMethod::RemoveBot, json!({"id": id})),
         ["bot", id, "--of", owner, ..] => {
             let mut p = settings(4, &["name", "provider"])?;
             p["id"] = (*id).into();
             p["of"] = (*owner).into();
-            ("people.addBot", p)
+            (CoreMethod::AddBot, p)
         }
-        ["person", id, "--rm", "--unused"] => ("people.removePerson", json!({"id": id, "unused": true})),
-        ["person", id, "--revoke", "--local"] => ("people.suspend", json!({"id": id})),
-        ["person", id, "--unrevoke", "--local"] => ("people.undo", json!({"id": id})),
-        ["person", id, "--clear-temp"] => ("people.clearTemp", json!({"id": id})),
+        ["person", id, "--rm", "--unused"] => (CoreMethod::RemovePerson, json!({"id": id, "unused": true})),
+        ["person", id, "--revoke", "--local"] => (CoreMethod::Suspend, json!({"id": id})),
+        ["person", id, "--unrevoke", "--local"] => (CoreMethod::Undo, json!({"id": id})),
+        ["person", id, "--clear-temp"] => (CoreMethod::ClearTemp, json!({"id": id})),
         ["person", id, ..] => {
             let mut p = settings(2, &["name", "lang", "tz"])?;
             p["id"] = (*id).into();
-            ("people.addPerson", p)
+            (CoreMethod::AddPerson, p)
         }
         _ => return None,
     })
+}
+
+/// Every `people.*` method `core_form` routes to. A new arm of `core_form` needs a variant here, and a variant needs a
+/// decision in [`CoreMethod::marked`] (an exhaustive match), so a method added without one does not compile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CoreMethod {
+    ListPeople,
+    Retired,
+    Revoke,
+    Grant,
+    RemoveBot,
+    AddBot,
+    RemovePerson,
+    Suspend,
+    Undo,
+    ClearTemp,
+    AddPerson,
+}
+
+impl CoreMethod {
+    fn name(self) -> &'static str {
+        match self {
+            Self::ListPeople => "people.listPeople",
+            Self::Retired => "people.retired",
+            Self::Revoke => "people.revoke",
+            Self::Grant => "people.grant",
+            Self::RemoveBot => "people.removeBot",
+            Self::AddBot => "people.addBot",
+            Self::RemovePerson => "people.removePerson",
+            Self::Suspend => "people.suspend",
+            Self::Undo => "people.undo",
+            Self::ClearTemp => "people.clearTemp",
+            Self::AddPerson => "people.addPerson",
+        }
+    }
+
+    /// Whether the write carries `viaSwitch`, so the core refuses it once authority is back on auth.json and the host
+    /// runs it through kith-auth instead. `people.clearTemp` is unmarked on purpose: it only removes the guest's
+    /// `<machine>/run/t/<id>` folders and touches no auth row, so there is nothing for a rollback to lose or for
+    /// kith-auth to repeat. The reads are unmarked too.
+    fn marked(self) -> bool {
+        match self {
+            Self::Revoke
+            | Self::Grant
+            | Self::RemoveBot
+            | Self::AddBot
+            | Self::RemovePerson
+            | Self::Suspend
+            | Self::Undo
+            | Self::AddPerson => true,
+            Self::ClearTemp | Self::ListPeople | Self::Retired => false,
+        }
+    }
 }
 
 /// The host's kith-auth calls for people, members and bots (`people.rs`, `botguests.rs`): kith-auth while the host is not
 /// switched (as it was), the matching `people.*` method of the core once it is ([`switched`]). A switched host whose core
 /// does not answer gets an error and nothing is written another way.
 pub(crate) async fn run_auth(bin: &Path, args: &[&str]) -> anyhow::Result<String> {
-    if !switched() {
+    if !switched_now() {
         // Today's call, with its stderr warning logged.
         return crate::remote::account::run(bin, args).await;
     }
@@ -617,15 +710,31 @@ pub(crate) async fn run_auth(bin: &Path, args: &[&str]) -> anyhow::Result<String
 
 /// [`run_auth`] with what kith-auth said on stderr (nothing from the core: its copy is the only one, so no copy can miss).
 pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<(String, String)> {
-    if !switched() {
+    if !switched_now() {
         return crate::remote::account::run_noted(bin, args).await;
     }
-    let Some((method, params)) = core_form(args) else {
+    let Some((core_method, params)) = core_form(args) else {
         anyhow::bail!("`kith-auth {}` has no core method: authority is on the core", args.join(" "));
     };
+    let method = core_method.name();
     // A read repeats harmlessly; a write is never sent twice.
-    let read = matches!(method, "people.listPeople" | "people.retired");
-    let said = owner_call(method, params, read).await?;
+    let read = matches!(core_method, CoreMethod::ListPeople | CoreMethod::Retired);
+    let mut params = params;
+    if core_method.marked() {
+        // The look at auth.json above and this write are two steps. The core checks the cutover phase inside the
+        // write's transaction and refuses a marked write unless it is `switched` or `rollingBack` (a stuck rollback
+        // keeps the tombstone, so removals must work). The lifetime lock is what excludes a rollback while the daemon
+        // lives; this marker covers a phase left behind.
+        params["viaSwitch"] = true.into();
+    }
+    let said = match owner_call(method, params, read).await {
+        Ok(said) => said,
+        // The rollback got there first: the file is (or is about to be) the truth again, so the write goes to kith-auth.
+        Err(e) if !read && e.downcast_ref::<CoreRefused>().is_some_and(|r| r.0.starts_with("not switched")) => {
+            return crate::remote::account::run_noted(bin, args).await;
+        }
+        Err(e) => return Err(e),
+    };
     // `kith-auth people X` and `retired X` answer by their exit code.
     let rows = said["rows"].as_array();
     match (method, args) {
@@ -648,6 +757,40 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
 #[cfg(test)]
 mod gate_tests {
     use super::*;
+
+    #[test]
+    fn the_read_cache_holds_for_one_gate_period_and_writes_do_not_use_it() {
+        let c = SwitchCache::new();
+        assert!(c.get(5000, || true));
+        assert!(c.get(5000 + 1999, || panic!("asked inside the period")), "kept");
+        assert!(!c.get(5000 + 2000, || false), "asked again after it");
+        // That writes ask switched_now, not the cache, is tested by behaviour in access_core_tests
+        // (`a_write_decides_from_a_fresh_stat_not_the_read_cache`).
+    }
+
+    #[test]
+    fn the_marked_writes_are_exactly_the_intended_people_writes() {
+        // Every kith-auth call shape core_form knows, one per arm. A new method needs a CoreMethod variant, which
+        // `marked` forces a decision for at compile time; this checks the decisions themselves.
+        let shapes: &[(&[&str], CoreMethod, bool)] = &[
+            (&["people", "--json"], CoreMethod::ListPeople, false),
+            (&["retired", "x"], CoreMethod::Retired, false),
+            (&["member", "house", "sam", "--rm"], CoreMethod::Revoke, true),
+            (&["member", "house", "sam", "preset=guest"], CoreMethod::Grant, true),
+            (&["bot", "b", "--rm"], CoreMethod::RemoveBot, true),
+            (&["bot", "b", "--of", "kai", "name=B"], CoreMethod::AddBot, true),
+            (&["person", "p", "--rm", "--unused"], CoreMethod::RemovePerson, true),
+            (&["person", "p", "--revoke", "--local"], CoreMethod::Suspend, true),
+            (&["person", "p", "--unrevoke", "--local"], CoreMethod::Undo, true),
+            (&["person", "p", "--clear-temp"], CoreMethod::ClearTemp, false),
+            (&["person", "p", "name=P"], CoreMethod::AddPerson, true),
+        ];
+        for (args, want, marked) in shapes {
+            let (got, _) = core_form(args).unwrap();
+            assert_eq!(got, *want, "{args:?}");
+            assert_eq!(got.marked(), *marked, "{args:?}");
+        }
+    }
 
     #[test]
     fn a_denied_gate_names_how_many_changes_the_core_missed() {

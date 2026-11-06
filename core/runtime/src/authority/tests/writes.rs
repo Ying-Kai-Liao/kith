@@ -1661,3 +1661,83 @@ fn joining_and_lineage_are_read_from_the_snapshot_the_write_runs_on() {
     assert_eq!(said["lineage"], json!(["mia-b2", "mia-b", "mia"]));
     assert!(a["people"].get("mia-b2").is_none());
 }
+
+#[test]
+fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched_or_rolling_back() {
+    use crate::cutover::state::{self, Phase, Switch};
+    let mut rig = Rig::new(&base());
+    // The rig has no folders of its own, so the write reads the caller's machine folder.
+    let layout = Layout::new(&crate::authority::revoke::Life::beside(&rig.c).machine);
+    let marked = json!({"person": "sam", "agent": "house", "preset": "member", "viaSwitch": true});
+    let unmarked = json!({"person": "sam", "agent": "house", "preset": "member"});
+    let phase = |p: Phase| {
+        let s = Switch {
+            phase: p,
+            snapshot: None,
+            at: 1,
+        };
+        state::write(&layout, "authority", &s).unwrap();
+    };
+    let rows = |rig: &mut Rig| {
+        rig.call("people.list", &json!({"person": "sam"})).unwrap()["rows"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    // No record (rolled back and cleared) or a stepping one: refused, no row changed.
+    for p in [None, Some(Phase::Stepping)] {
+        match p {
+            Some(p) => phase(p),
+            None => state::clear(&layout, "authority").unwrap(),
+        }
+        let e = rig.call("people.grant", &marked).unwrap_err();
+        assert!(e.contains("not switched"), "{e}");
+        assert_eq!(rows(&mut rig), 0);
+    }
+    // A damaged record refuses a grant, no row changed.
+    let damage = || std::fs::write(state::path(&layout, "authority").unwrap(), "garbage").unwrap();
+    damage();
+    assert!(rig.call("people.grant", &marked).is_err());
+    assert_eq!(rows(&mut rig), 0);
+    // An unmarked write (kith-auth's mirror, the terminal) is as it was, whatever the phase.
+    rig.call("people.grant", &unmarked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    rig.call("people.revoke", &json!({"person": "sam", "agent": "house"}))
+        .unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    // Switched: the marked write lands.
+    phase(Phase::Switched);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // A stuck rollback (RollingBack, the tombstone still in auth.json) is still the core's: a removal goes through,
+    // and the same removal sent again changes nothing.
+    phase(Phase::RollingBack);
+    let rm = json!({"person": "sam", "agent": "house", "viaSwitch": true});
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // A damaged record takes a removal (access only goes away; a retry changes nothing) and still refuses a grant.
+    damage();
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    let e = rig.call("people.grant", &marked).unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
+    assert_eq!(rows(&mut rig), 0);
+    phase(Phase::RollingBack);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // Once the rollback is done (no record) the same marked write is refused again, a suspend among them.
+    state::clear(&layout, "authority").unwrap();
+    let e = rig
+        .call("people.suspend", &json!({"id": "sam", "viaSwitch": true}))
+        .unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
+    let e = rig.call("people.revoke", &rm).unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
+    assert_eq!(rows(&mut rig), 1);
+}

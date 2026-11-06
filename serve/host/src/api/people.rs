@@ -394,7 +394,7 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
             // gate and send the guard back to a file that never got it (a revoke undone). A mirror that fails is
             // logged: the file has the change, and the gate only closes until `core-migrate` imports it.
             // A switched host wrote the core already (`run_auth`): no second copy to make.
-            let on_core = super::authority::mirrors_to_core() && !super::authority::switched();
+            let on_core = super::authority::mirrors_to_core() && !super::authority::switched_now();
             for (agent, role) in &want {
                 let had = roles::may_use(id, agent).await;
                 grant(&bin, id, agent, role, !had).await.with_context(|| format!("giving {id} {agent}"))?;
@@ -515,9 +515,10 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
         let said = match said {
             Ok((_, said)) => said,
             Err(e) => {
-                // Switched, the core is the only store: a revoke it didn't take must still stop what runs (the host's
-                // half is fail-closed), and the owner is told to run it again.
-                if revoke && super::authority::switched() {
+                // Switched or not (a switch may have landed a moment ago and kith-auth exits 3 on the tombstone): a
+                // revoke that was not taken must still stop what runs (the host's half is fail-closed), and the owner
+                // is told to run it again.
+                if revoke {
                     cut_off(hub, id).await;
                 }
                 return Err(e);

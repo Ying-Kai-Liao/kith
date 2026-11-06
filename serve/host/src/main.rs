@@ -543,7 +543,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// The kith project of a directory, as `kernel/bin/project-id` answers it (not routed from `kith` yet; a guest run is
+    /// The kith project of a directory, as `kernel/bin/project-id` answers it (routed from `kith` while `project-id` is switched; a guest run is
     /// refused here and stays with the Python, which asks the host over the run socket).
     #[command(name = "project-id", disable_help_flag = true)]
     ProjectId {
@@ -553,7 +553,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// `kith-pkg resolve`: the pinned package folder a run starts from (not routed from `kith` yet).
+    /// `kith-pkg resolve`: the pinned package folder a run starts from (routed from `kith` while `pkg` is switched).
     #[command(disable_help_flag = true)]
     Pkg {
         /// The kernel folder (default: the one this program finds).
