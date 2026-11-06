@@ -606,7 +606,7 @@ fn fake_python(root: &Path, check: &str, prepare: &str, run: &str) {
     script(
         &root.join("py"),
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$5\" >> {r}/py.log\ncase \"$3\" in\n  *'kith_door.check('*) cat {r}/check.json ;;\n  *) case \"$5\" in\n      *'\"act\":\"prepare\"'*) cat {r}/prepare.json ;;\n      *) cat {r}/run.json ;;\n    esac ;;\nesac\n"
+            "#!/bin/sh\nreq=$(cat)\nprintf '%s\\n' \"$req\" >> {r}/py.log\ncase \"$3\" in\n  *'kith_door.check('*) cat {r}/check.json ;;\n  *) case \"$req\" in\n      *'\"act\":\"prepare\"'*) cat {r}/prepare.json ;;\n      *) cat {r}/run.json ;;\n    esac ;;\nesac\n"
         ),
     );
 }
@@ -692,6 +692,8 @@ fn run_door_asks_the_card_whose_yes_turns_the_job_on_then_the_prepare_card() {
     let acts: Vec<&str> = log.lines().filter(|l| l.contains("\"act\"")).collect();
     assert_eq!(acts.len(), 2);
     assert!(acts[0].contains("\"act\":\"prepare\"") && acts[1].contains("\"act\":\"run\""));
+    // the acts run on the folder the card showed, not on the path the guest gave
+    assert!(acts.iter().all(|l| l.contains("\"path\":\"/real/proj\"")));
 
     // a no on the first card ends it: nothing is prepared or run
     let root = world("door-no");
@@ -807,7 +809,7 @@ fn report_bug_asks_the_card_with_the_draft_and_files_only_on_a_clear_allow() {
     script(
         &root.join("py"),
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$5\" >> {r}/py.log\ncase \"$3\" in\n  *kith_bug.build_draft*) printf '%s\\n' '{first}' ;;\n  *) case \"$5\" in *'\"yes\":true'*) echo '{{\"text\": \"Filed: https://example.test/7\"}}' ;; *) echo '{{\"text\": \"Not filed (no yes).\"}}' ;; esac ;;\nesac\n",
+            "#!/bin/sh\nreq=$(cat)\nprintf '%s\\n' \"$req\" >> {r}/py.log\necho \"$#\" \"$4\" >> {r}/argv.log\ncase \"$3\" in\n  *kith_bug.build_draft*) printf '%s\\n' '{first}' ;;\n  *) case \"$req\" in *'\"yes\":true'*) echo '{{\"text\": \"Filed: https://example.test/7\"}}' ;; *) echo '{{\"text\": \"Not filed (no yes).\"}}' ;; esac ;;\nesac\n",
             r = root.display(),
             first = first
         ),
@@ -839,6 +841,11 @@ fn report_bug_asks_the_card_with_the_draft_and_files_only_on_a_clear_allow() {
     // what the helper was given: the title and details as they came
     let log = std::fs::read_to_string(root.join("py.log")).unwrap();
     assert!(log.contains("\"title\":\"crash\"") && log.contains("\"details\":\"it broke\""));
+    // ... on stdin: the argv (what `ps` shows, and what E2BIG limits) holds the kernel folder and nothing of the report
+    let argv = std::fs::read_to_string(root.join("argv.log")).unwrap();
+    let lib = root.join("lib");
+    assert!(argv.lines().count() >= 2);
+    assert!(argv.lines().all(|l| l == format!("4 {}", lib.display())));
 }
 
 #[test]
@@ -846,7 +853,7 @@ fn report_bug_with_no_host_files_nothing_and_a_filed_draft_is_not_asked_again() 
     let root = world("bug-nohost");
     script(
         &root.join("py"),
-        "#!/bin/sh\ncase \"$3\" in\n  *kith_bug.build_draft*) echo '{\"draft\": {}, \"text\": \"T\", \"card\": {}}' ;;\n  *) case \"$5\" in *'\"yes\":false'*) echo '{\"text\": \"kept\"}' ;; *) echo '{\"text\": \"FILED\"}' ;; esac ;;\nesac\n",
+        "#!/bin/sh\nreq=$(cat)\ncase \"$3\" in\n  *kith_bug.build_draft*) echo '{\"draft\": {}, \"text\": \"T\", \"card\": {}}' ;;\n  *) case \"$req\" in *'\"yes\":false'*) echo '{\"text\": \"kept\"}' ;; *) echo '{\"text\": \"FILED\"}' ;; esac ;;\nesac\n",
     );
     let env = guest(&root, &root.join("no-host"));
     let a = json!({"title": "crash"});
@@ -899,4 +906,74 @@ fn the_python_helpers_parse() {
             assert!(st.success(), "{name} does not parse");
         }
     }
+}
+
+#[test]
+fn an_output_pipe_held_by_a_grandchild_times_out_instead_of_hanging() {
+    use super::proc::{Failed, run as run_proc};
+    // the child exits at once, its sleeper keeps stdout open for 5 s
+    let mut cmd = std::process::Command::new("/bin/sh");
+    cmd.args(["-c", "sleep 5 & echo started"]);
+    let t = std::time::Instant::now();
+    let r = run_proc(
+        cmd,
+        &Env::with(&[("PATH", "/bin:/usr/bin")]),
+        None,
+        Duration::from_millis(400),
+    );
+    assert!(matches!(r, Err(Failed::Timeout)));
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+}
+
+#[test]
+fn a_child_that_outlives_the_limit_is_killed_and_stdin_reaches_a_child() {
+    use super::proc::{Failed, run as run_proc};
+    let env = Env::with(&[("PATH", "/bin:/usr/bin")]);
+    let mut cmd = std::process::Command::new("/bin/sleep");
+    cmd.arg("30");
+    let t = std::time::Instant::now();
+    assert!(matches!(
+        run_proc(cmd, &env, None, Duration::from_millis(300)),
+        Err(Failed::Timeout)
+    ));
+    assert!(t.elapsed() < Duration::from_secs(3));
+    let mut cmd = std::process::Command::new("/bin/cat");
+    cmd.arg("-");
+    let Ok(r) = run_proc(cmd, &env, Some("{\"a\": 1}"), Duration::from_secs(5)) else {
+        panic!("cat failed");
+    };
+    assert_eq!((r.code, r.stdout.as_str()), (0, "{\"a\": 1}"));
+}
+
+#[test]
+fn the_python_helper_is_not_taken_from_the_guests_folders() {
+    // guest_scrub drops a whole variable that has an entry in the guest's folders, so a PATH with one gives the fixed interpreter
+    let root = world("py-path");
+    let kernel = root.join("kernel");
+    let agents = root.join("agents");
+    let mine = agents.join("front/files/people/guest/bin");
+    let good = root.join("good");
+    script(&mine.join("python3"), "#!/bin/sh\necho guest\n");
+    script(&good.join("python3"), "#!/bin/sh\necho trusted\n");
+    let tainted = format!("{}:{}", mine.display(), good.display());
+    let mut e = Env::with(&[
+        ("KITH_PERSON", "guest"),
+        ("KITH_AGENTS", agents.to_str().unwrap()),
+        ("PATH", &tainted),
+    ]);
+    e.home = root.clone();
+    assert_eq!(super::proc::interpreter(&e, &kernel), "/usr/bin/python3");
+    // the owner's PATH is trusted as it is
+    let owner = e.without(&["KITH_PERSON"]);
+    assert_eq!(
+        super::proc::interpreter(&owner, &kernel),
+        mine.join("python3").to_str().unwrap()
+    );
+    // a guest's PATH without their folders is searched as the launch does
+    let mut clean = e.clone();
+    clean.set("PATH", &format!("/nonexistent:{}", good.display()));
+    assert_eq!(
+        super::proc::interpreter(&clean, &kernel),
+        good.join("python3").to_str().unwrap()
+    );
 }
