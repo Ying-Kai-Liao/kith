@@ -140,9 +140,19 @@ pub fn uid() -> u32 {
 /// (`getpwuid_r`, no subprocess, no `$HOME`). `None` when the user has no entry or an empty home: the caller counts that
 /// as a guest.
 pub fn passwd_home() -> Option<std::path::PathBuf> {
-    use std::os::unix::ffi::OsStrExt as _;
     // SAFETY: getuid has no arguments and cannot fail.
-    let uid = unsafe { libc::getuid() };
+    passwd_entry_home(Err(unsafe { libc::getuid() }))
+}
+
+/// The home folder of the named user from the password database (`getpwnam_r`, as Python's `pwd.getpwnam(name).pw_dir`).
+/// `None` for an unknown name, an empty home or a name with a NUL.
+pub fn passwd_home_of(name: &str) -> Option<std::path::PathBuf> {
+    let name = std::ffi::CString::new(name).ok()?;
+    passwd_entry_home(Ok(&name))
+}
+
+fn passwd_entry_home(who: Result<&std::ffi::CStr, u32>) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
     let mut size = 1024;
     loop {
         let mut buf = vec![0 as libc::c_char; size];
@@ -151,13 +161,22 @@ pub fn passwd_home() -> Option<std::path::PathBuf> {
         let mut found: *mut libc::passwd = std::ptr::null_mut();
         // SAFETY: `pw` and `buf` outlive the call and `buf.len()` is its true size; on success `pw_dir` points into `buf`.
         let rc = unsafe {
-            libc::getpwuid_r(
-                uid,
-                &raw mut pw,
-                buf.as_mut_ptr(),
-                buf.len(),
-                &raw mut found,
-            )
+            match who {
+                Ok(name) => libc::getpwnam_r(
+                    name.as_ptr(),
+                    &raw mut pw,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &raw mut found,
+                ),
+                Err(uid) => libc::getpwuid_r(
+                    uid,
+                    &raw mut pw,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &raw mut found,
+                ),
+            }
         };
         if rc == libc::ERANGE && size < 1 << 20 {
             size *= 4;
