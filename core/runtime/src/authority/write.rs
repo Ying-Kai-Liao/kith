@@ -360,7 +360,7 @@ pub(crate) fn member(
 ) -> R<Vec<String>> {
     let wanted: Vec<&str> = agents.split(',').filter(|a| !a.is_empty()).collect();
     if let Some(budget) = kv.get("budget").filter(|b| !b.is_empty())
-        && !py_float(budget).is_some_and(|f| f.is_nan() || f >= 0.0)
+        && !py_float(budget).is_some_and(|f| f.is_finite() && f >= 0.0)
     {
         return usage("budget is dollars a month, e.g. budget=20");
     }
@@ -947,6 +947,11 @@ pub(crate) fn budgets(auth: &Value, agent: &str) -> R<Value> {
         .and_then(|m| m.get(agent))
         .and_then(Value::as_object);
     for (pid, row) in rows.into_iter().flatten().filter(|(p, _)| *p != EVERYONE) {
+        if !row.is_object() {
+            return die(format!(
+                "the member row of {pid} on {agent} is not an object: {row}"
+            ));
+        }
         let raw = row.get("budget").filter(|b| truthy(Some(b)));
         let amount = match raw {
             None => Value::Null,

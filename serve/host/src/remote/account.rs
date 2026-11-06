@@ -66,7 +66,7 @@ async fn apply(store: &Store, bin: &Path, owner: Option<&str>) -> Result<()> {
         // Unclaimed (or the account was deleted): the handle goes with it.
         let _w = crate::api::people::AUTH_WRITES.lock().await;
         if let Some(old) = store.kv_get(APPLIED) {
-            if let Some(person) = who(bin, &old).await.person {
+            if let Some(person) = who(bin, &old).await?.person {
                 crate::api::authority::run_auth(bin, &["handle", &person, PLATFORM, "--rm"]).await?;
                 tracing::info!(person, "the Mac left its account; removed the person's kith handle");
             }
@@ -75,7 +75,7 @@ async fn apply(store: &Store, bin: &Path, owner: Option<&str>) -> Result<()> {
         return Ok(());
     };
     let _w = crate::api::people::AUTH_WRITES.lock().await;
-    let found = who(bin, uid).await;
+    let found = who(bin, uid).await?;
     match (&found.person, &found.owner_id) {
         (Some(_), _) if found.owner => {}
         (Some(person), _) => {
@@ -121,23 +121,24 @@ pub async fn owner_handle(bin: &Path) -> Option<String> {
     owner["kith"].as_str().filter(|uid| !uid.is_empty()).map(str::to_owned)
 }
 
-pub(crate) async fn who(bin: &Path, uid: &str) -> Who {
-    if crate::api::authority::switched() {
+pub(crate) async fn who(bin: &Path, uid: &str) -> Result<Who> {
+    if crate::api::authority::switched_now() {
         return who_in_core(bin, uid).await;
     }
     let out = hq::output(bin, &["who", PLATFORM, uid]).await;
-    out.and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).map_or_else(Who::default, |v| Who::parse(&v))
+    Ok(out.and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).map_or_else(Who::default, |v| Who::parse(&v)))
 }
 
 /// `kith-auth who kith <uid>` for a switched host, from the core's people (the tombstone answers nothing). A core that
-/// can't be asked is nobody, which binds nothing: `apply` writes only when it found the owner person.
-async fn who_in_core(bin: &Path, uid: &str) -> Who {
-    let Ok(rows) = crate::api::authority::run_auth(bin, &["people", "--json"]).await else { return Who::default() };
-    let Ok(people) = serde_json::from_str::<Vec<Value>>(&rows) else { return Who::default() };
+/// can't be asked is an error, not nobody: `apply` then fails and runs again, rather than skipping the unbind and
+/// forgetting it ever had to happen.
+async fn who_in_core(bin: &Path, uid: &str) -> Result<Who> {
+    let rows = crate::api::authority::run_auth(bin, &["people", "--json"]).await?;
+    let people = serde_json::from_str::<Vec<Value>>(&rows)?;
     let text = |p: &Value, k: &str| p[k].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
     let mine = people.iter().find(|p| p["handles"][PLATFORM] == uid || p[PLATFORM] == uid);
     let owner = people.iter().find(|p| p["owner"] == true);
-    Who {
+    Ok(Who {
         person: mine.and_then(|p| text(p, "id")),
         owner: mine.is_some_and(|p| p["owner"] == true),
         was: mine
@@ -148,7 +149,7 @@ async fn who_in_core(bin: &Path, uid: &str) -> Who {
         owner_linked: owner.is_some_and(|p| text(p, PLATFORM).is_some()),
         revoked: mine.is_some_and(|p| p["revoked"] == true),
         held: false,
-    }
+    })
 }
 
 pub(crate) async fn run(bin: &Path, args: &[&str]) -> Result<String> {
@@ -213,7 +214,7 @@ async fn who_owner(bin: &Path) -> Result<String> {
             .ok_or_else(|| anyhow!("the core has no owner person yet"));
     }
     who(bin, "-")
-        .await
+        .await?
         .owner_id
         .ok_or_else(|| anyhow!("kith-auth has no owner person yet (kith-auth person <you> owner)"))
 }

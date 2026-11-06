@@ -686,7 +686,7 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
         anyhow::bail!("`kith-auth {}` has no core method: authority is on the core", args.join(" "));
     };
     // A read repeats harmlessly; a write is never sent twice.
-    let read = matches!(method, "people.listPeople" | "people.retired");
+    let read = matches!(method, "people.listPeople" | "people.retired" | "people.budgets" | "people.ledger");
     let mut params = params;
     if !read {
         // The look at auth.json above and this write are two steps: a rollback can land between them. The core checks

@@ -131,9 +131,68 @@ fn a_budget_that_is_no_number_is_an_error_never_no_limit() {
 }
 
 #[test]
+fn a_member_row_that_is_no_object_is_an_error_in_the_budgets_read() {
+    // The loader refuses such a row at import; the read must not turn one into "no limit" if it ever meets one.
+    let auth = json!({"members": {"house": {"sam": "member"}}});
+    let e = crate::authority::write::budgets(&auth, "house").unwrap_err();
+    assert!(e.msg.contains("not an object"), "{}", e.msg);
+}
+
+#[test]
+fn a_marked_ledger_handle_and_cap_write_is_refused_unless_the_phase_is_switched() {
+    use crate::cutover::state::{self, Phase, Switch};
+    let mut rig = rig();
+    let layout =
+        crate::layout::Layout::new(&crate::authority::revoke::Life::beside(&rig.c).machine);
+    let marked = [
+        (
+            "people.removeGrant",
+            json!({"key": "read:house:sam:/tmp/docs", "viaSwitch": true}),
+        ),
+        (
+            "people.handle",
+            json!({"person": "sam", "platform": "telegram", "remove": true, "viaSwitch": true}),
+        ),
+        ("people.botsCap", json!({"amount": "5", "viaSwitch": true})),
+    ];
+    let before = keys(&mut rig, &json!({}));
+    for p in [None, Some(Phase::RollingBack), Some(Phase::Stepping)] {
+        match p {
+            Some(p) => state::write(
+                &layout,
+                "authority",
+                &Switch {
+                    phase: p,
+                    snapshot: None,
+                    at: 1,
+                },
+            )
+            .unwrap(),
+            None => state::clear(&layout, "authority").unwrap(),
+        }
+        for (method, params) in &marked {
+            let e = rig.call(method, params).unwrap_err();
+            assert!(e.contains("not switched"), "{method}: {e}");
+        }
+    }
+    std::fs::write(state::path(&layout, "authority").unwrap(), "garbage").unwrap();
+    for (method, params) in &marked {
+        assert!(
+            rig.call(method, params)
+                .unwrap_err()
+                .contains("not switched"),
+            "{method}: damaged record"
+        );
+    }
+    assert_eq!(keys(&mut rig, &json!({})), before, "nothing was removed");
+    let sam = rig.call("people.listPeople", &json!({})).unwrap();
+    assert!(sam.to_string().contains("111"), "the handle stayed: {sam}");
+}
+
+#[test]
 fn the_budget_writes_keep_the_refusals_of_kith_auth() {
     let mut rig = rig();
-    for bad in ["lots", "-3"] {
+    for bad in ["lots", "-3", "nan", "inf", "-inf", "infinity"] {
         let e = rig
             .lines(
                 "people.grant",
