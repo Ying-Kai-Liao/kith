@@ -15,6 +15,7 @@
 //! "Live" is a claim whose state is not `ended` and an ask whose state is `open`.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use rusqlite::Connection;
 
@@ -28,6 +29,8 @@ pub(crate) struct Item {
     pub ids: Vec<String>,
     /// A non-zero count stops the step.
     pub stops: bool,
+    /// Why the item was not counted. A skipped item never reads as a pass.
+    pub skipped: Option<String>,
 }
 
 pub(crate) struct Preflight {
@@ -44,13 +47,21 @@ impl Preflight {
     pub(crate) fn lines(&self) -> Vec<String> {
         let mut out = self.notes.clone();
         for i in &self.items {
-            let mut l = format!("preflight {}. {}: {}", i.n, i.what, i.ids.len());
-            if !i.ids.is_empty() {
-                l.push_str(&format!(" ({})", i.ids.join(", ")));
+            let mut l = if let Some(why) = &i.skipped {
+                format!("preflight {}. {}: skipped: {why}", i.n, i.what)
+            } else {
+                format!("preflight {}. {}: {}", i.n, i.what, i.ids.len())
+            };
+            if i.skipped.is_none() && !i.ids.is_empty() {
+                let _ = write!(l, " ({})", i.ids.join(", "));
             }
             out.push(l);
         }
-        out.push(if self.ready() {
+        let skipped2 = self.items.iter().any(|i| i.n == 2 && i.skipped.is_some());
+        out.push(if self.ready() && skipped2 {
+            "preflight: ready; item 2 was skipped, so the step will compare after its own import (not 0 differences yet)"
+                .to_owned()
+        } else if self.ready() {
             "preflight: ready (items 1 to 5 are zero)".to_owned()
         } else {
             "preflight: NOT ready; the items above with a count must be zero first".to_owned()
@@ -174,6 +185,7 @@ pub(crate) fn run(
         what: "the import refuses",
         ids: import_refusal.into_iter().collect(),
         stops: true,
+        skipped: None,
     }];
     let mut notes = Vec::new();
     let Some(db) = db else {
@@ -192,39 +204,49 @@ pub(crate) fn run(
         .as_ref()
         .ok_or_else(|| Error::Refused("authority: no folders to look in".into()))?;
     let unmoved = authority::unmoved_vault_rows(ctx, db)?.unwrap_or_default();
-    let diffs = if !compare {
+    let (diffs, skipped) = if !compare {
         // The step compares right after its own import; before it, the core may be part-way through a re-run.
-        Vec::new()
+        (
+            Vec::new(),
+            Some("the step compares after its own import".to_owned()),
+        )
     } else if !unmoved.is_empty() {
         // `same_answer` refuses while credential records have not moved; item 4 names them.
-        notes.push("preflight: item 2 is not compared while item 4 is not zero".to_owned());
-        Vec::new()
+        (
+            Vec::new(),
+            Some("item 4 is not zero; the step will compare after its own import".to_owned()),
+        )
     } else if filled {
-        m.same_answer(env, db)?
+        (m.same_answer(env, db)?, None)
     } else {
-        notes.push(
-            "preflight: the core holds no people yet; item 2 is not compared (the step imports, then compares)"
-                .to_owned(),
-        );
-        Vec::new()
+        (
+            Vec::new(),
+            Some(
+                "the core holds no people yet; the step will compare after its own import"
+                    .to_owned(),
+            ),
+        )
     };
     items.push(Item {
         n: 2,
         what: "differences between the core and auth.json (check authority)",
         ids: diffs,
         stops: true,
+        skipped,
     });
     items.push(Item {
         n: 3,
         what: "open removals",
         ids: open_removals(db)?,
         stops: true,
+        skipped: None,
     });
     items.push(Item {
         n: 4,
         what: "credential records in serve.db that have not moved into the vault",
         ids: unmoved,
         stops: true,
+        skipped: None,
     });
     let (stray, non_owner) = live_holders(db)?;
     items.push(Item {
@@ -232,12 +254,14 @@ pub(crate) fn run(
         what: "live claims or open asks held by an id that is not a current person",
         ids: stray,
         stops: true,
+        skipped: None,
     });
     items.push(Item {
         n: 6,
         what: "live claims or open asks of a non-owner (listing only)",
         ids: non_owner,
         stops: false,
+        skipped: None,
     });
     Ok(Preflight { items, notes })
 }

@@ -1417,6 +1417,36 @@ fn preflight_item_2_counts_the_differences_once_the_core_holds_people() {
 }
 
 #[test]
+fn preflight_item_2_is_skipped_not_passed_on_an_empty_core() {
+    // A core.db that exists but holds no people yet.
+    let (r, reg) = rig();
+    drop(crate::start_with(&r.env.layout, MIGRATIONS).unwrap());
+    let t = dry_text(&r, &reg).expect("ready");
+    assert!(
+        t.contains("(check authority): skipped: the core holds no people yet"),
+        "{t}"
+    );
+    assert!(!t.contains("(check authority): 0"), "{t}");
+    assert!(
+        t.contains("the step will compare after its own import"),
+        "{t}"
+    );
+    assert!(!t.contains("items 1 to 5 are zero"), "{t}");
+}
+
+#[test]
+fn preflight_item_2_is_skipped_not_passed_while_item_4_is_not_zero() {
+    let (r, reg) = imported();
+    serve_with(&r, &[("router.key", "vault:v1:AAAA")]);
+    let e = dry_text(&r, &reg).unwrap_err();
+    assert!(
+        e.contains("(check authority): skipped: item 4 is not zero"),
+        "{e}"
+    );
+    assert!(!e.contains("(check authority): 0"), "{e}");
+}
+
+#[test]
 fn preflight_item_3_names_an_open_removal() {
     let (r, reg) = imported();
     r.db()
@@ -1477,7 +1507,7 @@ fn preflight_item_6_lists_a_bots_live_claim_without_stopping() {
 fn preflight_on_a_switched_module_says_so_and_counts_nothing() {
     let (r, reg) = imported();
     claim(&r, 1, "ghost", "running");
-    super::state::write(
+    state::write(
         &r.env.layout,
         "authority",
         &Switch {
