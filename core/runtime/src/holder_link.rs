@@ -860,11 +860,17 @@ pub(crate) fn reconcile(
         // nothing else would signal it: end its group the same way, matched by pid and start stamp (a reused pid is
         // left alone, as above). A group that will not end is logged, not a block: the claim stays `ending` and
         // `end_gone` ends it once the pid is gone.
+        // Only claims the old instance started: a NULL-instance or `--direct` run (an imported claim file, the user's
+        // own terminal) was started by no holder, may lead no group of its own, and is left to `end_gone`. Nor a pid
+        // the new instance lists.
         let stray: Vec<RecordedProc> = released
-            .kill
+            .holder_kill
             .iter()
-            .filter_map(|k| Some((k.pid?, k.started.clone()?)))
-            .filter(|(pid, _)| !stale.iter().any(|p| p.pid == *pid))
+            .filter(|(_, inst)| inst.as_deref() == Some(old))
+            .filter_map(|(k, _)| Some((k.pid?, k.started.clone()?)))
+            .filter(|(pid, _)| {
+                !stale.iter().any(|p| p.pid == *pid) && !procs.iter().any(|n| n.pid == *pid)
+            })
             .map(|(pid, started)| RecordedProc {
                 pid,
                 started,
@@ -920,13 +926,19 @@ fn end_groups(
                 notes.push(format!("holder: pid {} is gone; nothing to end", p.pid));
             }
             procstart::Probe::Alive(Some(now)) if procstart::comparable(&p.started, &now) => {
-                if procstart::same_process(&p.started, &now) {
-                    mine.push(p.pid);
-                } else {
+                if !procstart::same_process(&p.started, &now) {
                     notes.push(format!(
                         "holder: pid {} is not the process that was recorded (another start); left alone",
                         p.pid
                     ));
+                } else if procstart::session_id(p.pid).is_some_and(|sid| sid != p.pid) {
+                    // The same process, but not a group of its own: signalling -pid would hit another group.
+                    notes.push(format!(
+                        "holder: pid {} is not a session leader; left alone",
+                        p.pid
+                    ));
+                } else {
+                    mine.push(p.pid);
                 }
             }
             procstart::Probe::Alive(_) | procstart::Probe::Unknown => {
@@ -975,7 +987,9 @@ fn end_groups(
             std::thread::sleep(Duration::from_millis(50));
         }
         for pid in signalled.into_iter().filter(|pid| !mine.contains(pid)) {
-            notes.push(format!("holder: ended the process group of pid {pid}"));
+            notes.push(format!(
+                "holder: the process group of pid {pid} is gone after the signal"
+            ));
         }
     }
     if stuck.is_empty() {

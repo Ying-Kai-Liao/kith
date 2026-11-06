@@ -131,6 +131,10 @@ pub(crate) struct Released {
     pub kill: Vec<Kill>,
     /// Holder entries the holder lists whose claim is ended or unknown (step 5).
     pub kill_listed: Vec<i64>,
+    /// The part of `kill` that a holder started: a claim that is not `external`, with its `holder_instance`. A NULL
+    /// instance (an imported claim file, a terminal run) was started by no holder, so no `setsid` made its pid a group
+    /// leader of its own: those are left to `end_gone`, never signalled by a hello.
+    pub holder_kill: Vec<(Kill, Option<String>)>,
     /// Recorded holder processes no claim row knows (step 7).
     pub kill_procs: Vec<Kill>,
 }
@@ -938,23 +942,37 @@ fn release_unlisted(
         clippy::type_complexity,
         reason = "one row of the query below, used once"
     )]
-    let mut live: Vec<(i64, String, bool, Option<i64>, Option<String>)> = Vec::new();
+    let mut live: Vec<(
+        i64,
+        String,
+        bool,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+    )> = Vec::new();
     {
         // Only claims at or below the high-water mark read before the holder's list: a newer one may simply be missing
         // from a list that was read before it was taken.
         let mut st = tx.prepare(
-            "SELECT claim_id, state, kind = 'external', pid, pid_started FROM claims
+            "SELECT claim_id, state, kind = 'external', pid, pid_started, holder_instance FROM claims
              WHERE state IN ('claimed', 'running', 'ending') AND claim_id <= ?2
                AND (?1 IS NULL OR holder_instance IS NULL
                     OR (holder_instance <> ?1 AND holder_instance <> ?3))",
         )?;
         for r in st.query_map(params![foreign_to, high_water, HOST_INSTANCE], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
         })? {
             live.push(r?);
         }
     }
-    for (id, state, external, pid, started) in live {
+    for (id, state, external, pid, started, holder) in live {
         if listed.contains(&id) {
             continue;
         }
@@ -989,12 +1007,16 @@ fn release_unlisted(
                 if n == 1 {
                     requeue_turn(tx, id)?;
                 }
-                out.kill.push(kill_of(id, pid, started));
+                let k = kill_of(id, pid, started);
+                out.holder_kill.push((k.clone(), holder));
+                out.kill.push(k);
             }
             // Already ending: with a process, wait for it; without one it was never redeemed and now cannot be.
             _ => {
                 if pid.is_some() {
-                    out.kill.push(kill_of(id, pid, started));
+                    let k = kill_of(id, pid, started);
+                    out.holder_kill.push((k.clone(), holder));
+                    out.kill.push(k);
                 } else {
                     let n = tx.execute(
                         "UPDATE claims SET state = 'ended', ended_at = ?2

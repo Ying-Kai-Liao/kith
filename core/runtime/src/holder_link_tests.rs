@@ -551,7 +551,9 @@ fn a_blocked_pass_still_notes_the_groups_it_ended() {
     let stuck = out.unwrap_err();
     assert!(stuck.contains(&format!("pid {b} is running")), "{stuck}");
     assert!(
-        notes.contains(&format!("holder: ended the process group of pid {a}")),
+        notes.contains(&format!(
+            "holder: the process group of pid {a} is gone after the signal"
+        )),
         "{notes:?}"
     );
     rig.finish(&[&h1, &h2]);

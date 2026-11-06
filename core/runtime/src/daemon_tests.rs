@@ -1188,6 +1188,41 @@ fn a_running_claim_of_the_old_instance_is_signalled_and_ended_once_its_pid_is_go
     assert_eq!(claim_state(&d, id), "ended");
 }
 
+/// An imported or terminal claim (no holder instance) is the user's own process: a hello moves it to `ending` but never
+/// signals its group, even with a live pid and a matching start. `end_gone` is what ends it.
+#[cfg(unix)]
+#[test]
+fn a_running_claim_with_no_holder_instance_is_never_signalled_by_a_hello() {
+    use crate::db::HolderRecord;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig {
+        kill_wait: Duration::from_secs(2),
+        ..HolderConfig::default()
+    };
+    open_claims(&d);
+    let (pid, start) = leader();
+    let id = take_claim(&d, "a", "one");
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, id, pid, &start, "one", 20)?;
+            c.conn().execute(
+                "UPDATE claims SET holder_instance = NULL WHERE claim_id = ?1",
+                [id],
+            )?;
+            c.save_holder_record(&HolderRecord {
+                instance: Some("one".into()),
+                procs: Vec::new(),
+            })
+        })
+        .expect("record");
+    crate::holder_link::reconcile(&d.shared, "two", &[], &[], i64::MAX, &cfg).expect("hello");
+    assert!(alive(pid), "a process no holder started is not signalled");
+    assert_eq!(claim_state(&d, id), "ending");
+    signal(pid, "KILL");
+}
+
 /// A pid the holder listed that has exited before the start is read is not recorded: with no start it could be a
 /// stranger's by the time the instance changes. One that is there is recorded with the stamp it has now.
 #[cfg(unix)]
