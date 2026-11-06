@@ -549,6 +549,10 @@ fn set_auto(hub: &Hub, person: &str, on: bool, actor: &str, device: &str) -> Res
 async fn set_auto_allow(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result<Value> {
     Actor::of(hub, caller)?.owner_only()?;
     let (person, on) = (str_arg(b, "personId")?, b["on"].as_bool().ok_or_else(|| anyhow!("`on` is required"))?);
+    // A terminal-added person on a switched host has no host row yet: made here, as `setPersonAccess` does.
+    if hub.store.person(person).is_none() {
+        super::people::invited_or_core_person(hub, &auth_bin().await?, person).await?;
+    }
     set_auto(hub, person, on, &actor_label(hub, caller).await, caller.device_key())?;
     Ok(json!({"person": hub.store.person(person)}))
 }
