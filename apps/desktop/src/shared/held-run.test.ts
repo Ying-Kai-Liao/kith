@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { confirmMessage, failureOf, heldIcon, heldRowOf, IDLE, isHeldPermission, OWN_TURN, sinceText, stoppedDivider, taskLabel } from './held-run.ts'
+import { CANT_STOP, confirmMessage, failureOf, STILL_ENDING, heldIcon, heldRowOf, IDLE, isHeldPermission, OWN_TURN, sinceText, stoppedDivider, taskLabel } from './held-run.ts'
 import type { Entry, HeldRun } from './models.ts'
 
 const held: HeldRun = { session: 's1', kind: 'terminal', pid: 4812, since: new Date(2026, 9, 24, 9, 40).toISOString() }
@@ -55,6 +55,14 @@ test('states: stopping, failed with Try again, hidden after a refusal or the hos
   assert.equal(heldRowOf({ held, owner: true, phase: failureOf({ status: 403 }, 'Mac mini'), now }).button, null)
   assert.equal(heldRowOf({ held, owner: true, phase: OWN_TURN, now }).button, null)
   assert.equal(heldRowOf({ held, owner: true, phase: IDLE, now }).button, 'Stop')
+  // A Stop the host answered with stillEnding / cantStop is told: the first can be pressed again, the second can't.
+  const ending = heldRowOf({ held, owner: true, phase: STILL_ENDING, now })
+  assert.equal(ending.failed, true)
+  assert.equal(ending.button, 'Try again')
+  assert.match(ending.sentence, /Still ending/)
+  const cant = heldRowOf({ held, owner: true, phase: CANT_STOP, now })
+  assert.equal(cant.button, null)
+  assert.match(cant.sentence, /can't stop that run/)
 })
 
 test('the confirm names the Mac and the pid', () => {

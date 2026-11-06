@@ -98,6 +98,13 @@ pub fn save(conn: &Connection, layout: &Layout, agent: &str, shared: bool, name:
     }
 }
 
+/// Deletes the user's file (a version of its own, so `restore` brings it back).
+pub fn delete(conn: &Connection, layout: &Layout, agent: &str, shared: bool, name: &str) -> Result<Value> {
+    let t = target(layout, agent, shared, name)?;
+    let version = super::remove(conn, layout, &t, Who::Kai)?;
+    Ok(json!({"version": version_json(&version)}))
+}
+
 fn author(v: &Version) -> &'static str {
     match v.author {
         Author::User => "kai",

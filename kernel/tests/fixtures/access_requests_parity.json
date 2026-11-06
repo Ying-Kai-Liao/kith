@@ -1,0 +1,146 @@
+{
+  "about": "M2-3 parity script for the device-pairing access requests. The same steps run against the host's real code (serve/host/src/remote/cloud.rs, test `access_request_parity_script`) and against the core's rows (core/runtime/src/authority/tests/requests.rs). Steps: file (a request arrives: id, device number, platform, person = a member or null for the owner, code = the device has shown its code), suspend (the owner suspends the person: the host moves their memberships to suspended_*, the core runs people.suspend), membership_gone (the cloud reports the membership gone while the person stays in kith-auth: the host removes the membership row and, on its membership sync, denies that person's pending requests, which the core is told with people.deny; since M2-17 both sides refuse and there is no known difference), sync (the host's membership sync after a suspend: it denies the pending requests of a person with no membership, which the core is told with people.deny; since M2-17 a suspension also ends the waiting requests, with either switch, so an undo afterwards does not bring them back), undo (the owner undoes the suspension: the host restores the memberships, the core runs people.undo), expire (the cloud stops listing it: the host drops it on its next pull, the core's clock passes expires_at), approve / deny (with the answer both must give), list (the ids the owner sees, oldest first). An error is the text both give. Known difference: a second approve of an approved request. The core gives the same answer again and files nothing (its retry after a lost reply, approving_twice_gives_the_same_answer_and_files_nothing_again); the host forgot the request when it settled it and says 'unknown request', so no scenario repeats an approve.",
+  "scenarios": [
+    {
+      "name": "approve once, then a deny is an unknown request (a repeat approve is the core's own, see approving_twice_gives_the_same_answer)",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": null, "code": true}},
+        {"list": ["r1"]},
+        {"approve": "r1", "expect": {"ok": true, "scopes": ["control", "screen"]}},
+        {"list": []},
+        {"deny": "r1", "expect": {"err": "unknown request"}}
+      ]
+    },
+    {
+      "name": "approve after a deny",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": null, "code": true}},
+        {"deny": "r1", "expect": {"ok": true}},
+        {"list": []},
+        {"approve": "r1", "expect": {"err": "unknown request"}},
+        {"deny": "r1", "expect": {"err": "unknown request"}}
+      ]
+    },
+    {
+      "name": "deny after an approve",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "mac", "person": null, "code": true}},
+        {"approve": "r1", "expect": {"ok": true, "scopes": ["control", "screen"]}},
+        {"deny": "r1", "expect": {"err": "unknown request"}}
+      ]
+    },
+    {
+      "name": "an id nobody filed",
+      "steps": [
+        {"approve": "nope", "expect": {"err": "unknown request"}},
+        {"deny": "nope", "expect": {"err": "unknown request"}},
+        {"list": []}
+      ]
+    },
+    {
+      "name": "no approval before the device shows its code; a denial needs none",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": null, "code": false}},
+        {"file": {"id": "r2", "device": 2, "platform": "ios", "person": "sam", "code": false}},
+        {"approve": "r1", "expect": {"err": "The device hasn't shown its code yet."}},
+        {"approve": "r2", "expect": {"err": "The device hasn't shown its code yet."}},
+        {"list": ["r1", "r2"]},
+        {"deny": "r1", "expect": {"ok": true}},
+        {"list": ["r2"]}
+      ]
+    },
+    {
+      "name": "an expired request is gone",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": null, "code": true}},
+        {"file": {"id": "r2", "device": 2, "platform": "ios", "person": null, "code": true}},
+        {"expire": "r1"},
+        {"list": ["r2"]},
+        {"approve": "r1", "expect": {"err": "unknown request"}},
+        {"deny": "r1", "expect": {"err": "unknown request"}},
+        {"approve": "r2", "expect": {"ok": true, "scopes": ["control", "screen"]}}
+      ]
+    },
+    {
+      "name": "a member suspended while the request waited",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": "sam", "code": true}},
+        {"file": {"id": "r2", "device": 2, "platform": "ios", "person": "sam", "code": true}},
+        {"suspend": "sam"},
+        {"approve": "r1", "expect": {"err": "That account is no longer a member of this computer."}},
+        {"list": ["r2"]},
+        {"approve": "r1", "expect": {"err": "unknown request"}},
+        {"deny": "r2", "expect": {"ok": true}},
+        {"list": []}
+      ]
+    },
+    {
+      "name": "suspend, then the membership sync, then undo: the request the sync denied is gone for good",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": "sam", "code": true}},
+        {"file": {"id": "r2", "device": 2, "platform": "ios", "person": null, "code": true}},
+        {"suspend": "sam"},
+        {"sync": "sam"},
+        {"list": ["r2"]},
+        {"undo": "sam"},
+        {"approve": "r1", "expect": {"err": "unknown request"}},
+        {"list": ["r2"]},
+        {"approve": "r2", "expect": {"ok": true, "scopes": ["control", "screen"]}}
+      ]
+    },
+    {
+      "name": "membership_gone: the cloud reports the membership gone while the person stays in kith-auth",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": "sam", "code": true}},
+        {"file": {"id": "r2", "device": 2, "platform": "ios", "person": "sam", "code": true}},
+        {"file": {"id": "r3", "device": 3, "platform": "ios", "person": null, "code": true}},
+        {"membership_gone": "sam"},
+        {"list": ["r3"]},
+        {"approve": "r1", "expect": {"err": "unknown request"}},
+        {"deny": "r2", "expect": {"err": "unknown request"}},
+        {"approve": "r3", "expect": {"ok": true, "scopes": ["control", "screen"]}}
+      ]
+    },
+    {
+      "name": "a member's device carries no screen scope",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "ios", "person": "sam", "code": true}},
+        {"approve": "r1", "expect": {"ok": true, "scopes": ["control"]}}
+      ]
+    },
+    {
+      "name": "a web browser is never the owner's device, but may be a member's",
+      "steps": [
+        {"file": {"id": "r1", "device": 1, "platform": "web", "person": null, "code": true}},
+        {"file": {"id": "r2", "device": 2, "platform": "Web", "person": "sam", "code": true}},
+        {"approve": "r1", "expect": {"err": "A web browser can't be the owner's device."}},
+        {"list": ["r2"]},
+        {"approve": "r1", "expect": {"err": "unknown request"}},
+        {"approve": "r2", "expect": {"ok": true, "scopes": ["control"]}}
+      ]
+    },
+    {
+      "name": "a device that is already paired asks again",
+      "steps": [
+        {"file": {"id": "r1", "device": 7, "platform": "ios", "person": null, "code": true}},
+        {"approve": "r1", "expect": {"ok": true, "scopes": ["control", "screen"]}},
+        {"file": {"id": "r2", "device": 7, "platform": "ios", "person": null, "code": true}},
+        {"list": ["r2"]},
+        {"approve": "r2", "expect": {"ok": true, "scopes": ["control", "screen"]}},
+        {"list": []}
+      ]
+    },
+    {
+      "name": "the owner sees requests in the order they came",
+      "steps": [
+        {"file": {"id": "b", "device": 1, "platform": "ios", "person": null, "code": true}},
+        {"file": {"id": "a", "device": 2, "platform": "ios", "person": "sam", "code": false}},
+        {"file": {"id": "c", "device": 3, "platform": "mac", "person": null, "code": true}},
+        {"list": ["b", "a", "c"]},
+        {"approve": "a", "expect": {"err": "The device hasn't shown its code yet."}},
+        {"approve": "c", "expect": {"ok": true, "scopes": ["control", "screen"]}},
+        {"list": ["b", "a"]}
+      ]
+    }
+  ]
+}

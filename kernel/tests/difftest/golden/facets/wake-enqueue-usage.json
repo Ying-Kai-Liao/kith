@@ -1,0 +1,15 @@
+{
+  "fakes": "",
+  "step0.exit": "2\n",
+  "step0.stderr": "usage: kith-wake enqueue [-h] --id ID --agent AGENT [--person PERSON]\n                         [--room ROOM] [--door {run,host}] [--why WHY]\n                         session text [text ...]\nkith-wake enqueue: error: the following arguments are required: --id, --agent, text\n",
+  "step0.stdout": "",
+  "step1.exit": "2\n",
+  "step1.stderr": "usage: kith-wake enqueue [-h] --id ID --agent AGENT [--person PERSON]\n                         [--room ROOM] [--door {run,host}] [--why WHY]\n                         session text [text ...]\nkith-wake enqueue: error: the following arguments are required: session, --id, --agent, text\n",
+  "step1.stdout": "",
+  "step2.exit": "2\n",
+  "step2.stderr": "usage: kith-wake [-h]\n                 {enqueue,withdraw,withdraw-person,take,done,back,drain,deliver,wait,status,ls}\n                 ...\nkith-wake: error: argument cmd: invalid choice: 'bogus' (choose from 'enqueue', 'withdraw', 'withdraw-person', 'take', 'done', 'back', 'drain', 'deliver', 'wait', 'status', 'ls')\n",
+  "step2.stdout": "",
+  "step3.exit": "2\n",
+  "step3.stderr": "usage: kith-wake [-h]\n                 {enqueue,withdraw,withdraw-person,take,done,back,drain,deliver,wait,status,ls}\n                 ...\nkith-wake: error: the following arguments are required: cmd\n",
+  "step3.stdout": ""
+}

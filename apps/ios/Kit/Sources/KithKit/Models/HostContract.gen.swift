@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "bc3ef31542338898f9e8fcf31b6cd9580a454ab13313c47abbae43585f12d071"
+    public static let sha256 = "98263f4dab0b900f53daf4ee5f6a9af81e8a02c4b97eb674d57fa292e411f863"
 }
 
 extension HostContract {
@@ -460,6 +460,7 @@ extension HostContract {
         public var autoName: Bool
         public var tasks: Bool?
         public var hqAgent: String?
+        public var builtin: Bool?
         public var project: String?
         public var person: String?
         public var createdAt: Int64
@@ -478,10 +479,11 @@ extension HostContract {
         public var fastModeIssue: String?
         public var unread: Int64
         public var lastMessage: String?
+        public var lastSummary: String?
         public var lastAt: Int64
         public var botGuest: BotGuestRef?
 
-        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
+        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, builtin: Bool? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastSummary: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
             self.id = id
             self.kind = kind
             self.members = members
@@ -511,6 +513,7 @@ extension HostContract {
             self.autoName = autoName
             self.tasks = tasks
             self.hqAgent = hqAgent
+            self.builtin = builtin
             self.project = project
             self.person = person
             self.createdAt = createdAt
@@ -529,6 +532,7 @@ extension HostContract {
             self.fastModeIssue = fastModeIssue
             self.unread = unread
             self.lastMessage = lastMessage
+            self.lastSummary = lastSummary
             self.lastAt = lastAt
             self.botGuest = botGuest
         }
@@ -860,12 +864,16 @@ extension HostContract {
         }
     }
 
-    /// revoked is false when it already was.
+    /// revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host, and when nothing was sent to the core (a repeat remove, no kith-auth) or kith-auth itself failed. authUpdated is false when kith-auth failed to remove the person (auth.json may still hold it); absent otherwise.
     public struct Revoked: Codable, Hashable, Sendable {
         public var revoked: Bool
+        public var coreUpdated: Bool?
+        public var authUpdated: Bool?
 
-        public init(revoked: Bool) {
+        public init(revoked: Bool, coreUpdated: Bool? = nil, authUpdated: Bool? = nil) {
             self.revoked = revoked
+            self.coreUpdated = coreUpdated
+            self.authUpdated = authUpdated
         }
     }
 
@@ -1267,8 +1275,10 @@ extension HostContract {
         public var folder: String?
         public var clear: Bool?
         public var budget: Int64?
+        public var engine: String?
+        public var engineModel: String?
 
-        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil) {
+        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
             self.botId = botId
             self.text = text
             self.clientNonce = clientNonce
@@ -1281,6 +1291,8 @@ extension HostContract {
             self.folder = folder
             self.clear = clear
             self.budget = budget
+            self.engine = engine
+            self.engineModel = engineModel
         }
     }
 

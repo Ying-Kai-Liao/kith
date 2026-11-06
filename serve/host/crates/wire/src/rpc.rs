@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "bc3ef31542338898f9e8fcf31b6cd9580a454ab13313c47abbae43585f12d071";
+pub const CONTRACT_SHA256: &str = "98263f4dab0b900f53daf4ee5f6a9af81e8a02c4b97eb674d57fa292e411f863";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -642,6 +642,8 @@ pub struct Bot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hq_agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub person: Option<String>,
@@ -668,6 +670,8 @@ pub struct Bot {
     pub unread: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_summary: Option<String>,
     pub last_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot_guest: Option<BotGuestRef>,
@@ -924,11 +928,15 @@ pub struct BotInviteCreated {
     pub share: String,
 }
 
-/// revoked is false when it already was.
+/// revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host, and when nothing was sent to the core (a repeat remove, no kith-auth) or kith-auth itself failed. authUpdated is false when kith-auth failed to remove the person (auth.json may still hold it); absent otherwise.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Revoked {
     pub revoked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_updated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_updated: Option<bool>,
 }
 
 /// A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host.
@@ -1245,6 +1253,10 @@ pub struct SendParams {
     pub clear: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_model: Option<String>,
 }
 
 /// What `thread` takes.
@@ -1648,7 +1660,7 @@ pub mod method {
     pub const KITH_INFO: &str = "kithInfo";
     /// Their own chat with an agent they hold, one per agent: made on first use.
     pub const START_CHAT: &str = "startChat";
-    /// A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10.
+    /// A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10. engine (claude or codex) and engineModel are the owner's, for a new thread of the built-in scratch agent: that quick chat's own engine and model; ignored anywhere else.
     pub const SEND: &str = "send";
     /// A thread's replies (its newest 500); the root is in the main chat.
     pub const THREAD: &str = "thread";
@@ -1790,7 +1802,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "KithInfo", fields: &[("info", "KithCard?"), ("fetchedAt", "int"), ("error", "string?")], may_omit: &["error"] },
         crate::check::TypeSchema { name: "WorkingLane", fields: &[("chat", "string"), ("thread", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotGuestRef", fields: &[("botId", "string"), ("name", "string"), ("provider", "BotProvider"), ("ownerPerson", "string?"), ("ownerName", "string?")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Bot", fields: &[("id", "string"), ("kind", "BotKind"), ("members", "[string]"), ("labels", "[string]?"), ("name", "string"), ("description", "string"), ("avatarColor", "string"), ("avatarShape", "string"), ("avatarSource", "string"), ("backend", "string"), ("command", "string?"), ("cwd", "string?"), ("permission", "Permission"), ("model", "string?"), ("modelOptions", "{string}"), ("fastMode", "bool"), ("pinned", "bool"), ("position", "int"), ("hidden", "bool"), ("notify", "bool?"), ("connectors", "[string]"), ("skills", "[string]"), ("computer", "bool"), ("sharedMemory", "bool?"), ("harnessMemory", "bool?"), ("rowShowsSummary", "bool"), ("autoName", "bool"), ("tasks", "bool?"), ("hqAgent", "string?"), ("project", "string?"), ("person", "string?"), ("createdAt", "int"), ("managedWorkspace", "bool"), ("folder", "json?"), ("memoryRev", "int?"), ("workingLanes", "[WorkingLane]"), ("rev", "int"), ("deleted", "bool"), ("status", "BotStatus"), ("activity", "string"), ("startedAt", "int?"), ("workingChat", "string?"), ("workingThread", "string?"), ("fastModeSupport", "string"), ("fastModeIssue", "string?"), ("unread", "int"), ("lastMessage", "string?"), ("lastAt", "int"), ("botGuest", "BotGuestRef?")], may_omit: &["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "project", "person", "botGuest"] },
+        crate::check::TypeSchema { name: "Bot", fields: &[("id", "string"), ("kind", "BotKind"), ("members", "[string]"), ("labels", "[string]?"), ("name", "string"), ("description", "string"), ("avatarColor", "string"), ("avatarShape", "string"), ("avatarSource", "string"), ("backend", "string"), ("command", "string?"), ("cwd", "string?"), ("permission", "Permission"), ("model", "string?"), ("modelOptions", "{string}"), ("fastMode", "bool"), ("pinned", "bool"), ("position", "int"), ("hidden", "bool"), ("notify", "bool?"), ("connectors", "[string]"), ("skills", "[string]"), ("computer", "bool"), ("sharedMemory", "bool?"), ("harnessMemory", "bool?"), ("rowShowsSummary", "bool"), ("autoName", "bool"), ("tasks", "bool?"), ("hqAgent", "string?"), ("builtin", "bool?"), ("project", "string?"), ("person", "string?"), ("createdAt", "int"), ("managedWorkspace", "bool"), ("folder", "json?"), ("memoryRev", "int?"), ("workingLanes", "[WorkingLane]"), ("rev", "int"), ("deleted", "bool"), ("status", "BotStatus"), ("activity", "string"), ("startedAt", "int?"), ("workingChat", "string?"), ("workingThread", "string?"), ("fastModeSupport", "string"), ("fastModeIssue", "string?"), ("unread", "int"), ("lastMessage", "string?"), ("lastSummary", "string?"), ("lastAt", "int"), ("botGuest", "BotGuestRef?")], may_omit: &["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "builtin", "project", "person", "botGuest"] },
         crate::check::TypeSchema { name: "BotAnswer", fields: &[("bot", "Bot")], may_omit: &[] },
         crate::check::TypeSchema { name: "Entry", fields: &[("id", "string"), ("seq", "int"), ("botId", "string"), ("threadId", "string?"), ("rev", "int"), ("kind", "EntryKind"), ("turn", "int"), ("data", "json"), ("createdAt", "int"), ("updatedAt", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "Entries", fields: &[("entries", "[Entry]"), ("folder", "json?"), ("conversation", "RoomConversation?")], may_omit: &["folder", "conversation"] },
@@ -1815,7 +1827,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "CallAccepted", fields: &[("botId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "Proven", fields: &[("proven", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotInviteCreated", fields: &[("botId", "string"), ("inviteId", "string"), ("expiresAt", "int"), ("link", "string"), ("kithLink", "string"), ("share", "string")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Revoked", fields: &[("revoked", "bool")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Revoked", fields: &[("revoked", "bool"), ("coreUpdated", "bool?"), ("authUpdated", "bool?")], may_omit: &["coreUpdated", "authUpdated"] },
         crate::check::TypeSchema { name: "BotLimits", fields: &[("ratePerHour", "int"), ("concurrent", "int"), ("turnTimeoutS", "int?"), ("wakeProfile", "string?")], may_omit: &["turnTimeoutS", "wakeProfile"] },
         crate::check::TypeSchema { name: "BotGuest", fields: &[("botId", "string"), ("name", "string"), ("provider", "BotProvider"), ("state", "BotGuestState"), ("ownerPerson", "string?"), ("ownerName", "string?"), ("agents", "[string]"), ("limits", "BotLimits"), ("connected", "bool"), ("createdAt", "int"), ("joinedAt", "int?"), ("decidedAt", "int?"), ("decidedBy", "string?"), ("lastSeenAt", "int?"), ("revokedAt", "int?"), ("revokedWhy", "string?"), ("personId", "string?"), ("conversations", "json?")], may_omit: &["personId", "conversations"] },
         crate::check::TypeSchema { name: "BotGuests", fields: &[("bots", "[BotGuest]")], may_omit: &[] },
@@ -1840,7 +1852,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "HelloParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "KithInfoParams", fields: &[("botId", "string"), ("refresh", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "StartChatParams", fields: &[("agent", "string")], may_omit: &[] },
-        crate::check::TypeSchema { name: "SendParams", fields: &[("botId", "string"), ("text", "string"), ("clientNonce", "string?"), ("threadId", "string?"), ("attachments", "[string]?"), ("pasted", "[string]?"), ("newTask", "bool?"), ("via", "MessageVia?"), ("project", "string?"), ("folder", "string?"), ("clear", "bool?"), ("budget", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "SendParams", fields: &[("botId", "string"), ("text", "string"), ("clientNonce", "string?"), ("threadId", "string?"), ("attachments", "[string]?"), ("pasted", "[string]?"), ("newTask", "bool?"), ("via", "MessageVia?"), ("project", "string?"), ("folder", "string?"), ("clear", "bool?"), ("budget", "int?"), ("engine", "string?"), ("engineModel", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "ThreadParams", fields: &[("botId", "string"), ("rootId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "HistoryParams", fields: &[("botId", "string"), ("beforeSeq", "int?"), ("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "NewSessionParams", fields: &[("botId", "string")], may_omit: &[] },

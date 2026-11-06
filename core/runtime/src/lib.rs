@@ -1,0 +1,424 @@
+//! kith-core: the sealed core (docs/plans/runtime-design.md). It is the only writer of core.db and, later, the only
+//! place decisions are made. Product modules call its API and never its tables; this crate's public surface is the
+//! few entry points below, everything else is `pub(crate)`.
+//! `kernel/tests/kith-core-boundary-check` fails when that stops being true.
+//!
+//! M0a is the foundation: core.db with its lifetime lock and generation, owner-only permissions, the marker that refuses
+//! an empty start, and embedded mode. Calls go through the method table of `kith-api` ([`Core::call`]). M0c puts the
+//! daemon in front ([`Daemon`]: the owner socket, the version hello, the link to the holder) and gives the CLI its way
+//! in ([`reach`]).
+//!
+//! Three ways in, each of which takes the lifetime lock and bumps the generation under it:
+//! - [`start`]: the daemon. Checks the file, migrates an older one.
+//! - [`migrate`]: the explicit migrate entry point (`kith migrate`).
+//! - [`open_embedded`]: one command in its own process. Creates a fresh core.db but never migrates one that exists,
+//!   and runs no claim transactions. If the lock is held it does not wait: it answers [`Embedded::DaemonRunning`]
+//!   (the caller then asks the daemon). Two embedded commands at once behave the same way: the second one finds the
+//!   lock held.
+
+// M3-9a: account state in core.db and the read-only `account.*` rows; nothing writes it but the import and the tests.
+#[allow(
+    dead_code,
+    reason = "the import and the rows are its callers; runs switch later"
+)]
+mod accounts;
+// Nothing outside the tests calls it until the host and the CLI are switched to core.db (M2-9 onward). Unix only for
+// now: the rules it reuses (`kith_kernel::secrets`) are.
+#[cfg(unix)]
+#[allow(dead_code)]
+mod authority;
+// The ask tree (M3-8a): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at M3-10.
+#[cfg(unix)]
+#[allow(dead_code, reason = "first callers are the switch of kith-ask (M3-10)")]
+mod asks;
+mod call;
+// Nothing calls the store but the daemon's cards rows and the tests: the host's callers switch in lane H, and the raise,
+// claim and close verbs get theirs there and in M2-12.
+#[allow(dead_code, reason = "first callers are lane H")]
+mod cards;
+// The claim code (M3-2): the holder pipes, the warm runner and `terminal.open` call it from M3-4 on.
+#[allow(dead_code, reason = "first callers are M3-4, M3-5 and M3-11")]
+mod conversations;
+// The module-keyed cutover framework (M3-10a): `kith migrate step|status`, `kith rollback`. No module registered yet.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "lanes register their modules at their switch (M3-10b..g, M2-23)"
+)]
+mod cutover;
+mod daemon;
+// Nothing calls the doors but the daemon's `doors.*` rows and the tests: the host's sweep and `kith_door.py` switch later.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "first callers are the host's door code after the switch"
+)]
+mod doors;
+// Held terminals start on Unix only for now; elsewhere the relay has nothing to relay.
+#[cfg_attr(not(unix), allow(dead_code))]
+mod attach;
+mod db;
+mod error;
+mod gate;
+mod holder_link;
+mod kill_resend;
+// `kith migrate --authority`: auth.json and the Keychain into core.db and the envelope (M2-8).
+#[cfg(unix)]
+mod import;
+mod layout;
+mod lock;
+mod log;
+mod marker;
+mod migrations;
+mod owner;
+mod perms;
+mod runs;
+mod runsock;
+// The revoke order (M3-10d): claims of the person and their bots, then their ask tree. First caller is the kith-auth bridge (M2-18).
+#[cfg(unix)]
+#[allow(dead_code, reason = "first caller is the kith-auth bridge after M2-18")]
+mod revoke_order;
+// The agents' jobs.json indexed with the run state in core.db (M4-2); the host switches to it at M4-5.
+#[allow(
+    dead_code,
+    reason = "first callers are M4-3 and M4-5; the rows are reached through Core::call"
+)]
+mod schedules;
+// Held terminals start on Unix only for now; elsewhere `terminal.open` answers `direct` and most of it is unused.
+#[cfg_attr(not(unix), allow(dead_code))]
+mod terminal;
+// Engine sessions held by the core (M3-6): built and tested, called by no start until the switch.
+// Unix only for now, like `authority`: it reads through `kith_kernel::threads`, which is.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "first callers are the start protocol after the switch"
+)]
+mod transcripts;
+// The claim path's read (`lease_held_for_non_owner`, `held_in`) and `restart` have no caller until M3 and the daemon start
+// wire them; the rows reach the rest.
+#[allow(dead_code)]
+mod sync_lease;
+// The host vault calls `secrets.open|get|put` (M2-7); `delete` and `list` wait for kith-auth and rollback (M2-18).
+#[allow(dead_code, reason = "delete and list are M2-18's")]
+mod secrets;
+
+// The wake queue and waiters (M3-7): nothing calls them but the daemon's `wake.*` rows and the tests until the switch (M3-10).
+#[allow(dead_code, reason = "first callers are the switch of kith-wake, M3-10")]
+mod wake;
+
+// The host's claim rows (M3-10f): called only by a host started with KITH_HOST_CORE_CLAIMS=1.
+mod hostclaim;
+
+#[cfg(test)]
+mod runs_props;
+#[cfg(all(test, unix))]
+mod runsock_tests;
+#[cfg(test)]
+mod tests;
+
+pub use daemon::Daemon;
+pub use daemon::status;
+pub use db::Core;
+pub use error::Error;
+pub use owner::Reached;
+
+use kith_kernel::paths::Paths;
+
+use db::{MIGRATIONS, Migration, Mode, Opened};
+use layout::Layout;
+
+/// What an embedded open found.
+pub enum Embedded {
+    /// The lock is ours; the core is open for this command. Dropping it releases the lock.
+    Open(Box<Core>),
+    /// A core (the daemon, or another embedded command) holds the lock. `pid` is its process when core.holder says.
+    DaemonRunning { pid: Option<u32> },
+}
+
+/// What [`migrate`] did.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Migrated {
+    /// The schema core.db had, or `None` when it was just created.
+    pub from: Option<i64>,
+    pub to: i64,
+}
+
+/// What `kith migrate --authority` may do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AuthorityOptions {
+    /// Print what would change and write nothing.
+    pub dry_run: bool,
+    /// Replace authority rows core.db already holds when they differ from auth.json (the default is to refuse).
+    pub force: bool,
+}
+
+/// What [`migrate_authority`] did, one line each.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AuthorityReport {
+    pub dry_run: bool,
+    /// Whether core.db (or the envelope) changed, or in a dry run would.
+    pub changed: bool,
+    /// The `VACUUM INTO` copy taken before the first write.
+    pub backup: Option<std::path::PathBuf>,
+    pub lines: Vec<String>,
+}
+
+/// How [`stateless_through_core`] ran a verb.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Via {
+    /// Inside an embedded core: lock held, core.db checked, generation bumped.
+    Embedded,
+    /// Without a core, for a reason that is no fault: a daemon holds the lock, or there is no core.db yet.
+    Bare,
+    /// Without a core because it would not open here (permissions, missing, swapped, corrupt, needs migration, binary
+    /// older, I/O). The reason is one line in the core log; it is never silent.
+    BareAfterError(String),
+}
+
+/// Starts the daemon's core: takes the lifetime lock for good, checks the file (`quick_check`), migrates an older
+/// schema after `integrity_check` and a `VACUUM INTO` snapshot, and bumps the generation.
+pub fn start(paths: &Paths) -> Result<Core, Error> {
+    start_with(&Layout::new(&paths.machine), MIGRATIONS).map(|c| c.with_folders(paths))
+}
+
+/// `kith migrate`: the same as [`start`], released at once. Needs the lock, so a running daemon refuses it.
+pub fn migrate(paths: &Paths) -> Result<Migrated, Error> {
+    migrate_with(&Layout::new(&paths.machine), MIGRATIONS)
+}
+
+/// `kith migrate --authority`: imports auth.json's access tables into core.db and its profiles' Keychain items into the
+/// secrets envelope (see `import`). Idempotent, never edits the sources, `VACUUM INTO` a backup before the first write, and
+/// refuses rather than store an answer different from the file's. `ctx` says where the auth.json and the agents are.
+#[cfg(unix)]
+pub fn migrate_authority(
+    paths: &Paths,
+    ctx: &kith_kernel::secrets::Ctx,
+    opts: AuthorityOptions,
+) -> Result<AuthorityReport, Error> {
+    import::run(
+        &Layout::new(&paths.machine),
+        ctx,
+        opts,
+        &import::items::Keychain,
+        &mut import::items::OsEnvelope::default(),
+    )
+}
+
+/// `kith migrate --schedules`: copies `kith-sched`'s state files (the last tick and each job's last run) into core.db
+/// (see `import::schedules`). Idempotent, read-only on the sources, `--dry-run` writes nothing; jobs.json is not imported.
+// Crate-private until `kith migrate` runs it (M3-10) and the host switches (M4-5); only the tests call it.
+#[cfg(unix)]
+#[allow(dead_code, reason = "first caller is M3-10 / M4-5")]
+pub(crate) fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<AuthorityReport, Error> {
+    import::schedules::run(&Layout::new(&paths.machine), &paths.machine, dry_run)
+}
+
+/// `kith kernel cutover ...` (M3-10a): the cutover framework's verbs (`step MODULE [--dry-run] [--force]`, `rollback MODULE
+/// [--force]`, `status`, `check MODULE`, `modules`). Returns the lines to print. Takes the core's lifetime lock for the
+/// verbs that write, so a running daemon refuses them.
+#[cfg(unix)]
+pub fn cutover(
+    paths: &Paths,
+    kernel: &std::path::Path,
+    args: &[String],
+) -> Result<Vec<String>, Error> {
+    cutover::run(paths, kernel, args)
+}
+
+/// Opens the core inside this process for one command.
+pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
+    match embedded_with(&Layout::new(&paths.machine), MIGRATIONS)? {
+        Embedded::Open(c) => Ok(Embedded::Open(Box::new(c.with_folders(paths)))),
+        busy @ Embedded::DaemonRunning { .. } => Ok(busy),
+    }
+}
+
+/// What [`call_authority_embedded`] came to.
+#[cfg(unix)]
+#[derive(Debug)]
+pub enum EmbeddedCall {
+    /// The method ran in this process, under the core's lifetime lock.
+    Answered(serde_json::Value),
+    /// A daemon (or another embedded command) holds the lock: nothing ran; the caller asks the daemon.
+    Busy,
+    /// There is no core yet (a fresh install: no core.db, or an empty one, and no marker): nothing ran, and there is
+    /// nothing to keep in step. A marker with no core.db is not this: the core existed and is lost (a restore), so the
+    /// open refuses and the caller warns.
+    NoCore(std::path::PathBuf),
+}
+
+/// Runs one owner `people.*` write (`people.suspend`, `people.undo`, `people.removePerson`, `people.removeBot`) inside an
+/// embedded core, for a caller that found no daemon (kith-auth's mirror of a revoke). The same door as the daemon's:
+/// the method must exist and be open to the owner, the lock is the one lock, and the generation is bumped. Never creates
+/// a core.db and never migrates one: those stay with the daemon and `kith migrate`.
+#[cfg(unix)]
+pub fn call_authority_embedded(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<EmbeddedCall, Error> {
+    if !authority::call::serves(method) {
+        return Err(Error::NoSuchMethod(format!(
+            "kith-core: {method} is not an authority method"
+        )));
+    }
+    call::check(kith_api::Principal::Owner, method, params)?;
+    let layout = Layout::new(&paths.machine);
+    // A 0-byte file is what a failed first open leaves; with no marker it never held a core either.
+    let empty = std::fs::metadata(&layout.db).map_or(true, |m| m.len() == 0);
+    if empty && !layout.marker.exists() {
+        return Ok(EmbeddedCall::NoCore(layout.dir));
+    }
+    match open_embedded(paths)? {
+        Embedded::Open(mut core) => {
+            authority::call::call(&mut core, method, params).map(EmbeddedCall::Answered)
+        }
+        Embedded::DaemonRunning { .. } => Ok(EmbeddedCall::Busy),
+    }
+}
+
+/// Runs one owner `account.*` call (`state`, `rows`, `pick`, and the writers `out`, `clear`, `usage`, `started`) inside an
+/// embedded core, for the kernel verbs that find no daemon once `accounts` is switched (accounts-s1). The same door as the
+/// daemon's: the method must exist and be open to the owner, and the lock is the one lock. Never creates a core.db and never
+/// migrates one.
+#[cfg(unix)]
+pub fn call_account_embedded(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<EmbeddedCall, Error> {
+    if !accounts::call::serves(method) {
+        return Err(Error::NoSuchMethod(format!(
+            "kith-core: {method} is not an account method"
+        )));
+    }
+    call::check(kith_api::Principal::Owner, method, params)?;
+    let layout = Layout::new(&paths.machine);
+    let empty = std::fs::metadata(&layout.db).map_or(true, |m| m.len() == 0);
+    if empty && !layout.marker.exists() {
+        return Ok(EmbeddedCall::NoCore(layout.dir));
+    }
+    match open_embedded(paths)? {
+        Embedded::Open(core) => core
+            .account_call(method, params)
+            .map(EmbeddedCall::Answered),
+        Embedded::DaemonRunning { .. } => Ok(EmbeddedCall::Busy),
+    }
+}
+
+/// Points the kernel's notes (a lock or write it could not do and carried on) at the core log for the rest of this
+/// process: a kernel verb that does not go through the core (`kernel accounts`) calls this itself.
+pub fn route_kernel_notes(paths: &Paths) {
+    log::route_kernel_notes(&paths.logs);
+}
+
+/// The holder's folder and its secret file for this machine, the secret made if it is missing. The service layer names
+/// them in the job that makes the holder the supervised root (`kith-holder supervise`), so the holder that job starts is
+/// the one the daemon says hello to.
+pub fn holder_files(paths: &Paths) -> Result<(std::path::PathBuf, std::path::PathBuf), Error> {
+    let layout = Layout::new(&paths.machine);
+    perms::ensure_dir(&layout.dir)?;
+    holder_link::secret(&layout)?;
+    Ok((layout.holder_dir, layout.holder_secret))
+}
+
+/// Runs a verb that touches NO core state (paths, engines, launch today) inside an embedded core, so the verbs already
+/// switched to Rust go through the core's lock and checks. A verb that reads or writes core state must use
+/// [`open_embedded`], which refuses instead of falling back. This helper goes when M0b/M0c give those verbs the
+/// method table; until then it runs the verb bare when no core can open here:
+/// - quietly, when a daemon holds the lock or there is no core.db yet (nothing is wrong);
+/// - with one line in `core.log` (in the logs folder, never stdout) when the open failed, so a damaged or swapped
+///   core.db does not go unnoticed until the daemon refuses to start.
+pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T, Via) {
+    // The verb's kernel rules note a lock or write they could not do (the accounts state, the settings migration) here.
+    log::route_kernel_notes(&paths.logs);
+    // A read-only verb never creates the core as a side effect (a sandbox's state folder stays as it was): the daemon,
+    // `kith migrate` or a first embedded open that needs it makes core.db, and only then do verbs pass through it.
+    if !Layout::new(&paths.machine).db.is_file() {
+        return (verb(), Via::Bare);
+    }
+    match open_embedded(paths) {
+        Ok(Embedded::Open(core)) => {
+            let out = verb();
+            drop(core);
+            (out, Via::Embedded)
+        }
+        Ok(Embedded::DaemonRunning { .. }) => (verb(), Via::Bare),
+        Err(e) => {
+            log::fell_back(&paths.logs, &e);
+            let line = e.to_string();
+            (verb(), Via::BareAfterError(line))
+        }
+    }
+}
+
+/// Calls a method of the table on the daemon of this machine, through the owner socket. `repeatable` says the method
+/// may run twice without harm (a read): a broken connection is then retried once, as a restarting daemon needs. A write
+/// is never sent a second time, whatever the connection did.
+///
+/// Where nothing answers (no daemon, a stale socket) the answer is [`Reached::NoDaemon`] and the caller runs the verb
+/// embedded as it did before; where a daemon answers but disagrees about the protocol or the method table it is
+/// [`Reached::Mismatch`] with a note, and nothing has run.
+pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable: bool) -> Reached {
+    owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
+}
+
+/// [`reach`] as the host: proves the host secret instead of the owner token, so the daemon labels the connection `Host`
+/// and answers the rows only the host may call (the `syncLease` writes, and `secrets.get`). The secret lives only in the
+/// memory of the `kith serve` process whose own daemon ([`Daemon::spawn_as_host`]) holds the core lock: a process
+/// without such a daemon (a CLI, a second serve) finds no secret and gets [`Reached::NoDaemon`]; a daemon that has no
+/// Host (a standalone one) or is too old to know the principal gets [`Reached::Mismatch`] with the reason. Only `kith
+/// serve` calls this, and the secret is never given to a run or child process.
+/// A write is never sent twice (pass `repeatable: false`).
+pub fn reach_as_host(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+    repeatable: bool,
+) -> Reached {
+    owner::reach_as_principal(
+        &Layout::new(&paths.machine),
+        kith_api::Principal::Host,
+        method,
+        params,
+        repeatable,
+    )
+}
+
+/// A line in the core log for the CLI's side of the front (a daemon that disagrees about the version or the method
+/// table), written once while it stays the same, so `kith paths` prints nothing about it.
+pub fn note_once(paths: &Paths, note: &str) {
+    log::note_once(&paths.logs, "front: ", &format!("front: {note}"));
+}
+
+pub(crate) fn start_with(layout: &Layout, migrations: &[Migration]) -> Result<Core, Error> {
+    match db::open(layout, migrations, Mode::Daemon)? {
+        Opened::Core(c) => Ok(*c),
+        Opened::Busy(h) => Err(busy(h)),
+    }
+}
+
+pub(crate) fn migrate_with(layout: &Layout, migrations: &[Migration]) -> Result<Migrated, Error> {
+    let core = start_with(layout, migrations)?;
+    Ok(Migrated {
+        from: core.migrated_from(),
+        to: core.schema_version(),
+    })
+}
+
+pub(crate) fn embedded_with(layout: &Layout, migrations: &[Migration]) -> Result<Embedded, Error> {
+    match db::open(layout, migrations, Mode::Embedded)? {
+        Opened::Core(c) => Ok(Embedded::Open(c)),
+        Opened::Busy(h) => Ok(Embedded::DaemonRunning {
+            pid: h.map(|h| h.pid),
+        }),
+    }
+}
+
+pub(crate) fn busy(holder: Option<lock::Holder>) -> Error {
+    let who = holder.map_or(String::new(), |h| format!(" (pid {})", h.pid));
+    Error::AlreadyRunning(format!(
+        "kith-core: another core{who} holds the lock; stop it first (kith serve stop)"
+    ))
+}

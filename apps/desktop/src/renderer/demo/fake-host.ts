@@ -420,6 +420,12 @@ export class FakeHost {
       }
       case 'newSession':
         return {}
+      case 'kernelStatus':
+        return { ok: true, bin: '/usr/local/bin/kith', problem: null, hint: null }
+      case 'newKithAgent': {
+        const bot = this.saveBot({ avatarColor: '', avatarShape: 'blob', avatarSource: 'auto', backend: 'claude', cwd: '', permission: 'auto', name: str('name'), description: str('description'), hqAgent: str('name') } as unknown as BotDraft)
+        return { agent: str('name'), botId: bot.id, bot }
+      }
       case 'createBot':
       case 'updateBot':
         return { bot: this.saveBot(b as unknown as BotDraft | GroupDraft) }

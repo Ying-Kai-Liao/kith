@@ -5,18 +5,22 @@
 #   kith doctor                     check the install: links, repos, agents, services, plugin, background jobs
 #   kith backup [--yes|--check|--nightly [off]]   everything to private GitHub repos, making the missing ones; --check says what isn't; --nightly at 03:00 (kith-state)
 #   kith backup list|add|remove ...                      deprecated aliases of kith account add|remove|order (kith-account); the accounts live in `kith account`
-#   kith account add|list|remove ...                     extra Claude / Codex logins for that chain, one folder each (kith-account)
+#   kith account add|list|remove ... [--json]            extra Claude / Codex logins for that chain, one folder each (kith-account); add --json returns the login command instead of running it
 #   kith account use <id> [--agent A] | --reset           the main account an agent's runs use; the chain sits on top of it
 #   kith ls [--json]                list agents (--json: name, description, home, model, effort, harness, for programs)
 #   kith send-to <service> "text" [--body FILE|-] [--profile P] [--for A] [--json]   push to a bot's webhook (grok); "sent" = a run started (success:true), not a reply; Grok caps 200 runs/h per routine, silently (kith-send-to)
 #   kith who <words>               which agent owns this work: skills, tools, "Not yours" lines searched (kith-who)
 #   kith <agent> [-p ID] [-m MODEL] [-e EFFORT] [-H HARNESS] [--permission-mode MODE|--bypass] [task...]  interactive without a task, one-shot with one
 #   kith <agent> --resume|-r THREAD   pick up in this terminal a thread started in the app, or a Claude session id; -r alone: pick from the recent ones; -c: the latest begun here (kith-sessions)
+#   kith <agent> --held [...]        interactive, in a held terminal that outlives this window (the core's holder); kith attach comes back. Not at a terminal: starts it detached and prints how to attach. One line and the default (--direct) when the holder is not reachable; exit 75 when the conversation is busy
+#   kith attach [--observer] [--takeover] [<agent>|<session>]   attach to a held terminal (Ctrl-\ detaches; KITH_DETACH_KEY changes it); no word lists them
 #   kith <agent> --print [...]      show the assembled system prompt, don't run
 #   kith <agent> --inspect          start one run and report what it loads (tools, MCP servers, skills, plugins)
 #   kith <agent> --info-json        for a program (the bot detail page): one JSON object, the agent's role, package, skills, tools,
 #                                 MCP servers, projects, schedules, cost and memory; read-only, local, each part fails soft (kith-info)
 #   kith <agent> set permission MODE   this Mac's permission mode for the agent (MODE '' forgets it); its next run uses it
+#   kith <agent> set harness H [--model M] | model M|default | effort E|default | call-model M | limit N|none | at-limit MODE   [--json]
+#                                 agent settings; --json: one object {agent,setting,value,previous,changed}; an error is {"ok":false,"error":".."} on stdout, same exit code
 #   kith <agent> --launch-json [--hold PID] [...]   for a program that starts the run itself (kith serve): one JSON object on stdout
 #                                 with everything the run needs (env, cwd, system_prompt, settings, MCP servers, directories,
 #                                 claude_args to give claude as-is). Claude and Codex (Codex: settings and claude_args null); ignores
@@ -39,15 +43,23 @@
 #                                 Nothing in it points at a temp file. The pinned snapshot (KITH_AGENT_DIR) is kept while --hold's
 #                                 pid (default: the caller) lives; pass the long-lived process's pid. KITH_VIA=<name> tags the cost ledger.
 #   kith versions|pin|unpin|rollback <agent> [VERSION]   agent package versions (kith-pkg)
-#   kith new <name> "<description>"                      start a new agent (kith-new)
+#   kith new <name> "<description>" [--json]                   start a new agent (kith-new)
+#   kith scratch [-H harness] [-m model] [task...]       the built-in agent for quick chats: a new thread each time, engine and model per chat, nothing kept long-term
+#   kith scratch thread <id> [--json]                    which engine and model a scratch thread runs on (--resume keeps them unless -H/-m say otherwise)
+#   kith scratch keep <thread-id> <name> [--json]        make a real agent of a scratch thread: its summary becomes the description and a first draft of agent.md (kith-scratch)
 #   kith install <github-link> [--as NAME]               add an agent; each agent is its own git repo
-#   kith update                                          update kith itself: git pull, brew upgrade or install.sh again, by how it was installed; desktop app: the download link (kith-self-update)
+#   kith install <github-link> [--as NAME] --preview [--json]   what it would do here, keeping nothing; --yes --json installs
+#   kith update self                                     update kith itself: git pull, brew upgrade or install.sh again, by how it was installed; desktop app: the download link (kith-self-update)
 #   kith update|push|commit <agent>|--all                pull from, push to or commit the agent's repo; update --all: kith first, then every agent
 #   kith history <agent> | kith restore <agent> <commit>   every good version is committed; restore any of them
 #   kith share <agent> [--public [--fresh]]              put it on GitHub; --fresh: a public copy without its history
-#   kith market [words]                                  agents people shared: pick any by number to install
+#   kith market [words] [--new] [--json]                 agents people shared: pick any by number to install (--json: the list)
 #   kith search [words] [--mine]                         find agents on GitHub (repos tagged hq-agent)
 #   kith deps <agent>|--all [--install]                  programs an agent runs that this Mac lacks; --install adds them
+#   kith <agent> connect|disconnect <connector> [--profile P] [--json]   grant the agent a connector of this Mac (kith-auth); kith <agent> connectors [--json]: what it has
+#   kith connectors [--json]                           what this Mac can connect: kernel MCP services and the host's connectors
+#   kith <agent> skill add <id> [--json]               link a skill: a name in github.com/anthropics/skills, or owner/repo[/path][@ref]; skill remove <id> unlinks it (kith-skills)
+#   kith <agent> skills [--json]  ·  kith skills available [--json]   the agent's skills (own, learned, linked); the anthropics/skills catalog
 #   kith auth [ls|grant|revoke|set ...]                  which agent may use which service, as which account (kith-auth)
 #   kith door prepare AGENT DOOR|sweep|ls               a guest's doors: prepare one's cache (owner), stop them, list them (kith-door)
 #   kith cost [agents|agent <name>|...]                  what the agents cost, from the usage ledger (kith-cost)
@@ -56,19 +68,28 @@
 #   kith cards history [-n N] [--json]                  your agents' approval cards, no inputs (an agent with cards: read only; kith-cards)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
 #   kith group add-bot|remove-bot <room> <bot>  ·  kith bot set <bot> [--wake-profile P] [--turn-timeout S]   a bot guest (Grok) in a group room; its wake settings (kith-group)
+#   kith people [ls|show <id>] [--json]  ·  kith invite add|ls|revoke [--json]   the people you invited, and their app invites (kith-people)
+#   kith bot ls|invite|revoke-invite|revoke|decide|auto-allow [--json]   bot guests and their invites, through the host (kith-group)
+#   kith connector ls|search|info|install|remove [--json]   the MCP connectors installed on this Mac, through the host (kith-connector)
 #   kith keys add <service> --profile <account|service/account> [--for AGENT]   hand Kith a key through a card in the app (default AGENT: serve); never typed here (kith-keys)
 #   kith link [NAME] [--accept [CODE] | --deny] | unlink NAME   pair this Mac with another of your account's (kith-serve)
 #   kith memory search <words> [--agent NAME|--all]      search what the agents wrote down (kith-memory)
 #   kith recall <query> [--project p] [--room r] [--thread t] [--tier 2|3|all] [--json]   search notes within what you may see (kith-recall)
 #   kith summarise --thread <id>                         (owner) write a thread's summary now; kith forget --thread <id> drops its summary and recall rows (kith-recall)
 #   kith memory index rebuild|update                     the local memory index behind recall (kith-recall)
-#   kith memory check|log|diff|undo|forget|tidy ...           the write checks and versions of memory files (kith-memory)
+#   kith memory check|log|diff|undo|rm|forget|tidy ...         the write checks and versions of memory files (kith-memory)
 #   kith project [ls [--json]|open ID|root|add ID [dir] [--in P] [--home [DIR]]]  projects: what each holds, its folder, its memory
 #   kith schedule [ls|add|rm|run|log|--install ...]      run agent tasks on a cron schedule (kith-sched)
 #   kith acp <agent> [--keep team,…]                     the agent as an ACP agent, one session per chat (kith-acp)
 #   kith bug "<title>" [--details TEXT|-]|list|show ID|send ID|publish ID   report a bug: the owner's stays on this Mac with the transcript; anyone else's is a redacted GitHub issue after a yes (kith-bug)
-#   kith migrate [--dry-run|--undo|--force]            move this Mac from ~/.hq and the dev.hq.* jobs to ~/.kith and dev.kith.*, reversibly (kith-migrate)
+#   kith migrate run [--dry-run|--undo|--force]        move this Mac from ~/.hq and the dev.hq.* jobs to ~/.kith and dev.kith.*, reversibly (kith-migrate)
+#   kith paths [--json|--sh]                           where Kith's folders are (lib/kith_paths.py; the core's paths module when switched)
+#   kith engines [--json] | install ID | login ID       the coding engines: installed or not, and the command to install or sign in (lib/kith_engines.py; the core's engines module when switched)
 #   kith serve start|stop|restart|status|relay [URL]     Kith's host on this Mac (launchd dev.kith.serve, port 19224); `kith` is the same command (kith-serve)
+#
+# Bare `kith backup`, `kith update` and `kith migrate` print their verbs and exit 2: each acts on real state, so none starts
+# on a missing word. The flagged forms (`kith backup --yes`, `kith migrate --dry-run`, ...) still work for jobs and scripts.
+# `self` is reserved in `kith update self`: it is always kith, never an agent called self.
 #
 # Every run is pinned to a snapshot of the agent's package (bin/kith-pkg): edits, by anyone, become the next run's
 # version once they pass checks; running sessions keep theirs. Shared services and their secrets come from
@@ -95,34 +116,65 @@ set -euo pipefail
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
-[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,60p' "$0" | sed 's/^#   //'; exit 0; }
+[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,77p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
-[[ $1 == migrate ]] && exec "$KITH/bin/kith-migrate" "${@:2}"
+if [[ $1 == migrate ]]; then
+  [[ $# -eq 1 ]] && { echo "usage: kith migrate run [--dry-run|--undo|--force]   move this Mac from ~/.hq to ~/.kith (--dry-run shows the steps first)
+       kith migrate --status               where it stands" >&2; exit 2; }
+  [[ $2 == run ]] && shift
+  exec "$KITH/bin/kith-migrate" "${@:2}"
+fi
+# Verbs the Rust core has taken over are listed in lib/core-switched.txt; kith_core_exec returns when this one isn't, or
+# the program is missing or older, and the Python below answers (docs/plans/core-design.md section 3).
+if [[ $1 == paths ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec paths --kernel "$KITH" "${@:2}" || true; exec python3 "$KITH/lib/kith_paths.py" "${@:2}"; fi
+if [[ $1 == engines ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec engines "${@:2}" || true; exec python3 "$KITH/lib/kith_engines.py" "${@:2}"; fi
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
 export KITH_ROOT=$KITH
 # Where things are, from the one place that knows (lib/kith_paths.py): KITH_HOME (~/kith) holding kernel/ and agents/ (each
 # agent: role/ its repo, memory/ data/ files/ its life), and ~/.kith (user.md, projects, this Mac's things). Exported
 # for agents' tools.
+# What the caller gave for the folders: the Rust launch starts from these, as this call did, not from the answer below.
+kith_in=(); for v in KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS; do [[ -n ${!v+x} ]] && kith_in+=("$v=${!v}"); done
 eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
 
 case $1 in
+  attach)             . "$KITH/lib/kith-core.sh"; kith_held_attach_cmd "${@:2}"; exit $? ;;   # held terminals (kith AGENT --held)
   update)             # no agent: kith itself; --all: kith first, then the agents (a failed kith update still lets the agents update, but the exit is non-zero)
-                      [[ $# -eq 1 || ( $# -eq 2 && $2 == --dev ) ]] && exec "$KITH/bin/kith-self-update" "${@:2}"
+                      [[ $# -eq 1 ]] && { echo "usage: kith update self           update kith itself (self --dev pulls a dev checkout)
+       kith update <agent>...      pull the agent(s) from upstream
+       kith update --all           kith first, then every agent" >&2; exit 2; }
+                      [[ $2 == self ]] && { shift 2; exec "$KITH/bin/kith-self-update" "$@"; }
+                      [[ $# -eq 2 && $2 == --dev ]] && exec "$KITH/bin/kith-self-update" --dev
                       if [[ $2 == --all ]]; then rc=0; "$KITH/bin/kith-self-update" || rc=$?; "$KITH/bin/kith-pkg" "$@" || rc=$?; exit $rc; fi
                       exec "$KITH/bin/kith-pkg" "$@" ;;
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
-  rollback)           shift; exec "$KITH/bin/kith-pkg" pin "$@" ;;
+  rollback)           shift
+                      # A cutover module's name (kith migrate status) goes back to Python's files; anything else is an agent.
+                      if [[ -n ${1:-} && $1 != -* ]] && "$KITH/bin/kith-migrate" is-module "$1" >/dev/null 2>&1; then exec "$KITH/bin/kith-migrate" rollback "$@"; fi
+                      exec "$KITH/bin/kith-pkg" pin "$@" ;;
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
+  connectors)         exec "$KITH/bin/kith-auth" "$@" ;;
+  skills)             exec "$KITH/bin/kith-skills" "$@" ;;
   door)               shift; exec "$KITH/bin/kith-door" "${@:---help}" ;;
-  cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;
+  cost)               shift; . "$KITH/lib/kith-core.sh"; kith_cost "${@:-agents}"; exit $? ;;   # the ported verbs are the core's when `cost` is switched
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
   allow)              shift; exec "$KITH/bin/kith-allow" "${@:---help}" ;;
   cards)              shift; exec "$KITH/bin/kith-cards" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;
   backup)             case ${2:-} in list|add|remove) shift; exec "$KITH/bin/kith-account" backup "$@" ;; esac
+                      [[ $# -eq 1 ]] && { echo "usage: kith backup run [--yes|--check|--nightly [off]]   everything to private GitHub repos
+       kith backup list|add|remove ...                the backup chain (kith account)" >&2; exit 2; }
+                      [[ $2 == run ]] && shift
                       shift; exec "$KITH/bin/kith-state" backup "$@" ;;
-  account)            shift; exec "$KITH/bin/kith-account" "${@:---help}" ;;
+  account)            shift
+                      # The state verbs are the Rust core's when `account-state` is switched (lib/core-switched.txt) and a
+                      # program lists it: the file until `kith migrate step accounts`, the core's table after. Same words,
+                      # same exit codes (golden/account-state.json). Otherwise the Python answers.
+                      case ${1:-} in
+                        list|ls|pick|out|clear|usage) . "$KITH/lib/kith-core.sh"; kith_core_exec account-state --kernel "$KITH" "$@" || true ;;
+                      esac
+                      exec "$KITH/bin/kith-account" "${@:---help}" ;;
   new)                shift; exec "$KITH/bin/kith-new" "$@" ;;
   remote)             shift; exec "$KITH/bin/kith-remote" "${@:---help}" ;;
   recall)             shift; exec "$KITH/bin/kith-recall" "${@:---help}" ;;
@@ -136,6 +188,8 @@ case $1 in
   wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   group|bot)          exec "$KITH/bin/kith-group" "$@" ;;
+  people|invite)      exec "$KITH/bin/kith-people" "$@" ;;
+  connector)          shift; exec "$KITH/bin/kith-connector" "${@:---help}" ;;
   keys)               shift; exec "$KITH/bin/kith-keys" "${@:---help}" ;;
   serve)              shift; exec "$KITH/bin/kith-serve" "${@:-help}" ;;
   link|unlink)        exec "$KITH/bin/kith-serve" "$@" ;;
@@ -152,9 +206,11 @@ agent_names() {
     if [[ -f ${d}role/agent.md || -f ${d}agent.md ]]; then basename "$d"; fi
   done | sort -u
 }
+# What can follow `kith` besides an agent: a typo of one of these is suggested too.
+SUBCOMMANDS="init doctor backup account ls send-to who versions pin unpin rollback new install update push commit history restore share market search deps auth door cost ask allow remote group bot people invite keys link unlink memory recall summarise forget project schedule wake acp bug migrate serve"
 # Names that start with, contain, or sit within edit distance 2 of the typed one, comma-separated.
 agent_suggest() {
-  agent_names | awk -v t="$1" '
+  { agent_names; printf '%s\n' $SUBCOMMANDS; } | sort -u | awk -v t="$1" '
     function lev(a, b,  i, j, la, lb, c, m, d) {
       la = length(a); lb = length(b)
       for (i = 0; i <= la; i++) d[i, 0] = i
@@ -185,41 +241,77 @@ for name, o in json.load(sys.stdin).items():
     home = o["dir"][:-5] if o["dir"].endswith("/role") else "%s/agents/%s" % (os.environ["KITH_STATE"], name)
     h = field(text, "harness") or "claude"
     out.append({"name": name, "description": d.group(1) if d else "", "home": home, "model": field(text, "model"),
-                "effort": field(text, "effort"), "harness": "claude" if h == "claude-code" else h})
+                "effort": field(text, "effort"), "harness": "claude" if h == "claude-code" else h,
+                "builtin": bool(o.get("builtin"))})   # ships with kith (scratch): never backed up or shared
 print(json.dumps(out))' <<<"$pkgs"
   exit 0
 fi
 if [[ $1 == ls ]]; then
+  [[ $# -eq 1 ]] || { echo "usage: kith ls [--json]" >&2; exit 2; }
   "$KITH/bin/kith-pkg" list --json | python3 -I -c '
 import json, re, sys
 for name, o in json.load(sys.stdin).items():
     m = re.search(r"^description:\s*(.*)$", open(o["dir"] + "/agent.md").read(), re.M)
-    print("%-10s %s" % (name, (m.group(1) if m else "")[:110]))'
+    print("%-10s %s" % (name, (m.group(1) if m else "")[:110] + ("  (built in)" if o.get("builtin") else "")))'
   exit 0
 fi
 
+# Not a word an agent can be called: an option or a path never starts a run.
+if [[ ! $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "kith: \"$1\" is not a command or an agent name (kith -h lists the commands, kith ls the agents)." >&2; exit 2
+fi
 agent=$1; shift
-[[ ${1:-} == --info-json ]] && exec "$KITH/bin/kith-info" "$agent"
 # kith AGENT set permission MODE: this Mac's permission mode for the agent (what kith install asks, what apps change).
 # kith AGENT set harness H [--model M]: the harness agent.md names (kith-pkg set-harness), in the package, every Mac.
+# kith AGENT set model M|default, set effort E|default: agent.md's model and effort (kith-pkg set-field); --json on any set.
 # MODE '' forgets it. Applies to the agent's next run from any entry point.
 # kith AGENT set call-model MODEL: the model its voice-call turns run on ('default' forgets the choice, 'own' keeps the
 # agent's own model).
 # kith AGENT set limit N|none: the agent's monthly limit in dollars at API prices; kith AGENT set at-limit ask|tell|hold:
 # what an owner's run does once the agent is at it (see kith_settings.py; kith-cost limit AGENT shows where it stands).
 if [[ ${1:-} == set ]]; then
-  [[ -n $(agent_dir "$agent") ]] || { echo "kith: no agent '$agent' (try: kith ls)" >&2; exit 1; }
-  if [[ ${2:-} == call-model && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set call_model "$agent" "$3"; fi
-  if [[ ${2:-} == limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set limit "$agent" "$3"; fi
-  if [[ ${2:-} == at-limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set at_limit "$agent" "$3"; fi
-  if [[ ${2:-} == harness && ( $# -eq 3 || ( $# -eq 5 && $4 == --model ) ) ]]; then exec "$KITH/bin/kith-pkg" set-harness "$agent" "${@:3}"; fi
-  [[ ${2:-} == permission && $# -eq 3 ]] || { echo "usage: kith $agent set permission MODE   (MODE '' forgets this Mac's choice)
+  # --json anywhere after `set`: one JSON object on stdout, {"agent","setting","value","previous","changed"} (+ what the setting
+  # needs); an error is {"ok": false, "error": "..."} on stdout with the same non-zero exit and nothing on stderr.
+  set_json=0 set_args=()
+  for a in "${@:2}"; do if [[ $a == --json ]]; then set_json=1; else set_args+=("$a"); fi; done
+  set -- set "${set_args[@]+"${set_args[@]}"}"
+  set_fail() { if [[ $set_json == 1 ]]; then python3 -c 'import json,sys; print(json.dumps({"ok": False, "error": sys.argv[1]}))' "$1"; else echo "$1" >&2; fi; exit "${2:-2}"; }
+  [[ -n $(agent_dir "$agent") ]] || set_fail "kith: no agent '$agent' (try: kith ls)" 1
+  jflag=(); [[ $set_json == 1 ]] && jflag=(--json)
+  # The four writes of kith_settings.py are the Rust core's when `settings` is switched (lib/core-switched.txt) and a program
+  # lists it; kith_core_exec returns otherwise, and the Python answers. Same files, same lock, same answers (golden/settings.json).
+  . "$KITH/lib/kith-core.sh"
+  settings_verb=""
+  if [[ $# -eq 3 ]]; then
+    case ${2:-} in
+      call-model) settings_verb=call_model ;;
+      limit) settings_verb=limit ;;
+      at-limit) settings_verb=at_limit ;;
+      permission) settings_verb=permission_mode ;;
+    esac
+  fi
+  if [[ -n $settings_verb ]]; then
+    kith_core_exec settings --kernel "$KITH" set "$settings_verb" "$agent" "$3" "${jflag[@]+"${jflag[@]}"}" || true
+    exec python3 "$KITH/lib/kith_settings.py" set "$settings_verb" "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"
+  fi
+  if [[ ${2:-} == harness && ( $# -eq 3 || ( $# -eq 5 && $4 == --model ) ) ]]; then exec "$KITH/bin/kith-pkg" set-harness "$agent" "${@:3}" "${jflag[@]+"${jflag[@]}"}"; fi
+  if [[ ( ${2:-} == model || ${2:-} == effort ) && $# -eq 3 ]]; then exec "$KITH/bin/kith-pkg" set-field "$agent" "$2" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
+  set_fail "usage: kith $agent set permission MODE   (MODE '' forgets this Mac's choice)
        kith $agent set call-model MODEL   (MODEL: sonnet, haiku, opus, own for the agent's own model, default to forget)
        kith $agent set limit N|none       (a monthly limit in dollars at API prices; none forgets it)
        kith $agent set at-limit MODE      (ask, tell or hold: what your own runs do at the limit; ask by default)
-       kith $agent set harness H [--model M]   (claude, codex, ...: the harness it runs on; drops a model of the old one)" >&2; exit 2; }
-  exec python3 "$KITH/lib/kith_settings.py" set permission_mode "$agent" "$3"
+       kith $agent set harness H [--model M]   (claude, codex, ...: the harness it runs on; drops a model of the old one)
+       kith $agent set model M|default    (agent.md's model; a Claude model needs a Claude harness; default removes the line)
+       kith $agent set effort E|default   (low, medium, high, xhigh or max; default removes the line)
+       add --json to any of them: one JSON object on stdout; an error is {\"ok\": false, \"error\": \"...\"} on stdout, same exit code" 2
 fi
+# kith AGENT connect|disconnect|connectors, skill add|remove, skills: connectors and skills as grants on the agent.
+case ${1:-} in
+  connect|disconnect|connectors|skill|skills)
+    [[ -n $(agent_dir "$agent") ]] || { echo "kith: no agent '$agent' (try: kith ls)" >&2; exit 1; }
+    case $1 in skill|skills) exec "$KITH/bin/kith-skills" "$1" "$agent" "${@:2}" ;; esac
+    exec "$KITH/bin/kith-auth" "$1" "$agent" "${@:2}" ;;
+esac
 src_pkg=$(agent_dir "$agent")
 if [[ -z $src_pkg ]]; then
   echo "kith: no agent named \"$agent\"." >&2
@@ -231,8 +323,28 @@ if [[ -z $src_pkg ]]; then
   if [[ -n $guess ]]; then echo "Did you mean: $guess?" >&2; else echo "Run kith ls to see your agents." >&2; fi
   exit 2
 fi
+[[ ${1:-} == --info-json ]] && exec "$KITH/bin/kith-info" "$agent"
+# An agent that ships with kith (scratch): the kernel's own folder, no repo, never backed up or shared. Keyed on where it
+# resolves, so a user's own agent of the same name is an ordinary one.
+builtin=0; [[ $src_pkg == "$KITH"/agents/* ]] && builtin=1
+if [[ $builtin == 1 && ${1:-} =~ ^(keep|thread)$ ]]; then exec "$KITH/bin/kith-scratch" "$agent" "$@"; fi
 [[ ${1:-} == --backups-json ]] && exec python3 "$KITH/lib/kith_accounts.py" backups-json "$agent" "$src_pkg/agent.md"
 [[ ${1:-} == --accounts-json ]] && exec python3 "$KITH/lib/kith_accounts.py" accounts-json "$agent" "$src_pkg/agent.md"
+# kith AGENT --launch-json: the Rust core assembles the launch when `launch` is switched (lib/core-switched.txt) and a
+# program is here, else the script below does. Before anything is asked of kith-auth, so a "just this once" grant is taken
+# by one side only. The agent exists and is no name of a `kith kernel launch` piece (prompt, settings, mcp).
+if [[ $agent != prompt && $agent != settings && $agent != mcp ]]; then
+  . "$KITH/lib/kith-core.sh"
+  if kith_launch_json_flag "$@"; then
+    # The Rust launch finds the folders itself from what the caller gave: put those back for it (kith_in, above).
+    unset KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS
+    for kv in ${kith_in[@]+"${kith_in[@]}"}; do export "$kv"; done
+    kith_core_exec launch "$agent" --kernel "$KITH" "$@" || true
+    # Not switched, or no program: the script goes on with its own answer.
+    eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
+    kith_env_sync
+  fi
+fi
 if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/agents/$agent"; fi
 
 # Who the run is for: KITH_PERSON, set by the entry point (the bridge, a schedule) and inherited by every helper, so
@@ -280,8 +392,14 @@ for k, v in r.get("env", {}).items():
 print("p_env_names=%s" % q(" ".join(env)))')"
   [[ $p_allowed == 1 ]] || { echo "kith: $p_why (kith-auth member $agent ${KITH_PERSON})" >&2; exit 3; }
   if [[ -n $p_budget ]]; then   # the membership's monthly cap, for the agent they reached (the caller, for a helper)
+    # A limit that can't be read is not "no limit": anyone but the owner stops here (NaN, inf, a sign or text all fail).
+    if [[ $p_owner == 0 && ! $p_budget =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      echo "kith: your spending limit on ${p_budget_agent:-$agent} can't be read; ask the owner to set it again" >&2; exit 3
+    fi
     # Fails closed for anyone but the owner: a spend that can't be read is not $0.
-    if ! spent=$(KITH_PERSON_WAS=$p_was "$KITH/bin/kith-cost" spent "$KITH_PERSON" "$p_budget_agent" 2>/dev/null); then
+    . "$KITH/lib/kith-core.sh"
+    [[ -n ${_kith_core_primed:-} ]] || kith_core_prime
+    if ! spent=$(KITH_PERSON_WAS=$p_was kith_cost spent "$KITH_PERSON" "$p_budget_agent" 2>/dev/null); then
       [[ $p_owner == 1 ]] && spent=0 || { echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost failed); not running without the budget check" >&2; exit 3; }
     elif [[ $p_owner == 0 && ! $spent =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
       echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost gave '$spent'); not running without the budget check" >&2; exit 3
@@ -334,7 +452,11 @@ shared=$home/memory/shared
 
 # The pinned package (prompt.md = agent.md body + PROTOCOL.md). If versioning itself breaks, run the live folder
 # rather than not at all.
-pkg=$("$KITH/bin/kith-pkg" resolve "$agent") && [[ -f $pkg/prompt.md ]] \
+# `resolve` is the Rust core's when `pkg` is switched (lib/core-switched.txt); kith_core_exec returns otherwise (or with
+# KITH_CORE=python) and the Python answers. The rest of kith-pkg stays Python.
+. "$KITH/lib/kith-core.sh"
+[[ -n ${_kith_core_primed:-} ]] || kith_core_prime   # one program lookup for the pkg call and the project_id calls below
+pkg=$({ kith_core_exec pkg --kernel "$KITH" resolve "$agent" || "$KITH/bin/kith-pkg" resolve "$agent"; }) && [[ -f $pkg/prompt.md ]] \
   || { echo "kith: $agent: package snapshot failed; running the live folder" >&2; pkg=$src_pkg; }
 export KITH_AGENT=$agent KITH_AGENT_DIR=$pkg KITH_AGENT_HOME=$home KITH_AGENT_VERSION=${pkg##*@}
 [[ $pkg == "$src_pkg" ]] && KITH_AGENT_VERSION=live
@@ -374,10 +496,12 @@ sys.exit("kith: MCP servers not connected: %s" % bad if bad else 0)'
 fi
 
 chain_args=("$@")   # for the chain walk below
-print=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper=""
+print=0 want_held=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper="" backup_model=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --print)      print=1; shift ;;
+    --held)       want_held=1; shift ;;
+    --direct)     want_held=0; shift ;;
     --launch-json) launch=1; shift ;;
     --hold)       hold=$2; shift 2 ;;
     --resume)     resume_thread=${2:?kith: --resume needs a thread id or a Claude session id}; shift 2 ;;
@@ -414,6 +538,14 @@ if [[ -n $resume_thread || -n $resume_pick ]]; then
   resolved=$(python3 "$KITH/bin/kith-sessions" resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit 1
   eval "$resolved"
   [[ -z $r_cwd ]] || cd "$r_cwd" || exit 1
+  # A built-in's engine and model are per thread: a resumed one keeps what it started with unless -H/-m say otherwise.
+  if [[ $builtin == 1 ]]; then
+    s_harness="" s_model="" s_effort=""
+    eval "$(python3 "$KITH/lib/kith_accounts.py" session-run "$r_sid" --sh 2>/dev/null)" || true
+    [[ -n ${KITH_HARNESS:-} || -z $s_harness ]] || KITH_HARNESS=$s_harness
+    [[ -n ${KITH_MODEL:-} || -z $s_model || ${KITH_HARNESS:-claude} != "$s_harness" ]] || KITH_MODEL=$s_model
+    [[ -n ${KITH_EFFORT:-} || -z $s_effort ]] || KITH_EFFORT=$s_effort
+  fi
 fi
 # A one-shot that no host is picking the account for (another run's `kith ask`, a schedule: KITH_AGENT or
 # KITH_BACKUP_CHAIN) walks the candidates `kith account pick` lists: accounts marked out are skipped, and a usage-limit failure
@@ -431,7 +563,7 @@ fi
 # it asks (a terminal run asks here; a one-shot or the host's launch says so and goes on: the host asks before the
 # turn with a card), tells and goes on, or holds only when this Mac chose hold (kith AGENT set at-limit hold). A spend
 # that can't be read is no reason to stop the owner. Anyone else's runs keep their membership budget above.
-if [[ $p_owner == 1 ]] && lim=$("$KITH/bin/kith-cost" limit "$agent" --sh 2>/dev/null) && [[ -n $lim ]]; then
+if [[ $p_owner == 1 ]] && lim=$(kith_cost limit "$agent" --sh 2>/dev/null) && [[ -n $lim ]]; then
   l_over=0 l_at=ask l_text=""
   eval "$lim"
   if [[ $l_over == 1 ]]; then
@@ -452,18 +584,21 @@ if [[ $p_owner == 1 ]] && lim=$("$KITH/bin/kith-cost" limit "$agent" --sh 2>/dev
   fi
 fi
 # Launch-time lookups are the kernel's own, whoever the run is for: a guest token in the environment would narrow them.
+# They are the Rust core's when `project-id` is switched. A guest's own calls never come through here (the token is dropped
+# above): they reach bin/project-id, which asks the host over the run socket and which the core does not replace.
+project_id() { ( unset KITH_RUN_TOKEN; kith_core_exec project-id --kernel "$KITH" "$@" || true; exec "$KITH/bin/project-id" "$@" ); }
 if [[ -n $project ]]; then
-  env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \
-    || { echo "kith: unknown project '$project'. Known: $(env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --list | cut -f1 | cut -d' ' -f1 | tr '\n' ' ')" >&2
+  project_id --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \
+    || { echo "kith: unknown project '$project'. Known: $(project_id --list | cut -f1 | cut -d' ' -f1 | tr '\n' ' ')" >&2
          echo "    register one with: $KITH/bin/project-id --register $project [dir]" >&2; exit 1; }
 else
-  project=$(env -u KITH_RUN_TOKEN "$KITH/bin/project-id" || true)
+  project=$(project_id || true)
 fi
 
 # The project's parents (closest first) and the home folders along the chain (bin/project-id --info).
-info=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --info "$project" || true)
+info=$([[ -n $project ]] && project_id --info "$project" || true)
 parents=$(printf '%s\n' "$info" | tail -n +2 | cut -f1 | paste -sd' ' -)
-held=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --children "$project" --all || true)
+held=$([[ -n $project ]] && project_id --children "$project" --all || true)
 
 # Body without frontmatter, then long-term memory: the load filter of docs/memory-context.md (lib/kith_facets.py, the
 # same one the host's runs get through KITH_ROOM). The owner's run: about them, the agent's memory, then the shared part
@@ -518,7 +653,7 @@ use_account() {   # use_account ID: the entry's env, or exit 4 with one line
   local be
   be=$(python3 "$KITH/lib/kith_accounts.py" launch-env "$agent" "$1" ${record[@]+"${record[@]}"}) || exit 4
   eval "$be"
-  harness=$backup_harness acct=$backup_account account_id=$1
+  harness=$backup_harness acct=$backup_account account_id=${1%%@*}   # the ledger and sessions know the login, not the entry's model
 }
 # The account a session was made under (the cost ledger's account_id; one it doesn't know is taken as it is): --resume runs
 # under it, a handed-on session (KITH_RESUME) is continued on it when it is a ready candidate.
@@ -558,6 +693,7 @@ if [[ -n ${r_sid:-} || -n ${KITH_RESUME:-} ]]; then
   fi
 fi
 [[ -n $backup && $harness != "$own" ]] && { KITH_MODEL=""; unset HQ_MODEL; }   # agent.md's model names a model of its own harness (HQ_MODEL: kith_env_sync would fill it back)
+[[ -n $backup && -n $backup_model ]] && { KITH_MODEL=$backup_model; unset HQ_MODEL; }   # an entry claude@sonnet names its own model (the guard below drops a Claude one on another harness)
 if [[ -n $backup_cfg_var ]]; then export "$backup_cfg_var=$backup_cfg_dir" KITH_ACCOUNT_VAR=$backup_cfg_var; fi
 # Which harness and login answer this run, for the cost ledger (kith-cost reads them from the hook and from `record`)
 export KITH_PROVIDER=$harness KITH_ACCOUNT=$acct KITH_ACCOUNT_ID=$account_id
@@ -567,7 +703,7 @@ export KITH_PROVIDER=$harness KITH_ACCOUNT=$acct KITH_ACCOUNT_ID=$account_id
 # A Claude model name means nothing to another harness (codex -m sonnet fails): that harness's default answers instead.
 if [[ $harness != claude ]]; then
   case ${KITH_MODEL:-} in
-    opus*|sonnet*|haiku*|claude-*|best|opusplan) echo "kith: $KITH_MODEL is a Claude model; $agent runs on $harness's default model (kith $agent set harness $harness --model M picks one)" >&2; KITH_MODEL=""; unset HQ_MODEL ;;
+    opus*|sonnet*|haiku*|fable*|claude-*|best|opusplan) echo "kith: $KITH_MODEL is a Claude model; $agent runs on $harness's default model (kith $agent set harness $harness --model M picks one)" >&2; KITH_MODEL=""; unset HQ_MODEL ;;
   esac
 fi
 export KITH_MODEL=${KITH_MODEL:-} KITH_EFFORT=${KITH_EFFORT:-$(field effort)} KITH_PROJECT=$project
@@ -619,8 +755,21 @@ unset KITH_LAUNCH_ASK_ID KITH_ASK_ID HQ_LAUNCH_ASK_ID HQ_ASK_ID
 sid_file=${KITH_LAUNCH_SID_FILE:-}
 unset KITH_LAUNCH_SID_FILE
 [[ $p_owner == 1 && -z ${KITH_PERSON:-} && -n $ask_id ]] && export KITH_ASK_ID=$ask_id
+# The engine table's row for $1 (an id or alias), from the Rust program's `kernel engines launch`; fails without one.
+engine_spec() {
+  local bin
+  bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+  "$bin" kernel version 2>/dev/null | grep -q '"engines"' || return 1
+  "$bin" kernel engines launch "$1" --json 2>/dev/null
+}
+engine_spec=""
 if [[ $launch -eq 1 ]]; then
-  case $harness in claude|codex) ;; *) echo "kith: $agent runs on $harness; --launch-json covers claude and codex only for now" >&2; exit $([[ -n $backup ]] && echo 4 || echo 1) ;; esac
+  # Any other engine the Rust core's table lists with an ACP mode (kith kernel engines launch): its row goes into the launch
+  # object. No program, or one from before the subcommand, is today's error: never a silent wrong launch.
+  case $harness in claude|codex) ;; *)
+    engine_spec=$(engine_spec "$harness") && [[ $(printf '%s' "$engine_spec" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(1 if d.get("acp") or d.get("registry") else 0)' 2>/dev/null) == 1 ]] \
+      || { echo "kith: $agent runs on $harness; --launch-json covers claude and codex only for now" >&2; exit $([[ -n $backup ]] && echo 4 || echo 1); } ;;
+  esac
   out_format="" resume=""; unset KITH_CLAUDE_ARGS HQ_CLAUDE_ARGS
   export KITH_VIA=${KITH_VIA:-terminal}
 fi
@@ -635,7 +784,9 @@ reads_others=$(python3 "$KITH/lib/kith_settings.py" reads-others "$pkg/capabilit
 # only Claude Code can enforce keep the run on Claude Code.
 if [[ $p_owner == 0 ]]; then
   perm_mode=$p_mode
-  [[ $harness == claude ]] \
+  # Which engines can hold a guest run to its rules is the engine table's (serves_guests: tool hooks, a permission mode and
+  # per-run MCP); today that is Claude Code alone. The rest of this branch builds Claude Code's rules.
+  [[ $harness == claude ]] || [[ $(engine_spec "$harness" | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("serves_guests") is True)' 2>/dev/null) == True ]] \
     || { echo "kith: $agent for ${KITH_PERSON}: runs for anyone but the owner need Claude Code (path rules), not $harness" >&2; exit $([[ -n $backup ]] && echo 4 || echo 3); }
   # Their reads are an allowlist (permissions.blockReadsOutsideWorkingDirectories for the file tools, sandbox denyRead of
   # the home folder for Bash, and onFailure: block on the read hook, which Claude Code has from 2.1.295: an older or unreadable version is no run at all.
@@ -696,7 +847,7 @@ learned="$src_pkg/skills/learned"$'\n'"$(cd "$src_pkg" && pwd -P)/skills/learned
 if [[ $harness == claude ]]; then
 # The owner at their own terminal (same test as `terminal` below, which the settings fill needs earlier): their plugins stay on.
 owner_terminal=0
-[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && -t 0 && -t 1 ]] && owner_terminal=1
+[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && ( ( -t 0 && -t 1 ) || $want_held -eq 1 ) ]] && owner_terminal=1
 plugins=$(claude plugin list --json 2>/dev/null || echo '[]')
 # Memory checks: before a Write/Edit/MultiEdit of a memory file the host's `kith memory hook pre` runs kith-mem's
 # checks and blocks a refused write with the reason; after it, `post` records the version. Files that aren't memory
@@ -717,7 +868,8 @@ else
   echo "kith: no kith binary found, so memory writes by $agent are not checked or versioned (kith serve start builds it)" >&2
   [[ $p_owner == 0 ]] && { echo "kith: runs for anyone but the owner need the memory check; not running $agent for ${KITH_PERSON}" >&2; exit 3; }
 fi
-[[ $p_owner == 1 ]] && writable="$home/memory"$'\n'"$home_real/memory" \
+# A built-in (scratch) keeps no long-term memory: its memory folder is not pre-approved for writes.
+[[ $p_owner == 1 ]] && { [[ $builtin == 1 ]] && writable="" || writable="$home/memory"$'\n'"$home_real/memory"; } \
   || writable=$(printf '%s\n' "$mem" "$(real "$mem")" "$shared" "$(real "$shared")" "$files" "$(real "$files")")
 # The run's outbox (KITH_RUN_OUTBOX, made by whoever started the run: kith-sched, kith serve): kith-send leaves its
 # messages there for the app. Anyone but the owner writes that one folder of <machine>/outbox and nothing else in it.
@@ -1048,9 +1200,13 @@ for d in os.environ["READ_DIRS"].split("\n"):
 # trace (a cd followed by an export), whatever a hook says, and each ask was a card to the owner. Bash is fenced by the
 # sandbox above.
 import shlex
+# python3 by absolute path (the first in an absolute directory of the launching PATH, else /usr/bin/python3): a bare name
+# would be looked up on the PATH of the hook run itself, which a guest shell can change.
+py3 = next((c for c in (os.path.join(d, "python3") for d in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(d))
+            if os.path.isfile(c) and os.access(c, os.X_OK)), "/usr/bin/python3")
 fence_roots = [x for d in os.environ["READ_DIRS"].split("\n") + [os.environ.get("WORK", ""), os.environ.get("CTMP", "")] if d for x in both(os.path.abspath(d))]
-fence = "out=$(python3 -I %s/lib/kith_readfence.py %s) || out=%s; printf %%s \"$out\"" % (
-    shlex.quote(os.environ["KITH_ROOT"]), " ".join("--root " + shlex.quote(r) for r in dict.fromkeys(fence_roots)),
+fence = "out=$(%s -I %s/lib/kith_readfence.py %s) || out=%s; printf %%s \"$out\"" % (
+    shlex.quote(py3), shlex.quote(os.environ["KITH_ROOT"]), " ".join("--root " + shlex.quote(r) for r in dict.fromkeys(fence_roots)),
     shlex.quote(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                                    "permissionDecisionReason": "the read check could not run, so this read is refused"}})))
 s["hooks"].setdefault("PreToolUse", []).append({"matcher": "Read|Grep|Glob|LS|NotebookRead", "hooks": [{"type": "command", "command": fence, "timeout": 30, "onFailure": "block"}]})
@@ -1128,7 +1284,7 @@ emit_launch() {
   local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE"
   ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
-    BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib \
+    BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib ENGINE_SPEC=$engine_spec \
     python3 -I -c '
 import json, os
 e = os.environ.get
@@ -1139,6 +1295,10 @@ env = {k: os.environ[k] for k in e("ENV_NAMES").split() if k in os.environ}
 settings = json.loads(e("SETTINGS"))
 nz = lambda k: e(k) or None
 claude = e("HARNESS") == "claude"
+# Another engine (not claude, not codex): its table row, so the host can start it over ACP. Additive; claude and codex print
+# what they always printed.
+spec = json.loads(e("ENGINE_SPEC") or "null")
+extra = {} if not spec else {"engine": spec["engine"], "acp": spec["acp"], "role_prompt": spec["role_prompt"], "registry": spec["registry"]}
 print(json.dumps({
     "version": 1, "agent": e("KITH_AGENT"), "agent_version": e("KITH_AGENT_VERSION"), "harness": e("HARNESS"), "cwd": os.getcwd(),
     "env": env, "system_prompt": e("PROMPT"), "settings": settings, "mcp_servers": json.loads(e("MCP"))["mcpServers"],
@@ -1149,14 +1309,14 @@ print(json.dumps({
     "cost_tag": {"agent": e("KITH_AGENT"), "version": e("KITH_AGENT_VERSION"), "model": nz("KITH_MODEL"), "effort": nz("KITH_EFFORT"),
                  "via": e("KITH_VIA"), "project": nz("KITH_PROJECT"), "person": nz("KITH_PERSON")},
     "claude_args": sys.argv[1:] if claude else None,
-    "backup": nz("BACKUP"), "provider": nz("KITH_PROVIDER"), "account": nz("KITH_ACCOUNT"), "account_id": nz("KITH_ACCOUNT_ID")}))' "$@" >&3
+    "backup": nz("BACKUP"), "provider": nz("KITH_PROVIDER"), "account": nz("KITH_ACCOUNT"), "account_id": nz("KITH_ACCOUNT_ID"), **extra}))' "$@" >&3
 }
 # Codex (or another harness the launch JSON covers): the same facts, without Claude's settings.
 if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi
 # An interactive run of the owner's in their own terminal: no task, a tty on both ends, not started by another run (and not
 # by the host, a schedule or an ask, which set KITH_VIA). That covers `kith AGENT`, -r, -r ID and -c.
 terminal=0
-[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && -t 0 && -t 1 ]] && terminal=1
+[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && ( ( -t 0 && -t 1 ) || $want_held -eq 1 ) ]] && terminal=1
 # Its origin is the agent's own chat with the owner in the app (kith-send leaves messages there, kith-call rings it); the
 # host makes both. No host or no such chat: nothing is set, and kith-send goes to Telegram as before.
 if [[ $terminal -eq 1 && -z ${KITH_RUN_OUTBOX:-} && -z ${KITH_BRIDGE_OUTBOX:-} && -z ${KITH_CALL_KEY:-} ]]; then
@@ -1173,6 +1333,7 @@ fi
 [[ $p_owner == 1 || $launch -eq 1 ]] || python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || true
 # Another harness: the same run, handed to its adapter (prompt in a file, directories and MCP configs as lists).
 if [[ $harness != claude ]]; then
+  [[ $want_held -eq 0 ]] || echo "kith: --held holds claude sessions only; $harness runs here (--direct)" >&2
   printf '%s\n' "$prompt" > "$runs/$$.prompt.md"
   run_dirs=$(for ((i = 1; i < ${#dirs[@]}; i += 2)); do printf '%s\n' "${dirs[i]}"; done)
   [[ $terminal -eq 1 || $(slash_off) == false ]] && gs=1 || gs=0
@@ -1262,9 +1423,45 @@ if [[ $harness == claude ]]; then
   elif [[ $cont == 0 || $fork == 1 ]]; then csid=$(python3 -I -c 'import uuid; print(uuid.uuid4())'); args+=(--session-id "$csid")
   fi
 fi
+# The conversation's writer lock (runtime-design section 4): a claude run with a known session id starts under kith-stub, which
+# takes <machine>/core/locks/<id> and keeps it until claude exits, whether or not a core answers. It runs claude as its child
+# (exec keeps this shell's pid, so the claim file and the run token's pid binding still name it, and claude descends from it).
+# Busy (75): another run holds the lock, and this one ends with the stub's one line. A run with no id (-c) or another harness
+# starts as before, unlocked. No kith-stub program (KITH_STUB_BIN, else beside the kith program, symlinks resolved) is not
+# yet a refusal: an owner's run must just work, and a dev checkout or an older install may have none. One stderr line and
+# the run goes on; KITH_REQUIRE_STUB=1 turns it into a refusal (an unlocked run breaks I11). Refusing becomes the default
+# in M3, before warm turns, once every install path is proved to ship the stub.
+stub=()
+if [[ -n $csid ]]; then
+  stub_bin=${KITH_STUB_BIN:-}
+  if [[ -z $stub_bin ]]; then
+    kbin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || kbin=""
+    # Beside the program where it really lives first: install.sh links only `kith` into ~/.local/bin, so the stub sits next to
+    # the link's target (cli/<version>/bin); then beside the path as given.
+    if [[ -n $kbin ]]; then
+      for d in "$(python3 -I -c 'import os, sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "$kbin" 2>/dev/null)" "$(dirname "$kbin")"; do
+        [[ -n $d && -x $d/kith-stub ]] && { stub_bin=$d/kith-stub; break; }
+      done
+    fi
+  fi
+  # The stub takes keys of a-z 0-9 . _ - only (exit 70 otherwise, which after exec could not be told from a lock error):
+  # an id outside that starts unlocked with the same one line as a missing stub.
+  if [[ ! $csid =~ ^[a-z0-9._-]+$ ]]; then
+    [[ ${KITH_REQUIRE_STUB:-} != 1 ]] || { echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed)" >&2; exit 1; }
+    echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed); this run is not locked" >&2
+  elif [[ -n $stub_bin && -x $stub_bin ]]; then
+    stub=("$stub_bin" --lock-dir "$KITH_MACHINE/core/locks" --key "$csid" --)
+  elif [[ ${KITH_REQUIRE_STUB:-} == 1 ]]; then
+    echo "kith: no kith-stub program beside kith, so this conversation cannot be locked; install the current kith (kith update self)" >&2
+    exit 1
+  else
+    echo "kith: no kith-stub program beside kith; this run is not locked against another run of the same conversation" >&2
+  fi
+fi
 # The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.
 claim_person=""; [[ $p_owner == 1 ]] || claim_person=$p_id
 if [[ $# -gt 0 ]]; then
+  [[ $want_held -eq 0 ]] || echo "kith: --held is for an interactive session; this task runs here (--direct)" >&2
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
   [[ -z $csid ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
@@ -1289,7 +1486,20 @@ if [[ $# -gt 0 ]]; then
       python3 "$KITH/bin/kith-permit" apply "$runs/$$.settings.json" || true
     fi
   fi
-  exec claude "${args[@]}" -p "$*"
+  exec ${stub[@]+"${stub[@]}"} claude "${args[@]}" -p "$*"
+fi
+# --held: the same launch, handed to the core to start in the holder (kith_held_launch exits when it opened or was busy, and
+# returns here to run it directly, saying why). The ask token below is for a run that descends from this shell: a held
+# engine does not, and the core would drop it from the env anyway.
+if [[ $want_held -eq 1 ]]; then
+  if [[ $p_owner == 1 && $nested -eq 0 ]]; then
+    . "$KITH/lib/kith-core.sh"
+    export KITH_TERMINAL_SESSION=1
+    [[ -z $r_sid ]] || export KITH_RESUMED_FROM=$r_from
+    kith_held_launch "$agent" "$csid" "${r_sid:-}" "${args[@]}" || true
+  else
+    echo "kith: --held is for the owner's own terminal; running here (--direct)" >&2
+  fi
 fi
 [[ -t 0 && -t 1 ]] || { echo "kith: no terminal for an interactive session; give a task (kith $agent \"...\") or run it in a terminal" >&2; exit 1; }
 # An interactive owner run gets an ask token too, for the PermissionDenied hook alone (its card in the apps): no prompt tool
@@ -1310,4 +1520,4 @@ fi
 # pass through). One-shots above stay exec.
 [[ $p_owner == 1 && $harness == claude ]] && export KITH_TERMINAL_SESSION=1
 [[ -n $r_sid ]] && export KITH_RESUMED_FROM=$r_from
-exec python3 "$KITH/bin/kith-sessions" run "$agent" -- claude "${args[@]}"
+exec python3 "$KITH/bin/kith-sessions" run "$agent" -- ${stub[@]+"${stub[@]}"} claude "${args[@]}"

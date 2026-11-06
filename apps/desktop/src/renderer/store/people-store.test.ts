@@ -25,7 +25,7 @@ function rig(opts: { failUnrevoke?: string } = {}) {
       if (opts.failUnrevoke) throw new Error(opts.failUnrevoke)
       revoked = false
     },
-    people: async () => [{ personId: 'sam', name: 'Sam', agents: {}, projects: [], joined: true, openInvites: 0, devices: [], autoBots: false, revoked }],
+    people: async () => [{ personId: 'sam', name: 'Sam', agents: {}, everyoneAgents: {}, createdAt: 1, projects: [], joined: true, openInvites: 0, devices: [], autoBots: false, revoked }],
     invites: async () => [],
   }
   const store = { connection: { kind: 'online' }, client, ready: async () => client } as unknown as BotStore
@@ -63,4 +63,44 @@ test('a failed Undo shows the host reason and keeps the banner', async () => {
   await model.restorePerson('sam')
   assert.equal(model.error, 'Sam was removed for good.')
   assert.equal(model.removed?.personId, 'sam')
+})
+
+test('parsePeople keeps a null createdAt and everyoneAgents apart from own agents', async () => {
+  const { parsePeople } = await import('@shared/people')
+  const [p] = parsePeople({ people: [{ personId: 'lee', name: 'Lee', agents: { ada: 'member' }, everyoneAgents: { bot: 'guest' }, createdAt: null, projects: [], devices: [], joined: false, openInvites: 0 }] })
+  assert.equal(p!.createdAt, null)
+  assert.deepEqual(p!.agents, { ada: 'member' })
+  assert.deepEqual(p!.everyoneAgents, { bot: 'guest' })
+})
+
+test('removing an agent sends only the person\'s own rows, never the everyone row', async () => {
+  const { PeopleModel } = await import('./people-store.ts')
+  const sent: Record<string, string>[] = []
+  const person = { personId: 'lee', name: 'Lee', agents: { ada: 'member', zed: 'guest' }, everyoneAgents: { bot: 'guest' }, createdAt: null, projects: [], joined: false, openInvites: 0, devices: [], autoBots: false, revoked: false }
+  const client = {
+    people: async () => [person],
+    invites: async () => [],
+    setPersonAccess: async (_id: string, agents: Record<string, string>) => { sent.push(agents) },
+  }
+  const model = new PeopleModel({ connection: { kind: 'online' }, client, ready: async () => client } as unknown as BotStore)
+  await model.load()
+  await model.removeAgent(model.people[0]!, 'zed')
+  assert.deepEqual(sent, [{ ada: 'member' }])
+})
+
+test('a failed load is an error to retry, not an empty list', async () => {
+  const { PeopleModel } = await import('./people-store.ts')
+  let fail = true
+  const client = {
+    people: async () => { if (fail) throw new Error('kith-auth unreadable'); return [] },
+    invites: async () => [],
+  }
+  const model = new PeopleModel({ connection: { kind: 'online' }, client, ready: async () => client } as unknown as BotStore)
+  await model.load()
+  assert.equal(model.loadFailed, true)
+  assert.equal(model.error, 'kith-auth unreadable')
+  fail = false
+  await model.load()
+  assert.equal(model.loadFailed, false)
+  assert.equal(model.error, null)
 })

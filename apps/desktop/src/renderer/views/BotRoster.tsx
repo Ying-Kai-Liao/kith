@@ -15,6 +15,7 @@ import { BotRow } from './BotRow'
 import { ComputerRosterSection } from './ComputerRosterSection'
 import { GuestPromptList } from './GuestPromptList'
 import { CliNoticeCard } from './CliNoticeCard'
+import { KernelNotice } from './KernelNotice'
 import { UpdateNeededCard } from './UpdateNeededCard'
 
 /** A bot being dragged among its computer's bots, and the order it has made so far. */
@@ -165,9 +166,13 @@ export function BotRoster({ roster, compact, onContext }: {
   }
 
   const sections = roster.sections.map(({ computer, store, items }, index) => {
-    const mismatch = store.mismatch && !compact ? <StoreContext.Provider value={store}><UpdateNeededCard /></StoreContext.Provider> : null
-    const cli = store === app.local && !compact ? <CliNoticeCard /> : null
-    const notice = mismatch || cli ? <>{mismatch}{cli}</> : null
+    const notice = !compact ? (
+      <>
+        {store.mismatch ? <StoreContext.Provider value={store}><UpdateNeededCard /></StoreContext.Provider> : null}
+        {store === app.local ? <CliNoticeCard /> : null}
+        {store.isOwner ? <KernelNotice store={store} /> : null}
+      </>
+    ) : null
     const rows = ordered(computer.id, items).map((item) => row(item, items))
     const prompts = compact ? null : <GuestPromptList store={store} />
     if (!roster.grouped) return <div key={computer.id}>{notice}{prompts}{rows}</div>

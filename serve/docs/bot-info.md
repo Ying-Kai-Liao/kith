@@ -157,6 +157,8 @@ layer, `MEMORY.md`, `people/mum.md`; anything that isn't a Markdown memory file 
 | `kithMemoryHistory` | `shared`, `name`, `limit?` (50, max 500) | `{ name, shared, versions: [version] }`, newest first |
 | `kithMemoryDiff` | `shared`, `name`, `from?`, `to?` (version ids) | `{ from, to, diff }`; by default the version before the newest to the newest; `diff` has `- `/`+ ` lines, `  ` context, `…` gaps |
 | `kithMemoryRestore` | `shared`, `name`, `version` | `{ version, warnings }`: the file becomes that version's content, as a new version (cause `restore`) |
+| `kithMemoryDelete` | `shared`, `name` | `{ version }`: the file is removed and the deletion is a version (cause `delete`), so `kithMemoryRestore` brings it back. MEMORY.md is refused. Owner only (as `kith memory rm`) |
+| `kithMemoryForget` | `text` | `{ forgotten: true, text }`: no agent or tidy writes the fact again (as `kith memory forget`). Owner only |
 | `kithMemoryTidyUps` | `limit?` (20, max 100) | `{ tidyUps: [tidyUp] }`, newest first |
 | `kithMemoryUndoTidy` | `id` | `{ restored: [label], refused: [{ file, reason }], undone }` |
 | `kithMemoryPromotions` | `status?` (`pending` default, `declined`, `approved`, `stale`), `limit?` | `{ promotions: [{ id, file, from, audience, room, projects, reason, asks, status, at, decidedAt }] }` |
@@ -192,6 +194,9 @@ The thread's prose summary (`docs/memory-context.md`, "Summary") reaches the app
 - **Setting.** `rowShowsSummary` (bool, default `false`; `false` for bots stored without it) is on every bot the host sends.
   Set it with `updateBot` `{ id, rowShowsSummary: true|false }` (owner only, like every bot setting). The host only stores it:
   an app shows `summary.text` as the row when the setting is on and a summary exists, else the first message.
+  A bot's own row in the roster has no thread to read it from, so the bot carries `lastSummary` (the newest thread summary,
+  `null` when none): the owner gets every audience, an invited person only `person:<self>` or `shared` (never on a bot
+  guest's chat). An app shows it in place of `lastMessage` when `rowShowsSummary` is on.
 - **Citation.** `resolveCitation` `{ citation: "kith://thread/<id>#entry=<seq>" }` (`<id>` is a thread's root entry id, or
   `main:<bot id>` for a bot's own chat) returns `{ thread: { id, botId, rootId }, seq, at, entries }` (`at` is the id of the
   entry with that `seq` when it is among `entries`; a thread's newest 500, or 40 around `seq` in a main chat). For anyone

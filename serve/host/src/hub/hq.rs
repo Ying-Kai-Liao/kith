@@ -44,6 +44,7 @@ pub fn start(hub: &Arc<Hub>) {
     if cfg!(test) {
         return;
     }
+    crate::remote::members::start_mirror(hub);
     let hub = hub.clone();
     tokio::spawn(async move {
         loop {
@@ -82,6 +83,10 @@ impl Hub {
         let mut done = Synced::default();
         let rows = self.store.bots()?;
         for agent in agents {
+            // The built-in agent's folder is made when it first runs; its bot is there before that.
+            if agent.is_builtin() && !Path::new(&agent.home).is_dir() {
+                std::fs::create_dir_all(&agent.home)?;
+            }
             if !agent.runnable() {
                 tracing::debug!(agent = %agent.name, harness = ?agent.harness, "hq agent is not a Claude agent; no bot");
                 continue;
@@ -113,6 +118,9 @@ impl Hub {
             }
             if row.config.cwd != agent.home {
                 patch.insert("cwd".into(), agent.home.clone().into());
+            }
+            if row.config.builtin != agent.is_builtin() {
+                patch.insert("builtin".into(), agent.is_builtin().into());
             }
             // Chats with hq bots auto-thread (a task per burst) like any bot's; older bots were created with it off.
             if self.store.kv_get(&tasks_key(&row.config.id)).is_none() {
@@ -156,8 +164,8 @@ impl Hub {
 /// Its chat auto-threads: each burst of messages is a task in a thread of its own, as in any bot's chat.
 fn new_bot(agent: &HqAgent) -> BotConfig {
     serde_json::from_value(json!({
-        "id": "", "name": agent.name, "description": agent.description, "backend": "claude", "cwd": agent.home,
-        "hqAgent": agent.name, "permission": "default", "connectors": [], "skills": [],
+        "id": "", "name": if agent.is_builtin() { "Quick chats" } else { agent.name.as_str() }, "description": agent.description, "backend": "claude", "cwd": agent.home,
+        "hqAgent": agent.name, "permission": "default", "connectors": [], "skills": [], "builtin": agent.is_builtin(),
     }))
     .expect("a valid bot")
 }
@@ -207,8 +215,27 @@ mod tests {
         assert!(bot.model.is_none() && bot.connectors.is_empty() && bot.skills.is_empty());
 
         hub.update_bot(&json!({"id": bot.id, "name": "Home", "pinned": true, "notify": false, "permission": "auto",
-            "model": "opus", "hqAgent": "other", "backend": "codex"}))
+            "hqAgent": "other"}))
             .unwrap();
+        // An engine, model, effort or tool change is the CLI's: refused with the command, not dropped. An echo passes.
+        for (patch, command) in [
+            (json!({"model": "opus"}), "kith house set model"),
+            (json!({"backend": "codex"}), "kith house set harness"),
+            (json!({"modelOptions": {"effort": "high"}}), "kith house set effort"),
+            (json!({"fastMode": true}), "no Fast mode"),
+            (json!({"connectors": ["github"]}), "kith house connect"),
+            (json!({"skills": ["pdf"]}), "kith house skill add"),
+        ] {
+            let mut patch = patch;
+            patch["id"] = json!(bot.id);
+            let e = hub.update_bot(&patch).unwrap_err().to_string();
+            assert!(e.contains(command), "{patch}: {e}");
+        }
+        hub.update_bot(
+            &json!({"id": bot.id, "backend": "claude", "model": null, "modelOptions": {}, "fastMode": false,
+            "connectors": [], "skills": []}),
+        )
+        .unwrap();
         let done = hub.apply_hq_agents(&[agent(&dir, "house", "keeps the house tidy")]).unwrap();
         assert!(done.created.is_empty(), "never a second bot: {done:?}");
         let all = bots(&hub);
@@ -265,25 +292,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_claude_agents_get_bots() {
-        // What `hq ls --json` prints: an agent from an older hq has no harness, which means Claude; one this version
+    async fn only_agents_the_host_can_start_get_bots() {
+        // What `hq ls --json` prints: an agent from an older hq has no harness, which means Claude; Codex and the engines of
+        // the table with an ACP mode run (hermes and dsh have none); one this version
         // doesn't know is never started.
         let listed: Vec<HqAgent> = serde_json::from_str(
             r#"[{"name":"a","description":"","home":"/x"},{"name":"b","description":"","home":"/x","harness":"claude"},
-               {"name":"c","description":"","home":"/x","harness":"codex"},{"name":"d","description":"","home":"/x","harness":"gemini"}]"#,
+               {"name":"c","description":"","home":"/x","harness":"codex"},{"name":"d","description":"","home":"/x","harness":"frobnicator"}]"#,
         )
         .unwrap();
-        assert_eq!(listed.iter().map(HqAgent::runnable).collect::<Vec<_>>(), [true, true, false, false]);
+        assert_eq!(listed.iter().map(HqAgent::runnable).collect::<Vec<_>>(), [true, true, true, false]);
 
         let (hub, dir) = hub();
         let mut codex = agent(&dir, "coder", "");
-        codex.harness = Some(hq::Harness::Codex);
+        codex.harness = Some(hq::Harness::Hermes);
         let house = agent(&dir, "house", "");
         let done = hub.apply_hq_agents(&[codex.clone(), house.clone()]).unwrap();
         assert_eq!(done.created, ["house"], "no bot that would fail on every message");
         // An agent that switches to another harness is taken off the roster like one that left hq.
         let mut moved = house;
-        moved.harness = Some(hq::Harness::Codex);
+        moved.harness = Some(hq::Harness::Dsh);
         let done = hub.apply_hq_agents(&[codex, moved]).unwrap();
         assert_eq!(done.hidden, ["house"]);
     }

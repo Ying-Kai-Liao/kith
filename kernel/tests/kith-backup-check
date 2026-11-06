@@ -174,8 +174,8 @@ OUT=$("$KITH" echo --launch-json --backup codex:deep 2>/dev/null)
 check "codex:<name>: CODEX_HOME set" "is \"(d['env']['CODEX_HOME'], d['account'])\" \"('$M/accounts/codex/deep', 'deep')\""
 OUT=$("$KITH" echo --launch-json -H codex 2>/dev/null); rc=$?
 check "launch-json for an agent that runs on codex no longer refuses" "[ $rc = 0 ] && is \"(d['harness'], d['backup'])\" \"('codex', None)\""
-"$KITH" echo --launch-json -H pi >/dev/null 2>&1; rc=$?
-check "other harnesses are still refused" "[ $rc = 1 ]"
+"$KITH" echo --launch-json -H nosuchengine >/dev/null 2>&1; rc=$?
+check "an engine the table does not know is still refused" "[ $rc = 1 ]"
 
 # claude-api: the key never shows; the helper does
 "$KERNEL/bin/kith-auth" grant echo anthropic anthropic/main >/dev/null 2>&1

@@ -1,0 +1,2377 @@
+[
+ {
+  "name": "delegation-limits-and-cap-default",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [],
+  "run": [
+   [
+    "limits"
+   ],
+   [
+    "cap"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-cap-number",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 12.5}}"
+   }
+  ],
+  "run": [
+   [
+    "cap"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-cap-fraction",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 0.25}}"
+   }
+  ],
+  "run": [
+   [
+    "cap"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-cap-none",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": \"none\"}}"
+   }
+  ],
+  "run": [
+   [
+    "cap"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-cap-zero-is-unusable",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 0}}"
+   }
+  ],
+  "run": [
+   [
+    "cap"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-cap-broken-file",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{not json"
+   }
+  ],
+  "run": [
+   [
+    "cap"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-cap-bad-sibling-key",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 9}, \"backups\": \"x\"}"
+   }
+  ],
+  "run": [
+   [
+    "cap"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-parked",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/ask-1.parked",
+    "text": ""
+   }
+  ],
+  "run": [
+   [
+    "parked",
+    "ask-1"
+   ],
+   [
+    "parked",
+    "ask-2"
+   ],
+   [
+    "parked",
+    "bad/id"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-record-read",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/new.reg",
+    "text": "{\"asked\": \"echo\", \"chain\": \"c1\", \"hop\": 2, \"cross_hops\": 1, \"crossed\": true, \"cost\": 0.5, \"cost_base\": 1.0, \"state\": \"capped\", \"reply_to\": {\"session\": \"s\", \"ask\": \"p\"}}"
+   },
+   {
+    "write": "home/.kith/live/ask/old.reg",
+    "text": "{\"session\": \"s-old\", \"asked\": \"echo\"}"
+   },
+   {
+    "write": "home/.kith/live/ask/old-done.reg",
+    "text": "{\"session\": \"s-old\", \"done\": true}"
+   },
+   {
+    "write": "home/.kith/live/ask/bare.reg",
+    "text": "{}"
+   },
+   {
+    "write": "home/.kith/live/ask/damaged.reg",
+    "text": "{not json"
+   },
+   {
+    "write": "home/.kith/live/ask/listy.reg",
+    "text": "[1,2]"
+   }
+  ],
+  "run": [
+   [
+    "record",
+    "new"
+   ],
+   [
+    "record",
+    "old"
+   ],
+   [
+    "record",
+    "old-done"
+   ],
+   [
+    "record",
+    "bare"
+   ],
+   [
+    "record",
+    "damaged"
+   ],
+   [
+    "record",
+    "listy"
+   ],
+   [
+    "record",
+    "missing"
+   ],
+   [
+    "record",
+    "../x"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-root",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ],
+   [
+    "check",
+    "--crossing"
+   ],
+   [
+    "check",
+    "--id",
+    "ask-9"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-hop-6",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 5, \"cross_hops\": 0, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-hop-7",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 6, \"cross_hops\": 0, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-hop-8",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 7, \"cross_hops\": 0, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-hop-9",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 8, \"cross_hops\": 0, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-hop-10",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 9, \"cross_hops\": 0, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cross-1",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 0, \"cross_hops\": 0, \"crossed\": false, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check",
+    "--crossing"
+   ],
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cross-2",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 1, \"crossed\": true, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check",
+    "--crossing"
+   ],
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cross-3",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 2, \"crossed\": true, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check",
+    "--crossing"
+   ],
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cross-4",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 3, \"cross_hops\": 3, \"crossed\": true, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check",
+    "--crossing"
+   ],
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-local-hops-ignore-crossed-ones",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 10, \"cross_hops\": 2, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-under-default-cap",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 2.9}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-under-cap-none",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 2.9}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": \"none\"}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-under-cap-2.5",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 2.9}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 2.5}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-at-default-cap",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 3.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-at-cap-none",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 3.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": \"none\"}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-at-cap-2.5",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 3.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 2.5}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-over-default-cap",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 7.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-over-cap-none",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 7.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": \"none\"}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-over-cap-2.5",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 7.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/other.reg",
+    "text": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 2.5}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-cap-raised",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 6.0}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 10}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-old-records-count-nothing",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/old.reg",
+    "text": "{\"session\": \"s\"}"
+   },
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"old\", \"hop\": 1, \"cross_hops\": 0, \"cost\": null}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-cap-fraction-fires",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 1e-05}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 1e-05}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-cap-million",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2000000.0}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 1234567}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-base-carried",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 1, \"cost\": 1.0, \"cost_base\": 4.5}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-cost-base-over",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 1, \"cost\": 1.0, \"cost_base\": 4.5}"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": 5}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-parent-old-registration",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"session\": \"s-old\"}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ],
+   [
+    "check",
+    "--crossing"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-parent-damaged",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{nope"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-parent-list",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "[]"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-parent-missing",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "nobody"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-parent-unsafe-id",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "../p"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-parent-damaged-falls-to-handed-chain",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "3"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{nope"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-damaged-record-in-the-chain",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}"
+   },
+   {
+    "write": "home/.kith/live/ask/junk.reg",
+    "text": "{x"
+   },
+   {
+    "write": "home/.kith/live/ask/q.reg",
+    "text": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 2.5}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-defaults",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ],
+   [
+    "check",
+    "--crossing"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-full",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "4",
+   "KITH_ASK_CROSS": "2",
+   "KITH_ASK_COST": "1.5",
+   "KITH_ASK_FROM": "ask-far"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cross-3",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "3",
+   "KITH_ASK_CROSS": "3"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cross-0-hop-9",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "9",
+   "KITH_ASK_CROSS": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-8-cross-0",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "8",
+   "KITH_ASK_CROSS": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-at-cap",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "5"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-under-cap",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "4.999"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-over-cap-none",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "500"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"delegation\": {\"chain_cost_cap_usd\": \"none\"}}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-text",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "x"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cross-text",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_CROSS": "1.5"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-text",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "lots"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-negative",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "-1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-65",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "65"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cross-65",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_CROSS": "65"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-negative",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "-0.5"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-nan",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "nan"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-inf",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "inf"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-1e9",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "1e9"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-underscore",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "1_0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-spaced",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": " 3 "
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-plus",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "+2"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-huge",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "9999999999999999999999999999999999999999"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cost-exp",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_COST": "1e1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-hop-empty-uses-default",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": ""
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-cross-empty-uses-default",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_CROSS": ""
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-handed-unsafe-chain",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_CHAIN": "a/b",
+   "KITH_ASK_HOP": "99"
+  },
+  "setup": [],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ },
+ {
+  "name": "delegation-check-parent-wins-over-handed",
+  "command": "delegation",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/delegation-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "delegation",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_ASK_ID": "p",
+   "KITH_ASK_CHAIN": "far",
+   "KITH_ASK_HOP": "7"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/ask/p.reg",
+    "text": "{\"chain\": \"mine\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 0.0}"
+   }
+  ],
+  "run": [
+   [
+    "check"
+   ]
+  ]
+ }
+]

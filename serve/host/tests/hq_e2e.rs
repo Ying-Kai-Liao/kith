@@ -600,6 +600,89 @@ async fn permission_is_written_through_to_hq_and_read_back() {
     assert_eq!(std::fs::read_to_string(s.home.join("permission")).unwrap(), "plan");
 }
 
+/// What the editor does for an hq agent's own model, effort and harness: `kithSetSetting` goes through `kith … --json`,
+/// kith's refusal comes back as the error, and the answer is the info read back.
+#[tokio::test]
+async fn model_effort_and_harness_are_written_through_to_kith_and_read_back() {
+    let s = start().await;
+    let id = s.house().await["id"].as_str().unwrap().to_owned();
+    let set = |setting: &str, value: &str| json!({"botId": id, "setting": setting, "value": value});
+    let sets = || -> Vec<Value> {
+        std::fs::read_to_string(s.home.join("calls.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str::<Value>(l).unwrap()["args"].clone())
+            .filter(|a| a[1] == "set")
+            .collect()
+    };
+
+    let got = s.host.call("kithSetSetting", set("model", "opus")).await;
+    assert_eq!(got["info"]["model"], "opus", "the answer is kith's info, read back");
+    let got = s.host.call("kithSetSetting", set("effort", "high")).await;
+    assert_eq!(got["info"]["effort"], "high");
+    assert_eq!(got["info"]["model"], "opus");
+    let again = s.host.call("kithSetSetting", set("effort", "high")).await;
+    assert_eq!(again["info"]["effort"], "high", "the same value again is not an error");
+    assert_eq!(sets()[0], json!(["house", "set", "model", "opus", "--json"]));
+
+    // kith's refusal text, not the command line around it.
+    let why = s.host.refused("kithSetSetting", set("effort", "loud")).await;
+    assert!(why.contains("is not one of low, medium"), "{why}");
+    assert!(!why.contains("failed ("), "{why}");
+    let why = s.host.refused("kithSetSetting", set("harness", "codex")).await;
+    assert!(why.contains("a Claude model needs a Claude harness"), "{why}");
+    let moved = s
+        .host
+        .call("kithSetSetting", json!({"botId": id, "setting": "harness", "value": "codex", "model": "default"}))
+        .await;
+    assert_eq!(moved["info"]["harness"], "codex");
+    assert!(moved["info"]["model"].is_null());
+    assert_eq!(sets().last().unwrap(), &json!(["house", "set", "harness", "codex", "--model", "default", "--json"]));
+
+    s.host.call("kithSetSetting", set("effort", "default")).await;
+    let info = s.host.call("kithInfo", json!({"botId": id, "refresh": true})).await;
+    assert!(info["info"]["effort"].is_null(), "default forgets it");
+
+    for bad in [set("permission", "plan"), set("model", "--bad"), set("model", "two words"), set("model", "")] {
+        s.host.refused("kithSetSetting", bad).await;
+    }
+}
+
+/// "New bot": `newKithAgent` makes the agent through `kith new … --json` and the settings through `set`, and the answer
+/// carries its bot with the look the app picked; `kernelStatus` says the kernel runs.
+#[tokio::test]
+async fn a_new_bot_is_a_kith_agent_made_through_the_cli() {
+    let s = start().await;
+    let status = s.host.call("kernelStatus", json!({})).await;
+    assert_eq!(status["ok"], true, "{status}");
+    assert!(status["problem"].is_null());
+
+    let made = s
+        .host
+        .call(
+            "newKithAgent",
+            json!({"name": "trip-pal", "description": "Plans trips", "model": "opus", "effort": "high",
+                   "pinned": true, "avatarColor": "#112233"}),
+        )
+        .await;
+    assert_eq!(made["agent"], "trip-pal");
+    let id = made["botId"].as_str().expect("the roster has the new agent's bot");
+    assert_eq!(made["bot"]["hqAgent"], "trip-pal");
+    assert_eq!(made["bot"]["pinned"], true);
+    assert_eq!(made["bot"]["avatarColor"], "#112233");
+    assert!(s.host.roster().await.iter().any(|b| b["id"] == id), "the roster has the new bot");
+
+    let calls: Vec<Value> = s.lines("calls.jsonl").into_iter().map(|c| c["args"].clone()).collect();
+    let pos = |args: Value| calls.iter().position(|c| *c == args).unwrap_or_else(|| panic!("no call {args}"));
+    let new = pos(json!(["new", "trip-pal", "Plans trips", "--json"]));
+    let model = pos(json!(["trip-pal", "set", "model", "opus", "--json"]));
+    let effort = pos(json!(["trip-pal", "set", "effort", "high", "--json"]));
+    assert!(new < model && model < effort);
+
+    let why = s.host.refused("newKithAgent", json!({"name": "trip-pal", "description": "again"})).await;
+    assert!(why.contains("there is already an agent called"), "{why}");
+}
+
 /// A message spoken in a call: its turn gets the voice note and runs on the call model, the chat keeps the spoken
 /// words only, and a typed message after it is back on the agent's own model, in the same session.
 #[tokio::test]
@@ -687,16 +770,26 @@ async fn the_hosts_own_copy_never_overrides_hq() {
     let id = s.house().await["id"].as_str().unwrap().to_owned();
     // hq bots start with tasks on; this test reads the main chat.
     s.host.call("updateBot", json!({"id": id, "tasks": false})).await;
-    let edited = s
-        .host
-        .call(
-            "updateBot",
-            json!({"id": id, "model": "opus", "modelOptions": {"effort": "high"}, "fastMode": true, "permission": "auto"}),
-        )
-        .await;
+    // Model, effort and Fast mode are refused with the kith command that sets them, not dropped.
+    for (patch, command) in [
+        (json!({"model": "opus"}), "kith house set model"),
+        (json!({"modelOptions": {"effort": "high"}}), "kith house set effort"),
+        (json!({"fastMode": true}), "no Fast mode"),
+    ] {
+        let mut body = patch.clone();
+        body["id"] = json!(id);
+        let why = s.host.refused("updateBot", body).await;
+        assert!(why.contains(command), "{patch}: {why}");
+    }
+    // The permission is not the host's either, but an edit of it is only left unstored.
+    let edited = s.host.call("updateBot", json!({"id": id, "permission": "auto"})).await;
     assert_eq!(edited["bot"]["permission"], "default", "the edit of an hq bot's permission isn't stored");
     assert_eq!(edited["bot"]["fastMode"], false);
     assert!(edited["bot"]["model"].is_null());
+    // A full-row echo of what the host shows still goes through.
+    let echo = s.host.call("updateBot", edited["bot"].clone()).await;
+    assert_eq!(echo["bot"]["permission"], "default");
+    assert!(echo["bot"]["model"].is_null());
 
     s.host.reply(&id, "hello").await;
     let launch = &s.launches()[0];

@@ -1,0 +1,54 @@
+#!/bin/sh
+# The holder owns processes and decides nothing (docs/plans/runtime-design.md section 1). It must link neither
+# kith-core nor kith-kernel, nor any other crate of this repo: a holder that cannot see policy cannot grow any.
+# The stub (the writer lock, which the holder may spawn) is held to the same rule. Checks each manifest and
+# resolved dependency tree, on every platform the crate builds for. The one exception is kith-procstart (libc and
+# windows-sys only): the stub writes the same process start stamp the runtime compares.
+# Run from anywhere; needs cargo and the lockfile (no network once crates are fetched).
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+fail=0
+
+for crate in holder stub; do
+  pkg="kith-$crate"
+  manifest="$root/core/$crate/Cargo.toml"
+  crate_fail=0
+
+  # 1. The manifest names no path dependency and no kith-* crate.
+  if grep -nE '^\s*(kith[-_a-z]*)\s*=|path\s*=' "$manifest" | grep -vE '^\S*\s*(path = "src/(lib|main)\.rs"|name =|kith-procstart = \{ path = "\.\./procstart" \})' ; then
+    echo "core/$crate/Cargo.toml depends on a kith crate or a path (see lines above)" >&2
+    fail=1
+    crate_fail=1
+  fi
+
+  # 2. The resolved tree, for the host platform and for Windows, holds no kith-* crate but the crate itself.
+  for target in "" "--target x86_64-pc-windows-msvc"; do
+    # shellcheck disable=SC2086
+    tree=$(cd "$root/serve/host" && cargo tree --manifest-path Cargo.toml -p "$pkg" --locked --edges normal,build $target --prefix none | sort -u)
+    bad=$(printf '%s\n' "$tree" | grep -E '^kith' | grep -vE "^($pkg|kith-procstart) " || true)
+    if [ -n "$bad" ]; then
+      echo "$pkg links other kith crates ${target:+($target)}:" >&2
+      echo "$bad" >&2
+      fail=1
+      crate_fail=1
+    fi
+  done
+  # Printed per crate; a failure in the first must not hide the second's line.
+  if [ "$crate_fail" = 0 ]; then echo "$pkg links no kith crate"; fi
+done
+
+# 3. kith-procstart is the one kith crate the stub may link, so its own direct dependencies are held to libc and
+# windows-sys here: anything added there would reach the stub (and the holder's tree) without the checks above noticing.
+for target in "" "--target x86_64-pc-windows-msvc"; do
+  # shellcheck disable=SC2086
+  direct=$(cd "$root/serve/host" && cargo tree --manifest-path Cargo.toml -p kith-procstart --locked --edges normal,build $target --depth 1 --prefix none | sort -u)
+  bad=$(printf '%s\n' "$direct" | grep -vE '^(kith-procstart|libc|windows-sys) ' || true)
+  if [ -n "$bad" ]; then
+    echo "kith-procstart depends on more than libc and windows-sys ${target:+($target)}:" >&2
+    echo "$bad" >&2
+    fail=1
+  fi
+done
+[ "$fail" = 0 ] && echo "kith-procstart depends on libc and windows-sys only"
+exit "$fail"

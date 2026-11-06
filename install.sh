@@ -15,7 +15,7 @@
 # (user.md, projects, agents.json; your hq-state repo), machine-only things (secrets/, job state, logs) and the cli/
 # folder of releases. See docs/architecture.md.
 #
-# A Mac that ran hq keeps working untouched: ~/.hq stays its state until `kith migrate` moves it to ~/.kith, an
+# A Mac that ran hq keeps working untouched: ~/.hq stays its state until `kith migrate run` moves it to ~/.kith, an
 # existing ~/kith or ~/hq (a link or a folder) is left as it is, and the hq command still works.
 set -euo pipefail
 
@@ -72,12 +72,12 @@ if [ -z "$CUSTOM_HOME" ]; then
   fi
 fi
 # ~/.kith is a real folder on this Mac (kith init fills it). A Mac that ran hq has ~/.hq instead and keeps using it
-# until `kith migrate`; before 2026-10-15 ~/.hq was a link to the Kith folder: that layout keeps working too (state in
+# until `kith migrate run`; before 2026-10-15 ~/.hq was a link to the Kith folder: that layout keeps working too (state in
 # <kith>/state, machine things in ~/.config/hq).
 if [ -L "$HOME/.hq" ]; then
   echo "note: ~/.hq is a link (the older layout); kith keeps using <kith>/state and ~/.config/hq until you move them"
 elif [ -d "$HOME/.hq" ]; then
-  echo "note: this Mac's state is still ~/.hq; kith migrate moves it to ~/.kith (everything works until then)"
+  echo "note: this Mac's state is still ~/.hq; kith migrate run moves it to ~/.kith (everything works until then)"
 else
   mkdir -p "$HOME/.kith/secrets" && chmod 700 "$HOME/.kith/secrets"
   touch "$HOME/.kith/.migrated"   # ~/.kith is this Mac's folder (lib/kith_paths.py reads the marker)
@@ -101,7 +101,7 @@ if command -v claude >/dev/null; then
   claude plugin marketplace add "$ROOT" >/dev/null 2>&1 || true
   claude plugin install kith@kith >/dev/null 2>&1 || echo "note: the Claude Code plugin did not install: claude plugin install kith@kith"
   if claude plugin list 2>/dev/null | grep -q 'hq@hq'; then
-    echo "note: the old plugin hq@hq is still installed (subagents hq:<agent>): kith migrate removes it, or claude plugin uninstall hq@hq"
+    echo "note: the old plugin hq@hq is still installed (subagents hq:<agent>): kith migrate run removes it, or claude plugin uninstall hq@hq"
   fi
   [ -z "$CUSTOM_HOME$DEV" ] || echo "note: set the plugin's kith_path to $KERNEL in /plugin"
 fi

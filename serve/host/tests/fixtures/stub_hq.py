@@ -46,6 +46,12 @@ def schedules():
     return json.load(open(path, encoding="utf-8")) if os.path.exists(path) else []
 
 
+def setting(name):
+    """`set model|effort|harness` keeps the choice in the file of that name; none means the agent's default."""
+    path = os.path.join(home, name)
+    return (open(path, encoding="utf-8").read().strip() if os.path.exists(path) else "") or None
+
+
 def permission(default):
     path = os.path.join(home, "permission")
     return open(path, encoding="utf-8").read().strip() if os.path.exists(path) else default
@@ -198,9 +204,34 @@ def kernel_command():
     kernel_save(st)
 
 
+def made_agents():
+    """Agents `new` made: folders under `made/`, with the settings `set` wrote beside them."""
+    root = os.path.join(home, "made")
+    return sorted(os.listdir(root)) if os.path.isdir(root) else []
+
+
 if args == ["ls", "--json"]:
-    print(json.dumps([{"name": "house", "description": "Keeps the house", "home": home, "model": None,
-                       "effort": None, "harness": "claude"}]))
+    listed = [{"name": "house", "description": "Keeps the house", "home": home, "model": None,
+               "effort": None, "harness": "claude"}]
+    for name in made_agents():
+        folder = os.path.join(home, "made", name)
+        read = lambda key: open(os.path.join(folder, key), encoding="utf-8").read().strip() if os.path.exists(os.path.join(folder, key)) else None
+        listed.append({"name": name, "description": read("description"), "home": folder, "model": read("model"),
+                       "effort": read("effort"), "harness": read("harness") or "claude"})
+    print(json.dumps(listed))
+elif args[:1] == ["new"] and args[-1] == "--json" and len(args) == 4:
+    # kith's `new --json`: {agent, home, dir, description}; a refusal is {ok: false, error} on stdout, exit 1.
+    folder = os.path.join(home, "made", args[1])
+    if os.path.exists(folder) or args[1] == "house":
+        print(json.dumps({"ok": False, "error": f'kith: there is already an agent called "{args[1]}"'}))
+        sys.exit(1)
+    os.makedirs(os.path.join(folder, "role"))
+    open(os.path.join(folder, "description"), "w", encoding="utf-8").write(args[2])
+    print(json.dumps({"ok": True, "agent": args[1], "home": folder, "dir": os.path.join(folder, "role"), "description": args[2]}))
+elif len(args) == 5 and args[0] in made_agents() and args[1] == "set" and args[4] == "--json":
+    # `<made agent> set model|effort|harness VALUE --json`: kept in a file of that name beside the agent.
+    open(os.path.join(home, "made", args[0], args[2]), "w", encoding="utf-8").write(args[3])
+    print(json.dumps({"agent": args[0], "setting": args[2], "value": args[3], "previous": None, "changed": True}))
 elif args[:2] == ["project", "ls"]:
     path = os.path.join(home, "projects.json")
     print(open(path, encoding="utf-8").read() if os.path.exists(path) else '{"projects": []}')
@@ -222,6 +253,29 @@ elif args[:3] == ["house", "set", "permission"] and len(args) == 4:
         open(path, "w", encoding="utf-8").write(args[3])
     elif os.path.exists(path):
         os.remove(path)
+elif args[:2] == ["house", "set"] and args[2] in ("model", "effort", "harness") and args[-1] == "--json":
+    # kith's --json shape: {agent, setting, value, previous, changed}; a refusal is {ok: false, error} on stdout, exit 2.
+    name, value = args[2], args[3]
+    if name == "effort" and value not in ("default", "low", "medium", "high", "xhigh", "max"):
+        print(json.dumps({"ok": False, "error": f"effort {value} is not one of low, medium, high, xhigh, max"}))
+        sys.exit(2)
+    model = args[args.index("--model") + 1] if "--model" in args else setting("model")
+    harness = value if name == "harness" else (setting("harness") or "claude")
+    if model in ("opus", "sonnet", "haiku") and harness != "claude":
+        print(json.dumps({"ok": False, "error": f"a Claude model needs a Claude harness (harness is {harness})"}))
+        sys.exit(2)
+    previous = setting(name)
+    new = None if value == "default" else value
+    writes = [(name, new)]
+    if name == "harness":
+        writes.append(("model", None if model == "default" else model))
+    for key, val in writes:
+        path = os.path.join(home, key)
+        if val:
+            open(path, "w", encoding="utf-8").write(val)
+        elif os.path.exists(path):
+            os.remove(path)
+    print(json.dumps({"agent": "house", "setting": name, "value": new, "previous": previous, "changed": previous != new}))
 elif args[:3] == ["house", "set", "call-model"] and len(args) == 4:
     path = os.path.join(home, "call_model")
     if args[3] == "default":
@@ -306,8 +360,8 @@ elif args == ["house", "--info-json"]:
     names = sorted(n for n in os.listdir(memory) if os.path.isfile(os.path.join(memory, n))) if os.path.isdir(memory) else []
     files = [{"path": n, "bytes": os.path.getsize(os.path.join(memory, n)), "modified": "2026-10-22T00:00:00Z"} for n in names]
     print(json.dumps({
-        "version": 1, "agent": "house", "description": "Keeps the house", "harness": "claude", "model": None,
-        "effort": None, "permission_mode": permission("auto"), "home": home,
+        "version": 1, "agent": "house", "description": "Keeps the house", "harness": setting("harness") or "claude",
+        "model": setting("model"), "effort": setting("effort"), "permission_mode": permission("auto"), "home": home,
         "call_model": call_model()[0], "call_model_effective": call_model()[1],
         "role": {"path": home + "/role", "intro": "Keeps the house.", "sections": [{"title": "Not yours", "text": "Money."}]},
         "package": {"version": None, "remote": None, "dirty": False, "unpushed": 0, "pinned": None},
@@ -358,6 +412,11 @@ elif args[:2] == ["house", "--launch-json"]:
         print(f"{backup} is not logged in", file=sys.stderr)
         sys.exit(4)
     harness = "codex" if backup and backup.split(":")[0] == "codex" else "claude"
+    # An agent on another ACP engine (the file `harness`): the launch also names the engine, as the real kernel does.
+    own = setting("harness")
+    other = own if not backup and own not in (None, "claude", "codex") else None
+    if other:
+        harness = other
     account_id = backup or (static_order(kernel())[0][0] if kernel_on() else main_account())
     account = account_id.split(":")[1] if ":" in account_id else None
     model = args[args.index("-m") + 1] if "-m" in args else "haiku"
@@ -380,6 +439,7 @@ elif args[:2] == ["house", "--launch-json"]:
         "cost_tag": {"agent": "house", "version": "v1", "model": model, "effort": None, "via": os.environ.get("KITH_VIA") or "cli",
                      "project": project, "person": os.environ.get("KITH_PERSON") or None},
         "claude_args": [],
+        **({"engine": other, "acp": None, "registry": other, "role_prompt": "none"} if other else {}),
     }))
 else:
     print("unknown agent", file=sys.stderr)

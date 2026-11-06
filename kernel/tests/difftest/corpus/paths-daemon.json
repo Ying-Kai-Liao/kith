@@ -1,0 +1,34 @@
+[
+  {
+    "name": "paths-caller-env-not-daemon-env",
+    "command": "paths",
+    "needs": "rust",
+    "setup": [
+      {"mkdir": "home/.kith"},
+      {"write": "home/.kith/.migrated", "text": ""}
+    ],
+    "env": {"KITH_HOME": "{ROOT}/caller-kith", "KITH_AGENTS": "{ROOT}/caller-agents"},
+    "daemon_env": {"KITH_HOME": "{ROOT}/daemon-kith", "KITH_AGENTS": null},
+    "run": [
+      ["paths", "--json"],
+      ["paths"],
+      ["paths", "--sh"],
+      ["kernel", "paths", "--json"]
+    ]
+  },
+  {
+    "name": "paths-caller-has-no-env-the-daemon-has",
+    "command": "paths",
+    "needs": "rust",
+    "setup": [
+      {"mkdir": "home/.kith"},
+      {"write": "home/.kith/.migrated", "text": ""},
+      {"mkdir": "kith"}
+    ],
+    "env": {"KITH_HOME": null},
+    "daemon_env": {"KITH_HOME": "{ROOT}/daemon-kith"},
+    "run": [
+      ["paths", "--json"]
+    ]
+  }
+]

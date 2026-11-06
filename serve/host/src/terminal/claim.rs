@@ -2,7 +2,7 @@
 //! holds it is the one writer of that session, even before the registry file (written by the session's own hook seconds
 //! later) exists and even while the host is down. The kernel (`kernel/bin/kith-sessions`) writes and reads the same file.
 //!
-//! `{"pid": <claimer>, "procStart": "<ps lstart>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot", "takeover": bool}`
+//! `{"pid": <claimer>, "procStart": "<start stamp>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot" | <any other string>, "takeover": bool}`
 //!
 //! A claim whose pid is gone, or whose pid now started at another time, is stale and is replaced under a lock file
 //! (`<sid>.claim.lock`, flock). A claimer is a long-lived process: `kith <agent> --resume` claims for the shell
@@ -28,6 +28,13 @@ pub enum Kind {
     Bot,
     /// A `claude -p --resume` one-shot (`kith ask -c`, `kith <agent> -c "task"`, the bridge): keeps the host out like a terminal.
     Oneshot,
+    /// The core is starting a held terminal for the session and the claim still names the core's own pid (`kith serve`),
+    /// not the terminal's: nothing may signal it. `stop_holder` answers it as busy.
+    Starting,
+    /// A kind this build does not know (a newer binary wrote it, e.g. M1's holder kind). Read as a live holder judged by
+    /// pid + start alone, like `kith-sessions` and the crate do, and never removed as garbage by `take_as`.
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -56,15 +63,31 @@ fn terminal() -> Kind {
 }
 
 impl Claim {
-    /// The claimer still runs, and is the process that took the claim (a reused pid started at another time).
+    /// Whether the claimer's process is the one that took the claim: `Some(true)` positively, `Some(false)` positively
+    /// not (a reused pid), `None` when that cannot be told (an unreadable start, a stamp of the other form). A claim with no
+    /// start recorded is judged by its pid alone (`Some(true)`). A claim from before stamps holds `ps -o lstart` text, which
+    /// is compared the old way ([`super::registry::lstart_matches`]).
+    pub fn identity(&self) -> Option<bool> {
+        use kith_kernel::procstart::{comparable, is_stamp, same_process};
+        match self.proc_start.as_deref().filter(|s| !s.trim().is_empty()) {
+            None => Some(true),
+            Some(claimed) if is_stamp(claimed) => proc_start(self.pid)
+                .filter(|actual| comparable(claimed, actual))
+                .map(|actual| same_process(claimed, &actual)),
+            Some(text) => super::registry::lstart_matches(self.pid, text),
+        }
+    }
+
+    /// The claimer still runs, and is not positively another process (a reused pid has another start). Held when the start
+    /// cannot be read or compared: a wrong "free" would let a second writer in.
     pub fn is_live(&self) -> bool {
-        if !pid_runs(self.pid) {
-            return false;
-        }
-        match (&self.proc_start, proc_start(self.pid)) {
-            (Some(claimed), Some(actual)) => claimed.split_whitespace().collect::<Vec<_>>().join(" ") == actual,
-            _ => true,
-        }
+        pid_runs(self.pid) && self.identity() != Some(false)
+    }
+
+    /// Whether the claimer is positively the process that took the claim, which is what a signal needs: [`Self::is_live`]
+    /// also says "held" when the start cannot be compared.
+    pub fn is_claimer(&self) -> bool {
+        self.identity() == Some(true)
     }
 }
 
@@ -84,6 +107,15 @@ pub fn read(path: &Path) -> Option<Claim> {
 /// The live claim on `sid` (either name) that keeps the host from writing, if any. A host turn's own claim (`Kind::App`,
 /// see `agent/bot/turn.rs`) is not one: it only keeps a terminal out. A take-over's claim is.
 pub fn holder(state: &Path, sid: &str) -> Option<Claim> {
+    let files = holder_files(state, sid);
+    match super::core_claims::folders_for(state) {
+        // Flag on: the core's claim holds too (the files only name a writer from before the flag).
+        Some(f) if files.is_none() => super::core_claims::holder(&f, sid),
+        _ => files,
+    }
+}
+
+fn holder_files(state: &Path, sid: &str) -> Option<Claim> {
     [false, true]
         .into_iter()
         .filter_map(|t| read(&path(state, sid, t)))
@@ -99,6 +131,91 @@ pub fn take(state: &Path, sid: &str, kind: Kind, pid: u32, takeover: bool) -> st
 
 /// [`take`] for a run that has `person`'s profile on `agent` (`None`: the owner's).
 pub fn take_as(
+    state: &Path,
+    sid: &str,
+    kind: Kind,
+    pid: u32,
+    takeover: bool,
+    person: Option<&str>,
+    agent: Option<&str>,
+) -> std::io::Result<Result<(), Held>> {
+    take_for_turn(state, sid, kind, pid, takeover, person, agent, None)
+}
+
+/// [`take_as`] for a host turn, which knows the run's folder (`cwd`): with the core flag on, the turn's session row names it.
+#[allow(clippy::too_many_arguments, reason = "take_as's inputs and the folder")]
+pub fn take_for_turn(
+    state: &Path,
+    sid: &str,
+    kind: Kind,
+    pid: u32,
+    takeover: bool,
+    person: Option<&str>,
+    agent: Option<&str>,
+    cwd: Option<&str>,
+) -> std::io::Result<Result<(), Held>> {
+    // Flag on: the file claim is the writer (the kernel's takers only see it) and the core's claim shadows it. A proc claim
+    // names no session and a take-over claim is the host's step towards a stop (`sync::take_over` goes through the core
+    // itself), so both stay files.
+    let shadow = if takeover || sid.starts_with("proc-") { None } else { super::core_claims::folders_for(state) };
+    let taken = take_file(state, sid, kind, pid, takeover, person, agent)?;
+    let Some(f) = shadow else {
+        if matches!(taken, Ok(())) && !takeover {
+            super::intent::taken(state, sid);
+        }
+        return Ok(taken);
+    };
+    if let Err(held) = taken {
+        return Ok(Err(held));
+    }
+    match super::core_claims::take_as(&f, sid, kind, pid, person, agent, cwd) {
+        Ok(Ok(())) => {}
+        // The core has another writer (a claim only it knows): the file is given back, and so is the intent we have not touched.
+        Ok(Err(held)) => {
+            release_file(state, sid, pid, false);
+            return Ok(Err(held));
+        }
+        // The person was revoked after the caller's check: no turn.
+        Err(error) if super::core_claims::is_revoked(&error) => {
+            release_file(state, sid, pid, false);
+            return Err(error);
+        }
+        // Core down or refusing: the file claim is the writer, as with the flag off. The turn is not left without one.
+        Err(error) => tracing::warn!(%error, sid, "no core claim for a turn: it runs under its claim file"),
+    }
+    super::intent::taken(state, sid);
+    Ok(Ok(()))
+}
+
+/// What a host turn does with the result of its claim attempt: the one decision `claim_for_turn` (agent/bot/turn.rs) makes.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TurnClaim {
+    /// The turn holds the session (or a terminal that is this very process does).
+    Held,
+    /// The turn runs without a claim: a main-lane claim only keeps a terminal out, and a claim that failed to be written
+    /// (an io error) never stopped a turn.
+    Unclaimed,
+    /// Another writer holds the session: the turn is refused with this code.
+    Refused(&'static str),
+    /// The person was revoked (the core refused the claim, flag on): the turn is refused.
+    Revoked,
+}
+
+/// See [`TurnClaim`].
+pub fn judge_turn_claim(taken: &std::io::Result<Result<(), Held>>, pid: u32, main_lane: bool, bot: bool) -> TurnClaim {
+    match taken {
+        Ok(Ok(())) => TurnClaim::Held,
+        // A terminal got in between the start check and here: it keeps the session.
+        Ok(Err(held)) if held.0.pid == pid => TurnClaim::Held,
+        Ok(Err(_)) if main_lane => TurnClaim::Unclaimed,
+        Ok(Err(_)) => TurnClaim::Refused(if bot { "heldByOtherWriter" } else { "liveInTerminal" }),
+        Err(error) if super::core_claims::is_revoked(error) => TurnClaim::Revoked,
+        Err(_) => TurnClaim::Unclaimed,
+    }
+}
+
+/// The claim file of [`take_for_turn`]. `Err(Held)`: a live claim is there.
+fn take_file(
     state: &Path,
     sid: &str,
     kind: Kind,
@@ -143,10 +260,8 @@ pub fn take_as(
     })();
     let _ = std::fs::remove_file(&tmp);
     // A process that took the session ends the intent of the one before it and the decision of its idle period (F12 rules
-    // 12, 14), as the kernel's take_claim does; a take-over claim is the host's step towards a stop, not a new writer.
-    if matches!(result, Ok(Ok(()))) && !takeover {
-        super::intent::taken(state, sid);
-    }
+    // 12, 14), as the kernel's take_claim does (the caller, once the claim is whole); a take-over claim is the host's step
+    // towards a stop, not a new writer.
     result
 }
 
@@ -191,7 +306,11 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
             continue;
         }
         let Some(claim) = read(&path) else { continue };
-        if claim.person.as_deref().is_some_and(|p| persons.iter().any(|x| x == p)) && !keep(&claim) && claim.is_live() {
+        if claim.person.as_deref().is_some_and(|p| persons.iter().any(|x| x == p))
+            && !keep(&claim)
+            && claim.is_live()
+            && claim.is_claimer()
+        {
             holders.push((path, claim));
         }
     }
@@ -207,8 +326,10 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
         {
             super::intent::write(state, sid.strip_suffix(".takeover").unwrap_or(sid), "access revoked", claim.pid);
         }
-        // Children first found while the parent still lives; a one-shot's claimer is claude itself (the launcher's shell
-        // exec'd), so the claim's pid is the writing process and its children are what it started.
+        // Children first found while the parent still lives; a one-shot's claimer is the launcher's shell, exec'd into
+        // kith-stub (the conversation lock), whose child is claude: the claim's pid is the stub and its descendants are
+        // claude and what it started. The registry entry records the stub as `launcher`, so an intent written here
+        // for the claim's pid still reads as the run's reason.
         for pid in descendants(claim.pid).into_iter().chain([claim.pid]) {
             if pid != me && !victims.contains(&pid) {
                 victims.push(pid);
@@ -237,6 +358,101 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
     }
     ended
 }
+
+/// Ends the processes of core claims a revoke sent to `ending` (`people.suspend` / `people.removePerson` answer them as
+/// `kill`: pid and start stamp). Nothing in the daemon signals them: its holder link kills only what it started itself or
+/// an old instance's, and `end_gone` waits for the pid to leave. Like [`sweep`]: only a process positively the one that
+/// took the claim (a reused pid or a pid already gone is left alone, so a retried revoke kills nothing twice), its
+/// descendants first, SIGTERM then SIGKILL after `grace`. A claim with no recorded start is never signalled: the core
+/// may hand one out (an imported terminal claim carries none) and a pid alone could be a reused one. The SIGKILL goes
+/// only to what still has the start it had when found, and to the claimer's process group when it leads one (a session
+/// leader's group holds what it started, as the channels' `end_groups` does). Blocking. Returns the pids it signalled.
+pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -> Vec<u32> {
+    let me = std::process::id();
+    // (pid, start when found): the second signal is sent only to a process that still has it.
+    let mut victims: Vec<(u32, Option<String>)> = Vec::new();
+    // Groups the claimer led when it was verified (decided then: by the SIGKILL it is dead).
+    let mut groups: Vec<u32> = Vec::new();
+    for (pid, started) in held {
+        if started.as_deref().is_none_or(|s| s.trim().is_empty()) {
+            tracing::warn!(
+                pid,
+                "a claim with no recorded start was not ended: its pid alone cannot tell it from a reused one"
+            );
+            continue;
+        }
+        let claim = Claim {
+            pid: *pid,
+            proc_start: started.clone(),
+            at: String::new(),
+            kind: Kind::Other,
+            takeover: false,
+            person: None,
+            agent: None,
+        };
+        // A start that cannot be compared is not enough to signal: `is_claimer` wants a positive match.
+        if *pid == me || *pid <= 1 || !pid_runs(*pid) || !claim.is_claimer() {
+            continue;
+        }
+        for p in descendants(*pid).into_iter().chain([*pid]) {
+            if p != me && !victims.iter().any(|(v, _)| *v == p) {
+                victims.push((p, proc_start(p)));
+            }
+        }
+        if leads_group(*pid) && !groups.contains(pid) {
+            groups.push(*pid);
+        }
+    }
+    let pids: Vec<u32> = victims.iter().map(|(p, _)| *p).collect();
+    signal(&pids, libc::SIGTERM);
+    signal_groups(&groups, libc::SIGTERM);
+    let deadline = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < deadline && pids.iter().any(|p| pid_runs(*p)) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let same = |pid: u32, found: &Option<String>| {
+        pid_runs(pid)
+            && match (found, proc_start(pid)) {
+                (Some(then), Some(now)) => {
+                    kith_kernel::procstart::comparable(then, &now) && kith_kernel::procstart::same_process(then, &now)
+                }
+                _ => false,
+            }
+    };
+    let left: Vec<u32> = victims.iter().filter(|(p, s)| same(*p, s)).map(|(p, _)| *p).collect();
+    signal(&left, libc::SIGKILL);
+    // Whether or not the leader is still alive: POSIX does not reuse a pid as a process or group id while a group with
+    // that id exists, and a group that is gone answers ESRCH, which is ignored. A nohup'd or double-forked child of the
+    // claimer stays in the group and goes with it.
+    signal_groups(&groups, libc::SIGKILL);
+    pids
+}
+
+/// Whether `pid` leads its own process group (checked right after its start was verified). Never the host's own group:
+/// a host started from the claimer's shell would be in it.
+#[cfg(unix)]
+fn leads_group(pid: u32) -> bool {
+    // SAFETY: getpgid(2) and getpgrp(2) only read.
+    libc::pid_t::try_from(pid).is_ok_and(|p| unsafe { libc::getpgid(p) == p && libc::getpgrp() != p })
+}
+
+#[cfg(not(unix))]
+fn leads_group(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn signal_groups(groups: &[u32], sig: libc::c_int) {
+    for g in groups {
+        if let Ok(p) = libc::pid_t::try_from(*g) {
+            // SAFETY: killpg only sends a signal; ESRCH for a group that is gone is ignored.
+            unsafe { libc::killpg(p, sig) };
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_groups(_groups: &[u32], _sig: i32) {}
 
 #[cfg(unix)]
 fn signal(pids: &[u32], sig: libc::c_int) {
@@ -286,8 +502,16 @@ pub enum Stopped {
     Nobody,
     /// The host's own turn holds it (the claimer is a child of this host): its Stop ends it, not this.
     OwnTurn(Claim),
+    /// The core is still starting a held terminal and the claim names the core's pid: nothing was signalled.
+    Busy(Claim),
     /// The claimer and its children were ended.
     Ended(Claim),
+    /// SIGKILL was sent but something of the tree is still in the process table after the wait: the claim is kept, so a
+    /// take-over is refused until it is really gone (Stop again).
+    StillEnding(Claim),
+    /// This platform cannot signal a process tree, or the claim's start cannot be matched to the process: nothing was done
+    /// and the claim is kept.
+    CantStop(Claim),
 }
 
 /// Ends the live holder of `sid` (the owner's Stop for a session held by an old run): SIGTERM to the claimer and its
@@ -296,12 +520,50 @@ pub enum Stopped {
 ///
 /// This is a small kill helper of its own; it should merge with the claim sweep of the kernel-side lease work (#248).
 pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopped {
+    stop_holder_unless(state, sid, grace, core_pid())
+}
+
+/// The running core daemon's pid, from its status (no database read). None when there is no core.
+fn core_pid() -> Option<u32> {
+    crate::core_front::daemon_pid()
+}
+
+/// [`stop_holder`] with the core's pid given. A claim naming the core's own pid is never signalled, whatever its kind:
+/// that is `kith serve` (or an older kernel's claim of it), and a Stop would end the daemon, not a terminal.
+pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Duration, core: Option<u32>) -> Stopped {
+    // A claim on a pid that was reused (positively another process) holds nothing: given back, so it does not sit there
+    // as a held thread. (The readers already see it as free.)
+    for takeover in [false, true] {
+        if let Some(c) = read(&path(state, sid, takeover)).filter(|c| pid_runs(c.pid) && c.identity() == Some(false)) {
+            release(state, sid, c.pid, takeover);
+        }
+    }
     let Some(claim) = holder(state, sid) else { return Stopped::Nobody };
+    if claim.kind == Kind::Starting || core == Some(claim.pid) {
+        return Stopped::Busy(claim);
+    }
     if parent_of(claim.pid) == Some(std::process::id()) {
         return Stopped::OwnTurn(claim);
     }
-    let mut victims = children_of(claim.pid, 3);
-    victims.insert(0, claim.pid);
+    if cfg!(not(unix)) {
+        return Stopped::CantStop(claim);
+    }
+    match claim.identity() {
+        Some(true) => {}
+        // Positively another process (the pid was reused since the claim was written): nothing to stop, and nothing is
+        // signalled. The claim is given back so the thread is free.
+        Some(false) => {
+            release(state, sid, claim.pid, claim.takeover);
+            return Stopped::Nobody;
+        }
+        // The claim's start cannot be matched to the process (ps unreadable, another stamp form): it keeps holding the
+        // session, and nothing is signalled.
+        None => return Stopped::CantStop(claim),
+    }
+    // Descendants first, the claimer last (as the revoke `sweep` does): for a one-shot the claimer is kith-stub, which
+    // holds the conversation's lock, and the lock must not be free while claude still runs.
+    let mut victims = children_of(claim.pid, 4);
+    victims.push(claim.pid);
     // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
     super::intent::write(state, sid, "stopped from the app", claim.pid);
     signal(&victims, libc::SIGTERM);
@@ -312,8 +574,32 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
     // Still the claimer we judged? (The pid can only have gone, but a rest of the tree is signalled by pid alone.)
     let left: Vec<u32> = victims.iter().copied().filter(|p| pid_runs(*p)).collect();
     signal(&left, libc::SIGKILL);
+    // Wait (bounded) for them to be gone before the claim is given back: a take-over started at once would otherwise
+    // find the stub's lock still held and come back busy (75).
+    let reaped = std::time::Instant::now() + STOP_REAP;
+    while std::time::Instant::now() < reaped && victims.iter().any(|p| still_there(*p)) {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // A process that outlived SIGKILL (stuck in the kernel) may still hold the stub's lock: the claim stays with it.
+    if victims.iter().any(|p| still_there(*p)) {
+        return Stopped::StillEnding(claim);
+    }
     release(state, sid, claim.pid, claim.takeover);
     Stopped::Ended(claim)
+}
+
+/// How long [`stop_holder`] waits, after SIGKILL, for the processes to leave the table.
+const STOP_REAP: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether `pid` still holds anything: running, and not a zombie waiting for its parent (a zombie has released its
+/// descriptors, so its flock is gone).
+fn still_there(pid: u32) -> bool {
+    pid_runs(pid)
+        && std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .is_none_or(|o| !String::from_utf8_lossy(&o.stdout).trim_start().starts_with('Z'))
 }
 
 fn ps_pids(args: &[&str]) -> Vec<u32> {
@@ -371,6 +657,14 @@ impl Lock {
 
 /// Gives the claim back; only the claimer's own file is removed.
 pub fn release(state: &Path, sid: &str, pid: u32, takeover: bool) {
+    // The core's claim first, then the file: the file is the gate, so it goes last.
+    if !takeover && let Some(f) = super::core_claims::folders_for(state) {
+        super::core_claims::release(&f, sid, pid);
+    }
+    release_file(state, sid, pid, takeover);
+}
+
+fn release_file(state: &Path, sid: &str, pid: u32, takeover: bool) {
     let p = path(state, sid, takeover);
     // Under the claim lock: a taker may have replaced our (stale) claim with its own between the read and the remove.
     let Some(parent) = p.parent() else { return };

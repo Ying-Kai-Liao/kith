@@ -1,0 +1,73 @@
+[
+  {
+    "name": "ls-json-two-agents",
+    "command": "ls",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"},
+      {"write": "kith/agents/zed/role/agent.md", "text": "---\nname: zed\ndescription: second agent\nmodel: haiku\n---\nYou zed.\n"}
+    ],
+    "run": [["ls"], ["ls", "--json"]]
+  },
+  {
+    "name": "info-json-agent",
+    "command": "info",
+    "setup": [
+      {"mkdir": "kith/state/sched"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\neffort: low\n---\nYou echo things back.\n\n## Not yours\nTaxes -> finance.\n"},
+      {"write": "kith/agents/echo/role/skills/greet/SKILL.md", "text": "---\nname: greet\ndescription: Say hello\n---\nbody\n"},
+      {"write": "kith/agents/echo/memory/MEMORY.md", "text": "# memory\npantry has flour\n"},
+      {"write": "kith/agents/echo/jobs.json", "text": "[{\"id\":\"daily\",\"cron\":\"0 8 * * *\",\"task\":\"say hi\"}]\n"},
+      {"write": "kith/state/sched/state.json", "text": "{\"tick\":\"2026-10-22T10:00\",\"last\":{\"echo/daily\":{\"at\":\"2026-10-22T08:00\",\"pid\":999999,\"log\":\"/x\",\"why\":\"due\"}}}\n"}
+    ],
+    "run": [["echo", "--info-json"]]
+  },
+  {
+    "name": "auth-ls-empty-and-granted",
+    "command": "auth",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"}
+    ],
+    "run": [["auth", "ls"], ["auth", "grant", "echo", "notion", "notion/library"], ["auth", "ls"], ["auth", "granted", "notion"]]
+  },
+  {
+    "name": "sched-ls",
+    "command": "schedule",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"},
+      {"write": "kith/agents/echo/jobs.json", "text": "[{\"id\":\"daily\",\"cron\":\"0 8 * * *\",\"task\":\"say hi\"},{\"id\":\"off\",\"cron\":\"0 9 * * 1\",\"task\":\"x\",\"paused\":true}]\n"}
+    ],
+    "run": [["schedule", "ls"]]
+  },
+  {
+    "name": "new-agent",
+    "command": "new",
+    "setup": [{"mkdir": "kith/state"}],
+    "run": [["new", "pip", "A test agent that does little"], ["ls", "--json"]]
+  },
+  {
+    "name": "project-ls-json",
+    "command": "project",
+    "setup": [{"mkdir": "kith/state"}],
+    "run": [["project", "ls", "--json"], ["project", "root"]]
+  },
+  {
+    "name": "agent-connectors-skills-json",
+    "command": "connectors",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"},
+      {"write": "kith/agents/echo/role/skills/greet/SKILL.md", "text": "---\nname: greet\ndescription: Say hello\n---\nbody\n"}
+    ],
+    "sort_lists": true,
+    "run": [["echo", "connectors", "--json"], ["echo", "skills", "--json"], ["connectors", "--json"]]
+  },
+  {
+    "name": "unknown-agent-refused",
+    "command": "unknown",
+    "setup": [{"mkdir": "kith/state"}],
+    "run": [["nosuchagent"]]
+  }
+]

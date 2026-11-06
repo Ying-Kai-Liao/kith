@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # kith-new — scaffold a new kith agent with the repo's conventions; the builder agent fills in the judgement parts.
 #
-#   kith-new <name> "<description>"     create the agent in the agents folder as its own git repo (fails if it exists)
+#   kith-new <name> "<description>" [--instructions FILE|-] [--json]
+#                                       create the agent in the agents folder as its own git repo (fails if it exists);
+#                                       --instructions: FILE (or stdin) is the first draft of agent.md's opening paragraph,
+#                                       in place of the TODO line (kith scratch keep uses it; nothing is asked either way)
+#                                       --json (anywhere): print {"agent","home","dir","description"} on success, and
+#                                       {"ok": false, "error": "..."} on any failure (stdout only, stderr silent); same exit codes
 #
 # Creates agent.md (frontmatter + section skeleton), capabilities.yaml, settings.json (every installed plugin off
 # except kith: an agent carries only its own tools), skills/learned/, and its state (memory/) in the state folder
@@ -12,19 +17,50 @@ set -euo pipefail
 # Follow the script's own symlinks but keep the repo's logical path (it may be a symlink to a path with spaces).
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
-name=${1:-}; desc=${2:-}
-[[ $name =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "kith-new: name must be lowercase letters, digits, dashes (got '$name')" >&2; exit 2; }
-[[ $name != kith ]] || { echo "kith-new: an agent can't be called 'kith' (it is the command's own name)" >&2; exit 2; }
-[[ -n $desc && $desc != *": "* ]] || { echo "kith-new: give a one-line description without ': ' in it" >&2; exit 2; }
+json=0; made=""
+# One way out for every failure: today's message on stderr, or under --json an error object on stdout and a silent stderr.
+fail() {
+  trap - ERR
+  # Only the folder this run made, so a retry doesn't hit "already exists" (a folder from before the run never gets here).
+  [[ -z $made ]] || rm -rf "$made"
+  if [[ $json == 1 ]]; then python3 -c 'import json,sys; print(json.dumps({"ok": False, "error": sys.argv[1]}))' "$2"
+  else echo "kith-new: $2" >&2; fi
+  exit "$1"
+}
+instr_from=""; args=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --json) json=1; shift ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$src" | sed '$d;s/^# \{0,1\}//'; exit 0 ;;
+    --instructions) [[ $# -ge 2 ]] || { fail 2 "--instructions needs a file or -"; }; instr_from=$2; shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+name=${args[0]:-}; desc=${args[1]:-}
+instr=""
+if [[ -n $instr_from ]]; then
+  if [[ $instr_from == - ]]; then instr=$(cat); else instr=$(cat "$instr_from" 2>/dev/null) || fail 2 "can't read $instr_from"; fi
+fi
+[[ $name =~ ^[a-z][a-z0-9-]{1,30}$ ]] || fail 2 "name must be lowercase letters, digits, dashes (got '$name')"
+[[ $name != kith ]] || fail 2 "an agent can't be called 'kith' (it is the command's own name)"
+[[ -n $desc && $desc != *": "* ]] || fail 2 "give a one-line description without ': ' in it"
 eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"   # KITH_HOME, KITH_STATE, KITH_AGENTS
 agents=$KITH_AGENTS
 # The agent's folder: role/ (its own repo, what it is) next to memory/, data/, files/ (what it has lived).
-[[ -e $agents/$name ]] && { echo "kith-new: agent '$name' already exists" >&2; exit 1; }
+[[ -e $agents/$name ]] && fail 1 "agent '$name' already exists"
 home="$agents/$name/role"
 state="$agents/$name"
 
+# A step failing from here on (set -e) still answers under --json, and nothing else reaches stderr.
+if [[ $json == 1 ]]; then exec 2>/dev/null; fi
+trap 'fail 1 "scaffolding $name failed at line $LINENO"' ERR
+
+made=$state
 mkdir -p "$home/skills/learned" "$state/memory/projects" "$state/memory/sessions"
 touch "$home/skills/learned/.keep"
+
+intro=$instr
+[[ -n $intro ]] || intro="You are the user's $name specialist. TODO(builder): one paragraph on who you are and what you are for."
 
 cat > "$home/agent.md" <<EOF
 ---
@@ -33,7 +69,7 @@ description: $desc
 memory: user
 ---
 
-You are the user's $name specialist. TODO(builder): one paragraph on who you are and what you are for.
+$intro
 
 ## How you work
 - TODO(builder): 3–6 bullets: how you approach the work, what is state (read from source every time) vs memory,
@@ -98,6 +134,14 @@ __pycache__/
 .DS_Store
 node_modules/
 EOF
-git -C "$home" init -q && git -C "$home" add -A && git -C "$home" commit -q -m "$name: scaffold (kith-new)"
+git -C "$home" init -q
+git -C "$home" add -A
+git -C "$home" commit -q -m "$name: scaffold (kith-new)"
 
+trap - ERR
+made=""
+if [[ $json == 1 ]]; then
+  python3 -c 'import json,sys; print(json.dumps({"agent": sys.argv[1], "home": sys.argv[2], "dir": sys.argv[3], "description": sys.argv[4]}))' "$name" "$state" "$home" "$desc"
+  exit 0
+fi
 echo "created $home (its own git repo): agent.md (TODOs for the builder), capabilities.yaml, settings.json, skills/; state in $state"

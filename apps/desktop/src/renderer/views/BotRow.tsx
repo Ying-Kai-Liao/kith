@@ -7,6 +7,7 @@ import { BotAvatar, BotGuestAvatar, CountBadge, OriginTag, SkyPatch } from '../c
 import type { Face } from '../components/Avatar'
 import { LiveBot } from '../components/Avatar'
 import { messagePreview } from '../lib/message-preview'
+import { rowLine } from '../lib/row-line'
 import type { BotStore } from '../store/bot-store'
 import { rowTime } from './crew/row-time'
 import './crew/crew-sidebar.css'
@@ -95,5 +96,5 @@ function statusLine(bot: Bot, store: BotStore): string {
   if (needsInput(bot)) return bot.activity || 'Needs your approval'
   if (isWorking(bot)) return bot.activity || 'Working…'
   if (bot.status === 'error') return messagePreview(bot.lastMessage ?? 'Something went wrong')
-  return messagePreview(bot.lastMessage ?? (isGroup(bot) ? `${bot.members.length} bots` : `${store.backendName(bot.backend)} · ${folderName(bot)}`))
+  return messagePreview(rowLine(bot) ?? (isGroup(bot) ? `${bot.members.length} bots` : `${store.backendName(bot.backend)} · ${folderName(bot)}`))
 }

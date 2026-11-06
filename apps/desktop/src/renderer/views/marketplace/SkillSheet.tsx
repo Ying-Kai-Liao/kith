@@ -13,7 +13,7 @@ import { usePlugins } from './plugins'
 export type SkillRef = { name: string; description: string } & ({ id: string; source?: never; installed?: never } | { source: string; installed?: boolean; id?: never })
 
 /** A skill's details (kit `SkillSheet`): what it tells the bot, its `SKILL.md`, with Add while it isn't installed. */
-export function SkillSheet({ skill }: { skill: SkillRef }) {
+export function SkillSheet({ skill, onAdd }: { skill: SkillRef; onAdd?: () => void }) {
   const store = useStore()
   const plugins = usePlugins(store)
   const [markdown, setMarkdown] = useState<string | null>(null)
@@ -21,7 +21,7 @@ export function SkillSheet({ skill }: { skill: SkillRef }) {
   const [adding, setAdding] = useState(false)
   const which = skill.source !== undefined ? { source: skill.source } : { id: skill.id }
   const source = skill.source ?? null
-  const added = source === null || skill.installed === true || plugins.installedSkills.some((s) => s.id === source.toLowerCase())
+  const added = source === null || skill.installed === true || (!onAdd && plugins.installedSkills.some((s) => s.id === source.toLowerCase()))
 
   useEffect(() => {
     let live = true
@@ -35,6 +35,8 @@ export function SkillSheet({ skill }: { skill: SkillRef }) {
   }, [])
 
   const add = async () => {
+    // A bot-bound add (the Marketplace): the caller asks which bot and runs `kith <bot> skill add`.
+    if (onAdd) return onAdd()
     if (!source) return
     setAdding(true)
     setError(null)

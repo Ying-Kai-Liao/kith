@@ -1,0 +1,134 @@
+//! The tombstone: a module's source file (auth.json, state.json ...) replaced by a small JSON note, so an old Python
+//! reader that opens it finds out at once that the data moved, instead of reading nothing and carrying on. The reader
+//! side is `kernel/lib/kith_tombstone.py` (same format: a JSON object with `"kith_tombstone": 1`).
+//!
+//! The original is not lost: it is hard-linked (else copied) to `<name>.pre-cutover-<unix time>` first, with its mode.
+//! The rollback's export-back writes the real file again over the tombstone.
+
+use std::path::{Path, PathBuf};
+
+use serde_json::{Value, json};
+
+use crate::error::{Error, Result};
+
+fn note_of(path: &Path) -> Option<Value> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .filter(|v| v.get("kith_tombstone").is_some())
+}
+
+pub(crate) fn is_tombstone(path: &Path) -> bool {
+    note_of(path).is_some()
+}
+
+/// A file that exists and is not a tombstone (whatever it holds): the old reader's own file.
+pub(crate) fn is_real(path: &Path) -> bool {
+    path.is_file() && !is_tombstone(path)
+}
+
+/// Whether a tombstone put at or after `at` kept a copy of `path` (`<name>.pre-cutover-<t>`, `t >= at`): the switch
+/// finished its tombstone, so a real file there now was put back by someone, not left by a half-finished step. A copy
+/// that is the real file itself (the hard link, or the same bytes) is the half-step: the crash came after the link and
+/// before the rename, so it does not count.
+pub(crate) fn kept_since(path: &Path, at: i64) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let prefix = format!("{name}.pre-cutover-");
+    let Some(dir) = path.parent().and_then(|d| std::fs::read_dir(d).ok()) else {
+        return false;
+    };
+    dir.flatten().any(|e| {
+        e.file_name()
+            .to_str()
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|t| t.parse::<i64>().ok())
+            .is_some_and(|t| t >= at)
+            && !same_file(path, &e.path())
+    })
+}
+
+/// Whether any `<name>.pre-cutover-<t>` copy with `t >= at` sits beside `path`, whatever its bytes: the tombstone got at
+/// least as far as keeping the file.
+pub(crate) fn has_copy_since(path: &Path, at: i64) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let prefix = format!("{name}.pre-cutover-");
+    let Some(dir) = path.parent().and_then(|d| std::fs::read_dir(d).ok()) else {
+        return false;
+    };
+    dir.flatten().any(|e| {
+        e.file_name()
+            .to_str()
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|t| t.parse::<i64>().ok())
+            .is_some_and(|t| t >= at)
+    })
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(x), Ok(y)) = (std::fs::metadata(a), std::fs::metadata(b))
+            && x.dev() == y.dev()
+            && x.ino() == y.ino()
+        {
+            return true;
+        }
+    }
+    matches!((std::fs::read(a), std::fs::read(b)), (Ok(x), Ok(y)) if x == y)
+}
+
+/// The module a tombstone at `path` names (`None`: not a tombstone).
+pub(crate) fn module_of(path: &Path) -> Option<String> {
+    note_of(path).map(|v| {
+        v.get("module")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    })
+}
+
+fn note(module: &str) -> String {
+    let v = json!({
+        "kith_tombstone": 1,
+        "module": module,
+        "message": format!("this data moved to the Kith core (module {module}); the old reader must not use this file"),
+        "rollback": format!("kith rollback {module}"),
+    });
+    format!("{v}\n")
+}
+
+/// Puts the tombstone at `path`. Idempotent: a path that already holds one is left alone. Returns the line to report.
+pub(crate) fn ensure(path: &Path, module: &str, now: i64) -> Result<String> {
+    if module_of(path).as_deref() == Some(module) {
+        return Ok(format!("tombstone already at {}", path.display()));
+    }
+    let io = |e: std::io::Error| Error::Io(format!("cutover: {}: {e}", path.display()));
+    let tmp = path.with_extension("tombstone.tmp");
+    std::fs::write(&tmp, note(module)).map_err(io)?;
+    crate::perms::make_private(&tmp)?;
+    let kept = if path.exists() {
+        let mut name = path.file_name().unwrap_or_default().to_os_string();
+        name.push(format!(".pre-cutover-{now}"));
+        let kept: PathBuf = path.with_file_name(name);
+        if std::fs::hard_link(path, &kept).is_err() {
+            std::fs::copy(path, &kept).map_err(io)?;
+        }
+        Some(kept)
+    } else {
+        None
+    };
+    std::fs::rename(&tmp, path).map_err(io)?;
+    Ok(match kept {
+        Some(k) => format!(
+            "tombstoned {} (the original is kept at {})",
+            path.display(),
+            k.display()
+        ),
+        None => format!("tombstoned {} (it did not exist)", path.display()),
+    })
+}

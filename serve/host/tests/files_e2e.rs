@@ -23,6 +23,7 @@ impl Drop for Host {
     fn drop(&mut self) {
         common::stop(&mut self.child);
         let _ = std::fs::remove_dir_all(&self.home);
+        common::forget_home(&self.home);
         let _ = std::fs::remove_dir_all(&self.work);
     }
 }

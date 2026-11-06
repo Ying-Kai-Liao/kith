@@ -28,7 +28,7 @@
 //! terminal the host opens (`kith account add ...`); a new Claude account first answers `{ok: false, warning}` and
 //! is made only when asked again with `yes`.
 
-use super::backups::{READ_TIMEOUT, WRITE_TIMEOUT, WRITES, kith, refresh_known, valid_id};
+use super::backups::{READ_TIMEOUT, WRITE_TIMEOUT, WRITES, kith, refresh_known, valid_agent, valid_id};
 use crate::agent::hq;
 use crate::hub::Hub;
 use anyhow::{Result, anyhow, bail};
@@ -89,7 +89,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
 fn agent_of(v: &Value) -> Result<Option<&str>> {
     match v {
         Value::Null => Ok(None),
-        Value::String(a) if valid_id(a) && !a.contains(':') => Ok(Some(a)),
+        Value::String(a) if valid_agent(a) => Ok(Some(a)),
         _ => bail!("`agent` must be an agent name"),
     }
 }

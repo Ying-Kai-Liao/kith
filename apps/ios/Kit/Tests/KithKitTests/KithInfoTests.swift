@@ -119,16 +119,53 @@ private func houseInfo() throws -> KithInfo {
     #expect(BotSections(hqAgent: nil, info: nil).kithSettings)
 }
 
-@Test func hqSettingsWriteThePermissionThroughAndTheRestIsReadOnlySetInKith() throws {
+@Test func hqSettingsAreAllWrittenThroughAndFastModeIsNotOffered() throws {
     var info = try houseInfo()
     info.permissionMode = "plan"
     info.model = "opus"
     info.effort = nil
     let rows = HqSetting.rows(info)
-    #expect(rows.map(\.key) == [.permission, .callModel, .model, .effort, .fastMode])
-    #expect(rows.map(\.value) == ["plan", "default", "opus", "Agent's default", "Off"])
-    #expect(rows.map(\.editable) == [true, true, false, false, false])
-    #expect(rows.filter { !$0.editable }.allSatisfy { $0.hint.hasPrefix(HqSetting.setInKith) })
+    #expect(rows.map(\.key) == [.permission, .callModel, .harness, .model, .effort])
+    #expect(rows.map(\.value) == ["plan", "default", "claude", "opus", "default"])
+    #expect(rows.allSatisfy { $0.editable })
+    #expect(HqSetting.rows(nil).allSatisfy { !$0.editable })
+}
+
+@Test func kithSetSettingSendsTheHostsParams() async throws {
+    let transport = RecordingTransport(#"{"info":null,"error":"effort must be low, medium, high"}"#)
+    let res = try await HostClient(transport: transport).kithSetSetting(botId: "b1", setting: "harness", value: "codex", model: "gpt-5")
+    #expect(res.error == "effort must be low, medium, high")
+    let call = try #require(await transport.calls.first)
+    #expect(call.method == "kithSetSetting")
+    let json = try #require(JSONSerialization.jsonObject(with: call.body) as? [String: Any])
+    #expect(json["botId"] as? String == "b1" && json["setting"] as? String == "harness")
+    #expect(json["value"] as? String == "codex" && json["model"] as? String == "gpt-5")
+}
+
+@Test func aKithAgentsDraftKeepsWhatTheBotHoldsForTheFieldsKithOwns() throws {
+    let kith = try decode(Bot.self, #"{"id":"a","hqAgent":"house","backend":"claude","model":"opus","connectors":["x"]}"#)
+    var draft = BotDraft(kith)
+    draft.backend = "codex"; draft.model = "gpt"; draft.fastMode = true; draft.connectors = []; draft.skills = ["s"]; draft.notify = false
+    let sent = draft.keepingKithOwned(from: kith)
+    #expect(sent.backend == "claude" && sent.model == "opus" && sent.fastMode == kith.fastMode)
+    #expect(sent.connectors == ["x"] && sent.skills == kith.skills)
+    #expect(sent.notify == false)
+    let plain = try decode(Bot.self, #"{"id":"p","backend":"claude"}"#)
+    #expect(draft.keepingKithOwned(from: plain).backend == "codex")
+}
+
+private actor RecordingTransport: HostTransport {
+    struct Call: Sendable { var method: String; var body: Data }
+    private(set) var calls: [Call] = []
+    let answer: String
+    init(_ answer: String) { self.answer = answer }
+    nonisolated func call(_ method: String, body: Data, timeout: TimeInterval) async throws -> Data {
+        await record(Call(method: method, body: body))
+        return Data(answer.utf8)
+    }
+    private func record(_ call: Call) { calls.append(call) }
+    nonisolated func stream(_ request: HostStreamRequest) -> AsyncThrowingStream<Data, Error> { AsyncThrowingStream { $0.finish() } }
+    nonisolated func states() -> AsyncStream<LinkState> { AsyncStream { $0.finish() } }
 }
 
 @Test func nothingIsEditableUntilHqAnsweredAndNoPermissionInHqShowsTheDefault() throws {

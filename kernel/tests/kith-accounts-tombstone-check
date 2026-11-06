@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# kith-accounts-tombstone-check: once `kith migrate step accounts` has tombstoned <machine>/accounts/state.json, every Python
+# writer of it fails closed with a clear message and leaves the note exactly as it is (lib/kith_accounts.py read_state,
+# update_state, mark_out, clear_out, record_started, the old-kernel-marks import; bin/kith-account out|clear|usage). A plain
+# file, or none, behaves as before. Throwaway machine folder; nothing real is touched. The Rust half is the kernel's
+# `a_tombstoned_state_file_is_never_written_over...` and the runtime's cutover/modules tests.
+#
+#   kernel/tests/kith-accounts-tombstone-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-accounts-tombstone-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+export HOME=$T/home KITH_HOME=$T/kith
+unset KITH_STATE HQ_STATE KITH_MACHINE HQ_MACHINE KITH_PROJECT KITH_PERSON KITH_AGENT CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME
+export KITH_STATE=$KITH_HOME/state
+KITH_MACHINE=$KITH_STATE   # the machine folder is the state folder here, as kith-account-check has it
+mkdir -p "$HOME" "$KITH_MACHINE/accounts" "$KITH_MACHINE/serve"
+S=$KITH_MACHINE/accounts/state.json
+NOTE='{"kith_tombstone": 1, "module": "accounts", "message": "moved", "rollback": "kith rollback accounts"}'
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; sed 's/^/     | /' "$T/out" 2>/dev/null | tail -6; fails=$((fails + 1)); fi; }
+PY="import sys; sys.path.insert(0, '$KERNEL/lib'); import kith_accounts as a, kith_tombstone as k"
+# Runs python code that must raise Tombstoned; the note must be byte for byte what it was.
+refuses() { python3 -I -c "$PY
+try:
+    $1
+except k.Tombstoned as e:
+    assert e.module == 'accounts' and 'kith rollback accounts' in str(e), str(e)
+else:
+    raise SystemExit('no refusal')" >"$T/out" 2>&1 && [[ "$(cat "$S")" == "$NOTE" ]] && [[ ! -e "$S.corrupt" ]]; }
+
+printf '%s\n' "$NOTE" > "$S"
+NOTE=$(cat "$S")
+check "read_state refuses a tombstoned file" "refuses 'a.read_state()'"
+check "update_state refuses and does not swallow it as a disk error" "refuses 'a.update_state(lambda d: d.setdefault(\"claude\", {}))'"
+check "mark_out refuses" "refuses 'a.mark_out(\"claude\", until=1900000000)'"
+check "clear_out refuses" "refuses 'a.clear_out(\"claude\")'"
+# A start time only feeds the spread policy: with no core to take it the run goes on, one line says so, the note stays.
+check "record_started notes the loss and does not stop the run" "python3 -I -c \"$PY
+a.record_started('claude')\" >'$T/out' 2>&1 && grep -q 'was not noted' '$T/out' && [[ \"\$(cat '$S')\" == '$NOTE' ]] && [[ ! -e '$S.corrupt' ]]"
+echo '{"claude": {"out_until": 1900000000}}' > "$KITH_MACHINE/serve/kernel-backups-out.json"
+check "the old kernel's marks are neither merged nor renamed while tombstoned" "refuses 'a.read_state()' && [[ -e '$KITH_MACHINE/serve/kernel-backups-out.json' ]]"
+rm "$KITH_MACHINE/serve/kernel-backups-out.json"
+
+for verb in "out claude" "clear claude" "usage claude"; do
+  check "kith account $verb: one clear line, exit 1, note untouched" \
+    "\"$KERNEL/bin/kith-account\" $verb >'$T/out' 2>&1 </dev/null; rc=\$?; [[ \$rc -eq 1 ]] && grep -q 'moved to the Kith core' '$T/out' && grep -q 'kith rollback accounts' '$T/out' && [[ \"\$(cat '$S')\" == '$NOTE' ]]"
+done
+
+# A plain file (or none) is the old behaviour.
+printf '{"version": 1, "accounts": {"claude": {"last_started": 5}}}\n' > "$S"
+check "a plain file reads" "python3 -I -c \"$PY
+assert a.read_state()['claude']['last_started'] == 5\" >'$T/out' 2>&1"
+check "a plain file is written" "python3 -I -c \"$PY
+a.record_started('claude', now=9)
+assert a.read_state()['claude']['last_started'] == 9\" >'$T/out' 2>&1"
+rm "$S"
+check "no file reads as empty and is created by a write" "python3 -I -c \"$PY
+assert a.read_state() == {}
+a.record_started('claude', now=3)
+assert a.read_state()['claude']['last_started'] == 3\" >'$T/out' 2>&1"
+
+# After the rollback wrote the real file again the writers work.
+printf '%s\n' "$NOTE" > "$S"
+check "refused while the note is there" "refuses 'a.read_state()'"
+printf '{"version": 1, "accounts": {}}\n' > "$S"
+check "usable again once the file is real" "python3 -I -c \"$PY
+assert a.read_state() == {}\" >'$T/out' 2>&1"
+
+[[ $fails -eq 0 ]] && { echo "all accounts tombstone checks passed"; exit 0; }
+echo "$fails check(s) failed"
+exit 1

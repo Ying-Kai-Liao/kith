@@ -1,0 +1,55 @@
+[package]
+name = "kith-kernel"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The kernel's rules in Rust, shared by the kith program and the host: where Kith's folders are"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/): cargo only searches parent folders for a root.
+workspace = "../../serve/host"
+
+[lib]
+name = "kith_kernel"
+path = "src/lib.rs"
+
+# The CLI and the host both link this, so each dependency is one the host already has (chrono, chrono-tz and croner for
+# schedule triggers; the host's routines use the same majors).
+[dependencies]
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+# auth.json is locked with flock, as the Python kernel and the host do.
+fs2 = "0.4.3"
+# A door in a job is named by the digest of its declaration and lockfile.
+sha2 = "0.11.0"
+# The cost ledger (`cost.db`) is SQLite; the host links the same bundled copy.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+# kill(2) for the claim sweep and "is that pid running" (threads::os); the host links the same version.
+libc = "0.2"
+# Process start stamps (`kith_kernel::procstart` re-exports it); the stub links the same crate.
+kith-procstart = { path = "../procstart" }
+# Triggers (schedule): the host's routines use the same crates and majors, so one Cargo.lock holds one copy of each.
+chrono = "0.4.45"
+chrono-tz = "0.10.4"
+croner = "3"
+serde = { version = "1.0.229", features = ["derive"] }
+
+[lints.rust]
+# `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"

@@ -4,6 +4,7 @@
   kith bug "<title>" [--details TEXT|-]   report one (details from stdin with -)
   kith bug list                           (owner) the local reports, newest first
   kith bug show <id>                      (owner) one report: where it is and what it says
+  --json on any of these: one object on stdout ({"bugs": [...]}, the report, {"ok": true, "id", ...}), or {"ok": false, "error"}
   kith bug send <id>                      (owner) hand it to coder (kith ask --bg coder -p kith), by path
   kith bug publish <id>                   (owner) turn a local report into a redacted public issue, after a yes
 
@@ -23,10 +24,14 @@ sys.path.insert(0, str(HERE.parent / 'lib'))
 import kith_bug as kb  # noqa: E402
 
 USAGE = __doc__.split('\n\n')[0].strip()
+JSON = False   # --json: the result is one object on stdout, and an error is {"ok": false, "error"} there
 
 
 def die(msg, code=1):
-    print('kith bug: ' + msg, file=sys.stderr)
+    if JSON:
+        print(json.dumps({'ok': False, 'error': msg}))
+    else:
+        print('kith bug: ' + msg, file=sys.stderr)
     sys.exit(code)
 
 
@@ -90,16 +95,22 @@ def report_owner(title, details):
         ['# ' + title, '', details or '(no details)', '', '- agent: %s' % (meta['agent'] or '-'), '- project: %s' % (meta['project'] or '-'),
          '- cwd: %s' % meta['cwd'], '- kith: %s' % meta['kith'], '- time: %s' % meta['time'], '- session: %s' % (sid or '-'),
          '- transcript: %s' % note, '']))
-    print('Saved bug %s (%s)\n%s' % (new_id, note, folder))
+    if JSON:
+        print(json.dumps({'ok': True, 'id': new_id, 'path': str(folder), 'transcript': note, 'filed': False}))
+    else:
+        print('Saved bug %s (%s)\n%s' % (new_id, note, folder))
     return 0
 
 
 def report_redacted(title, details, who):
     d = kb.build_draft(title, details, who)
-    tty = sys.stdin.isatty() and sys.stdout.isatty()
-    if not tty:
+    tty = sys.stdin.isatty() and sys.stdout.isatty() and not JSON
+    if not tty and not JSON:
         print(kb.draft_text(d))
     status, text = kb.file_draft(d, permit_decide(), interactive=tty)
+    if JSON:
+        print(json.dumps({'ok': status in ('filed', 'already'), 'status': status, 'message': text, 'draft': kb.draft_text(d)}))
+        return 0 if status in ('filed', 'already') else 3
     print(text)
     return 0 if status in ('filed', 'already') else 3
 
@@ -120,10 +131,27 @@ def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
         return 0
-    cmd = argv[0]
+    global JSON
+    if '--json' in argv:
+        JSON = True
+        argv = [a for a in argv if a != '--json']
+    cmd = argv[0] if argv else ''
+    if JSON and not argv:
+        die(USAGE, 2)
     if cmd == 'list':
         need_owner()
         rows = sorted(p.parent for p in bugs_dir().glob('*/report.json')) if bugs_dir().is_dir() else []
+        if JSON:
+            bugs = []
+            for r in reversed(rows):
+                try:
+                    meta = json.loads((r / 'report.json').read_text())
+                except ValueError:
+                    meta = {}
+                bugs.append({'id': r.name, 'title': meta.get('title', ''), 'time': meta.get('time'), 'agent': meta.get('agent', ''),
+                             'project': meta.get('project', ''), 'path': str(r)})
+            print(json.dumps({'bugs': bugs}))
+            return 0
         for r in reversed(rows):
             print('%s  %s' % (r.name, json.loads((r / 'report.json').read_text()).get('title', '')))
         return 0
@@ -132,6 +160,9 @@ def main(argv):
         if len(argv) != 2:
             die('usage: kith bug %s <id>' % cmd)
         meta, folder = load(argv[1])
+        if cmd == 'show' and JSON:
+            print(json.dumps({'id': folder.name, 'path': str(folder), 'report': meta, 'text': (folder / 'report.md').read_text()}))
+            return 0
         if cmd == 'show':
             print(folder)
             print((folder / 'report.md').read_text())
@@ -140,6 +171,8 @@ def main(argv):
             ask = os.environ.get('KITH_BUG_ASK') or str(HERE / 'kith')
             msg = ('A bug was reported in kith. Read %s/report.md; the full session transcript is %s/transcript.jsonl (helpers '
                    'beside it). Find the cause and fix it. Do not paste the transcript anywhere public.' % (folder, folder))
+            if JSON:
+                die('send has no --json form: it hands the report to coder (kith ask --bg)', 2)
             os.execv(ask, [ask, 'ask', '--bg', 'coder', '-p', 'kith', msg])
         return report_redacted(meta['title'], meta.get('details', ''), 'user')
     # everything else is a new report

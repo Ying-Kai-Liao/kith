@@ -1,0 +1,519 @@
+//! The state file: what each account is doing right now (`kernel/lib/kith_accounts.py`, "the state file"). One file for the
+//! whole Mac, `<machine>/accounts/state.json`, `{"version": 1, "accounts": {"claude:work": {"out_until", "reason", "since",
+//! "cleared_at", "usage", "last_started"}}}`. This side reads it and notes `last_started` for a launch; marking an account
+//! out or clearing it, and usage readings, stay with the Python commands.
+//!
+//! Writers take an exclusive lock on `state.json.lock` (the same `flock` the Python side takes), read the file again under
+//! it, and swap a new one in (temp file and rename), so two runs marking different accounts at once lose nothing. A corrupt
+//! file is kept as `state.json.corrupt`, then replaced on the next write. A disk that can't be written to loses the mark;
+//! the run goes on.
+
+use super::{Map, create_new, pyjson, temp_in};
+use fs2::FileExt as _;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+
+/// A usage reading older than this says nothing about now (as the host's).
+const USAGE_STALE: f64 = 30.0 * 60.0;
+
+/// An account that is out of usage until a time, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mark {
+    pub until: i64,
+    pub reason: String,
+}
+
+pub fn state_file(machine: &Path) -> PathBuf {
+    machine.join("accounts").join("state.json")
+}
+
+/// Python's `float(v)`: numbers, booleans and numeric text; anything else raises there, `None` here.
+fn pyfloat(v: &Value) -> Option<f64> {
+    match v {
+        Value::Number(n) => n.as_f64(),
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// Python's `int(v)`: numbers (cut towards zero), booleans and whole-number text.
+#[allow(clippy::cast_possible_truncation)]
+fn pyint(v: &Value) -> Option<i64> {
+    match v {
+        Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        Value::Bool(b) => Some(i64::from(*b)),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// Python's `str(v)` for the values a reason can be.
+fn pystr(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Bool(b) => if *b { "True" } else { "False" }.to_owned(),
+        Value::Null => "None".to_owned(),
+        other => pyjson::dumps(other),
+    }
+}
+
+/// Python truthiness of a JSON value.
+fn truthy(v: Option<&Value>) -> bool {
+    match v {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Array(a)) => !a.is_empty(),
+        Some(Value::Object(o)) => !o.is_empty(),
+    }
+}
+
+fn reason_of(v: &Map) -> String {
+    match v.get("reason") {
+        Some(r) if truthy(Some(r)) => pystr(r),
+        _ => "rate_limit".to_owned(),
+    }
+}
+
+/// `(accounts, corrupt)`: the file's accounts; empty and `corrupt` when it exists but isn't ours.
+fn read_raw(machine: &Path) -> (Map, bool) {
+    let text = match std::fs::read(state_file(machine)) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Map::new(), false),
+        Err(_) => return (Map::new(), true),
+    };
+    let Ok(Value::Object(mut d)) = serde_json::from_slice::<Value>(&text) else {
+        return (Map::new(), true);
+    };
+    let Some(Value::Object(accts)) = d.remove("accounts") else {
+        return (Map::new(), true);
+    };
+    (
+        accts.into_iter().filter(|(_, v)| v.is_object()).collect(),
+        false,
+    )
+}
+
+/// The file's text for these accounts, as Python writes it.
+fn render(accts: &Map) -> String {
+    let mut top = Map::new();
+    top.insert("version".to_owned(), Value::from(1));
+    top.insert("accounts".to_owned(), Value::Object(accts.clone()));
+    pyjson::dumps_pretty(&Value::Object(top)) + "\n"
+}
+
+/// `_write_atomic(path, data, 0o600)`: a temp file beside it, then the swap.
+pub fn write_atomic(path: &Path, data: &[u8], mode: u32) -> std::io::Result<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = temp_in(dir, &format!(".{name}."), "");
+    let result = (|| {
+        let mut f = create_new(&tmp, mode)?;
+        f.write_all(data)?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+fn lock(machine: &Path) -> std::io::Result<std::fs::File> {
+    let f = state_file(machine);
+    if let Some(dir) = f.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut name = f.into_os_string();
+    name.push(".lock");
+    let l = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(false)
+        .create(true)
+        .open(PathBuf::from(name))?;
+    l.lock_exclusive()?;
+    Ok(l)
+}
+
+thread_local! {
+    /// This thread holds the writers' lock through [`hold`]: its own `snapshot` must not wait on it (flock conflicts between
+    /// two opens of the file even in one process).
+    static HELD: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The writers' lock (`state.json.lock`), held by the cutover step from the import through the tombstone so no writer's
+/// mark is lost in between and no writer's rename can replace the tombstone. Released when dropped.
+pub struct StateHold(std::fs::File);
+
+impl Drop for StateHold {
+    fn drop(&mut self) {
+        HELD.with(|h| h.set(h.get().saturating_sub(1)));
+        let _ = fs2::FileExt::unlock(&self.0);
+    }
+}
+
+/// Takes the writers' lock exclusively, waiting up to `wait` for a writer that holds it (a clear error after that; the
+/// lock is never left taken on failure). While it is held this thread's [`snapshot`] reads without waiting on it.
+pub fn hold(machine: &Path, wait: std::time::Duration) -> std::io::Result<StateHold> {
+    let f = state_file(machine);
+    if let Some(dir) = f.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut name = f.into_os_string();
+    name.push(".lock");
+    let l = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(false)
+        .create(true)
+        .open(PathBuf::from(name))?;
+    let deadline = std::time::Instant::now() + wait;
+    while l.try_lock_exclusive().is_err() {
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!(
+                    "state.json.lock is held by another writer (waited {}s); try again in a moment",
+                    wait.as_secs()
+                ),
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    HELD.with(|h| h.set(h.get() + 1));
+    Ok(StateHold(l))
+}
+
+/// The file is a cutover tombstone (`kith migrate step accounts`): the state moved to the core. Nothing here may write the
+/// file then, or it would overwrite the note (and `read_raw` would call the note corrupt and move it aside).
+pub fn tombstoned(machine: &Path) -> bool {
+    std::fs::read(state_file(machine))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|v| v.get("kith_tombstone").is_some())
+}
+
+/// Writes the file from these accounts, over a tombstone: the rollback's export-back (`kith rollback accounts`) and nothing
+/// else. Under the writers' lock, atomically, as `update` writes it.
+pub fn replace(machine: &Path, accts: &Map) -> std::io::Result<()> {
+    let _lock = lock(machine)?;
+    write_atomic(&state_file(machine), render(accts).as_bytes(), 0o600)
+}
+
+/// `change(accounts)` under the lock, then written back atomically. A disk that can't be written to loses the mark and the
+/// run goes on, but the loss is noted in the host's log (`crate::log`) instead of vanishing.
+pub fn update(machine: &Path, change: impl FnOnce(&mut Map)) {
+    let done = (|| -> std::io::Result<()> {
+        let _lock = lock(machine)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("can't take the lock: {e}")))?;
+        if tombstoned(machine) {
+            return Err(std::io::Error::other(
+                "the accounts state moved to the Kith core (kith rollback accounts brings it back)",
+            ));
+        }
+        let (mut accts, corrupt) = read_raw(machine);
+        if corrupt {
+            let f = state_file(machine);
+            let _ = std::fs::rename(&f, f.with_file_name("state.json.corrupt"));
+        }
+        change(&mut accts);
+        write_atomic(&state_file(machine), render(&accts).as_bytes(), 0o600)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("can't write it: {e}")))
+    })();
+    if let Err(e) = done {
+        crate::log::note(&format!(
+            "accounts state: a change to {} was lost: {e}",
+            state_file(machine).display()
+        ));
+    }
+}
+
+/// A launch is real: note when the account last started. Where the state lives is [`super::change::make`]'s to say; a
+/// start that cannot be noted never stops the run, but is written to the log.
+pub fn record_started(machine: &Path, entry: &str, now: i64) {
+    let change = super::change::Change::Started {
+        id: entry.to_owned(),
+    };
+    if let Err(e) = super::change::make(machine, &change, now) {
+        crate::log::note(&format!("accounts state: a start of {entry} was lost: {e}"));
+    }
+}
+
+/// The host's own out mark for `id` as `kith account clear` remembers it: `int(float(out_until))`, 0 when there is none.
+pub fn host_out_until(machine: &Path, id: &str) -> i64 {
+    legacy_marks(&legacy_files(machine).0)
+        .into_iter()
+        .find(|(k, _)| k == id)
+        .and_then(|(_, m)| m.get("out_until").and_then(pyfloat))
+        .map_or(0, |f| {
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                f as i64
+            }
+        })
+}
+
+/// The host's own file (read only: it holds it in memory and rewrites it until it moves to the state file) and the file the
+/// first kernel chain wrote beside it (imported once, then renamed).
+fn legacy_files(machine: &Path) -> (PathBuf, PathBuf) {
+    let d = machine.join("serve");
+    (d.join("backups.json"), d.join("kernel-backups-out.json"))
+}
+
+/// The entries of a legacy file that name a time in the future or past (`out_until` above 0); nothing at all when any is
+/// unreadable, as the Python's one `try` around the lot.
+fn legacy_marks(path: &Path) -> Vec<(String, Map)> {
+    let Ok(text) = std::fs::read(path) else {
+        return vec![];
+    };
+    let Ok(Value::Object(d)) = serde_json::from_slice::<Value>(&text) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for (k, v) in d {
+        if let Value::Object(m) = v {
+            let until = match m.get("out_until") {
+                None => 0.0,
+                Some(u) => match pyfloat(u) {
+                    Some(f) => f,
+                    None => return vec![],
+                },
+            };
+            if until > 0.0 {
+                out.push((k, m));
+            }
+        }
+    }
+    out
+}
+
+/// The legacy kernel marks laid over `accts`: the later `out_until` wins. `None` when any entry is unreadable (the caller
+/// then changes nothing, as the Python's one `try`).
+fn merge_kernel_marks(accts: &mut Map, marks: Vec<(String, Map)>) -> Option<()> {
+    for (k, v) in marks {
+        let e = accts
+            .entry(k)
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()?;
+        let until = pyfloat(v.get("out_until")?)?;
+        let have = e.get("out_until").map_or(Some(0.0), pyfloat)?;
+        if until > have {
+            let since = match v.get("since") {
+                Some(s) if truthy(Some(s)) => pyint(s)?,
+                _ => pyint(v.get("out_until")?)?,
+            };
+            e.insert(
+                "out_until".to_owned(),
+                Value::from(pyint(v.get("out_until")?)?),
+            );
+            e.insert(
+                "reason".to_owned(),
+                Value::String(reason_of(&v).chars().take(40).collect()),
+            );
+            e.insert("since".to_owned(), Value::from(since));
+        }
+    }
+    Some(())
+}
+
+/// `serve/kernel-backups-out.json` into the state file, once: the later `out_until` wins; the old file is renamed.
+fn import_kernel_marks(machine: &Path) {
+    let old = legacy_files(machine).1;
+    if !old.exists() || tombstoned(machine) {
+        return;
+    }
+    let _ = (|| -> Option<()> {
+        let _lock = lock(machine).ok()?;
+        let marks = legacy_marks(&old);
+        let (mut accts, _) = read_raw(machine);
+        merge_kernel_marks(&mut accts, marks)?;
+        write_atomic(&state_file(machine), render(&accts).as_bytes(), 0o600).ok()?;
+        let mut renamed = old.clone().into_os_string();
+        renamed.push(".imported");
+        std::fs::rename(&old, PathBuf::from(renamed)).ok()
+    })();
+}
+
+/// What `kith migrate --accounts` sees of the state: the file's accounts with the legacy kernel marks laid over them in
+/// memory, as [`read`] would leave them, but nothing written, renamed or created.
+#[derive(Debug)]
+pub struct Snapshot {
+    /// `<machine>/accounts/state.json`, whether or not it exists.
+    pub file: PathBuf,
+    /// The bytes of `state.json` as read under the same hold as the accounts (None: no file).
+    pub bytes: Option<Vec<u8>>,
+    /// The accounts, as `read` returns them.
+    pub accounts: Map,
+    /// `state.json` exists but is not ours (unreadable, not an object, no `accounts` object): `read` sees it as empty.
+    pub not_ours: bool,
+    /// Top-level keys of `state.json` besides `version` and `accounts` (the core's import does not keep them).
+    pub extra_keys: Vec<String>,
+    /// `serve/kernel-backups-out.json` is there; `legacy_applied` says its marks were readable and laid over.
+    pub legacy_present: bool,
+    pub legacy_applied: bool,
+}
+
+/// [`Snapshot`] of the machine's state, read under a shared hold of `state.json.lock` (the lock the writers take, if it
+/// exists). The file is replaced by rename, so a read could never see a torn file; the hold keeps the file and the legacy
+/// merge consistent with a writer that is mid-update.
+pub fn snapshot(machine: &Path) -> Snapshot {
+    let mut lockname = state_file(machine).into_os_string();
+    lockname.push(".lock");
+    let held = std::fs::File::open(PathBuf::from(lockname))
+        .ok()
+        .filter(|_| HELD.with(std::cell::Cell::get) == 0);
+    if let Some(l) = &held {
+        let _ = fs2::FileExt::lock_shared(l);
+    }
+    let mut snap = Snapshot {
+        file: state_file(machine),
+        bytes: None,
+        accounts: Map::new(),
+        not_ours: false,
+        extra_keys: vec![],
+        legacy_present: false,
+        legacy_applied: false,
+    };
+    if let Ok(text) = std::fs::read(state_file(machine)) {
+        snap.bytes = Some(text.clone());
+        match serde_json::from_slice::<Value>(&text) {
+            Ok(Value::Object(mut d)) => {
+                snap.extra_keys = d
+                    .keys()
+                    .filter(|k| *k != "version" && *k != "accounts")
+                    .cloned()
+                    .collect();
+                if let Some(Value::Object(a)) = d.remove("accounts") {
+                    snap.accounts = a.into_iter().filter(|(_, v)| v.is_object()).collect();
+                } else {
+                    snap.not_ours = true;
+                }
+            }
+            _ => snap.not_ours = true,
+        }
+    }
+    let old = legacy_files(machine).1;
+    if old.exists() {
+        snap.legacy_present = true;
+        let marks = legacy_marks(&old);
+        let mut merged = snap.accounts.clone();
+        if merge_kernel_marks(&mut merged, marks).is_some() {
+            snap.accounts = merged;
+            snap.legacy_applied = true;
+        }
+    }
+    if let Some(l) = held {
+        let _ = fs2::FileExt::unlock(&l);
+    }
+    snap
+}
+
+/// Where the accounts' state is read from: `pick`, the statuses and the listing ask this and nothing else. The file is the
+/// default ([`FileState`], today's behaviour); the core supplies one over its database (`kith-core`, which this crate does not
+/// depend on). It answers the shape `state.json`'s `accounts` has (`{entry: {out_until, reason, since, cleared_at, usage,
+/// last_started, ...}}`), so every reader below it stays as it is.
+pub trait StateSource {
+    /// The accounts' state. `machine` is where the file source looks; another source may ignore it.
+    fn accounts(&self, machine: &Path) -> Map;
+}
+
+/// State that was read already (and checked): a verb reads once, so a second read that fails cannot turn into "no state".
+pub struct Fixed(pub Map);
+
+impl StateSource for Fixed {
+    fn accounts(&self, _machine: &Path) -> Map {
+        self.0.clone()
+    }
+}
+
+/// `<machine>/accounts/state.json` (the old kernel marks imported into it first): what every run reads today.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FileState;
+
+impl StateSource for FileState {
+    fn accounts(&self, machine: &Path) -> Map {
+        // The file, or the core's table once the state moved there (the host installs its store for the verbs it runs).
+        super::change::read_state_lossy(machine)
+    }
+}
+
+/// [`out_marks`] over a source: the host's own file still comes from `machine`.
+pub fn out_marks_from(src: &dyn StateSource, machine: &Path, now: f64) -> HashMap<String, Mark> {
+    out_marks(machine, &src.accounts(machine), now)
+}
+
+/// The state file's accounts (none when there is no file or it is corrupt), the old kernel marks imported first.
+pub fn read(machine: &Path) -> Map {
+    import_kernel_marks(machine);
+    read_raw(machine).0
+}
+
+/// Every account that is out of usage until a time in the future: this file, and the host's own file while the host still
+/// keeps one (a mark of the host's older than the account's last `clear` is ignored).
+pub fn out_marks(machine: &Path, state: &Map, now: f64) -> HashMap<String, Mark> {
+    let mut marks: HashMap<String, Mark> = HashMap::new();
+    for (k, v) in legacy_marks(&legacy_files(machine).0) {
+        let cleared = state.get(&k).and_then(Value::as_object);
+        let num = |m: Option<&Map>, key: &str| {
+            m.and_then(|m| m.get(key)).and_then(pyfloat).unwrap_or(0.0)
+        };
+        let until = v.get("out_until").and_then(pyfloat).unwrap_or(0.0);
+        // A mark the host made before our `clear` is ignored; one it made or extended after it (a later since, or an
+        // out_until past the one that was cleared: the host keeps `since` when it extends) counts.
+        if until > now
+            && (num(Some(&v), "since") > num(cleared, "cleared_at")
+                || until > num(cleared, "cleared_host_until"))
+        {
+            #[allow(clippy::cast_possible_truncation)]
+            marks.insert(
+                k,
+                Mark {
+                    until: until as i64,
+                    reason: reason_of(&v),
+                },
+            );
+        }
+    }
+    for (k, v) in state {
+        let Some(v) = v.as_object() else { continue };
+        let Some(until) = v.get("out_until").map_or(Some(0.0), pyfloat) else {
+            continue;
+        };
+        #[allow(clippy::cast_precision_loss)] // epoch seconds fit an f64
+        let have = marks.get(k).map_or(0.0, |m| m.until as f64);
+        if until > now && until > have {
+            let Some(i) = v.get("out_until").and_then(pyint) else {
+                continue;
+            };
+            marks.insert(
+                k.clone(),
+                Mark {
+                    until: i,
+                    reason: reason_of(v),
+                },
+            );
+        }
+    }
+    marks
+}
+
+/// The fullest window's percent of a fresh reading; `None` when there is none (or it is stale or damaged).
+pub fn usage_level(entry: Option<&Value>, now: f64) -> Option<f64> {
+    let u = entry?.get("usage")?.as_object().filter(|u| !u.is_empty())?;
+    if now - pyfloat(u.get("read_at")?)? > USAGE_STALE {
+        return None;
+    }
+    u.get("windows")?
+        .as_array()?
+        .iter()
+        .map(|w| pyfloat(w.get("percent")?))
+        .collect::<Option<Vec<f64>>>()?
+        .into_iter()
+        .reduce(f64::max)
+}

@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below (see the skill's "Sync commit").
-SYNC=fb5f140f6c84bc079684575a8ce93373eba51275
+SYNC=0e958a1b99a5444265d2803158087462147d6911
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
@@ -30,6 +30,15 @@ FILES=(
   serve/host/src/run_outbox.rs            # a run's outbox into the person's app chat (the app door: the relay's block)
   kernel/lib/kith_door.py                 # the guest door: run (lock, kith-auth door, claim, start = DoorStart), sweep (DoorSweep)
   serve/host/src/doors.rs                 # the host's door sweep: on cut_off, the bot-guest sweep and every 60 s (DoorSweep)
+  core/runtime/src/authority/revoke.rs   # M2-4: person_suspend (the revoked fact, rows untouched), person_remove, person_rename
+  core/runtime/src/doors/mod.rs           # M2-14: the door table (start, mark_live, sweep, sweep_ids, end: DoorStart, DoorSweep)
+  core/runtime/src/doors/call.rs          # M2-14: the doors.* rows
+  core/runtime/src/migrations/doors/m0060_doors.rs  # M2-14: the doors table
+  core/runtime/src/revoke_order.rs        # M3-10d/M2-18c: the order (claims of P and B, then the asks), open_removals, replay_open (ClaimSweep, AskSweep)
+  core/runtime/src/authority/call.rs      # which writes run the order (a removal does; a suspend does not yet), the open-removal join refusal
+  serve/host/src/api/authority.rs         # the host's gate for KITH_CORE_AUTHORITY=1: fingerprint latch (CoreGate, GuardP)
+  core/runtime/src/import/authority.rs    # M2-18c: record_suspends (a revoke the file has and the core missed gets the open_removals row), record_removals
+  core/runtime/src/authority/mod.rs       # the readers: snapshot (revoked), may/resolve/cut_off over secrets
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

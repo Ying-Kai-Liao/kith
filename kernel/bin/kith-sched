@@ -11,6 +11,10 @@
   kith-sched tick                                        (launchd, every minute) start the jobs that are due
   kith-sched --install | --uninstall                     the LaunchAgent dev.kith.sched that ticks
 
+--json (ls, add, rm, pause, resume, run, log; anywhere after the verb): one JSON object on stdout, nothing else. A
+listing is {"jobs": [...]} / {"runs": [...]}; an acting verb is {"ok": true, ...}; a failure is {"ok": false, "error"}
+with the exit code the text mode has. `log` also takes AGENT/ID.
+
 A job is a one-shot `kith AGENT "task"`, the same run as from your terminal: pinned package, memory, the agent's own
 tools, tagged in the cost ledger with via=schedule. The task is told it was scheduled and to deliver with kith-send,
 which goes to your Telegram and, through the run's outbox, to the person's chat with the agent in the Kith app. Jobs
@@ -30,14 +34,19 @@ Runs start with `--permission-mode` from KITH_SCHED_PERMISSION_MODE when set, el
 defaultMode, else in kith's default (auto; ~/.kith/settings.json changes it): no one is there to approve a tool call, so
 one that would need it is refused. The agent's settings.json allow/deny rules still apply.
 Machine state (last tick, last runs): ~/.kith/sched/. Logs (tick.log, each run's output): ~/.kith/logs/sched/.
+
+KITH_SCHED_NOW (tests): the time kith-sched takes as now, instead of the clock: ISO local time ("2026-11-03T08:00") or
+epoch seconds. Unset, nothing changes. It sets the tick, the catch-up window, the 6 h still-running rule, `ls`'s next
+times and the stamps kith-sched writes; it does not move the clock of the runs it starts.
 """
-import contextlib, datetime as dt, fcntl, json, os, plistlib, re, subprocess, sys, time
+import contextlib, datetime as dt, fcntl, io, json, os, plistlib, re, subprocess, sys, time
 from pathlib import Path
 
 KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_launchd  # noqa: E402
 import kith_runenv  # noqa: E402
+import kith_tombstone  # noqa: E402
 from kith_paths import paths, launcher, job_installed, retire_old_job, stable_kernel  # noqa: E402  the one place that knows where kith's folders are
 STATE = paths()['KITH_STATE']
 MACHINE = paths()['KITH_MACHINE'] / 'sched'  # last tick, last run per job
@@ -56,6 +65,23 @@ KEEP_RUNS, KEEP_RUN_DAYS = 50, 30
 AUTH_LOG_MAX = 5 * 1024 * 1024
 TERMINAL_DAYS = 7
 PRUNE_EVERY = 3600   # seconds between prunes: the tick runs every minute, the files grow slowly
+
+
+def clock():
+    """Now, as local time without a zone. KITH_SCHED_NOW (ISO local time, or epoch seconds) hands tests a fixed one."""
+    v = os.environ.get('KITH_SCHED_NOW', '').strip()
+    if not v:
+        return dt.datetime.now()
+    try:
+        return dt.datetime.fromtimestamp(float(v))
+    except ValueError:
+        t = dt.datetime.fromisoformat(v)
+        return t.astimezone().replace(tzinfo=None) if t.tzinfo else t
+
+
+def epoch():
+    """clock() as epoch seconds; the real time.time() when KITH_SCHED_NOW is unset."""
+    return clock().timestamp() if os.environ.get('KITH_SCHED_NOW', '').strip() else time.time()
 
 
 # --- cron -------------------------------------------------------------------------------------------------------------
@@ -165,10 +191,15 @@ def editing(agent):
 def all_jobs():
     for a in agents():
         for j in load(a):
+            if 'trigger' in j and 'cron' not in j:   # a routine the Kith core fires (kith migrate), not a cron job of ours
+                continue
             yield a, j
 
 
 def machine():
+    # Moved to the Kith core (`kith migrate step schedules`): state.json is a note, and carrying on as if it were empty
+    # would start every job again. Tombstoned is not caught below (it is an OSError): kith-sched stops with its message.
+    kith_tombstone.check(MACHINE / 'state.json')
     try:
         return json.loads((MACHINE / 'state.json').read_text())
     except (OSError, ValueError):
@@ -177,6 +208,7 @@ def machine():
 
 def save_machine(s):
     MACHINE.mkdir(parents=True, exist_ok=True)
+    kith_tombstone.check(MACHINE / 'state.json')   # the last stop before the rename would replace the note
     tmp = MACHINE / 'state.json.tmp'
     tmp.write_text(json.dumps(s, indent=1))
     tmp.replace(MACHINE / 'state.json')
@@ -222,7 +254,7 @@ def run_outbox(agent, job, person):
         meta = root / (run + '.json')
         with open(str(meta) + '.tmp', 'w') as f:
             json.dump({'agent': agent, 'person': person, 'via': 'schedule', 'job': job['id'], 'cron': job['cron'],
-                       'at': time.time()}, f)
+                       'at': epoch()}, f)
         os.replace(str(meta) + '.tmp', meta)
     except OSError:
         return None
@@ -238,7 +270,7 @@ def tell_app(agent, jid, op):
     name = os.path.join(box, '%d.json' % time.time_ns())
     try:
         with open(name + '.tmp', 'w') as f:
-            json.dump({'as': agent, 'at': time.time(), 'schedule': {'id': jid, 'op': op}}, f)
+            json.dump({'as': agent, 'at': epoch(), 'schedule': {'id': jid, 'op': op}}, f)
         os.rename(name + '.tmp', name)   # whole or not at all: the host reads *.json only
     except OSError as e:
         print('kith-sched: the app was not told (%s)' % e, file=sys.stderr)
@@ -266,6 +298,7 @@ def start(agent, job, now, why):
               'KITH_BRIDGE_OUTBOX', 'KITH_RUN_OUTBOX', 'KITH_CALL_CHAT', 'KITH_CALL_KEY'):   # and the HQ_ twins that sync_env made
         env.pop('HQ_' + k[5:], None)
         env.pop(k, None)
+    env.pop('KITH_SCHED_NOW', None)   # the test clock is the tick's, not the run's
     env['KITH_BACKUP_CHAIN'] = 'on'   # no host picks the account: bin/kith walks the account candidates (kith account pick)
     if job.get('person'):   # none: whoever started this (launchd's tick: the owner; a run by hand: that run's person)
         env['KITH_PERSON'] = env['HQ_PERSON'] = job['person']
@@ -363,7 +396,7 @@ def prune_terminal(dirpath, now=None, days=TERMINAL_DAYS):
 def prune(force=False):
     """Hourly housekeeping from the tick: run logs, auth.log, terminal records. Deletes are idempotent."""
     s = machine()
-    t = time.time()
+    t = epoch()
     if not force and t - s.get('pruned', 0) < PRUNE_EVERY:
         return
     s['pruned'] = t
@@ -378,6 +411,8 @@ def prune(force=False):
 def tick():
     try:
         prune()
+    except kith_tombstone.Tombstoned:
+        pass   # said once, below, where the tick stops
     except Exception as e:   # housekeeping must never stop jobs from starting
         print('kith-sched: prune: %s' % e, file=sys.stderr)
     # The wake queue (kith-wake): owed turns of ended sessions start here once their writer lets go, and turns whose
@@ -391,7 +426,7 @@ def tick():
         subprocess.run([sys.executable, str(KITH / 'bin/kith-wake'), 'drain'], timeout=30, stdout=subprocess.DEVNULL)
     except Exception as e:  # noqa: BLE001
         print('kith-sched: wake drain: %s' % e, file=sys.stderr)
-    now = dt.datetime.now().replace(second=0, microsecond=0)
+    now = clock().replace(second=0, microsecond=0)
     s = machine()
     last = dt.datetime.fromisoformat(s['tick']) if s.get('tick') else now - dt.timedelta(minutes=1)
     since = max(last, now - CATCH_UP)
@@ -459,7 +494,7 @@ def find(agent, jid, jobs=None):
 
 
 def ls(only=None):
-    now, last = dt.datetime.now(), machine().get('last', {})
+    now, last = clock(), machine().get('last', {})
     rows = [(a, j) for a, j in all_jobs() if only in (None, a)]
     if not rows:
         print('no jobs%s. Add one: kith schedule add <agent> "0 8 * * *" "the task"' % (' for ' + only if only else ''))
@@ -487,7 +522,135 @@ def log(agent=None, jid=None):
             print('\n' + runs[-1].read_text()[-3000:])
 
 
+# --- --json -----------------------------------------------------------------------------------------------------------
+
+def job_row(agent, j, last, now):
+    """One job for a client: the stored fields (older files may lack some), when it runs next, how it last went."""
+    row = {'agent': agent, 'id': j['id'], 'cron': j.get('cron'), 'task': j.get('task'), 'paused': bool(j.get('paused'))}
+    for k in ('person', 'model', 'effort', 'harness'):
+        if j.get(k): row[k] = j[k]
+    nxt = None
+    try:
+        if not row['paused']:
+            n = next_time(parse(j['cron']), now)
+            nxt = n.isoformat(timespec='minutes') if n else None
+    except (ValueError, AttributeError, KeyError, TypeError) as e:
+        row['error'] = 'bad cron: %s' % e
+    row['next'] = nxt
+    l = last.get('%s/%s' % (agent, j['id']))
+    row['last'] = {'at': l.get('at'), 'why': l.get('why'), 'pid': l.get('pid'), 'log': l.get('log'),
+                   'running': bool(running(l.get('pid')))} if l else None
+    return row
+
+
+def json_cmd(cmd, rest):
+    """The --json twin of a verb: returns the object to print. Failures arrive as SystemExit(message)."""
+    now = clock()
+    if cmd == 'ls':
+        if rest: need_agent(rest[0])
+        last = machine().get('last', {})
+        return {'jobs': [job_row(a, j, last, now) for a, j in all_jobs() if not rest or a == rest[0]],
+                'ticking': bool(job_installed('sched'))}
+    if cmd == 'log':
+        agent, jid = (rest[0].split('/', 1) + [None])[:2] if rest and '/' in rest[0] else ((rest + [None, None])[:2])
+        n = None
+        if '/' in (rest[0] if rest else ''):
+            n = rest[1] if len(rest) > 1 else None
+        elif len(rest) > 2:
+            n = rest[2]
+        if n is not None and (not n.isdigit() or int(n) < 1):
+            sys.exit('kith-sched: n must be a positive number')
+        if agent: need_agent(agent)
+        runs = []
+        for k, v in sorted(machine().get('last', {}).items(), key=lambda kv: kv[1].get('at', '')):
+            a, j = k.split('/', 1)
+            if agent in (None, a) and jid in (None, j):
+                runs.append({'agent': a, 'id': j, 'at': v.get('at'), 'why': v.get('why'), 'pid': v.get('pid'),
+                             'log': v.get('log'), 'running': bool(running(v.get('pid')))})
+        if n: runs = runs[-int(n):]
+        return {'agent': agent, 'id': jid, 'runs': runs}
+    if cmd == 'add':
+        opts, pos, i = {}, [], 0
+        while i < len(rest):
+            if rest[i] in ('--id', '-m', '--model', '-e', '--effort', '-H', '--harness'):
+                if i + 1 >= len(rest): sys.exit('kith-sched: %s needs a value' % rest[i])
+                opts[{'--id': 'id', '-H': 'H', '--harness': 'H'}.get(rest[i], rest[i].lstrip('-')[0])] = rest[i + 1]; i += 2
+            else:
+                pos.append(rest[i]); i += 1
+        if len(pos) != 3:
+            sys.exit('usage: kith-sched add AGENT "CRON" "task" [--id ID] [-m MODEL] [-e EFFORT] [-H HARNESS]')
+        agent, cron, task = pos
+        need_agent(agent)
+        try:
+            nxt = next_time(parse(cron), now)
+        except ValueError as e:
+            sys.exit('kith-sched: %s' % e)
+        if opts.get('e') and opts['e'] not in EFFORTS:
+            sys.exit('kith-sched: effort must be one of %s' % ', '.join(EFFORTS))
+        job = {'id': opts.get('id') or slug(task), 'cron': cron, 'task': task}
+        if os.environ.get('KITH_PERSON'): job['person'] = os.environ['KITH_PERSON']
+        if opts.get('m'): job['model'] = opts['m']
+        if opts.get('e'): job['effort'] = opts['e']
+        if opts.get('H'): job['harness'] = opts['H']
+        with editing(agent) as jobs:
+            had = any(j['id'] == job['id'] for j in jobs)
+            jobs[:] = [j for j in jobs if j['id'] != job['id']] + [job]
+        tell_app(agent, job['id'], 'updated' if had else 'added')
+        return {'ok': True, 'replaced': had, 'job': job_row(agent, job, machine().get('last', {}), now)}
+    if cmd in ('rm', 'pause', 'resume', 'run') and len(rest) == 2:
+        agent, jid = rest
+        need_agent(agent)
+        if cmd == 'run':
+            buf = io.StringIO()
+            job = find(agent, jid)
+            caller = os.environ.get('KITH_PERSON')
+            if job.get('person') and caller:
+                try:
+                    me, them = resolve(agent, caller), resolve(agent, job['person'])
+                except (OSError, ValueError, subprocess.SubprocessError) as e:
+                    sys.exit("kith-sched: can't check %s with kith-auth (%s)" % (caller, e))
+                if not me.get('owner') and me.get('person') != them.get('person'):
+                    sys.exit('kith-sched: %s/%s runs for %s; only they or the owner can start it by hand'
+                             % (agent, jid, job['person']))
+            with contextlib.redirect_stdout(buf):
+                lg = start(agent, job, now.replace(second=0, microsecond=0), 'run by hand')
+            if not lg:
+                sys.exit('kith-sched: ' + (buf.getvalue().strip() or 'not started'))
+            l = machine().get('last', {}).get('%s/%s' % (agent, jid), {})
+            return {'ok': True, 'agent': agent, 'id': jid, 'pid': l.get('pid'), 'log': str(lg)}
+        with editing(agent) as jobs:
+            job = find(agent, jid, jobs)
+            was = bool(job.get('paused'))
+            if cmd == 'rm':
+                jobs.remove(job); changed = True
+            else:
+                job.pop('paused', None)
+                if cmd == 'pause': job['paused'] = True
+                changed = (not was) if cmd == 'pause' else was
+        tell_app(agent, jid, {'rm': 'removed', 'pause': 'paused', 'resume': 'resumed'}[cmd])
+        return {'ok': True, 'agent': agent, 'id': jid, 'changed': changed}
+    sys.exit('kith-sched: --json: usage: kith-sched ls|add|rm|pause|resume|run|log ... --json')
+
+
+def main_json(argv):
+    out, err, code = {'ok': False}, io.StringIO(), 0
+    cmd = argv[0] if argv else ''
+    try:
+        with contextlib.redirect_stderr(err):
+            out = json_cmd(cmd, argv[1:])
+    except SystemExit as e:
+        code = e.code if isinstance(e.code, int) else 1
+        msg = e.code if isinstance(e.code, str) else 'failed'
+        out = {'ok': False, 'error': re.sub(r'^kith-sched: ', '', msg)}
+    except Exception as e:   # a client reads JSON whatever happens
+        code, out = 1, {'ok': False, 'error': str(e)}
+    print(json.dumps(out, ensure_ascii=False))
+    sys.exit(code)
+
+
 def main(argv):
+    if '--json' in argv and argv[:1] != ['tick']:
+        return main_json([a for a in argv if a != '--json'])
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip()); return
     cmd, rest = argv[0], argv[1:]
@@ -509,7 +672,7 @@ def main(argv):
         agent, cron, task = pos
         need_agent(agent)
         try:
-            nxt = next_time(parse(cron), dt.datetime.now())
+            nxt = next_time(parse(cron), clock())
         except ValueError as e:
             sys.exit('kith-sched: %s' % e)
         if opts.get('e') and opts['e'] not in EFFORTS:
@@ -541,7 +704,7 @@ def main(argv):
                 if not me.get('owner') and me.get('person') != them.get('person'):
                     sys.exit('kith-sched: %s/%s runs for %s; only they or the owner can start it by hand'
                              % (agent, jid, job['person']))
-            log = start(agent, job, dt.datetime.now().replace(second=0, microsecond=0), 'run by hand')
+            log = start(agent, job, clock().replace(second=0, microsecond=0), 'run by hand')
             if not log:
                 sys.exit(1)
             print('started → %s' % log)
@@ -561,4 +724,12 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except kith_tombstone.Tombstoned as e:   # the schedule state moved to the core (kith migrate step schedules)
+        if sys.argv[1:] == ['tick']:
+            # launchd runs this every minute: after the switch it fires nothing (the core does), and a non-zero exit
+            # would show the job as broken forever. One quiet line, exit 0; every other verb still fails closed.
+            print('kith-sched: tick skipped, the schedules moved to the Kith core (%s)' % e.module)
+            sys.exit(0)
+        sys.exit('kith-sched: %s' % e)

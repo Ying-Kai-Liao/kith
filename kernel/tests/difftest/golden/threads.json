@@ -1,0 +1,2527 @@
+[
+ {
+  "name": "threads-claim-free-thread",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "s-1",
+    "1"
+   ],
+   [
+    "holder",
+    "s-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-free-thread-person",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "s-1",
+    "1",
+    "p1",
+    "coder"
+   ],
+   [
+    "holder",
+    "s-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-terminal-free-thread",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "1"
+   ],
+   [
+    "holder",
+    "s-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-held-by-live-writer",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "claim",
+    "s-1",
+    "2"
+   ],
+   [
+    "terminal",
+    "s-1",
+    "2"
+   ],
+   [
+    "holder",
+    "s-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-held-by-oneshot",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"oneshot\", \"person\": \"p1\", \"agent\": \"coder\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-held-by-app-and-bot",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-2.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"bot\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "2"
+   ],
+   [
+    "claim",
+    "s-2",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-held-by-unknown-kind",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"compact\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-same-pid-asks-again",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "1"
+   ],
+   [
+    "claim",
+    "s-1",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-stale-dead-pid",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "1"
+   ],
+   [
+    "holder",
+    "s-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-stale-reused-pid",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 1, \"procStart\": \"Mon Jan  1 00:00:00 1990\", \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "2147483000"
+   ],
+   [
+    "holder",
+    "s-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-empty-start-time-is-unknown",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 1, \"procStart\": \"\", \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-old-file-pid-only",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 1}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-2.claim",
+    "text": "{\"pid\": 2147483000}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "2147483000"
+   ],
+   [
+    "terminal",
+    "s-2",
+    "2147483000"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-damaged-files",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": ""
+   },
+   {
+    "write": "home/.kith/live/terminal/s-2.claim",
+    "text": "{"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-3.claim",
+    "text": "not json"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-4.claim",
+    "text": "[1, 2]"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-5.claim",
+    "text": "{}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "1"
+   ],
+   [
+    "terminal",
+    "s-2",
+    "1"
+   ],
+   [
+    "terminal",
+    "s-3",
+    "1"
+   ],
+   [
+    "terminal",
+    "s-4",
+    "1"
+   ],
+   [
+    "terminal",
+    "s-5",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-two-sessions",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "s-1",
+    "1"
+   ],
+   [
+    "claim",
+    "s-2",
+    "2147483000"
+   ],
+   [
+    "terminal",
+    "s-1",
+    "2147483000"
+   ],
+   [
+    "terminal",
+    "s-2",
+    "2147483000"
+   ],
+   [
+    "holder",
+    "s-1"
+   ],
+   [
+    "holder",
+    "s-2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-prunes-stale-neighbours",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-2.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/junk.claim",
+    "text": "{"
+   },
+   {
+    "write": "home/.kith/live/terminal/proc-9.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-4.takeover.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "claim",
+    "s-3",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-takeover-in-progress",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.takeover.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\", \"takeover\": true}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-2.takeover.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\", \"takeover\": true}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "2147482999"
+   ],
+   [
+    "claim",
+    "s-2",
+    "2147482999"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-ends-intent-and-decision",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/intent/s-1.json",
+    "text": "{\"why\": \"idle\", \"at\": \"2026-01-01T00:00:00Z\", \"pid\": 5}"
+   },
+   {
+    "write": "home/.kith/sessions/decisions/s-1.json",
+    "text": "{\"decision\": \"compact\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "s-1",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-without-state-folder",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": null,
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "s-1",
+    "1"
+   ],
+   [
+    "terminal",
+    "s-1",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-usage-and-bad-pid",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "s-1",
+    "x"
+   ],
+   [
+    "claim"
+   ],
+   [
+    "terminal",
+    "s-1"
+   ],
+   [
+    "-h"
+   ],
+   [
+    "--help"
+   ]
+  ],
+  "stderr": false,
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-claim-release",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "s-1",
+    "1"
+   ],
+   [
+    "claim",
+    "s-2",
+    "2147483000"
+   ],
+   [
+    "release",
+    "1"
+   ],
+   [
+    "holder",
+    "s-1"
+   ],
+   [
+    "holder",
+    "s-2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-proc-claim",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/proc-5.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/proc-6.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "proc",
+    "1",
+    "p1",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-sweep-nobody",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\", \"person\": \"p1\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-2.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "sweep",
+    "p1"
+   ],
+   [
+    "sweep",
+    "p1",
+    "p2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-free-thread",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"cwd\": \"{HOME}/work\", \"type\": \"user\"}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2147483000"
+   ],
+   [
+    "holder",
+    "abc-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-oneshot",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"cwd\": \"{HOME}/work\", \"type\": \"user\"}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2147483000",
+    "oneshot"
+   ],
+   [
+    "holder",
+    "abc-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-held-by-live-writer",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"cwd\": \"{HOME}/work\", \"type\": \"user\"}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/abc-1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"oneshot\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2"
+   ],
+   [
+    "holder",
+    "abc-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-stale-claim",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"cwd\": \"{HOME}/work\", \"type\": \"user\"}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/abc-1.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2147483000"
+   ],
+   [
+    "holder",
+    "abc-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-takeover-in-progress",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"cwd\": \"{HOME}/work\", \"type\": \"user\"}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/abc-1.takeover.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\", \"takeover\": true}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2"
+   ],
+   [
+    "holder",
+    "abc-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-unknown-thread",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "nope",
+    "2"
+   ],
+   [
+    "resolve",
+    "coder",
+    "../x",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-folder-gone",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"cwd\": \"{HOME}/gone\", \"type\": \"user\"}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2"
+   ],
+   [
+    "holder",
+    "abc-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-no-cwd-in-transcript",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2147483000"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-registry-other-agent",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"cwd\": \"{HOME}/work\", \"type\": \"user\"}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/abc-1.json",
+    "text": "{\"v\": 1, \"sessionId\": \"abc-1\", \"agent\": \"other\", \"cwd\": \"{HOME}/work\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2"
+   ],
+   [
+    "holder",
+    "abc-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-registry-cwd",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/there"
+   },
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/abc-1.json",
+    "text": "{\"v\": 1, \"sessionId\": \"abc-1\", \"agent\": \"coder\", \"cwd\": \"{HOME}/there\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2147483000"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-registry-pid-not-ours",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/.claude/projects/-work/abc-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"cwd\": \"{HOME}/work\", \"type\": \"user\"}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/abc-1.json",
+    "text": "{\"v\": 1, \"sessionId\": \"abc-1\", \"agent\": \"coder\", \"pid\": 1}"
+   },
+   {
+    "write": "home/.claude/sessions/1.json",
+    "text": "{\"sessionId\": \"abc-1\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-1",
+    "2147483000"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-other-login",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/.kith/machine/accounts/claude/work/projects/-w/abc-9.jsonl",
+    "text": "{\"cwd\": \"{HOME}/work\"}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-9",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-resolve-config-dir",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "CLAUDE_CONFIG_DIR": "{HOME}/other-claude"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/other-claude/projects/-w/abc-8.jsonl",
+    "text": "{\"cwd\": \"{HOME}/work\"}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "abc-8",
+    "2147483000"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "threads-record-terminal",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-resumed",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude",
+   "KITH_RESUMED_FROM": "s-0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"source\": \"resume\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-oneshot-ask",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_RUN_KIND": "ask",
+   "KITH_RUN_LABEL": " architect "
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-oneshot-schedule-and-helper",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_RUN_KIND": "schedule"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-helper-label",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_RUN_KIND": "helper",
+   "KITH_RUN_LABEL": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-not-listed",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude",
+   "KITH_PERSON": "p1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-hidden",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude",
+   "KITH_HIDE_SESSION": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-host-run",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude",
+   "KITH_VIA": "serve"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-unknown-run-kind",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_RUN_KIND": "bridge"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-no-agent",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_TERMINAL_SESSION": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-worktree",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x/.claude/worktrees/a1\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-no-session-id",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"cwd\": \"/work/x\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-compact-keeps-start",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s-1.json",
+    "text": "{\"v\": 1, \"sessionId\": \"s-1\", \"startedAt\": \"yesterday\"}"
+   }
+  ],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"source\": \"compact\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-non-ascii",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "café",
+   "KITH_ACCOUNT_ID": "claude"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/w/\\u00fcber\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-bad-json",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude"
+  },
+  "setup": [],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "not json",
+  "stderr": false,
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ },
+ {
+  "name": "threads-record-finds-nothing-above",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_AGENT": "coder",
+   "KITH_TERMINAL_SESSION": "1",
+   "KITH_PROJECT": "kith",
+   "KITH_ACCOUNT_ID": "claude"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/sessions/1.json",
+    "text": "{\"sessionId\": \"s-1\"}"
+   }
+  ],
+  "run": [
+   [
+    "record"
+   ]
+  ],
+  "stdin": "{\"session_id\": \"s-1\", \"cwd\": \"/work/x\", \"transcript_path\": \"/h/.claude/projects/p/s-1.jsonl\", \"source\": \"startup\"}",
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "mask_keys": [
+   "pid",
+   "procStart",
+   "launcher",
+   "launcherStart"
+  ]
+ }
+]

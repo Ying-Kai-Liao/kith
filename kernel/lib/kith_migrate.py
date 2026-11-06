@@ -153,17 +153,17 @@ def report():
     if s == 'migrated':
         lines = [('✓', 'migrated: this Mac\'s kith is ~/.kith (~/.hq is a link to it)')]
     elif s == 'unmigrated':
-        lines = [('!', 'not migrated: this Mac still runs on the hq names; kith migrate --dry-run shows the steps')]
+        lines = [('!', 'not migrated: this Mac still runs on the hq names; kith migrate run --dry-run shows the steps')]
     elif s == 'partial':
-        lines = [('✗', 'partly migrated (a migrate stopped half way): kith migrate continues it, kith migrate --undo reverses it')]
+        lines = [('✗', 'partly migrated (a migrate stopped half way): kith migrate run continues it, kith migrate run --undo reverses it')]
     elif s == 'other':
-        lines = [('!', '~/.hq is the older link to the Kith folder, which kith migrate does not move')]
+        lines = [('!', '~/.hq is the older link to the Kith folder, which kith migrate run does not move')]
     else:
         lines = [('✓', 'nothing to migrate: this Mac never had ~/.hq' if s == 'fresh' else 'migrated')]
     if s != 'unmigrated':
         lines += [('!', f'still on an hq name: {t}') for t in left]
     else:
-        lines.append(('·', f'{len(left)} thing(s) on hq names; kith migrate moves them'))
+        lines.append(('·', f'{len(left)} thing(s) on hq names; kith migrate run moves them'))
     return lines
 
 
@@ -764,7 +764,7 @@ def migrate(dry=False, force=False):
         print('nothing to migrate: there is no ~/.hq (kith init makes ~/.kith)')
         return 0
     if s == 'other':
-        print(f'{OLD} is not a real folder (the older link layout); kith migrate leaves it', file=sys.stderr)
+        print(f'{OLD} is not a real folder (the older link layout); kith migrate run leaves it', file=sys.stderr)
         return 1
     m = load()
     if s == 'partial' and not m:
@@ -794,7 +794,7 @@ def migrate(dry=False, force=False):
             print(f'{i}/{len(STEPS)} {name}')
             m['steps'].setdefault(name, {})
             do(m, True)
-        print('\nthen: a manifest in ~/.kith/migrate-manifest.json; kith migrate --undo reverses all of it')
+        print('\nthen: a manifest in ~/.kith/migrate-manifest.json; kith migrate run --undo reverses all of it')
         return 0
     try:
         if not m:
@@ -816,9 +816,9 @@ def migrate(dry=False, force=False):
         m['finished'] = time.strftime('%Y%m%d-%H%M%S')
         save(m)
     except Stop as e:
-        print(f'\nstopped: {e}\nfix that and run kith migrate again to continue, or kith migrate --undo to go back', file=sys.stderr)
+        print(f'\nstopped: {e}\nfix that and run kith migrate run again to continue, or kith migrate run --undo to go back', file=sys.stderr)
         return 1
-    print(f'\ndone. The backup is {m["backup"]} (never deleted by kith). Undo: kith migrate --undo')
+    print(f'\ndone. The backup is {m["backup"]} (never deleted by kith). Undo: kith migrate run --undo')
     if (NEW / 'bin/kith-uv').exists():
         print(f'Full Disk Access is granted per path: give {NEW}/bin/kith-uv Full Disk Access again '
               f'(System Settings -> Privacy & Security -> Full Disk Access).')
@@ -866,10 +866,26 @@ def undo(dry=False, force=False):
     return 0
 
 
+def cutover(argv):
+    """`kith migrate step|status|check|rollback|is-module ...`: the module-keyed cutover framework, which lives in the Rust core
+    (`kith kernel cutover`, core/runtime/src/cutover/). Nothing here touches the hq -> kith steps above."""
+    import kith_paths
+    binary = kith_paths.kith_bin()
+    if not binary:
+        print('kith migrate: this Mac has no kith program, and the cutover steps run in it (kith update)', file=sys.stderr)
+        return 1
+    if argv[0] == 'is-module':   # for `kith rollback NAME`: a cutover module, or an agent package
+        r = subprocess.run([binary, 'kernel', 'cutover', 'modules'], capture_output=True, text=True)
+        return 0 if r.returncode == 0 and len(argv) == 2 and argv[1] in r.stdout.split() else 1
+    return subprocess.run([binary, 'kernel', 'cutover', *argv]).returncode
+
+
 def main(argv):
     if '-h' in argv or '--help' in argv:
         print(__doc__.strip())
         return 0
+    if argv and argv[0] in ('step', 'status', 'check', 'rollback', 'is-module'):
+        return cutover(argv)
     flags = set(argv)
     unknown = flags - {'--dry-run', '--undo', '--force', '--status'}
     if unknown:

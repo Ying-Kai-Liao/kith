@@ -101,7 +101,7 @@ impl Actor {
     pub(super) fn compacted(&mut self, id: &str, summary: Option<String>) {
         // Kith's own summary of the thread (tier 2 of recall), whoever's harness compacted: an hq agent's context is its
         // own, but its thread still gets a summary. A compaction reported twice finds the summary already covering.
-        memory::summary::request(&self.hub, &self.cfg.id, self.lane.thread.as_deref(), SummaryReason::Compaction);
+        crate::hqmem::summary::request(&self.hub, &self.cfg.id, self.lane.thread.as_deref(), SummaryReason::Compaction);
         if self.is_hq() {
             return;
         }
@@ -281,7 +281,7 @@ impl Actor {
         let (id, text) = handoff::pending(&self.hub.store, &self.cfg.id)?;
         handoff::sent(&self.hub, &self.cfg.id, &id);
         // The conversation rolled over: the old one ended.
-        memory::summary::request(&self.hub, &self.cfg.id, None, SummaryReason::End);
+        crate::hqmem::summary::request(&self.hub, &self.cfg.id, None, SummaryReason::End);
         self.forget_session();
         Some(text)
     }

@@ -1,0 +1,514 @@
+//! Owner-only files. The core folder is 0700 and core.db (+ -wal, -shm), core.lock, core.holder and the marker 0600, refused at
+//! start if looser, with the command that fixes it. On Windows the same rule is an access list with no entry for
+//! anyone but the owner, SYSTEM and Administrators (read with `icacls`).
+//!
+//! TODO(windows): read the access list natively (`GetNamedSecurityInfoW` and the DACL's entries, through windows-sys)
+//! instead of running `icacls`, as the holder's start time on macOS no longer runs `ps`. Left: it can only be written
+//! and tried on Windows, and `acl_is_owner_only` below is the rule the native read would feed.
+
+use std::fs;
+use std::path::Path;
+
+use crate::error::{Error, Result};
+use crate::layout::Layout;
+
+/// Creates the core folder (owner-only) when it is missing, and refuses one that is open to others.
+pub(crate) fn ensure_dir(dir: &Path) -> Result<()> {
+    if !dir.exists() {
+        create_private_dir(dir)?;
+    }
+    check_dir(dir)
+}
+
+#[cfg(unix)]
+fn create_private_dir(dir: &Path) -> Result<()> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    // The machine folder above may not exist yet on a first setup; those parents keep the default mode.
+    if let Some(parent) = dir.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+#[cfg(not(unix))]
+fn create_private_dir(dir: &Path) -> Result<()> {
+    fs::create_dir_all(dir)?;
+    restrict(dir)
+}
+
+#[cfg(unix)]
+fn mode(path: &Path) -> Result<u32> {
+    use std::os::unix::fs::PermissionsExt as _;
+    Ok(fs::metadata(path)?.permissions().mode() & 0o777)
+}
+
+#[cfg(unix)]
+fn check_dir(dir: &Path) -> Result<()> {
+    let m = mode(dir)?;
+    if m & 0o077 != 0 {
+        return Err(Error::Permissions(format!(
+            "kith-core: {} is mode {m:03o}, open to other users; kith won't start until it is private: chmod 700 '{}'",
+            dir.display(),
+            dir.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn check_file(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    // A sidecar another connection deleted since the listing is nothing to protect; anything else gone is an error.
+    let m = match fs::metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && is_sidecar(path) => return Ok(()),
+        r => r?.permissions().mode() & 0o777,
+    };
+    if m & 0o077 != 0 {
+        return Err(Error::Permissions(format!(
+            "kith-core: {} is mode {m:03o}, open to other users; kith won't start until it is private: chmod 600 '{}'",
+            path.display(),
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn check_dir(dir: &Path) -> Result<()> {
+    check_acl(dir)
+}
+
+#[cfg(not(unix))]
+fn check_file(path: &Path) -> Result<()> {
+    check_acl(path)
+}
+
+/// The folder and every file of the layout that exists must be owner-only.
+pub(crate) fn check_files(layout: &Layout) -> Result<()> {
+    check_dir(&layout.dir)?;
+    for f in layout.files() {
+        if f.exists() {
+            check_file(&f)?;
+        }
+    }
+    Ok(())
+}
+
+/// Makes an owner-only empty file when none exists (so SQLite, which copies the main file's mode to its -wal and -shm,
+/// never creates core.db with the process umask). On Windows files take their access list from the core folder (set
+/// with `(OI)(CI)` in `ensure_dir`), so nothing is pre-made: SQLite creates core.db itself and `check_files` reads the
+/// result. (Pre-making it and rewriting its list with `icacls` first is what SQLite then could not open there.)
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
+pub(crate) fn create_private_file(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    if !path.exists() {
+        open_private(path)?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+/// Opens (creating owner-only) a file for read and write, without truncating it.
+pub(crate) fn open_private(path: &Path) -> Result<fs::File> {
+    let mut o = fs::OpenOptions::new();
+    o.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        o.mode(0o600);
+    }
+    Ok(o.open(path)?)
+}
+
+/// Sets owner-only on a file the core did not create itself (a `VACUUM INTO` snapshot). On Windows it already has the
+/// folder's list; this checks it.
+pub(crate) fn make_private(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    #[cfg(not(unix))]
+    check_file(path)?;
+    Ok(())
+}
+
+/// Principals an owner-only access list may name besides the owner: the system and the administrators already have the
+/// machine.
+const ALLOWED_PRINCIPALS: [&str; 3] = [
+    "NT AUTHORITY\\SYSTEM",
+    "BUILTIN\\ADMINISTRATORS",
+    "CREATOR OWNER",
+];
+
+/// Whether `icacls` output lists only `user` (and the allowed system principals). The output is the path, then one
+/// `DOMAIN\name:(rights)` entry per line (the first shares the path's line). Compiled everywhere so it is tested
+/// everywhere; only Windows runs `icacls`.
+#[cfg_attr(unix, allow(dead_code))]
+pub(crate) fn acl_is_owner_only(icacls_output: &str, path: &str, user: &str) -> bool {
+    let user = user.to_ascii_uppercase();
+    let mut seen = 0;
+    for line in icacls_output.lines() {
+        let line = line.trim();
+        let line = line.strip_prefix(path).unwrap_or(line).trim();
+        if line.is_empty() || line.starts_with("Successfully processed") {
+            continue;
+        }
+        // `DOMAIN\name:(OI)(CI)(F)`: the principal ends at the colon that is followed by a parenthesis.
+        let Some(at) = line.find(":(") else { continue };
+        let principal = line[..at].trim().to_ascii_uppercase();
+        seen += 1;
+        let mine = principal == user || principal.rsplit('\\').next() == Some(user.as_str());
+        if !mine && !ALLOWED_PRINCIPALS.contains(&principal.as_str()) {
+            return false;
+        }
+    }
+    seen > 0
+}
+
+#[cfg(not(unix))]
+fn user() -> String {
+    std::env::var("USERNAME").unwrap_or_default()
+}
+
+/// What reading one access list came to.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(unix, allow(dead_code))]
+enum Verdict {
+    Private,
+    Open,
+    /// `icacls` failed and the file is gone (a real `NotFound`), and it is one of `SQLite`'s sidecars: they are deleted
+    /// when the last connection closes, which can happen between the existence check and the read. Nothing to protect.
+    Vanished,
+    /// `icacls` failed and the file is not provably gone: still there, a handle opening, access denied, a dangling
+    /// link, or any file other than a sidecar that went missing. Worth another try, then refused. (A delete-pending
+    /// file under legacy delete semantics fails the metadata call too, so it reads as gone, i.e. Vanished for a
+    /// sidecar.)
+    Unreadable,
+}
+
+/// `SQLite`'s `<name>.db-wal` and `<name>.db-shm`: the only files allowed to vanish mid-check.
+fn is_sidecar(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with(".db-wal") || n.ends_with(".db-shm"))
+}
+
+/// Whether the file is provably gone after `icacls` failed on it. `meta` is the kind of error a fresh metadata call
+/// gave (None when it succeeded). A real `NotFound` is gone. A file mid-delete on Windows (another connection closed
+/// its handle, delete pending) answers metadata with access denied while `icacls` says it can't find it: that pair is
+/// gone too, but access denied alone (a file we can't see into) is not.
+#[cfg_attr(unix, allow(dead_code))]
+fn gone_after_failure(meta: Option<std::io::ErrorKind>, icacls_text: &str) -> bool {
+    use std::io::ErrorKind::{NotFound, PermissionDenied};
+    let lower = icacls_text.to_lowercase();
+    match meta {
+        Some(NotFound) => true,
+        Some(PermissionDenied) => lower.contains("cannot find") || lower.contains("not find"),
+        _ => false,
+    }
+}
+
+/// Whether `icacls` output holds at least one `principal:(rights)` entry.
+#[cfg_attr(unix, allow(dead_code))]
+fn has_entries(text: &str) -> bool {
+    text.lines().any(|l| l.contains(":("))
+}
+
+#[cfg_attr(unix, allow(dead_code))]
+fn judge(
+    read_ok: bool,
+    text: &str,
+    path: &str,
+    user: &str,
+    still_exists: bool,
+    allow_vanish: bool,
+) -> Verdict {
+    if read_ok {
+        // `icacls` can exit 0 while naming no entry: its error text ("...being used by another process", "Failed
+        // processing 1 files") stands where the list should be. That is no list at all, not an open one.
+        // When the sidecar is gone by now, that error text is its deletion ("The system cannot find the file
+        // specified", exit 0): the CI flake. Only a sidecar that is provably gone is excused; a list with entries is
+        // never excused here: entries beside a failure are a partial read of a file that existed, so Unreadable.
+        if !has_entries(text) || text.contains("Failed processing 1 ") {
+            if !has_entries(text) && !still_exists && allow_vanish {
+                Verdict::Vanished
+            } else {
+                Verdict::Unreadable
+            }
+        } else if acl_is_owner_only(text, path, user) {
+            Verdict::Private
+        } else {
+            Verdict::Open
+        }
+    } else if still_exists || !allow_vanish {
+        Verdict::Unreadable
+    } else {
+        Verdict::Vanished
+    }
+}
+
+/// What `icacls` printed, on one line and capped, for the refusal text.
+#[cfg(not(unix))]
+fn saw(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(500)
+        .collect()
+}
+
+#[cfg(not(unix))]
+fn check_acl(path: &Path) -> Result<()> {
+    let allow_vanish = is_sidecar(path);
+    // A -shm being created or torn down by another connection answers `icacls` with an error for a moment; a real
+    // open list never goes away, so a few short retries cost nothing on the normal path.
+    let mut unreadable = false;
+    let mut last_text = String::new();
+    for attempt in 0..10 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
+        let out = std::process::Command::new("icacls").arg(path).output();
+        if let Ok(o) = &out {
+            last_text = format!(
+                "{} {}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            );
+        }
+        let verdict = match out {
+            Ok(o) => judge(
+                o.status.success(),
+                &String::from_utf8_lossy(&o.stdout),
+                &path.to_string_lossy(),
+                &user(),
+                !gone_after_failure(
+                    fs::symlink_metadata(path).err().map(|e| e.kind()),
+                    &last_text,
+                ),
+                allow_vanish,
+            ),
+            Err(e) => {
+                return Err(Error::Permissions(format!(
+                    "kith-core: can't read the access list of {}: {e}",
+                    path.display()
+                )));
+            }
+        };
+        match verdict {
+            Verdict::Private | Verdict::Vanished => return Ok(()),
+            Verdict::Open => {
+                unreadable = false;
+                break;
+            }
+            Verdict::Unreadable => unreadable = true,
+        }
+    }
+    if unreadable {
+        return Err(Error::Permissions(format!(
+            "kith-core: can't read the access list of {}; kith won't start until it can: check that the file is there and readable by you (icacls \"{}\") (icacls saw: {})",
+            path.display(),
+            path.display(),
+            saw(&last_text)
+        )));
+    }
+    Err(Error::Permissions(format!(
+        "kith-core: {} is open to other accounts; kith won't start until it is private: icacls \"{}\" /inheritance:r /grant:r \"{}:(OI)(CI)F\" (icacls saw: {})",
+        path.display(),
+        path.display(),
+        user(),
+        saw(&last_text)
+    )))
+}
+
+/// Removes inherited entries and grants the owner alone, passed on to every file made inside.
+#[cfg(not(unix))]
+fn restrict(path: &Path) -> Result<()> {
+    let st = std::process::Command::new("icacls")
+        .arg(path)
+        .args(["/inheritance:r", "/grant:r"])
+        .arg(format!("{}:(OI)(CI)F", user()))
+        .output()?;
+    if st.status.success() {
+        Ok(())
+    } else {
+        Err(Error::Permissions(format!(
+            "kith-core: can't make {} private (icacls failed)",
+            path.display()
+        )))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    const OWNER_ONLY: &str = "C:\\m\\core.db-shm HOST\\me:(F)\n NT AUTHORITY\\SYSTEM:(F)\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
+
+    #[test]
+    fn a_sidecar_deleted_while_being_read_is_not_an_open_file() {
+        assert_eq!(judge(false, "", "x", "me", false, true), Verdict::Vanished);
+        assert_eq!(judge(false, "", "x", "me", true, true), Verdict::Unreadable);
+    }
+
+    #[test]
+    fn gone_means_not_found_or_delete_pending_with_icacls_agreeing() {
+        use std::io::ErrorKind::{NotFound, PermissionDenied};
+        let nf = "Failed processing 1 files C:\\m\\core.db-wal: The system cannot find the file specified.";
+        assert!(gone_after_failure(Some(NotFound), ""));
+        assert!(gone_after_failure(Some(PermissionDenied), nf));
+        assert!(!gone_after_failure(
+            Some(PermissionDenied),
+            "Access is denied."
+        ));
+        assert!(!gone_after_failure(None, nf));
+        assert!(!gone_after_failure(Some(std::io::ErrorKind::Other), nf));
+    }
+
+    /// The Unix side of the same race: listed, then deleted before the stat.
+    #[cfg(unix)]
+    #[test]
+    fn a_sidecar_deleted_before_the_mode_read_passes_but_other_files_do_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(check_file(&tmp.path().join("core.db-wal")).is_ok());
+        assert!(check_file(&tmp.path().join("core.db-shm")).is_ok());
+        assert!(check_file(&tmp.path().join("core.db")).is_err());
+    }
+
+    #[test]
+    fn error_text_in_place_of_a_list_is_unreadable_not_open() {
+        let msg = "C:\\m\\core.db-wal: The process cannot access the file because it is being used by another process.\nSuccessfully processed 0 files; Failed processing 1 files\n";
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+    }
+
+    /// The CI flake: `icacls` exits 0 with "Failed processing 1 files ... cannot find the file specified" when the
+    /// sidecar is deleted between the existence check and the read.
+    #[test]
+    fn icacls_exit_zero_with_a_deleted_sidecar_is_vanished_only_for_sidecars() {
+        let msg = "Successfully processed 0 files; Failed processing 1 files\nC:\\m\\core.db-wal: The system cannot find the file specified.\n";
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", false, true),
+            Verdict::Vanished
+        );
+        // Still there: not excused. Not a sidecar (core.db must never vanish): not excused.
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db", "me", false, false),
+            Verdict::Unreadable
+        );
+        // A real list open to Users is refused even when the sidecar is gone by the time we look.
+        let open = format!("{OWNER_ONLY} BUILTIN\\Users:(R)\n");
+        assert_eq!(
+            judge(true, &open, "C:\\m\\core.db-shm", "me", false, true),
+            Verdict::Open
+        );
+    }
+
+    /// The sidecar was deleted and created again (a new connection) before we looked: it exists, so it is judged,
+    /// never excused as vanished.
+    #[test]
+    fn a_recreated_open_sidecar_is_never_vanished() {
+        let msg = "C:\\m\\core.db-wal: The process cannot access the file because it is being used by another process.\nSuccessfully processed 0 files; Failed processing 1 files\n";
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+        assert_eq!(
+            judge(false, "", "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+    }
+
+    #[test]
+    fn entries_beside_a_failure_are_not_vanished() {
+        let text = "C:\\m\\core.db-wal HOST\\me:(F)\n NT AUTHORITY\\SYSTEM:(F)\n\nSuccessfully processed 0 files; Failed processing 1 files\n";
+        for exists in [true, false] {
+            assert_eq!(
+                judge(true, text, "C:\\m\\core.db-wal", "me", exists, true),
+                Verdict::Unreadable
+            );
+        }
+    }
+
+    #[test]
+    fn only_sidecars_may_vanish() {
+        assert_eq!(
+            judge(false, "", "x", "me", false, false),
+            Verdict::Unreadable
+        );
+        assert!(is_sidecar(Path::new("C:\\m\\core.db-wal")));
+        assert!(is_sidecar(Path::new("C:\\m\\core.db-shm")));
+        for n in [
+            "core.db",
+            "core.lock",
+            "core.holder",
+            "core.token",
+            "snap.db",
+            "core.db-journal",
+            "core.db-wal.bak",
+            "x-wal",
+            "x-shm",
+            "-wal",
+            "core.db-shm.tmp",
+        ] {
+            assert!(!is_sidecar(Path::new(n)), "{n}");
+        }
+    }
+
+    #[test]
+    fn a_readable_list_is_still_judged_by_its_entries() {
+        assert_eq!(
+            judge(true, OWNER_ONLY, "C:\\m\\core.db-shm", "me", true, true),
+            Verdict::Private
+        );
+        let open = format!("{OWNER_ONLY} BUILTIN\\Users:(R)\n");
+        assert_eq!(
+            judge(true, &open, "C:\\m\\core.db-shm", "me", true, true),
+            Verdict::Open
+        );
+    }
+
+    /// The order from the CI flake: one connection creating and dropping the sidecars while the folder is checked.
+    #[cfg(windows)]
+    #[test]
+    fn checking_while_another_connection_makes_and_removes_sidecars_passes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("core");
+        ensure_dir(&dir).unwrap();
+        let db = dir.join("core.db");
+        let churn_db = db.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = stop.clone();
+        let t = std::thread::spawn(move || {
+            while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                let c = rusqlite::Connection::open(&churn_db).unwrap();
+                c.pragma_update(None, "journal_mode", "WAL").unwrap();
+                c.execute_batch("CREATE TABLE IF NOT EXISTS t(x)").unwrap();
+            }
+        });
+        for _ in 0..40 {
+            for f in ["core.db", "core.db-wal", "core.db-shm"] {
+                let p = dir.join(f);
+                if p.exists() {
+                    check_file(&p).unwrap();
+                }
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        t.join().unwrap();
+    }
+}

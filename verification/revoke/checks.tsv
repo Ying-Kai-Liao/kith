@@ -39,6 +39,21 @@ door	PROPERTY	DoorD1	pass
 broken-door-no-hold	PROPERTY	DoorD2c	fail
 broken-door-split	PROPERTY	DoorD2	fail
 broken-no-door-sweep	PROPERTY	DoorD1	fail
+# --- the core's door table (M2-14): a revoke marks the doors swept in its own step, and a swept door is final --------
+core-door	INVARIANT	TypeOK	pass
+core-door	PROPERTY	DoorD2	pass
+core-door	PROPERTY	DoorD2c	pass
+core-door	PROPERTY	DoorD1	pass
+core-door	PROPERTY	DoorNoResurrect	pass
+core-door	INVARIANT	DoorsCutWithRevoke	pass
+door	INVARIANT	DoorsCutWithRevoke	fail
+door	PROPERTY	DoorNoResurrect	pass
+broken-door-undo-revives	PROPERTY	DoorNoResurrect	fail
+core-bot-door	INVARIANT	TypeOK	pass
+core-bot-door	PROPERTY	BotDoorCut	pass
+core-bot-door	PROPERTY	DoorNoResurrect	pass
+core-bot-door	INVARIANT	DoorsCutWithRevoke	pass
+bot-door	INVARIANT	DoorsCutWithRevoke	fail
 # --- a bot's door: never one its owner doesn't hold (I6, kith-auth owner_cut) ---
 bot-door	INVARIANT	TypeOK	pass
 bot-door	PROPERTY	BotDoorCut	pass
@@ -68,6 +83,14 @@ broken-answer-after-end	PROPERTY	StoppedNeverWakes	fail
 broken-no-ask-sweep	PROPERTY	AsksEnded	fail
 broken-no-wake-withdraw	PROPERTY	WakesWithdrawn	fail
 asks	INVARIANT	NeverAnswerWake	fail
+# --- the core's revoke order (M3-10d, core/runtime/src/revoke_order.rs): claims of P and B swept, THEN the asks ended. Code for a removal and for a suspend (`people.suspend` records the order in open_removals and runs it after the commit; a crash is replayed) ---
+core-order	INVARIANT	TypeOK	pass
+core-order	INVARIANT	OrderKept	pass
+core-order	PROPERTY	Swept	pass
+core-order	PROPERTY	AsksEnded	pass
+core-order	PROPERTY	StoppedNeverWakes	pass
+broken-asks-first	INVARIANT	OrderKept	fail
+broken-bots-skipped	PROPERTY	Swept	fail
 handle	INVARIANT	TypeOK	pass
 handle	PROPERTY	HandleConverges	pass
 handle	PROPERTY	HandleStampsGrow	pass
@@ -87,3 +110,78 @@ broken-handle-store-first	PROPERTY	HandleConverges	fail
 removal	INVARIANT	TypeOK	pass
 removal	INVARIANT	NoOrphan	pass
 broken-removal-orphans	INVARIANT	NoOrphan	fail
+core-door	INVARIANT	NeverDoorKilled	fail
+core-bot-door	INVARIANT	NeverBotDoorKilled	fail
+# --- the core's cards (M2-11b): a revoke withdraws P's and B's open cards and unused once-grants in its own step; undo revives none -----
+cards	INVARIANT	TypeOK	pass
+cards	PROPERTY	CardsCut	pass
+cards	PROPERTY	CardNoResurrect	pass
+broken-card-no-withdraw	PROPERTY	CardsCut	fail
+broken-card-undo-revives	PROPERTY	CardsCut	fail
+broken-card-undo-revives	PROPERTY	CardNoResurrect	fail
+cards	INVARIANT	NeverCardUsed	fail
+cards	INVARIANT	NeverCardWithdrawn	fail
+# --- the core behind the host's guard (KITH_CORE_AUTHORITY=1, OFF in every deploy; M2-16/18a): kith-auth writes auth.json, then the core; the gate shuts on any write of auth.json ---
+core-gate	INVARIANT	TypeOK	pass
+core-gate	PROPERTY	R1	pass
+core-gate	PROPERTY	R5	pass
+core-gate	PROPERTY	R5c	pass
+core-gate	PROPERTY	R6	pass
+core-gate	PROPERTY	R6c	pass
+broken-core-gate-stale	PROPERTY	R1	fail
+broken-core-gate-stale	PROPERTY	R5	fail
+core-gate	INVARIANT	NeverCoreRevoked	fail
+core-gate	INVARIANT	NeverGateShut	fail
+# --- the host SWITCHED (#875, 2026-11-06 re-sync): auth.json is a tombstone, run_auth writes people.* to the core, the guard asks the core with no gate (core_selected = switched() || ...). One fact, so the latch and its window do not exist ---
+switched	INVARIANT	TypeOK	pass
+switched	INVARIANT	CoreInStep	pass
+switched	PROPERTY	R1	pass
+switched	PROPERTY	R5	pass
+switched	PROPERTY	R5c	pass
+switched	PROPERTY	R6	pass
+switched	PROPERTY	R6c	pass
+switched	INVARIANT	NeverCoreRevoked	fail
+# The window a rollback leaves: the host caches switched() for GATE_EVERY (2 s), so a revoke made right after `kith rollback authority` goes to the core, not the file the host is back on (a FINDING, see the skill's Re-sync 2026-11-06 (2))
+broken-switch-lag	INVARIANT	CoreInStep	fail
+broken-switch-lag	PROPERTY	R6	fail
+# A core-only write of the revoked fact (a hand-run core-call; no production writer) while UNSWITCHED: the latch answers from the stale copy until its next parity ask (the window #876 named); a gate that checks parity per request has none
+core-only-write	PROPERTY	R1	fail
+core-only-write-parity	PROPERTY	R1	pass
+# --- switched, the configuration M2-23 runs: the full code row set, and the door/cards/order hooks combined with it ---
+switched	INVARIANT	R2	pass
+switched	INVARIANT	R4	pass
+switched	INVARIANT	SyncAgrees	pass
+switched	INVARIANT	BotBelowOwner	pass
+switched	INVARIANT	SideOnlyLatched	pass
+core-gate	INVARIANT	SideOnlyLatched	pass
+switched	PROPERTY	R6cDown	pass
+switched	PROPERTY	R6cWake	pass
+switched	PROPERTY	NeverBridgeInCloudDown	pass
+switched-door	INVARIANT	TypeOK	pass
+switched-door	PROPERTY	DoorD2	pass
+switched-door	PROPERTY	DoorD2c	pass
+switched-door	PROPERTY	DoorD1	pass
+switched-door	PROPERTY	DoorNoResurrect	pass
+switched-door	INVARIANT	DoorsCutWithRevoke	pass
+switched-cards	INVARIANT	TypeOK	pass
+switched-cards	PROPERTY	CardsCut	pass
+switched-cards	PROPERTY	CardNoResurrect	pass
+switched-order	INVARIANT	TypeOK	pass
+switched-order	INVARIANT	OrderKept	pass
+switched-order	PROPERTY	Swept	pass
+switched-order	PROPERTY	AsksEnded	pass
+switched-order	PROPERTY	StoppedNeverWakes	pass
+# the origin Mac itself serves P while the cloud has the revoke (Publish made it look in sync)
+broken-switch-lag	PROPERTY	R6c	fail
+
+# --- the kill after the revoke commit (M2-23 gate): ClaimEnding (core) then KillSent (host); the host may lose it; the supervisor pass re-sends ---
+core-kill-split	INVARIANT	TypeOK	pass
+core-kill-split	INVARIANT	OrderKept	pass
+core-kill-split	PROPERTY	Swept	pass
+core-kill-split	PROPERTY	NoLiveProc	pass
+# core-kill-resend: with ReSendNeedsLink = FALSE, KillReSend never reads link[m]; LinkFlaps would only change link, so the action stays enabled and weak fairness holds. The flap is left out of this row only for TLC's heap (512 MB).
+core-kill-resend	INVARIANT	TypeOK	pass
+core-kill-resend	INVARIANT	OrderKept	pass
+core-kill-resend	PROPERTY	NoLiveProc	pass
+broken-no-kill-resend	PROPERTY	NoLiveProc	fail
+broken-resend-needs-link	PROPERTY	NoLiveProc	fail

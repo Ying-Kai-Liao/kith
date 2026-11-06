@@ -18,13 +18,13 @@ test('a plain bot keeps every card, whatever Kith says', () => {
 })
 
 test('an hq bot keeps every card until Kith details are on screen, except the harness notes tab', () => {
-  assert.deepEqual(botSections('house', null), { ...ALL_SECTIONS, harnessMemoryTab: false, kithSettings: false })
+  assert.deepEqual(botSections('house', null), { ...ALL_SECTIONS, backendPicker: false, harnessMemoryTab: false, kithSettings: false })
 })
 
 test('a card stays when Kith could not read what it repeats', () => {
   const partial = { ...house, harness: null, errors: { role: 'unreadable' } }
   assert.deepEqual(botSections('house', partial), {
-    instructions: true, backendPicker: true, harnessMemoryTab: false, kithSettings: false,
+    instructions: true, backendPicker: false, harnessMemoryTab: false, kithSettings: false,
   })
 })
 
@@ -34,10 +34,10 @@ test('an hq bot on a host without kithInfo keeps Kith\'s own settings controls',
   assert.equal(botSections('house', house, false).kithSettings, false)
 })
 
-test('hq settings: permission is written through to hq, the rest is read-only "Set in Kith"', () => {
-  const rows = hqSettings({ permissionMode: 'plan', callModel: null, model: 'opus', effort: null })
+test('hq settings: all but Fast mode are written through to kith, Fast mode is read-only "Set in Kith"', () => {
+  const rows = hqSettings({ permissionMode: 'plan', callModel: null, model: 'opus', effort: null, harness: null })
   assert.deepEqual(rows.map((r) => [r.key, r.value, r.editable]), [
-    ['permission', 'plan', true], ['callModel', 'default', true], ['model', 'opus', false], ['effort', "Agent's default", false], ['fastMode', 'Off', false],
+    ['permission', 'plan', true], ['callModel', 'default', true], ['harness', 'claude', true], ['model', 'opus', true], ['effort', 'default', true], ['fastMode', 'Off', false],
   ])
   for (const r of rows.filter((r) => !r.editable)) assert.match(r.hint, /^Set in Kith/)
 })

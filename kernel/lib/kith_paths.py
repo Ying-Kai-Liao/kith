@@ -6,7 +6,8 @@
   kith_paths.py --json   the same as JSON (the Claude Code adapter)
   kith_paths.py --kernel the kernel path for plists and hooks (KITH_KERNEL, else <machine>/cli/current/share/kith/kernel)
   kith_paths.py --bin    the kith program (Rust), or nothing when this Mac has none
-  kith_paths.py --guest-sandbox   exit 0 inside the sandbox of a run for anyone but the owner, else 1
+  kith_paths.py --machine  this Mac's own folder (KITH_MACHINE)
+  kith_paths.py --guest-sandbox  exit 0 inside the sandbox of a run for anyone but the owner, else 1
   kith_paths.py --guest-tmp ID    makes that guest's Claude Code temp folder and prints it (nothing: no short one fits)
 Two places, like ~/.claude for Claude Code:
 
@@ -28,6 +29,7 @@ Which one is this Mac's, since ~/.kith can exist long before the state moves (ki
   ~/.kith exists (no ~/.hq)         ~/.kith  (a Mac that never had ~/.hq, kith serve's serve/ in it, or a fresh install)
   nothing yet                      state in <home>/state until install.sh makes ~/.kith
 
+KITH_AGENTS (HQ_AGENTS) set: that folder for agents/ alone.
 KITH_HOME (HQ_HOME) set: that folder instead of ~/kith, else ~/kith when it exists, else ~/hq. Without either link:
 the Kith folder around the kernel when it sits there as kernel/ (a checkout), else the kernel folder; a release copy of
 the kernel (<machine>/cli/<version>/share/kith/kernel) says nothing about it, so that is ~/kith. Before ~/.hq became a real
@@ -140,7 +142,9 @@ def paths():
     fallback = linked if is_release() else KERNEL.parent if KERNEL.name == 'kernel' else KERNEL
     home = (Path(os.path.expanduser(given)) if given else linked if linked.is_dir()
             else old_linked if old_linked.is_dir() else dot if dot.is_symlink() and dot.is_dir() else fallback)
-    out = {'KITH_HOME': home, 'KITH_STATE': dot if mine else home / 'state', 'KITH_AGENTS': home / 'agents'}
+    given_agents = getenv('AGENTS').strip()   # moves the agents folder alone
+    agents = Path(os.path.expanduser(given_agents)) if given_agents else home / 'agents'
+    out = {'KITH_HOME': home, 'KITH_STATE': dot if mine else home / 'state', 'KITH_AGENTS': agents}
     out.update({k + '_REAL': Path(os.path.realpath(v)) for k, v in list(out.items())})
     if mine:
         out.update(KITH_MACHINE=dot, KITH_SECRETS=dot / 'secrets', KITH_LOGS=dot / 'logs', KITH_CACHE=dot / 'cache',
@@ -150,7 +154,7 @@ def paths():
         out.update(KITH_MACHINE=config, KITH_SECRETS=config,
                    KITH_LOGS=_first(HOME / 'Library/Logs/kith', HOME / 'Library/Logs/hq'),
                    KITH_CACHE=_first(HOME / 'Library/Caches/kith', HOME / 'Library/Caches/hq'),
-                   KITH_STORE=home / 'agents' / '.store')
+                   KITH_STORE=agents / '.store')
     return out
 
 
@@ -160,22 +164,25 @@ def launcher():
     return _first(bin_dir / 'kith-uv', bin_dir / 'hq-uv')
 
 
-def _has_hook(binary):
+def _has_hook(binary, timeout=10):
     """Does this kith program answer `kith memory hook`? An older one doesn't, and a hook that can't run checks nothing."""
     import subprocess
     try:
-        r = subprocess.run([binary, 'memory', 'hook', '--help'], capture_output=True, text=True, timeout=10)
+        r = subprocess.run([binary, 'memory', 'hook', '--help'], capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return False
     return r.returncode == 0 and 'phase' in r.stdout.lower()
 
 
-def kith_bin():
+def kith_bin(budget=None):
     """The kith program (the Rust host, which also answers `kith memory check|log|diff|undo|forget|hook`): KITH_BIN, else
     a kith on PATH that isn't the kernel's bash entry, else the host kith serve installed, else one built in this
     kernel's checkout (CARGO_TARGET_DIR or serve/host/target); the first that has `kith memory hook`. A dev build never
     beats an installed host by accident (CARGO_TARGET_DIR is set in sessions started from the repo): KITH_DEV_BIN=1 puts
-    the build right after KITH_BIN. '' when there is none."""
+    the build right after KITH_BIN. '' when there is none. `budget` (seconds) caps the probing of all the candidates
+    together (one probe may take 10 s otherwise); a candidate left unprobed when it runs out counts as none."""
+    import time
+    end = time.monotonic() + budget if budget else None
     own = KERNEL / 'bin' / 'kith'
     target = Path(os.environ.get('CARGO_TARGET_DIR') or KERNEL.parent / 'serve/host/target')
     built = [target / 'dev-app/kith', target / 'release/kith', target / 'debug/kith']
@@ -185,7 +192,7 @@ def kith_bin():
     for c in candidates:
         # Any kernel bash entry is out, not only this kernel's own: ~/.local/bin/kith may be another checkout's.
         if c and os.access(c, os.X_OK) and Path(c).is_file() and not (own.exists() and os.path.samefile(c, own)) \
-                and Path(os.path.realpath(c)).parts[-3:] != ('kernel', 'bin', 'kith') and _has_hook(str(c)):
+                and Path(os.path.realpath(c)).parts[-3:] != ('kernel', 'bin', 'kith') and _has_hook(str(c), 10 if end is None else min(10, max(end - time.monotonic(), 0.1))):
             return str(c)
     return ''
 
@@ -319,6 +326,8 @@ if __name__ == '__main__':
         print(stable_kernel())
     elif arg == '--bin':
         print(kith_bin())
+    elif arg == '--machine':
+        print(p['KITH_MACHINE'])
     elif arg == '--guest-sandbox':
         sys.exit(0 if guest_sandbox() else 1)
     elif arg == '--guest-tmp':

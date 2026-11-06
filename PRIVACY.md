@@ -15,9 +15,9 @@ item names the code responsible, so you can check it yourself.
 - **Secrets.** Account and API keys are kept in the macOS Keychain (`kernel/bin/kith-auth`). Connector credentials
   are encrypted in the host's database, with the key in the Keychain (`serve/host/src/market/vault.rs`).
 
-**Backups, if you turn them on.** `kith backup` asks first, then copies your state (`user.md`, projects, the agent
+**Backups, if you turn them on.** `kith backup run` asks first, then copies your state (`user.md`, projects, the agent
 list), your agents' memory and your own agents' instructions to **private GitHub repositories in your own account**.
-`kith backup --nightly` repeats this every night at 03:00. Databases are saved as SQL text. The copies aren't
+`kith backup run --nightly` repeats this every night at 03:00. Databases are saved as SQL text. The copies aren't
 encrypted, so anyone you give access to those repositories can read them (`kernel/bin/kith-state`,
 `kernel/lib/dot-kith.gitignore`, `kernel/lib/agents.gitignore`). The secrets folder, the logs and the host's chat
 database are kept out of git.

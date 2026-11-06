@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# kith-summary-check — `kith memory summary show|forget|write --thread ID [--json]` against a seeded host store, in a
+# throwaway HOME and KITH_HOME (the real ~/.kith is never read or written). The store is a throwaway serve.db that
+# KITH_SERVE_DB points at; the host is not running.
+#
+#   kernel/tests/kith-summary-check     needs the kith program: KITH_BIN, or serve/host's `cargo build --bin kith`;
+#                                       a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+BIN=${KITH_BIN:-${CARGO_TARGET_DIR:-$KERNEL/../serve/host/target}/debug/kith}
+[ -x "$BIN" ] || { echo "kith-summary-check: no kith program at $BIN (cargo build --bin kith in serve/host, or set KITH_BIN)" >&2; exit 2; }
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-summary-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_BIN=$BIN KITH_SERVE_DB=$T/serve.db KITH_KERNEL=$KERNEL KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_ROOM KITH_VIA KITH_RUN_TOKEN KITH_RUN_SOCKET HQ_HOME KITH_SERVE_HOME
+mkdir -p "$HOME" "$KITH_HOME/state"
+KITH=$KERNEL/bin/kith
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+# is EXPR EXPECTED: the python expression EXPR over the JSON in $OUT (as d) prints EXPECTED.
+is() { [ "$(EXPR=$1 OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(os.environ["EXPR"]))')" = "$2" ]; }
+
+python3 - "$KITH_SERVE_DB" <<'PY'
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.executescript("""
+CREATE TABLE entries(seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, bot_id TEXT NOT NULL, rev INTEGER NOT NULL,
+  kind TEXT NOT NULL, turn INTEGER NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, thread_id TEXT);
+CREATE TABLE thread_summaries (thread_id TEXT PRIMARY KEY, room TEXT, agent TEXT NOT NULL, audience TEXT NOT NULL,
+  projects TEXT NOT NULL DEFAULT '[]', text TEXT NOT NULL, links TEXT NOT NULL DEFAULT '[]', covered_seq INTEGER NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL DEFAULT 'end', written_at INTEGER NOT NULL DEFAULT 0, cost_via TEXT NOT NULL DEFAULT 'summary');
+CREATE TABLE bots(id TEXT PRIMARY KEY, rev INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, config TEXT NOT NULL, session_id TEXT, read_rev INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE thread_forgotten (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+""")
+row = {"thread": {"summary": {"text": "We chose zebras.", "writtenAt": 1700000000000}, "summaryAudience": "owner", "title": "keep"}}
+db.execute("INSERT INTO entries(id, bot_id, rev, kind, turn, data, created_at, updated_at) VALUES ('t1', 'b', 1, 'user', 1, ?, 1, 1)", (json.dumps(row),))
+db.execute("INSERT INTO thread_summaries(thread_id, room, agent, audience, text, covered_seq, written_at) VALUES ('t1', 'room', 'echo', 'owner', 'We chose zebras.', 3, 1700000000000)")
+db.commit()
+PY
+
+OUT=$("$KITH" memory summary show --thread t1 --json)
+check "show --json: text, writtenAt, audience, not forgotten" "is \"(d['summary']['text'], d['summary']['writtenAt'], d['summary']['audience'], d['forgotten'])\" \"('We chose zebras.', 1700000000000, 'owner', False)\""
+check "show: the text first" "[ \"\$(\"$KITH\" memory summary show --thread t1 | head -1)\" = 'We chose zebras.' ]"
+OUT=$("$KITH" memory summary show --thread nope --json)
+check "show --json, no summary: null, not forgotten" "is \"(d['summary'], d['forgotten'])\" \"(None, False)\""
+"$KITH" memory summary show --thread nope >/dev/null; rc=$?
+check "show, no summary: exit 1" "[ $rc = 1 ]"
+
+check "a run-token caller is refused" "! env KITH_RUN_TOKEN=x KITH_RUN_SOCKET=/nope \"$KITH\" memory summary show --thread t1 >$T/o 2>$T/e && grep -q 'only the owner' $T/e && [ ! -s $T/o ]"
+check "a person's run is refused to forget" "! env KITH_PERSON=sam \"$KITH\" memory summary forget --thread t1 >$T/o 2>$T/e && grep -q 'only the owner' $T/e"
+check "a group room is refused" "! env KITH_ROOM=group:x \"$KITH\" memory summary show --thread t1 >$T/o 2>$T/e && grep -q 'only the owner' $T/e"
+check "the refused calls left the summary alone" "\"$KITH\" memory summary show --thread t1 --json | grep -q zebras"
+"$KITH" memory summary show --thread 'a b' >/dev/null 2>&1; rc=$?
+check "a bad thread id is a usage error" "[ $rc = 2 ]"
+
+OUT=$("$KITH" memory summary forget --thread t1 --json)
+check "forget --json: {forgotten: true}" "is \"(d['forgotten'], d['thread'])\" \"(True, 't1')\""
+OUT=$("$KITH" memory summary show --thread t1 --json)
+check "after forget: no summary, forgotten flag set" "is \"(d['summary'], d['forgotten'])\" \"(None, True)\""
+check "forget twice: same answer" "\"$KITH\" memory summary forget --thread t1 --json | grep -q '\"forgotten\": true'"
+"$KITH" memory summary show --thread t1 >$T/o; rc=$?
+check "show, forgotten (text): says so, exit 1" "[ $rc = 1 ] && grep -q '^forgotten: t1' $T/o"
+
+# the stub host: forget goes through it when it is up (the row copy is the host's to strip, so the store alone leaves it)
+python3 - "$T/port" <<'PY' &
+import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        open(sys.argv[1] + '.hit', 'a').write(self.path + '\n')
+        b = json.dumps({'forgotten': True}).encode()
+        self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(('127.0.0.1', 0), H)
+open(sys.argv[1], 'w').write(str(s.server_address[1]))
+s.serve_forever()
+PY
+STUB=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$T/port" ] && break; sleep 0.3; done
+mkdir -p "$T/serve"; echo tok > "$T/serve/token"
+check "forget, host up: asks the host's forgetThread" "env KITH_SERVE_PORT=\$(cat $T/port) \"$KITH\" memory summary forget --thread t1 --json | grep -q '\"forgotten\"' && grep -q forgetThread $T/port.hit"
+kill $STUB 2>/dev/null; wait $STUB 2>/dev/null || true
+
+# write needs the running host: with none it says so (kith summarise's message) and fails
+check "write, host down: a clear error" "! env KITH_SERVE_PORT=1 KITH_SERVE_DIR=$T \"$KITH\" memory summary write --thread t1 --json >$T/o 2>$T/e && grep -q 'host could not be reached' $T/e"
+check "write: a run-token caller is refused" "! env KITH_RUN_TOKEN=x KITH_RUN_SOCKET=/nope \"$KITH\" memory summary write --thread t1 >$T/o 2>$T/e && grep -q 'only the owner' $T/e"
+
+echo
+if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

@@ -1,0 +1,37 @@
+[
+ {
+  "name": "auth-ls-empty-and-granted",
+  "command": "auth",
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"
+   }
+  ],
+  "run": [
+   [
+    "auth",
+    "ls"
+   ],
+   [
+    "auth",
+    "grant",
+    "echo",
+    "notion",
+    "notion/library"
+   ],
+   [
+    "auth",
+    "ls"
+   ],
+   [
+    "auth",
+    "granted",
+    "notion"
+   ]
+  ]
+ }
+]

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """kith-project — the projects kith knows: what each holds, where its files are, what the agents wrote about it.
 
-  kith project [dir]                                   the project here (or at dir) and the ones it sits in
+  kith project [dir] [--json]                          the project here (or at dir) and the ones it sits in; --json:
+                                                     {"project": id, "projects": [entry, ...]} closest first, entries as ls --json
   kith project ls [--json]                             every project, as a tree; --json: {"projects":[{id, paths, home,
                                                      remotes, parent, memory, exists}]} sorted by id, paths absolute
   kith project add ID [dir] [--in PARENT] [--home [DIR]] [--json]
@@ -9,7 +10,7 @@
                                                      --home makes one: inside the parent's home, else <root>/ID;
                                                      --json prints the entry as ls --json does
   kith project root [DIR]                              where new homes go (default ~/Documents); DIR changes it
-  kith project notes ID...                             the tier-1 notes of those projects as this run may see them
+  kith project notes ID... [--json]                             the tier-1 notes of those projects as this run may see them
                                                      (KITH_AGENT, KITH_PERSON, KITH_ROOM): what a chat gets when its
                                                      subject moves to a project after its first message
   kith project open [ID] [claude options]              work on the whole project: Claude Code in its home (else its
@@ -135,14 +136,21 @@ def open_project(argv):
     os.execvp('claude', args)
 
 
-def notes(ids):
-    """Who asks comes from the environment, never from arguments, as for `kith recall`."""
+def notes(ids, as_json=False):
+    """Who asks comes from the environment, never from arguments, as for `kith recall`.
+    --json: {"notes": block, "more": n, "start": {id: start files}}; empty for a caller that may see nothing."""
     import kith_facets, kith_recall
+    got = {'notes': '', 'more': 0, 'start': {}}
+
+    def done():
+        if as_json:
+            print(json.dumps(got))
+        return 0
     who = kith_recall.caller()
     agent, aud = who['agent'], who['audiences']
     import re
     if not agent or aud == [] or not re.fullmatch(r'[a-z][a-z0-9-]*', agent):
-        return 0   # not a known caller: nothing, like recall
+        return done()   # not a known caller: nothing, like recall
     if aud is None or who['who'] == 'owner':
         reader = {'kind': 'owner', 'id': '', 'rooms': []}
     elif who['who'].startswith('bot-'):
@@ -152,19 +160,23 @@ def notes(ids):
     p = paths()
     home = next((d for d in (p['KITH_AGENTS'] / agent, p['KITH_STATE'] / 'agents' / agent) if d.is_dir()), None)
     if not home:
-        return 0
+        return done()
     room = os.environ.get('KITH_ROOM') or kith_facets.own_room(agent, reader)
     ids = [i for i in ids if kith_facets.ID.match(i)]
     out = kith_facets.project_notes(agent, home, reader, room, ids)
     if out['block']:
-        print(out['block'])
-        if out['more']:
-            print('(%d more project notes: kith recall <words> --project <id>)' % out['more'])
+        got['notes'], got['more'] = out['block'], out['more']
+        if not as_json:
+            print(out['block'])
+            if out['more']:
+                print('(%d more project notes: kith recall <words> --project <id>)' % out['more'])
     for i in ids:
         start = kith_facets.start_files(agent, home, reader, room, i, members=None, state=p['KITH_STATE'])
         if start:
-            print(start)
-    return 0
+            got['start'][i] = start
+            if not as_json:
+                print(start)
+    return done()
 
 
 def main(argv):
@@ -175,7 +187,7 @@ def main(argv):
     if argv[:1] == ['root']:
         return subprocess.call([str(BIN / 'project-id'), '--root', *argv[1:]])
     if argv[:1] == ['notes']:
-        return notes(argv[1:])
+        return notes([a for a in argv[1:] if a != '--json'], '--json' in argv)
     if argv[:1] == ['open']:
         return open_project(argv[1:])
     projects = registry()
@@ -204,12 +216,21 @@ def main(argv):
                 tree(pid, 0, {pid})
         return 0
 
+    as_json = '--json' in argv
+    argv = [a for a in argv if a != '--json']
     found = subprocess.run([str(BIN / 'project-id'), *argv[:1]], capture_output=True, text=True)
+    if found.returncode != 0 and as_json:
+        print(json.dumps({'ok': False, 'error': 'no project here'}))
+        return 1
     if found.returncode != 0:
         print('no project here. Register one: kith project add <id> [dir] [--in PARENT] [--home [DIR]]')
         return 1
     chain = subprocess.run([str(BIN / 'project-id'), '--info', found.stdout.strip()],
                            capture_output=True, text=True).stdout.split('\n')
+    if as_json:
+        ids = [l.split('\t')[0] for l in chain if l]
+        print(json.dumps({'project': found.stdout.strip(), 'projects': [entry(i, projects[i]) for i in ids if i in projects]}))
+        return 0
     for i, line in enumerate(l for l in chain if l):
         if i:
             print()

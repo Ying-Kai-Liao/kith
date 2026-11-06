@@ -9,7 +9,7 @@ import type { KithInfo } from './kith-info.ts'
 export interface BotSections {
   /** "Standing instructions": Kith's About shows the agent's role. */
   instructions: boolean
-  /** The agent (backend) picker: Kith's Model & permissions shows the harness. */
+  /** The host-native agent (backend) picker. Never for an hq bot: the harness is `kith <agent> set harness`, a row of `HqSettings`. */
   backendPicker: boolean
   /**
    * The harness's own notes tab in Memory. For an hq bot it is Claude Code's MEMORY.md of the bot's working
@@ -34,10 +34,10 @@ export function botSections(
 ): BotSections {
   if (!hqAgent) return ALL_SECTIONS
   const kithSettings = unsupportedHost
-  if (!info) return { ...ALL_SECTIONS, harnessMemoryTab: false, kithSettings }
+  if (!info) return { ...ALL_SECTIONS, backendPicker: false, harnessMemoryTab: false, kithSettings }
   return {
     instructions: !(info.role || info.description) || info.errors.role !== undefined,
-    backendPicker: !info.harness,
+    backendPicker: false,
     harnessMemoryTab: false,
     kithSettings,
   }
@@ -90,7 +90,7 @@ function callModelName(id: string): string {
 }
 
 export interface HqSetting {
-  key: 'permission' | 'callModel' | 'model' | 'effort' | 'fastMode'
+  key: 'permission' | 'callModel' | 'harness' | 'model' | 'effort' | 'fastMode'
   label: string
   /** What hq reports, or plain words when it has nothing. */
   value: string
@@ -99,6 +99,22 @@ export interface HqSetting {
   hint: string
 }
 
+/** Effort levels `kith <agent> set effort` takes, plus `default` (forget the choice). */
+export const EFFORT_LEVELS: { id: string; label: string }[] = [
+  { id: 'default', label: "Agent's default" },
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Extra high' },
+  { id: 'max', label: 'Max' },
+]
+
+/** The harnesses the picker offers for a kith agent; the agent's current one is added when it is another. */
+export const HARNESSES: { id: string; label: string }[] = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+]
+
 export const SET_IN_KITH = 'Set in Kith'
 
 /**
@@ -106,7 +122,7 @@ export const SET_IN_KITH = 'Set in Kith'
  * The permission mode and the call model have hq settings to write to (`kith <agent> set permission|call-model`); the
  * model and effort are the agent package's own, and hq has no Fast mode.
  */
-export function hqSettings(info: Pick<KithInfo, 'permissionMode' | 'callModel' | 'model' | 'effort'> & { callModelDefault?: string | null } | null): HqSetting[] {
+export function hqSettings(info: Pick<KithInfo, 'permissionMode' | 'callModel' | 'model' | 'effort'> & { harness?: string | null; callModelDefault?: string | null } | null): HqSetting[] {
   return [
     {
       key: 'permission', label: 'Permissions', editable: info !== null,
@@ -118,8 +134,21 @@ export function hqSettings(info: Pick<KithInfo, 'permissionMode' | 'callModel' |
       value: info ? (info.callModel ?? 'default') : '…',
       hint: 'The model that answers when you talk to this agent in a voice call. Typed messages use the agent\'s own model.',
     },
-    { key: 'model', label: 'Model', editable: false, value: info?.model ?? "Agent's default", hint: `${SET_IN_KITH}: the agent's package picks it.` },
-    { key: 'effort', label: 'Effort', editable: false, value: info?.effort ?? "Agent's default", hint: `${SET_IN_KITH}: the agent's package picks it.` },
+    {
+      key: 'harness', label: 'Harness', editable: info !== null,
+      value: info ? (info.harness ?? 'claude') : '…',
+      hint: 'The program that runs this agent on this computer. Switching drops a model the new harness can\'t run.',
+    },
+    {
+      key: 'model', label: 'Model', editable: info !== null,
+      value: info ? (info.model ?? 'default') : '…',
+      hint: 'Kept by Kith for this agent. Every chat of this agent uses it from its next turn.',
+    },
+    {
+      key: 'effort', label: 'Effort', editable: info !== null,
+      value: info ? (info.effort ?? 'default') : '…',
+      hint: 'How hard the agent thinks. Kept by Kith for this agent.',
+    },
     { key: 'fastMode', label: 'Fast mode', editable: false, value: 'Off', hint: `${SET_IN_KITH}: hq has no Fast mode.` },
   ]
 }

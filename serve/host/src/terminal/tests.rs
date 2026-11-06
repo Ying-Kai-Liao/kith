@@ -521,11 +521,79 @@ async fn a_pid_started_at_another_time_is_not_the_session() {
         let v = json!({"pid": me, "sessionId": "s1", "status": "idle", "procStart": proc_start});
         std::fs::write(r.dir.join("sessions").join(format!("{me}.json")), v.to_string()).unwrap();
     };
-    let actual = registry::proc_start(me).expect("ps knows the process");
+    let actual = registry::proc_start(me).expect("the process has a start stamp");
     write(&actual);
     assert_eq!(registry::liveness(&reg, sessions.as_deref()), Live::Idle);
+    write(&reused_start());
+    assert_eq!(registry::liveness(&reg, sessions.as_deref()), Live::Closed, "a reused pid has another start stamp");
+    // Claude Code's own file holds `ps` text, compared as before: another time is a reused pid.
     write("Mon Jan  1 00:00:00 2001");
     assert_eq!(registry::liveness(&reg, sessions.as_deref()), Live::Closed, "a reused pid started at another time");
+}
+
+/// A stamp in this system's form that no running process has: a pid reused after a crash.
+fn reused_start() -> String {
+    match registry::proc_start(std::process::id()).as_deref().and_then(|s| s.split_once(':')) {
+        Some((boot, _)) => format!("{boot}:1"),
+        None => "e1".to_owned(),
+    }
+}
+
+/// A claim written before stamps holds `ps -o lstart=` text. It is compared the old way: text that positively differs from
+/// the live pid's start is a reused pid and the claim is free (as before stamps); text that matches holds.
+#[tokio::test]
+async fn a_claim_with_old_lstart_text_holds_only_while_the_text_matches_the_process() {
+    let r = Rig::new();
+    let me = r.sleeper();
+    let path = claim::path(&r.state(), "s1", false);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, json!({"pid": me, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t"}).to_string()).unwrap();
+    assert!(claim::holder(&r.state(), "s1").is_none(), "another start time: a reused pid, free");
+    assert!(claim::take(&r.state(), "s1", Kind::Terminal, me, false).unwrap().is_ok(), "and taken over");
+    let text = registry::lstart(me, false).expect("ps knows the process");
+    std::fs::write(&path, json!({"pid": me, "procStart": text, "at": "t"}).to_string()).unwrap();
+    assert_eq!(claim::holder(&r.state(), "s1").map(|c| c.pid), Some(me), "the same start time holds");
+}
+
+/// An owner's Stop on a claim whose old text says another start (the pid was reused by a process the claim never named):
+/// nothing is signalled, the claim is given back, and the thread is free. A matching old text is stopped as before.
+#[tokio::test]
+async fn stopping_an_old_text_claim_on_a_reused_pid_frees_it_without_a_signal() {
+    let r = Rig::new();
+    let (mut shell, held) = shell_with_child();
+    let path = claim::path(&r.state(), "o1", false);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, json!({"pid": held, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t"}).to_string())
+        .unwrap();
+    let got = claim::stop_holder(&r.state(), "o1", GRACE);
+    assert!(matches!(got, claim::Stopped::Nobody), "{got:?}");
+    assert!(claim::read(&path).is_none(), "the claim is given back");
+    assert!(shell.try_wait().unwrap().is_none() && registry::pid_runs(held), "nothing was signalled");
+    // Pressed twice: nobody holds it.
+    assert!(matches!(claim::stop_holder(&r.state(), "o1", GRACE), claim::Stopped::Nobody));
+    // The same claim with text that matches the process is the claimer: stopped.
+    let text = registry::lstart(held, false).expect("ps knows the process");
+    std::fs::write(&path, json!({"pid": held, "procStart": text, "at": "t"}).to_string()).unwrap();
+    let got = claim::stop_holder(&r.state(), "o1", GRACE);
+    assert!(matches!(got, claim::Stopped::Ended(_)), "{got:?}");
+    shell.wait().unwrap();
+}
+
+/// A start that cannot be compared (a stamp of the other form) is not "different": the claim holds, and Stop refuses.
+#[tokio::test]
+async fn stopping_a_claim_whose_start_cannot_be_compared_signals_nothing() {
+    let r = Rig::new();
+    let (mut shell, held) = shell_with_child();
+    let other_form = if reused_start().starts_with('e') { "bx:1" } else { "e1" };
+    let path = claim::path(&r.state(), "o2", false);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, json!({"pid": held, "procStart": other_form, "at": "t"}).to_string()).unwrap();
+    assert_eq!(claim::holder(&r.state(), "o2").map(|c| c.pid), Some(held));
+    let got = claim::stop_holder(&r.state(), "o2", GRACE);
+    assert!(matches!(got, claim::Stopped::CantStop(_)), "{got:?}");
+    assert!(shell.try_wait().unwrap().is_none(), "nothing was signalled");
+    shell.kill().unwrap();
+    shell.wait().unwrap();
 }
 
 /// Claude Code writes its session file's `procStart` in UTC; `ps` prints the Mac's local time. Away from UTC the two
@@ -567,7 +635,7 @@ fn the_start_time_is_read_in_the_c_locale_under_any_caller_locale() {
             "C-locale lstart, got {start:?}"
         );
     }
-    assert_eq!(registry::lstart_via(zh(), me, false), registry::proc_start(me));
+    assert_eq!(registry::lstart_via(zh(), me, false), registry::lstart(me, false));
 }
 
 #[test]
@@ -718,8 +786,7 @@ async fn a_claim_of_a_dead_or_reused_pid_is_taken_over() {
     assert_eq!(claim::read(&path).unwrap().pid, me);
     // A live pid that started at another time is a reused pid.
     let other = r.sleeper();
-    std::fs::write(&path, json!({"pid": other, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t"}).to_string())
-        .unwrap();
+    std::fs::write(&path, json!({"pid": other, "procStart": reused_start(), "at": "t"}).to_string()).unwrap();
     assert!(claim::holder(&r.state(), "s1").is_none());
     assert!(claim::take(&r.state(), "s1", Kind::Terminal, me, false).unwrap().is_ok());
     // No temp files are left behind (the lock file stays, empty).
@@ -1042,6 +1109,28 @@ async fn a_oneshot_claim_written_by_the_kernel_is_parsed_and_holds_the_session()
     assert!(claim::take(&r.state(), "s1", Kind::App, std::process::id(), false).unwrap().is_err());
 }
 
+#[tokio::test]
+async fn a_claim_of_an_unknown_kind_is_a_live_holder_and_take_as_never_removes_it() {
+    let r = Rig::new();
+    let pid = r.sleeper();
+    // A kind a newer binary writes (M1's holder). Python and the crate keep it as a live holder; so must this.
+    let p = claim::path(&r.state(), "s1", false);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let start = registry::proc_start(pid).expect("ps knows the process");
+    let body = json!({"pid": pid, "procStart": start, "at": "2026-11-03T00:00:00+00:00", "kind": "newer-kind"});
+    std::fs::write(&p, body.to_string()).unwrap();
+    assert_eq!(claim::read(&p).expect("an unknown kind still parses").kind, Kind::Other);
+    assert_eq!(claim::holder(&r.state(), "s1").expect("it holds the session").pid, pid);
+    let held = claim::take(&r.state(), "s1", Kind::Terminal, std::process::id(), false).unwrap().unwrap_err();
+    assert_eq!(held.0.pid, pid);
+    assert!(p.exists(), "take_as must not delete a live claim it cannot name");
+    // Judged by pid + start only: a reused pid (another start time) is stale whatever the kind, and replaced.
+    let stale = json!({"pid": pid, "procStart": reused_start(), "kind": "newer-kind"});
+    std::fs::write(&p, stale.to_string()).unwrap();
+    assert!(claim::holder(&r.state(), "s1").is_none());
+    assert!(claim::take(&r.state(), "s1", Kind::Terminal, std::process::id(), false).unwrap().is_ok());
+}
+
 // --- the revoke sweep: claims name the person, the sweep ends their holders -----------------------------------------
 
 /// A process with a child of its own (`sh` waiting on a `sleep`), so the sweep's reach to children can be seen. The child's pid
@@ -1097,6 +1186,32 @@ async fn the_sweep_ends_a_left_over_guest_holder_and_its_child_and_keeps_the_own
 }
 
 #[tokio::test]
+async fn stopping_a_session_the_core_is_still_starting_signals_nothing() {
+    let r = Rig::new();
+    // The claim names the core's own pid (`kith serve`) until the terminal's is known: a Stop must not touch it.
+    let (mut shell, held) = shell_with_child();
+    claim::take(&r.state(), "s1", Kind::Starting, held, false).unwrap().unwrap();
+    assert!(matches!(claim::stop_holder(&r.state(), "s1", GRACE), claim::Stopped::Busy(_)));
+    assert!(shell.try_wait().unwrap().is_none(), "nothing was signalled");
+    assert_eq!(super::intent::read(&r.state(), "s1"), None);
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+}
+
+#[tokio::test]
+async fn stopping_a_claim_that_names_the_core_pid_signals_nothing_whatever_its_kind() {
+    let r = Rig::new();
+    // Version skew: an older kernel wrote the core's pid under a kind this build would otherwise end.
+    let (mut shell, held) = shell_with_child();
+    claim::take(&r.state(), "c1", Kind::Terminal, held, false).unwrap().unwrap();
+    let got = claim::stop_holder_unless(&r.state(), "c1", GRACE, Some(held));
+    assert!(matches!(got, claim::Stopped::Busy(_)), "{got:?}");
+    assert!(shell.try_wait().unwrap().is_none(), "nothing was signalled");
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+}
+
+#[tokio::test]
 async fn stopping_a_holder_writes_its_intent_first() {
     let r = Rig::new();
     // The holder is the shell's child, so it is not this process' own turn (`OwnTurn`).
@@ -1108,6 +1223,44 @@ async fn stopping_a_holder_writes_its_intent_first() {
 }
 
 #[tokio::test]
+async fn stopping_a_holder_that_ignores_term_ends_it_and_its_child_before_the_claim_goes() {
+    // outer sh -> claimer (ignores TERM) -> child (ignores TERM): the claimer is a one-shot's stub, the child its claude.
+    let mut sh = std::process::Command::new("sh")
+        .args(["-c", r#"sh -c 'trap "" TERM; sleep 300 & echo $!; wait' & echo $!; wait"#])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = std::io::BufReader::new(sh.stdout.take().unwrap());
+    let mut pids: Vec<u32> = Vec::new();
+    for _ in 0..2 {
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut lines, &mut line).unwrap();
+        pids.push(line.trim().parse().unwrap());
+    }
+    // The two lines come in either order: the claimer is the one whose parent is the outer shell.
+    let (claimer, kid) = if parent_pid(pids[0]) == sh.id() { (pids[0], pids[1]) } else { (pids[1], pids[0]) };
+    let rig = Rig::new();
+    claim::take(&rig.state(), "h2", Kind::Terminal, claimer, false).unwrap().unwrap();
+    assert!(matches!(claim::stop_holder(&rig.state(), "h2", GRACE), claim::Stopped::Ended(_)));
+    // The claim goes only once they were gone: with the claim file removed, nothing of the tree is in the table.
+    assert!(claim::read(&claim::path(&rig.state(), "h2", false)).is_none());
+    assert!(!alive(claimer) && !alive(kid), "the tree is gone (or a zombie) when the claim is");
+    sh.wait().unwrap();
+}
+
+/// Running and not a zombie, from one `ps` (no retry: the point is the state right now).
+fn alive(pid: u32) -> bool {
+    let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
+    let stat = String::from_utf8_lossy(&out.stdout);
+    !stat.trim().is_empty() && !stat.trim_start().starts_with('Z')
+}
+
+fn parent_pid(pid: u32) -> u32 {
+    let out = std::process::Command::new("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
+}
+
+#[tokio::test]
 async fn the_sweep_leaves_a_reused_pid_alone() {
     let r = Rig::new();
     let stranger = r.sleeper();
@@ -1115,7 +1268,7 @@ async fn the_sweep_leaves_a_reused_pid_alone() {
     let path = claim::path(&r.state(), "g2", false);
     std::fs::write(
         &path,
-        json!({"pid": stranger, "procStart": "Mon Jan  1 00:00:00 2001", "at": "t", "kind": "oneshot", "person": "sam"})
+        json!({"pid": stranger, "procStart": reused_start(), "at": "t", "kind": "oneshot", "person": "sam"})
             .to_string(),
     )
     .unwrap();
@@ -1249,7 +1402,7 @@ async fn a_pid_reused_after_a_crash_does_not_keep_a_one_shot_working() {
     r.register_one_shot("a3", "ask", "asked from a terminal", pid, None);
     let path = registry::dir(&r.dir.join("state")).join("a3.json");
     let mut reg: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    reg["procStart"] = "Mon Jan  1 00:00:00 2001".into();
+    reg["procStart"] = reused_start().into();
     std::fs::write(&path, reg.to_string()).unwrap();
     let parsed = registry::read_one(&r.dir.join("state"), "a3").unwrap();
     assert_eq!(registry::liveness(&parsed, Some(&r.dir.join("sessions"))), Live::Closed);
@@ -1322,3 +1475,6 @@ async fn a_mirrored_ask_card_reaches_the_owner_and_no_invited_person_or_bot_gues
         assert!(roles::event_for_bot(&r.hub.store, "some-bot", ev).is_none(), "a bot guest saw an owner-only run");
     }
 }
+
+#[path = "core_claims_flow_tests.rs"]
+mod core_claims;

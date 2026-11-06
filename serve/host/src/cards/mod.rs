@@ -339,7 +339,7 @@ fn tell_asker(card: &Card, how: &str) {
             tracing::warn!(card = %card.id, "no kernel to answer a kith ask with");
             return;
         };
-        let env = std::env::vars().filter(|(k, _)| crate::channels::run::inherited(k));
+        let env = std::env::vars().filter(|(k, _)| crate::channels::run::inherited(k)).chain(crate::kernel::stub_env());
         let spawned = std::process::Command::new(bin)
             .args(&args)
             .env_clear()
@@ -675,7 +675,7 @@ pub fn delivered(store: &Store, entry_id: &str, allow: bool) {
     let Some(card) = store.card_by_entry(entry_id) else { return };
     let done = match card.state {
         CardState::Approved if allow => store.card_use(&card.id).map(drop),
-        s if s.open() => store.card_withdraw(&card.id).map(drop),
+        s if s.open() && !secret::claimed(&card.id) => store.card_withdraw(&card.id).map(drop),
         _ => Ok(()),
     };
     if let Err(error) = done {
@@ -740,6 +740,7 @@ pub fn park_entry(hub: &Hub, entry_id: &str) -> bool {
 /// A failed attempt's question can never be answered usefully: withdrawn, shown as expired like before.
 pub fn withdraw_entry(hub: &Hub, entry_id: &str) {
     if let Some(card) = hub.store.card_by_entry(entry_id)
+        && !secret::claimed(&card.id)
         && hub.store.card_withdraw(&card.id).unwrap_or(false)
     {
         close_entry(hub, &card, "expired");
@@ -848,7 +849,7 @@ fn auth_stamp() -> Vec<Option<std::time::SystemTime>> {
     let files = match std::env::var_os("KITH_AUTH").filter(|v| !v.is_empty()) {
         Some(given) => vec![std::path::PathBuf::from(given)],
         None => vec![
-            crate::kernel::machine_dir(&home).join("secrets/auth.json"),
+            crate::kernel::folders(&home).secrets.join("auth.json"),
             home.join(".config/kith/auth.json"),
             home.join(".config/hq/auth.json"),
         ],
