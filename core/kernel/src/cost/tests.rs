@@ -259,3 +259,44 @@ fn the_clock_takes_epoch_seconds_and_iso_text() {
     // blank is the real clock
     assert!(super::Now::from_env(Some("  ")).is_ok());
 }
+
+/// A kernel folder whose `bin/kith-auth` prints `body` and exits `code`, whatever it is asked.
+#[cfg(unix)]
+fn kernel_with_auth(p: &Paths, code: i32, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = p.kernel.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let f = bin.join("kith-auth");
+    std::fs::write(
+        &f,
+        format!("#!/bin/sh\nprintf '%s' '{body}'\nexit {code}\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn members_says_when_the_budgets_cannot_be_read() {
+    let (p, root) = world("members-budgets");
+    let members = |p: &Paths| -> Value {
+        serde_json::from_str(&run(p, &fixed_clock(), &args(&["members", "alpha"])).stdout).unwrap()
+    };
+    kernel_with_auth(&p, 0, r#"{"sam": 5.0}"#);
+    let ok = members(&p);
+    assert_eq!(ok["budgets"], json!({"sam": 5.0}));
+    assert!(ok.get("budgetsError").is_none());
+    // A kith-auth that fails or answers text is not "nobody has a budget"; nor is a tombstone (exit 3) when the core
+    // can't be asked from here.
+    for (code, body) in [(1, ""), (0, "not json"), (3, "")] {
+        kernel_with_auth(&p, code, body);
+        let bad = members(&p);
+        assert_eq!(bad["budgets"], json!({}), "exit {code}");
+        assert_eq!(
+            bad["budgetsError"],
+            json!("can't read budgets"),
+            "exit {code}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}

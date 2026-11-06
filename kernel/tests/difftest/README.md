@@ -177,7 +177,8 @@ the offset of "now", as the Python does), New York, Lord Howe, December and Febr
 
 Not covered (no Rust side yet, `kith kernel cost` exits 2): `today|week|month|all`, `agents`, `agent NAME` as text, `people`, `session`, `csv`,
 and the hooks `tag` / `record`. A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
-that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`).
+that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`). This is the one intended
+difference of the `cost` switch (`kernel/lib/core-switched.txt`, `kernel/tests/kith-cost-switch-check`): the Python raises, the core does not.
 
 ### Settings (M5-4)
 
