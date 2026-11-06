@@ -1536,7 +1536,10 @@ async fn main() -> Result<()> {
             // verbs, the launch) does so through the core. Not the verbs that hold the core themselves.
             if !matches!(
                 cmd,
-                KernelCmd::Cutover { .. } | KernelCmd::CoreMigrate { .. } | KernelCmd::CoreDaemon | KernelCmd::CoreStatus { .. }
+                KernelCmd::Cutover { .. }
+                    | KernelCmd::CoreMigrate { .. }
+                    | KernelCmd::CoreDaemon
+                    | KernelCmd::CoreStatus { .. }
             ) {
                 account_store::install(&kernel::folders(&kith_kernel::paths::process_home()));
             }
