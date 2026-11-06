@@ -29,6 +29,9 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.may"
             | "people.resolve"
             | "people.bridgeHeld"
+            | "people.who"
+            | "people.door"
+            | "people.granted"
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
@@ -182,6 +185,9 @@ fn is_read(method: &str, params: &Value) -> bool {
             | "people.may"
             | "people.resolve"
             | "people.bridgeHeld"
+            | "people.who"
+            | "people.door"
+            | "people.granted"
             | "people.invites"
             | "people.budgets"
             | "people.ledger"
@@ -377,6 +383,32 @@ pub(crate) fn call_in(
                 |a| json!({ "held": Rules::new(c, a).bridge_held(person) }),
             )
         }
+        // `kith-auth who <platform> <user-id>`, `door` and `granted` (M2-23): the reads kith-auth routes here on the tombstone.
+        "people.who" => {
+            let (platform, id) = (
+                need(params, "platform").map_err(|d| store::refusal(&d))?,
+                need(params, "id").map_err(|d| store::refusal(&d))?,
+            );
+            store::read(core, |a| Rules::new(c, a).who(platform, id))
+        }
+        "people.door" => {
+            let (agent, person, piece) = (
+                need(params, "agent").map_err(|d| store::refusal(&d))?,
+                need(params, "person").map_err(|d| store::refusal(&d))?,
+                need(params, "piece").map_err(|d| store::refusal(&d))?,
+            );
+            store::read(core, |a| Rules::new(c, a).door(agent, person, piece))?
+                .map_err(|d| store::refusal(&d))
+        }
+        "people.granted" => {
+            let (agent, service) = (
+                need(params, "agent").map_err(|d| store::refusal(&d))?,
+                need(params, "service").map_err(|d| store::refusal(&d))?,
+            );
+            store::read(core, |a| {
+                json!({ "grants": Rules::new(c, a).granted(agent, service) })
+            })
+        }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         // `kith-auth budgets AGENT --json`: the lines are that one JSON line, so a caller that reads the CLI's output reads
         // this one's. A budget that is no number is an error, never "no limit".
@@ -407,6 +439,10 @@ pub(crate) fn call_in(
                 write::ledger(a, c, person.as_deref(), agent)
             })?;
             Ok(json!({ "rows": rows, "lines": [Value::Array(rows.clone()).to_string()] }))
+        }
+        // `bots-cap --json` (kith-cost bots): the cap as written and every id the owner's bots spend under.
+        "people.botsCap" if word(params, "amount").is_none() && switch(params, "json") => {
+            store::read(core, write::bots_cap_json)
         }
         "people.botsCap" if word(params, "amount").is_none() => {
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))
