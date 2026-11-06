@@ -366,10 +366,34 @@ fn invited_person(hub: &Hub, id: &str) -> Result<PersonRow> {
     hub.store.person(id).ok_or_else(|| anyhow!("`{id}` isn't someone you invited"))
 }
 
+/// `invited_person`, and on a switched host also a person the core holds but the host never invited: one the owner
+/// added from the terminal (`kith-auth person` + `member`) and `kith migrate --authority` imported. The People list
+/// shows them, so the owner must be able to change their access. The row made is `createInvite`'s (`put_person`, a repeat
+/// keeps what is there, so two calls at once make one); it holds no access of its own. The owner, a bot and a revoked
+/// person are refused as before.
+async fn invited_or_core_person(hub: &Hub, bin: &Path, id: &str) -> Result<PersonRow> {
+    if let Some(p) = hub.store.person(id) {
+        return Ok(p);
+    }
+    if super::authority::switched_now()
+        && let Some(a) = crate::remote::members::auth_person(bin, id).await?
+        && !a.owner
+        && a.bot_of.is_empty()
+        && a.revoked_at.is_none()
+    {
+        let name = if a.name.is_empty() { id } else { a.name.as_str() };
+        hub.store.put_person(id, name)?;
+        if let Some(p) = hub.store.person(id) {
+            return Ok(p);
+        }
+    }
+    invited_person(hub, id)
+}
+
 async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     let id = str_arg(b, "personId")?;
-    let person = invited_person(hub, id)?;
     let bin = auth_bin().await?;
+    let person = invited_or_core_person(hub, &bin, id).await?;
     let changed_agents = !b["agents"].is_null();
     let mut warnings: Vec<String> = Vec::new();
     {
