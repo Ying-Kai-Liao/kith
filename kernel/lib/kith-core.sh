@@ -82,7 +82,7 @@ kith_cost_ported() {
 # kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the line is one it answers, else the Python.
 # A subshell, because kith_core_exec execs; `KITH_PERSON_WAS=.. kith_cost ..` reaches whichever answers.
 kith_cost() {
-  ( kith_cost_ported "$@" && kith_core_exec cost --kernel "$KITH" "$@"; exec "$KITH/bin/kith-cost" "$@" )
+  ( if kith_cost_ported "$@"; then kith_core_exec cost --kernel "$KITH" "$@" || :; fi; exec "$KITH/bin/kith-cost" "$@" )
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag

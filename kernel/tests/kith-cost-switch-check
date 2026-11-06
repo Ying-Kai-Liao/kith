@@ -52,6 +52,7 @@ AUTH person kai owner >/dev/null; AUTH person sam >/dev/null; AUTH person eve >/
 AUTH bot bot-s --of sam name=Scout >/dev/null
 AUTH member echo sam budget=5 >/dev/null
 AUTH member echo eve budget=5 >/dev/null
+AUTH member echo bot-s >/dev/null
 
 # The ledger: the owner and sam spent a little this month; eve spent past her budget; bot-s spends from sam.
 "$KERNEL/bin/kith-cost" sync >/dev/null 2>&1
