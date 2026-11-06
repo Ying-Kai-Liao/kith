@@ -119,6 +119,8 @@ def prompt(request):
         room = text.split("New messages in the room (oldest first):\n", 1)[-1].split("\n\n", 1)[0]
         last = room.strip().splitlines()[-1] if "New messages" in text else ""
         reply = "reply: group" if last.startswith("User:") else "(pass)"
+        if "MENTIONB" in last:
+            reply = "@b over to you"
         # A chatty room never runs dry: every reply carries the marker the next speaker answers.
         if "CHATTY" in room:
             reply = "CHATTY ok"

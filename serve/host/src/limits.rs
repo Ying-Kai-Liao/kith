@@ -234,10 +234,8 @@ pub fn park(hub: &Hub, bot: &BotConfig, lane: &Lane, ids: &[String], state: &Val
 /// to the budget, which runs the message again. Reads the month's numbers first, so it runs on its own task.
 pub fn guest_refused(hub: std::sync::Arc<Hub>, bot: BotConfig, lane: Lane, ids: Vec<String>, refused: &str) {
     let (Some(person), Some(agent)) = (bot.person.clone(), bot.hq_agent.clone()) else { return };
-    if !refused.contains("has used $") || !valid_agent(&agent) {
-        return;
-    }
-    if refused.contains("your bots have used $") {
+    let Some(kind) = refused_at(refused).filter(|_| valid_agent(&agent)) else { return };
+    if kind == "bots" {
         return bots_refused(hub, bot, lane, ids, agent);
     }
     tokio::spawn(async move {
@@ -265,6 +263,18 @@ pub fn guest_refused(hub: std::sync::Arc<Hub>, bot: BotConfig, lane: Lane, ids: 
         let body = card["title"].as_str().unwrap_or_default();
         push::notify(&hub, &owner, Some(&bot.id), &format!("{name} reached their limit"), body, AlertKind::NeedsInput);
     });
+}
+
+/// Which cap the kernel's refusal names (kernel/bin/kith): "bots" for the owner's bots together, "person" for one
+/// person's budget on an agent, None for any other refusal.
+fn refused_at(refused: &str) -> Option<&'static str> {
+    if refused.contains("your bots have used $") {
+        Some("bots")
+    } else if refused.contains(" has used $") {
+        Some("person")
+    } else {
+        None
+    }
 }
 
 /// One of the owner's bots stopped at the bots' cap: the same card as a guest's, raising the cap for all of them.
@@ -475,6 +485,27 @@ mod tests {
         assert_eq!((card["limit"]["addTo"].as_f64(), card["limit"]["raiseTo"].as_f64()), (Some(60.0), Some(100.0)));
         let names: Vec<&str> = card["options"].as_array().unwrap().iter().filter_map(|o| o["name"].as_str()).collect();
         assert_eq!(names, ["Add $10", "Raise to $100", "Leave it"]);
+    }
+
+    /// The kernel's refusal line whose printf format starts with `start`, rendered with `args` as the kernel does.
+    fn kernel_refusal(start: &str, args: &[&str]) -> String {
+        let kith = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith");
+        let src = std::fs::read_to_string(kith).unwrap();
+        let line = src.lines().find(|l| l.trim_start().starts_with(&format!("printf '{start}"))).unwrap();
+        let format = line.trim_start().strip_prefix("printf '").unwrap().split('\'').next().unwrap();
+        let out = std::process::Command::new("printf").arg(format).args(args).output().unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    #[test]
+    fn the_kernels_refusal_lines_name_their_cap() {
+        let bots = kernel_refusal("kith: your bots", &["50.2", "50", "bot-k"]);
+        assert!(bots.starts_with("kith: your bots have used $50.20 of their $50"), "{bots}");
+        assert_eq!(refused_at(&bots), Some("bots"));
+        let person = kernel_refusal("kith: %s has used", &["mia", "20.1", "20", "video", "video", "mia"]);
+        assert!(person.starts_with("kith: mia has used $20.10 of their $20"), "{person}");
+        assert_eq!(refused_at(&person), Some("person"));
+        assert_eq!(refused_at("kith: not allowed (kith-auth member video mia)"), None);
     }
 
     #[test]
