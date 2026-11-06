@@ -56,10 +56,11 @@
 //!   the gate and carried through. Until S2 the host's gate (and `revoke_person`'s sweep of the holders) is the fence.
 //! - **K2.** "Gone" means the ACP adapter's pid is dead (`settle` calls `end_gone`), but the transcript is written by its
 //!   `claude` child; gone should mean the process group is empty. Open: fix before M3-5.
-//! - **The holder's hello.** The turn claim names [`HOST_INSTANCE`], which is never the holder's. `different_holder` ends the
-//!   claims of every other instance it does not list (and kills their pids), so a holder hello during a host turn would kill the
-//!   warm agent process. Not fixable here (`conversations/claims.rs` is not this module's); open before the holder runs with
-//!   the flag on.
+//! - **The holder's hello (done).** The turn claim names [`HOST_INSTANCE`], which is never the holder's. The core's hello
+//!   (`holder_link::reconcile`) runs `different_holder`, which ends the unlisted claims of an old holder instance but skips
+//!   any claim naming `HOST_INSTANCE` (`release_unlisted`), so a holder hello during a host turn leaves the claim and its
+//!   warm agent process alone; a holder that says hello under that name is refused. The core's own restart (step 5,
+//!   `claims::reconcile`) still reconciles the host's claims: a new generation makes them stale.
 //! - **Writer lock.** Host turns take no writer lock, but `WriterLock4`'s P1 rests on the stub holding one.
 //! - **Park.** The host never calls `park`/`unpark`.
 //! - **Kill idle.** The warm agent process is kept after a turn, though P7/killidle decided to kill it first.

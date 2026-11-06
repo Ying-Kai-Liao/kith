@@ -433,6 +433,14 @@ fn claude_version(sys: &Sys<'_>) -> Option<String> {
     None
 }
 
+/// Digits with at most one inner dot: a finite, non-negative amount (no NaN, inf, sign or exponent).
+fn plain_number(t: &str) -> bool {
+    !t.is_empty()
+        && t.split('.').count() <= 2
+        && t.split('.')
+            .all(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// `uuid4().hex`. An unreadable random source is an error: an all-zero id would be shared by every run, and a run's
 /// id and temp file names must not collide.
 fn random_hex() -> Result<String, String> {
@@ -617,6 +625,18 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             .map(pystr)
             .unwrap_or_default();
         if !p_budget.is_empty() {
+            // A limit that can't be read is not "no limit": for anyone but the owner the run stops here.
+            if !p_owner && !plain_number(&p_budget) {
+                let on = if p_budget_agent.is_empty() {
+                    agent
+                } else {
+                    &p_budget_agent
+                };
+                say(&format!(
+                    "kith: your spending limit on {on} can't be read; ask the owner to set it again"
+                ));
+                return Err(3);
+            }
             let sys = Sys { env: &env };
             let mut c = sys.cmd(
                 kernel.join("bin/kith-cost"),
@@ -637,11 +657,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                     return Err(3);
                 }
                 Some(t) => {
-                    let numeric = !t.is_empty()
-                        && t.split('.').count() <= 2
-                        && t.split('.')
-                            .all(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()));
-                    if !p_owner && !numeric {
+                    if !p_owner && !plain_number(&t) {
                         say(&format!(
                             "kith: can't read what {person} has spent this month (kith-cost gave '{t}'); not running without the budget check"
                         ));
@@ -1464,6 +1480,23 @@ mod tests {
 
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|x| (*x).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_limit_is_read_only_when_it_is_a_plain_amount() {
+        for ok in ["0", "10", "12.50", "0.01"] {
+            assert!(plain_number(ok), "{ok}");
+        }
+        for bad in [
+            "", "abc", "NaN", "nan", "inf", "-inf", "Infinity", "-5", "+5", "1e3", "1.", ".5",
+            "1.2.3", " 5",
+        ] {
+            assert!(!plain_number(bad), "{bad:?}");
+        }
+        // finite budgets compare as before: under runs, over stops
+        let f = |x: &str| x.trim().parse::<f64>().ok();
+        assert!(f("1.0").unwrap() < f("5").unwrap());
+        assert!(f("5").unwrap() >= f("5").unwrap());
     }
 
     #[test]
