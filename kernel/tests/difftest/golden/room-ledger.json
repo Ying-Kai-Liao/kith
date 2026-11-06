@@ -1,0 +1,3302 @@
+[
+ {
+  "name": "rl-args",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/a",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/a.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/b",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/b.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   }
+  ],
+  "run": [
+   [
+    "-",
+    "a"
+   ],
+   [
+    "-",
+    "a",
+    "pre"
+   ],
+   [
+    "-",
+    "a",
+    "pre",
+    "--agent",
+    "echo"
+   ],
+   [
+    "-",
+    "a",
+    "pre",
+    "--agent",
+    "echo",
+    "--home"
+   ],
+   [
+    "sam",
+    "a",
+    "bogus",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "a",
+    "POST",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "a",
+    "--agent",
+    "echo",
+    "post",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "a",
+    "post",
+    "--home",
+    "{HOME}/agents/echo",
+    "--agent",
+    "echo"
+   ],
+   [
+    "sam",
+    "a",
+    "post",
+    "-agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "a",
+    "post",
+    "--agent=echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "a",
+    "-h"
+   ],
+   [
+    "sam",
+    "a",
+    "--help"
+   ],
+   [
+    "sam",
+    "b",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo",
+    "extra",
+    "--args",
+    "ignored"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ },
+ {
+  "name": "rl-post",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/n1",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n1.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n2",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp2/n2.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n3",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n3.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n4",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n4.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n5",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n5.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n6",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n6.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n7",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n7.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n8",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n8.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n9",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n9.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n10",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n10.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n11",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n11.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/n12",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n12.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/deep",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/sub/deep/d.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/dotted",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/g.r_p-2/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/e/both",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam,kai\n"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   },
+   {
+    "write": "home/e/kai",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=kai\n"
+   },
+   {
+    "write": "home/e/other",
+    "text": "KITH_ROOM=grp2\nKITH_ROOM_MEMBERS=sam\n"
+   },
+   {
+    "write": "home/e/norooom",
+    "text": "KITH_ROOM_MEMBERS=sam\n"
+   },
+   {
+    "write": "home/e/empty",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=\n"
+   },
+   {
+    "write": "home/e/messy",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS= Sam , BAD id,KAI,sam,,x_y,-no, .no,Éva,K\n"
+   },
+   {
+    "write": "home/e/ownerflags",
+    "text": "KITH_ROOM=grp1\nKITH_OWNER=1\nKITH_ROOM_OWNER_ONLY=1\n"
+   },
+   {
+    "write": "home/e/person",
+    "text": "KITH_ROOM=grp1\nKITH_PERSON=sam\nKITH_ROOM_MEMBERS=sam\n"
+   },
+   {
+    "write": "home/e/channel",
+    "text": "KITH_ROOM=grp1\nKITH_OWNER=1\nKITH_ROOM_OWNER_ONLY=1\nKITH_ROOM_MEMBERS=sam\nKITH_VIA=telegram\n"
+   },
+   {
+    "write": "home/e/guest",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\nKITH_RUN_TOKEN=tok\nKITH_RUN_SOCKET=/nowhere.sock\nKITH_PERSON=sam\n"
+   },
+   {
+    "write": "home/e/dotroom",
+    "text": "KITH_ROOM=g.r_p-2\nKITH_ROOM_MEMBERS=kai,sam\n"
+   }
+  ],
+  "run": [
+   [
+    "both",
+    "n1",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n1",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "kai",
+    "n1",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "both",
+    "n1",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "other",
+    "n2",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "norooom",
+    "n3",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "empty",
+    "n4",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "messy",
+    "n5",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "ownerflags",
+    "n6",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "person",
+    "n7",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "channel",
+    "n8",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "guest",
+    "n9",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "both",
+    "deep",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "dotroom",
+    "dotted",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "both",
+    "n10",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n10",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "both",
+    "n10",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ },
+ {
+  "name": "rl-pre",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/old1",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/old1.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/new1",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/new1.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/old3",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/old3.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/missing",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/missing.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/dir",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/adir\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/link",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/link.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/dangling",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/dangling.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/old4",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/old4.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/old1.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/new1.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/old3.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/old4.md",
+    "text": "x"
+   },
+   {
+    "mkdir": "home/agents/echo/memory/rooms/grp1/adir"
+   },
+   {
+    "link": "home/agents/echo/memory/rooms/grp1/link.md",
+    "to": "{HOME}/agents/echo/memory/rooms/grp1/old4.md"
+   },
+   {
+    "link": "home/agents/echo/memory/rooms/grp1/dangling.md",
+    "to": "{HOME}/agents/echo/memory/rooms/grp1/nowhere.md"
+   },
+   {
+    "write": "home/.kith/room-ledger/echo/grp1.json",
+    "text": "{\n \"rooms/grp1/old3.md\": [\n  \"kai\",\n  \"sam\"\n ]\n}"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   }
+  ],
+  "run": [
+   [
+    "sam",
+    "missing",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "old1",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "old1",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "old1",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "new1",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "new1",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "old3",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "old3",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "dir",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "link",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "dangling",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "missing",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ },
+ {
+  "name": "rl-paths",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/p_memfile",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/MEMORY.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_roomdir",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_roomtop",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/top.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_badid",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/bad id/x.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_hidden",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/.hidden/x.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_dotdot_in",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/../grp1/ok.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_dotdot_out",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/../../MEMORY.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_outside_mem",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/../rooms/grp1/x.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_other_agent",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/other/memory/rooms/grp1/x.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_memory2",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory2/rooms/grp1/x.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_rel",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"memory/rooms/grp1/x.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_empty",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_tilde",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"~/x.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_trailing",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/tdir/\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_viaout",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/out/f.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_vialink",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/ln/vialink.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_store",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/store/mem/rooms/grp1/z.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_id64",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_id65",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_dotid",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/a.b/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_rooms_case",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/Rooms/grp1/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_rooms_nested",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/rooms/grp2/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_spaces",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/a note.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p_unicode",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/caf\\u00e9.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/num",
+    "text": "{\"tool_input\": {\"file_path\": 123}}"
+   },
+   {
+    "write": "home/in/null",
+    "text": "{\"tool_input\": {\"file_path\": null}}"
+   },
+   {
+    "write": "home/in/arr",
+    "text": "{\"tool_input\": {\"file_path\": [\"{HOME}/agents/echo/memory/rooms/grp1/x.md\"]}}"
+   },
+   {
+    "write": "home/in/nokey",
+    "text": "{\"tool_input\": {\"command\": \"x\"}}"
+   },
+   {
+    "write": "home/in/camel",
+    "text": "{\"tool_input\": {\"filePath\": \"{HOME}/agents/echo/memory/rooms/grp1/x.md\"}}"
+   },
+   {
+    "write": "home/in/toplevel",
+    "text": "{\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/x.md\"}"
+   },
+   {
+    "mkdir": "home/agents/echo/memory/rooms/grp1"
+   },
+   {
+    "mkdir": "home/outside"
+   },
+   {
+    "link": "home/agents/echo/memory/rooms/grp1/out",
+    "to": "{HOME}/outside"
+   },
+   {
+    "link": "home/agents/echo/memory/ln",
+    "to": "{HOME}/agents/echo/memory/rooms/grp1"
+   },
+   {
+    "mkdir": "home/store/mem/rooms/grp1"
+   },
+   {
+    "mkdir": "home/agents/echo2"
+   },
+   {
+    "link": "home/agents/echo2/memory",
+    "to": "{HOME}/store/mem"
+   },
+   {
+    "write": "home/in/e2_via_home",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo2/memory/rooms/grp1/y.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   },
+   {
+    "write": "home/e/a",
+    "text": "KITH_ROOM=a.b\nKITH_ROOM_MEMBERS=sam\n"
+   }
+  ],
+  "run": [
+   [
+    "sam",
+    "p_memfile",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_roomdir",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_roomtop",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_badid",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_hidden",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_dotdot_in",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_dotdot_out",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_outside_mem",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_other_agent",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_memory2",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_rel",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_empty",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_tilde",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_trailing",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_viaout",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_vialink",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_store",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_id64",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_id65",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_dotid",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_rooms_case",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_rooms_nested",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_spaces",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_unicode",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "num",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "null",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "arr",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "nokey",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "camel",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "toplevel",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_store",
+    "post",
+    "--agent",
+    "echo2",
+    "--home",
+    "{HOME}/agents/echo2"
+   ],
+   [
+    "sam",
+    "e2_via_home",
+    "post",
+    "--agent",
+    "echo2",
+    "--home",
+    "{HOME}/agents/echo2"
+   ],
+   [
+    "sam",
+    "p_dotid",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "p_vialink",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ },
+ {
+  "name": "rl-stdin",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/empty",
+    "text": ""
+   },
+   {
+    "write": "home/in/spaces",
+    "text": "   \n"
+   },
+   {
+    "write": "home/in/text",
+    "text": "not json"
+   },
+   {
+    "write": "home/in/arr",
+    "text": "[]"
+   },
+   {
+    "write": "home/in/null",
+    "text": "null"
+   },
+   {
+    "write": "home/in/str",
+    "text": "\"s\""
+   },
+   {
+    "write": "home/in/num",
+    "text": "7"
+   },
+   {
+    "write": "home/in/obj",
+    "text": "{}"
+   },
+   {
+    "write": "home/in/ti_null",
+    "text": "{\"tool_input\":null}"
+   },
+   {
+    "write": "home/in/ti_arr",
+    "text": "{\"tool_input\":[1]}"
+   },
+   {
+    "write": "home/in/ti_str",
+    "text": "{\"tool_input\":\"x\"}"
+   },
+   {
+    "write": "home/in/ti_empty",
+    "text": "{\"tool_input\":{}}"
+   },
+   {
+    "write": "home/in/ti_zero",
+    "text": "{\"tool_input\":0}"
+   },
+   {
+    "write": "home/in/trunc",
+    "text": "{\"tool_input\":{\"file_path\":\"{HOME}/agents/echo/memory/rooms/grp1/t.md"
+   },
+   {
+    "write": "home/in/garbage",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/g.md\", \"content\": \"x\"}} trailing"
+   },
+   {
+    "write": "home/in/two",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/two1.md\", \"content\": \"x\"}}\n{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/two2.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/ws",
+    "text": "\n\n  {\n  \"x\": [\n    1,\n    2\n  ],\n  \"tool_input\": {\n    \"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/ws.md\"\n  }\n}\n\n"
+   },
+   {
+    "write": "home/in/dupkey",
+    "text": "{\"tool_input\":{\"file_path\":\"/x/y.md\",\"file_path\":\"{HOME}/agents/echo/memory/rooms/grp1/dup.md\"}}"
+   },
+   {
+    "write": "home/in/escaped",
+    "text": "{\"tool_input\":{\"file_path\":\"{HOME}/agents/echo/memory/rooms/\\u0067rp1/esc\\/aped.md\"}}"
+   },
+   {
+    "write": "home/in/bom",
+    "text": "﻿{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/bom.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/single",
+    "text": "{'tool_input': {}}"
+   },
+   {
+    "write": "home/in/trailing_comma",
+    "text": "{\"tool_input\":{\"file_path\":\"{HOME}/agents/echo/memory/rooms/grp1/tc.md\",}}"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   }
+  ],
+  "run": [
+   [
+    "sam",
+    "empty",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "spaces",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "text",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "arr",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "null",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "str",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "num",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "obj",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_null",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_arr",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_str",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_empty",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_zero",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "trunc",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "garbage",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "two",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ws",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "dupkey",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "escaped",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "bom",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "single",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "trailing_comma",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "empty",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "spaces",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "text",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "arr",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "null",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "str",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "num",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "obj",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_null",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_arr",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_str",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_empty",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ti_zero",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "trunc",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "garbage",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "two",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "ws",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "dupkey",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "escaped",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "bom",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "single",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "trailing_comma",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ },
+ {
+  "name": "rl-ledger-states",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=gl\nKITH_ROOM_MEMBERS=sam,kai\n"
+   },
+   {
+    "write": "home/in/l_missing",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-missing/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-missing/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/in/l_empty",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-empty/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-empty/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-empty/gl.json",
+    "text": ""
+   },
+   {
+    "write": "home/in/l_corrupt",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-corrupt/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-corrupt/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-corrupt/gl.json",
+    "text": "{oops"
+   },
+   {
+    "write": "home/in/l_list",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-list/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-list/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-list/gl.json",
+    "text": "[\"rooms/gl/n.md\"]"
+   },
+   {
+    "write": "home/in/l_null",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-null/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-null/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-null/gl.json",
+    "text": "null"
+   },
+   {
+    "write": "home/in/l_string",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-string/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-string/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-string/gl.json",
+    "text": "\"rooms/gl/n.md\""
+   },
+   {
+    "write": "home/in/l_number",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-number/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-number/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-number/gl.json",
+    "text": "5"
+   },
+   {
+    "write": "home/in/l_emptyobj",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-emptyobj/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-emptyobj/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-emptyobj/gl.json",
+    "text": "{}"
+   },
+   {
+    "write": "home/in/l_other",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-other/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-other/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-other/gl.json",
+    "text": "{\n \"z.md\": [\n  \"a\"\n ],\n \"rooms/gl/n.md\": [\n  \"kai\",\n  \"sam\"\n ],\n \"a\": [\n  \"b\"\n ],\n \"str\": \"x\",\n \"n\": 3\n}"
+   },
+   {
+    "write": "home/in/l_valstr",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valstr/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valstr/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valstr/gl.json",
+    "text": "{\"rooms/gl/n.md\": \"sam\"}"
+   },
+   {
+    "write": "home/in/l_valstr2",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valstr2/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valstr2/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valstr2/gl.json",
+    "text": "{\"rooms/gl/n.md\": \"ssaamm\"}"
+   },
+   {
+    "write": "home/in/l_valnum",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valnum/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valnum/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valnum/gl.json",
+    "text": "{\"rooms/gl/n.md\": 3}"
+   },
+   {
+    "write": "home/in/l_valnull",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valnull/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valnull/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valnull/gl.json",
+    "text": "{\"rooms/gl/n.md\": null}"
+   },
+   {
+    "write": "home/in/l_valnest",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valnest/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valnest/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valnest/gl.json",
+    "text": "{\"rooms/gl/n.md\": [[\"sam\"]]}"
+   },
+   {
+    "write": "home/in/l_valdict",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valdict/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valdict/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valdict/gl.json",
+    "text": "{\"rooms/gl/n.md\": {\"sam\": 1, \"kai\": 2}}"
+   },
+   {
+    "write": "home/in/l_valmixed",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valmixed/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valmixed/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valmixed/gl.json",
+    "text": "{\"rooms/gl/n.md\": [1, \"sam\", null, true, \"kai\"]}"
+   },
+   {
+    "write": "home/in/l_valdup",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valdup/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valdup/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valdup/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"sam\", \"sam\", \"kai\"]}"
+   },
+   {
+    "write": "home/in/l_valunsorted",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valunsorted/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valunsorted/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valunsorted/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"sam\", \"kai\", \"al\"]}"
+   },
+   {
+    "write": "home/in/l_valbool",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-valbool/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-valbool/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-valbool/gl.json",
+    "text": "{\"rooms/gl/n.md\": true}"
+   },
+   {
+    "write": "home/in/l_unsort",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-unsort/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-unsort/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-unsort/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"a\"], \"other\": [1, \"b\"]}"
+   },
+   {
+    "write": "home/in/l_unsort2",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-unsort2/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-unsort2/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-unsort2/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"a\"], \"other\": [null, null]}"
+   },
+   {
+    "write": "home/in/l_unsort3",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-unsort3/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-unsort3/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-unsort3/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"a\"], \"other\": [{}, {}]}"
+   },
+   {
+    "write": "home/in/l_sortmix",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-sortmix/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-sortmix/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-sortmix/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"a\"], \"other\": [3, 1.5, true]}"
+   },
+   {
+    "write": "home/in/l_sortnest",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-sortnest/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-sortnest/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-sortnest/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"a\"], \"other\": [[\"a\", 1], [\"a\", 2]]}"
+   },
+   {
+    "write": "home/in/l_unsortnest",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-unsortnest/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-unsortnest/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-unsortnest/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"a\"], \"other\": [[\"a\", 1], [\"a\", \"b\"]]}"
+   },
+   {
+    "write": "home/in/l_single",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-single/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-single/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-single/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"a\"], \"other\": [null]}"
+   },
+   {
+    "write": "home/in/l_nonlist",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-nonlist/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-nonlist/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-nonlist/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"a\"], \"other\": \"x\", \"o2\": {\"a\": 1}}"
+   },
+   {
+    "write": "home/in/l_dupkeys",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-dupkeys/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-dupkeys/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-dupkeys/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"kai\"], \"k\": 1, \"rooms/gl/n.md\": [\"kai\", \"sam\"]}"
+   },
+   {
+    "write": "home/in/l_indent1",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-indent1/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-indent1/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-indent1/gl.json",
+    "text": "{\n \"rooms/gl/n.md\": [\n  \"kai\",\n  \"sam\"\n ],\n \"rooms/gl/m.md\": []\n}"
+   },
+   {
+    "write": "home/in/l_unicode",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-unicode/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-unicode/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-unicode/gl.json",
+    "text": "{\"rooms/gl/\\u00e9.md\": [\"sam\"]}"
+   },
+   {
+    "write": "home/in/l_bom",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-bom/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-bom/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-bom/gl.json",
+    "text": "﻿{\"rooms/gl/n.md\": [\"kai\", \"sam\"]}"
+   },
+   {
+    "write": "home/in/l_float",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-float/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/a-float/memory/rooms/gl/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-float/gl.json",
+    "text": "{\"rooms/gl/n.md\": [\"kai\", \"sam\"], \"f\": 1.5, \"e\": 1e5, \"t\": 1.0}"
+   },
+   {
+    "write": "home/in/l_accent",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-unicode/memory/rooms/gl/\\u00e9.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/l_blocked",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-blocked/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/.kith/room-ledger/a-blocked",
+    "text": "in the way"
+   },
+   {
+    "write": "home/in/l_isdir",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-isdir/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "mkdir": "home/.kith/room-ledger/a-isdir/gl.json"
+   },
+   {
+    "write": "home/in/l_lockdir",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-lockdir/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "mkdir": "home/.kith/room-ledger/a-lockdir/gl.json.lock"
+   },
+   {
+    "write": "home/in/l_stateisfile",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/a-sf/memory/rooms/gl/n.md\", \"content\": \"x\"}}"
+   }
+  ],
+  "run": [
+   [
+    "sam",
+    "l_missing",
+    "pre",
+    "--agent",
+    "a-missing",
+    "--home",
+    "{HOME}/agents/a-missing"
+   ],
+   [
+    "sam",
+    "l_missing",
+    "post",
+    "--agent",
+    "a-missing",
+    "--home",
+    "{HOME}/agents/a-missing"
+   ],
+   [
+    "sam",
+    "l_empty",
+    "pre",
+    "--agent",
+    "a-empty",
+    "--home",
+    "{HOME}/agents/a-empty"
+   ],
+   [
+    "sam",
+    "l_empty",
+    "post",
+    "--agent",
+    "a-empty",
+    "--home",
+    "{HOME}/agents/a-empty"
+   ],
+   [
+    "sam",
+    "l_corrupt",
+    "pre",
+    "--agent",
+    "a-corrupt",
+    "--home",
+    "{HOME}/agents/a-corrupt"
+   ],
+   [
+    "sam",
+    "l_corrupt",
+    "post",
+    "--agent",
+    "a-corrupt",
+    "--home",
+    "{HOME}/agents/a-corrupt"
+   ],
+   [
+    "sam",
+    "l_list",
+    "pre",
+    "--agent",
+    "a-list",
+    "--home",
+    "{HOME}/agents/a-list"
+   ],
+   [
+    "sam",
+    "l_list",
+    "post",
+    "--agent",
+    "a-list",
+    "--home",
+    "{HOME}/agents/a-list"
+   ],
+   [
+    "sam",
+    "l_null",
+    "pre",
+    "--agent",
+    "a-null",
+    "--home",
+    "{HOME}/agents/a-null"
+   ],
+   [
+    "sam",
+    "l_null",
+    "post",
+    "--agent",
+    "a-null",
+    "--home",
+    "{HOME}/agents/a-null"
+   ],
+   [
+    "sam",
+    "l_string",
+    "pre",
+    "--agent",
+    "a-string",
+    "--home",
+    "{HOME}/agents/a-string"
+   ],
+   [
+    "sam",
+    "l_string",
+    "post",
+    "--agent",
+    "a-string",
+    "--home",
+    "{HOME}/agents/a-string"
+   ],
+   [
+    "sam",
+    "l_number",
+    "pre",
+    "--agent",
+    "a-number",
+    "--home",
+    "{HOME}/agents/a-number"
+   ],
+   [
+    "sam",
+    "l_number",
+    "post",
+    "--agent",
+    "a-number",
+    "--home",
+    "{HOME}/agents/a-number"
+   ],
+   [
+    "sam",
+    "l_emptyobj",
+    "pre",
+    "--agent",
+    "a-emptyobj",
+    "--home",
+    "{HOME}/agents/a-emptyobj"
+   ],
+   [
+    "sam",
+    "l_emptyobj",
+    "post",
+    "--agent",
+    "a-emptyobj",
+    "--home",
+    "{HOME}/agents/a-emptyobj"
+   ],
+   [
+    "sam",
+    "l_other",
+    "pre",
+    "--agent",
+    "a-other",
+    "--home",
+    "{HOME}/agents/a-other"
+   ],
+   [
+    "sam",
+    "l_other",
+    "post",
+    "--agent",
+    "a-other",
+    "--home",
+    "{HOME}/agents/a-other"
+   ],
+   [
+    "sam",
+    "l_valstr",
+    "pre",
+    "--agent",
+    "a-valstr",
+    "--home",
+    "{HOME}/agents/a-valstr"
+   ],
+   [
+    "sam",
+    "l_valstr",
+    "post",
+    "--agent",
+    "a-valstr",
+    "--home",
+    "{HOME}/agents/a-valstr"
+   ],
+   [
+    "sam",
+    "l_valstr2",
+    "pre",
+    "--agent",
+    "a-valstr2",
+    "--home",
+    "{HOME}/agents/a-valstr2"
+   ],
+   [
+    "sam",
+    "l_valstr2",
+    "post",
+    "--agent",
+    "a-valstr2",
+    "--home",
+    "{HOME}/agents/a-valstr2"
+   ],
+   [
+    "sam",
+    "l_valnum",
+    "pre",
+    "--agent",
+    "a-valnum",
+    "--home",
+    "{HOME}/agents/a-valnum"
+   ],
+   [
+    "sam",
+    "l_valnum",
+    "post",
+    "--agent",
+    "a-valnum",
+    "--home",
+    "{HOME}/agents/a-valnum"
+   ],
+   [
+    "sam",
+    "l_valnull",
+    "pre",
+    "--agent",
+    "a-valnull",
+    "--home",
+    "{HOME}/agents/a-valnull"
+   ],
+   [
+    "sam",
+    "l_valnull",
+    "post",
+    "--agent",
+    "a-valnull",
+    "--home",
+    "{HOME}/agents/a-valnull"
+   ],
+   [
+    "sam",
+    "l_valnest",
+    "pre",
+    "--agent",
+    "a-valnest",
+    "--home",
+    "{HOME}/agents/a-valnest"
+   ],
+   [
+    "sam",
+    "l_valnest",
+    "post",
+    "--agent",
+    "a-valnest",
+    "--home",
+    "{HOME}/agents/a-valnest"
+   ],
+   [
+    "sam",
+    "l_valdict",
+    "pre",
+    "--agent",
+    "a-valdict",
+    "--home",
+    "{HOME}/agents/a-valdict"
+   ],
+   [
+    "sam",
+    "l_valdict",
+    "post",
+    "--agent",
+    "a-valdict",
+    "--home",
+    "{HOME}/agents/a-valdict"
+   ],
+   [
+    "sam",
+    "l_valmixed",
+    "pre",
+    "--agent",
+    "a-valmixed",
+    "--home",
+    "{HOME}/agents/a-valmixed"
+   ],
+   [
+    "sam",
+    "l_valmixed",
+    "post",
+    "--agent",
+    "a-valmixed",
+    "--home",
+    "{HOME}/agents/a-valmixed"
+   ],
+   [
+    "sam",
+    "l_valdup",
+    "pre",
+    "--agent",
+    "a-valdup",
+    "--home",
+    "{HOME}/agents/a-valdup"
+   ],
+   [
+    "sam",
+    "l_valdup",
+    "post",
+    "--agent",
+    "a-valdup",
+    "--home",
+    "{HOME}/agents/a-valdup"
+   ],
+   [
+    "sam",
+    "l_valunsorted",
+    "pre",
+    "--agent",
+    "a-valunsorted",
+    "--home",
+    "{HOME}/agents/a-valunsorted"
+   ],
+   [
+    "sam",
+    "l_valunsorted",
+    "post",
+    "--agent",
+    "a-valunsorted",
+    "--home",
+    "{HOME}/agents/a-valunsorted"
+   ],
+   [
+    "sam",
+    "l_valbool",
+    "pre",
+    "--agent",
+    "a-valbool",
+    "--home",
+    "{HOME}/agents/a-valbool"
+   ],
+   [
+    "sam",
+    "l_valbool",
+    "post",
+    "--agent",
+    "a-valbool",
+    "--home",
+    "{HOME}/agents/a-valbool"
+   ],
+   [
+    "sam",
+    "l_unsort",
+    "pre",
+    "--agent",
+    "a-unsort",
+    "--home",
+    "{HOME}/agents/a-unsort"
+   ],
+   [
+    "sam",
+    "l_unsort",
+    "post",
+    "--agent",
+    "a-unsort",
+    "--home",
+    "{HOME}/agents/a-unsort"
+   ],
+   [
+    "sam",
+    "l_unsort2",
+    "pre",
+    "--agent",
+    "a-unsort2",
+    "--home",
+    "{HOME}/agents/a-unsort2"
+   ],
+   [
+    "sam",
+    "l_unsort2",
+    "post",
+    "--agent",
+    "a-unsort2",
+    "--home",
+    "{HOME}/agents/a-unsort2"
+   ],
+   [
+    "sam",
+    "l_unsort3",
+    "pre",
+    "--agent",
+    "a-unsort3",
+    "--home",
+    "{HOME}/agents/a-unsort3"
+   ],
+   [
+    "sam",
+    "l_unsort3",
+    "post",
+    "--agent",
+    "a-unsort3",
+    "--home",
+    "{HOME}/agents/a-unsort3"
+   ],
+   [
+    "sam",
+    "l_sortmix",
+    "pre",
+    "--agent",
+    "a-sortmix",
+    "--home",
+    "{HOME}/agents/a-sortmix"
+   ],
+   [
+    "sam",
+    "l_sortmix",
+    "post",
+    "--agent",
+    "a-sortmix",
+    "--home",
+    "{HOME}/agents/a-sortmix"
+   ],
+   [
+    "sam",
+    "l_sortnest",
+    "pre",
+    "--agent",
+    "a-sortnest",
+    "--home",
+    "{HOME}/agents/a-sortnest"
+   ],
+   [
+    "sam",
+    "l_sortnest",
+    "post",
+    "--agent",
+    "a-sortnest",
+    "--home",
+    "{HOME}/agents/a-sortnest"
+   ],
+   [
+    "sam",
+    "l_unsortnest",
+    "pre",
+    "--agent",
+    "a-unsortnest",
+    "--home",
+    "{HOME}/agents/a-unsortnest"
+   ],
+   [
+    "sam",
+    "l_unsortnest",
+    "post",
+    "--agent",
+    "a-unsortnest",
+    "--home",
+    "{HOME}/agents/a-unsortnest"
+   ],
+   [
+    "sam",
+    "l_single",
+    "pre",
+    "--agent",
+    "a-single",
+    "--home",
+    "{HOME}/agents/a-single"
+   ],
+   [
+    "sam",
+    "l_single",
+    "post",
+    "--agent",
+    "a-single",
+    "--home",
+    "{HOME}/agents/a-single"
+   ],
+   [
+    "sam",
+    "l_nonlist",
+    "pre",
+    "--agent",
+    "a-nonlist",
+    "--home",
+    "{HOME}/agents/a-nonlist"
+   ],
+   [
+    "sam",
+    "l_nonlist",
+    "post",
+    "--agent",
+    "a-nonlist",
+    "--home",
+    "{HOME}/agents/a-nonlist"
+   ],
+   [
+    "sam",
+    "l_dupkeys",
+    "pre",
+    "--agent",
+    "a-dupkeys",
+    "--home",
+    "{HOME}/agents/a-dupkeys"
+   ],
+   [
+    "sam",
+    "l_dupkeys",
+    "post",
+    "--agent",
+    "a-dupkeys",
+    "--home",
+    "{HOME}/agents/a-dupkeys"
+   ],
+   [
+    "sam",
+    "l_indent1",
+    "pre",
+    "--agent",
+    "a-indent1",
+    "--home",
+    "{HOME}/agents/a-indent1"
+   ],
+   [
+    "sam",
+    "l_indent1",
+    "post",
+    "--agent",
+    "a-indent1",
+    "--home",
+    "{HOME}/agents/a-indent1"
+   ],
+   [
+    "sam",
+    "l_unicode",
+    "pre",
+    "--agent",
+    "a-unicode",
+    "--home",
+    "{HOME}/agents/a-unicode"
+   ],
+   [
+    "sam",
+    "l_unicode",
+    "post",
+    "--agent",
+    "a-unicode",
+    "--home",
+    "{HOME}/agents/a-unicode"
+   ],
+   [
+    "sam",
+    "l_bom",
+    "pre",
+    "--agent",
+    "a-bom",
+    "--home",
+    "{HOME}/agents/a-bom"
+   ],
+   [
+    "sam",
+    "l_bom",
+    "post",
+    "--agent",
+    "a-bom",
+    "--home",
+    "{HOME}/agents/a-bom"
+   ],
+   [
+    "sam",
+    "l_float",
+    "pre",
+    "--agent",
+    "a-float",
+    "--home",
+    "{HOME}/agents/a-float"
+   ],
+   [
+    "sam",
+    "l_float",
+    "post",
+    "--agent",
+    "a-float",
+    "--home",
+    "{HOME}/agents/a-float"
+   ],
+   [
+    "sam",
+    "l_accent",
+    "post",
+    "--agent",
+    "a-unicode",
+    "--home",
+    "{HOME}/agents/a-unicode"
+   ],
+   [
+    "sam",
+    "l_blocked",
+    "post",
+    "--agent",
+    "a-blocked",
+    "--home",
+    "{HOME}/agents/a-blocked"
+   ],
+   [
+    "sam",
+    "l_isdir",
+    "post",
+    "--agent",
+    "a-isdir",
+    "--home",
+    "{HOME}/agents/a-isdir"
+   ],
+   [
+    "sam",
+    "l_lockdir",
+    "post",
+    "--agent",
+    "a-lockdir",
+    "--home",
+    "{HOME}/agents/a-lockdir"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)",
+   "\\.tmp\\d+$"
+  ]
+ },
+ {
+  "name": "rl-state-file",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/statefile",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/n",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/statefile",
+    "text": "x"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   }
+  ],
+  "run": [
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ },
+ {
+  "name": "rl-state-default",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": null,
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/n",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   }
+  ],
+  "run": [
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ },
+ {
+  "name": "rl-homes",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/n",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/in/m",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/ghost/memory/rooms/grp1/m.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   }
+  ],
+  "run": [
+   [
+    "sam",
+    "m",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/ghost"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo/"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "e.x-1_2",
+    "--home",
+    "{HOME}/agents/./echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    ""
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/nowhere"
+   ],
+   [
+    "sam",
+    "n",
+    "pre",
+    "--agent",
+    "bad agent",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "bad agent",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    ".",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "a/b",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "-x",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "../x",
+    "--home",
+    "{HOME}/agents/echo"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ },
+ {
+  "name": "rl-home-cwd",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "../../w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "../../w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/n",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/n.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/n.md",
+    "text": "x"
+   },
+   {
+    "write": "home/in/m",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/ghost/memory/rooms/grp1/m.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   }
+  ],
+  "run": [
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    ""
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "."
+   ],
+   [
+    "sam",
+    "n",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "../echo"
+   ],
+   [
+    "sam",
+    "n",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "."
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ],
+  "cwd": "home/agents/echo"
+ },
+ {
+  "name": "rl-parallel",
+  "command": "room-ledger",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "{KERNEL}"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+   },
+   {
+    "write": "home/in/p1",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/p1.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p2",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/p2.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p3",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/p3.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p4",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/p4.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p5",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/p5.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p6",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/p6.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p7",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/p7.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/in/p8",
+    "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/p8.md\", \"content\": \"x\"}}"
+   },
+   {
+    "write": "home/e/both",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam,kai\n"
+   },
+   {
+    "write": "home/e/sam",
+    "text": "KITH_ROOM=grp1\nKITH_ROOM_MEMBERS=sam\n"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/p1.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/p2.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/p3.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/p4.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/p5.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/p6.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/p7.md",
+    "text": "x"
+   },
+   {
+    "write": "home/agents/echo/memory/rooms/grp1/p8.md",
+    "text": "x"
+   }
+  ],
+  "run": [
+   [
+    "both",
+    "par",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "par",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "sam",
+    "par",
+    "pre",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "both",
+    "par",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "both",
+    "par",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ],
+   [
+    "both",
+    "par",
+    "post",
+    "--agent",
+    "echo",
+    "--home",
+    "{HOME}/agents/echo"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|in/|e/)"
+  ]
+ }
+]

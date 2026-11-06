@@ -27,6 +27,9 @@ pub mod procstart;
 // Unix only: it writes projects.json through `secrets::pyjson`.
 #[cfg(unix)]
 pub mod project;
+// Unix only: flock and mode(2), like `project`.
+#[cfg(unix)]
+pub mod room_ledger;
 pub mod schedule;
 #[cfg(unix)]
 pub mod secrets;
