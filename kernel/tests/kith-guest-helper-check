@@ -25,6 +25,8 @@ cat > "$T/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 [[ $1 == --version ]] && { echo "2.1.309 (Claude Code)"; exit 0; }
 [[ $1 == plugin ]] && { echo '[]'; exit 0; }
+# KITH_STUB_HANG=FILE: starts a grandchild that outlives its parent, writes its pid to FILE, and never answers
+[[ -n ${KITH_STUB_HANG:-} ]] && { sleep 300 & echo $! > "$KITH_STUB_HANG"; wait; }
 printf '{"result":"pong from %s for %s ask=%s","session_id":"s1","total_cost_usd":0}' "$KITH_AGENT" "$KITH_PERSON" "${KITH_ASK_TOKEN:-none}"
 STUB
 chmod +x "$T/bin/claude"
@@ -95,6 +97,28 @@ has "held: the owner's run (KITH_PERSON is the owner) does not wait" "$(KITH_PER
 # sub-second clock: bash SECONDS is whole seconds, so a boundary crossing read 1.2 s as 2; a wait would be ~30 s
 expect "and is not held at all" "$(python3 -c 'import sys, time; print(int(time.time() - float(sys.argv[1]) < 5))' "$start")" 1
 rm "$KITH_SERVE_DIR/cloud-sync.json"
+
+# a helper wait that runs out ends the whole group (kith-ask, bin/kith, the engine, what it started) and settles the ask
+# `stopped`: no answer wakes anyone later, and nothing of the run is left
+rm -f "$T/hang.pid"
+short=$(env KITH_STUB_HANG="$T/hang.pid" KITH_PERSON=guest KITH_AGENT=front python3 -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+kp.HELPER_WAIT_S = 10
+print(kp.ask_helper({"agent": "helper", "task": "never answers"}))' "$KERNEL/bin/kith-permit")
+has "a helper that outlives the wait: the agent is told" "$short" "did not answer in time"
+gone() { for _ in $(seq 40); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.25; done; return 1; }
+if [ -s "$T/hang.pid" ]; then
+  gone "$(cat "$T/hang.pid")"; expect "and the run's grandchild is gone, not left running" "$?" 0
+else
+  echo "FAIL the stub never started its grandchild"; fails=$((fails + 1))
+fi
+# the ask records are <machine>/live/ask/ask-*.reg; ours is the one whose brief is the task above
+expect "and the ask is settled stopped, ended" "$(python3 -c '
+import glob, json, sys
+regs = [json.load(open(f)) for f in glob.glob(sys.argv[1] + "/**/live/ask/ask-*.reg", recursive=True)]
+print(sorted({(r.get("state"), bool(r.get("ended_at")), bool(r.get("done"))) for r in regs if "never answers" in json.dumps(r)}))' "$T")" "[('stopped', True, True)]"
 
 # the tool is listed for a run that has a person and for none else
 tools() { env "$@" python3 -c '

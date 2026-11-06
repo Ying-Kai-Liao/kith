@@ -47,6 +47,15 @@ pub fn signal(pid: i64, sig: libc::c_int) {
     }
 }
 
+/// SIGTERM or SIGKILL for every process of the group `pgid` (a child started with `process_group(0)` leads the group of its own
+/// pid); errors (nobody is left) are ignored. A group id is not handed out again while a member runs.
+pub fn signal_group(pgid: i64, sig: libc::c_int) {
+    if let Some(p) = as_pid(pgid) {
+        // SAFETY: a plain killpg(2); the callers started the group themselves.
+        unsafe { libc::killpg(p, sig) };
+    }
+}
+
 pub const SIGTERM: libc::c_int = libc::SIGTERM;
 pub const SIGKILL: libc::c_int = libc::SIGKILL;
 
