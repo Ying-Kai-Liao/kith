@@ -1454,8 +1454,8 @@ fn a_crash_between_the_hard_link_and_the_rename_is_still_a_half_step_and_steps_a
     name.push(".pre-cutover-9999999999");
     std::fs::hard_link(r.auth(), r.auth().with_file_name(name)).unwrap();
     std::fs::remove_dir(blocker).unwrap();
-    let out = step(&reg, &r.env, "authority", opts()).unwrap();
-    assert!(!said(&out, "already switched"), "{out:?}");
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    // The file is exactly what the switch imported: no import, the record stays Switched, the tombstone is finished.
     assert!(tombstone::is_tombstone(&r.auth()));
     assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
 }
@@ -1667,5 +1667,84 @@ fn a_real_step_stops_on_the_preflight_before_it_writes_anything() {
         phase(&r.env, "authority").is_none(),
         "no record was written"
     );
+    assert!(!tombstone::is_tombstone(&r.auth()));
+}
+
+fn kept_copy_name(r: &Rig) -> PathBuf {
+    let mut name = r.auth().file_name().unwrap().to_os_string();
+    name.push(".pre-cutover-9999999999");
+    r.auth().with_file_name(name)
+}
+
+fn refusal(res: Result<Vec<String>>) -> String {
+    match res {
+        Err(Error::Refused(s)) => s,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_half_step_then_a_kith_auth_write_is_told_to_roll_back_first() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The crash came between the hard link and the rename: the kept copy is the real file's inode.
+    std::fs::hard_link(r.auth(), kept_copy_name(&r)).unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    // kith-auth's next write replaces the file (temp file, rename): a new inode with new bytes.
+    revoked_in_file(&r, "sam");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    v["people"]["sam"]["revoked"] = json!({"at": 8});
+    let tmp = r.auth().with_extension("tmp");
+    std::fs::write(&tmp, v.to_string()).unwrap();
+    std::fs::rename(&tmp, r.auth()).unwrap();
+    let bytes = std::fs::read(r.auth()).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    let (roll, back) = (
+        msg.find("kith rollback authority").expect(&msg),
+        msg.find("Put the tombstone back").expect(&msg),
+    );
+    assert!(roll < back, "rollback comes first: {msg}");
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    assert_eq!(std::fs::read(r.auth()).unwrap(), bytes, "file unchanged");
+}
+
+#[test]
+fn a_crash_before_the_link_with_differing_rows_may_use_force() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("the file is newer and wins"), "{msg}");
+    assert!(msg.contains("--force"), "{msg}");
+}
+
+#[test]
+fn a_file_equal_to_a_kept_copy_finishes_the_tombstone_without_importing() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The kept copy is the file's own bytes (the crash came after the link); the core moved on meanwhile (a revoke).
+    std::fs::copy(r.auth(), kept_copy_name(&r)).unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    r.db()
+        .execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", [])
+        .unwrap();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(revoked_in_core(&r, "sam"), "the core's rows are unchanged");
+}
+
+#[test]
+fn a_kith_auth_write_after_a_kept_copy_keeps_the_record_switched_and_says_rollback_first() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    std::fs::copy(r.auth(), kept_copy_name(&r)).unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    revoked_in_file(&r, "sam");
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("kith rollback authority"), "{msg}");
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
     assert!(!tombstone::is_tombstone(&r.auth()));
 }

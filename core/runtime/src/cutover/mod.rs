@@ -320,22 +320,37 @@ pub(crate) fn step(
                 !tombstone::is_tombstone(p)
                     && (!tombstone::is_real(p) || tombstone::kept_since(p, s.at))
             }) {
-                return Err(Error::Refused(format!(
-                    "cutover: {name} is switched but {} {}; nothing was changed and the record stays. Put the tombstone back, or to take the file as it is run `kith rollback {name}`",
-                    p.display(),
-                    if tombstone::is_real(&p) {
-                        "is a real file beside the copy the switch kept (an old file put back?)"
-                    } else {
-                        "is missing"
-                    }
-                )));
+                return Err(Error::Refused(if tombstone::is_real(&p) {
+                    // The file may hold writes since the switch (kith-auth replaced it after the crash): putting the
+                    // tombstone over it would lose them. Rollback leaves the real file, skips secrets and clears the marker.
+                    format!(
+                        "cutover: {name} is switched but {} is a real file beside the copy the switch kept (an old file put back, or one kith-auth wrote after a crash); nothing was changed and the record stays. If the file may hold changes since the switch, run `kith rollback {name}` first: it leaves the real file as it is and clears the marker. Put the tombstone back only if you know the file is older than the switch",
+                        p.display()
+                    )
+                } else {
+                    format!(
+                        "cutover: {name} is switched but {} is missing; nothing was changed and the record stays. Put the tombstone back, or to take the file as it is run `kith rollback {name}`",
+                        p.display()
+                    )
+                }));
             }
-            let s = Switch {
-                phase: Phase::Stepping,
-                ..s
-            };
-            state::write(&env.layout, name, &s)?;
-            Some(s)
+            // Every real file is the same as a copy kept since the switch (the crash came after the link): it holds exactly
+            // what the switch imported, made under the source lock after the sha check. Nothing to import; the record
+            // stays Switched and only the tombstone is finished below. Rows the core changed since are the newer side.
+            if m.tombstones(env)
+                .iter()
+                .filter(|p| !tombstone::is_tombstone(p))
+                .all(|p| tombstone::has_copy_since(p, s.at))
+            {
+                Some(s)
+            } else {
+                let s = Switch {
+                    phase: Phase::Stepping,
+                    ..s
+                };
+                state::write(&env.layout, name, &s)?;
+                Some(s)
+            }
         }
         c => c,
     };
