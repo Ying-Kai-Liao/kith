@@ -44,6 +44,7 @@ use crate::error::{Error, Result};
 use crate::layout::Layout;
 
 pub(crate) mod authority;
+pub(crate) mod authority_preflight;
 #[cfg(test)]
 mod authority_tests;
 pub(crate) mod marker;
@@ -162,6 +163,15 @@ pub(crate) trait Module {
     fn dry_run_despite_refusal(&self) -> bool {
         false
     }
+    /// What `step` counts before it writes anything (the dry run prints it, a real step stops on it). `import` is the dry
+    /// run's import result, or `None` for a real step. Read-only. Default: nothing to count.
+    fn preflight(
+        &self,
+        _env: &Env,
+        _import: Option<&Result<Vec<String>>>,
+    ) -> Result<Option<authority_preflight::Preflight>> {
+        Ok(None)
+    }
     /// Informational lines `check` appends (never a difference, never counted). Default none.
     fn check_notes(&self, _env: &Env) -> Vec<String> {
         Vec::new()
@@ -270,7 +280,21 @@ pub(crate) fn step(
         }
     }
     if opts.dry_run {
-        lines.extend(m.import(env, None, opts)?);
+        let imp = m.import(env, None, opts);
+        if let Some(p) = m.preflight(env, Some(&imp))? {
+            if let Ok(l) = imp {
+                lines.extend(l);
+            }
+            lines.extend(p.lines());
+            if !p.ready() {
+                return Err(Error::Refused(format!(
+                    "cutover: {name}: dry run: not ready\n{}",
+                    lines.join("\n")
+                )));
+            }
+        } else {
+            lines.extend(imp?);
+        }
         lines.push(format!(
             "dry run: {name} is {}; nothing was changed",
             cur.map_or("not switched", |s| s.phase.word())
@@ -354,6 +378,15 @@ pub(crate) fn step(
     if cur.as_ref().is_none_or(|s| s.phase == Phase::Stepping) {
         // One `at` for the whole step: the file's, and then the marker's.
         let at = cur.as_ref().map_or_else(now_secs, |s| s.at);
+        // Before the snapshot and the record: a preflight that stops leaves nothing behind.
+        if let Some(p) = m.preflight(env, None)?
+            && !p.ready()
+        {
+            return Err(Error::Refused(format!(
+                "cutover: {name}: preflight not ready; nothing was changed\n{}",
+                p.lines().join("\n")
+            )));
+        }
         if snapshot.is_none() {
             let p = core.backup(&env.layout, &format!("cutover-{name}"))?;
             snapshot = Some(p.display().to_string());
