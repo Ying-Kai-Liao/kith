@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# kith-account-state-switch-check — the `account-state` switch (kernel/lib/core-switched.txt) and the step of the accounts
+# module: `kith account list|pick|out|clear|usage` is answered by `kith kernel account-state` when the line is there and a
+# kith program lists the module, by bin/kith-account (Python) when KITH_CORE=python, when the line is gone, or when the
+# program is too old. After `kith kernel cutover step accounts` the state is the core's table, state.json is a tombstone, and
+# nothing reads the tombstone: the verbs, the Python readers (lib/kith_accounts.py) and a launch's `--record` all go through
+# the core; KITH_CORE=python is refused; the rollback writes the file back with the marks made in between. Needs the Rust
+# program: KITH_DIFFTEST_BIN=/path/to/kith (without one the check says so and exits 0).
+#
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-account-state-switch-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+REAL=${KITH_DIFFTEST_BIN:-}
+if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN)"; exit 0; fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-account-state-switch-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+export HOME=$T/home KITH_HOME=$T/home/.kith TZ=UTC
+unset KITH_STATE HQ_STATE KITH_MACHINE HQ_MACHINE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CORE KITH_BIN HQ_HOME CLAUDE_CONFIG_DIR CODEX_HOME
+mkdir -p "$HOME" "$T/bin" "$KITH_HOME/agents/echo/role" "$KITH_HOME/accounts/claude/work"
+export KITH_STATE=$KITH_HOME
+MACHINE=$KITH_HOME
+S=$MACHINE/accounts/state.json
+printf -- '---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n' > "$KITH_HOME/agents/echo/role/agent.md"
+printf '{"accounts": ["claude:work", "claude"], "agents": {}}' > "$MACHINE/settings.json"
+# A signed-in claude, whichever folder it is asked about.
+printf '#!/bin/sh\ncase "$1 $2" in "auth status") echo "{\\"loggedIn\\":true}"; exit 0;; esac\nexit 0\n' > "$T/bin/claude"
+chmod +x "$T/bin/claude"
+export PATH=$T/bin:$PATH
+
+# The program the router finds: the real one behind a wrapper that logs what it was asked.
+LOG=$T/calls
+printf '#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n' "$LOG" "$REAL" > "$T/bin/kith-wrap"
+chmod +x "$T/bin/kith-wrap"
+# A program from before the module: it answers `kernel version` without it.
+printf '#!/bin/sh\necho "$*" >> "%s"\n[ "$1 $2" = "kernel version" ] && echo %s\nexit 0\n' "$LOG" "'{\"abi\":1,\"modules\":[\"paths\"]}'" > "$T/bin/kith-old"
+chmod +x "$T/bin/kith-old"
+
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; sed 's/^/     | /' "$T/out" 2>/dev/null | tail -8; fails=$((fails + 1)); fi; }
+hits() { grep -c '^kernel account-state' "$LOG" 2>/dev/null || true; }
+reset() { rm -f "$S" "$S.lock" "$LOG"; touch "$LOG"; }
+FAR=4102444800
+KITH=$KERNEL/bin/kith
+W=$T/bin/kith-wrap
+
+# 1. Switched: each line reaches `kernel account-state`; the answer and the file are the Python's.
+LINES=(
+  "account out claude:work --until $FAR --reason maintenance"
+  "account clear claude:work"
+  "account list --json"
+  "account pick echo --json"
+  "account usage claude:work"
+  "account usage claude:work --json {\"windows\":[{\"name\":\"w\",\"percent\":5}],\"read_at\":4102444000}"
+  "account out bad!id"
+)
+for l in "${LINES[@]}"; do
+  reset; KITH_BIN=$W "$KITH" $l > "$T/rust.out" 2>"$T/rust.err"; echo $? > "$T/rust.rc"
+  hit=$(hits); cp "$S" "$T/rust.file" 2>/dev/null || : > "$T/rust.file"
+  reset; KITH_CORE=python KITH_BIN=$W "$KITH" $l > "$T/py.out" 2>"$T/py.err"; echo $? > "$T/py.rc"
+  pyhit=$(hits); cp "$S" "$T/py.file" 2>/dev/null || : > "$T/py.file"
+  check "rust answers: $l" "[ \"$hit\" = 1 ]"
+  check "KITH_CORE=python keeps it in Python: $l" "[ \"$pyhit\" = 0 ]"
+  # last_started and the times a write makes are the clock's; compare the rest.
+  check "same stdout, stderr, exit code and file: $l" "cmp -s '$T/rust.out' '$T/py.out' && cmp -s '$T/rust.err' '$T/py.err' && cmp -s '$T/rust.rc' '$T/py.rc' && python3 -c '
+import json, sys
+def load(p):
+    t = open(p).read()
+    d = json.loads(t) if t else None
+    for e in ((d or {}).get(\"accounts\") or {}).values():
+        for k in (\"cleared_at\", \"since\", \"last_started\"): e.pop(k, None)
+    return d
+assert load(sys.argv[1]) == load(sys.argv[2])' '$T/rust.file' '$T/py.file'"
+done
+
+# 2. Rollback: the line removed from a copy of the kernel folder, the Python answers again.
+cp -R "$KERNEL" "$T/k"
+grep -v '^account-state	' "$KERNEL/lib/core-switched.txt" > "$T/k/lib/core-switched.txt"
+reset; KITH_BIN=$W "$T/k/bin/kith" account clear claude:work > "$T/out" 2>&1
+check "line removed: Python answers" "[ \"\$(hits)\" = 0 ] && grep -q 'ready again' '$T/out'"
+
+# 3. A program that does not list the module: the Python answers, silently.
+reset; KITH_BIN=$T/bin/kith-old "$KITH" account clear claude:work > "$T/out" 2>&1
+check "program without the module: Python answers" "! grep -q '^kernel account-state' '$LOG' && grep -q 'ready again' '$T/out'"
+
+# 4. The step. state.json becomes a tombstone and the core holds the marks.
+reset
+KITH_CORE=python "$KITH" account out claude:work --until $FAR --reason before > /dev/null
+"$REAL" kernel core-migrate > "$T/out" 2>&1
+DBF=$(ls "$MACHINE"/core/*.db 2>/dev/null | head -1)   # the core's database file, found rather than named
+check "the core is made" "[ -s '$DBF' ]"
+"$REAL" kernel cutover step accounts > "$T/out" 2>&1
+check "step accounts: no refusal, a tombstone" "grep -q 'kith_tombstone' '$S'"
+reset_log() { rm -f "$LOG"; touch "$LOG"; }
+
+reset_log
+KITH_BIN=$W "$KITH" account list --json > "$T/out" 2>&1
+check "list after the step reads the core (the mark made before it)" "grep -q '\"out_until\": $FAR' '$T/out' && [ \"\$(hits)\" = 1 ]"
+KITH_BIN=$W "$KITH" account out codex:b --until $FAR --reason after > "$T/out" 2>&1
+check "out after the step is written to the core" "grep -q 'codex:b is out until' '$T/out'"
+check "the tombstone is untouched" "grep -q 'kith_tombstone' '$S'"
+KITH_BIN=$W "$KITH" account pick echo --json > "$T/out" 2>&1
+check "pick after the step skips the account marked out" "grep -q 'claude:work' '$T/out' && python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert any(s[\"id\"]==\"claude:work\" and s[\"status\"]==\"out\" for s in p[\"skipped\"]), p' '$T/out'"
+KITH_BIN=$W "$KITH" account usage claude --json '{"windows":[{"name":"w","percent":9}],"read_at":4102444000}' > "$T/out" 2>&1
+KITH_BIN=$W "$KITH" account usage claude > "$T/out" 2>&1
+check "usage written and read through the core" "grep -q '\"percent\": 9' '$T/out'"
+KITH_BIN=$W "$KITH" account clear claude:work > "$T/out" 2>&1
+check "clear after the step" "grep -q 'claude:work is ready again' '$T/out'"
+
+# The Python readers find the tombstone and ask the core.
+PYSTATE="import sys; sys.path.insert(0, '$KERNEL/lib'); import kith_accounts as a"
+KITH_BIN=$W python3 -I -c "$PYSTATE
+s = a.read_state()
+assert s['codex:b']['out_until'] == $FAR, s
+assert 'out_until' not in s['claude:work'], s
+a.record_started('claude')
+a.mark_out('claude', until=$FAR, reason='rate_limit')
+assert a.read_state()['claude']['last_started'] > 1000000000
+assert a.read_state()['claude']['out_until'] == $FAR" > "$T/out" 2>&1
+check "kith_accounts.py read_state/record_started/mark_out go through the core" "[ \$? = 0 ]"
+KITH_BIN=$W python3 "$KERNEL/lib/kith_accounts.py" main-env echo "$KITH_HOME/agents/echo/role/agent.md" --state --record > "$T/out" 2>&1
+check "main-env --state --record works against the tombstone" "grep -q 'main_id=' '$T/out'"
+KITH_BIN=$W python3 "$KERNEL/lib/kith_accounts.py" accounts-json echo "$KITH_HOME/agents/echo/role/agent.md" > "$T/out" 2>&1
+check "accounts-json reads the core" "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d[\"accounts\"]' '$T/out'"
+check "the tombstone is still untouched" "grep -q 'kith_tombstone' '$S' && [ ! -e '$S.corrupt' ]"
+
+# A core that refuses (its database unreadable): every reader stops, none shows the accounts as ready.
+mv "$DBF" "$T/db.keep"; printf "junk" > "$DBF"
+KITH_BIN=$W "$KITH" account list --json > "$T/out" 2>&1; rc=$?
+check "list with the core refusing: exit 1, no rows" "[ $rc = 1 ] && ! grep -q ready '$T/out'"
+KITH_BIN=$W python3 "$KERNEL/lib/kith_accounts.py" accounts-json echo "$KITH_HOME/agents/echo/role/agent.md" > "$T/out" 2>&1; rc=$?
+check "accounts-json with the core refusing: exit 4" "[ $rc = 4 ]"
+KITH_BIN=$W python3 "$KERNEL/lib/kith_accounts.py" main-env echo "$KITH_HOME/agents/echo/role/agent.md" --state > "$T/out" 2>&1; rc=$?
+check "main-env --state with the core refusing: exit 4" "[ $rc = 4 ]"
+rm -f "$DBF"*; mv "$T/db.keep" "$DBF"
+
+# No program: Python fails closed, never reads the note.
+KITH_BIN=$T/bin/kith-old KITH_CORE=python "$KITH" account list > "$T/out" 2>&1
+check "KITH_CORE=python is refused once the module moved" "grep -q 'has moved to the core' '$T/out'"
+PATH=/usr/bin:/bin python3 -I "$KERNEL/bin/kith-account" list > "$T/out" 2>&1; rc=$?
+check "the Python verb without a core fails closed" "[ $rc = 1 ] && grep -q 'moved to the Kith core' '$T/out'"
+
+# 5. Rollback: the file again, with the marks made after the step.
+"$REAL" kernel cutover rollback accounts > "$T/out" 2>&1
+check "rollback writes state.json back" "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); a=d[\"accounts\"]; assert a[\"codex:b\"][\"out_until\"]==$FAR and a[\"claude\"][\"last_started\"]>1000000000, d' '$S'"
+KITH_CORE=python "$KITH" account list --json > "$T/out" 2>&1
+check "Python answers again after the rollback" "grep -q 'out of usage' '$T/out'"
+
+echo
+if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails check(s) failed"; exit 1; fi

@@ -234,16 +234,29 @@ pub fn update(machine: &Path, change: impl FnOnce(&mut Map)) {
     }
 }
 
-/// A launch is real: note when the account last started.
+/// A launch is real: note when the account last started. Where the state lives is [`super::change::make`]'s to say; a
+/// start that cannot be noted never stops the run, but is written to the log.
 pub fn record_started(machine: &Path, entry: &str, now: i64) {
-    update(machine, |accts| {
-        let e = accts
-            .entry(entry.to_owned())
-            .or_insert_with(|| Value::Object(Map::new()));
-        if let Some(e) = e.as_object_mut() {
-            e.insert("last_started".to_owned(), Value::from(now));
-        }
-    });
+    let change = super::change::Change::Started {
+        id: entry.to_owned(),
+    };
+    if let Err(e) = super::change::make(machine, &change, now) {
+        crate::log::note(&format!("accounts state: a start of {entry} was lost: {e}"));
+    }
+}
+
+/// The host's own out mark for `id` as `kith account clear` remembers it: `int(float(out_until))`, 0 when there is none.
+pub fn host_out_until(machine: &Path, id: &str) -> i64 {
+    legacy_marks(&legacy_files(machine).0)
+        .into_iter()
+        .find(|(k, _)| k == id)
+        .and_then(|(_, m)| m.get("out_until").and_then(pyfloat))
+        .map_or(0, |f| {
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                f as i64
+            }
+        })
 }
 
 /// The host's own file (read only: it holds it in memory and rewrites it until it moves to the state file) and the file the
@@ -410,13 +423,23 @@ pub trait StateSource {
     fn accounts(&self, machine: &Path) -> Map;
 }
 
+/// State that was read already (and checked): a verb reads once, so a second read that fails cannot turn into "no state".
+pub struct Fixed(pub Map);
+
+impl StateSource for Fixed {
+    fn accounts(&self, _machine: &Path) -> Map {
+        self.0.clone()
+    }
+}
+
 /// `<machine>/accounts/state.json` (the old kernel marks imported into it first): what every run reads today.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FileState;
 
 impl StateSource for FileState {
     fn accounts(&self, machine: &Path) -> Map {
-        read(machine)
+        // The file, or the core's table once the state moved there (the host installs its store for the verbs it runs).
+        super::change::read_state_lossy(machine)
     }
 }
 

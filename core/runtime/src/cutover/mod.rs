@@ -10,7 +10,7 @@
 //! `restore_secrets` (write secrets back to the OS store: Keychain, DPAPI ...; run before the files so a file never
 //! appears without its keys) and `live` (module-specific reasons not to roll back now). `depends_on` orders modules:
 //! a step refuses until the dependencies are switched, a rollback refuses while a dependent is switched.
-//! The cutover module name is the `module` column of `kernel/lib/core-switched.txt` for its verbs (that is how the router
+//! The cutover module name is the third column of `kernel/lib/core-switched.txt` for its verbs when there is one, else the `module` column (that is how the router
 //! knows which switch to look at).
 //!
 //! # Operations (all idempotent, all under core.db's lifetime lock, so two shells or a daemon refuse instead of racing)
