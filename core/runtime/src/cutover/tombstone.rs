@@ -22,6 +22,11 @@ pub(crate) fn is_tombstone(path: &Path) -> bool {
     note_of(path).is_some()
 }
 
+/// A file that exists and is not a tombstone (whatever it holds): the old reader's own file.
+pub(crate) fn is_real(path: &Path) -> bool {
+    path.is_file() && !is_tombstone(path)
+}
+
 /// The module a tombstone at `path` names (`None`: not a tombstone).
 pub(crate) fn module_of(path: &Path) -> Option<String> {
     note_of(path).map(|v| {
