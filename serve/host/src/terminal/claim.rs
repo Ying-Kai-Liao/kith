@@ -371,7 +371,8 @@ pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -
     let me = std::process::id();
     // (pid, start when found): the second signal is sent only to a process that still has it.
     let mut victims: Vec<(u32, Option<String>)> = Vec::new();
-    let mut leaders: Vec<(u32, Option<String>)> = Vec::new();
+    // Groups the claimer led when it was verified (decided then: by the SIGKILL it is dead).
+    let mut groups: Vec<u32> = Vec::new();
     for (pid, started) in held {
         if started.as_deref().is_none_or(|s| s.trim().is_empty()) {
             tracing::warn!(
@@ -398,10 +399,13 @@ pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -
                 victims.push((p, proc_start(p)));
             }
         }
-        leaders.push((*pid, started.clone()));
+        if leads_group(*pid) && !groups.contains(pid) {
+            groups.push(*pid);
+        }
     }
     let pids: Vec<u32> = victims.iter().map(|(p, _)| *p).collect();
     signal(&pids, libc::SIGTERM);
+    signal_groups(&groups, libc::SIGTERM);
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline && pids.iter().any(|p| pid_runs(*p)) {
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -417,20 +421,37 @@ pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -
     };
     let left: Vec<u32> = victims.iter().filter(|(p, s)| same(*p, s)).map(|(p, _)| *p).collect();
     signal(&left, libc::SIGKILL);
-    #[cfg(unix)]
-    for (pid, started) in &leaders {
-        // The leader of its own group, still the claimer: whatever else the group holds goes with it.
-        if let Ok(p) = libc::pid_t::try_from(*pid)
-            && same(*pid, started)
-            // SAFETY: getpgid(2) only reads.
-            && unsafe { libc::getpgid(p) } == p
-        {
-            // SAFETY: killpg only sends a signal, to the group of a process just checked to be the claimer.
-            unsafe { libc::killpg(p, libc::SIGKILL) };
-        }
-    }
+    // Whether or not the leader is still alive: POSIX does not reuse a pid as a process or group id while a group with
+    // that id exists, and a group that is gone answers ESRCH, which is ignored. A nohup'd or double-forked child of the
+    // claimer stays in the group and goes with it.
+    signal_groups(&groups, libc::SIGKILL);
     pids
 }
+
+/// Whether `pid` leads its own process group (checked right after its start was verified).
+#[cfg(unix)]
+fn leads_group(pid: u32) -> bool {
+    // SAFETY: getpgid(2) only reads.
+    libc::pid_t::try_from(pid).is_ok_and(|p| unsafe { libc::getpgid(p) } == p)
+}
+
+#[cfg(not(unix))]
+fn leads_group(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn signal_groups(groups: &[u32], sig: libc::c_int) {
+    for g in groups {
+        if let Ok(p) = libc::pid_t::try_from(*g) {
+            // SAFETY: killpg only sends a signal; ESRCH for a group that is gone is ignored.
+            unsafe { libc::killpg(p, sig) };
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_groups(_groups: &[u32], _sig: i32) {}
 
 #[cfg(unix)]
 fn signal(pids: &[u32], sig: libc::c_int) {

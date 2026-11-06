@@ -686,6 +686,46 @@ fn exits(child: &mut std::process::Child) -> bool {
     false
 }
 
+#[test]
+fn a_claimed_group_leaders_orphaned_child_that_ignores_sigterm_goes_with_it() {
+    use std::os::unix::process::CommandExt as _;
+    let file = std::env::temp_dir().join(format!("kith-orphan-{}", std::process::id()));
+    let _ = std::fs::remove_file(&file);
+    // The subshell leaves its sleeper (SIGTERM ignored) to the init process: not a descendant of the claimer, but in its group.
+    let script = format!("(trap '' TERM; sleep 60 & echo $! > '{}'); exec sleep 60", file.display());
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c").arg(script);
+    // SAFETY: setsid is async-signal-safe and the closure does nothing else.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        })
+    };
+    let mut leader = cmd.spawn().unwrap();
+    let orphan = loop {
+        if let Some(pid) = std::fs::read_to_string(&file).ok().and_then(|t| t.trim().parse::<i32>().ok()) {
+            break pid;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let started = kith_kernel::procstart::start_stamp(leader.id()).expect("the leader's start");
+    crate::terminal::claim::end_claimed(&[(leader.id(), Some(started))], std::time::Duration::from_millis(300));
+    let _ = leader.wait();
+    let gone = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // SAFETY: signal 0 only tests for existence.
+        unsafe { libc::kill(orphan, 0) != 0 }
+    });
+    let _ = std::fs::remove_file(&file);
+    if !gone {
+        // SAFETY: cleanup of the test's own sleeper.
+        unsafe { libc::kill(orphan, libc::SIGKILL) };
+    }
+    assert!(gone, "the orphaned child of a group leader is gone");
+}
+
 /// The `kill` entry the core answers for a claim of a process (`people.suspend` / `people.removePerson`).
 fn kill_entry(pid: u32, started: &str) -> Value {
     json!({"claimId": 1, "pid": pid, "started": started})
