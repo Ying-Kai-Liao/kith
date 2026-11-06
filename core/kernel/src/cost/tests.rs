@@ -279,6 +279,15 @@ fn kernel_with_auth(p: &Paths, code: i32, body: &str) {
 #[test]
 fn members_says_when_the_budgets_cannot_be_read() {
     let (p, root) = world("members-budgets");
+    // The exit-3 case asks the core through KITH_BIN; a stub that fails keeps the test off the test binary itself.
+    let stub = root.join("kith-stub");
+    std::fs::write(&stub, "#!/bin/sh\nexit 1\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // SAFETY: only this test sets KITH_BIN in this binary, and no other thread reads it while the cases run.
+    unsafe { std::env::set_var("KITH_BIN", &stub) };
     let members = |p: &Paths| -> Value {
         serde_json::from_str(&run(p, &fixed_clock(), &args(&["members", "alpha"])).stdout).unwrap()
     };
@@ -298,5 +307,6 @@ fn members_says_when_the_budgets_cannot_be_read() {
             "exit {code}"
         );
     }
+    unsafe { std::env::remove_var("KITH_BIN") };
     let _ = std::fs::remove_dir_all(root);
 }

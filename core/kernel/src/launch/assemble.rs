@@ -197,8 +197,8 @@ fn pyrepr(x: &str) -> String {
 ///
 /// Bash also runs `kith_cutover_refuse` under `KITH_CORE=python`, refusing the rollback of a module whose files the core
 /// owns after its cutover. It is left out here on purpose: that refusal only matters for a module that has a cutover step,
-/// and `pkg` and `project-id` have none, so the rollback is always allowed for these two verbs. Add the refusal when one
-/// of them gets a cutover.
+/// and `pkg`, `project-id` and `cost` have none (the core does not own the cost ledger), so the rollback is always
+/// allowed for these verbs. Add the refusal when one of them gets a cutover.
 fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
     match get(env, "KITH_CORE") {
         "python" => return false,

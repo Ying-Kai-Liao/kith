@@ -78,6 +78,15 @@ for line in "spent sam echo" "limit echo --sh" "members echo" "usage --json" "ag
   esac
 done
 
+# 2b. A limit set and spent past (the owner kai spent $1 on echo): the two `limit echo --sh` outputs are the same bytes, and
+# the launch holds on both paths (at-limit hold), so the core's limit read is judged on a real "over", not on "no limit".
+"$KITH" echo set limit 0.5 >/dev/null 2>&1; "$KITH" echo set at-limit hold >/dev/null 2>&1
+reset; "$KITH" cost limit echo --sh > "$T/rust.out" 2>/dev/null
+check "limit set and over: the core answers, l_over=1" "[ \"\$(calls '')\" = 0 ] && grep -q 'l_over=1' '$T/rust.out'"
+reset; KITH_CORE=python "$KITH" cost limit echo --sh > "$T/py.out" 2>/dev/null
+check "limit set and over: same bytes either way" "[ \"\$(calls '')\" -ge 1 ] && cmp -s '$T/rust.out' '$T/py.out'"
+"$KITH" echo set limit 0 >/dev/null 2>&1
+
 # 3. tag and record, the text reports and a bare `kith cost` stay Python with the line on.
 for line in "tag x" "record" "people month" "month" ""; do
   reset; "$KITH" cost $line >/dev/null 2>&1 </dev/null
@@ -108,8 +117,29 @@ for path in rust bash; do
   check "$path path: a member over the budget is refused" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q 'has used' '$T/l.err'"
   reset; launch $path bot-s X=1
   check "$path path: a bot guest under its owner's budget runs" "[ \"\$(cat '$T/l.rc')\" = 0 ]"
+  "$KITH" echo set limit 0.5 >/dev/null 2>&1
+  reset; launch $path kai X=1
+  "$KITH" echo set limit 0 >/dev/null 2>&1
+  check "$path path: the owner over the agent's limit (hold) is held" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q 'held until you raise the limit' '$T/l.err'"
   reset; launch $path eve KITH_CORE=python
   check "$path path, KITH_CORE=python: the member over the budget is refused, kith-cost asked" "[ \"\$(cat '$T/l.rc')\" = 3 ] && [ \"\$(calls 'spent')\" -ge 1 ]"
+done
+
+# 5b. A renamed person: zed spent past the budget under the old id, then became zoe. The ledger still says zed, so zoe is
+# refused on both paths (KITH_PERSON_WAS carries the old id to the spend).
+AUTH person zed >/dev/null; AUTH member echo zed budget=5 >/dev/null
+python3 - "$M/cost.db" <<'PY'
+import datetime as dt, sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+c.execute("insert into runs (session, agent, person) values ('sz', 'echo', 'zed')")
+c.execute("insert into req values ('rz', 'sz', ?, 'p', 'm', 'main', '1', 0, 0, 0, 0, 9.0)", (now,))
+c.commit()
+PY
+AUTH person zed id=zoe >/dev/null
+for path in rust bash; do
+  reset; launch $path zoe X=1
+  check "$path path: a renamed member whose old id spent past the budget is refused" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q 'has used' '$T/l.err'"
 done
 
 # 6. A NaN, inf or text budget refuses a guest's run, switched or not (the limit that can't be read is not "no limit").
