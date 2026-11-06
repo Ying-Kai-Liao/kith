@@ -1,0 +1,5 @@
+\* switched (#875) with the core's door table and the guest door
+CoreGate = TRUE
+Switched = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE

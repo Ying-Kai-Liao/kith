@@ -152,16 +152,21 @@ pub fn credentials_line(key: &SigningKey, guest: &Guest) -> String {
 /// stdout, stderr or a log. Refuses an existing path (a symlink included) rather than following or replacing it.
 pub fn write_credentials_file(path: &Path, key: &SigningKey, guest: &Guest) -> Result<(), CliError> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    // create_new is O_EXCL, which also refuses a symlink at the path.
-    let mut f =
-        fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => CliError::usage(format!(
-                "{} already exists: pick a path that doesn't, so no existing file is overwritten.",
-                path.display()
-            )),
-            _ => io_err(path, &e),
-        })?;
+    // create_new is O_EXCL, which also refuses a symlink at the path. Windows has no Unix mode, so no mode there.
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => CliError::usage(format!(
+            "{} already exists: pick a path that doesn't, so no existing file is overwritten.",
+            path.display()
+        )),
+        _ => io_err(path, &e),
+    })?;
     f.write_all(credentials_line(key, guest).as_bytes()).map_err(|e| io_err(path, &e))
 }
 
@@ -395,13 +400,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("c");
         write_credentials_file(&p, &key(), &guest()).unwrap();
+        #[cfg(unix)]
         assert_eq!(std::os::unix::fs::PermissionsExt::mode(&fs::metadata(&p).unwrap().permissions()) & 0o777, 0o600);
         let line = fs::read_to_string(&p).unwrap();
         assert!(Store::open(None, Some(&line)).unwrap().is_env());
         assert!(write_credentials_file(&p, &key(), &guest()).is_err());
-        let l = tmp.path().join("l");
-        std::os::unix::fs::symlink(tmp.path().join("t"), &l).unwrap();
-        assert!(write_credentials_file(&l, &key(), &guest()).is_err());
-        assert!(!tmp.path().join("t").exists());
+        #[cfg(unix)]
+        {
+            let l = tmp.path().join("l");
+            std::os::unix::fs::symlink(tmp.path().join("t"), &l).unwrap();
+            assert!(write_credentials_file(&l, &key(), &guest()).is_err());
+            assert!(!tmp.path().join("t").exists());
+        }
     }
 }

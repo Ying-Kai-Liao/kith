@@ -157,8 +157,14 @@ fn lapses_in(expires_at_ms: i64) -> String {
 /// Opens the file the value will go to before asking the host: the host hands the value over once, so a path that
 /// can't be written must be found out first. New file only, mode 0600; a symlink or an existing file is refused.
 fn open_new(path: &std::path::Path) -> Result<std::fs::File, CliError> {
-    use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).map_err(|e| match e.kind() {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path).map_err(|e| match e.kind() {
         std::io::ErrorKind::AlreadyExists => CliError::usage(format!(
             "{} already exists: pick a path that doesn't, so no existing file is overwritten. The secret was not taken.",
             path.display()
@@ -277,16 +283,22 @@ mod tests {
 
     #[test]
     fn open_new_is_private_and_never_replaces() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("k");
         drop(open_new(&path).unwrap());
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         assert!(open_new(&path).is_err());
-        let link = dir.path().join("l");
-        std::os::unix::fs::symlink(dir.path().join("target"), &link).unwrap();
-        assert!(open_new(&link).is_err());
-        assert!(!dir.path().join("target").exists());
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("l");
+            std::os::unix::fs::symlink(dir.path().join("target"), &link).unwrap();
+            assert!(open_new(&link).is_err());
+            assert!(!dir.path().join("target").exists());
+        }
     }
 
     #[test]
