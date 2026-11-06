@@ -66,8 +66,14 @@ pub(crate) async fn resolve(person: &str, agent: &str) -> Option<Value> {
     // `KITH_CORE_AUTHORITY=1` (M2-16): the core's `people.may` is the truth, asked within a bound; None when it can't be
     // asked in time, which every caller reads as "no" (or "try again" for `may_use_checked`). The owner is None too.
     if super::authority::guard_on_core() {
-        let v = super::authority::core_verdict(person, agent).await.filter(|v| !v.owner)?;
-        return Some(json!({"allowed": v.allowed, "preset": v.preset}));
+        use super::authority::Heard;
+        match super::authority::core_heard(person, agent).await {
+            Heard::Verdict(v) if !v.owner => return Some(json!({"allowed": v.allowed, "preset": v.preset})),
+            Heard::Verdict(_) | Heard::Unknown => return None,
+            // The core refused the marked read: authority is back on auth.json (a rollback the host's cache has not
+            // seen yet), so kith-auth answers below, from the file.
+            Heard::NotSwitched => {}
+        }
     }
     let bin = account::bin().await?;
     let out = crate::channels::hq::output(&bin, &["resolve", agent, "--person", person]).await?;
