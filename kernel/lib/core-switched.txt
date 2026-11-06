@@ -5,3 +5,4 @@ launch	launch
 settings	settings
 pkg	pkg
 project-id	project
+cost	cost

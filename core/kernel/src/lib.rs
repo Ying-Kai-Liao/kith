@@ -44,6 +44,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
     &[
         "accounts",
         "acp",
+        "cost",
         "delegation",
         "engines",
         "launch",
@@ -70,7 +71,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","launch","paths","pkg","project","settings","threads"]}"#
+            r#"{"abi":1,"modules":["accounts","acp","cost","delegation","engines","launch","paths","pkg","project","settings","threads"]}"#
         );
     }
 }

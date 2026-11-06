@@ -211,6 +211,30 @@ fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
     })
 }
 
+/// `kith-cost ARGS` answered by the core in process (`cost` in lib/core-switched.txt): its stdout without the last newline when it
+/// exits 0, else `None`, which the callers read as `kith-cost` failing. Only the verbs the launch asks (`spent`, `limit --sh`).
+fn cost_core(
+    kernel: &Path,
+    p: &paths::Paths,
+    env: &Env,
+    home: &Path,
+    person_was: &str,
+    args: &[&str],
+) -> Option<String> {
+    let paths = crate::cost::Paths {
+        machine: p.machine.clone(),
+        home: home.to_path_buf(),
+        kernel: kernel.to_path_buf(),
+    };
+    let cenv = crate::cost::Env {
+        now: env.get("KITH_COST_NOW").cloned(),
+        person_was: person_was.to_owned(),
+    };
+    let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+    let out = crate::cost::run(&paths, &cenv, &args);
+    (out.code == 0).then(|| out.stdout.trim_end_matches('\n').to_owned())
+}
+
 // ---- programs
 
 struct Sys<'a> {
@@ -637,17 +661,29 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                 ));
                 return Err(3);
             }
-            let sys = Sys { env: &env };
-            let mut c = sys.cmd(
-                kernel.join("bin/kith-cost"),
-                &["spent", &person, &p_budget_agent],
-            );
-            c.env("KITH_PERSON_WAS", &p_was).stderr(Stdio::null());
-            let spent = c.output().ok().filter(|o| o.status.success()).map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .trim_end_matches('\n')
-                    .to_owned()
-            });
+            // `cost` in lib/core-switched.txt: the core's own `spent` (kith-cost spent is the rollback, KITH_CORE=python).
+            let spent = if switched(kernel, &env, "cost") {
+                cost_core(
+                    kernel,
+                    &p,
+                    &env,
+                    &home_dir,
+                    &p_was,
+                    &["spent", &person, &p_budget_agent],
+                )
+            } else {
+                let sys = Sys { env: &env };
+                let mut c = sys.cmd(
+                    kernel.join("bin/kith-cost"),
+                    &["spent", &person, &p_budget_agent],
+                );
+                c.env("KITH_PERSON_WAS", &p_was).stderr(Stdio::null());
+                c.output().ok().filter(|o| o.status.success()).map(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .trim_end_matches('\n')
+                        .to_owned()
+                })
+            };
             let spent = match spent {
                 None if p_owner => "0".to_owned(),
                 None => {
@@ -814,15 +850,18 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
 
     // ---- the agent's monthly limit
     let sys = Sys { env: &env };
-    if p_owner
-        && let Some(lim) = sys
-            .out(
-                kernel.join("bin/kith-cost"),
-                &["limit", agent, "--sh"],
-                false,
-            )
-            .filter(|l| !l.is_empty())
-    {
+    let limit_line = if !p_owner {
+        None
+    } else if switched(kernel, &env, "cost") {
+        cost_core(kernel, &p, &env, &home_dir, "", &["limit", agent, "--sh"])
+    } else {
+        sys.out(
+            kernel.join("bin/kith-cost"),
+            &["limit", agent, "--sh"],
+            false,
+        )
+    };
+    if let Some(lim) = limit_line.filter(|l| !l.is_empty()) {
         let v = assignments(&lim);
         if v.get("l_over").map(String::as_str) == Some("1") {
             let at = v.get("l_at").map_or("ask", String::as_str);
