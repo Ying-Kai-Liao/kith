@@ -112,6 +112,11 @@ impl Core {
         std::fs::write(dir.join("authority.switch"), format!("state={state}\nat=1\n")).unwrap();
     }
 
+    /// The rollback ended: the core's cutover record for authority is gone.
+    pub(super) fn clear_phase(&self) {
+        std::fs::remove_file(self.tmp.path().join("machine/core/cutover/authority.switch")).ok();
+    }
+
     /// The tombstone is the file `auth` (the one kith-auth reads in the rig), so anything that still runs kith-auth finds it.
     #[allow(clippy::unused_self)] // kept a method so it reads next to `switched`
     pub(super) fn switched_over(&self, auth: &std::path::Path) {
@@ -467,8 +472,16 @@ async fn the_core_refuses_a_switched_route_write_once_the_phase_is_not_switched(
     core.phase("switched");
     assert!(core.ask("people.grant", marked("guest")).is_some());
     assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
+    // A stuck rollback keeps the tombstone and the core is still the store: the write lands.
     core.phase("rolling-back");
-    assert!(core.ask("people.grant", marked("member")).is_none(), "RollingBack");
+    assert!(core.ask("people.grant", marked("member")).is_some(), "RollingBack");
+    assert_eq!(core.rows(), [("house".to_owned(), "member".to_owned())]);
+    // Any other phase refuses it.
+    core.phase("stepping");
+    assert!(core.ask("people.grant", marked("guest")).is_none(), "Stepping");
+    assert_eq!(core.rows(), [("house".to_owned(), "member".to_owned())]);
+    core.phase("switched");
+    assert!(core.ask("people.grant", marked("guest")).is_some());
     assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
     // Unmarked (kith-auth's mirror, the terminal) is as it was.
     let plain = json!({"person": "sam", "agent": "house", "preset": "member"});
@@ -483,12 +496,74 @@ async fn the_host_falls_back_to_kith_auth_when_the_core_says_the_rollback_got_th
     let core = Core::start(&r);
     core.on();
     core.switched();
-    // The host's look at the file saw the tombstone; the rollback then wrote its phase (the file is not back yet in
-    // this test, as in the race: kith-auth is the rig's own file).
-    core.phase("rolling-back");
+    // The host's look at the file saw the tombstone; the rollback then finished (a stale phase left behind: no
+    // record; the file is not back yet in this test, as in the race: kith-auth is the rig's own file).
+    core.clear_phase();
     assert!(r.allowed("sam", "house"));
     super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
     assert!(!r.allowed("sam", "house"), "the plain file got the revoke");
+}
+
+#[tokio::test]
+async fn a_removal_during_a_stuck_rollback_is_done_by_the_core_and_repeats_harmlessly() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    core.switched();
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "preset=guest"]).await.unwrap();
+    assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
+    // The rollback failed half-way: RollingBack and the tombstone still in auth.json.
+    core.phase("rolling-back");
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+    assert!(core.rows().is_empty(), "the core took the removal (a kith-auth run would leave the core's row)");
+    // A retry changes nothing and still answers.
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+    assert_eq!(core.rows().len(), 0);
+}
+
+#[tokio::test]
+async fn a_suspend_is_refused_by_the_core_when_not_switched_and_the_host_falls_back() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    core.switched();
+    core.clear_phase();
+    // The core on its own refuses the marked suspend.
+    assert!(core.ask("people.suspend", json!({"id": "sam", "viaSwitch": true})).is_none());
+    assert!(r.allowed("sam", "house"));
+    // The host takes the refusal as "the rollback got there first" and runs kith-auth.
+    super::authority::run_auth(&r.bin, &["person", "sam", "--revoke", "--local"]).await.unwrap();
+    assert!(!r.allowed("sam", "house"), "kith-auth got the suspend");
+}
+
+#[tokio::test]
+async fn a_write_decides_from_a_fresh_stat_not_the_read_cache() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    // Right after a switch the read cache still says "not switched": the write goes to the core, not to kith-auth.
+    *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap() = Some(false);
+    core.switched();
+    assert!(!super::authority::switched());
+    super::authority::run_auth_noted(&r.bin, &["member", "house", "sam", "preset=guest"]).await.unwrap();
+    assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
+    // run_auth decides the same way: stale-false on a tombstoned host, the write still goes to the core (a kith-auth
+    // run on the tombstone would fail, and would leave the core's row).
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+    assert!(core.rows().is_empty(), "run_auth wrote to the core");
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "preset=guest"]).await.unwrap();
+    assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
+    // Right after a rollback the cache still says "switched" but the file is back: the write goes to kith-auth.
+    let auth = core.tmp.path().join("auth.json");
+    std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
+    *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap() = Some(true);
+    assert!(super::authority::switched() && !super::authority::switched_now());
+    super::authority::run_auth_noted(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+    assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())], "the core was not asked");
+    *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap() = None;
 }
 
 #[tokio::test]
