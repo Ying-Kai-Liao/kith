@@ -414,8 +414,6 @@ fn claude_version(sys: &Sys<'_>) -> Option<String> {
     None
 }
 
-/// `uuid4().hex`. An unreadable random source is an error: an all-zero id would be shared by every run, and a run's
-/// id and temp file names must not collide.
 /// Digits with at most one inner dot: a finite, non-negative amount (no NaN, inf, sign or exponent).
 fn plain_number(t: &str) -> bool {
     !t.is_empty()
@@ -424,6 +422,8 @@ fn plain_number(t: &str) -> bool {
             .all(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// `uuid4().hex`. An unreadable random source is an error: an all-zero id would be shared by every run, and a run's
+/// id and temp file names must not collide.
 fn random_hex() -> Result<String, String> {
     let mut b = [0u8; 16];
     #[cfg(unix)]
