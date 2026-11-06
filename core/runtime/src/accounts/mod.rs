@@ -24,6 +24,8 @@ pub(crate) mod failover;
 mod failover_tests;
 #[cfg(all(test, unix))]
 mod tests;
+#[cfg(all(test, unix))]
+mod write_tests;
 
 type Map = serde_json::Map<String, Value>;
 
@@ -264,7 +266,12 @@ pub(crate) fn mark_out(
     entry.insert("since".into(), since);
     entry.insert("out_until".into(), Value::from(until));
     entry.insert("reason".into(), Value::from(reason));
-    let p = split(&entry);
+    put(conn, id, &entry)
+}
+
+/// `INSERT OR REPLACE` of one entry as the columns hold it.
+fn put(conn: &Connection, id: &str, entry: &Map) -> Result<()> {
+    let p = split(entry);
     conn.execute(
         &format!(
             "INSERT OR REPLACE INTO account_state ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
@@ -281,5 +288,42 @@ pub(crate) fn mark_out(
             p.extra
         ],
     )?;
+    Ok(())
+}
+
+/// One entry, as `state.json` keeps it.
+fn read_entry(conn: &Connection, id: &str) -> Result<Option<Map>> {
+    use rusqlite::OptionalExtension as _;
+    let row = conn
+        .query_row(
+            &format!("SELECT {COLUMNS} FROM account_state WHERE id = ?1"),
+            [id],
+            entry_of,
+        )
+        .optional()?;
+    Ok(row.and_then(|(_, v)| match v {
+        Value::Object(m) => Some(m),
+        _ => None,
+    }))
+}
+
+/// One change of the writers (`kith account out|clear|usage`, a launch's start), in one transaction: the same edit the
+/// file's writers make (`kith_kernel::accounts::apply_change`) on the entry's row. The caller gates it ([`core_writes`]).
+pub(crate) fn make(
+    conn: &Connection,
+    change: &kith_kernel::accounts::Change,
+    now: i64,
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    let id = change.id();
+    let mut one = Map::new();
+    if let Some(e) = read_entry(&tx, id)? {
+        one.insert(id.to_owned(), Value::Object(e));
+    }
+    kith_kernel::accounts::apply_change(&mut one, change, now);
+    if let Some(Value::Object(e)) = one.get(id) {
+        put(&tx, id, e)?;
+    }
+    tx.commit()?;
     Ok(())
 }

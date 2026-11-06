@@ -78,7 +78,7 @@ fn dedup(ids: Vec<String>) -> Vec<String> {
 }
 
 /// A usage reading as the row shows it (`usage_json`), `null` when there is none or it is damaged.
-fn usage_json(e: Option<&Value>, now: f64) -> Value {
+pub(super) fn usage_json(e: Option<&Value>, now: f64) -> Value {
     let reading = || -> Option<Value> {
         let u = e?.get("usage")?.as_object().filter(|u| !u.is_empty())?;
         let read_at = u.get("read_at")?;

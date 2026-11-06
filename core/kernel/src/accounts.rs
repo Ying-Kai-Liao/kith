@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+mod change;
+#[cfg(test)]
+mod change_tests;
 mod clock;
 mod listing;
 mod mirror;
@@ -26,13 +29,19 @@ mod pyjson;
 pub mod settings;
 mod state;
 
+pub use change::{
+    Change, OUT_FOR, Store, apply as apply_change, host_until, make as make_change,
+    now_secs as clock_secs, parse_until, read_state, reason_ok, store, use_store, validate_usage,
+};
 pub use listing::rows_from;
+mod verbs;
 pub use pick::{Pick, Skipped, Status, pick_from};
 pub use settings::read_settings;
 pub use state::{
     FileState, Snapshot, StateHold, StateSource, hold, out_marks_from, record_started, replace,
     snapshot, state_file, tombstoned,
 };
+pub use verbs::{VERBS, Verb, pick_value, run_verb};
 
 type Map = serde_json::Map<String, Value>;
 

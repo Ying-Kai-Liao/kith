@@ -167,7 +167,14 @@ case $1 in
        kith backup list|add|remove ...                the backup chain (kith account)" >&2; exit 2; }
                       [[ $2 == run ]] && shift
                       shift; exec "$KITH/bin/kith-state" backup "$@" ;;
-  account)            shift; exec "$KITH/bin/kith-account" "${@:---help}" ;;
+  account)            shift
+                      # The state verbs are the Rust core's when `account-state` is switched (lib/core-switched.txt) and a
+                      # program lists it: the file until `kith migrate step accounts`, the core's table after. Same words,
+                      # same exit codes (golden/account-state.json). Otherwise the Python answers.
+                      case ${1:-} in
+                        list|ls|pick|out|clear|usage) . "$KITH/lib/kith-core.sh"; kith_core_exec account-state --kernel "$KITH" "$@" || true ;;
+                      esac
+                      exec "$KITH/bin/kith-account" "${@:---help}" ;;
   new)                shift; exec "$KITH/bin/kith-new" "$@" ;;
   remote)             shift; exec "$KITH/bin/kith-remote" "${@:---help}" ;;
   recall)             shift; exec "$KITH/bin/kith-recall" "${@:---help}" ;;
