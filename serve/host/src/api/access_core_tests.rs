@@ -388,9 +388,17 @@ async fn a_switched_host_reads_the_people_from_the_core_and_revokes_there() {
     assert_eq!(said["allowed"], true);
     let none = members::apply_revoked(Some(&r.bin), Some(&[])).await.unwrap();
     assert_eq!(none.cut.len() + none.restored.len(), 0);
-    // The chat handle has no core method: refused, never run on the tombstone.
-    let e = members::locked_run(&r.bin, &["handle", "sam", "kith", "user_x"]).await.unwrap_err();
-    assert!(format!("{e:#}").contains("no core method"), "{e:#}");
+    // The chat handle is the core's (`people.handle`): bound and let go there, never run on the tombstone.
+    members::locked_run(&r.bin, &["handle", "sam", "kith", "user_x"]).await.unwrap();
+    assert_eq!(crate::remote::account::owner_handle(&r.bin).await, None, "the owner's own handle is not sam's");
+    let sam = |rows: Value| rows["rows"].as_array().unwrap().iter().find(|p| p["id"] == "sam").cloned().unwrap();
+    assert_eq!(sam(core.ask("people.listPeople", json!({})).unwrap())["kith"], "user_x");
+    let e = members::locked_run(&r.bin, &["handle", "kai", "kith", "user_x"]).await.unwrap_err();
+    assert!(format!("{e:#}").contains("already sam"), "{e:#}");
+    members::locked_run(&r.bin, &["handle", "kai", "kith", "user_k"]).await.unwrap();
+    assert_eq!(crate::remote::account::owner_handle(&r.bin).await.as_deref(), Some("user_k"));
+    members::locked_run(&r.bin, &["handle", "sam", "kith", "--rm"]).await.unwrap();
+    assert_eq!(sam(core.ask("people.listPeople", json!({})).unwrap())["kith"], "", "unbound reads as no account");
 }
 
 #[tokio::test]

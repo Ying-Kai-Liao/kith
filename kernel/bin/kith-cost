@@ -531,17 +531,47 @@ def agent_json(c, name, period):
                       'models': models, 'costliest': costliest, 'forecast': forecast(days, spent, amount, name)}))
 
 
+def read_budgets(agent):
+    """Each person's monthly budget on the agent, from kith-auth; from the core once auth.json is its tombstone (kith-auth
+    exits 3 there). Raises when neither can be read: an unreadable limit is never "no limit"."""
+    here = os.path.dirname(os.path.realpath(__file__))
+    auth = os.path.join(here, 'kith-auth')
+    r = subprocess.run([auth, 'budgets', agent, '--json'], capture_output=True, text=True, timeout=20)
+    if r.returncode == 0:
+        return json.loads(r.stdout)
+    if r.returncode != 3:
+        raise subprocess.CalledProcessError(r.returncode, auth)
+    from kith_paths import kith_bin
+    bin_ = kith_bin(budget=4)
+    if not bin_:
+        raise OSError('no kith program to ask the core')
+    params = {'agent': agent, 'kernel': os.path.dirname(here), 'home': str(Path.home()),
+              'env': {k: os.environ[k] for k in ('KITH_STATE', 'HQ_STATE', 'KITH_HOME', 'HQ_HOME', 'KITH_AGENTS', 'HQ_AGENTS')
+                      if os.environ.get(k)}}
+    c = subprocess.run([bin_, 'kernel', 'core-call', 'people.budgets', '--params-stdin'], input=json.dumps(params),
+                       capture_output=True, text=True, timeout=20, check=True)
+    budgets = json.loads(c.stdout)['budgets']
+    if not isinstance(budgets, dict):
+        raise ValueError('the core answered no budgets')
+    return budgets
+
+
 def members(c, agent):
     rows = c.execute('''select coalesce(person, 'owner'), sum(cost) from hq_req where hq_agent = ? and ts >= ?
                          group by 1''', (agent, utc(month_start()))).fetchall()
     try:   # each person's own budget on the agent (kith-auth member .. budget=), null when it has none
-        out = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth'), 'budgets', agent,
-                              '--json'], capture_output=True, text=True, timeout=20, check=True).stdout
-        budgets = json.loads(out)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        budgets = {}
-    print(json.dumps({'agent': agent, 'month': period_label('month'), 'people': {p: round(x or 0, 4) for p, x in rows},
-                      'budgets': budgets}))
+        budgets = read_budgets(agent)
+        error = None
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        # Not "nobody has a budget": a broken kith-auth, an unreachable core and a malformed budget all land here, and
+        # from here they look the same. `budgetsError` lets the app say it can't read them instead of "no budget" (the
+        # limit itself is enforced at launch, which fails closed on its own).
+        budgets, error = {}, "can't read budgets"
+    out = {'agent': agent, 'month': period_label('month'), 'people': {p: round(x or 0, 4) for p, x in rows},
+           'budgets': budgets}
+    if error:
+        out['budgetsError'] = error
+    print(json.dumps(out))
 
 
 def bots_json(c):
