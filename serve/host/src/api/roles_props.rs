@@ -804,11 +804,14 @@ fn guard_never_lets_a_person_past_their_grant_on_a_switched_host() {
 }
 
 /// What a core can be told: a member row, a guest row, or none. The rest of `Ans` are things kith-auth can print.
+/// Only a person the host has a row for holds core rows: a host drops its row only after the core's are gone
+/// (`Undo::run`), so "a core grant for someone the host never invited" is no state to test; `setPersonAccess` rightly
+/// refuses it ("isn't someone you invited") when the property takes the grant away.
 fn core_grants(sc: &Scenario) -> Scenario {
     let mut sc = sc.clone();
-    for row in &mut sc.grants {
+    for (row, host_row) in sc.grants.iter_mut().zip(&sc.people) {
         for a in row {
-            if !matches!(a, Ans::Member | Ans::Guest) {
+            if host_row.is_none() || !matches!(a, Ans::Member | Ans::Guest) {
                 *a = Ans::Denied(false);
             }
         }
