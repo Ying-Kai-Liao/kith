@@ -99,6 +99,176 @@ pub fn comparable(a: &str, b: &str) -> bool {
     matches!((form(a), form(b)), (Some(x), Some(y)) if x == y)
 }
 
+/// What ending a claim's process signals: the claimer and everything below it, and its process group when it leads one.
+/// The daemon's rule for its kill re-send; the host's `end_claimed` still has its own copy (no dead-leader group rule; the
+/// daemon's re-send covers it).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Victims {
+    /// Descendants first, the claimer last. Never this process, never pid 1.
+    pub pids: Vec<u32>,
+    /// The claimer's process group, when `pgid == pid` (a host spawn is `process_group(0)`: a group leader, not a
+    /// session leader) and it is not this process's own group.
+    pub group: Option<u32>,
+}
+
+/// The processes to signal for a claim whose process `root` was verified (its stamp matched) just now.
+#[must_use]
+pub fn claim_victims(root: u32) -> Victims {
+    groups::claim_victims(root)
+}
+
+/// The group of a claimer that is already gone but whose group still has members (#919's rule): the leader is gone, the
+/// recorded start is from this boot (so the pid was not handed to a stranger across a reboot) and the group id is still
+/// held. POSIX does not give a pid to a new process or group while a group of that id exists, so a live group of that
+/// id is the old one. `None` otherwise.
+#[must_use]
+pub fn orphan_group(pid: u32, recorded: &str) -> Option<u32> {
+    if pid <= 1 || !matches!(probe(pid), Probe::Gone) || !from_this_boot(recorded) {
+        return None;
+    }
+    groups::group_alive(pid).then_some(pid)
+}
+
+/// Whether `stamp` was taken in the current boot, read against pid 1's own stamp: the same boot id on Linux, a start
+/// no earlier than init's elsewhere. False when pid 1 cannot be read or the forms differ.
+#[must_use]
+pub fn from_this_boot(stamp: &str) -> bool {
+    let Probe::Alive(Some(init)) = probe(1) else {
+        return false;
+    };
+    if !comparable(stamp, &init) {
+        return false;
+    }
+    if let (Some(a), Some(b)) = (stamp.strip_prefix('b'), init.strip_prefix('b')) {
+        return a.split_once(':').map(|x| x.0) == b.split_once(':').map(|x| x.0);
+    }
+    match (
+        stamp.strip_prefix('e').and_then(|s| s.parse::<i64>().ok()),
+        init.strip_prefix('e').and_then(|s| s.parse::<i64>().ok()),
+    ) {
+        (Some(s), Some(i)) => s >= i,
+        _ => false,
+    }
+}
+
+/// A signal [`signal`] and [`signal_group`] can send.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sig {
+    Term,
+    Kill,
+}
+
+/// Sends `sig` to each pid. A pid that is gone is ignored. No-op where there are no signals.
+pub fn signal(pids: &[u32], sig: Sig) {
+    for p in pids {
+        groups::kill(*p, sig, false);
+    }
+}
+
+/// Sends `sig` to a process group. A group that is gone is ignored.
+pub fn signal_group(group: u32, sig: Sig) {
+    groups::kill(group, sig, true);
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+mod groups {
+    use super::{Sig, Victims};
+
+    fn id(pid: u32) -> Option<libc::pid_t> {
+        libc::pid_t::try_from(pid).ok().filter(|p| *p > 1)
+    }
+
+    pub(super) fn kill(pid: u32, sig: Sig, group: bool) {
+        let Some(p) = id(pid) else { return };
+        let s = match sig {
+            Sig::Term => libc::SIGTERM,
+            Sig::Kill => libc::SIGKILL,
+        };
+        // SAFETY: plain kill(2) / killpg(2); ESRCH for what is gone is ignored.
+        unsafe {
+            if group {
+                libc::killpg(p, s);
+            } else {
+                libc::kill(p, s);
+            }
+        }
+    }
+
+    pub(super) fn group_alive(pid: u32) -> bool {
+        // SAFETY: signal 0 only checks that the group exists; getpgrp only reads.
+        id(pid).is_some_and(|p| unsafe { libc::getpgrp() != p && libc::killpg(p, 0) == 0 })
+    }
+
+    fn pgid(pid: libc::pid_t) -> Option<libc::pid_t> {
+        // SAFETY: getpgid only reads the process table.
+        let g = unsafe { libc::getpgid(pid) };
+        (g > 0).then_some(g)
+    }
+
+    /// Every process below `root`, from one `ps` listing.
+    fn descendants(root: u32) -> Vec<u32> {
+        let Ok(out) = std::process::Command::new("ps")
+            .args(["-A", "-o", "pid=,ppid="])
+            .output()
+        else {
+            return Vec::new();
+        };
+        let table: Vec<(u32, u32)> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| {
+                let mut it = l.split_whitespace();
+                Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+            })
+            .collect();
+        let mut found: Vec<u32> = Vec::new();
+        let mut frontier = vec![root];
+        while let Some(parent) = frontier.pop() {
+            for (pid, ppid) in &table {
+                if *ppid == parent && *pid != root && !found.contains(pid) {
+                    found.push(*pid);
+                    frontier.push(*pid);
+                }
+            }
+        }
+        found
+    }
+
+    pub(super) fn claim_victims(root: u32) -> Victims {
+        let me = std::process::id();
+        let Some(r) = id(root).filter(|_| root != me) else {
+            return Victims::default();
+        };
+        let pids = descendants(root)
+            .into_iter()
+            .chain([root])
+            .filter(|p| *p > 1 && *p != me)
+            .collect();
+        // SAFETY: getpgrp only reads.
+        let own = unsafe { libc::getpgrp() };
+        let group = (pgid(r) == Some(r) && own != r).then_some(root);
+        Victims { pids, group }
+    }
+}
+
+#[cfg(not(unix))]
+mod groups {
+    use super::{Sig, Victims};
+
+    pub(super) fn kill(_: u32, _: Sig, _: bool) {}
+
+    pub(super) fn group_alive(_: u32) -> bool {
+        false
+    }
+
+    pub(super) fn claim_victims(root: u32) -> Victims {
+        Victims {
+            pids: vec![root],
+            group: None,
+        }
+    }
+}
+
 /// `/proc/<pid>/stat` text: (state letter, starttime ticks). The command (field 2) is in parentheses and may hold
 /// anything, so count from the last `)`. Pure, so the Linux reading is tested on every platform.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -339,6 +509,27 @@ mod imp {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stamp_of_this_boot_is_told_from_an_old_one() {
+        let own = start_stamp(std::process::id()).unwrap();
+        // pid 1 may be unreadable in a sandbox: then nothing is "from this boot", which is the safe answer.
+        if matches!(probe(1), Probe::Alive(Some(_))) {
+            assert!(from_this_boot(&own), "{own}");
+        }
+        assert!(!from_this_boot("bGONE:1") || !cfg!(target_os = "linux"));
+        assert!(!from_this_boot("e1"));
+        assert!(!from_this_boot(""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn this_process_is_never_its_own_victim() {
+        assert_eq!(claim_victims(std::process::id()), Victims::default());
+        assert_eq!(claim_victims(1), Victims::default());
+        assert_eq!(orphan_group(std::process::id(), "e1"), None);
+    }
 
     #[test]
     fn this_process_is_alive_with_a_stable_stamp() {

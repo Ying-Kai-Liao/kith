@@ -61,6 +61,7 @@ mod db;
 mod error;
 mod gate;
 mod holder_link;
+mod kill_resend;
 // `kith migrate --authority`: auth.json and the Keychain into core.db and the envelope (M2-8).
 #[cfg(unix)]
 mod import;
