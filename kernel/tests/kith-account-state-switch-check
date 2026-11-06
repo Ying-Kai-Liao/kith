@@ -139,7 +139,8 @@ rm -f "$DBF"*; mv "$T/db.keep" "$DBF"
 # No program: Python fails closed, never reads the note.
 KITH_BIN=$T/bin/kith-old KITH_CORE=python "$KITH" account list > "$T/out" 2>&1
 check "KITH_CORE=python is refused once the module moved" "grep -q 'has moved to the core' '$T/out'"
-PATH=/usr/bin:/bin python3 -I "$KERNEL/bin/kith-account" list > "$T/out" 2>&1; rc=$?
+# kith_bin also finds a build in the checkout (serve/host/target/debug/kith, which CI's host-build has), so point it at none.
+CARGO_TARGET_DIR=$T/no-build PATH=/usr/bin:/bin python3 -I "$KERNEL/bin/kith-account" list > "$T/out" 2>&1; rc=$?
 check "the Python verb without a core fails closed" "[ $rc = 1 ] && grep -q 'moved to the Kith core' '$T/out'"
 
 # 5. Rollback: the file again, with the marks made after the step.
