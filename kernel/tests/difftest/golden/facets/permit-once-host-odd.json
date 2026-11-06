@@ -1,5 +1,5 @@
 {
-  "fakes": "host-sock {\"input\": {\"command\": \"two\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\nhost-sock {\"input\": {\"command\": \"empty\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\n",
+  "fakes": "host-sock {\"input\": {\"command\": \"two\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\nhost-sock {\"input\": {\"command\": \"empty\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\nhost-sock {\"input\": {\"command\": \"h3\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\nhost-sock {\"input\": {\"command\": \"h4\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\nhost-sock {\"input\": {\"command\": \"h5\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\nhost-sock {\"input\": {\"command\": \"h6\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\n",
   "state:home/.kith/run/once/r1/": "<empty dir>\n",
   "state:home/serve/token": "fake-serve-token\n",
   "step0.exit": "0\n",
@@ -7,5 +7,17 @@
   "step0.stdout": "",
   "step1.exit": "0\n",
   "step1.stderr": "",
-  "step1.stdout": ""
+  "step1.stdout": "",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "",
+  "step3.exit": "0\n",
+  "step3.stderr": "",
+  "step3.stdout": "",
+  "step4.exit": "0\n",
+  "step4.stderr": "",
+  "step4.stdout": "",
+  "step5.exit": "0\n",
+  "step5.stderr": "",
+  "step5.stdout": ""
 }

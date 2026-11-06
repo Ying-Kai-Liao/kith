@@ -678,6 +678,27 @@ fn p6_malformed_lines_are_denied() {
     assert_eq!(prop_malformed_lines_are_denied(), Ok(()));
 }
 
+/// P8: a card yes kept for one run is taken by that run alone, once, whichever other runs and calls are asked about.
+fn prop_once_is_the_askers_alone() -> Result<(), String> {
+    check((0usize..4, 0usize..4, 0usize..3, 0usize..3), |(owner, other, call, other_call)| {
+        let t = TokenTable::with_ancestry(descends_window);
+        let (run, call_key) = (format!("run{owner}"), format!("call{call}"));
+        t.keep_once(&run, call_key.clone(), false);
+        let (other_run, other_key) = (format!("run{other}"), format!("call{other_call}"));
+        if other_run != run || other_key != call_key {
+            prop_assert!(!t.take_once(&other_run, &other_key), "{other_run}/{other_key} took {run}/{call_key}");
+        }
+        prop_assert!(t.take_once(&run, &call_key), "the asker lost its yes");
+        prop_assert!(!t.take_once(&run, &call_key), "the yes was taken twice");
+        Ok(())
+    })
+}
+
+#[test]
+fn p8_once_is_the_askers_alone() {
+    assert_eq!(prop_once_is_the_askers_alone(), Ok(()));
+}
+
 #[test]
 fn p7_pid_reuse_and_sibling_runs() {
     assert_eq!(prop_pid_reuse_and_sibling_runs(), Ok(()));

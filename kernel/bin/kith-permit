@@ -465,7 +465,7 @@ def denied(raw, once_dir, env=os.environ):
     return RETRY
 
 
-ONCE_WAIT_S = 10
+ONCE_WAIT_S = 4
 
 
 def host_allows(tool, tool_input, env):
@@ -496,7 +496,7 @@ def once(raw, once_dir, env=os.environ):
         if not host_allows(d['tool_name'], d['tool_input'], env):
             return ''
     except (OSError, ValueError):
-        note =os.path.join(once_dir, 'note-' + key)
+        note = os.path.join(once_dir, 'note-' + key)
         try:
             fresh = time.time() - os.stat(note).st_mtime <= NOTE_S
             with open(note) as f:

@@ -205,7 +205,15 @@ impl TokenTable {
     }
 
     fn revoke(&self, key: &[u8; 32]) {
-        self.entries.locked().remove(key);
+        let gone = self.entries.locked().remove(key);
+        if let Some(e) = gone {
+            self.drop_onces(&e.identity.run_id);
+        }
+    }
+
+    /// A run that lost its token keeps no yes: nothing could ask for it, and it would only sit until it expires.
+    fn drop_onces(&self, run_id: &str) {
+        self.onces.locked().retain(|(run, _), _| run != run_id);
     }
 
     /// A token for an owner run the kernel starts itself (over the API): bound to the process that will start the
@@ -221,7 +229,12 @@ impl TokenTable {
 
     /// Ends a token handed out by [`Self::insert_ask`]; false when it was not there.
     pub fn revoke_token(&self, token: &str) -> bool {
-        self.entries.locked().remove(&digest(token)).is_some()
+        let gone = self.entries.locked().remove(&digest(token));
+        let was_there = gone.is_some();
+        if let Some(e) = gone {
+            self.drop_onces(&e.identity.run_id);
+        }
+        was_there
     }
 
     /// Drops API-issued tokens past their end or whose process is gone (`alive`); returns the run ids that lost one,
@@ -242,7 +255,12 @@ impl TokenTable {
             .map(|(k, run, _, _)| (k, run))
             .collect();
         let mut entries = self.entries.locked();
-        dead.into_iter().filter_map(|(k, run)| entries.remove(&k).map(|_| run)).collect()
+        let reaped: Vec<String> = dead.into_iter().filter_map(|(k, run)| entries.remove(&k).map(|_| run)).collect();
+        drop(entries);
+        for run in &reaped {
+            self.drop_onces(run);
+        }
+        reaped
     }
 
     #[cfg(test)]
@@ -868,6 +886,8 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
             Response::Line(json!({"ok": true, "allowed": allowed}))
         }
         Ok(Authorized { identity, access: Some(call), .. }) => match (hub(), call) {
+            // Not reached: the arm above takes every ConsumeOnce that authorized. Kept so the match stays total
+            // and a future change to that arm cannot turn this into a card or a hub call.
             (_, AccessCall::ConsumeOnce(_)) => Response::refused("not authorized"),
             (Some(hub), AccessCall::Request(req)) => {
                 Response::Line(crate::cards::access::request(&hub, &identity, &req).await)
@@ -1400,6 +1420,26 @@ mod tests {
                 .sum();
             assert_eq!(wins, 1);
         }
+    }
+
+    #[test]
+    fn a_run_that_loses_its_token_keeps_no_yes() {
+        let t = open_table();
+        let (a, b) = (ask_identity("echo", "s1", None), ask_identity("echo", "s1", None));
+        let (ta, tb) = (
+            t.insert_ask(a.clone(), 5, Duration::from_secs(60)).unwrap(),
+            t.insert_ask(b.clone(), 5, Duration::from_secs(60)).unwrap(),
+        );
+        t.keep_once(&a.run_id, "k".into(), false);
+        t.keep_once(&b.run_id, "k".into(), false);
+        assert!(t.revoke_token(&ta));
+        assert!(!t.onces.locked().keys().any(|(run, _)| *run == a.run_id));
+        assert!(t.onces.locked().keys().any(|(run, _)| *run == b.run_id));
+        // a token past its end is reaped, and takes the run's yes with it
+        t.entries.locked().values_mut().for_each(|e| e.expires = Some(Instant::now() - Duration::from_secs(1)));
+        assert_eq!(t.reap(|_| true), vec![b.run_id.clone()]);
+        assert!(t.onces.locked().is_empty());
+        let _ = tb;
     }
 
     #[test]

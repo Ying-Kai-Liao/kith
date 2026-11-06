@@ -65,7 +65,7 @@ pub fn host_once_key(tool: &str, input: &Value) -> Option<String> {
 }
 
 /// How long `once` waits for the host to answer `consumeOnce`: it only looks in a table.
-const CONSUME_WAIT_S: u64 = 10;
+const CONSUME_WAIT_S: u64 = 4;
 
 /// Whether the host still holds the yes for this call, and uses it up. The file `denied` left is only a hint that there
 /// may be one: the yes lives in the host, so a file the run wrote itself allows nothing. No token, no socket, no answer:

@@ -2837,6 +2837,10 @@
    {
     "write": "home/in/pnv1",
     "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"nv 1\"}}"
+   },
+   {
+    "write": "home/replies/consume-yes",
+    "text": "{\"ok\": true, \"allowed\": true}\n"
    }
   ],
   "run": [
@@ -2890,21 +2894,21 @@
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "pnv0",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "pnv0",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
    ],
    [
-    "none",
+    "ask:consume-yes",
     "pnv1",
     "once",
     "--dir",
@@ -4936,6 +4940,38 @@
    {
     "write": "home/.kith/run/once/r1/a1ff9a84f3f607b0a3e9e1f185ce7924cce39736ea21729f3512af5b9db1d66d",
     "text": "4000000000\n"
+   },
+   {
+    "write": "home/in/h3",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"h3\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/e415ae1548f200c0d0c87da2427d3a55bed8df8d66d021d4a28f2b8c3dd19467",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/in/h4",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"h4\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/ef096cfb1298cbc2fbffd109815d181441374a58a0d2a1cc4730117885c137af",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/in/h5",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"h5\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/0f88ecef10fc6a8e4808048a7333298ddc7a17cf3322924894cdc48d600c74ad",
+    "text": "4000000000\n"
+   },
+   {
+    "write": "home/in/h6",
+    "text": "{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"h6\"}}"
+   },
+   {
+    "write": "home/.kith/run/once/r1/4d3f71fb7409e9bf538790365f10798f71bc3e0204400f873ea0e13d817f94b6",
+    "text": "4000000000\n"
    }
   ],
   "run": [
@@ -4949,6 +4985,34 @@
    [
     "ask:ok-not-true",
     "empty",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:allowed-not-true",
+    "h3",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:garbage",
+    "h4",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:empty",
+    "h5",
+    "once",
+    "--dir",
+    "{HOME}/.kith/run/once/r1"
+   ],
+   [
+    "ask:list",
+    "h6",
     "once",
     "--dir",
     "{HOME}/.kith/run/once/r1"
