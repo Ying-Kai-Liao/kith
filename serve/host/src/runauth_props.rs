@@ -551,7 +551,9 @@ pub fn prop_only_recall_is_authorized() -> Result<(), String> {
                         // The other methods: refused without their fields (a tool; a kind, target and reason), and checked
                         // on their own in runauth.rs and cards/access_tests.rs (`consumeAccess` takes none, so it isn't here).
                         "requestPermission",
-                        "requestAccess"
+                        "requestAccess",
+                        // An owner run's only (the guest's scope is refused first), checked in runauth.rs.
+                        "consumeOnce"
                     ][..]
                 )
                 .prop_map(|m| json!(m)),

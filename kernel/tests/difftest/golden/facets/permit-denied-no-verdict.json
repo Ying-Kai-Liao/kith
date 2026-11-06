@@ -25,12 +25,12 @@
   "step6.json": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"PermissionDenied\",\n    \"retry\": true\n  }\n}\n",
   "step6.stderr": "",
   "step7.exit": "0\n",
-  "step7.json": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"PreToolUse\",\n    \"permissionDecision\": \"allow\",\n    \"permissionDecisionReason\": \"kith: you allowed this once\"\n  }\n}\n",
   "step7.stderr": "",
+  "step7.stdout": "",
   "step8.exit": "0\n",
   "step8.stderr": "",
   "step8.stdout": "",
   "step9.exit": "0\n",
-  "step9.json": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"PreToolUse\",\n    \"permissionDecision\": \"allow\",\n    \"permissionDecisionReason\": \"kith: you allowed this once\"\n  }\n}\n",
-  "step9.stderr": ""
+  "step9.stderr": "",
+  "step9.stdout": ""
 }

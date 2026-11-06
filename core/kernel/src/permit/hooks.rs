@@ -14,13 +14,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The host waits its live window (default 90 s, at most 600) before it answers; a little longer than that.
 pub const WAIT_S: u64 = 660;
-const ONCE_KEEP_S: f64 = 24.0 * 3600.0;
+pub const ONCE_KEEP_S: f64 = 24.0 * 3600.0;
 /// What the classifier said when it gave no verdict. Claude Code ignores retry for these.
-const NO_VERDICT: [&str; 2] = ["Auto mode could not evaluate", "Classifier unavailable"];
+pub const NO_VERDICT: [&str; 2] = ["Auto mode could not evaluate", "Classifier unavailable"];
 /// The note for a refused retry lives a minute; one call is told at most once in 10 minutes.
 const NOTE_S: f64 = 60.0;
 /// A yes to a no-verdict block is only good for the next few minutes.
-const SHORT_ONCE_S: f64 = 600.0;
+pub const SHORT_ONCE_S: f64 = 600.0;
 const TOLD_S: f64 = 600.0;
 
 fn no_card(why: &str) -> String {
@@ -56,6 +56,33 @@ pub fn once_key(tool: &str, input: &Value) -> String {
     let text = dumps_sorted(&json!([tool, Value::Object(ti)]));
     let digest = Sha256::digest(text.as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The key the host files a yes under: `once_key`, or None for an input `once` and `denied` would not act on (a whole
+/// number too big to tell apart from its neighbour), which gets no yes.
+pub fn host_once_key(tool: &str, input: &Value) -> Option<String> {
+    (!has_big_int(input)).then(|| once_key(tool, input))
+}
+
+/// How long `once` waits for the host to answer `consumeOnce`: it only looks in a table.
+const CONSUME_WAIT_S: u64 = 10;
+
+/// Whether the host still holds the yes for this call, and uses it up. The file `denied` left is only a hint that there
+/// may be one: the yes lives in the host, so a file the run wrote itself allows nothing. No token, no socket, no answer:
+/// no.
+fn host_allows(env: &Env, tool: &str, input: &Value) -> bool {
+    let (Some(token), Some(socket)) = (env.get("KITH_ASK_TOKEN"), env.get("KITH_ASK_SOCKET")) else {
+        return false;
+    };
+    // only the owner's pair is used, never a guest's
+    let asker = Env::with(&[("KITH_ASK_TOKEN", token), ("KITH_ASK_SOCKET", socket)]);
+    let mut body = Map::new();
+    body.insert("tool".to_owned(), json!(tool));
+    body.insert("input".to_owned(), input.clone());
+    let reply = call_host(&asker, "consumeOnce", &body, Duration::from_secs(CONSUME_WAIT_S));
+    reply.is_some_and(|r| {
+        r.get("ok") == Some(&Value::Bool(true)) && r.get("allowed") == Some(&Value::Bool(true))
+    })
 }
 
 /// A whole number too big for i64/u64: without serde's arbitrary_precision it is read as an f64, so two different ones
@@ -248,20 +275,23 @@ pub fn denied(raw: &str, once_dir: &Path, env: &Env) -> String {
 
 /// The PreToolUse hook's output: allow (and use up the one-shot) when this exact call was approved; refuse it with the reason
 /// when `denied` left a note for its retry a moment ago; else ''.
-pub fn once(raw: &str, once_dir: &Path) -> String {
+pub fn once(raw: &str, once_dir: &Path, env: &Env) -> String {
     let Some(d) = hook_input(raw).filter(|d| !has_big_int(&d["tool_input"])) else {
         return String::new();
     };
     if d.get("hook_event_name").and_then(Value::as_str) != Some("PreToolUse") {
         return String::new();
     }
-    let key = once_key(
-        d["tool_name"].as_str().unwrap_or_default(),
-        &d["tool_input"],
-    );
+    let tool = d["tool_name"].as_str().unwrap_or_default();
+    let key = once_key(tool, &d["tool_input"]);
     let path = once_dir.join(&key);
     match take_one_shot(&path) {
-        Ok(true) => {}
+        // the file is a hint: the host says whether this call was really approved, and uses the yes up
+        Ok(true) => {
+            if !host_allows(env, tool, &d["tool_input"]) {
+                return String::new();
+            }
+        }
         Ok(false) => return String::new(),
         Err(()) => {
             let note = once_dir.join(format!("note-{key}"));
