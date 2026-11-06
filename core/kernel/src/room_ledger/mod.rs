@@ -75,8 +75,9 @@ fn present_now(ctx: &Ctx, room: &str) -> Vec<String> {
 /// `(room, rel)` for a file under `<home>/memory/rooms/<room>/`, links resolved on both sides.
 fn target(home: &str, data: &Value) -> Option<(String, String)> {
     let path = data.get("tool_input")?.get("file_path")?.as_str()?;
-    // a NUL in the path is not refused: the Python's non-strict `realpath` carries on with it
-    if !path.starts_with('/') {
+    // the Python's `realpath` raises on a NUL and its caller swallows that, so the note goes unrecorded;
+    // refuse it here so every OS agrees (Linux accepts a NUL in a Path where the Python does not)
+    if !path.starts_with('/') || path.contains('\0') {
         return None;
     }
     let mem = realpath(&Path::new(home).join("memory"));

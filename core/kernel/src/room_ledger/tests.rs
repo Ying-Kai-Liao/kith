@@ -108,3 +108,20 @@ fn ids_strip_and_lowercase_as_python_does() {
     );
     assert_eq!(py_strip("\x1c a \u{a0}"), "a");
 }
+
+#[test]
+fn a_path_with_a_nul_is_never_recorded() {
+    let root = scratch("nul");
+    let c = ctx(&root, "grp1", "sam");
+    let home = root.join("home");
+    let args: Vec<String> = ["post", "--agent", "echo", "--home", home.to_str().unwrap()]
+        .map(String::from)
+        .to_vec();
+    // a real \u0000 in the JSON, as the difftest case sends it
+    let input = format!(
+        "{{\"tool_input\": {{\"file_path\": \"{}/memory/rooms/grp1/a\\u0000b.md\"}}}}",
+        home.to_str().unwrap()
+    );
+    assert_eq!(run(&c, &args, &mut input.as_bytes()), 0);
+    assert!(!root.join("state/room-ledger/echo/grp1.json").exists());
+}
