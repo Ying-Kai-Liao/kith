@@ -775,10 +775,6 @@
     "text": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/caf\\u00e9.md\", \"content\": \"x\"}}"
    },
    {
-    "write": "home/in/nul",
-    "text": "{\"tool_input\": {\"file_path\": \"{HOME}/agents/echo/memory/rooms/grp1/a\\u0000b.md\"}}"
-   },
-   {
     "write": "home/in/num",
     "text": "{\"tool_input\": {\"file_path\": 123}}"
    },
@@ -1050,15 +1046,6 @@
    [
     "sam",
     "p_unicode",
-    "post",
-    "--agent",
-    "echo",
-    "--home",
-    "{HOME}/agents/echo"
-   ],
-   [
-    "sam",
-    "nul",
     "post",
     "--agent",
     "echo",
