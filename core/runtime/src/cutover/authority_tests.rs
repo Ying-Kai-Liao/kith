@@ -1401,7 +1401,10 @@ fn a_step_over_an_old_auth_json_put_back_after_a_finished_switch_is_refused() {
         .map(|e| e.path())
         .find(|p| p.to_string_lossy().contains(".pre-cutover-"))
         .expect("the tombstone kept a copy");
-    std::fs::copy(&kept, r.auth()).unwrap();
+    // An old file that differs from the kept copy (one that is the copy is the half-step, see below).
+    let mut old = std::fs::read(&kept).unwrap();
+    old.extend_from_slice(b"\n");
+    std::fs::write(r.auth(), old).unwrap();
     let before = std::fs::read(r.auth()).unwrap();
     let e = step(&reg, &r.env, "authority", opts())
         .unwrap_err()
@@ -1440,4 +1443,19 @@ fn rolling_back_a_stepping_module_left_by_a_repair_clears_its_marker() {
     assert_eq!(phase(&r.env, "authority"), None);
     assert!(marker::read(&r.db(), "authority").is_none());
     assert!(marker::seed(&r.db(), "authority").is_none());
+}
+
+#[test]
+fn a_crash_between_the_hard_link_and_the_rename_is_still_a_half_step_and_steps_again() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The tombstone got as far as the kept link; the rename never happened. The link is the real file itself.
+    let mut name = r.auth().file_name().unwrap().to_os_string();
+    name.push(".pre-cutover-9999999999");
+    std::fs::hard_link(r.auth(), r.auth().with_file_name(name)).unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    let out = step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(!said(&out, "already switched"), "{out:?}");
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
 }

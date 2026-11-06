@@ -28,7 +28,9 @@ pub(crate) fn is_real(path: &Path) -> bool {
 }
 
 /// Whether a tombstone put at or after `at` kept a copy of `path` (`<name>.pre-cutover-<t>`, `t >= at`): the switch
-/// finished its tombstone, so a real file there now was put back by someone, not left by a half-finished step.
+/// finished its tombstone, so a real file there now was put back by someone, not left by a half-finished step. A copy
+/// that is the real file itself (the hard link, or the same bytes) is the half-step: the crash came after the link and
+/// before the rename, so it does not count.
 pub(crate) fn kept_since(path: &Path, at: i64) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -43,7 +45,22 @@ pub(crate) fn kept_since(path: &Path, at: i64) -> bool {
             .and_then(|n| n.strip_prefix(&prefix))
             .and_then(|t| t.parse::<i64>().ok())
             .is_some_and(|t| t >= at)
+            && !same_file(path, &e.path())
     })
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(x), Ok(y)) = (std::fs::metadata(a), std::fs::metadata(b))
+            && x.dev() == y.dev()
+            && x.ino() == y.ino()
+        {
+            return true;
+        }
+    }
+    matches!((std::fs::read(a), std::fs::read(b)), (Ok(x), Ok(y)) if x == y)
 }
 
 /// The module a tombstone at `path` names (`None`: not a tombstone).
