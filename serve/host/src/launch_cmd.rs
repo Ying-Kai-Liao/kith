@@ -222,6 +222,7 @@ pub fn print_settings(a: &Args) -> Result<()> {
         cwd: &cwd,
         user_home: &c.home,
         kith_bin: kith_bin.as_deref(),
+        fence_bin: kith_bin.as_deref(),
         plugins_json: &plugins_json,
         owner_terminal: a.terminal,
         api_helper: a.api_helper.as_deref().unwrap_or_default(),
