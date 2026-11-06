@@ -59,6 +59,29 @@ pub fn group_gone(pgid: u32) -> bool {
     imp::group_gone(pgid)
 }
 
+/// Whether `stamp` is a start in the boot the system is running now: on Linux a `b…` stamp with the current boot id, on
+/// macOS an `e…` stamp at or after `kern.boottime`. Anything else (an earlier boot, an empty or old `lstart` record, a
+/// test marker, a boot that cannot be read, another system) is false. A caller that would signal the group of a recorded
+/// pid that is gone asks this first: a group at that id from an earlier boot is a stranger's. (macOS moves
+/// `kern.boottime` with a wall-clock step; a step forward makes a live record look older and so only leaves it alone.)
+#[must_use]
+pub fn this_boot(stamp: &str) -> bool {
+    in_boot(stamp, imp::boot_id().as_deref(), imp::boot_ms())
+}
+
+/// [`this_boot`] against a given boot id (Linux) and boot time in epoch ms (macOS). Pure, so both are tested everywhere.
+fn in_boot(stamp: &str, boot_id: Option<&str>, boot_ms: Option<i64>) -> bool {
+    match form(stamp) {
+        Some('b') => boot_id.is_some_and(|id| {
+            stamp[1..]
+                .split_once(':')
+                .is_some_and(|(s, _)| s == id.trim())
+        }),
+        Some('e') => boot_ms.is_some_and(|b| stamp[1..].parse::<i64>().is_ok_and(|ms| ms >= b)),
+        _ => false,
+    }
+}
+
 /// The recorded form of an epoch start.
 #[must_use]
 pub fn epoch_stamp(ms: i64) -> String {
@@ -151,6 +174,40 @@ mod imp {
             return false;
         }
         std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+    }
+
+    pub(super) fn boot_id() -> Option<String> {
+        if cfg!(target_os = "linux") {
+            std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()
+        } else {
+            None
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn boot_ms() -> Option<i64> {
+        let mut mib = [libc::CTL_KERN, libc::KERN_BOOTTIME];
+        // SAFETY: an all-zero timeval is a valid value for sysctl to fill in.
+        let mut tv: libc::timeval = unsafe { std::mem::zeroed() };
+        let mut len = size_of::<libc::timeval>();
+        // SAFETY: `mib` is two ints; `tv` is `len` bytes and outlives the call, which writes at most `len` bytes into it.
+        let rc = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                2,
+                (&raw mut tv).cast::<libc::c_void>(),
+                &raw mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (rc == 0 && len == size_of::<libc::timeval>() && tv.tv_sec > 0)
+            .then(|| tv.tv_sec * 1000 + i64::from(tv.tv_usec) / 1000)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn boot_ms() -> Option<i64> {
+        None
     }
 
     pub(super) fn session_id(pid: u32) -> Option<u32> {
@@ -289,6 +346,15 @@ mod imp {
         true
     }
 
+    // No process groups to signal here, so no caller needs the boot.
+    pub(super) fn boot_id() -> Option<String> {
+        None
+    }
+
+    pub(super) fn boot_ms() -> Option<i64> {
+        None
+    }
+
     pub(super) fn probe(pid: u32) -> Probe {
         if pid == 0 {
             return Probe::Gone;
@@ -360,6 +426,14 @@ mod imp {
 
     pub(super) fn group_gone(_: u32) -> bool {
         true
+    }
+
+    pub(super) fn boot_id() -> Option<String> {
+        None
+    }
+
+    pub(super) fn boot_ms() -> Option<i64> {
+        None
     }
 }
 
@@ -470,6 +544,34 @@ mod tests {
     fn pid_zero_is_nobodys() {
         assert_eq!(probe(0), Probe::Gone);
         assert!(group_gone(0));
+    }
+
+    #[test]
+    fn only_a_stamp_from_the_running_boot_is_this_boots() {
+        let id = "8c1e0f6a-1b2c-4d3e-9f40-5a6b7c8d9e0f\n";
+        assert!(in_boot(&boot_stamp(id, 5), Some(id), None));
+        assert!(!in_boot(&boot_stamp("another", 5), Some(id), None));
+        assert!(!in_boot(&boot_stamp(id, 5), None, Some(0)), "no boot id");
+        assert!(in_boot(&epoch_stamp(2_000), None, Some(2_000)));
+        assert!(
+            !in_boot(&epoch_stamp(1_999), None, Some(2_000)),
+            "before the boot"
+        );
+        assert!(
+            !in_boot(&epoch_stamp(2_000), Some(id), None),
+            "no boot time"
+        );
+        for unknown in ["", "e", "Thu Nov  6 10:00:00 2026", "x1"] {
+            assert!(!in_boot(unknown, Some(id), Some(0)), "{unknown:?}");
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn this_process_started_in_this_boot() {
+        let mine = start_stamp(std::process::id()).expect("own start");
+        assert!(this_boot(&mine), "{mine}");
+        assert!(!this_boot("e1"));
     }
 
     /// A leader that exits leaves its group alive while a child in it runs: the pid is gone, the group is not.

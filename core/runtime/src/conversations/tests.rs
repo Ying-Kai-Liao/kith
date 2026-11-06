@@ -1280,6 +1280,32 @@ fn a_direct_claim_survives_reconcile_and_a_holder_change_and_ends_when_its_pid_i
     assert_eq!(state(&c, id), "ended");
 }
 
+/// A `--direct` claimer leads its terminal job's group and its MCP children share it: with the claimer dead and a child
+/// still in the group, the claim stays live; it ends once the group is empty.
+#[test]
+fn a_direct_claim_with_a_dead_pid_and_a_live_group_stays_live() {
+    struct Group(std::cell::Cell<bool>);
+    impl Liveness for Group {
+        fn start(&self, _: u32) -> Option<String> {
+            None
+        }
+        fn gone(&self, _: u32) -> bool {
+            true
+        }
+        fn group_gone(&self, _: u32) -> bool {
+            !self.0.get()
+        }
+    }
+    let (_t, mut c) = open();
+    let id = direct(&mut c, "c1", 700);
+    let live = Group(std::cell::Cell::new(true));
+    assert!(end_gone(&mut c, &live, 23).expect("probe").is_empty());
+    assert_eq!(state(&c, id), "claimed");
+    live.0.set(false);
+    assert_eq!(end_gone(&mut c, &live, 24).expect("probe"), vec![id]);
+    assert_eq!(state(&c, id), "ended");
+}
+
 #[test]
 fn a_second_reconcile_in_one_generation_is_refused() {
     let (_t, mut c) = open();

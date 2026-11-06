@@ -906,8 +906,9 @@ pub(crate) fn reconcile(
 }
 
 /// Ends the process group of each recorded process whose pid still has the recorded start stamp, or whose pid is gone
-/// while its group still has a process, and waits for the groups to be empty. A pid that is gone with its group, or has
-/// another start in the same form, is not ours: left alone. So is a
+/// while its group still has a process and its record is a start from this boot, and waits for the groups to be empty. A
+/// pid that is gone with its group, gone with a record from an earlier boot or of unknown form, or has another start in
+/// the same form, is not ours: left alone. So is a
 /// live pid that is not a session leader: every holder spawn calls `setsid`, so the recorded process leads its session
 /// and anything else at that pid is a stranger, whatever the record says. A start that cannot be told otherwise (the
 /// pid's own cannot be read, or the record is empty, old `ps` text, or of another form) is neither: nothing is
@@ -927,6 +928,14 @@ fn end_groups(
             // hand a pid out while a group of that id has a process left, so a live group here is still the recorded one.
             procstart::Probe::Gone if procstart::group_gone(p.pid) => {
                 notes.push(format!("holder: pid {} is gone; nothing to end", p.pid));
+            }
+            // That only holds within one boot: after a reboot the id is anyone's, and an unknown start proves nothing.
+            procstart::Probe::Gone if !procstart::this_boot(&p.started) => {
+                notes.push(format!(
+                    "holder: pid {} is gone and its record ({:?}) is not from this boot, so its process group is not \
+                     the one recorded; left alone",
+                    p.pid, p.started
+                ));
             }
             procstart::Probe::Gone => {
                 notes.push(format!(

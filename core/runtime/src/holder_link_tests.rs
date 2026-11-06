@@ -559,33 +559,39 @@ fn a_blocked_pass_still_notes_the_groups_it_ended() {
     rig.finish(&[&h1, &h2]);
 }
 
-/// A recorded stub that died with its engine still running in its group: the group is ended, not left as "gone". A
-/// recorded pid whose group is empty too is left alone.
+/// A group whose leader has exited and been reaped, with a `sleep` child still in it: (the group id, the child).
 #[cfg(unix)]
-#[test]
-fn a_group_whose_leader_died_is_ended() {
+fn orphan_group() -> (u32, u32) {
     use std::os::unix::process::CommandExt as _;
-    let orphan_group = || {
-        let mut leader = std::process::Command::new("sh")
-            .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
-            .stdout(std::process::Stdio::piped())
-            .process_group(0)
-            .spawn()
-            .unwrap();
-        let mut out = String::new();
-        std::io::Read::read_to_string(leader.stdout.as_mut().unwrap(), &mut out).unwrap();
-        leader.wait().unwrap();
-        (leader.id(), out.trim().parse::<u32>().unwrap())
-    };
-    let (pgid, engine) = orphan_group();
+    let mut leader = std::process::Command::new("sh")
+        .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+        .stdout(std::process::Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let mut out = String::new();
+    std::io::Read::read_to_string(leader.stdout.as_mut().unwrap(), &mut out).unwrap();
+    leader.wait().unwrap();
+    let pgid = leader.id();
     assert_eq!(
         kith_kernel::procstart::probe(pgid),
         kith_kernel::procstart::Probe::Gone
     );
     assert!(!kith_kernel::procstart::group_gone(pgid));
+    (pgid, out.trim().parse().unwrap())
+}
+
+/// A recorded stub (its start from this boot) that died with its engine still running in its group: the group is
+/// ended, not left as "gone". A recorded pid whose group is empty too is left alone.
+#[cfg(unix)]
+#[test]
+fn a_group_whose_leader_died_is_ended() {
+    let (pgid, engine) = orphan_group();
+    // The leader's own stamp is gone with it; this test process started in the same boot, which is all that is asked.
+    let this_boot = kith_kernel::procstart::start_stamp(std::process::id()).unwrap();
     let recorded = |pid| RecordedProc {
         pid,
-        started: "e1".into(),
+        started: this_boot.clone(),
         conv: "c".into(),
     };
     let mut notes = Vec::new();
@@ -606,6 +612,30 @@ fn a_group_whose_leader_died_is_ended() {
         notes,
         vec![format!("holder: pid {pgid} is gone; nothing to end")]
     );
+}
+
+/// After a reboot a gone pid's id is anyone's: a live group at it whose record is from an earlier boot, or whose start is
+/// unknown, is never signalled.
+#[cfg(unix)]
+#[test]
+fn a_live_group_at_a_dead_pid_with_a_record_from_another_boot_is_left_alone() {
+    let (pgid, engine) = orphan_group();
+    for started in ["e1", "", "Thu Nov  6 10:00:00 2026"] {
+        let mut notes = Vec::new();
+        let rec = RecordedProc {
+            pid: pgid,
+            started: started.into(),
+            conv: "c".into(),
+        };
+        super::end_groups(&mut notes, &[rec], Duration::from_secs(1)).unwrap();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("left alone"), "{notes:?}");
+        assert!(
+            !kith_kernel::procstart::group_gone(pgid),
+            "engine {engine} is not signalled for {started:?}"
+        );
+    }
+    assert!(super::signal_group(pgid, "KILL"));
 }
 
 #[test]

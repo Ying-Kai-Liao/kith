@@ -10,7 +10,7 @@
 //! | 5 reconcile after a generation bump | [`reconcile`] |
 //! | 6 revoke a person | [`revoke_person`] |
 //! | 7 a different holder instance | [`different_holder`] |
-//! | `ending` -> `ended` once the pid is gone | [`end_gone`] |
+//! | `ending` -> `ended` once the pid and its process group are gone | [`end_gone`] |
 //! | an exit on a usage limit: mark out, requeue | [`report`] -> `accounts::failover` (M3-9b) |
 //!
 //! The rules the writer-lock model (`verification/writer-lock/Holder.tla`, switch `RedeemWrite`) checks, and the
@@ -21,15 +21,16 @@
 //! - **Release on a new holder instance** is a CAS too: an unlisted `claimed` claim becomes `ended`, so a later redeem
 //!   fails (`release_unlisted`).
 //! - A `running` claim the holder does not list is never `ended` straight away: it goes to `ending` and stays the writer
-//!   (the partial unique index `claims_one_writer` blocks a second claim) until its recorded pid is confirmed gone
-//!   ([`end_gone`]) or the holder reports the exit of that same pid ([`report`]).
+//!   (the partial unique index `claims_one_writer` blocks a second claim) until its recorded pid and the process group
+//!   it led are confirmed gone ([`end_gone`]) or the holder reports the exit of that same pid ([`report`]).
 //! - A `done` or `exit` report ends a `running` or `ending` claim only when it names the recorded pid. One that names
 //!   another pid (a respawn that lost the lock) changes nothing. One that names no pid on a claim with a recorded pid
 //!   moves it to `ending` (still the writer): [`end_gone`] then ends it once that pid is gone. `busy` follows the same
 //!   pid rule. Reports are keyed by `(claim_id, kind, pid)` (migration 81), so the real writer's own report is
 //!   never shadowed by another process's.
 //! - A `--direct` (`external`) claim has no stub and no holder entry: reconcile and a holder change leave it alone, and
-//!   only its recorded pid being gone ends it ([`end_gone`]).
+//!   only its recorded pid and that pid's process group being gone end it ([`end_gone`]): a terminal claimer leads its
+//!   job's group and the MCP servers it started share it, so a live group is still the writer's.
 //! - The may check is the caller's, but the revoke it saw is carried in: [`revoke_epoch`] before the check, passed in
 //!   [`NewClaim::revoke_seen`], refused in the transaction if [`revoke_person`] bumped it since. [`redeem`] needs no
 //!   epoch: [`revoke_person`] moves live claims off `claimed`, so a later redeem fails its CAS.
