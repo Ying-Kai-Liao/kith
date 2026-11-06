@@ -206,14 +206,9 @@ pub(crate) fn user_writes(conn: &Connection) -> Result<bool> {
     if tests_switched::get() {
         return Ok(true);
     }
-    let _ = conn;
     Ok(switched(conn))
 }
 
-/// The `accounts` cutover module is switched for THIS core: the switch file, the marker in this very database and the
-/// tombstone all agree (`cutover::same_answer::may_serve`), so a core.db from another machine, a forged switch file or a
-/// rolled-back module answers no. The machine folder is found from the connection's own path; a database that is not at
-/// `<machine>/core/core.db` (memory, a test's scratch file) is never switched. Unix only, like the framework.
 #[cfg(test)]
 pub(crate) mod tests_switched {
     use std::cell::Cell;
@@ -226,6 +221,10 @@ pub(crate) mod tests_switched {
     }
 }
 
+/// The `accounts` cutover module is switched for THIS core: the switch file, the marker in this very database and the
+/// tombstone all agree (`cutover::same_answer::may_serve`), so a core.db from another machine, a forged switch file or a
+/// rolled-back module answers no. The machine folder is found from the connection's own path; a database that is not at
+/// `<machine>/core/core.db` (memory, a test's scratch file) is never switched. Unix only, like the framework.
 #[cfg(unix)]
 fn switched(conn: &Connection) -> bool {
     use crate::cutover::{Env, modules::accounts::Accounts, same_answer::may_serve};

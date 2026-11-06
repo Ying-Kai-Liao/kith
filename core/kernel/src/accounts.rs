@@ -39,8 +39,8 @@ mod verbs;
 pub use pick::{Pick, Skipped, Status, pick_from};
 pub use settings::read_settings;
 pub use state::{
-    FileState, Snapshot, StateHold, StateSource, hold, out_marks_from, record_started, replace,
-    snapshot, state_file, tombstoned,
+    FileState, Fixed, Snapshot, StateHold, StateSource, hold, out_marks_from, record_started,
+    replace, snapshot, state_file, tombstoned,
 };
 pub use verbs::{VERBS, Verb, pick_value, run_verb};
 
@@ -855,10 +855,11 @@ pub fn main_env(
     let mut entry = main_id(ctx, agent, Some(agent_md), None);
     if opts.state {
         // A choice made over state that could not be read would start on an account that is out: stop instead.
-        read_state(&ctx.machine).map_err(|e| format!("can't tell which accounts are out: {e}"))?;
+        let state = read_state(&ctx.machine)
+            .map_err(|e| format!("can't tell which accounts are out: {e}"))?;
         let s = settings::read(ctx);
         let now = clock::now();
-        let picked = pick_from(ctx, &s, agent, Some(agent_md), false, now, &FileState);
+        let picked = pick_from(ctx, &s, agent, Some(agent_md), false, now, &Fixed(state));
         let mut cands = picked.candidates.clone();
         match opts.prefer {
             Some(p) if cands.iter().any(|c| c == p) && !picked.all_out => {

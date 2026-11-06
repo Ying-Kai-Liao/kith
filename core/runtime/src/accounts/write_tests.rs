@@ -205,3 +205,32 @@ fn a_write_is_one_transaction() {
     assert_eq!(s["claude"], json!({"last_started": NOW}));
     assert_eq!(s["codex"]["out_until"], NOW + 9);
 }
+
+#[test]
+fn the_failover_flag_alone_does_not_open_the_four_writers() {
+    let (_t, core) = core();
+    core.conn()
+        .execute(
+            "INSERT INTO meta (key, value) VALUES (?1, '1')",
+            [super::CORE_WRITES],
+        )
+        .unwrap();
+    for (m, p) in [
+        (
+            "account.out",
+            json!({"id": "claude", "until": NOW + 10, "now": NOW}),
+        ),
+        ("account.clear", json!({"id": "claude", "now": NOW})),
+        ("account.started", json!({"id": "claude", "now": NOW})),
+        (
+            "account.usage",
+            json!({"id": "claude", "reading": {"windows": [{"name": "w", "percent": 1}]}, "now": NOW}),
+        ),
+    ] {
+        let e = call(&core, m, &p).unwrap_err();
+        assert!(matches!(e, Error::Refused(_)), "{m}: {e}");
+    }
+    assert_eq!(state(&core), json!({}));
+    // the failover's own writer still goes through its flag
+    assert!(super::core_writes(core.conn()).unwrap());
+}

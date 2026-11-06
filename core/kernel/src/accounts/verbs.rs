@@ -111,12 +111,9 @@ pub fn pick_value(agent: &str, cross_harness: bool, p: &super::Pick) -> Value {
     })
 }
 
-/// The state is read next: a tombstone, or a core that does not give it, stops the verb (exit 1) instead of showing every
-/// account as ready.
-fn guard(ctx: &Ctx<'_>) -> Result<(), Verb> {
-    change::read_state(&ctx.machine)
-        .map(|_| ())
-        .map_err(|e| Verb::die(&e, 1))
+/// The state, read once for the verb: a tombstone, or a core that does not give it, stops the verb.
+fn checked(ctx: &Ctx<'_>) -> Result<Map, Verb> {
+    change::read_state(&ctx.machine).map_err(|e| Verb::die(&e, 1))
 }
 
 /// A settings file in the older shape is rewritten in the new one before every command (`kith_settings.migrate_file()`
@@ -155,8 +152,13 @@ fn list(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
     if !args.is_empty() {
         return Err(Verb::die("account list [--agent A] [--json]", 2));
     }
-    guard(ctx)?;
-    Ok(Verb::out(listing::list(ctx, json, &agent)))
+    let state = checked(ctx)?;
+    Ok(Verb::out(listing::list_over(
+        ctx,
+        json,
+        &agent,
+        &state::Fixed(state),
+    )))
 }
 
 fn pick(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
@@ -165,9 +167,17 @@ fn pick(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
         return Err(Verb::die("account pick <agent> [--json]", 2));
     }
     let agent = agent_arg(ctx, Some(args.remove(0)))?;
-    guard(ctx)?;
+    let state = checked(ctx)?;
     let s = settings::read(ctx);
-    let p = pick_from(ctx, &s, &agent, None, true, clock::now(), &state::FileState);
+    let p = pick_from(
+        ctx,
+        &s,
+        &agent,
+        None,
+        true,
+        clock::now(),
+        &state::Fixed(state),
+    );
     if as_json {
         let v = pick_value(&agent, settings::cross_harness(&s, &agent), &p);
         return Ok(Verb::out(pyjson::dumps(&v) + "\n"));

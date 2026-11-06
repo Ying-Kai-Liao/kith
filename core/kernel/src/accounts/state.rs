@@ -423,6 +423,15 @@ pub trait StateSource {
     fn accounts(&self, machine: &Path) -> Map;
 }
 
+/// State that was read already (and checked): a verb reads once, so a second read that fails cannot turn into "no state".
+pub struct Fixed(pub Map);
+
+impl StateSource for Fixed {
+    fn accounts(&self, _machine: &Path) -> Map {
+        self.0.clone()
+    }
+}
+
 /// `<machine>/accounts/state.json` (the old kernel marks imported into it first): what every run reads today.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FileState;

@@ -361,8 +361,13 @@ fn usage_text(r: &Map) -> String {
 /// `kith account list [--agent A] [--json]`: every account, whether it is in the set (and its place), ready / out until a
 /// time / signed out (and the command that fixes it), last usage, pins.
 pub fn list(ctx: &Ctx<'_>, json: bool, agent: &str) -> String {
+    list_over(ctx, json, agent, &state::FileState)
+}
+
+/// [`list`] over a given state source.
+pub fn list_over(ctx: &Ctx<'_>, json: bool, agent: &str, src: &dyn state::StateSource) -> String {
     let s = settings::read(ctx);
-    let rows = rows(ctx, &s, agent, true, clock::now());
+    let rows = rows_from(ctx, &s, agent, true, clock::now(), src);
     if json {
         return pyjson::dumps(&Value::Array(rows.into_iter().map(Value::Object).collect())) + "\n";
     }
