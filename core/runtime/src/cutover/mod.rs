@@ -172,6 +172,12 @@ pub(crate) trait Module {
     fn source_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
         Ok(None)
     }
+    /// What the marker also keeps of this import (stored beside it, removed with it): the rows that existed when the switch
+    /// was made, for a rollback that must not give a row added since the keys of an older row with the same id. Read after
+    /// the import, before the marker. Default none.
+    fn seed(&self, _env: &Env, _db: &rusqlite::Connection) -> Result<Option<String>> {
+        Ok(None)
+    }
     /// Runs under the source lock, just before the tombstones are put: a module that recorded what its import read
     /// refuses here when a source changed since (a writer that does not take the lock), so the step never tombstones a
     /// file it did not import. Default: nothing to check.
@@ -244,7 +250,12 @@ pub(crate) fn step(
     {
         return Err(Error::Refused(format!("cutover: {name}: {why}")));
     }
-    let cur = state::read(&env.layout, name)?;
+    // A damaged record is read as "no record" only for the repair below, under the locks; anything else about it refuses.
+    let (cur, damaged) = match state::read(&env.layout, name) {
+        Ok(c) => (c, None),
+        Err(e @ Error::Refused(_)) if !opts.dry_run => (None, Some(e)),
+        Err(e) => return Err(e),
+    };
     let mut lines = Vec::new();
     if cur.as_ref().is_some_and(|s| s.phase == Phase::RollingBack) {
         return Err(Error::Refused(format!(
@@ -269,17 +280,47 @@ pub(crate) fn step(
     let mut core = lock(env)?;
     // Held to the end of the step: the import, the check, the marker, the record and the tombstones.
     let _source = m.source_lock(env)?;
+    // A crash after the switched record and before the tombstones leaves the file a real auth.json that kith-auth still
+    // writes (the host sees no tombstone, so it is unswitched). Those writes were never imported: step the module again
+    // from the import, under the source lock this step holds, not over them.
+    let cur = match cur {
+        Some(s)
+            if s.phase == Phase::Switched
+                && m.tombstones(env)
+                    .iter()
+                    .any(|p| !tombstone::is_tombstone(p)) =>
+        {
+            let s = Switch {
+                phase: Phase::Stepping,
+                ..s
+            };
+            state::write(&env.layout, name, &s)?;
+            Some(s)
+        }
+        c => c,
+    };
     let mut snapshot = cur.as_ref().and_then(|s| s.snapshot.clone());
-    // A finished switch whose record was lost: every tombstone names this module and the core holds the marker. The
-    // sources are gone, so there is nothing to import; the record is written again and that is all.
+    // A finished switch whose record was lost or damaged: every tombstone names this module and the core holds the
+    // marker. The sources are gone, so there is nothing to import; the record is written again and that is all.
     if cur.is_none() {
         let tombs = m.tombstones(env);
-        if let Some((at, _)) = marker::read(core.conn(), name).filter(|_| {
+        let finished = marker::read(core.conn(), name).filter(|_| {
             !tombs.is_empty()
                 && tombs
                     .iter()
                     .all(|p| tombstone::module_of(p).as_deref() == Some(name))
-        }) {
+        });
+        if finished.is_none()
+            && let Some(e) = damaged
+        {
+            // A damaged record still counts as switched: nothing may step over it unless the tombstones and the marker
+            // say the switch had finished.
+            return Err(Error::Refused(format!(
+                "{e}. Repair: if the switch had finished, put `state=switched` and `at=<the marker's at>` back in {}; else restore it from a backup, then re-run `kith migrate step {name}`",
+                state::path(&env.layout, name)?.display()
+            )));
+        }
+        if let Some((at, _)) = finished {
             state::write(
                 &env.layout,
                 name,
@@ -324,7 +365,8 @@ pub(crate) fn step(
         // Before the marker and the switched record: a refusal here leaves the module stepping, so a rerun imports again.
         m.before_tombstone(env)?;
         let digest = m.digest(env, core.conn())?;
-        marker::write(&mut core, name, at, &digest)?;
+        let seed = m.seed(env, core.conn())?;
+        marker::write(&mut core, name, at, &digest, seed.as_deref())?;
         state::write(
             &env.layout,
             name,
@@ -409,8 +451,18 @@ pub(crate) fn rollback(
         },
     )?;
     lines.extend(m.restore_secrets(env, &mut core)?);
-    lines.extend(m.export_back(env, &mut core)?);
-    for p in m.tombstones(env) {
+    // export_back never replaces a real file: the rename is its last act, so a file that is not a tombstone means the
+    // export finished (a crash before the record was cleared) or the switch never got to tombstone it. Either way
+    // kith-auth may have written it since, and the core's older rows would undo that.
+    let tombs = m.tombstones(env);
+    if !tombs.is_empty() && tombs.iter().all(|p| tombstone::is_real(p)) {
+        lines.push(format!(
+            "{name}: the source files are already real files; they are left as they are"
+        ));
+    } else {
+        lines.extend(m.export_back(env, &mut core)?);
+    }
+    for p in tombs {
         if tombstone::is_tombstone(&p) {
             return Err(Error::Refused(format!(
                 "cutover: {name}: export-back left a tombstone at {}; still rolling back (re-run `kith rollback {name}`)",

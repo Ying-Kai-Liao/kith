@@ -1174,3 +1174,160 @@ fn a_list_of_one_stays_a_list_and_a_derived_owner_is_left_unsaid() {
         "it did name the owner"
     );
 }
+
+/// A step that died after the switched record and before the tombstone: the tombstone's temporary file cannot be written.
+/// The directory is the crash; removing it is the restart.
+fn crash_before_tombstone(r: &Rig, reg: &[Box<dyn Module>]) -> PathBuf {
+    let blocker = r.auth().with_extension("tombstone.tmp");
+    std::fs::create_dir(&blocker).unwrap();
+    step(reg, &r.env, "authority", opts()).unwrap_err();
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(
+        !tombstone::is_tombstone(&r.auth()),
+        "the file is still real"
+    );
+    blocker
+}
+
+fn revoked_in_file(r: &Rig, id: &str) {
+    r.edit(|v| v["people"][id]["revoked"] = json!({"at": 7}));
+}
+
+fn revoked_in_core(r: &Rig, id: &str) -> bool {
+    r.db()
+        .query_row("SELECT revoked FROM people WHERE id = ?1", [id], |x| {
+            x.get::<_, i64>(0)
+        })
+        .unwrap()
+        == 1
+}
+
+#[test]
+fn a_crash_after_the_switched_record_does_not_lose_a_kith_auth_revoke() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // kith-auth still writes the real file (the host is unswitched); its mirror to the core failed.
+    revoked_in_file(&r, "sam");
+    assert!(!revoked_in_core(&r, "sam"));
+    std::fs::remove_dir(blocker).unwrap();
+    // The import refuses to overwrite the core's older rows without --force: nothing is tombstoned, the revoke is safe
+    // in the file, and the module is stepping again.
+    assert!(step(&reg, &r.env, "authority", opts()).is_err());
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Stepping));
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    let force = Opts {
+        force: true,
+        ..opts()
+    };
+    let out = step(&reg, &r.env, "authority", force).unwrap();
+    assert!(!said(&out, "already switched"), "{out:?}");
+    assert!(revoked_in_core(&r, "sam"), "the revoke was imported");
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    // Run again: now it is finished, and says so.
+    let out = step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(said(&out, "already switched"), "{out:?}");
+}
+
+#[test]
+fn a_rollback_of_a_half_step_leaves_the_real_file_alone() {
+    let (r, reg) = rig();
+    let _blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    let out = rollback(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(said(&out, "left as they are"), "{out:?}");
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(v["people"]["sam"]["revoked"]["at"], 7, "the revoke stays");
+    assert_eq!(phase(&r.env, "authority"), None);
+    assert!(marker::read(&r.db(), "authority").is_none());
+}
+
+#[test]
+fn a_rollback_that_crashed_after_the_rename_does_not_undo_a_later_revoke() {
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    let at = state::read(&r.env.layout, "authority").unwrap().unwrap().at;
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    // The crash: the file is renamed, the record and the marker are still there.
+    state::write(
+        &r.env.layout,
+        "authority",
+        &Switch {
+            phase: Phase::RollingBack,
+            snapshot: None,
+            at,
+        },
+    )
+    .unwrap();
+    {
+        let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+        marker::write(&mut core, "authority", at, "", None).unwrap();
+    }
+    revoked_in_file(&r, "sam");
+    let out = rollback(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(said(&out, "left as they are"), "{out:?}");
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(v["people"]["sam"]["revoked"]["at"], 7);
+    assert_eq!(phase(&r.env, "authority"), None);
+    assert!(marker::read(&r.db(), "authority").is_none());
+}
+
+#[test]
+fn export_back_does_not_replace_a_real_file_even_when_called_on_one() {
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    std::fs::write(r.auth(), json!({"people": {"x": {}}}).to_string()).unwrap();
+    let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+    let out = reg[0].export_back(&r.env, &mut core).unwrap();
+    assert!(said(&out, "left as it is"), "{out:?}");
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert!(v["people"]["x"].is_object() && v["people"]["kai"].is_null());
+}
+
+/// A person removed in the core and added again while switched (a new `seq`).
+fn readd_mia(r: &Rig) {
+    let db = r.db();
+    db.execute("DELETE FROM memberships WHERE person = 'mia'", [])
+        .unwrap();
+    db.execute("DELETE FROM people WHERE id = 'mia'", [])
+        .unwrap();
+    db.execute(
+        "INSERT INTO people (id, name) VALUES ('mia', 'New Mia')",
+        [],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_reused_id_gets_none_of_the_old_rows_copy_only_keys_after_a_rollback() {
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    readd_mia(&r);
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(v["people"]["mia"]["name"], "New Mia");
+    assert!(
+        v["people"]["mia"].get("agents").is_none(),
+        "{}",
+        v["people"]["mia"]
+    );
+    // A row that was there at the switch and never left keeps its keys.
+    assert_eq!(v["people"]["mia-bot"]["bot_of"], "mia");
+    assert_eq!(v["people"]["kai"]["handles"]["telegram"], "1");
+}
+
+#[test]
+fn a_marker_from_before_seeds_brings_no_copy_only_keys_back() {
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    r.db()
+        .execute("DELETE FROM meta WHERE key = 'cutover:authority:seed'", [])
+        .unwrap();
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert!(v["people"]["mia"].get("agents").is_none());
+    assert_eq!(
+        v["people"]["mia"]["name"], "Mia",
+        "the core's keys are there"
+    );
+}

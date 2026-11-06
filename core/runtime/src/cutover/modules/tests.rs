@@ -201,7 +201,7 @@ fn accounts_a_tampered_marker_or_switch_file_denies_everything() {
     assert!(!writes(&env));
     // A marker for another switch (`at` differs): a forged or stale file.
     let mut core = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
-    marker::write(&mut core, "accounts", 1, "").unwrap();
+    marker::write(&mut core, "accounts", 1, "", None).unwrap();
     drop(core);
     assert!(!serves(&env, &super::accounts::Accounts));
     assert!(!writes(&env));
