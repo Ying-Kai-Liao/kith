@@ -428,11 +428,12 @@ pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -
     pids
 }
 
-/// Whether `pid` leads its own process group (checked right after its start was verified).
+/// Whether `pid` leads its own process group (checked right after its start was verified). Never the host's own group:
+/// a host started from the claimer's shell would be in it.
 #[cfg(unix)]
 fn leads_group(pid: u32) -> bool {
-    // SAFETY: getpgid(2) only reads.
-    libc::pid_t::try_from(pid).is_ok_and(|p| unsafe { libc::getpgid(p) } == p)
+    // SAFETY: getpgid(2) and getpgrp(2) only read.
+    libc::pid_t::try_from(pid).is_ok_and(|p| unsafe { libc::getpgid(p) == p && libc::getpgrp() != p })
 }
 
 #[cfg(not(unix))]
