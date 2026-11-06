@@ -61,7 +61,12 @@ fn check_dir(dir: &Path) -> Result<()> {
 
 #[cfg(unix)]
 fn check_file(path: &Path) -> Result<()> {
-    let m = mode(path)?;
+    use std::os::unix::fs::PermissionsExt as _;
+    // A sidecar another connection deleted since the listing is nothing to protect; anything else gone is an error.
+    let m = match fs::metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && is_sidecar(path) => return Ok(()),
+        r => r?.permissions().mode() & 0o777,
+    };
     if m & 0o077 != 0 {
         return Err(Error::Permissions(format!(
             "kith-core: {} is mode {m:03o}, open to other users; kith won't start until it is private: chmod 600 '{}'",
@@ -188,11 +193,25 @@ enum Verdict {
 }
 
 /// `SQLite`'s `<name>.db-wal` and `<name>.db-shm`: the only files allowed to vanish mid-check.
-#[cfg_attr(unix, allow(dead_code))]
 fn is_sidecar(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.ends_with(".db-wal") || n.ends_with(".db-shm"))
+}
+
+/// Whether the file is provably gone after `icacls` failed on it. `meta` is the kind of error a fresh metadata call
+/// gave (None when it succeeded). A real `NotFound` is gone. A file mid-delete on Windows (another connection closed
+/// its handle, delete pending) answers metadata with access denied while `icacls` says it can't find it: that pair is
+/// gone too, but access denied alone (a file we can't see into) is not.
+#[cfg_attr(unix, allow(dead_code))]
+fn gone_after_failure(meta: Option<std::io::ErrorKind>, icacls_text: &str) -> bool {
+    use std::io::ErrorKind::{NotFound, PermissionDenied};
+    let lower = icacls_text.to_lowercase();
+    match meta {
+        Some(NotFound) => true,
+        Some(PermissionDenied) => lower.contains("cannot find") || lower.contains("not find"),
+        _ => false,
+    }
 }
 
 /// Whether `icacls` output holds at least one `principal:(rights)` entry.
@@ -252,7 +271,7 @@ fn check_acl(path: &Path) -> Result<()> {
     // open list never goes away, so a few short retries cost nothing on the normal path.
     let mut unreadable = false;
     let mut last_text = String::new();
-    for attempt in 0..5 {
+    for attempt in 0..10 {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_millis(40));
         }
@@ -270,8 +289,10 @@ fn check_acl(path: &Path) -> Result<()> {
                 &String::from_utf8_lossy(&o.stdout),
                 &path.to_string_lossy(),
                 &user(),
-                // Only a real NotFound is gone; access denied or a dangling link is not.
-                !matches!(fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound),
+                !gone_after_failure(
+                    fs::symlink_metadata(path).err().map(|e| e.kind()),
+                    &last_text,
+                ),
                 allow_vanish,
             ),
             Err(e) => {
@@ -336,6 +357,30 @@ mod tests {
     fn a_sidecar_deleted_while_being_read_is_not_an_open_file() {
         assert_eq!(judge(false, "", "x", "me", false, true), Verdict::Vanished);
         assert_eq!(judge(false, "", "x", "me", true, true), Verdict::Unreadable);
+    }
+
+    #[test]
+    fn gone_means_not_found_or_delete_pending_with_icacls_agreeing() {
+        use std::io::ErrorKind::{NotFound, PermissionDenied};
+        let nf = "Failed processing 1 files C:\\m\\core.db-wal: The system cannot find the file specified.";
+        assert!(gone_after_failure(Some(NotFound), ""));
+        assert!(gone_after_failure(Some(PermissionDenied), nf));
+        assert!(!gone_after_failure(
+            Some(PermissionDenied),
+            "Access is denied."
+        ));
+        assert!(!gone_after_failure(None, nf));
+        assert!(!gone_after_failure(Some(std::io::ErrorKind::Other), nf));
+    }
+
+    /// The Unix side of the same race: listed, then deleted before the stat.
+    #[cfg(unix)]
+    #[test]
+    fn a_sidecar_deleted_before_the_mode_read_passes_but_other_files_do_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(check_file(&tmp.path().join("core.db-wal")).is_ok());
+        assert!(check_file(&tmp.path().join("core.db-shm")).is_ok());
+        assert!(check_file(&tmp.path().join("core.db")).is_err());
     }
 
     #[test]
