@@ -368,10 +368,12 @@ fn invited_person(hub: &Hub, id: &str) -> Result<PersonRow> {
 
 /// `invited_person`, and on a switched host also a person the core holds but the host never invited: one the owner
 /// added from the terminal (`kith-auth person` + `member`) and `kith migrate --authority` imported. The People list
-/// shows them, so the owner must be able to change their access. The row made is `createInvite`'s (`put_person`, a repeat
+/// shows them, so the owner must be able to change their access. Only when switched: on a host that is not, the owner
+/// can still run `kith-auth member` from the terminal, but on a switched one kith-auth exits 3 on the tombstone (G1),
+/// so this is the only way in. The row made is `createInvite`'s (`put_person`, a repeat
 /// keeps what is there, so two calls at once make one); it holds no access of its own. The owner, a bot and a revoked
 /// person are refused as before.
-async fn invited_or_core_person(hub: &Hub, bin: &Path, id: &str) -> Result<PersonRow> {
+pub(super) async fn invited_or_core_person(hub: &Hub, bin: &Path, id: &str) -> Result<PersonRow> {
     if let Some(p) = hub.store.person(id) {
         return Ok(p);
     }
@@ -401,8 +403,8 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         if changed_agents {
             let want = roles_of(&b["agents"])?;
             // What kith-auth says they hold by their own row, whoever made it (the owner may have added one with the
-            // CLI): a read that fails stops here, before anything is changed. The file, not the core: until the
-            // switch auth.json is the truth and the core a copy of it.
+            // CLI): a read that fails stops here, before anything is changed. Until the switch the file is the
+            // truth and the core a copy of it; on a switched host this read goes to the core.
             let held: Vec<String> = crate::remote::members::auth_person(&bin, id)
                 .await
                 .context("couldn't read what kith-auth says they hold")?

@@ -927,6 +927,64 @@ fn set_person_access_reaches_a_core_person_with_no_host_row() {
     }
 }
 
+/// Core-only ids that must stay refused: the owner, a bot, a revoked person, and one the core never heard of.
+fn refused_core_ids(core: &Core) -> [&'static str; 4] {
+    core.ask("people.addPerson", json!({"id": "kai", "owner": true})).expect("owner");
+    core.ask("people.addBot", json!({"id": "botx", "of": PEOPLE[1]})).expect("bot");
+    core.ask("people.addPerson", json!({"id": "gone"})).expect("person");
+    core.ask("people.suspend", json!({"id": "gone"})).expect("suspend");
+    ["kai", "botx", "gone", "nobody"]
+}
+
+fn owner_call(w: &World, method: &str, body: Value) -> anyhow::Result<Value> {
+    w.rt.block_on(super::dispatch(&w.hub, &super::devices::Caller::Local, method, body))
+}
+
+/// The switched-only rule: a host that is not switched still needs the host row (the owner has `kith-auth member`).
+#[test]
+fn set_person_access_on_an_unswitched_host_still_needs_a_host_row() {
+    let w = World::new();
+    let body = json!({"personId": PEOPLE[0], "agents": {}});
+    let e = owner_call(&w, "setPersonAccess", body).expect_err("no host row");
+    assert!(format!("{e:#}").contains("isn't someone you invited"), "{e:#}");
+    assert!(w.hub.store.person(PEOPLE[0]).is_none(), "a row was made");
+}
+
+/// A projects-only call (agents null) and a grant take the same road as the revoke.
+#[test]
+fn set_person_access_on_a_core_person_can_share_projects_and_grant() {
+    let w = World::switched();
+    assert!(w.hub.store.person(PEOPLE[0]).is_none());
+    owner_call(&w, "setPersonAccess", json!({"personId": PEOPLE[0], "projects": ["pr1"]})).expect("projects only");
+    let row = w.hub.store.person(PEOPLE[0]).expect("row made");
+    assert_eq!(row.projects, vec!["pr1".to_owned()]);
+    let body = json!({"personId": PEOPLE[1], "agents": {AGENTS[1]: "member"}});
+    owner_call(&w, "setPersonAccess", body).expect("grant");
+    assert!(w.hub.store.person(PEOPLE[1]).is_some());
+    let core = w.core.as_ref().unwrap();
+    let said = core.ask("people.may", json!({"person": PEOPLE[1], "agent": AGENTS[1]})).unwrap();
+    assert_eq!(said["allowed"], true, "the core holds the grant: {said}");
+    w.assert_kith_auth_untouched();
+}
+
+/// `setAutoAllowBots` has the same gap: the toggle needs the host row.
+#[test]
+fn set_auto_allow_bots_reaches_a_core_person_with_no_host_row() {
+    let w = World::switched();
+    assert!(w.hub.store.person(PEOPLE[0]).is_none());
+    owner_call(&w, "setAutoAllowBots", json!({"personId": PEOPLE[0], "on": true})).expect("terminal-added person");
+    assert!(w.hub.store.person(PEOPLE[0]).is_some_and(|p| p.auto_bots));
+    for id in refused_core_ids(w.core.as_ref().unwrap()) {
+        let e = owner_call(&w, "setAutoAllowBots", json!({"personId": id, "on": true})).expect_err(id);
+        assert!(format!("{e:#}").contains("isn't someone you invited"), "{id}: {e:#}");
+        assert!(w.hub.store.person(id).is_none(), "{id} got a host row");
+    }
+    let core = w.core.as_ref().unwrap();
+    core.ask("people.suspend", json!({"id": PEOPLE[1]})).expect("suspend");
+    let e = owner_call(&w, "setAutoAllowBots", json!({"personId": PEOPLE[1], "on": true})).expect_err("revoked");
+    assert!(format!("{e:#}").contains("isn't someone you invited"), "{e:#}");
+}
+
 /// Soundness alone passes a guard that refuses everything: these calls must get through.
 #[test]
 fn guard_lets_a_granted_member_use_their_own_chat() {
