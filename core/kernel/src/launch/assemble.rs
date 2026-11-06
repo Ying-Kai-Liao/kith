@@ -1615,7 +1615,16 @@ mod tests {
             "#!/bin/sh\necho 'usage: kith kernel readfence --root DIR'\n",
         );
         let old = script("old", "#!/bin/sh\necho 'no agent named kernel'\nexit 1\n");
-        assert!(knows_readfence(&new));
+        // A script just written can still be "text file busy" while another test forks: ask again.
+        let mut knows = false;
+        for _ in 0..20 {
+            knows = knows_readfence(&new);
+            if knows {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        assert!(knows);
         assert!(!knows_readfence(&old));
         assert!(!knows_readfence(&dir.join("missing")));
         assert!(knows_readfence(&std::env::current_exe().unwrap()));
