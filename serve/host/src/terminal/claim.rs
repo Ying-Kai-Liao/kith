@@ -359,6 +359,44 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
     ended
 }
 
+/// Ends the processes of core claims a revoke sent to `ending` (`people.suspend` / `people.removePerson` answer them as
+/// `kill`: pid and start stamp). Nothing in the daemon signals them: its holder link kills only what it started itself or
+/// an old instance's, and `end_gone` waits for the pid to leave. Like [`sweep`]: only a process positively the one that
+/// took the claim (a reused pid or a pid already gone is left alone, so a retried revoke kills nothing twice), its
+/// descendants first, SIGTERM then SIGKILL after `grace`. Blocking. Returns the pids it signalled.
+pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -> Vec<u32> {
+    let me = std::process::id();
+    let mut victims: Vec<u32> = Vec::new();
+    for (pid, started) in held {
+        let claim = Claim {
+            pid: *pid,
+            proc_start: started.clone(),
+            at: String::new(),
+            kind: Kind::Other,
+            takeover: false,
+            person: None,
+            agent: None,
+        };
+        // A start that cannot be compared is not enough to signal: `is_claimer` wants a positive match.
+        if *pid == me || *pid <= 1 || !pid_runs(*pid) || !claim.is_claimer() {
+            continue;
+        }
+        for p in descendants(*pid).into_iter().chain([*pid]) {
+            if p != me && !victims.contains(&p) {
+                victims.push(p);
+            }
+        }
+    }
+    signal(&victims, libc::SIGTERM);
+    let deadline = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < deadline && victims.iter().any(|p| pid_runs(*p)) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let left: Vec<u32> = victims.iter().copied().filter(|p| pid_runs(*p)).collect();
+    signal(&left, libc::SIGKILL);
+    victims
+}
+
 #[cfg(unix)]
 fn signal(pids: &[u32], sig: libc::c_int) {
     for pid in pids {

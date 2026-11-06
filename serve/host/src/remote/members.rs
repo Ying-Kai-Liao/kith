@@ -205,7 +205,19 @@ pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {
 pub async fn auth_people_now(bin: &Path) -> Result<Vec<AuthPerson>> {
     let mut people = auth_people(bin).await?;
     if crate::api::authority::guard_on_core() {
-        let rows = crate::api::authority::owner_call("people.list", json!({}), true).await?;
+        // Marked while the host believes it is switched: the core refuses it once authority is back on auth.json, and
+        // the list kith-auth gave above (the file's rows) then stands.
+        let marked = json!({ "viaSwitch": crate::api::authority::switched() });
+        let rows = match crate::api::authority::owner_call("people.list", marked, true).await {
+            Ok(rows) => rows,
+            Err(e)
+                if e.downcast_ref::<crate::api::authority::CoreRefused>()
+                    .is_some_and(|r| r.0.starts_with("not switched")) =>
+            {
+                return Ok(people);
+            }
+            Err(e) => return Err(e),
+        };
         let rows = rows["rows"].as_array().cloned().unwrap_or_default();
         let agent = |r: &serde_json::Value| AuthAgent {
             agent: r["agent"].as_str().unwrap_or_default().to_owned(),

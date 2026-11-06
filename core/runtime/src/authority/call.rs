@@ -173,6 +173,22 @@ fn removal_only(method: &str) -> bool {
     )
 }
 
+/// The methods that only look, which the host's guard marks with `viaSwitch` (`CoreMethod::marked`, `core_verdict`).
+fn is_read(method: &str, params: &Value) -> bool {
+    matches!(
+        method,
+        "people.list"
+            | "people.listPeople"
+            | "people.may"
+            | "people.resolve"
+            | "people.bridgeHeld"
+            | "people.invites"
+            | "people.budgets"
+            | "people.ledger"
+            | "people.retired"
+    ) || (method == "people.botsCap" && word(params, "amount").is_none())
+}
+
 fn switch(params: &Value, key: &str) -> bool {
     params.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -272,6 +288,18 @@ pub(crate) fn call_in(
     method: &str,
     params: &Value,
 ) -> Result<Value> {
+    // A host that read through the switch (its guard reads, `viaSwitch`) is refused unless authority is switched, like a
+    // marked write below, so the host's cached "switched" is not part of the safety argument: right after a rollback
+    // the file is the truth again, and this store may be missing a revoke that only reached the file. A damaged record
+    // is refused too (a read answers from a store nobody can vouch for; the host then reads the file, which fails closed).
+    if switch(params, "viaSwitch") && is_read(method, params) {
+        let machine = core
+            .folders()
+            .map_or_else(|| life.machine.clone(), |f| f.machine.clone());
+        if authority_record(&machine) != Record::Switched {
+            return Err(Error::Refused(format!("authority: {NOT_SWITCHED}")));
+        }
+    }
     match method {
         "people.list" => store::read(
             core,

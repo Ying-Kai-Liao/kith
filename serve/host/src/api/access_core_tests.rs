@@ -582,3 +582,158 @@ async fn a_failed_revoke_while_unswitched_still_cuts_the_person_off() {
     assert!(super::people::local_revoke(&r.hub, &nowhere, "sam", true).await.is_err());
     assert!(r.hub.store.suspended_people().unwrap().contains(&"sam".to_owned()), "cut_off ran");
 }
+
+// MARK: S3: a marked read is refused by the core unless it is switched
+
+#[tokio::test]
+async fn the_core_refuses_a_marked_read_unless_the_phase_is_switched_or_rolling_back() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    let reads: [(&str, Value); 7] = [
+        ("people.may", json!({"person": "sam", "agent": "house"})),
+        ("people.listPeople", json!({})),
+        ("people.list", json!({"person": "sam"})),
+        ("people.invites", json!({})),
+        ("people.retired", json!({"id": "sam"})),
+        ("people.budgets", json!({"agent": "house"})),
+        ("people.ledger", json!({})),
+    ];
+    let marked = |p: &Value| {
+        let mut p = p.clone();
+        p["viaSwitch"] = true.into();
+        p
+    };
+    // No record (rolled back and cleared): every marked read is refused; the unmarked ones are as they were.
+    for (m, p) in &reads {
+        assert!(core.ask(m, p.clone()).is_some(), "{m}: unmarked");
+        assert!(core.ask(m, marked(p)).is_none(), "{m}: no record");
+    }
+    for state in ["switched", "rolling-back"] {
+        core.phase(state);
+        for (m, p) in &reads {
+            assert!(core.ask(m, marked(p)).is_some(), "{m}: {state}");
+        }
+    }
+    core.phase("stepping");
+    for (m, p) in &reads {
+        assert!(core.ask(m, marked(p)).is_none(), "{m}: stepping");
+    }
+    // A record nobody can read: a read is refused (a write that only removes access still goes through).
+    core.phase("switched");
+    let record = core.tmp.path().join("machine/core/cutover/authority.switch");
+    std::fs::write(&record, b"\xff\xfe not a record").unwrap();
+    for (m, p) in &reads {
+        assert!(core.ask(m, marked(p)).is_none(), "{m}: damaged");
+    }
+    assert!(
+        core.ask("people.suspend", json!({"id": "sam", "viaSwitch": true})).is_some(),
+        "a removal still goes through"
+    );
+}
+
+#[tokio::test]
+async fn after_a_rollback_a_stale_switched_cache_does_not_let_the_guard_read_the_core() {
+    use super::authority::Authority;
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    sam_only_in_the_core(&r, &core);
+    core.on();
+    core.switched();
+    assert!(roles::may_use("sam", "house").await, "switched: the core's row answers");
+    // The rollback finished (record cleared, file plain) inside the cache's 2 s: it still says switched. Sam is then
+    // revoked in the file; the core, no longer the store, never heard of it.
+    core.clear_phase();
+    let auth = core.tmp.path().join("auth.json");
+    std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
+    *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap() = Some(true);
+    assert!(super::authority::switched() && !super::authority::switched_now());
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+    assert!(!r.allowed("sam", "house"), "the file revoked Sam");
+    assert!(core.rows().iter().any(|(a, _)| a == "house"), "the core still grants");
+    // The core refuses the marked read, and the guard answers from the file.
+    assert_eq!(super::authority::core_heard("sam", "house").await, super::authority::Heard::NotSwitched);
+    assert!(!roles::may_use("sam", "house").await, "the file's revoke wins over a stale cache");
+    // The events' seam fails closed on the refusal instead of answering from the core.
+    assert!(!core.data.granted("sam", "house"));
+}
+
+#[tokio::test]
+async fn a_stale_unswitched_cache_reads_unmarked_and_the_core_answers() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    sam_only_in_the_core(&r, &core);
+    core.on();
+    core.switched();
+    // Right after the switch the cache still says "not switched": the read carries no marker and the core, the only
+    // store now, answers.
+    *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap() = Some(false);
+    assert!(roles::may_use("sam", "house").await);
+}
+
+// MARK: S4: a switched suspend or removal ends the person's live core claims
+
+fn exits(child: &mut std::process::Child) -> bool {
+    for _ in 0..100 {
+        if child.try_wait().unwrap().is_some() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
+}
+
+/// The `kill` entry the core answers for a claim of a process (`people.suspend` / `people.removePerson`).
+fn kill_entry(pid: u32, started: &str) -> Value {
+    json!({"claimId": 1, "pid": pid, "started": started})
+}
+
+#[tokio::test]
+async fn the_kill_list_of_a_suspend_or_removal_ends_the_claimed_process_once() {
+    let mut child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+    let started = kith_kernel::procstart::start_stamp(child.id()).expect("the sleeper's start");
+    // A claim whose recorded start is another process's: a reused pid, never signalled.
+    let other = kith_kernel::procstart::start_stamp(std::process::id()).expect("our start");
+    let said = json!({"lines": [], "kill": [kill_entry(child.id(), &other)]});
+    assert_eq!(super::authority::finish_revoke(&said, "sam").await, "");
+    assert!(child.try_wait().unwrap().is_none(), "a pid with another start stamp is left alone");
+    // The recorded process: gone.
+    let said = json!({"lines": [], "kill": [kill_entry(child.id(), &started)]});
+    assert_eq!(super::authority::finish_revoke(&said, "sam").await, "");
+    assert!(exits(&mut child), "the revoked person's process is gone");
+    // A retry: the pid is gone (reaped), nothing is signalled and nothing fails.
+    assert_eq!(super::authority::finish_revoke(&said, "sam").await, "");
+}
+
+#[tokio::test]
+async fn a_switched_suspend_through_the_host_reports_nothing_pending_when_the_order_finished() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    core.switched();
+    let (core_updated, pending) = super::people::local_revoke(&r.hub, &r.bin, "sam", true).await.unwrap();
+    assert!(core_updated && pending.is_none(), "{pending:?}");
+    let (_, pending) = super::people::local_revoke(&r.hub, &r.bin, "sam", true).await.unwrap();
+    assert!(pending.is_none(), "a retried suspend is harmless");
+    // The core's answer is what `finish_revoke` reads: `kill` is a list of {claimId, pid, started}.
+    let said = core.ask("people.suspend", json!({"id": "sam", "viaSwitch": true})).unwrap();
+    assert!(said.get("kill").is_none_or(Value::is_array), "{said}");
+}
+
+#[tokio::test]
+async fn a_revoke_the_core_could_not_finish_is_told_to_the_owner() {
+    let said = json!({"lines": [], "revokePending": "claims: the database is locked"});
+    let line = super::authority::finish_revoke(&said, "sam").await;
+    assert!(
+        line.contains("sam") && line.contains("part of the revoke is pending") && line.contains("database is locked"),
+        "{line}"
+    );
+    assert_eq!(super::authority::finish_revoke(&json!({"lines": []}), "sam").await, "");
+    // A kill entry with no pid, or for a pid that is not running, is left alone.
+    let gone = json!({"kill": [kill_entry(999_999, "e1"), {"claimId": 2, "pid": null}]});
+    assert_eq!(super::authority::finish_revoke(&gone, "sam").await, "");
+}

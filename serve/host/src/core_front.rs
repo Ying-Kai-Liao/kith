@@ -67,6 +67,7 @@ pub fn caller_env() -> serde_json::Map<String, Value> {
 /// One read row asked of the daemon by the host itself (the event filter's authority questions, M2-15). `Some(answer)`
 /// only when a daemon answered; no daemon, a refusal, a mismatch or a lost connection are all `None`, which the asker
 /// must read as "no" for anything that grants.
+#[cfg(test)]
 pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
     match kith_core::reach(folders, method, params, true) {
         kith_core::Reached::Answered(answer) => Some(answer),

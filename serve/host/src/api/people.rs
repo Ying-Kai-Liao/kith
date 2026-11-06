@@ -474,7 +474,7 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
         }
         // Undo on the owner clears old data (an owner who was also revoked). It stays on this Mac: the cloud never holds
         // the owner (apply_revoked skips them), so there is nothing to post and no other computer to tell.
-        let core_updated = local_revoke(hub, &bin, id, false).await?;
+        let (core_updated, _) = local_revoke(hub, &bin, id, false).await?;
         return Ok(json!({"revoked": false, "everywhere": false, "coreUpdated": core_updated}));
     }
     if !who.bot_of.is_empty() {
@@ -491,21 +491,27 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    let core_updated = local_revoke(hub, &bin, id, revoke).await?;
+    let (core_updated, pending) = local_revoke(hub, &bin, id, revoke).await?;
     if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
         crate::remote::handle_revokes::changed(hub, &who, revoke);
     }
     // false: auth.json has it but the core's copy missed it (or may have); the owner runs it again once the core is up.
-    Ok(json!({"revoked": revoke, "everywhere": everywhere, "coreUpdated": core_updated}))
+    let mut out = json!({"revoked": revoke, "everywhere": everywhere, "coreUpdated": core_updated});
+    // The core took the revoke but could not finish stopping their runs: said to the owner, not only logged.
+    if let Some(pending) = pending {
+        out["revokePending"] = pending.into();
+    }
+    Ok(out)
 }
 
 /// This computer's half of a revoke or its undo, for the owner's own call, a change from the cloud and one from a paired
 /// computer: kith-auth's revoked state, then what the host holds. A revoke cuts the person off at once (R5) and keeps
 /// their devices, memberships and open invites for undo (R1, R2); an undo gives them back. Either repeats harmlessly.
 /// True when the core's copy of the person took the change too; false when kith-auth warned that it didn't (logged here).
-pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<bool> {
-    let core_updated = {
+/// The second is what a switched core said it could not finish of the revoke order (`revokePending`), for the owner.
+pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<(bool, Option<String>)> {
+    let (core_updated, pending) = {
         let _w = AUTH_WRITES.lock().await;
         let said = super::authority::run_auth_noted(
             bin,
@@ -525,14 +531,15 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
             }
         };
         account::note_stderr(id, &said);
-        !account::core_missed(&said)
+        let pending = said.lines().find(|l| l.contains("part of the revoke is pending")).map(str::to_owned);
+        (!account::core_missed(&said), pending)
     };
     if revoke {
         cut_off(hub, id).await;
     } else {
         restored(hub, id);
     }
-    Ok(core_updated)
+    Ok((core_updated, pending))
 }
 
 /// Undo: what the revoke kept is back as it was.
