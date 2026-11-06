@@ -186,7 +186,7 @@ fn write(core: &Core, method: &str, params: &Value) -> Result<Value> {
         }
         _ => (Change::Started { id: id.to_owned() }, json!({ "id": id })),
     };
-    if !super::user_writes(core.conn())? {
+    if !super::user_writes(core.conn()) {
         return Err(Error::Refused(format!(
             "kith-core: {method}: account state is still in state.json; kith migrate step accounts moves it here"
         )));

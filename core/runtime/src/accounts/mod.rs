@@ -201,24 +201,12 @@ pub(crate) fn core_writes(conn: &Connection) -> Result<bool> {
 
 /// Whether the four writers of `kith account` (`out`, `clear`, `usage`, a start) may write: only a real switch. The flag
 /// [`CORE_WRITES`] opens the failover alone.
-pub(crate) fn user_writes(conn: &Connection) -> Result<bool> {
+pub(crate) fn user_writes(conn: &Connection) -> bool {
     #[cfg(test)]
     if tests_switched::get() {
-        return Ok(true);
+        return true;
     }
-    Ok(switched(conn))
-}
-
-#[cfg(test)]
-pub(crate) mod tests_switched {
-    use std::cell::Cell;
-    thread_local! { static ON: Cell<bool> = const { Cell::new(false) }; }
-    pub(crate) fn get() -> bool {
-        ON.with(Cell::get)
-    }
-    pub(crate) fn set(on: bool) {
-        ON.with(|c| c.set(on));
-    }
+    switched(conn)
 }
 
 /// The `accounts` cutover module is switched for THIS core: the switch file, the marker in this very database and the
@@ -348,4 +336,16 @@ pub(crate) fn make(
     }
     tx.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) mod tests_switched {
+    use std::cell::Cell;
+    thread_local! { static ON: Cell<bool> = const { Cell::new(false) }; }
+    pub(crate) fn get() -> bool {
+        ON.with(Cell::get)
+    }
+    pub(crate) fn set(on: bool) {
+        ON.with(|c| c.set(on));
+    }
 }
