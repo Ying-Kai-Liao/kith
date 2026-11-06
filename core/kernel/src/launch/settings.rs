@@ -1394,15 +1394,23 @@ fn guest_sandbox(
             .flat_map(|d| both(&abspath(&d))),
     );
     let refused = r#"{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "the read check could not run, so this read is refused"}}"#;
+    let root_args = fence_roots
+        .iter()
+        .map(|r| format!("--root {}", shquote(r)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    // The Rust hook (`kith kernel readfence`) when the launch knows a kith binary, else the Python one. A hook that cannot
+    // run (a kith binary too old to know the verb, a missing script) still prints the refusal through `|| out=`.
+    let program = match i.kith_bin.filter(|b| !b.is_empty()) {
+        Some(bin) => format!("{} kernel readfence", shquote(bin)),
+        None => format!(
+            "{} -I {}/lib/kith_readfence.py",
+            shquote(&python3_abs(i.env)),
+            shquote(g.kernel)
+        ),
+    };
     let fence = format!(
-        "out=$({} -I {}/lib/kith_readfence.py {}) || out={}; printf %s \"$out\"",
-        shquote(&python3_abs(i.env)),
-        shquote(g.kernel),
-        fence_roots
-            .iter()
-            .map(|r| format!("--root {}", shquote(r)))
-            .collect::<Vec<_>>()
-            .join(" "),
+        "out=$({program} {root_args}) || out={}; printf %s \"$out\"",
         shquote(refused)
     );
     list(obj(sm, "hooks")?, "PreToolUse")?.push(json!({

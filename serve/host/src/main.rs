@@ -553,6 +553,13 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// The guest read fence (`kernel/lib/kith_readfence.py`): the PreToolUse hook JSON on stdin, `--root DIR` for each folder the
+    /// run may read; prints a deny decision or nothing. A launch writes this as the hook when it knows a kith binary.
+    #[command(disable_help_flag = true)]
+    Readfence {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
     /// `kith-pkg resolve`: the pinned package folder a run starts from (routed from `kith` while `pkg` is switched).
     #[command(disable_help_flag = true)]
     Pkg {
@@ -1502,6 +1509,21 @@ async fn main() -> Result<()> {
             if let KernelCmd::Attach { endpoint, ticket_stdin, observer, takeover, detach_key, tty } = cmd {
                 std::process::exit(run_attach(&endpoint, ticket_stdin, observer, takeover, &detach_key, tty));
             }
+            if let KernelCmd::Readfence { args } = &cmd {
+                // Before the account store, the core and its log: the hook runs on every file tool call of a guest run.
+                use std::io::{Read as _, Write as _};
+                let mut stdin = Vec::new();
+                let read = std::io::stdin().read_to_end(&mut stdin);
+                let ctx = kith_kernel::readfence::Ctx::from_process();
+                let out = if read.is_ok() {
+                    kith_kernel::readfence::run(&ctx, args, &stdin)
+                } else {
+                    kith_kernel::readfence::run(&ctx, args, b"")
+                };
+                print!("{out}");
+                let _ = std::io::stdout().flush();
+                std::process::exit(0);
+            }
             // Every kernel verb's notes (the accounts state, the settings migration) reach core.log, also the ones that
             // exit before `through_core`.
             kith_core::route_kernel_notes(&kernel::folders(&kith_kernel::paths::process_home()));
@@ -1649,6 +1671,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Threads { .. }
                     | KernelCmd::ProjectId { .. }
                     | KernelCmd::Pkg { .. }
+                    | KernelCmd::Readfence { .. }
                     | KernelCmd::Permit { .. }
                     | KernelCmd::AccountState { .. }
                     | KernelCmd::Secrets { .. }
