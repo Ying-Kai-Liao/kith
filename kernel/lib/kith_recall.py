@@ -306,22 +306,25 @@ def caller():
         if owner:
             # known members, so the room's notes are in play: the owner's own set cut to what every member may see
             # (no member at all: nothing is cut but other people's notes)
-            sets = [_member_audiences(m, who['agent']) for m in members]
+            sets = [_member_audiences(m, who['agent'], room) for m in members]
             base = {'owner', 'shared', 'room:' + room}
             return {**who, 'audiences': sorted(base.intersection(*sets)), 'present': members}
-        # everyone present reads the answer: the asker's set cut to what every member may also see
-        sets = [_member_audiences(m, who['agent']) for m in members]
-        return {**who, 'audiences': sorted(set(who['audiences']).intersection(*sets)), 'present': members}
+        # everyone present reads the answer: the asker's set cut to what every member may also see. Room membership
+        # lives with the host (as in kith_facets load): a person its member list names is in this room.
+        own = set(who['audiences']) | ({'room:' + room} if who['who'] in members and not who.get('bot') else set())
+        sets = [_member_audiences(m, who['agent'], room) for m in members]
+        return {**who, 'audiences': sorted(own.intersection(*sets)), 'present': members}
     return who
 
 
-def _member_audiences(pid, agent):
-    """What a room member may see of this agent's memory; empty when kith-auth does not know them."""
+def _member_audiences(pid, agent, room):
+    """What a member of group room `room` may see of this agent's memory (the room among it: the host's member list
+    named them); empty when kith-auth does not know them."""
     r = _auth('resolve', agent or '-', '--person', pid)
     if not r or not r.get('allowed'):
         return set()
     rooms = [x for x in r.get('rooms', []) if isinstance(x, str) and kith_facets.ID.match(x)]
-    return {'shared', 'person:' + pid, *('room:' + x for x in rooms)}
+    return {'shared', 'person:' + pid, 'room:' + room, *('room:' + x for x in rooms)}
 
 
 def _caller():
@@ -339,7 +342,7 @@ def _caller():
         # bot_may lets the bot use (resolve runs it). No answer from kith-auth, no access.
         r = _auth('resolve', agent or '-', '--person', person) if agent else None
         ok = bool(r and r.get('allowed')) and bot_root(rows, person)
-        return {**nobody, 'audiences': ['shared']} if ok else nobody
+        return {**nobody, 'audiences': ['shared'], 'bot': True} if ok else nobody
     r = _auth('resolve', agent or '-', '--person', person)
     pid = (r or {}).get('person') or ''
     if not r or not r.get('allowed') or not agent or not re.fullmatch(r'[a-z][a-z0-9-]*', pid):
