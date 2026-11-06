@@ -1236,6 +1236,62 @@
       }
     },
     {
+      "name": "kernel.accountState",
+      "summary": "`kith account list|pick|out|clear|usage` over the accounts' state wherever it lives (the file, or the core's table once `accounts` is switched), plus `state` and `started` for the Python readers.",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "args",
+          "summary": "The verb and its arguments.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "account-state"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "args": {
+            "kind": "rest"
+          }
+        }
+      }
+    },
+    {
       "name": "kernel.delegation.limits",
       "summary": "How far a chain of asks may go.",
       "params": [
@@ -10828,6 +10884,342 @@
             "kind": "switch",
             "spellings": [
               "--deep"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.rows",
+      "summary": "Every account as `kith account list --json` shows it (the array of rows), with the out marks and usage read from the core's database. With `--agent`, that agent's order and where `pick` would start.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "That agent's order and start.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "deep",
+          "summary": "Ask each harness whether its login is good (the list always does).",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "rows"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "deep": {
+            "kind": "switch",
+            "spellings": [
+              "--deep"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.out",
+      "summary": "Marks an account out of usage until a time (`kith account out`): written to the core's database once `accounts` is switched, refused before.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The account id, such as `claude:work`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "until",
+          "summary": "Epoch seconds the limit lifts; none: an hour from now.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "reason",
+          "summary": "A short word, up to 40 letters, digits, space . _ -; default `manual`.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "extend",
+          "summary": "An account already out for longer stays so.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, epoch seconds (tests).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "out"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "until": {
+            "kind": "flag",
+            "spellings": [
+              "--until"
+            ]
+          },
+          "reason": {
+            "kind": "flag",
+            "spellings": [
+              "--reason"
+            ]
+          },
+          "extend": {
+            "kind": "switch",
+            "spellings": [
+              "--extend"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.clear",
+      "summary": "Ready again (`kith account clear`): forgets the out mark and notes the time, so a host mark made before it is ignored.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The account id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "hostUntil",
+          "summary": "The host's own mark standing now (epoch seconds), 0 for none.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, epoch seconds (tests).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "clear"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "hostUntil": {
+            "kind": "flag",
+            "spellings": [
+              "--host-until"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.usage",
+      "summary": "Records a usage reading for an account (`kith account usage ID --json READING`), after the same checks; answers the stored reading.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The account id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "reading",
+          "summary": "`{windows: [{name, percent, resets_at?}], read_at?}`.",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "now",
+          "summary": "The clock, epoch seconds (tests).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "usage"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "reading": {
+            "kind": "flag",
+            "spellings": [
+              "--reading"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.started",
+      "summary": "Notes that a launch started on an account (`last_started`).",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The account id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, epoch seconds (tests).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "started"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
             ]
           }
         }

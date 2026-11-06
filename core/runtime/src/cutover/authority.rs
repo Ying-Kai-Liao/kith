@@ -47,12 +47,12 @@ use std::time::{Duration, Instant};
 
 use kith_kernel::secrets::Ctx;
 use rusqlite::Connection;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 use zeroize::{Zeroize as _, Zeroizing};
 
 use super::secrets_back::{self, OsStore};
-use super::{Env, Module, Opts, SourceLock, tombstone};
+use super::{Env, Module, Opts, SourceLock, marker, tombstone};
 use crate::AuthorityOptions;
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -416,10 +416,90 @@ fn overlay(base: Option<&Value>, from: &Value, keys: &[&str]) -> Value {
     Value::Object(row)
 }
 
+/// The rows whose old-copy keys a rollback may bring back: those that existed when the switch was made and are the same
+/// incarnation now. A person removed and added again while switched has a new `seq`, so a reused id (a bot, an `--unused`
+/// id) gets none of the old row's keys, such as the handles of an ended member.
+#[derive(Default)]
+pub(crate) struct Keep {
+    people: BTreeSet<String>,
+    /// (agent, person): a membership is kept only with its person.
+    members: BTreeSet<(String, String)>,
+    presets: BTreeSet<String>,
+}
+
+/// The seed `step` leaves beside the marker: each person's `seq`, the memberships and the presets at the switch.
+fn seed_of(db: &Connection) -> Result<String> {
+    let mut people = Map::new();
+    let mut q = db.prepare("SELECT id, seq FROM people")?;
+    for r in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+        let (id, seq) = r?;
+        people.insert(id, seq.into());
+    }
+    let mut members: Map<String, Value> = Map::new();
+    let mut q = db.prepare("SELECT agent, person FROM memberships")?;
+    for r in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (agent, person) = r?;
+        if let Value::Array(a) = members
+            .entry(agent)
+            .or_insert_with(|| Value::Array(Vec::new()))
+        {
+            a.push(person.into());
+        }
+    }
+    let mut presets = Vec::new();
+    let mut q = db.prepare("SELECT name FROM presets")?;
+    for r in q.query_map([], |r| r.get::<_, String>(0))? {
+        presets.push(Value::String(r?));
+    }
+    Ok(json!({"people": people, "members": members, "presets": presets}).to_string())
+}
+
+/// What the seed lets back now. No seed (a marker from before seeds) or one that does not parse: nothing comes back,
+/// which loses the old copy's other keys for those rows and gives no row anyone else's.
+fn keep_from(db: &Connection, seed: Option<&str>) -> Result<Keep> {
+    let Some(v) = seed.and_then(|t| serde_json::from_str::<Value>(t).ok()) else {
+        return Ok(Keep::default());
+    };
+    let mut keep = Keep::default();
+    let mut q = db.prepare("SELECT id, seq FROM people")?;
+    for r in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+        let (id, seq) = r?;
+        if v["people"].get(&id).and_then(Value::as_i64) == Some(seq) {
+            keep.people.insert(id);
+        }
+    }
+    for (agent, persons) in v["members"].as_object().into_iter().flatten() {
+        for p in persons
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            if keep.people.contains(p) {
+                keep.members.insert((agent.clone(), p.to_owned()));
+            }
+        }
+    }
+    keep.presets = v["presets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|n| n.as_str().map(str::to_owned))
+        .collect();
+    Ok(keep)
+}
+
+/// [`merge_back_with`] bringing every row's old keys back (the pure merge the tests of the other tables use).
+#[cfg(test)]
+pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
+    merge_back_with(base, snap, None)
+}
+
 /// The file `kith-auth` reads, from core.db's tables (`snap`, as `authority::snapshot` reads them) laid over `base`, the
 /// last file that held the other keys. Every person, row, revoke and invite in core.db is in the result; nothing the core
 /// no longer has is.
-pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
+/// `keep`: which rows may take the old copy's keys that core.db does not hold (`None`: all of them).
+pub(crate) fn merge_back_with(base: Option<Value>, snap: &Value, keep: Option<&Keep>) -> Value {
     let base = base.filter(Value::is_object);
     let old = |t: &str| base.as_ref().and_then(|b| b.get(t));
     let mut out: Map<String, Value> = base
@@ -439,7 +519,13 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
     {
         people.insert(
             id.clone(),
-            overlay(old("people").and_then(|o| o.get(id)), p, PERSON_KEYS),
+            overlay(
+                old("people")
+                    .and_then(|o| o.get(id))
+                    .filter(|_| keep.is_none_or(|k| k.people.contains(id))),
+                p,
+                PERSON_KEYS,
+            ),
         );
     }
     out.insert("people".into(), Value::Object(people));
@@ -454,7 +540,10 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
         for (person, r) in rows.as_object().into_iter().flatten() {
             let was = old("members")
                 .and_then(|m| m.get(agent))
-                .and_then(|a| a.get(person));
+                .and_then(|a| a.get(person))
+                .filter(|_| {
+                    keep.is_none_or(|k| k.members.contains(&(agent.clone(), person.clone())))
+                });
             kept.insert(person.clone(), overlay(was, r, MEMBER_KEYS));
         }
         members.insert(agent.clone(), Value::Object(kept));
@@ -469,7 +558,13 @@ pub(crate) fn merge_back(base: Option<Value>, snap: &Value) -> Value {
     {
         presets.insert(
             name.clone(),
-            overlay(old("presets").and_then(|o| o.get(name)), p, PRESET_KEYS),
+            overlay(
+                old("presets")
+                    .and_then(|o| o.get(name))
+                    .filter(|_| keep.is_none_or(|k| k.presets.contains(name))),
+                p,
+                PRESET_KEYS,
+            ),
         );
     }
     out.insert("presets".into(), Value::Object(presets));
@@ -677,18 +772,21 @@ impl Module for AuthorityModule {
         // Runs under `rollback_lock` (taken before the rolling-back record), so no writer starts a read-modify-write on
         // the file while it is replaced.
         let snap = crate::authority::snapshot(core.conn())?;
-        // A file that is already a real auth.json (a rollback run again after it wrote) keeps its other keys; else the
-        // copy the tombstone kept.
-        let current = std::fs::read(&ctx.auth)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-            .filter(|v| v.is_object() && v.get("kith_tombstone").is_none());
-        let (base, from) = match current {
-            Some(v) => (Some(v), None),
-            None => match pre_cutover(&ctx.auth) {
-                Some((v, p)) => (Some(v), Some(p)),
-                None => (None, None),
-            },
+        // A real auth.json is never replaced: `rollback` does not call this over one, and a caller that does gets the file
+        // back as it is (kith-auth may have written it since, and the core's rows are older). Only a tombstone, or no
+        // file, is written over; the keys the core does not hold come from the copy the tombstone kept.
+        if tombstone::is_real(&ctx.auth) {
+            return Ok(vec![
+                "auth.json is already a real file; left as it is".to_owned(),
+            ]);
+        }
+        let keep = keep_from(
+            core.conn(),
+            marker::seed(core.conn(), self.name()).as_deref(),
+        )?;
+        let (base, from) = match pre_cutover(&ctx.auth) {
+            Some((v, p)) => (Some(v), Some(p)),
+            None => (None, None),
         };
         let mut lines = Vec::new();
         match &from {
@@ -702,7 +800,7 @@ impl Module for AuthorityModule {
             ),
             None => {}
         }
-        let text = serde_json::to_string_pretty(&merge_back(base, &snap))
+        let text = serde_json::to_string_pretty(&merge_back_with(base, &snap, Some(&keep)))
             .map_err(|e| Error::Io(format!("authority: auth.json: {e}")))?;
         let io = |e: std::io::Error| Error::Io(format!("authority: {}: {e}", ctx.auth.display()));
         let tmp = ctx.auth.with_extension("restore.tmp");
@@ -789,6 +887,10 @@ impl Module for AuthorityModule {
         lines.extend(kept);
         lines.extend(returned);
         Ok(lines)
+    }
+
+    fn seed(&self, _env: &Env, db: &Connection) -> Result<Option<String>> {
+        seed_of(db).map(Some)
     }
 
     fn digest(&self, _env: &Env, db: &Connection) -> Result<String> {

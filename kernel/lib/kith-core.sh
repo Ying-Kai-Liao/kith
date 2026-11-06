@@ -7,8 +7,8 @@
 #                                    - this Mac has a kith program that lists the module in `kith kernel version`.
 #                                    Otherwise it returns 1 and the caller runs the Python, silently.
 #
-# lib/core-switched.txt is read here at run time, never baked into the program, so a git pull and an older program
-# cannot disagree about what is switched. Removing a line is the rollback.
+# lib/core-switched.txt (`verb<TAB>module[<TAB>cutover module]`) is read here at run time, never baked into the program, so a
+# git pull and an older program cannot disagree about what is switched. Removing a line is the rollback.
 # kith_cutover_refuse MODULE   exits 1 with one line when MODULE has been switched to the core on this Mac (or is part-way
 # through a rollback), so KITH_CORE=python cannot hand it back to the Python. The state is one file per module,
 # <machine>/core/cutover/MODULE.switch (core/runtime/src/cutover/state.rs); a missing file means unswitched. Returns
@@ -38,12 +38,14 @@ kith_core_prime() {
 }
 
 kith_core_exec() {
-  local verb=$1 module bin ver
+  local verb=$1 module cutover bin ver
   shift
-  module=$(awk -F'\t' -v v="$verb" '$1 == v { print $2; exit }' "$KITH/lib/core-switched.txt" 2>/dev/null)
+  # A third column names the cutover module when it is not the one `kernel version` lists (account-state is the verbs of
+  # the accounts module).
+  read -r module cutover < <(awk -F'\t' -v v="$verb" '$1 == v { print $2, ($3 != "" ? $3 : $2); exit }' "$KITH/lib/core-switched.txt" 2>/dev/null) || true
   if [[ ${KITH_CORE:-} == python ]]; then
     # After a module's cutover (kith migrate step) Python must not write its files again: refuse, never fall back.
-    kith_cutover_refuse "${module:-${verb%% *}}"
+    kith_cutover_refuse "${cutover:-${verb%% *}}"
     return 1
   fi
   if [[ -z $module ]]; then

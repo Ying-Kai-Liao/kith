@@ -201,7 +201,7 @@ fn accounts_a_tampered_marker_or_switch_file_denies_everything() {
     assert!(!writes(&env));
     // A marker for another switch (`at` differs): a forged or stale file.
     let mut core = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
-    marker::write(&mut core, "accounts", 1, "").unwrap();
+    marker::write(&mut core, "accounts", 1, "", None).unwrap();
     drop(core);
     assert!(!serves(&env, &super::accounts::Accounts));
     assert!(!writes(&env));
@@ -496,32 +496,29 @@ fn both_s1_modules_are_listed_and_checkable() {
 // --- the step refusals, the source lock, and the SHOULDs -----------------------------------------------------------------
 
 #[test]
-fn refused_accounts_step_names_the_missing_lane_and_leaves_nothing_behind() {
+fn accounts_a_step_through_the_real_registry_is_no_longer_refused_and_account_writes_follow() {
+    // accounts-s1: the core reads and writes account state (`account.*`, `kith kernel account-state`), so the step that used
+    // to refuse for want of that lane goes through the registry as it is, and the core takes the writers afterwards.
     let (_t, env) = setup();
-    let before = std::fs::read(kith_kernel::accounts::state_file(&env.machine)).unwrap();
-    for dry_run in [false, true, false] {
-        let e = step(
-            &registry(),
-            &env,
-            "accounts",
-            Opts {
-                dry_run,
-                ..Opts::default()
-            },
+    let out = step(&registry(), &env, "accounts", opts()).unwrap();
+    assert!(out.iter().any(|l| l.contains("same answer")), "{out:?}");
+    assert!(tombstone::is_tombstone(&kith_kernel::accounts::state_file(
+        &env.machine
+    )));
+    let core = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
+    let r = core
+        .account_call(
+            "account.out",
+            &json!({"id": "claude:new", "until": 4_102_444_800_i64, "reason": "after", "now": 1_900_000_000}),
         )
-        .unwrap_err();
-        let text = e.to_string();
-        assert!(text.contains("out/clear/usage"), "{text}");
-        assert!(text.contains("kernel.accounts.*"), "{text}");
-        assert_eq!(text.lines().count(), 1, "{text}");
-    }
-    assert!(state::read(&env.layout, "accounts").unwrap().is_none());
-    assert!(!kith_kernel::accounts::tombstoned(&env.machine));
-    assert_eq!(
-        std::fs::read(kith_kernel::accounts::state_file(&env.machine)).unwrap(),
-        before
+        .unwrap();
+    assert_eq!(r["outUntil"], 4_102_444_800_i64);
+    let rows = crate::accounts::read_all(core.conn()).unwrap();
+    assert_eq!(rows["claude:new"]["reason"], "after");
+    assert!(
+        rows.contains_key("claude:work"),
+        "the imported rows are still there"
     );
-    assert!(!env.layout.db.exists(), "no core.db was opened or made");
 }
 
 #[test]
