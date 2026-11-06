@@ -102,12 +102,16 @@ fn resident(dir: &Path, script: &str) -> (Child, Chan) {
     (child, Chan::new(mine))
 }
 
+/// One line of the child's stdout, read a byte at a time: a `BufReader` made per call could take the next line into
+/// its buffer and drop it with itself (two pids printed together lost the second).
 fn first_line(child: &mut Child) -> String {
-    let mut s = String::new();
-    BufReader::new(child.stdout.as_mut().unwrap())
-        .read_line(&mut s)
-        .unwrap();
-    s.trim().to_string()
+    let out = child.stdout.as_mut().unwrap();
+    let mut line = Vec::new();
+    let mut b = [0u8; 1];
+    while std::io::Read::read(out, &mut b).unwrap() == 1 && b[0] != b'\n' {
+        line.push(b[0]);
+    }
+    String::from_utf8(line).unwrap().trim().to_string()
 }
 
 #[test]
