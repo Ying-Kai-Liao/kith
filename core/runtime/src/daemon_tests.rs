@@ -744,17 +744,24 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
     let recorded = || d.shared.with_core(|c| c.holder_record()).expect("record");
 
     // 1. A core.db from M0a records no instance: the first hello records it and ends nothing.
-    crate::holder_link::reconcile(&d.shared, "one", &[], &cfg).expect("first hello");
+    crate::holder_link::reconcile(&d.shared, "one", &[], &[], i64::MAX, &cfg).expect("first hello");
     assert_eq!(recorded().instance.as_deref(), Some("one"));
     assert!(alive(held_pid) && alive(stranger_pid));
 
     // 1b. The serve host's own claim name is refused at the hello and nothing is recorded.
-    crate::holder_link::reconcile(&d.shared, crate::holder_link::HOST_INSTANCE, &[], &cfg)
-        .expect_err("the host's name");
+    crate::holder_link::reconcile(
+        &d.shared,
+        crate::holder_link::HOST_INSTANCE,
+        &[],
+        &[],
+        i64::MAX,
+        &cfg,
+    )
+    .expect_err("the host's name");
     assert_eq!(recorded().instance.as_deref(), Some("one"));
 
     // 2. The same instance again: nothing to do.
-    crate::holder_link::reconcile(&d.shared, "one", &[], &cfg).expect("same");
+    crate::holder_link::reconcile(&d.shared, "one", &[], &[], i64::MAX, &cfg).expect("same");
     assert!(alive(held_pid));
 
     // 3. The old instance reported a process that is still its own (same pid, same start time) and one whose pid has
@@ -766,7 +773,7 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
             proc(stranger_pid, &other_start()),
         ],
     );
-    crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("takeover");
+    crate::holder_link::reconcile(&d.shared, "two", &[], &[], i64::MAX, &cfg).expect("takeover");
     assert!(
         !alive(held_pid),
         "confirmed gone before the new instance is recorded"
@@ -776,8 +783,15 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
 
     // 4. Processes the new instance lists itself are not the old one's, whatever the record says.
     record(Some("two"), vec![proc(stranger_pid, &other_start())]);
-    crate::holder_link::reconcile(&d.shared, "three", &[proc(stranger_pid, "x")], &cfg)
-        .expect("listed");
+    crate::holder_link::reconcile(
+        &d.shared,
+        "three",
+        &[proc(stranger_pid, "x")],
+        &[],
+        i64::MAX,
+        &cfg,
+    )
+    .expect("listed");
     assert!(alive(stranger_pid));
     signal(stranger_pid, "KILL");
 }
@@ -886,7 +900,8 @@ fn a_record_with_old_or_empty_starts_ends_nothing_and_waits_for_the_pid_to_go() 
         proc(gone_pid, "Thu Jan  1 00:00:00 1970"),
         proc(gone_pid, ""),
     ]);
-    crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("gone pids end nothing");
+    crate::holder_link::reconcile(&d.shared, "two", &[], &[], i64::MAX, &cfg)
+        .expect("gone pids end nothing");
     assert_eq!(instance().as_deref(), Some("two"));
     // A live pid with old text, with nothing, or with the other form: not ended, the old record kept, twice over.
     let foreign = if cfg!(target_os = "linux") {
@@ -897,7 +912,7 @@ fn a_record_with_old_or_empty_starts_ends_nothing_and_waits_for_the_pid_to_go() 
     for old in ["Thu Jan  1 00:00:00 1970", "", foreign] {
         record(vec![proc(live_pid, old)]);
         for _ in 0..2 {
-            let err = crate::holder_link::reconcile(&d.shared, "three", &[], &cfg)
+            let err = crate::holder_link::reconcile(&d.shared, "three", &[], &[], i64::MAX, &cfg)
                 .expect_err("an unknown start holds the new instance back");
             assert!(err.to_string().contains("still running"), "{err}");
             assert!(alive(live_pid), "never signalled for {old:?}");
@@ -906,10 +921,11 @@ fn a_record_with_old_or_empty_starts_ends_nothing_and_waits_for_the_pid_to_go() 
     }
     // The same process with its own stamp is the one that is ended; with another start in the same form, left alone.
     record(vec![proc(live_pid, &other_start())]);
-    crate::holder_link::reconcile(&d.shared, "three", &[], &cfg).expect("a stranger's pid");
+    crate::holder_link::reconcile(&d.shared, "three", &[], &[], i64::MAX, &cfg)
+        .expect("a stranger's pid");
     assert!(alive(live_pid));
     record(vec![proc(live_pid, &live_start)]);
-    crate::holder_link::reconcile(&d.shared, "four", &[], &cfg).expect("its own");
+    crate::holder_link::reconcile(&d.shared, "four", &[], &[], i64::MAX, &cfg).expect("its own");
     assert!(!alive(live_pid));
     // Every holder spawn is its own session leader. A live pid that is not one, with a start nobody can compare, is
     // provably not the recorded process: left alone, and it does not hold the new instance back.
@@ -920,7 +936,7 @@ fn a_record_with_old_or_empty_starts_ends_nothing_and_waits_for_the_pid_to_go() 
     let stranger_pid = stranger.id();
     for old in ["Thu Jan  1 00:00:00 1970", "", foreign] {
         record(vec![proc(stranger_pid, old)]);
-        crate::holder_link::reconcile(&d.shared, "five", &[], &cfg)
+        crate::holder_link::reconcile(&d.shared, "five", &[], &[], i64::MAX, &cfg)
             .expect("not a session leader: a stranger");
         assert!(alive(stranger_pid));
         assert_eq!(instance().as_deref(), Some("five"));
@@ -928,6 +944,89 @@ fn a_record_with_old_or_empty_starts_ends_nothing_and_waits_for_the_pid_to_go() 
     }
     let _ = stranger.kill();
     let _ = stranger.wait();
+}
+
+/// A hello under a new instance ends the old instance's claims the new one does not list, after its processes are
+/// confirmed gone, and never the serve host's own turn claims running at the same time.
+#[test]
+fn a_hello_under_a_new_instance_ends_the_old_instances_claims_but_not_the_hosts() {
+    use crate::conversations::claims::{Kind, NewClaim, claim};
+    use crate::db::HolderRecord;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig {
+        kill_wait: Duration::from_secs(2),
+        ..HolderConfig::default()
+    };
+    // Another test may have opened claims for this generation already; either way they are open after this.
+    let _ = d
+        .shared
+        .with_core(|c| crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1));
+    let take = |conv: &str, instance: &str| -> i64 {
+        d.shared
+            .with_core(|c| {
+                c.conn().execute(
+                    "INSERT OR IGNORE INTO conversations (id, agent, engine, created_at, updated_at) VALUES (?1, 'a', 'claude', 1, 1)",
+                    [conv],
+                )?;
+                c.conn().execute(
+                    "INSERT INTO turns (conversation, person, source, state, queued_at) VALUES (?1, 'sam', 'app', 'queued', 1)",
+                    [conv],
+                )?;
+                let turn = c.conn().last_insert_rowid();
+                let req = NewClaim {
+                    conversation: conv,
+                    kind: Kind::Turn,
+                    person: "sam",
+                    turn: Some(turn),
+                    holder_instance: Some(instance),
+                    account: None,
+                    process: None,
+                    revoke_seen: 0,
+                };
+                Ok(claim(c, &req, 10)?.claim_id)
+            })
+            .expect("claim")
+    };
+    let state = |id: i64| -> String {
+        d.shared
+            .with_core(|c| {
+                Ok(c.conn().query_row(
+                    "SELECT state FROM claims WHERE claim_id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )?)
+            })
+            .expect("state")
+    };
+    let old_unlisted = take("a", "one");
+    let old_listed = take("b", "one");
+    let host = take("c", crate::holder_link::HOST_INSTANCE);
+    d.shared
+        .with_core(|c| {
+            c.save_holder_record(&HolderRecord {
+                instance: Some("one".into()),
+                procs: Vec::new(),
+            })
+        })
+        .expect("record");
+
+    crate::holder_link::reconcile(&d.shared, "two", &[], &[old_listed], i64::MAX, &cfg)
+        .expect("hello");
+    assert_eq!(state(old_unlisted), "ended");
+    assert_eq!(state(old_listed), "claimed");
+    assert_eq!(
+        state(host),
+        "claimed",
+        "the host's claim is not the old holder's"
+    );
+    // The same hello again, and one under a third instance with an empty list: still the host's.
+    crate::holder_link::reconcile(&d.shared, "two", &[], &[old_listed], i64::MAX, &cfg)
+        .expect("repeat");
+    crate::holder_link::reconcile(&d.shared, "three", &[], &[], i64::MAX, &cfg).expect("third");
+    assert_eq!(state(old_listed), "ended");
+    assert_eq!(state(host), "claimed");
 }
 
 /// A pid the holder listed that has exited before the start is read is not recorded: with no start it could be a

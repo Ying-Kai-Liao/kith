@@ -388,6 +388,10 @@ fn connected(
     // A holder reached through a command runs on another machine: its pids mean nothing here, so no start time is
     // read and no process group is ended on this machine's account, and the local holder's record is left alone.
     let remote = cfg.command.is_some();
+    // Claims opened after this are newer than the welcome's list and may simply be missing from it.
+    let high_water = shared
+        .with_core(|c| claims::claim_high_water(c))
+        .map_err(|e| Lost::Link(e.to_string()))?;
     let procs = if remote {
         Vec::new()
     } else {
@@ -407,7 +411,8 @@ fn connected(
             "holder: linked through a command; its pids are not this machine's, so nothing is recorded or ended here",
         );
     } else {
-        reconcile(shared, &instance, &procs, cfg)?;
+        let listed = listed_claims(&client.welcome.procs);
+        reconcile(shared, &instance, &procs, &listed, high_water, cfg)?;
     }
     // Before the state says connected: whoever waits for that state may call terminal.open at once.
     // What the core keeps of each held process (its claim, pid and conversation), so an exit the holder reports can be
@@ -489,7 +494,15 @@ fn connected(
         seen.note_all(&held);
         let now = record_procs(&held);
         if now != known {
-            reconcile(shared, &instance, &now, cfg)?;
+            // Same instance as the record: the claims are not looked at, the list is for the signature's sake.
+            reconcile(
+                shared,
+                &instance,
+                &now,
+                &listed_claims(&held),
+                high_water,
+                cfg,
+            )?;
             shared.set_holder(|h| {
                 h.procs = now.len();
                 h.pids = now.iter().map(|p| p.pid).collect();
@@ -744,8 +757,15 @@ pub(crate) fn record_procs(held: &[proto::Held]) -> Vec<RecordedProc> {
         .collect()
 }
 
+/// The claim ids a holder's listing names, exited entries included: the holder still knows them until they are acked.
+fn listed_claims(held: &[proto::Held]) -> Vec<i64> {
+    held.iter()
+        .filter_map(|h| i64::try_from(h.claim).ok())
+        .collect()
+}
+
 /// The serve host's instance name on its turn claims; no holder may say hello under it (see [`reconcile`]).
-pub(crate) const HOST_INSTANCE: &str = "kith-serve-host";
+pub(crate) const HOST_INSTANCE: &str = claims::HOST_INSTANCE;
 
 /// Step 7: a hello that meets an instance other than the recorded one ends what the old one held, confirms it gone,
 /// and only then records the new instance. A record from M0a has no instance: nothing is ended on its account.
@@ -753,13 +773,20 @@ pub(crate) const HOST_INSTANCE: &str = "kith-serve-host";
 /// Instance ids and the host: the serve host names its own turn claims `kith-serve-host` (`HOST_INSTANCE` in
 /// `serve/host/src/terminal/core_claims.rs`) and, after a restart, ends any claim carrying that name as its own stale
 /// one. A holder that said hello under the same id would have its live claims ended by the host, so the hello is
-/// refused and nothing is recorded. Open: `claims::different_holder` (step 7 of the claims) is not run from this hello
-/// yet; the M3 holder owns that wiring, and until it lands only the process groups below are ended here. A record
-/// stored before this rule is not re-read as a refusal: only the hello is checked.
+/// refused and nothing is recorded. A record stored before this rule is not re-read as a refusal: only the hello is
+/// checked.
+///
+/// The claims: once the old instance's process groups are confirmed gone, `claims::different_holder` ends the old
+/// instance's claims the new one does not list (`listed`, read at `high_water` before the holder was asked). It never
+/// touches the host's claims ([`HOST_INSTANCE`]). If a group would not end, the claims are left as they are: that process
+/// may still hold the writer lock, and the next hello looks again. The pass is idempotent: after it nothing is left
+/// under the old instance, and the record then names the new one, so a repeated hello does not come back here.
 pub(crate) fn reconcile(
     shared: &Shared,
     instance: &str,
     procs: &[RecordedProc],
+    listed: &[i64],
+    high_water: i64,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), Lost> {
     if instance == HOST_INSTANCE {
@@ -800,6 +827,19 @@ pub(crate) fn reconcile(
         );
         for n in notes {
             log::note(&shared.logs, &n);
+        }
+        let released = shared
+            .with_core(|c| claims::different_holder(c, instance, listed, &[], high_water, now_ms()))
+            .map_err(|e| Lost::Link(e.to_string()))?;
+        if !released.ended.is_empty() || !released.kill.is_empty() {
+            log::note(
+                &shared.logs,
+                &format!(
+                    "holder: instance {old} is gone; ended {} claim(s) it held, {} more wait for their process",
+                    released.ended.len(),
+                    released.kill.len()
+                ),
+            );
         }
     }
     if recorded.instance.as_deref() != Some(instance) || recorded.procs != procs {

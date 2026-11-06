@@ -917,8 +917,14 @@ pub(crate) fn end_gone(core: &mut Core, live: &dyn Liveness, now: i64) -> Result
     Ok(ended)
 }
 
+/// The serve host's instance name on its own turn claims (`HOST_INSTANCE` in `serve/host/src/terminal/core_claims.rs`).
+/// The host is not a holder: a holder's hello (step 7) never ends its claims, whatever the holder lists.
+pub(crate) const HOST_INSTANCE: &str = "kith-serve-host";
+
 /// The claims the holder's listing does not cover, ended or moved to `ending` (steps 5 and 7). `foreign_to` limits it
-/// to claims of another holder instance (step 7); `None` takes every live claim (step 5).
+/// to claims of another holder instance (step 7), never the host's ([`HOST_INSTANCE`]); `None` takes every live claim
+/// (step 5). Step 5 keeps the host's claims in: it runs once per core generation, and a claim of the previous
+/// generation is not the host's to keep (its reports fail as stale), so it must be reconciled like any other.
 fn release_unlisted(
     tx: &Transaction<'_>,
     listed: &HashSet<i64>,
@@ -939,9 +945,10 @@ fn release_unlisted(
         let mut st = tx.prepare(
             "SELECT claim_id, state, kind = 'external', pid, pid_started FROM claims
              WHERE state IN ('claimed', 'running', 'ending') AND claim_id <= ?2
-               AND (?1 IS NULL OR holder_instance IS NULL OR holder_instance <> ?1)",
+               AND (?1 IS NULL OR holder_instance IS NULL
+                    OR (holder_instance <> ?1 AND holder_instance <> ?3))",
         )?;
-        for r in st.query_map(params![foreign_to, high_water], |r| {
+        for r in st.query_map(params![foreign_to, high_water, HOST_INSTANCE], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })? {
             live.push(r?);
