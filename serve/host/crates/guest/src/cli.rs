@@ -93,6 +93,9 @@ pub struct AskArgs {
     /// Ask in a room (`rm_...`).
     #[arg(long, value_name = "ROOM")]
     pub room: Option<String>,
+    /// With `--room`: the membership generation `room read` or the wake named; refused if you were taken out since.
+    #[arg(long = "gen", value_name = "GEN", requires = "room")]
+    pub r#gen: Option<i64>,
     /// Who is talking through this bot (a label the host cannot verify).
     #[arg(long)]
     pub speaker: Option<String>,
@@ -176,6 +179,10 @@ pub struct RoomPostArgs {
     /// The turn key the wake named: with it this post is your reply to your turn.
     #[arg(long, value_name = "KEY")]
     pub turn_key: Option<String>,
+    /// The membership generation the wake or `room read` named: if you were taken out of the room since, the post is
+    /// refused.
+    #[arg(long = "gen", value_name = "GEN")]
+    pub r#gen: Option<i64>,
     /// A key that makes a repeated post (even from a new process) post once; default: a hash of the post.
     #[arg(long, value_name = "KEY")]
     pub nonce: Option<String>,

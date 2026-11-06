@@ -8,6 +8,10 @@ struct ThreadWriterDock: View {
     let botId: String
     /// The thread's root message.
     let rootId: String
+    /// Inside a task card: no gutter of its own (the card has it).
+    var inCard = false
+    /// After a take-over succeeded: a card points the chat's box at its task.
+    var onTaken: (() -> Void)?
     @Environment(BotStore.self) private var model
     @State private var taking = false
     @State private var failed = false
@@ -21,9 +25,9 @@ struct ThreadWriterDock: View {
             WriterBanner(phase: phase, mac: model.hostName, tint: AgentTint.resolve(bot?.avatarColor), pending: taking) {
                 confirming = true
             }
-            .padding(.horizontal, KithSpacing.gutter)
+            .padding(.horizontal, inCard ? 0 : KithSpacing.gutter)
             .padding(.top, 6)
-            .padding(.bottom, 8)
+            .padding(.bottom, inCard ? 0 : 8)
             .kithSheet(isPresented: $confirming) {
                 TakeOverSheet(mac: model.hostName, command: ThreadFeed.resumeCommand(root: root, bot: bot), pending: taking,
                               onConfirm: takeOver, onCancel: { confirming = false })
@@ -39,6 +43,7 @@ struct ThreadWriterDock: View {
         Task {
             do {
                 _ = try await model.ready().takeOverThread(botId: botId, threadId: rootId)
+                onTaken?()
             } catch {
                 failed = true
                 model.lastError = (error as? ThreadWriterError)?.errorDescription ?? error.localizedDescription

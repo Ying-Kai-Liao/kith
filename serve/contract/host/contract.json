@@ -445,11 +445,12 @@
       "mayOmit": ["duplicate"]
     },
     "BotRoom": {
-      "doc": "A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next.",
+      "doc": "A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), the bot's membership generation gen (what a post or room ask names; it rises each time the bot is put back in the room), and the cursor to read from next.",
       "fields": {
         "room": "string",
         "conversation": "string?",
         "epoch": "int?",
+        "gen": "int?",
         "entries": "[BotEntry]",
         "cursor": "int",
         "secrets": "[BotRoomSecret]?"
@@ -773,7 +774,7 @@
       "result": "BotProof"
     },
     "botAsk": {
-      "doc": "Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room (a room this bot is a member of) turns the ask into one turn of the agent it @-mentions there: no conversation opens, the agent's reply wakes nobody, and an open conversation's budget is charged.",
+      "doc": "Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room (a room this bot is a member of) turns the ask into one turn of the agent it @-mentions there: no conversation opens, the agent's reply wakes nobody, and an open conversation's budget is charged. gen (from a room read or wake) other than the bot's current membership generation in the room is notFound.",
       "who": ["bot"],
       "params": {
         "agent": "string?",
@@ -781,6 +782,7 @@
         "conversation": "string?",
         "ref": "string?",
         "room": "string?",
+        "gen": "int?",
         "speaker": "string?",
         "clientNonce": "string",
         "noQueue": "bool?"
@@ -788,13 +790,14 @@
       "result": "BotAsked"
     },
     "botPost": {
-      "doc": "Posts into a room the bot is a member of. conversation and epoch say which turn it answers; with the turnKey of the turn the room is waiting on it is the member's reply, without one it is an unprompted post (charged one turn; wakes only the members it @-mentions, only while the conversation is open with budget left). Anything else is kept as late and wakes nobody. clientNonce makes a retry post once; the same nonce with other text is nonceReused. A post never opens or tops up a budget. A room the bot is not in is notFound.",
+      "doc": "Posts into a room the bot is a member of. conversation and epoch say which turn it answers; with the turnKey of the turn the room is waiting on it is the member's reply, without one it is an unprompted post (charged one turn; wakes only the members it @-mentions, only while the conversation is open with budget left). Anything else is kept as late and wakes nobody. clientNonce makes a retry post once; the same nonce with other text is nonceReused. A post never opens or tops up a budget. A room the bot is not in, or a gen (from a room read or wake) other than its current membership generation there, is notFound.",
       "who": ["bot"],
       "params": {
         "room": "string",
         "conversation": "string",
         "epoch": "int",
         "turnKey": "string?",
+        "gen": "int?",
         "text": "string",
         "clientNonce": "string"
       },

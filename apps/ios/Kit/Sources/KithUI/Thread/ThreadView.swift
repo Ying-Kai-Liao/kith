@@ -36,6 +36,9 @@ public struct ThreadView: View {
     /// The reply whose time and context line is showing; scrolling closes it.
     @State var contextLineEntry: String?
     @State var loadingEarlier = false
+    /// The task cards on screen, for the "working now" line over the box. Not read by the list, so a card scrolling in
+    /// or out redraws the box only.
+    @State var visibleTasks = VisibleTasks()
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var bot: Bot? { model.bots[botId] }
@@ -47,7 +50,9 @@ public struct ThreadView: View {
         transcript
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
-                switch ThreadFeed.chatBottom(held: ThreadFeed.heldTask(in: model.chat(botId)),
+                // A bot's tasks carry their own writer banner on the card, so the box stays (a send to a held task
+                // takes it over first, or waits for the terminal); elsewhere the banner sits over the box.
+                switch ThreadFeed.chatBottom(held: bot?.usesTasks == true && bot?.botGuest == nil ? nil : ThreadFeed.heldTask(in: model.chat(botId)),
                                              mismatch: model.mismatch != nil, guest: bot?.botGuest != nil) {
                 case .updateNeeded:
                     // Nothing sent now could be read on the other side.
@@ -69,7 +74,7 @@ public struct ThreadView: View {
                     if let guest = bot?.botGuest { ReadOnlyLine(text: guest.readOnlyLine) }
                 case .composer:
                     // The phone is in the top bar, so the dock has no call button.
-                    Composer(botId: botId)
+                    Composer(botId: botId, visibleTasks: visibleTasks) { model.focusEntry = BotStore.FocusEntry(chat: botId, entry: $0) }
                 }
             }
             .animation(Motion.reduced(Motion.layout, reduceMotion), value: model.mismatch)
@@ -153,6 +158,8 @@ public struct ThreadView: View {
             BotMessageRow(group: group) { botChat = BotChatTarget(id: group.peerId) }
         case .topic(let group):
             topicRow(group)
+        case .task(let root, let thread):
+            taskCard(root: root, thread: thread)
         case .steps(let run):
             StepsRow(run: run, expanded: expandedSteps.contains(run.id),
                      toggle: { toggleSteps(run.id) }, openTrace: { showTrace = true })
@@ -233,11 +240,13 @@ public struct ThreadView: View {
         return ReplyQuote.line(of: message)
     }
 
-    /// Reply goes to the composer, so it needs one: not a read-only chat, nor a message in a thread a terminal holds.
+    /// Reply goes to the composer, so it needs one: not a read-only chat, nor a message in a thread a terminal holds
+    /// (a task's is the exception: its send takes the task over first).
     func canReply(_ entry: Entry) -> Bool {
         guard bot != nil, bot?.isReadOnly != true, bot?.botGuest == nil, ReplyQuote.line(of: entry) != nil else { return false }
         guard let root = entry.threadId else { return true }
-        return model.allEntries(botId).first { $0.id == root }?.data.thread?.isHeldElsewhere != true
+        guard let rootEntry = model.allEntries(botId).first(where: { $0.id == root }) else { return true }
+        return rootEntry.data.thread?.isHeldElsewhere != true || (rootEntry.isTask && rootEntry.data.thread?.isHeldByTerminal == true)
     }
 
     /// Only the owner splits topics off, from a settled message that isn't already in or starting one.
@@ -247,8 +256,10 @@ public struct ThreadView: View {
         return !["sending", "failed", "queued"].contains(entry.data.status ?? "")
     }
 
+    /// Reply quotes the message and, in a bot's tasks, points the box at that message's task.
     func reply(_ entry: Entry) {
         model.replyQuotes[botId] = entry
+        if bot?.usesTasks == true { model.target(taskOf: entry) }
     }
 
     /// A message that starts a thread whose replies were not all loaded (only live ones arrived).
@@ -328,6 +339,9 @@ struct ChatItem: Identifiable {
         case steps(ThreadFeed.StepsRun)
         /// Main chat only: a run the owner split off, folded into one card (see `Topics`).
         case topic(TopicGroup)
+        /// Main chat only: a task's first message and its thread (replies and tool calls, in time order) as one card
+        /// at the place the task started (see `TaskCard`).
+        case task(root: Entry, thread: [Entry])
     }
 
     let id: String
@@ -343,7 +357,24 @@ struct ChatItem: Identifiable {
         // A topic's entries leave the flat view; its card stands where the topic starts.
         let topics = groupingExchanges && foldingTopics ? Topics.groups(in: allEntries) : []
         let folded = Set(topics.flatMap { $0.members.map(\.id) })
-        let entries = folded.isEmpty ? allEntries : allEntries.filter { !folded.contains($0.id) }
+        var entries = folded.isEmpty ? allEntries : allEntries.filter { !folded.contains($0.id) }
+        // A task's thread leaves the flat view too: its card holds it, where the task started.
+        var threads: [String: [Entry]] = [:]
+        if groupingExchanges && foldingTopics {
+            let tasks = Set(entries.filter(\.isTask).map(\.id))
+            if !tasks.isEmpty {
+                var seen = Set<String>()
+                for e in entries {
+                    guard let root = e.threadId, tasks.contains(root), seen.insert(ThreadFeed.stableId(e)).inserted else { continue }
+                    threads[root, default: []].append(e)
+                }
+                for key in threads.keys { threads[key] = threads[key]?.enumerated().sorted { a, b in
+                    a.element.createdAt == b.element.createdAt ? a.offset < b.offset : a.element.createdAt < b.element.createdAt
+                }.map(\.element) }
+                entries = entries.filter { $0.threadId.map { !tasks.contains($0) } ?? true }
+                for root in tasks where threads[root] == nil { threads[root] = [] }
+            }
+        }
         var out: [ChatItem] = []
         var lastDate: Date?
         var lastAuthor: String?
@@ -383,6 +414,12 @@ struct ChatItem: Identifiable {
             switch slot {
             case .exchanges(let group):
                 out.append(ChatItem(id: id, kind: .exchanges(group)))
+                lastAuthor = nil
+            case .entry(let e) where e.isTask && threads[e.id] != nil:
+                let thread = threads[e.id] ?? []
+                out.append(ChatItem(id: id, kind: .task(root: e, thread: thread)))
+                // The next separator counts from the card's newest row.
+                if let newest = thread.map(\.createdAt).max(), newest > e.createdAt { lastDate = Date(milliseconds: newest) }
                 lastAuthor = nil
             case .entry(let e):
                 // In a group each bot is its own author.
@@ -430,6 +467,7 @@ struct ChatItem: Identifiable {
         case let .entry(entry, _): entry.id == id || ThreadFeed.stableId(entry) == id
         case let .steps(run): run.steps.contains { $0.id == id }
         case let .topic(group): group.members.contains { $0.id == id || ThreadFeed.stableId($0) == id }
+        case let .task(root, thread): ([root] + thread).contains { $0.id == id || ThreadFeed.stableId($0) == id }
         case .exchanges, .separator: false
         }
     }
@@ -572,7 +610,8 @@ extension ThreadView {
         }
         // Offline, "working" is only what the computer last said; don't show it as live. In a group the live line above
         // the box says who is working, so the chat shows it once.
-        if let bot, let lane = workingLane, !(bot.isGroup && model.roomConversations.open(chat: botId, lane: nil) != nil) {
+        if let bot, let lane = workingLane, !(bot.isGroup && model.roomConversations.open(chat: botId, lane: nil) != nil),
+           !Self.insideCard(lane, items: items) {
             rows.append(ConversationRow("working") {
                 WorkingIndicator(bot: bot, thinking: model.currentThinking(botId, thread: lane.thread))
                     .padding(.top, 6)
@@ -586,6 +625,12 @@ extension ThreadView {
             model.restartStream()
             _ = try? await model.ready()
         })
+    }
+
+    /// Work in a task's lane shows on its card's live line, not as the chat's own working row.
+    private static func insideCard(_ lane: WorkingLane, items: [ChatItem]) -> Bool {
+        guard let thread = lane.thread else { return false }
+        return items.contains { if case .task(let root, _) = $0.kind { root.id == thread } else { false } }
     }
 
     private var moreOnComputer: Bool {

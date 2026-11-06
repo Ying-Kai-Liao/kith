@@ -247,7 +247,7 @@ fn answer_unchecked(fake: &Fake, method: &str, body: &Value) -> Result<Value, (u
                 .map(|(id, _)| json!({"id": id, "from": "Kai", "label": "deploy key", "expiresAt": 4_102_444_800_000_i64}))
                 .collect();
             Ok(
-                json!({"room": "rm_1", "conversation": null, "epoch": null, "entries": [], "cursor": 7, "secrets": secrets}),
+                json!({"room": "rm_1", "conversation": null, "epoch": null, "gen": 12, "entries": [], "cursor": 7, "secrets": secrets}),
             )
         }
         "botSecretFetch" => match s.secret.take_if(|(id, _)| body["id"] == *id) {

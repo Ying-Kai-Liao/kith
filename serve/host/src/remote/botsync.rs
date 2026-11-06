@@ -3,12 +3,14 @@
 //! and still has open, binds the key to that invite's bot, and lists it in the signed ACL. A key the cloud made up is
 //! never admitted, and one that never shows the invite token (`proveBotInvite`) is dropped again after ten minutes.
 
+use crate::LockExt;
 use crate::api::botguests;
 use crate::hub::Hub;
 use crate::remote::crypto;
 use crate::store::{BotState, Device, DeviceSource, Scope, Store, now_ms};
 use kith_wire::cloud::path;
 use serde_json::json;
+use std::sync::Mutex;
 
 /// kv: cloud bot devices (`bd_...`) this host ended and the cloud has not yet confirmed as revoked (JSON array).
 const PENDING_REVOKES: &str = "bot_device_revokes";
@@ -37,8 +39,28 @@ pub async fn sync(hub: &Hub, listed: Option<&[Listed]>) {
 pub async fn apply(hub: &Hub, listed: &[Listed]) -> anyhow::Result<()> {
     let now = now_ms();
     for l in listed {
-        let known = hub.store.bot_guests()?.into_iter().any(|g| g.cloud_device.as_deref() == Some(&l.bot_device_id));
-        if known {
+        let bound = hub.store.bot_guests()?.into_iter().find(|g| g.cloud_device.as_deref() == Some(&l.bot_device_id));
+        if let Some(g) = bound {
+            // A bound device whose bot has ended relies on end_bot's queue entry, which is dropped if the kv write
+            // failed there; queue it again (it dedupes). A rotation's old device belongs to a live bot: left alone.
+            if !g.state.live() {
+                queue(&hub.store, PENDING_REVOKES, &l.bot_device_id);
+            }
+            continue;
+        }
+        // The cloud lists only this computer's devices, and invite ids are clash-checked across computers, so an invite
+        // this host doesn't know is one it lost (createBotInvite deletes it when the cloud's reply is lost) and an
+        // invite it closed (revoked, used, expired, or its bot ended) can still be accepted in the cloud first
+        // (`retry_revokes` drops the invite on a 409). Either way the device holds a slot, so it is ours to revoke.
+        let open = hub
+            .store
+            .bot_invite(&l.invite_id)
+            .is_some_and(|i| i.open(now) && hub.store.bot_guest(&i.bot_id).is_some_and(|g| g.state.live()));
+        if !open {
+            // Only queued: `pull` runs `retry_revokes` once at its end. Posting here would re-post both queues in full
+            // inside the first pull, which runs under the relay's 10 s STATE_WAIT (a timeout skips
+            // `sync_lease::pulled` and holds guests). The `pulling` lock is held across the awaits of a pull anyway.
+            queue(&hub.store, PENDING_REVOKES, &l.bot_device_id);
             continue;
         }
         admit(hub, l, now);
@@ -111,7 +133,7 @@ fn admit(hub: &Hub, l: &Listed, now: i64) {
             tracing::warn!(error = format!("{e:#}"), bot = bot.bot_id, "couldn't remove a bot's old key");
         }
         if let Some(cloud) = &bot.cloud_device {
-            queue_device_revoke(&hub.store, cloud);
+            queue(&hub.store, PENDING_REVOKES, cloud);
         }
     }
     tracing::info!(bot = bot.bot_id, "a bot guest joined at the cloud");
@@ -153,34 +175,36 @@ fn list(store: &Store, key: &str) -> Vec<String> {
     store.kv_get(key).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
 }
 
-fn set_list(store: &Store, key: &str, ids: &[String]) {
-    let saved = serde_json::to_string(ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(key, &v));
+/// Changes a queue in one step: it is read again here, so an id queued while a retry was awaiting the cloud is kept,
+/// and no `.await` sits between the read and the write (same shape as cloud.rs `update_pending_revokes`).
+fn update_list(store: &Store, key: &str, change: impl FnOnce(&mut Vec<String>)) {
+    static WRITING: Mutex<()> = Mutex::new(());
+    let _one_at_a_time = WRITING.locked();
+    let mut ids = list(store, key);
+    change(&mut ids);
+    let saved = serde_json::to_string(&ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(key, &v));
     if let Err(e) = saved {
         tracing::warn!(error = format!("{e:#}"), "couldn't remember a bot revoke for the cloud");
     }
 }
 
-fn queue_device_revoke(store: &Store, id: &str) {
-    let mut ids = list(store, PENDING_REVOKES);
-    if !ids.iter().any(|i| i == id) {
-        ids.push(id.to_owned());
-        set_list(store, PENDING_REVOKES, &ids);
-    }
+fn queue(store: &Store, key: &str, id: &str) {
+    update_list(store, key, |ids| {
+        if !ids.iter().any(|i| i == id) {
+            ids.push(id.to_owned());
+        }
+    });
 }
 
 /// Tells the cloud a bot device ended here; a failure is retried on later pulls (local access is already gone).
 pub async fn revoke_device_in_cloud(hub: &Hub, cloud_device: &str) {
-    queue_device_revoke(&hub.store, cloud_device);
+    queue(&hub.store, PENDING_REVOKES, cloud_device);
     retry_revokes(hub).await;
 }
 
 /// Cancels a bot invite in the cloud that was never used.
 pub async fn revoke_invite_in_cloud(hub: &Hub, invite_id: &str) {
-    let mut ids = list(&hub.store, PENDING_INVITE_REVOKES);
-    if !ids.iter().any(|i| i == invite_id) {
-        ids.push(invite_id.to_owned());
-        set_list(&hub.store, PENDING_INVITE_REVOKES, &ids);
-    }
+    queue(&hub.store, PENDING_INVITE_REVOKES, invite_id);
     retry_revokes(hub).await;
 }
 
@@ -195,18 +219,235 @@ pub async fn retry_revokes(hub: &Hub) {
         if ids.is_empty() {
             continue;
         }
-        let mut left = vec![];
+        let mut confirmed = vec![];
         for id in ids {
             match super::cloud::post(hub, &path(&id), &json!({})).await {
-                Ok(_) => {}
+                Ok(_) => confirmed.push(id),
                 // Gone there already, or (an invite) accepted meanwhile: the device is what to revoke then.
-                Err(e) if super::cloud::refused_with(&e, 404) || super::cloud::refused_with(&e, 409) => {}
+                Err(e) if super::cloud::refused_with(&e, 404) || super::cloud::refused_with(&e, 409) => {
+                    confirmed.push(id);
+                }
                 Err(e) => {
                     tracing::warn!(error = format!("{e:#}"), id, "couldn't revoke a bot in the cloud");
-                    left.push(id);
                 }
             }
         }
-        set_list(&hub.store, key, &left);
+        // Only what the cloud confirmed leaves the queue: an id queued during the awaits above stays.
+        update_list(&hub.store, key, |ids| ids.retain(|i| !confirmed.contains(i)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+    use crate::remote::identity::Identity;
+    use axum::response::IntoResponse;
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    #[derive(Default)]
+    struct Gate {
+        entered: Notify,
+        release: Notify,
+        first: std::sync::atomic::AtomicBool,
+    }
+
+    /// A cloud that holds its first revoke call (device or invite) until released and refuses every other.
+    async fn gated_cloud(gate: Arc<Gate>) -> String {
+        use axum::extract::State as Ax;
+        use axum::http::StatusCode;
+        use std::sync::atomic::Ordering;
+        let hold = |Ax(g): Ax<Arc<Gate>>| async move {
+            if g.first.swap(true, Ordering::SeqCst) {
+                return (StatusCode::INTERNAL_SERVER_ERROR, "no").into_response();
+            }
+            g.entered.notify_one();
+            g.release.notified().await;
+            axum::Json(json!({})).into_response()
+        };
+        let app = axum::Router::new()
+            .route("/v1/host/bot-devices/{id}/revoke", axum::routing::post(hold))
+            .route("/v1/host/bot-invites/{id}/revoke", axum::routing::post(hold))
+            .with_state(gate);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    }
+
+    async fn queued_during_retry(key: &str) {
+        let dir = std::env::temp_dir().join(format!("kith-botsync-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("t.db")).unwrap();
+        let hub = Hub::new(store, "host".into(), Identity::load_or_create(&dir).unwrap(), "token".into(), 0);
+        let gate = Arc::new(Gate::default());
+        hub.store.kv_set("test_cloud_url", &gated_cloud(gate.clone()).await).unwrap();
+        queue(&hub.store, key, "a");
+
+        let retry = tokio::spawn({
+            let hub = hub.clone();
+            async move { retry_revokes(&hub).await }
+        });
+        gate.entered.notified().await;
+        queue(&hub.store, key, "b");
+        gate.release.notify_one();
+        retry.await.unwrap();
+
+        assert_eq!(list(&hub.store, key), ["b"], "the confirmed id is gone, the one queued meanwhile is not");
+    }
+
+    #[tokio::test]
+    async fn a_bot_device_queued_during_a_retry_is_kept() {
+        queued_during_retry(PENDING_REVOKES).await;
+    }
+
+    #[tokio::test]
+    async fn a_bot_invite_queued_during_a_retry_is_kept() {
+        queued_during_retry(PENDING_INVITE_REVOKES).await;
+    }
+
+    /// A cloud that records every device revoke it is asked for.
+    async fn recording_cloud(calls: Arc<Mutex<Vec<String>>>) -> String {
+        use axum::extract::{Path, State as Ax};
+        let app = axum::Router::new()
+            .route(
+                "/v1/host/bot-devices/{id}/revoke",
+                axum::routing::post(|Ax(c): Ax<Arc<Mutex<Vec<String>>>>, Path(id): Path<String>| async move {
+                    c.lock().unwrap().push(id);
+                    axum::Json(json!({}))
+                }),
+            )
+            .with_state(calls);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    }
+
+    fn hub_with_cloud(base: &str) -> Arc<Hub> {
+        let dir = std::env::temp_dir().join(format!("kith-botsync-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("t.db")).unwrap();
+        let hub = Hub::new(store, "host".into(), Identity::load_or_create(&dir).unwrap(), "token".into(), 0);
+        hub.store.kv_set("test_cloud_url", base).unwrap();
+        hub
+    }
+
+    /// A live bot with one invite; `revoked` closes the invite as the owner would.
+    fn bot_with_invite(hub: &Hub, revoked: bool) {
+        let g = crate::store::BotGuest {
+            bot_id: "b1".into(),
+            person_id: "bot-00000001".into(),
+            owner_person: None,
+            name: "bot".into(),
+            provider: "x".into(),
+            agents: vec![],
+            state: BotState::Invited,
+            device_key: None,
+            cloud_device: None,
+            rate_per_hour: 60,
+            concurrent: 1,
+            turn_timeout_s: 60,
+            wake_profile: None,
+            created_at: 0,
+            joined_at: None,
+            decided_at: None,
+            decided_by: None,
+            last_seen_at: None,
+            revoked_at: None,
+            revoked_why: None,
+        };
+        hub.store.put_bot_guest(&g).unwrap();
+        let i = crate::store::BotInvite {
+            invite_id: "inv1".into(),
+            bot_id: "b1".into(),
+            token_hash: "h".into(),
+            created_at: 0,
+            expires_at: i64::MAX,
+            used_at: None,
+            revoked_at: None,
+        };
+        hub.store.put_bot_invite(&i).unwrap();
+        if revoked {
+            hub.store.revoke_bot_invite("inv1").unwrap();
+        }
+    }
+
+    fn device(invite: &str) -> Listed {
+        Listed {
+            bot_device_id: "bd_1".into(),
+            invite_id: invite.into(),
+            device_key: crypto::b64(&[7u8; 32]),
+            name: "bot".into(),
+            provider: None,
+            created_at: 0,
+        }
+    }
+
+    /// A bot that ended here: its device is bound and its revoke was lost from the queue.
+    fn ended_bound_bot(hub: &Hub) {
+        bot_with_invite(hub, false);
+        hub.store.bind_bot_device("b1", &crypto::b64(&[7u8; 32]), "bd_1", BotState::Joining).unwrap();
+        hub.store.end_bot_guest("b1", BotState::Revoked, "test", 1).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_device_on_an_invite_closed_here_is_queued_for_revoke_not_posted() {
+        let calls = Arc::default();
+        let hub = hub_with_cloud(&recording_cloud(Arc::clone(&calls)).await);
+        bot_with_invite(&hub, true);
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert!(calls.lock().unwrap().is_empty(), "apply posts nothing; pull's retry_revokes does");
+        assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"], "queued once");
+        assert!(hub.store.bot_guest("b1").unwrap().state.live(), "no local bot is ended");
+        retry_revokes(&hub).await;
+        assert_eq!(*calls.lock().unwrap(), ["bd_1"]);
+        assert_eq!(list(&hub.store, PENDING_REVOKES), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn a_device_on_an_invite_whose_bot_ended_is_queued() {
+        let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
+        bot_with_invite(&hub, false);
+        hub.store.end_bot_guest("b1", BotState::Revoked, "test", 1).unwrap();
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"]);
+    }
+
+    #[tokio::test]
+    async fn a_device_on_an_unknown_invite_is_queued_for_revoke() {
+        let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
+        bot_with_invite(&hub, true);
+        apply(&hub, &[device("lost-reply")]).await.unwrap();
+        assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"]);
+    }
+
+    #[tokio::test]
+    async fn a_bound_device_of_an_ended_bot_is_queued_again() {
+        let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
+        ended_bound_bot(&hub);
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"]);
+    }
+
+    #[tokio::test]
+    async fn a_bound_device_of_a_live_bot_is_left_alone() {
+        let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
+        bot_with_invite(&hub, false);
+        hub.store.bind_bot_device("b1", &crypto::b64(&[7u8; 32]), "bd_1", BotState::Joining).unwrap();
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert_eq!(list(&hub.store, PENDING_REVOKES), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn a_device_on_an_open_invite_is_admitted_not_revoked() {
+        let calls = Arc::default();
+        let hub = hub_with_cloud(&recording_cloud(Arc::clone(&calls)).await);
+        bot_with_invite(&hub, false);
+        apply(&hub, &[device("inv1")]).await.unwrap();
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(hub.store.bot_guest("b1").unwrap().cloud_device.as_deref(), Some("bd_1"));
     }
 }
