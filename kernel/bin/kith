@@ -385,6 +385,10 @@ for k, v in r.get("env", {}).items():
 print("p_env_names=%s" % q(" ".join(env)))')"
   [[ $p_allowed == 1 ]] || { echo "kith: $p_why (kith-auth member $agent ${KITH_PERSON})" >&2; exit 3; }
   if [[ -n $p_budget ]]; then   # the membership's monthly cap, for the agent they reached (the caller, for a helper)
+    # A limit that can't be read is not "no limit": anyone but the owner stops here (NaN, inf, a sign or text all fail).
+    if [[ $p_owner == 0 && ! $p_budget =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      echo "kith: your spending limit on ${p_budget_agent:-$agent} can't be read; ask the owner to set it again" >&2; exit 3
+    fi
     # Fails closed for anyone but the owner: a spend that can't be read is not $0.
     if ! spent=$(KITH_PERSON_WAS=$p_was "$KITH/bin/kith-cost" spent "$KITH_PERSON" "$p_budget_agent" 2>/dev/null); then
       [[ $p_owner == 1 ]] && spent=0 || { echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost failed); not running without the budget check" >&2; exit 3; }
