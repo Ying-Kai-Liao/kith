@@ -1663,7 +1663,7 @@ fn joining_and_lineage_are_read_from_the_snapshot_the_write_runs_on() {
 }
 
 #[test]
-fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched() {
+fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched_or_rolling_back() {
     use crate::cutover::state::{self, Phase, Switch};
     let mut rig = Rig::new(&base());
     // The rig has no folders of its own, so the write reads the caller's machine folder.
@@ -1684,8 +1684,8 @@ fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched() 
             .unwrap()
             .len()
     };
-    // No record, a rolling-back record or a stepping one: refused, no row changed.
-    for p in [None, Some(Phase::RollingBack), Some(Phase::Stepping)] {
+    // No record (rolled back and cleared) or a stepping one: refused, no row changed.
+    for p in [None, Some(Phase::Stepping)] {
         match p {
             Some(p) => phase(p),
             None => state::clear(&layout, "authority").unwrap(),
@@ -1707,5 +1707,24 @@ fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched() 
     // Switched: the marked write lands.
     phase(Phase::Switched);
     rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // A stuck rollback (RollingBack, the tombstone still in auth.json) is still the core's: a removal goes through,
+    // and the same removal sent again changes nothing.
+    phase(Phase::RollingBack);
+    let rm = json!({"person": "sam", "agent": "house", "viaSwitch": true});
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // Once the rollback is done (no record) the same marked write is refused again, a suspend among them.
+    state::clear(&layout, "authority").unwrap();
+    let e = rig
+        .call("people.suspend", &json!({"id": "sam", "viaSwitch": true}))
+        .unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
+    let e = rig.call("people.revoke", &rm).unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
     assert_eq!(rows(&mut rig), 1);
 }

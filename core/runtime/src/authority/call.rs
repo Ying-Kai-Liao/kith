@@ -137,14 +137,17 @@ fn need<'a>(params: &'a Value, key: &str) -> std::result::Result<&'a str, Die> {
 /// What a `viaSwitch` write is refused with while authority is not switched; the host reads it to fall back to kith-auth.
 pub(crate) const NOT_SWITCHED: &str = "not switched: authority is back on auth.json";
 
-/// Whether the authority module's cutover phase is `switched` (the file the switch writes first and the rollback
-/// rewrites first). Unreadable counts as not switched: the write is refused and the host falls back to the file.
+/// Whether the authority module's cutover phase is `switched` or `rollingBack`: a rollback that failed or is stuck
+/// leaves the tombstone in auth.json and the phase at `RollingBack`, and the core is still the only store there, so a
+/// marked write (a removal above all) must go through. Any other phase (unswitched, rolled back) refuses it, and an
+/// unreadable record counts as not switched: the host falls back to the file.
 fn authority_switched(machine: &Path) -> bool {
+    use crate::cutover::state::Phase;
     let layout = crate::layout::Layout::new(machine);
     crate::cutover::state::read(&layout, "authority")
         .ok()
         .flatten()
-        .is_some_and(|s| s.phase == crate::cutover::state::Phase::Switched)
+        .is_some_and(|s| matches!(s.phase, Phase::Switched | Phase::RollingBack))
 }
 
 fn switch(params: &Value, key: &str) -> bool {
@@ -359,9 +362,11 @@ pub(crate) fn call_in(
                 |a| write_in(m, params, c, life, a, &fresh),
                 |tx, said| {
                     // A host that routed this write here because auth.json held the tombstone says so (`viaSwitch`).
-                    // Its look at the file and this write are two steps, and `kith rollback authority` can land
-                    // between them (the phase is RollingBack before the file is put back), so the phase is checked
-                    // here, in the write's own transaction. A write without the marker (kith-auth's mirror, the
+                    // Its look at the file and this write are two steps. The cutover lifetime lock is what
+                    // excludes `kith rollback authority` while the daemon lives (the rollback takes it before it
+                    // writes RollingBack), so this check is for a phase left behind (rolled back, never switched).
+                    // RollingBack counts as switched: a stuck rollback keeps the tombstone, and removals must work.
+                    // The phase is read here, in the write's own transaction. A write without the marker (kith-auth's mirror, the
                     // terminal) keeps today's behaviour.
                     if switch(params, "viaSwitch") && !authority_switched(&machine) {
                         return Err(Error::Refused(format!("authority: {NOT_SWITCHED}")));

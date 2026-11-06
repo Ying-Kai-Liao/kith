@@ -644,6 +644,25 @@ fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
     })
 }
 
+/// The `people.*` writes that carry `viaSwitch`, so the core refuses them once authority is back on auth.json and the
+/// host runs them through kith-auth instead. `people.clearTemp` is not here on purpose: it only clears a guest's
+/// temporary grants and a retry on kith-auth would find nothing to clear. A new write method must be put in this list or
+/// in [`SWITCH_UNMARKED`] (a test fails until it is).
+const SWITCH_MARKED: &[&str] = &[
+    "people.revoke",
+    "people.grant",
+    "people.removeBot",
+    "people.addBot",
+    "people.removePerson",
+    "people.suspend",
+    "people.undo",
+    "people.addPerson",
+];
+
+/// The writes `core_form` produces that do not carry the marker, and the reads.
+#[cfg(test)]
+const SWITCH_UNMARKED: &[&str] = &["people.clearTemp", "people.listPeople", "people.retired"];
+
 /// The host's kith-auth calls for people, members and bots (`people.rs`, `botguests.rs`): kith-auth while the host is not
 /// switched (as it was), the matching `people.*` method of the core once it is ([`switched`]). A switched host whose core
 /// does not answer gets an error and nothing is written another way.
@@ -666,9 +685,11 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
     // A read repeats harmlessly; a write is never sent twice.
     let read = matches!(method, "people.listPeople" | "people.retired");
     let mut params = params;
-    if !read {
-        // The look at auth.json above and this write are two steps: a rollback can land between them. The core checks
-        // the cutover phase inside the write's transaction and refuses a marked write unless it is `switched`.
+    if SWITCH_MARKED.contains(&method) {
+        // The look at auth.json above and this write are two steps. The core checks the cutover phase inside the
+        // write's transaction and refuses a marked write unless it is `switched` or `rollingBack` (a stuck rollback
+        // keeps the tombstone, so removals must work). The lifetime lock is what excludes a rollback while the daemon
+        // lives; this marker covers a phase left behind.
         params["viaSwitch"] = true.into();
     }
     let said = match owner_call(method, params, read).await {
@@ -708,13 +729,34 @@ mod gate_tests {
         assert!(c.get(5000, || true));
         assert!(c.get(5000 + 1999, || panic!("asked inside the period")), "kept");
         assert!(!c.get(5000 + 2000, || false), "asked again after it");
-        // A write decides from switched_now (a plain stat): the cache must not come back on these two.
-        let src = include_str!("authority.rs");
-        for f in ["run_auth(", "run_auth_noted("] {
-            let at = src.find(&format!("async fn {f}")).unwrap();
-            let body = &src[at..at + 300];
-            assert!(body.contains("!switched_now()") && !body.contains("!switched()"), "{f} decides from a fresh stat");
-        }
+        // That writes ask switched_now, not the cache, is tested by behaviour in access_core_tests
+        // (`a_write_decides_from_a_fresh_stat_not_the_read_cache`).
+    }
+
+    #[test]
+    fn the_marked_writes_are_exactly_the_intended_people_writes() {
+        // Every kith-auth call shape core_form knows, one per arm.
+        let shapes: &[&[&str]] = &[
+            &["people", "--json"],
+            &["retired", "x"],
+            &["member", "house", "sam", "--rm"],
+            &["member", "house", "sam", "preset=guest"],
+            &["bot", "b", "--rm"],
+            &["bot", "b", "--of", "kai", "name=B"],
+            &["person", "p", "--rm", "--unused"],
+            &["person", "p", "--revoke", "--local"],
+            &["person", "p", "--unrevoke", "--local"],
+            &["person", "p", "--clear-temp"],
+            &["person", "p", "name=P"],
+        ];
+        let methods: std::collections::BTreeSet<&str> = shapes.iter().map(|a| core_form(a).unwrap().0).collect();
+        let marked: std::collections::BTreeSet<&str> = SWITCH_MARKED.iter().copied().collect();
+        let unmarked: std::collections::BTreeSet<&str> = SWITCH_UNMARKED.iter().copied().collect();
+        assert!(marked.is_disjoint(&unmarked));
+        // Set equality: a method added to core_form must be decided one way or the other.
+        let decided: std::collections::BTreeSet<&str> = marked.union(&unmarked).copied().collect();
+        assert_eq!(methods, decided);
+        assert!(!marked.contains("people.clearTemp"));
     }
 
     #[test]
