@@ -27,8 +27,18 @@ kith_cutover_refuse() {
   return 0
 }
 
+# kith_core_prime   looks up the program and its module list once and keeps them in shell variables, so the launch's
+# several kith_core_exec calls (pkg, project-id x3) do not each spawn `kith_paths.py --bin` and `kith kernel version`.
+# Subshells inherit the variables; nothing is exported. The decision is the same as without it, made earlier.
+kith_core_prime() {
+  _kith_core_bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || _kith_core_bin=""
+  _kith_core_ver=""
+  [[ -z $_kith_core_bin ]] || _kith_core_ver=$("$_kith_core_bin" kernel version 2>/dev/null) || _kith_core_ver=""
+  _kith_core_primed=1
+}
+
 kith_core_exec() {
-  local verb=$1 module bin
+  local verb=$1 module bin ver
   shift
   module=$(awk -F'\t' -v v="$verb" '$1 == v { print $2; exit }' "$KITH/lib/core-switched.txt" 2>/dev/null)
   if [[ ${KITH_CORE:-} == python ]]; then
@@ -40,8 +50,13 @@ kith_core_exec() {
     [[ ${KITH_CORE:-} == rust ]] || return 1
     module=${verb%% *}
   fi
-  bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
-  "$bin" kernel version 2>/dev/null | grep -q "\"$module\"" || return 1
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
   # KITH_BIN names the program that was checked, so the core launch (which takes KITH_BIN as it is, once it answers
   # `memory hook`) and the router agree on one binary.
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"

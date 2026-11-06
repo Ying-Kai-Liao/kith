@@ -648,6 +648,8 @@ jobs:
           kernel/tests/difftest/kith-difftest --golden kernel/tests/difftest/golden --rust --bin "$PWD/serve/host/target/debug/kith"
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
+          # The pkg and project-id switches: the launch's two lookups are the core's, per verb, and a guest's project-id stays Python.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
           # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.
           KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-embedded-check
           # A direct run holds its conversation's lock under kith-stub (M1-3).
