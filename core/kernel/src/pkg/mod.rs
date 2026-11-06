@@ -13,7 +13,7 @@
 //!
 //! The port keeps the shape of the Python: one function each, with the same checks in the same order, because the order of
 //! the messages and of the files written is part of what the golden record (`kernel/tests/difftest/golden/pkg-resolve.json`)
-//! freezes. `KITH_CORE=python` stays the rollback: the verb is not in `kernel/lib/core-switched.txt`.
+//! freezes. `KITH_CORE=python` stays the rollback: the `pkg` line of `kernel/lib/core-switched.txt` is the switch, removing it the rollback.
 
 // The ports keep the shape of their Python originals (one line each way) so a reader can hold them side by side.
 #![allow(

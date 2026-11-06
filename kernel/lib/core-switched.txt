@@ -3,3 +3,5 @@ paths	paths
 engines	engines
 launch	launch
 settings	settings
+pkg	pkg
+project-id	project
