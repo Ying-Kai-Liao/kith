@@ -64,7 +64,7 @@ async fn forget_removed(hub: &Hub, bin: &Path) {
 pub(crate) async fn locked_run(bin: &Path, args: &[&str]) -> Result<String> {
     // The core has no method for a person's chat handle (`handle`): a switched host says so and does not run kith-auth on
     // the tombstone. Open gate: switched joins and end_access can't set or clear the kith handle.
-    if crate::api::authority::switched() {
+    if crate::api::authority::switched_now() {
         anyhow::bail!(
             "`kith-auth {}` has no core method (handle bind/unbind): authority is on the core",
             args.join(" ")

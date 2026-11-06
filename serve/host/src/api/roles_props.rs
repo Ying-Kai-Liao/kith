@@ -328,6 +328,7 @@ impl World {
         core.on();
         // The tombstone is the file kith-auth would read, and kith-auth is a stand-in that logs every call and fails.
         core.switched_over(&w.dir.join("auth.json"));
+        core.phase("switched");
         let bin = w.dir.join("kith-auth-logging");
         std::fs::write(
             &bin,
