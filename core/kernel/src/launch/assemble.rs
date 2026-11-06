@@ -192,6 +192,25 @@ fn pyrepr(x: &str) -> String {
     }
 }
 
+/// Whether `verb` is the core's: a line in `lib/core-switched.txt`, or `KITH_CORE=rust`; `KITH_CORE=python` is the rollback
+/// (`kith_core_exec` in lib/kith-core.sh decides the same way for the shell).
+///
+/// Bash also runs `kith_cutover_refuse` under `KITH_CORE=python`, refusing the rollback of a module whose files the core
+/// owns after its cutover. It is left out here on purpose: that refusal only matters for a module that has a cutover step,
+/// and `pkg` and `project-id` have none, so the rollback is always allowed for these two verbs. Add the refusal when one
+/// of them gets a cutover.
+fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
+    match get(env, "KITH_CORE") {
+        "python" => return false,
+        "rust" => return true,
+        _ => {}
+    }
+    fs::read_to_string(kernel.join("lib/core-switched.txt")).is_ok_and(|t| {
+        t.lines()
+            .any(|l| l.split_once('\t').is_some_and(|(v, _)| v == verb))
+    })
+}
+
 // ---- programs
 
 struct Sys<'a> {
@@ -414,6 +433,14 @@ fn claude_version(sys: &Sys<'_>) -> Option<String> {
     None
 }
 
+/// Digits with at most one inner dot: a finite, non-negative amount (no NaN, inf, sign or exponent).
+fn plain_number(t: &str) -> bool {
+    !t.is_empty()
+        && t.split('.').count() <= 2
+        && t.split('.')
+            .all(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// `uuid4().hex`. An unreadable random source is an error: an all-zero id would be shared by every run, and a run's
 /// id and temp file names must not collide.
 fn random_hex() -> Result<String, String> {
@@ -598,6 +625,18 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             .map(pystr)
             .unwrap_or_default();
         if !p_budget.is_empty() {
+            // A limit that can't be read is not "no limit": for anyone but the owner the run stops here.
+            if !p_owner && !plain_number(&p_budget) {
+                let on = if p_budget_agent.is_empty() {
+                    agent
+                } else {
+                    &p_budget_agent
+                };
+                say(&format!(
+                    "kith: your spending limit on {on} can't be read; ask the owner to set it again"
+                ));
+                return Err(3);
+            }
             let sys = Sys { env: &env };
             let mut c = sys.cmd(
                 kernel.join("bin/kith-cost"),
@@ -618,11 +657,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                     return Err(3);
                 }
                 Some(t) => {
-                    let numeric = !t.is_empty()
-                        && t.split('.').count() <= 2
-                        && t.split('.')
-                            .all(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()));
-                    if !p_owner && !numeric {
+                    if !p_owner && !plain_number(&t) {
                         say(&format!(
                             "kith: can't read what {person} has spent this month (kith-cost gave '{t}'); not running without the budget check"
                         ));
@@ -705,8 +740,29 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     // ---- the pinned package
     let sys = Sys { env: &env };
     let mut pkg = src_pkg.clone();
-    match sys
-        .out(kernel.join("bin/kith-pkg"), &["resolve", agent], true)
+    // `pkg` in lib/core-switched.txt: the core's own `resolve` (kith-pkg resolve is the rollback, KITH_CORE=python).
+    let resolved = if switched(kernel, &env, "pkg") {
+        let ctx = crate::pkg::Ctx {
+            kernel: kernel.to_path_buf(),
+            agents: p.agents.clone(),
+            state: p.state.clone(),
+            store: p.store.clone(),
+            github: env
+                .get("KITH_GITHUB_GIT")
+                .map_or("https://github.com", String::as_str)
+                .trim_end_matches('/')
+                .to_owned(),
+            // The must-ask python runs in this process's environment, not in the launch's env map that the old kith-pkg
+            // subprocess had; the two differ only by what the launch edits (KITH_RUN_TOKEN, KITH_AGENT*).
+            python: "python3".to_owned(),
+        };
+        let out = crate::pkg::cli::run(&ctx, &["resolve".to_owned(), agent.to_owned()]);
+        eprint!("{}", out.stderr);
+        (out.code == 0).then(|| out.stdout.trim_end_matches('\n').to_owned())
+    } else {
+        sys.out(kernel.join("bin/kith-pkg"), &["resolve", agent], true)
+    };
+    match resolved
         .map(PathBuf::from)
         .filter(|d| d.join("prompt.md").is_file())
     {
@@ -795,9 +851,26 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     let mut no_token = env.clone();
     no_token.remove("KITH_RUN_TOKEN");
     if project.is_empty() {
-        project = Sys { env: &no_token }
-            .out(kernel.join("bin/project-id"), &[], false)
-            .unwrap_or_default();
+        // `project-id` in lib/core-switched.txt: the core answers. Never as a guest: the token is dropped above, and a guest's
+        // own calls stay with bin/project-id, which asks the host.
+        project = if switched(kernel, &env, "project-id") {
+            let ctx = crate::project::Ctx {
+                state: p.state.clone(),
+                home: home_dir.clone(),
+                cwd: std::env::current_dir().unwrap_or_default(),
+                guest: false,
+            };
+            let out = crate::project::run(&ctx, &[]);
+            if out.code == 0 {
+                out.stdout.trim_end_matches('\n').to_owned()
+            } else {
+                String::new()
+            }
+        } else {
+            Sys { env: &no_token }
+                .out(kernel.join("bin/project-id"), &[], false)
+                .unwrap_or_default()
+        };
     } else if !reg.has(&project) {
         let known: String = reg.known().iter().map(|k| format!("{k} ")).collect();
         say(&format!(
@@ -1407,6 +1480,23 @@ mod tests {
 
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|x| (*x).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_limit_is_read_only_when_it_is_a_plain_amount() {
+        for ok in ["0", "10", "12.50", "0.01"] {
+            assert!(plain_number(ok), "{ok}");
+        }
+        for bad in [
+            "", "abc", "NaN", "nan", "inf", "-inf", "Infinity", "-5", "+5", "1e3", "1.", ".5",
+            "1.2.3", " 5",
+        ] {
+            assert!(!plain_number(bad), "{bad:?}");
+        }
+        // finite budgets compare as before: under runs, over stops
+        let f = |x: &str| x.trim().parse::<f64>().ok();
+        assert!(f("1.0").unwrap() < f("5").unwrap());
+        assert!(f("5").unwrap() >= f("5").unwrap());
     }
 
     #[test]

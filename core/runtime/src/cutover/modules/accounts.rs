@@ -13,9 +13,13 @@
 //!   merge leave the note alone and log (`kith_kernel::accounts::tombstoned`).
 //! - `export_back`: the table's rows written as `state.json` again, over the tombstone (the original stays beside it as
 //!   `state.json.pre-cutover-<time>`).
-//! - `step_refusal`: `kith migrate step accounts` refuses today. After the tombstone every reader of the file fails closed, and
-//!   the core has no reader (`kith_accounts.py` pick/rows/list, `kernel.accounts.*`) or writer (`kith account out|clear|usage`)
-//!   for the account state yet, so a launch would stop. The plan gates the step on that lane (docs/plans/one-bot-model.md).
+//! - Readers and writers after the step (accounts-s1): nothing reads the tombstone. `kith account list|pick|out|clear|usage`
+//!   and the Rust launch run `kith kernel account-state` / `accounts`, which read and write the table through the `account.*`
+//!   rows (the daemon, else an embedded core: `serve/host/src/account_store.rs`, installed while the switch file says
+//!   switched). The Python readers that remain (`kith_accounts.py`: `run-chain`, `accounts-json`, `launch-env` and
+//!   `main-env` with `--record`, the host's `--accounts-json`) find the tombstone and ask the same verbs. The four
+//!   writers are one edit each (`kith_kernel::accounts::apply_change`), applied to the file under `state.json.lock` before
+//!   the step and to the entry's row in one transaction after it.
 //! - `source_lock`: an exclusive flock on `state.json.lock` from the import through the tombstone, the lock the Python and
 //!   Rust writers take, so no mark is lost in between and no writer's rename lands over the note.
 //! - Once switched the core is the writer: `accounts::core_writes` is true exactly when `may_serve` says yes, so the
@@ -44,16 +48,6 @@ impl Module for Accounts {
 
     fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
         vec![kith_kernel::accounts::state_file(&env.machine)]
-    }
-
-    fn step_refusal(&self, _env: &Env) -> Option<String> {
-        // Past the tombstone nothing but the core may answer for the file, and the readers still read the file:
-        // `kith_accounts.py`'s read verbs (pick, rows, list), `kernel.accounts.*` and the out, clear and usage commands have
-        // no core reader or writer yet, so a step would stop every agent launch (`--record` hits the tombstone).
-        Some(
-            "not stepped: the core has no reader or writer for kith_accounts.py's read verbs, kernel.accounts.* or out/clear/usage yet; step accounts only after that lane exists"
-                .into(),
-        )
     }
 
     fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {

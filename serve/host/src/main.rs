@@ -1,6 +1,7 @@
 //! `kith-serve`: runs coding-agent bots over ACP and serves the Kith apps.
 
 mod access;
+mod account_store;
 mod agent;
 mod analytics;
 mod api;
@@ -495,6 +496,17 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
+    /// `kith account list|pick|out|clear|usage` (`kernel/bin/kith-account`), plus `state` and `started` for the Python readers:
+    /// the accounts' state in the file, or in the core once `kith migrate step accounts` moved it.
+    // -h/--help belong to the Python usage text, which this is not routed for.
+    #[command(name = "account-state", disable_help_flag = true)]
+    AccountState {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
     /// What Claude Code usage costs, the verbs the launch and the apps call (`kernel/bin/kith-cost`): `limit AGENT [--json|--sh]`,
     /// `spent PERSON [AGENT]`, `usage [PERIOD] --json`, `agent NAME [PERIOD] --json`, `members AGENT`, `bots --json` and `sync`.
     /// Prints what `kith-cost` prints, with its exit codes (2: a verb the core does not have yet). Not routed from `kith` yet.
@@ -531,7 +543,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// The kith project of a directory, as `kernel/bin/project-id` answers it (not routed from `kith` yet; a guest run is
+    /// The kith project of a directory, as `kernel/bin/project-id` answers it (routed from `kith` while `project-id` is switched; a guest run is
     /// refused here and stays with the Python, which asks the host over the run socket).
     #[command(name = "project-id", disable_help_flag = true)]
     ProjectId {
@@ -550,7 +562,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// `kith-pkg resolve`: the pinned package folder a run starts from (not routed from `kith` yet).
+    /// `kith-pkg resolve`: the pinned package folder a run starts from (routed from `kith` while `pkg` is switched).
     #[command(disable_help_flag = true)]
     Pkg {
         /// The kernel folder (default: the one this program finds).
@@ -817,6 +829,38 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
             4
         }
     }
+}
+
+/// `kith kernel account-state <verb>`: `kith account list|pick|out|clear|usage` and the two verbs the Python readers use
+/// (`state`, `started`). Exit codes are the Python's: 2 a usage error, 1 a refusal (the core's, or a tombstone).
+fn print_account_state(kernel: Option<std::path::PathBuf>, mut args: Vec<String>) -> i32 {
+    use kith_kernel::accounts::{self, Ctx, System};
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let p = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env);
+    let system = System { kernel: kernel.clone() };
+    let ctx = Ctx {
+        machine: p.machine.clone(),
+        agents: p.agents.clone(),
+        kernel,
+        home,
+        claude_config_dir: std::env::var("CLAUDE_CONFIG_DIR").ok(),
+        out: &system,
+    };
+    let verb = args.remove(0);
+    if !accounts::VERBS.contains(&verb.as_str()) {
+        eprintln!("kith: unknown command: {verb} (kith account --help)");
+        return 2;
+    }
+    let stdin = || {
+        let mut text = String::new();
+        let _ = std::io::stdin().read_to_string(&mut text);
+        text
+    };
+    let out = accounts::run_verb(&ctx, &verb, args, &stdin);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    out.code
 }
 
 /// `kith kernel delegation <verb>`; the refusal exits 4 (`REFUSED`), as `kith ask` does.
@@ -1241,6 +1285,10 @@ fn print_engines(json: bool, action: Option<EnginesAction>) -> Result<()> {
 /// verb runs bare when no core opens here (a daemon holds the lock, or this is a first setup). M0b replaces this with
 /// a call through the method table.
 fn through_core<T>(verb: impl FnOnce() -> T) -> T {
+    // The verb asks the core itself (accounts, once moved): an embedded core held here would refuse it.
+    if kith_kernel::accounts::store().is_some() {
+        return verb();
+    }
     let p = kernel::folders(&kith_kernel::paths::process_home());
     kith_core::stateless_through_core(&p, verb).0
 }
@@ -1504,6 +1552,20 @@ async fn main() -> Result<()> {
                 core_front::print_status(json);
                 return Ok(());
             }
+            // Once `kith migrate step accounts` moved the state to the core, every verb that reads or writes it (the accounts
+            // verbs, the launch) does so through the core. Not the verbs that hold the core themselves.
+            if !matches!(
+                cmd,
+                KernelCmd::Cutover { .. }
+                    | KernelCmd::CoreMigrate { .. }
+                    | KernelCmd::CoreDaemon
+                    | KernelCmd::CoreStatus { .. }
+            ) {
+                account_store::install(&kernel::folders(&kith_kernel::paths::process_home()));
+            }
+            if let KernelCmd::AccountState { kernel, args } = cmd {
+                std::process::exit(print_account_state(kernel, args));
+            }
             if let KernelCmd::Secrets { kernel, args } = cmd {
                 std::process::exit(print_secrets(kernel, &args));
             }
@@ -1612,6 +1674,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }
                     | KernelCmd::Permit { .. }
+                    | KernelCmd::AccountState { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }

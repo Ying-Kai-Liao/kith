@@ -9085,5 +9085,97 @@
    "third",
    "helper"
   ]
+ },
+ {
+  "name": "mcp-stdin-lone-cr",
+  "command": "permit",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "sh",
+    "w.sh",
+    "py",
+    "k"
+   ],
+   "new": [
+    "sh",
+    "w.sh",
+    "rs",
+    "{BIN}",
+    "k"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "KITH_SERVE_DIR": "{HOME}/serve",
+   "TZ": "UTC"
+  },
+  "setup": [
+   {
+    "write": "home/w.sh",
+    "text": "#!/bin/sh\n# One call of kith-permit's MCP server with a stand-in for the host: w.sh SIDE... MODE STDIN\n#   SIDE  py KERNEL | rs BIN KERNEL    (KERNEL: a folder under home/, here \"k\": copies of bin/kith-permit and bin/kith-auth,\n#                                       a stand-in bin/kith-ask, lib linked to this checkout's)\n#   MODE  none | run:NAME | ask:NAME (a unix socket answering replies/NAME[.2 ...]; no such file: it hangs up) | deadrun | deadask\n#   STDIN a file in in/ (@NAME@ words are filled in below, so no token-shaped text is written in a case)\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nkernel=$(cd \"$kernel\" && pwd -P)\nmode=$1; in=$2; shift 2\ndir=$(mktemp -d /tmp/kp.XXXXXX)\npid=\ncase $mode in\n  ask:*|run:*)\n    pid=$(python3 fh.py unix \"$dir/s\" \"replies/${mode#*:}\" \"$dir/ready\" >/dev/null 2>&1 & echo $!)\n    n=0; while [ ! -s \"$dir/ready\" ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done\n    if [ \"${mode%%:*}\" = ask ]; then export KITH_ASK_SOCKET=\"$dir/s\"; else export KITH_RUN_SOCKET=\"$dir/s\"; fi ;;\n  deadask) export KITH_ASK_SOCKET=\"$dir/none\" ;;\n  deadrun) export KITH_RUN_SOCKET=\"$dir/none\" ;;\nesac\nGHTOKEN=\"gh\"\"p_\"\"AAAABBBBCCCCDDDD1111222233334444\"\nexport MY_API_TOKEN=\"not-a-real-\"\"secret-value-9931\"\nsub() { sed -e \"s|@GHTOKEN@|$GHTOKEN|g\" -e \"s|@APIVALUE@|$MY_API_TOKEN|g\" -e \"s|@HOME@|$HOME|g\" \"in/$in\"; }\nif [ \"$side\" = py ]; then\n  sub | python3 \"$kernel/bin/kith-permit\" \"$@\"\nelse\n  sub | \"$bin\" kernel permit --kernel \"$kernel\" \"$@\"\nfi\nrc=$?\n[ -n \"$pid\" ] && kill $pid 2>/dev/null\nrm -rf \"$dir\"\nexit $rc\n"
+   },
+   {
+    "write": "home/fh.py",
+    "text": "import json, os, socket, subprocess, sys\nkind, where, replyf, ready = sys.argv[1:5]\nlog = os.environ.get('DIFFTEST_FAKELOG')\n\n\ndef read(p):\n    return open(p, 'rb').read() if os.path.exists(p) else None\n\n\n# replies/NAME is the answer to every request; replies/NAME.2, .3 ... are the answers to the 2nd, 3rd ... request\nraws = [read(replyf)]\nwhile read('%s.%d' % (replyf, len(raws) + 1)) is not None:\n    raws.append(read('%s.%d' % (replyf, len(raws) + 1)))\nhook = replyf + '.do'      # a shell script run after the request is logged and before it is answered (the host's side effects)\nn = 0\n\n\ndef note(s):\n    if log:\n        with open(log, 'a') as f:\n            f.write(s + '\\n')\n\n\nsrv = socket.socket(socket.AF_UNIX)\nsrv.bind(where)\nsrv.listen(5)\nopen(ready, 'w').write('1')\nwhile True:\n    c, _ = srv.accept()\n    buf = b''\n    while not buf.endswith(b'\\n'):\n        d = c.recv(65536)\n        if not d:\n            break\n        buf += d\n    try:\n        note('host-sock ' + json.dumps(json.loads(buf.decode()), sort_keys=True))\n    except Exception:\n        note('host-sock (not json)')\n    if os.path.exists(hook):\n        subprocess.run(['sh', hook], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n    raw = raws[min(n, len(raws) - 1)]\n    n += 1\n    if raw is not None:\n        c.sendall(raw)\n    c.close()\n"
+   },
+   {
+    "mkdir": "home/k/bin"
+   },
+   {
+    "link": "home/k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-permit",
+     "{KERNEL}/bin/kith-auth",
+     "{HOME}/k/bin/"
+    ]
+   },
+   {
+    "write": "home/k/bin/kith-ask",
+    "text": "#!/bin/sh\nbin=$(cd \"$(dirname \"$0\")\" && pwd)\necho \"kith-ask $1 | task=$3 | person=$KITH_PERSON agent=$KITH_AGENT ask-token=${KITH_ASK_TOKEN:+set} run-token=${KITH_RUN_TOKEN:+set}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$3\" in\n  FAIL*) echo \"boom: the helper broke\" >&2; exit 1 ;;\n  SYNC*) echo \"kith: this Mac is out of sync with the Kith cloud\" >&2; exit 1 ;;\n  EMPTY*) exit 0 ;;\n  OUTFAIL*) echo \"stdout reason\"; exit 1 ;;\n  LONGERR*) python3 -c \"print('e' * 3000)\" >&2; exit 1 ;;\nesac\nres=$(python3 \"$bin/kith-auth\" resolve \"$1\" --person \"$KITH_PERSON\" --via \"$KITH_AGENT\" --take-once 2>&1) || { echo \"kith-auth: $res\" >&2; exit 1; }\nverdict=$(printf '%s' \"$res\" | python3 -c 'import json, sys\nr = json.load(sys.stdin)\nprint(\"held\" if r.get(\"held\") else \"ok\" if r.get(\"allowed\") else \"no: %s\" % r.get(\"why\"))')\ncase $verdict in\n  held) echo \"kith: this Mac is out of sync with the Kith cloud\" >&2; exit 1 ;;\n  ok) echo \"$1 answers: $3\" ;;\n  *) echo \"kith: $verdict\" >&2; exit 1 ;;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/in/cr-joined",
+    "text": "{\"id\": 1, \"method\": \"ping\"}\r{\"id\": 2, \"method\": \"ping\"}\n{\"id\": 3, \"method\": \"ping\"}\n"
+   },
+   {
+    "write": "home/in/cr-lone",
+    "text": "{\"id\": 1, \"method\": \"ping\"}\r\n{\"id\": 2, \"method\": \"ping\"}\r{\"id\": 3, \"method\": \"ping\"}\r"
+   },
+   {
+    "write": "home/in/cr-in-string",
+    "text": "{\"id\": \"a\rb\", \"method\": \"ping\"}\n"
+   }
+  ],
+  "run": [
+   [
+    "none",
+    "cr-joined"
+   ],
+   [
+    "none",
+    "cr-lone"
+   ],
+   [
+    "none",
+    "cr-in-string"
+   ]
+  ],
+  "normalize": [],
+  "ignore": [
+   "^home/(w\\.sh|fh\\.py|replies/|in/|k/)"
+  ],
+  "mask_keys": [
+   "since",
+   "at",
+   "third",
+   "helper"
+  ]
  }
 ]

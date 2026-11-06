@@ -805,11 +805,17 @@ fn guard_never_lets_a_person_past_their_grant_on_a_switched_host() {
 }
 
 /// What a core can be told: a member row, a guest row, or none. The rest of `Ans` are things kith-auth can print.
+/// A person with no host row holds no core rows here. That state IS reachable on a switched host: the owner adds a
+/// person from the terminal (`kith-auth person` + `member`) before the switch, `kith migrate --authority` imports them,
+/// and the host only creates rows in `createInvite`. This property drops it because its caller is a proven device, and
+/// a proven device always came through invite -> host row; for that caller the revoke below must be possible. The gap
+/// itself (the owner cannot revoke such a person through `setPersonAccess`) is pinned by
+/// `set_person_access_reaches_a_core_person_with_no_host_row`.
 fn core_grants(sc: &Scenario) -> Scenario {
     let mut sc = sc.clone();
-    for row in &mut sc.grants {
+    for (row, host_row) in sc.grants.iter_mut().zip(&sc.people) {
         for a in row {
-            if !matches!(a, Ans::Member | Ans::Guest) {
+            if host_row.is_none() || !matches!(a, Ans::Member | Ans::Guest) {
                 *a = Ans::Denied(false);
             }
         }
@@ -887,6 +893,19 @@ fn never_past_their_grant(switched: bool) {
 /// A plain card (no tool named, kind fetch, no approver stored, no card-store row) for the hand-written cases.
 fn entry(bot: usize, permission: bool, author: usize, secret: usize) -> EntrySpec {
     EntrySpec { bot, permission, author, secret, tool: 0, approver: 0, card: None }
+}
+
+/// The M2 follow-up: on a switched host a terminal-added person, imported into the core, has no host row, and
+/// `setPersonAccess` refuses to revoke them ("isn't someone you invited") although the core holds their grant.
+#[test]
+#[ignore = "known gap, M2 follow-up: setPersonAccess needs a host row (people.rs invited_person) that an imported person lacks"]
+fn set_person_access_reaches_a_core_person_with_no_host_row() {
+    let w = World::switched();
+    w.write_grants(&[[Ans::Member, Ans::Denied(false)], [Ans::Denied(false), Ans::Denied(false)]]);
+    assert!(w.hub.store.person(PEOPLE[0]).is_none());
+    let body = json!({"personId": PEOPLE[0], "agents": {}});
+    w.rt.block_on(super::dispatch(&w.hub, &super::devices::Caller::Local, "setPersonAccess", body))
+        .expect("the owner can take away an imported person's access");
 }
 
 /// Soundness alone passes a guard that refuses everything: these calls must get through.
