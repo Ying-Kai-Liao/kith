@@ -38,7 +38,8 @@ agent() { # name harness-or-empty
 }
 # The launch object with the throwaway roots made stable. The Rust program, the kernel folder and the checkout are made
 # stable too: they are written into the hook commands (a path with a space is escaped once or twice there), so the golden
-# files hold in any checkout path.
+# files hold in any checkout path. A checkout path with no space is not shell-quoted there, one with a space is: the quotes
+# around a stable path are dropped so both read alike.
 norm_paths() {
   python3 -c '
 import sys
@@ -49,7 +50,7 @@ for path, name in ((sys.argv[1], "<B>"), (sys.argv[2], "<K>"), (sys.argv[3], "<R
             t = t.replace(path.replace(" ", "\\" * n + " "), name)
 sys.stdout.write(t)' "${BIN:-}" "$KERNEL" "$(dirname "$KERNEL")"
 }
-launch() { (cd "$T/home" && "$KITH" "$@" --launch-json 2>"$T/err") | sed -e "s#$T#<T>#g" | norm_paths | sed -E -e 's/@[0-9a-f]{10}/@<h>/g' -e 's/"[0-9a-f]{10}"/"<h>"/g' -e 's/[0-9a-f]{32}/<id>/g' -e 's/date=\\"[0-9-]+\\"/date=\\"<d>\\"/g'; }
+launch() { (cd "$T/home" && "$KITH" "$@" --launch-json 2>"$T/err") | sed -e "s#$T#<T>#g" | norm_paths | sed -E -e "s/'(<[KBR]>[^' ]*)'/\\1/g" -e 's/@[0-9a-f]{10}/@<h>/g' -e 's/"[0-9a-f]{10}"/"<h>"/g' -e 's/[0-9a-f]{32}/<id>/g' -e 's/date=\\"[0-9-]+\\"/date=\\"<d>\\"/g'; }
 BIN=${KITH_DIFFTEST_BIN:-${KITH_BIN:-$(python3 "$KERNEL/lib/kith_paths.py" --bin 2>/dev/null || true)}}
 [ -n "$BIN" ] && export KITH_BIN=$BIN   # the kernel finds its Rust program here (kith_paths.py --bin)
 AUTH=$KERNEL/bin/kith-auth
@@ -62,6 +63,7 @@ for pair in "cl claude" "cx codex"; do
   out=$(launch "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["agent_version"]="<v>"; print(json.dumps(d, indent=1, sort_keys=True))')
   if [ -n "${UPDATE_GOLDEN:-}" ]; then printf '%s\n' "$out" > "$FIX/launch-$2.json"; fi
   check "$2 launch-json is the golden one" "[ \"\$out\" = \"\$(cat '$FIX/launch-$2.json')\" ]"
+  [ "$out" = "$(cat "$FIX/launch-$2.json")" ] || diff <(printf '%s\n' "$out") "$FIX/launch-$2.json" | cut -c1-400 | head -20
 done
 
 HAVE=0

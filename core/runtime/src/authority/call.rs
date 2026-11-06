@@ -32,6 +32,10 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
+            | "people.budgets"
+            | "people.ledger"
+            | "people.removeGrant"
+            | "people.handle"
             | "people.invite"
             | "people.invites"
             | "people.removeInvite"
@@ -346,6 +350,36 @@ pub(crate) fn call_in(
             )
         }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
+        // `kith-auth budgets AGENT --json`: the lines are that one JSON line, so a caller that reads the CLI's output reads
+        // this one's. A budget that is no number is an error, never "no limit".
+        "people.budgets" => {
+            let agent = need(params, "agent").map_err(|d| store::refusal(&d))?;
+            let said =
+                store::read(core, |a| write::budgets(a, agent))?.map_err(|d| store::refusal(&d))?;
+            Ok(json!({ "budgets": said, "lines": [said.to_string()] }))
+        }
+        // `kith-auth ledger [--person ID] [--agent AGENT] --json`: rows, and the same as the one JSON line.
+        "people.ledger" => {
+            let named = |k: &str| -> std::result::Result<Option<&str>, Die> {
+                match word(params, k) {
+                    Some(v) if v.is_empty() || v.starts_with('-') => Err(Die {
+                        msg: "ledger [--person ID] [--agent AGENT] [--json] | ledger --rm <key>"
+                            .into(),
+                        code: 2,
+                    }),
+                    v => Ok(v),
+                }
+            };
+            let (person, agent) = (
+                named("person").map_err(|d| store::refusal(&d))?,
+                named("agent").map_err(|d| store::refusal(&d))?,
+            );
+            let rows = store::read(core, |a| {
+                let person = person.map(|p| secrets::canonical(a, p));
+                write::ledger(a, c, person.as_deref(), agent)
+            })?;
+            Ok(json!({ "rows": rows, "lines": [Value::Array(rows.clone()).to_string()] }))
+        }
         "people.botsCap" if word(params, "amount").is_none() => {
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))
         }
@@ -572,6 +606,20 @@ pub(super) fn write_in(
             need(params, "domain")?,
             switch(params, "remove"),
         )?)),
+        "people.removeGrant" => Ok(lines(write::remove_grant(a, c, need(params, "key")?)?)),
+        "people.handle" => {
+            let uid = if switch(params, "remove") {
+                None
+            } else {
+                Some(need(params, "uid")?)
+            };
+            Ok(lines(write::handle(
+                a,
+                need(params, "person")?,
+                need(params, "platform")?,
+                uid,
+            )?))
+        }
         "people.botsCap" => Ok(lines(write::bots_cap(a, need(params, "amount")?)?)),
         "people.invite" => {
             let said = write::invite_create(

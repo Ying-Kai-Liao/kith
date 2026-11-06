@@ -21,7 +21,7 @@ const CARD_TOOL: &str = "mcp__kithpermit__report_bug";
 pub(super) const DRAFT: &str = r"
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
-req = json.loads(sys.argv[2])
+req = json.load(sys.stdin)
 try:
     import kith_bug
     env = os.environ
@@ -43,7 +43,7 @@ except Exception as e:
 pub(super) const FINISH: &str = r"
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
-req = json.loads(sys.argv[2])
+req = json.load(sys.stdin)
 try:
     import kith_bug
     env = os.environ

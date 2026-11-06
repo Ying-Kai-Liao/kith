@@ -624,6 +624,28 @@ fn core_form(args: &[&str]) -> Option<(CoreMethod, Value)> {
             p["agent"] = (*agent).into();
             (CoreMethod::Grant, p)
         }
+        // The spending limits and the grants ledger (`limits.rs`, `people.rs`): kith-auth's own reads and writes of them.
+        ["bots-cap", amount] => (CoreMethod::BotsCap, json!({"amount": amount})),
+        ["budgets", agent, "--json"] => (CoreMethod::Budgets, json!({"agent": agent})),
+        ["ledger", "--rm", key] => (CoreMethod::RemoveGrant, json!({"key": key})),
+        ["ledger", "--json", rest @ ..] => {
+            let mut p = serde_json::Map::new();
+            for pair in rest.chunks(2) {
+                let [flag, value] = pair else { return None };
+                p.insert(
+                    flag.strip_prefix("--").filter(|k| matches!(*k, "person" | "agent"))?.to_owned(),
+                    (*value).into(),
+                );
+            }
+            (CoreMethod::Ledger, Value::Object(p))
+        }
+        // A chat handle (a member's join binds the account, the end of access lets it go).
+        ["handle", person, platform, "--rm"] => {
+            (CoreMethod::Handle, json!({"person": person, "platform": platform, "remove": true}))
+        }
+        ["handle", person, platform, uid] => {
+            (CoreMethod::Handle, json!({"person": person, "platform": platform, "uid": uid}))
+        }
         ["bot", id, "--rm"] => (CoreMethod::RemoveBot, json!({"id": id})),
         ["bot", id, "--of", owner, ..] => {
             let mut p = settings(4, &["name", "provider"])?;
@@ -659,6 +681,11 @@ enum CoreMethod {
     Undo,
     ClearTemp,
     AddPerson,
+    BotsCap,
+    Budgets,
+    Ledger,
+    RemoveGrant,
+    Handle,
 }
 
 impl CoreMethod {
@@ -675,6 +702,11 @@ impl CoreMethod {
             Self::Undo => "people.undo",
             Self::ClearTemp => "people.clearTemp",
             Self::AddPerson => "people.addPerson",
+            Self::BotsCap => "people.botsCap",
+            Self::Budgets => "people.budgets",
+            Self::Ledger => "people.ledger",
+            Self::RemoveGrant => "people.removeGrant",
+            Self::Handle => "people.handle",
         }
     }
 
@@ -691,8 +723,11 @@ impl CoreMethod {
             | Self::RemovePerson
             | Self::Suspend
             | Self::Undo
-            | Self::AddPerson => true,
-            Self::ClearTemp | Self::ListPeople | Self::Retired => false,
+            | Self::AddPerson
+            | Self::BotsCap
+            | Self::RemoveGrant
+            | Self::Handle => true,
+            Self::ClearTemp | Self::ListPeople | Self::Retired | Self::Budgets | Self::Ledger => false,
         }
     }
 }
@@ -718,7 +753,8 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
     };
     let method = core_method.name();
     // A read repeats harmlessly; a write is never sent twice.
-    let read = matches!(core_method, CoreMethod::ListPeople | CoreMethod::Retired);
+    let read =
+        matches!(core_method, CoreMethod::ListPeople | CoreMethod::Retired | CoreMethod::Budgets | CoreMethod::Ledger);
     let mut params = params;
     if core_method.marked() {
         // The look at auth.json above and this write are two steps. The core checks the cutover phase inside the
@@ -784,6 +820,12 @@ mod gate_tests {
             (&["person", "p", "--unrevoke", "--local"], CoreMethod::Undo, true),
             (&["person", "p", "--clear-temp"], CoreMethod::ClearTemp, false),
             (&["person", "p", "name=P"], CoreMethod::AddPerson, true),
+            (&["bots-cap", "5"], CoreMethod::BotsCap, true),
+            (&["budgets", "house", "--json"], CoreMethod::Budgets, false),
+            (&["ledger", "--json", "--person", "sam"], CoreMethod::Ledger, false),
+            (&["ledger", "--rm", "k"], CoreMethod::RemoveGrant, true),
+            (&["handle", "sam", "telegram", "--rm"], CoreMethod::Handle, true),
+            (&["handle", "sam", "telegram", "42"], CoreMethod::Handle, true),
         ];
         for (args, want, marked) in shapes {
             let (got, _) = core_form(args).unwrap();

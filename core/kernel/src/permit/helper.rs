@@ -71,7 +71,7 @@ pub fn ask_helper_within(
     }
     let mut cmd = Command::new(kernel.join("bin/kith-ask"));
     cmd.args([agent.as_str(), "--", task.as_str()]);
-    let r = match run(cmd, &child, wait) {
+    let r = match run(cmd, &child, None, wait) {
         Ok(r) => r,
         Err(Failed::Timeout) => {
             return format!("{agent} did not answer in time; carry on without it.");
@@ -114,7 +114,7 @@ fn helper_card(
     let may = |args: &[&str]| {
         let mut cmd = Command::new(kernel.join("bin/kith-auth"));
         cmd.arg("may").args(args);
-        match run(cmd, child, Duration::from_secs(30)) {
+        match run(cmd, child, None, Duration::from_secs(30)) {
             Ok(r) => r.code == 0,
             // kith ask asks kith-auth again and says why
             Err(_) => true,
