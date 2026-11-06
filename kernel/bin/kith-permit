@@ -244,7 +244,7 @@ def run_helper(argv, env):
             except OSError:
                 pass
             try:
-                p.communicate(timeout=wait)
+                p.communicate(timeout=wait or HELPER_GRACE_S)   # after KILL a grandchild that kept the pipes open must not hold us
                 break
             except subprocess.TimeoutExpired:
                 pass
