@@ -106,6 +106,9 @@ mod secrets;
 #[allow(dead_code, reason = "first callers are the switch of kith-wake, M3-10")]
 mod wake;
 
+// The host's claim rows (M3-10f): called only by a host started with KITH_HOST_CORE_CLAIMS=1.
+mod hostclaim;
+
 #[cfg(test)]
 mod runs_props;
 #[cfg(all(test, unix))]

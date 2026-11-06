@@ -626,3 +626,237 @@ fn forged_bots_are_refused_and_nothing_is_ended() {
     let ok = ["mia-b1".to_owned(), "mia-b2".to_owned()];
     revoke_everywhere(&mut f.core, "mia", &ok, NOW).unwrap();
 }
+
+fn is_revoked(f: &Fixture, id: &str) -> i64 {
+    f.core
+        .conn()
+        .query_row("SELECT revoked FROM people WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_suspend_runs_the_order_sweeps_the_person_and_their_bots_and_clears_its_record() {
+    let mut f = fixture();
+    let live = world(&mut f);
+    let out =
+        crate::authority::call::call(&mut f.core, "people.suspend", &json!({"id": "mia"})).unwrap();
+    assert!(out["revokePending"].is_null(), "{out}");
+    assert!(
+        out["kill"].as_array().is_some_and(|k| !k.is_empty()),
+        "the writers to kill come back: {out}"
+    );
+    assert!(out.get("suspendedPerson").is_none(), "{out}");
+    assert_eq!(is_revoked(&f, "mia"), 1, "the suspend stands");
+    for (conv, id) in &live {
+        let want = if conv.starts_with("c-k") {
+            "running"
+        } else {
+            "ending"
+        };
+        assert_eq!(state_of(&f.core, "claims", "claim_id", *id), want, "{conv}");
+    }
+    assert_eq!(state_of(&f.core, "asks", "id", "a1"), "stopped");
+    assert_eq!(state_of(&f.core, "asks", "id", "a3"), "stopped");
+    assert_eq!(state_of(&f.core, "asks", "id", "k1"), "open");
+    for p in ["mia", "mia-b1", "mia-b2"] {
+        assert_eq!(revoke_epoch(&f.core, p).unwrap(), 1, "{p}");
+    }
+    assert_eq!(open_rows(&f), 0);
+}
+
+#[test]
+fn a_crash_between_the_suspend_and_the_order_is_finished_by_the_replay() {
+    let mut f = fixture();
+    let live = world(&mut f);
+    // the suspend committed with its record and the core died before the order
+    f.core
+        .conn()
+        .execute("UPDATE people SET revoked = 1 WHERE id = 'mia'", [])
+        .unwrap();
+    super::record_suspend(f.core.conn(), "mia", 1.0).unwrap();
+    let (kill, failed) = super::replay_open(&mut f.core, NOW).unwrap();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert_ne!(kill.len(), 0);
+    assert_eq!(state_of(&f.core, "asks", "id", "a3"), "stopped");
+    assert_eq!(state_of(&f.core, "claims", "claim_id", live[3].1), "ending");
+    assert_eq!(open_rows(&f), 0);
+}
+
+#[test]
+fn an_undo_before_the_order_has_run_drops_the_record_and_sweeps_nobody() {
+    let mut f = fixture();
+    let live = world(&mut f);
+    f.core
+        .conn()
+        .execute("UPDATE people SET revoked = 1 WHERE id = 'mia'", [])
+        .unwrap();
+    super::record_suspend(f.core.conn(), "mia", 1.0).unwrap();
+    let out =
+        crate::authority::call::call(&mut f.core, "people.undo", &json!({"id": "mia"})).unwrap();
+    assert!(out["kill"].is_null(), "{out}");
+    assert_eq!(is_revoked(&f, "mia"), 0);
+    assert_eq!(open_rows(&f), 1, "undo leaves the record for the order");
+    let (kill, failed) = super::replay_open(&mut f.core, NOW).unwrap();
+    assert!(kill.is_empty() && failed.is_empty());
+    assert_eq!(open_rows(&f), 0, "dropped without acting");
+    assert_eq!(state_of(&f.core, "asks", "id", "a1"), "open");
+    assert_eq!(
+        state_of(&f.core, "claims", "claim_id", live[1].1),
+        "running"
+    );
+    assert_eq!(revoke_epoch(&f.core, "mia").unwrap(), 0);
+}
+
+#[test]
+fn a_repeat_suspend_merges_the_record_and_runs_the_order_again_harmlessly() {
+    let mut f = fixture();
+    world(&mut f);
+    for _ in 0..2 {
+        let out =
+            crate::authority::call::call(&mut f.core, "people.suspend", &json!({"id": "mia"}))
+                .unwrap();
+        assert!(out["revokePending"].is_null(), "{out}");
+        assert_eq!(open_rows(&f), 0);
+    }
+    assert_eq!(state_of(&f.core, "asks", "id", "a1"), "stopped");
+    // suspend, undo, suspend again: the second suspend sweeps what started in between
+    crate::authority::call::call(&mut f.core, "people.undo", &json!({"id": "mia"})).unwrap();
+    let seen = revoke_epoch(&f.core, "mia").unwrap();
+    let mut nt = new_turn("c-again", "app", "mia");
+    nt.revoke_seen = seen;
+    let t = enqueue_turn(&mut f.core, &nt, 2).unwrap();
+    let again = claim(&mut f.core, &new_claim("c-again", "mia", t, seen), 3)
+        .unwrap()
+        .claim_id;
+    redeem(&mut f.core, again, 30, "e30", "h1", 4).unwrap();
+    crate::authority::call::call(&mut f.core, "people.suspend", &json!({"id": "mia"})).unwrap();
+    assert_eq!(state_of(&f.core, "claims", "claim_id", again), "ending");
+    assert_eq!(open_rows(&f), 0);
+}
+
+#[test]
+fn the_owner_is_refused_a_suspend_and_leaves_no_record() {
+    let mut f = fixture();
+    f.core
+        .conn()
+        .execute("UPDATE people SET owner = 1 WHERE id = 'kai'", [])
+        .unwrap();
+    let err = crate::authority::call::call(&mut f.core, "people.suspend", &json!({"id": "kai"}))
+        .unwrap_err();
+    assert!(err.to_string().contains("owner"), "{err}");
+    assert_eq!(open_rows(&f), 0);
+}
+
+fn suspended_with_row(f: &mut Fixture, id: &str) {
+    f.core
+        .conn()
+        .execute("UPDATE people SET revoked = 1 WHERE id = ?1", [id])
+        .unwrap();
+    super::record_suspend(f.core.conn(), id, 1.0).unwrap();
+}
+
+#[test]
+fn a_failed_order_inside_a_suspend_sets_revoke_pending_keeps_the_suspend_and_the_replay_finishes_it()
+ {
+    let mut f = fixture();
+    let live = world(&mut f);
+    // a recorded name that is in people and not mia's bot makes the order refuse (never skip)
+    f.core
+        .conn()
+        .execute(
+            "INSERT INTO open_removals (person, bots, at) VALUES ('mia', '[\"kai\"]', 1)",
+            [],
+        )
+        .unwrap();
+    let out =
+        crate::authority::call::call(&mut f.core, "people.suspend", &json!({"id": "mia"})).unwrap();
+    assert!(out["revokePending"].is_string(), "{out}");
+    assert_eq!(is_revoked(&f, "mia"), 1, "the suspend stands");
+    assert_eq!(open_rows(&f), 1, "the row stays");
+    assert_eq!(state_of(&f.core, "asks", "id", "a1"), "open");
+    f.core
+        .conn()
+        .execute("UPDATE open_removals SET bots = '[]'", [])
+        .unwrap();
+    let (kill, failed) = super::replay_open(&mut f.core, NOW).unwrap();
+    assert!(failed.is_empty() && !kill.is_empty(), "{failed:?}");
+    assert_eq!(state_of(&f.core, "asks", "id", "a1"), "stopped");
+    assert_eq!(state_of(&f.core, "claims", "claim_id", live[1].1), "ending");
+    assert_eq!(open_rows(&f), 0);
+}
+
+#[test]
+fn a_removal_after_a_suspend_merges_into_one_row_and_the_order_runs_once() {
+    let mut f = fixture();
+    world(&mut f);
+    suspended_with_row(&mut f, "mia");
+    assert_eq!(open_rows(&f), 1);
+    let out =
+        crate::authority::call::call(&mut f.core, "people.removePerson", &json!({"id": "mia"}))
+            .unwrap();
+    assert!(out["revokePending"].is_null(), "{out}");
+    assert_eq!(open_rows(&f), 0);
+    assert_eq!(state_of(&f.core, "asks", "id", "a1"), "stopped");
+    assert_eq!(state_of(&f.core, "asks", "id", "a3"), "stopped");
+}
+
+#[test]
+fn a_rename_or_a_bot_removal_is_refused_while_a_suspend_order_is_open_but_an_edit_is_not() {
+    let mut f = fixture();
+    world(&mut f);
+    suspended_with_row(&mut f, "mia");
+    for (m, params) in [
+        ("people.renamePerson", json!({"id": "mia", "to": "mia2"})),
+        ("people.removeBot", json!({"id": "mia-b1"})),
+    ] {
+        let err = crate::authority::call::call(&mut f.core, m, &params).unwrap_err();
+        assert!(
+            err.to_string().contains("finishing the revoke of mia"),
+            "{m}: {err}"
+        );
+    }
+    assert!(
+        f.core
+            .conn()
+            .query_row(
+                "SELECT 1 FROM people WHERE id = 'mia-b1' AND bot_of = 'mia'",
+                [],
+                |_| Ok(())
+            )
+            .is_ok(),
+        "nothing moved"
+    );
+    // a name/lang/tz edit of someone already in people is not joining
+    crate::authority::call::call(
+        &mut f.core,
+        "people.addPerson",
+        &json!({"id": "mia", "name": "Mia"}),
+    )
+    .unwrap();
+    // an unrelated bot removal goes through
+    crate::authority::call::call(&mut f.core, "people.removeBot", &json!({"id": "kai-b"})).unwrap();
+    // and once the order has run, the rename is allowed
+    let (_, failed) = super::replay_open(&mut f.core, NOW).unwrap();
+    assert!(failed.is_empty(), "{failed:?}");
+    crate::authority::call::call(
+        &mut f.core,
+        "people.renamePerson",
+        &json!({"id": "mia", "to": "mia2"}),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_record_for_the_owner_is_dropped_by_the_replay_not_replayed_forever() {
+    let mut f = fixture();
+    f.core
+        .conn()
+        .execute("UPDATE people SET owner = 1 WHERE id = 'kai'", [])
+        .unwrap();
+    super::record_suspend(f.core.conn(), "kai", 1.0).unwrap();
+    let (_, failed) = super::replay_open(&mut f.core, NOW).unwrap();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert_eq!(open_rows(&f), 0);
+}

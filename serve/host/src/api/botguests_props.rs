@@ -6,6 +6,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use super::access_core_tests::Core;
 use super::devices::{Caller, Forbidden, NotAllowed, Principal, principal};
 use super::rig::Rig;
 use super::roles::{self, BOT_METHODS, BOT_PENDING_METHODS};
@@ -79,6 +80,10 @@ struct MBot {
 }
 
 struct State {
+    /// Declared before the rig: it clears the process-wide switch before the rig lets the next test in.
+    core: Option<Core>,
+    /// Switched: the file the stand-in kith-auth appends every call to. It must stay empty.
+    auth_log: Option<std::path::PathBuf>,
     r: Rig,
     /// Who calls: Kai's own apps, then the two people's phones.
     callers: [Caller; 3],
@@ -128,6 +133,12 @@ const CONCS: [i64; 6] = [0, 1, 2, 3, 8, 9];
 #[allow(clippy::needless_range_loop)]
 impl State {
     async fn new(pool: Vec<String>) -> Self {
+        Self::build(pool, false).await
+    }
+
+    /// `switched`: once the people are made, a core daemon takes them over (the same people, grants and the owner), and
+    /// auth.json becomes a tombstone, so every later write and read of the host goes to the core.
+    async fn build(pool: Vec<String>, switched: bool) -> Self {
         let r = Rig::new().await;
         r.owner_bot("house");
         r.owner_bot("money");
@@ -149,7 +160,34 @@ impl State {
             .collect();
         members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
         let callers = [Caller::Local, r.device("sam-phone", Some("sam")), r.device("ann-phone", Some("ann"))];
+        let (core, auth_log) = if switched {
+            let core = Core::start(&r);
+            core.ask("people.addPerson", json!({"id": "ann"})).expect("ann");
+            for p in ["sam", "ann"] {
+                for a in AGENTS {
+                    core.ask("people.grant", json!({"person": p, "agent": a, "preset": "member"})).expect("grant");
+                }
+            }
+            core.on();
+            // The tombstone goes where kith-auth reads (`KITH_AUTH` of the rig), so a call left on kith-auth fails
+            // closed as in production; and the real kith-auth is swapped for a stand-in that logs and fails.
+            core.switched_over(&r.dir.join("auth.json"));
+            let log = r.dir.join("kith-auth-calls");
+            let bin = r.dir.join("kith-auth-logging");
+            std::fs::write(&bin, format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", log.display())).unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            *crate::remote::account::TEST_BIN.lock().unwrap() = Some(bin);
+            assert!(crate::api::authority::switched(), "the rig is not switched");
+            (Some(core), Some(log))
+        } else {
+            (None, None)
+        };
         Self {
+            core,
+            auth_log,
             r,
             callers,
             roles: [[0; 2], [1, 1], [1, 1]],
@@ -564,7 +602,71 @@ impl State {
         let this = &*self;
         let base = base.as_str();
         let others = futures::future::join_all((0..this.bots.len()).map(|bi| this.check_other(bi, base))).await;
-        others.into_iter().collect()
+        others.into_iter().collect::<Result<(), String>>()?;
+        self.check_core()?;
+        self.check_kith_auth_untouched()
+    }
+
+    /// Switched: what the core holds is what the model says, read back, so that a write the host lost (a
+    /// `people.removeBot`, a `people.suspend`, a `people.revoke`) is not hidden by the host's own refusal.
+    fn check_core(&self) -> Result<(), String> {
+        let Some(core) = &self.core else { return Ok(()) };
+        let all = core.ask("people.listPeople", json!({})).ok_or("the core did not list people")?;
+        let rows = all["rows"].as_array().ok_or("people.listPeople has no rows")?;
+        let row = |id: &str| rows.iter().find(|r| r["id"] == id);
+        for p in 1..3 {
+            let person = row(WHO[p]).ok_or_else(|| format!("the core lost {}", WHO[p]))?;
+            if self.removed[p] {
+                check!(person["revoked"] == true, "{} was removed but the core has them live", WHO[p]);
+                continue;
+            }
+            check!(person["revoked"] != true, "{} is live in the model but revoked in the core", WHO[p]);
+            let list = core.ask("people.list", json!({"person": WHO[p]})).ok_or("the core did not list grants")?;
+            let mut got: Vec<(String, String)> = list["rows"]
+                .as_array()
+                .ok_or("people.list has no rows")?
+                .iter()
+                .map(|r| {
+                    (
+                        r["agent"].as_str().unwrap_or_default().to_owned(),
+                        r["preset"].as_str().unwrap_or_default().to_owned(),
+                    )
+                })
+                .collect();
+            let mut want: Vec<(String, String)> = (0..2)
+                .filter(|a| self.roles[p][*a] != 0)
+                .map(|a| (AGENTS[a].to_owned(), ["", "member", "guest"][usize::from(self.roles[p][a])].to_owned()))
+                .collect();
+            got.sort();
+            want.sort();
+            check!(got == want, "the core holds {got:?} for {}, the model {want:?}", WHO[p]);
+        }
+        for b in &self.bots {
+            let Some(guest) = self.r.hub.store.bot_guest(&b.id) else { continue };
+            let bot = row(&guest.person_id);
+            if b.state == St::Ended {
+                check!(bot.is_none(), "the core still has a row for ended bot {}", guest.person_id);
+            } else {
+                let bot = bot.ok_or_else(|| format!("the core has no row for live bot {}", guest.person_id))?;
+                check!(
+                    bot["bot_of"] == WHO[b.owner],
+                    "bot {} is of {}, the model says {}",
+                    guest.person_id,
+                    bot["bot_of"],
+                    WHO[b.owner]
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Switched: no call reached kith-auth (the stand-in in `TEST_BIN` logs each one and fails).
+    fn check_kith_auth_untouched(&self) -> Result<(), String> {
+        let Some(log) = &self.auth_log else { return Ok(()) };
+        let calls = std::fs::read_to_string(log).unwrap_or_default();
+        check!(calls.is_empty(), "a switched host ran kith-auth: {calls}");
+        check!(crate::api::authority::switched(), "the host is not switched");
+        Ok(())
     }
 
     /// One bot against the model; returns whether an ask of it has gone through and the conversations it made.
@@ -731,12 +833,23 @@ fn sim() -> (tokio::runtime::Runtime, Vec<String>) {
 /// people around it.
 #[test]
 fn a_bot_never_has_more_than_its_owner_holds_now() {
+    sequences(false);
+}
+
+/// The same sequences and the same model with the host switched (P6): auth.json is a tombstone and a core holds the
+/// people, grants and bots, so a revoke, a removal and a shrink go through the core, and every read comes from it.
+#[test]
+fn a_bot_never_has_more_than_its_owner_holds_now_on_a_switched_host() {
+    sequences(true);
+}
+
+fn sequences(switched: bool) {
     let (rt, pool) = sim();
     assert!(pool.len() > 100, "router walk found {} methods", pool.len());
     runner(10)
         .run(&proptest::collection::vec(op(), 1..9), |ops| {
             // Dropped before the next case builds its own: the rig holds the process-wide environment.
-            let mut state = rt.block_on(State::new(pool.clone()));
+            let mut state = rt.block_on(State::build(pool.clone(), switched));
             let outcome = rt.block_on(async {
                 // Kai's own bot first, so a case never passes by refusing everything.
                 state.create(0, 3).await?;
@@ -762,6 +875,115 @@ fn a_bot_never_has_more_than_its_owner_holds_now() {
         })
         .unwrap();
     assert!(SERVED.load(Ordering::Relaxed) > 0, "no ask was ever served: the property checked nothing");
+}
+
+/// (P6) A switched host never reaches kith-auth: the stand-in in `TEST_BIN` logs each call and fails, the tombstone sits
+/// where the real one would read it, and this slice of the calls a guest and an owner make leaves the log empty and
+/// the core holding what was asked.
+#[test]
+fn a_switched_host_never_runs_kith_auth() {
+    let (rt, pool) = sim();
+    let mut state = rt.block_on(State::build(pool, true));
+    rt.block_on(async {
+        assert!(crate::api::authority::switched(), "the host is switched");
+        // The owner's and a member's createBotInvite (the owner's person is looked up in the core).
+        state.create(0, 3).await.unwrap();
+        state.create(1, 3).await.unwrap();
+        state.create(2, 1).await.unwrap();
+        for bot in 0..3 {
+            state.step(&Op::Allow { bot, always: false }).await.unwrap();
+        }
+        state.check_all().await.unwrap();
+        // botAsk and myBots.
+        // check_all asked as every bot and recorded that this one was served; a second ask here would race its still
+        // running turns (the per-bot limit of two) on a slow runner.
+        assert!(state.bots[1].served, "the bot is served while the core is up");
+        state.step(&Op::MyBots { actor: 1 }).await.unwrap();
+        state.step(&Op::MyBots { actor: 0 }).await.unwrap();
+        // setPersonAccess, a bot's revoke by its owner and by Kai, a person's removal.
+        state.step(&Op::SetAccess { person: 2, roles: [2, 0] }).await.unwrap();
+        state.step(&Op::RevokeBot { actor: 1, bot: 1 }).await.unwrap();
+        state.step(&Op::RevokeBot { actor: 0, bot: 0 }).await.unwrap();
+        state.step(&Op::Remove { person: 2 }).await.unwrap();
+        state.check_all().await.unwrap();
+        assert!(crate::api::authority::switched(), "the host is still switched");
+    });
+    state.check_kith_auth_untouched().unwrap();
+}
+
+/// (P6) `createInvite` for the owner's own id is refused on a switched host too (the owner check used to ask kith-auth,
+/// found nothing on the tombstone and let it through), and no kith-auth call is made.
+#[test]
+fn a_switched_host_refuses_an_invite_for_the_owner() {
+    let (rt, pool) = sim();
+    let state = rt.block_on(State::build(pool, true));
+    rt.block_on(async {
+        assert!(crate::api::authority::switched());
+        let body = json!({"personId": "kai", "agents": {"house": "member"}});
+        let res = state.call(&Caller::Local, "createInvite", body).await;
+        let said = res.err().map(|e| format!("{e:#}")).unwrap_or_default();
+        assert!(said.contains("the owner doesn't need an invite"), "got: {said:?}");
+        let rows = state.core.as_ref().unwrap().ask("people.list", json!({"person": "kai"})).unwrap();
+        assert!(rows["rows"].as_array().is_some_and(Vec::is_empty), "the owner was given grants: {rows}");
+    });
+    state.check_kith_auth_untouched().unwrap();
+}
+
+/// The core is down (`CoreDown`) or the rules say no.
+fn down_or_refused(e: &anyhow::Error) -> bool {
+    e.is::<crate::api::authority::CoreDown>() || refused(e)
+}
+
+/// (14, 16, 17, P6) A switched host whose core is down: every bot call is refused, nobody can make a bot or change
+/// access (a removal still ends the bot here), and nothing is written to the tombstone (a switched host never runs kith-auth).
+#[test]
+fn a_switched_host_with_the_core_down_refuses_every_bot_call() {
+    let (rt, pool) = sim();
+    let mut state = rt.block_on(State::build(pool.clone(), true));
+    let tomb =
+        || std::fs::read_to_string(crate::api::authority::TEST_AUTH_FILE.lock().unwrap().clone().unwrap()).unwrap();
+    let before = tomb();
+    rt.block_on(async {
+        // A live bot of Kai's and of Sam's, served while the core is up.
+        state.create(0, 3).await.unwrap();
+        state.create(1, 3).await.unwrap();
+        for bot in 0..2 {
+            state.step(&Op::Allow { bot, always: false }).await.unwrap();
+        }
+        state.check_all().await.unwrap();
+        // The core is up: Sam's bot is served.
+        // check_all asked as the bot and recorded the answer; asking again here would meet its running turns.
+        assert!(state.bots[1].served, "the bot is served while the core is up");
+    });
+    state.core.as_mut().unwrap().stop();
+    rt.block_on(async {
+        for bi in 0..state.bots.len() {
+            let id = state.bots[bi].id.clone();
+            let ask = json!({"agent": "house", "text": "hi", "clientNonce": format!("down{bi}")});
+            let res = state.call(&state.bots[bi].caller, "botAsk", ask).await;
+            assert!(res.err().is_some_and(|e| down_or_refused(&e)), "bot {id} was served with the core down");
+        }
+        let body = json!({"name": "late", "provider": "grok", "agents": ["house"]});
+        for (actor, caller) in state.callers.iter().enumerate() {
+            let res = state.call(caller, "createBotInvite", body.clone()).await;
+            assert!(res.err().is_some_and(|e| down_or_refused(&e)), "{} made a bot with the core down", WHO[actor]);
+        }
+        // A removal is the one write that stays safe without the core: the host ends the bot here (the cut is local, as in
+        // `a_switched_revoke_with_the_core_down_still_cuts_the_person_off_here`), and the bot is refused after it.
+        let id = state.bots[1].id.clone();
+        let res = state.call(&state.callers[1], "revokeBot", json!({"botId": id})).await;
+        assert!(res.is_ok(), "an owner can still remove their bot with the core down: {res:?}");
+        let ask = json!({"agent": "house", "text": "hi", "clientNonce": "after"});
+        let res = state.call(&state.bots[1].caller, "botAsk", ask).await;
+        assert!(res.err().is_some_and(|e| e.is::<Forbidden>()), "a removed bot is refused");
+        let res = state.call(&Caller::Local, "setPersonAccess", json!({"personId": "sam", "agents": {}})).await;
+        assert!(
+            res.err().is_some_and(|e| e.is::<crate::api::authority::CoreDown>()),
+            "access was changed while the core could not record it"
+        );
+    });
+    assert_eq!(tomb(), before, "nothing is written to the tombstone");
+    state.check_kith_auth_untouched().unwrap();
 }
 
 /// (f) Ten live bots per owner, counted per owner: the eleventh is refused with `tooMany` whatever another owner

@@ -1535,3 +1535,114 @@ fn a_renamed_person_is_not_revoked_as_if_removed() {
     assert_eq!(ask_state(&f, "a-sam"), "open");
     assert_eq!(f.count("open_removals"), 0);
 }
+
+#[test]
+fn a_person_the_file_has_suspended_and_core_db_has_not_gets_the_order_from_the_reimport() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-mia", "mia");
+    ask_of(&f, "a-bot", "mia-bot");
+    ask_of(&f, "a-sam", "sam");
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the suspension of mia")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(ask_state(&f, "a-mia"), "stopped");
+    assert_eq!(ask_state(&f, "a-bot"), "stopped");
+    assert_eq!(ask_state(&f, "a-sam"), "open");
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_file_that_marks_the_owner_revoked_leaves_no_row_and_the_next_import_goes_through() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    f.auth(&crew(
+        &json!({"kai": {"name": "Kai", "owner": true, "revoked": {"at": 3}}}),
+    ));
+    assert!(f.run(force(), &FakeKeychain::default(), &mut sink).is_err());
+    assert_eq!(f.count("open_removals"), 0);
+    // a file that drops the owner flag still can not list the core's owner
+    let auth: Value = serde_json::from_str(&crew(
+        &json!({"kai": {"name": "Kai", "revoked": {"at": 3}}}),
+    ))
+    .unwrap();
+    let core = open_all(&f.layout);
+    let listed = super::authority::suspends(core.conn(), &auth).unwrap();
+    assert!(listed.is_empty(), "{listed:?}");
+    drop(core);
+    f.auth(&crew(&json!({"sam": {"name": "Sam S"}})));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_person_revoked_in_the_file_and_already_in_core_db_is_not_swept_again() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-mia", "mia");
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia M", "revoked": {"at": 7}}}),
+    ));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(ask_state(&f, "a-mia"), "open", "old cores are not swept");
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_person_revoked_in_core_db_and_back_in_the_file_with_an_open_row_does_not_block_the_import() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    f.import(&mut sink).unwrap();
+    crate::revoke_order::record_suspend(open_all(&f.layout).conn(), "mia", 1.0).unwrap();
+    f.auth(&crew(&json!({})));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn the_dry_run_lists_the_suspensions_it_would_record() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    let rep = f
+        .run(
+            AuthorityOptions {
+                dry_run: true,
+                force: true,
+            },
+            &FakeKeychain::default(),
+            &mut sink,
+        )
+        .unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("would record the suspension of mia")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(f.count("open_removals"), 0);
+}

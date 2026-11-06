@@ -83,7 +83,7 @@ broken-answer-after-end	PROPERTY	StoppedNeverWakes	fail
 broken-no-ask-sweep	PROPERTY	AsksEnded	fail
 broken-no-wake-withdraw	PROPERTY	WakesWithdrawn	fail
 asks	INVARIANT	NeverAnswerWake	fail
-# --- the core's revoke order (M3-10d, core/runtime/src/revoke_order.rs): claims of P and B swept, THEN the asks ended. Code for a removal; for a suspend the design, pending Finding 1 (open before M2-23), so Swept, OrderKept and AsksEnded hold only conditionally until then ---
+# --- the core's revoke order (M3-10d, core/runtime/src/revoke_order.rs): claims of P and B swept, THEN the asks ended. Code for a removal and for a suspend (`people.suspend` records the order in open_removals and runs it after the commit; a crash is replayed) ---
 core-order	INVARIANT	TypeOK	pass
 core-order	INVARIANT	OrderKept	pass
 core-order	PROPERTY	Swept	pass
@@ -132,3 +132,44 @@ broken-core-gate-stale	PROPERTY	R1	fail
 broken-core-gate-stale	PROPERTY	R5	fail
 core-gate	INVARIANT	NeverCoreRevoked	fail
 core-gate	INVARIANT	NeverGateShut	fail
+# --- the host SWITCHED (#875, 2026-11-06 re-sync): auth.json is a tombstone, run_auth writes people.* to the core, the guard asks the core with no gate (core_selected = switched() || ...). One fact, so the latch and its window do not exist ---
+switched	INVARIANT	TypeOK	pass
+switched	INVARIANT	CoreInStep	pass
+switched	PROPERTY	R1	pass
+switched	PROPERTY	R5	pass
+switched	PROPERTY	R5c	pass
+switched	PROPERTY	R6	pass
+switched	PROPERTY	R6c	pass
+switched	INVARIANT	NeverCoreRevoked	fail
+# The window a rollback leaves: the host caches switched() for GATE_EVERY (2 s), so a revoke made right after `kith rollback authority` goes to the core, not the file the host is back on (a FINDING, see the skill's Re-sync 2026-11-06 (2))
+broken-switch-lag	INVARIANT	CoreInStep	fail
+broken-switch-lag	PROPERTY	R6	fail
+# A core-only write of the revoked fact (a hand-run core-call; no production writer) while UNSWITCHED: the latch answers from the stale copy until its next parity ask (the window #876 named); a gate that checks parity per request has none
+core-only-write	PROPERTY	R1	fail
+core-only-write-parity	PROPERTY	R1	pass
+# --- switched, the configuration M2-23 runs: the full code row set, and the door/cards/order hooks combined with it ---
+switched	INVARIANT	R2	pass
+switched	INVARIANT	R4	pass
+switched	INVARIANT	SyncAgrees	pass
+switched	INVARIANT	BotBelowOwner	pass
+switched	INVARIANT	SideOnlyLatched	pass
+core-gate	INVARIANT	SideOnlyLatched	pass
+switched	PROPERTY	R6cDown	pass
+switched	PROPERTY	R6cWake	pass
+switched	PROPERTY	NeverBridgeInCloudDown	pass
+switched-door	INVARIANT	TypeOK	pass
+switched-door	PROPERTY	DoorD2	pass
+switched-door	PROPERTY	DoorD2c	pass
+switched-door	PROPERTY	DoorD1	pass
+switched-door	PROPERTY	DoorNoResurrect	pass
+switched-door	INVARIANT	DoorsCutWithRevoke	pass
+switched-cards	INVARIANT	TypeOK	pass
+switched-cards	PROPERTY	CardsCut	pass
+switched-cards	PROPERTY	CardNoResurrect	pass
+switched-order	INVARIANT	TypeOK	pass
+switched-order	INVARIANT	OrderKept	pass
+switched-order	PROPERTY	Swept	pass
+switched-order	PROPERTY	AsksEnded	pass
+switched-order	PROPERTY	StoppedNeverWakes	pass
+# the origin Mac itself serves P while the cloud has the revoke (Publish made it look in sync)
+broken-switch-lag	PROPERTY	R6c	fail

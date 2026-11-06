@@ -44,7 +44,7 @@
 //!
 //! Not imported here at all: cards (PR #711) and access requests (M2-3).
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Map, Value};
 
 use crate::error::{Error, Result};
@@ -605,6 +605,45 @@ pub(super) fn record_removals(conn: &Connection, auth: &Value, now_ms: f64) -> R
         crate::revoke_order::record_removal(conn, id, bots, now_ms)?;
     }
     Ok(found.into_iter().map(|(id, _)| id).collect())
+}
+
+/// The people the file has suspended and core.db holds as not suspended (a missed suspend mirror). Reads only. The owner
+/// (an old file may still mark one revoked) and bots are skipped: the order refuses the owner, so a row would replay
+/// forever. A person new to core.db is not listed: nothing of theirs is in the core to sweep. Only the file's current id
+/// is read, not its `was` ids (a rename is the rename follow-up's).
+pub(super) fn suspends(conn: &Connection, auth: &Value) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for (id, p) in table(auth, "people")?.into_iter().flatten() {
+        if !truthy(p.get("revoked"), &format!("people.{id}.revoked"))? {
+            continue;
+        }
+        if truthy(p.get("owner"), &format!("people.{id}.owner"))?
+            || p.get("bot_of").is_some_and(|b| !b.is_null())
+        {
+            continue;
+        }
+        // core.db's owner is never listed, whatever the file says of them.
+        let held: Option<(i64, i64)> = conn
+            .query_row(
+                "SELECT revoked, owner FROM people WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if held == Some((0, 0)) {
+            out.push(id.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// Writes the open record for each of [`suspends`]'s ids, in the caller's transaction, before `clear()`. Returns the ids.
+pub(super) fn record_suspends(conn: &Connection, auth: &Value, now_ms: f64) -> Result<Vec<String>> {
+    let found = suspends(conn, auth)?;
+    for id in &found {
+        crate::revoke_order::record_suspend(conn, id, now_ms)?;
+    }
+    Ok(found)
 }
 
 /// Empties the tables `insert_all` fills (a forced re-import). `authority_settings` keeps any key it does not own.
