@@ -281,6 +281,15 @@ fn accounts_a_repeated_step_and_a_crash_part_way_resume() {
     // A crash between the record and the tombstone: the file is back (as a copy of the original), the record says switched.
     let file = kith_kernel::accounts::state_file(&env.machine);
     std::fs::remove_file(&file).unwrap();
+    // (a missing file is refused, not repaired: the kept copy is put back as the real file)
+    assert!(step(&reg, &env, "accounts", opts()).is_err());
+    let kept = std::fs::read_dir(file.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.to_string_lossy().contains(".pre-cutover-"))
+        .expect("the tombstone kept a copy");
+    std::fs::copy(&kept, &file).unwrap();
     step(&reg, &env, "accounts", opts()).unwrap();
     assert!(tombstone::is_tombstone(&file), "step repairs the tombstone");
     // A crash during the import: the record says stepping and nothing is tombstoned.
