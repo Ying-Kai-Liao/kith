@@ -188,11 +188,11 @@ pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
 /// and bots for the undo). Every invited person's devices, memberships and open invites are then parked or given back to
 /// match their revoked state, flipped here or not, in the same hold of the kith-auth lock as the flip: what a failed
 /// pull or a race with the owner's own revoke left half done is put right by the next pull (architect's RevokePark
-/// model, fix). Returns the people newly revoked here, whose running turns the caller stops. None (a cloud that
+/// model, fix). The people newly revoked here are cut off before it returns, an error included. None (a cloud that
 /// predates revoking) changes nothing. An error fails the pull: this host stays out of sync rather than serve on access
 /// it could not apply (I2).
-pub async fn apply_revoked(hub: &Hub, bin: Option<&Path>, listed: Option<&[String]>) -> Result<Vec<String>> {
-    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(vec![]) };
+pub async fn apply_revoked(hub: &Hub, bin: Option<&Path>, listed: Option<&[String]>) -> Result<()> {
+    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(()) };
     let mut cut = vec![];
     let mut moved = false;
     let applied: Result<()> = async {
@@ -216,11 +216,15 @@ pub async fn apply_revoked(hub: &Hub, bin: Option<&Path>, listed: Option<&[Strin
         Ok(())
     }
     .await;
-    // Also when a later flip failed: what was parked before it already stopped granting.
+    // Also when a later flip failed: what was parked before it already stopped granting, and whoever this pull revoked
+    // before the failure is cut off now, not left running until some later pull.
     if moved {
         hub.auth_changed();
     }
-    applied.map(|()| cut)
+    for person in cut {
+        crate::api::people::cut_off(hub, &person).await;
+    }
+    applied
 }
 
 /// Whether `person` is revoked here (their own state). False when kith-auth can't say: the caller then does what it

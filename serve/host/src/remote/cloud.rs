@@ -432,9 +432,7 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     let owner_uid = owner.as_ref().map(|o| o.user_id.clone());
     // Before the memberships: a membership the revoke cut then ends on a person already revoked (R6). A failure fails
     // the pull, so this host stays out of sync instead of serving on access it couldn't apply.
-    for person in super::members::apply_revoked(hub, bin.as_deref(), state.revoked.as_deref()).await? {
-        crate::api::people::cut_off(hub, &person).await;
-    }
+    super::members::apply_revoked(hub, bin.as_deref(), state.revoked.as_deref()).await?;
     // Before the grants: a member's device is kept only while its account is bound to its person.
     super::members::sync(hub, state.memberships.as_deref(), owner_uid.as_deref()).await;
     super::botsync::sync(hub, state.bot_devices.as_deref()).await;

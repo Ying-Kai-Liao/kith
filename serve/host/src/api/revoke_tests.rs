@@ -313,6 +313,82 @@ async fn a_revoke_sweeps_the_persons_runs_and_what_their_sessions_are_owed() {
 }
 
 #[tokio::test]
+async fn a_pull_that_fails_on_a_later_person_still_cuts_off_the_ones_it_revoked_before() {
+    use std::os::unix::fs::PermissionsExt;
+    let r = Rig::new().await;
+    joined(&r).await;
+    let made = call(&r, "createInvite", json!({"name": "Tom", "agents": {"house": "member"}})).await.unwrap();
+    // The list is the whole set of memberships: sam's stays in it.
+    let sam_invite = r.hub.store.memberships().unwrap()[0].invite_id.clone();
+    let listed = [
+        members::Listed {
+            membership_id: "mem_sam".into(),
+            user_id: "user_sam".into(),
+            invite_id: sam_invite,
+            ..Default::default()
+        },
+        members::Listed {
+            membership_id: "mem_tom".into(),
+            user_id: "user_tom".into(),
+            invite_id: made["inviteId"].as_str().unwrap().to_owned(),
+            ..Default::default()
+        },
+    ];
+    members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
+    let state = r.hub.terminal.env().state;
+    // Whoever kith-auth lists first is revoked first; the one listed after it is the one whose flip fails.
+    let order: Vec<String> = members::auth_people(&r.bin)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|p| p.id == "sam" || p.id == "tom")
+        .map(|p| p.id)
+        .collect();
+    let (first, second) = (order[0].as_str(), order[1].as_str());
+    for (id, who) in [("owed-first", first), ("owed-second", second)] {
+        let session = format!("sess-{who}");
+        let owed = crate::wake::Request {
+            session: &session,
+            id,
+            agent: "house",
+            person: Some(who),
+            room: None,
+            host_door: true,
+            why: "a reply",
+            text: "an answer",
+        };
+        crate::wake::enqueue(&state, &owed).unwrap();
+    }
+    // kith-auth that refuses to revoke `second`, and is the real one for everything else.
+    let shim = r.dir.join("kith-auth-refusing");
+    let real = r.bin.display();
+    std::fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *\"person {second} --revoke\"*) echo no >&2; exit 1;; esac\nexec \"{real}\" \"$@\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    // The cloud revokes both; the flip of the second fails, after the first went through.
+    let both = ["user_sam".to_owned(), "user_tom".to_owned()];
+    let failed = members::apply_revoked(&r.hub, Some(&shim), Some(&both)).await.unwrap_err();
+    assert!(format!("{failed:#}").contains(second), "failed on {second}, got {failed:#} (order {order:?})");
+    assert!(
+        !r.allowed(first, "house"),
+        "{first}'s revoke was applied before the failure (order {order:?}, sam {}, tom {})",
+        r.who("user_sam"),
+        r.who("user_tom")
+    );
+    assert_eq!(
+        crate::wake::status(&state, "owed-first").as_deref(),
+        Some("withdrawn"),
+        "and {first} is cut off now, not when some later pull gets through"
+    );
+}
+
+#[tokio::test]
 async fn a_removal_deletes_what_a_revoke_keeps() {
     let r = Rig::new().await;
     joined(&r).await;

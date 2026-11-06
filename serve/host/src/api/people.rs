@@ -448,7 +448,12 @@ pub(crate) fn park(hub: &Hub, person: &str, revoked: bool) -> bool {
     match done {
         Ok(m) if m == Moved::default() => false,
         Ok(m) => {
-            tracing::info!(person, revoked, ?m, "a revoked person's devices, memberships and invites parked or given back");
+            tracing::info!(
+                person,
+                revoked,
+                ?m,
+                "a revoked person's devices, memberships and invites parked or given back"
+            );
             true
         }
         Err(e) => {
