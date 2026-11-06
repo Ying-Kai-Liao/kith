@@ -49,6 +49,25 @@ pub(crate) fn kept_since(path: &Path, at: i64) -> bool {
     })
 }
 
+/// Whether any `<name>.pre-cutover-<t>` copy with `t >= at` sits beside `path`, whatever its bytes: the tombstone got at
+/// least as far as keeping the file.
+pub(crate) fn has_copy_since(path: &Path, at: i64) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let prefix = format!("{name}.pre-cutover-");
+    let Some(dir) = path.parent().and_then(|d| std::fs::read_dir(d).ok()) else {
+        return false;
+    };
+    dir.flatten().any(|e| {
+        e.file_name()
+            .to_str()
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|t| t.parse::<i64>().ok())
+            .is_some_and(|t| t >= at)
+    })
+}
+
 fn same_file(a: &Path, b: &Path) -> bool {
     #[cfg(unix)]
     {

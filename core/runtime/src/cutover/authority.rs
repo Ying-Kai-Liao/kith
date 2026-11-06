@@ -214,12 +214,13 @@ fn hold_auth_lock(auth: &Path, wait: Duration) -> Result<AuthLock> {
     }
 }
 
-/// The SHA-256 of the file's bytes; "missing" when it does not exist.
-/// Replaces the import's `core-migrate --force` advice when a crash repair meets rows that differ.
+/// Replaces the import's `core-migrate --force` advice when a crash repair meets rows that differ and no copy was kept:
+/// the crash came before the tombstone's link, so the file is the newer side.
 const REPAIR_FORCE: &str = "This is the repair of a switch that stopped before the tombstone: kith-auth kept writing auth.json after the \
      core took its rows, so the file is newer and wins. Run `kith migrate step authority --force` to replace the core's rows \
      with the file's (a backup of core.db is taken first).";
 
+/// The SHA-256 of the file's bytes; "missing" when it does not exist.
 fn sha_of(path: &Path) -> Result<String> {
     use std::fmt::Write as _;
     match std::fs::read(path) {
