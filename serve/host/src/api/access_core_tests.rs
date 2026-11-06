@@ -726,6 +726,15 @@ fn a_claimed_group_leaders_orphaned_child_that_ignores_sigterm_goes_with_it() {
     assert!(gone, "the orphaned child of a group leader is gone");
 }
 
+/// A stamp of the same form as `s`, for a process started long after it.
+fn later_stamp(s: &str) -> String {
+    if let Some((boot, ticks)) = s.strip_prefix('b').and_then(|r| r.split_once(':')) {
+        return format!("b{boot}:{}", ticks.parse::<u64>().unwrap() + 100_000);
+    }
+    let ms: i64 = s.strip_prefix('e').expect("an e or b stamp").parse().unwrap();
+    format!("e{}", ms + 1_000_000)
+}
+
 /// The `kill` entry the core answers for a claim of a process (`people.suspend` / `people.removePerson`).
 fn kill_entry(pid: u32, started: &str) -> Value {
     json!({"claimId": 1, "pid": pid, "started": started})
@@ -735,8 +744,9 @@ fn kill_entry(pid: u32, started: &str) -> Value {
 async fn the_kill_list_of_a_suspend_or_removal_ends_the_claimed_process_once() {
     let mut child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
     let started = kith_kernel::procstart::start_stamp(child.id()).expect("the sleeper's start");
-    // A claim whose recorded start is another process's: a reused pid, never signalled.
-    let other = kith_kernel::procstart::start_stamp(std::process::id()).expect("our start");
+    // A claim whose recorded start is another process's: a reused pid, never signalled. Made from the sleeper's own
+    // stamp, moved far off: two real processes started this close can share a stamp (Linux counts 10 ms ticks).
+    let other = later_stamp(&started);
     let said = json!({"lines": [], "kill": [kill_entry(child.id(), &other)]});
     assert_eq!(super::authority::finish_revoke(&said, "sam").await, "");
     assert!(child.try_wait().unwrap().is_none(), "a pid with another start stamp is left alone");
