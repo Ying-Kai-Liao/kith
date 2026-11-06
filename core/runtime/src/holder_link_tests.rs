@@ -559,6 +559,55 @@ fn a_blocked_pass_still_notes_the_groups_it_ended() {
     rig.finish(&[&h1, &h2]);
 }
 
+/// A recorded stub that died with its engine still running in its group: the group is ended, not left as "gone". A
+/// recorded pid whose group is empty too is left alone.
+#[cfg(unix)]
+#[test]
+fn a_group_whose_leader_died_is_ended() {
+    use std::os::unix::process::CommandExt as _;
+    let orphan_group = || {
+        let mut leader = std::process::Command::new("sh")
+            .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut out = String::new();
+        std::io::Read::read_to_string(leader.stdout.as_mut().unwrap(), &mut out).unwrap();
+        leader.wait().unwrap();
+        (leader.id(), out.trim().parse::<u32>().unwrap())
+    };
+    let (pgid, engine) = orphan_group();
+    assert_eq!(
+        kith_kernel::procstart::probe(pgid),
+        kith_kernel::procstart::Probe::Gone
+    );
+    assert!(!kith_kernel::procstart::group_gone(pgid));
+    let recorded = |pid| RecordedProc {
+        pid,
+        started: "e1".into(),
+        conv: "c".into(),
+    };
+    let mut notes = Vec::new();
+    super::end_groups(&mut notes, &[recorded(pgid)], Duration::from_secs(10)).unwrap();
+    assert!(
+        kith_kernel::procstart::group_gone(pgid),
+        "engine {engine} is ended with its group"
+    );
+    assert!(
+        notes.contains(&format!(
+            "holder: the process group of pid {pgid} is gone after the signal"
+        )),
+        "{notes:?}"
+    );
+    let mut notes = Vec::new();
+    super::end_groups(&mut notes, &[recorded(pgid)], Duration::from_secs(10)).unwrap();
+    assert_eq!(
+        notes,
+        vec![format!("holder: pid {pgid} is gone; nothing to end")]
+    );
+}
+
 #[test]
 fn forget_refuses_a_process_the_live_holder_lists_unless_the_holder_is_blocked() {
     let (_t, m) = machine();

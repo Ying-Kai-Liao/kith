@@ -17,6 +17,11 @@ pub(crate) trait Liveness {
     /// True only when the system says there is no such process. An error, a refusal or a missing record is not "gone":
     /// a failed probe must never free a live holder.
     fn gone(&self, pid: u32) -> bool;
+    /// True only when the system says no process is left in the process group `pgid`. A test double whose processes
+    /// have no groups answers for the pid alone.
+    fn group_gone(&self, pgid: u32) -> bool {
+        self.gone(pgid)
+    }
 }
 
 /// The real system.
@@ -28,6 +33,9 @@ impl Liveness for System {
     }
     fn gone(&self, pid: u32) -> bool {
         pid_gone(pid)
+    }
+    fn group_gone(&self, pgid: u32) -> bool {
+        procstart::group_gone(pgid)
     }
 }
 

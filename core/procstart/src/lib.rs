@@ -51,6 +51,14 @@ pub fn session_id(pid: u32) -> Option<u32> {
     imp::session_id(pid)
 }
 
+/// True only when the system says no process is left in the process group `pgid` (`kill(-pgid, 0)` is ESRCH). A leader
+/// that has died does not empty its group: an engine it started in that group may still run (and write). A refusal or
+/// any other error is not "gone". Windows has no process groups (a job object ends each spawn): always true there.
+#[must_use]
+pub fn group_gone(pgid: u32) -> bool {
+    imp::group_gone(pgid)
+}
+
 /// The recorded form of an epoch start.
 #[must_use]
 pub fn epoch_stamp(ms: i64) -> String {
@@ -131,6 +139,18 @@ mod imp {
             };
         }
         start(pid)
+    }
+
+    pub(super) fn group_gone(pgid: u32) -> bool {
+        // Zero or a negative number would name another target to kill(2); no group has that id.
+        let Some(g) = libc::pid_t::try_from(pgid).ok().filter(|g| *g > 0) else {
+            return true;
+        };
+        // SAFETY: signal 0 to a group only checks that one of its processes exists; nothing is sent.
+        if unsafe { libc::killpg(g, 0) } == 0 {
+            return false;
+        }
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
     }
 
     pub(super) fn session_id(pid: u32) -> Option<u32> {
@@ -265,6 +285,10 @@ mod imp {
         None
     }
 
+    pub(super) fn group_gone(_: u32) -> bool {
+        true
+    }
+
     pub(super) fn probe(pid: u32) -> Probe {
         if pid == 0 {
             return Probe::Gone;
@@ -332,6 +356,10 @@ mod imp {
 
     pub(super) fn session_id(_: u32) -> Option<u32> {
         None
+    }
+
+    pub(super) fn group_gone(_: u32) -> bool {
+        true
     }
 }
 
@@ -441,5 +469,43 @@ mod tests {
     #[test]
     fn pid_zero_is_nobodys() {
         assert_eq!(probe(0), Probe::Gone);
+        assert!(group_gone(0));
+    }
+
+    /// A leader that exits leaves its group alive while a child in it runs: the pid is gone, the group is not.
+    #[cfg(unix)]
+    #[test]
+    fn a_group_outlives_its_dead_leader_until_its_last_process_ends() {
+        use std::os::unix::process::CommandExt;
+        let mut leader = std::process::Command::new("sh")
+            .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pgid = leader.id();
+        let mut out = String::new();
+        std::io::Read::read_to_string(leader.stdout.as_mut().unwrap(), &mut out).unwrap();
+        leader.wait().unwrap();
+        let child: libc::pid_t = out.trim().parse().unwrap();
+        assert_eq!(probe(pgid), Probe::Gone, "the leader is reaped");
+        assert!(!group_gone(pgid), "its child still runs in the group");
+        // SAFETY: the group this test started.
+        assert_eq!(
+            unsafe { libc::killpg(libc::pid_t::try_from(pgid).unwrap(), libc::SIGKILL) },
+            0
+        );
+        let mut empty = false;
+        for _ in 0..100 {
+            if group_gone(pgid) {
+                empty = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            empty,
+            "the group of {pgid} (child {child}) ends once its last process does"
+        );
     }
 }

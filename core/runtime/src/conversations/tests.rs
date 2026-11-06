@@ -701,6 +701,83 @@ fn a_reused_pid_counts_as_gone_and_a_probe_that_cannot_tell_does_not() {
     assert_eq!(state(&c, id2), "ending");
 }
 
+/// The stub (the recorded pid) leads its process group and the engine runs in it. On macOS the engine can outlive the
+/// stub: the claim is still the writer's until no process is left in the group.
+#[test]
+fn a_dead_stub_with_its_engine_still_in_the_group_keeps_the_claim() {
+    struct Group {
+        engine: std::cell::Cell<bool>,
+    }
+    impl Liveness for Group {
+        fn start(&self, _: u32) -> Option<String> {
+            None
+        }
+        fn gone(&self, _: u32) -> bool {
+            true
+        }
+        fn group_gone(&self, _: u32) -> bool {
+            !self.engine.get()
+        }
+    }
+    let (_t, mut c) = open();
+    let live = Group {
+        engine: std::cell::Cell::new(true),
+    };
+    let (id, _) = running(&mut c, "c1", 100);
+    stop(&mut c, id, "revoked", false, 30).expect("stop");
+    assert!(end_gone(&mut c, &live, 31).expect("probe").is_empty());
+    assert_eq!(state(&c, id), "ending");
+    assert!(
+        claim(&mut c, &new_claim("c1", None), 32).is_err(),
+        "still one writer"
+    );
+    live.engine.set(false);
+    assert_eq!(end_gone(&mut c, &live, 33).expect("probe"), vec![id]);
+    assert_eq!(state(&c, id), "ended");
+    claim(&mut c, &new_claim("c1", None), 34).expect("free");
+}
+
+/// The same on the real system: a group leader that has exited and been reaped, with its child still in the group.
+#[cfg(unix)]
+#[test]
+fn on_the_real_system_a_claim_ends_only_once_its_group_is_empty() {
+    use std::os::unix::process::CommandExt as _;
+    let mut leader = std::process::Command::new("sh")
+        .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+        .stdout(std::process::Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .expect("spawn");
+    let pgid = leader.id();
+    let mut out = String::new();
+    std::io::Read::read_to_string(leader.stdout.as_mut().expect("stdout"), &mut out).expect("read");
+    leader.wait().expect("reaped");
+    let (_t, mut c) = open();
+    let (id, _) = running(&mut c, "c1", pgid);
+    stop(&mut c, id, "revoked", false, 30).expect("stop");
+    let system = crate::gate::System;
+    assert!(
+        end_gone(&mut c, &system, 31).expect("probe").is_empty(),
+        "the child {out} runs on"
+    );
+    assert_eq!(state(&c, id), "ending");
+    let killed = std::process::Command::new("/bin/kill")
+        .args(["-s", "KILL", "--"])
+        .arg(format!("-{pgid}"))
+        .status()
+        .expect("kill");
+    assert!(killed.success());
+    let mut ended = Vec::new();
+    for at in 32..132 {
+        ended = end_gone(&mut c, &system, at).expect("probe");
+        if !ended.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(ended, vec![id]);
+}
+
 #[test]
 fn stop_requeues_or_cancels_the_turn_and_ignores_a_claim_that_is_not_live() {
     let (_t, mut c) = open();

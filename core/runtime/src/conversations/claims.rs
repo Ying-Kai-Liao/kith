@@ -47,7 +47,7 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 
 use crate::db::{Core, RecordedProc};
 use crate::error::{Error, Result};
-use crate::gate::{Liveness, holder_alive};
+use crate::gate::{Liveness, same_process};
 
 /// `meta` key: the core generation whose reconcile has committed. Claims are refused until it equals the core's.
 pub(super) const RECONCILED: &str = "claims_reconciled_generation";
@@ -874,14 +874,19 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
     })
 }
 
-/// True when the system says this recorded process is gone: no such pid, or the pid now has another start time (reused).
-/// A probe that cannot tell is not "gone", and neither is a claim whose start time is the old `lstart` text (the stub
-/// still records it): that only ends when the pid is gone.
+/// True when the system says this recorded process and everything it started in its group are gone: the pid has another
+/// start time (reused, which the system does not do while a group of that id has a process left), or there is no such
+/// pid and no process is left in the group it led (a holder spawn's stub leads its group; its engine runs in it and may
+/// outlive it). A probe that cannot tell is not "gone", and neither is a claim whose start time is the old `lstart` text
+/// (the stub still records it): that only ends when the pid and its group are gone.
 fn recorded_gone(live: &dyn Liveness, pid: u32, started: &str) -> bool {
-    !holder_alive(live, pid, started)
+    match live.start(pid) {
+        Some(current) => !same_process(started, &current),
+        None => live.gone(pid) && live.group_gone(pid),
+    }
 }
 
-/// `ending -> ended` (and a `--direct` run's `claimed -> ended`), only once the recorded process is confirmed gone. Reads, probes outside any transaction, then one
+/// `ending -> ended` (and a `--direct` run's `claimed -> ended`), only once the recorded process and its group are confirmed gone. Reads, probes outside any transaction, then one
 /// CAS per claim that still names the same process. Returns the claims it ended.
 pub(crate) fn end_gone(core: &mut Core, live: &dyn Liveness, now: i64) -> Result<Vec<i64>> {
     let mut candidates: Vec<(i64, i64, String)> = Vec::new();

@@ -905,8 +905,9 @@ pub(crate) fn reconcile(
     Ok(())
 }
 
-/// Ends the process group of each recorded process whose pid still has the recorded start stamp, and waits for the
-/// groups to be empty. A pid that is gone, or has another start in the same form, is not ours: left alone. So is a
+/// Ends the process group of each recorded process whose pid still has the recorded start stamp, or whose pid is gone
+/// while its group still has a process, and waits for the groups to be empty. A pid that is gone with its group, or has
+/// another start in the same form, is not ours: left alone. So is a
 /// live pid that is not a session leader: every holder spawn calls `setsid`, so the recorded process leads its session
 /// and anything else at that pid is a stranger, whatever the record says. A start that cannot be told otherwise (the
 /// pid's own cannot be read, or the record is empty, old `ps` text, or of another form) is neither: nothing is
@@ -922,8 +923,17 @@ fn end_groups(
     let mut stuck: Vec<String> = Vec::new();
     for p in procs {
         match procstart::probe(p.pid) {
-            procstart::Probe::Gone => {
+            // The leader died but its group may not have: the engine it started runs on in it. The system does not
+            // hand a pid out while a group of that id has a process left, so a live group here is still the recorded one.
+            procstart::Probe::Gone if procstart::group_gone(p.pid) => {
                 notes.push(format!("holder: pid {} is gone; nothing to end", p.pid));
+            }
+            procstart::Probe::Gone => {
+                notes.push(format!(
+                    "holder: pid {} is gone but its process group still runs; ending the group",
+                    p.pid
+                ));
+                mine.push(p.pid);
             }
             procstart::Probe::Alive(Some(now)) if procstart::comparable(&p.started, &now) => {
                 if !procstart::same_process(&p.started, &now) {
@@ -964,7 +974,7 @@ fn end_groups(
         let begun = Instant::now();
         let mut forced = false;
         loop {
-            mine.retain(|pid| group_alive(*pid));
+            mine.retain(|pid| !procstart::group_gone(*pid));
             if mine.is_empty() {
                 break;
             }
@@ -1023,11 +1033,6 @@ fn signal_group(pid: u32, signal: &str) -> bool {
         .arg(format!("-{pid}"))
         .output()
         .is_ok_and(|o| o.status.success())
-}
-
-#[cfg(unix)]
-fn group_alive(pid: u32) -> bool {
-    signal_group(pid, "0")
 }
 
 // --- A warm turn's writer lock, through the holder (M3-4) ----------------------------------------------------------
