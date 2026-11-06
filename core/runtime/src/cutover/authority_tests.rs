@@ -1331,3 +1331,113 @@ fn a_marker_from_before_seeds_brings_no_copy_only_keys_back() {
         "the core's keys are there"
     );
 }
+
+#[test]
+fn a_rollback_of_a_half_step_does_not_bring_back_a_key_the_owner_deleted() {
+    let (r, reg) = rig();
+    let _blocker = crash_before_tombstone(&r, &reg);
+    // The envelope still seals an item the owner has deleted from the Keychain since.
+    r.vault
+        .borrow_mut()
+        .insert("keychain:svc#gone".into(), "s3cr3t-val".into());
+    let out = rollback(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(said(&out, "left as they are"), "{out:?}");
+    assert!(r.os.borrow().is_empty(), "nothing was written back");
+    assert_eq!(phase(&r.env, "authority"), None);
+}
+
+#[test]
+fn a_rollback_re_run_after_the_rename_does_not_bring_back_a_key_the_owner_deleted() {
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    let at = state::read(&r.env.layout, "authority").unwrap().unwrap().at;
+    r.vault
+        .borrow_mut()
+        .insert("keychain:svc#gone".into(), "s3cr3t-val".into());
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    // The owner deletes the restored key, then the crash: the file is renamed, the record and marker are still there.
+    r.os.borrow_mut().clear();
+    state::write(
+        &r.env.layout,
+        "authority",
+        &Switch {
+            phase: Phase::RollingBack,
+            snapshot: None,
+            at,
+        },
+    )
+    .unwrap();
+    {
+        let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+        marker::write(&mut core, "authority", at, "", None).unwrap();
+    }
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(r.os.borrow().is_empty(), "{:?}", r.os.borrow());
+    assert_eq!(phase(&r.env, "authority"), None);
+    assert!(marker::read(&r.db(), "authority").is_none());
+}
+
+#[test]
+fn a_step_over_a_missing_auth_json_is_refused_and_the_record_stays() {
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    std::fs::remove_file(r.auth()).unwrap();
+    let e = step(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("missing"), "{e}");
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(marker::read(&r.db(), "authority").is_some());
+    assert!(!r.auth().exists(), "nothing was written");
+}
+
+#[test]
+fn a_step_over_an_old_auth_json_put_back_after_a_finished_switch_is_refused() {
+    let (r, reg) = rig();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    let kept = std::fs::read_dir(r.auth().parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.to_string_lossy().contains(".pre-cutover-"))
+        .expect("the tombstone kept a copy");
+    std::fs::copy(&kept, r.auth()).unwrap();
+    let before = std::fs::read(r.auth()).unwrap();
+    let e = step(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("real file"), "{e}");
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(marker::read(&r.db(), "authority").is_some());
+    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+}
+
+#[test]
+fn the_repair_refusal_names_step_force_and_says_the_file_wins() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    let e = step(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("kith migrate step authority --force"), "{e}");
+    assert!(e.contains("the file is newer and wins"), "{e}");
+    assert!(!e.contains("core-migrate"), "{e}");
+}
+
+#[test]
+fn rolling_back_a_stepping_module_left_by_a_repair_clears_its_marker() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    assert!(step(&reg, &r.env, "authority", opts()).is_err());
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Stepping));
+    assert!(marker::read(&r.db(), "authority").is_some(), "S1 leaves it");
+    let out = rollback(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(said(&out, "cancelled"), "{out:?}");
+    assert_eq!(phase(&r.env, "authority"), None);
+    assert!(marker::read(&r.db(), "authority").is_none());
+    assert!(marker::seed(&r.db(), "authority").is_none());
+}

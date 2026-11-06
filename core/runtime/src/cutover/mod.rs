@@ -290,6 +290,22 @@ pub(crate) fn step(
                     .iter()
                     .any(|p| !tombstone::is_tombstone(p)) =>
         {
+            // Only a real file with no copy kept at the switch is the half-step. A missing file, or a real one beside a
+            // copy a finished tombstone kept (an old file put back), is something else: the record stays as it is.
+            if let Some(p) = m.tombstones(env).into_iter().find(|p| {
+                !tombstone::is_tombstone(p)
+                    && (!tombstone::is_real(p) || tombstone::kept_since(p, s.at))
+            }) {
+                return Err(Error::Refused(format!(
+                    "cutover: {name} is switched but {} {}; nothing was changed and the record stays. Put the tombstone back, or to take the file as it is run `kith rollback {name}`",
+                    p.display(),
+                    if tombstone::is_real(&p) {
+                        "is a real file beside the copy the switch kept (an old file put back?)"
+                    } else {
+                        "is missing"
+                    }
+                )));
+            }
             let s = Switch {
                 phase: Phase::Stepping,
                 ..s
@@ -316,7 +332,7 @@ pub(crate) fn step(
             // A damaged record still counts as switched: nothing may step over it unless the tombstones and the marker
             // say the switch had finished.
             return Err(Error::Refused(format!(
-                "{e}. Repair: if the switch had finished, put `state=switched` and `at=<the marker's at>` back in {}; else restore it from a backup, then re-run `kith migrate step {name}`",
+                "{e}. Repair: if no source is a tombstone, remove the record ({}) and run `kith migrate step {name}` again. If the sources are tombstones but the core holds no marker, core.db was restored from before the switch: stop, do not step (restore a core.db from after it, or roll the sources back by hand)",
                 state::path(&env.layout, name)?.display()
             )));
         }
@@ -414,6 +430,8 @@ pub(crate) fn rollback(
     let mut core = lock(env)?;
     if cur.phase == Phase::Stepping {
         // Nothing was tombstoned and Python never stopped writing; the imported rows stay (a re-step is idempotent).
+        // A crash repair (S1) leaves a marker on a Stepping module; none must outlive the record.
+        marker::clear(&mut core, name)?;
         state::clear(&env.layout, name)?;
         lines.push(format!("{name}: an unfinished step was cancelled"));
         return Ok(lines);
@@ -450,16 +468,17 @@ pub(crate) fn rollback(
             ..cur
         },
     )?;
-    lines.extend(m.restore_secrets(env, &mut core)?);
     // export_back never replaces a real file: the rename is its last act, so a file that is not a tombstone means the
     // export finished (a crash before the record was cleared) or the switch never got to tombstone it. Either way
-    // kith-auth may have written it since, and the core's older rows would undo that.
+    // kith-auth may have written it since, and the core's older rows would undo that. The secrets are skipped too: the
+    // sealed copy would bring back an item the owner deleted since.
     let tombs = m.tombstones(env);
     if !tombs.is_empty() && tombs.iter().all(|p| tombstone::is_real(p)) {
         lines.push(format!(
             "{name}: the source files are already real files; they are left as they are"
         ));
     } else {
+        lines.extend(m.restore_secrets(env, &mut core)?);
         lines.extend(m.export_back(env, &mut core)?);
     }
     for p in tombs {

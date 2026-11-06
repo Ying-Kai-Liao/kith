@@ -27,6 +27,25 @@ pub(crate) fn is_real(path: &Path) -> bool {
     path.is_file() && !is_tombstone(path)
 }
 
+/// Whether a tombstone put at or after `at` kept a copy of `path` (`<name>.pre-cutover-<t>`, `t >= at`): the switch
+/// finished its tombstone, so a real file there now was put back by someone, not left by a half-finished step.
+pub(crate) fn kept_since(path: &Path, at: i64) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let prefix = format!("{name}.pre-cutover-");
+    let Some(dir) = path.parent().and_then(|d| std::fs::read_dir(d).ok()) else {
+        return false;
+    };
+    dir.flatten().any(|e| {
+        e.file_name()
+            .to_str()
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|t| t.parse::<i64>().ok())
+            .is_some_and(|t| t >= at)
+    })
+}
+
 /// The module a tombstone at `path` names (`None`: not a tombstone).
 pub(crate) fn module_of(path: &Path) -> Option<String> {
     note_of(path).map(|v| {
