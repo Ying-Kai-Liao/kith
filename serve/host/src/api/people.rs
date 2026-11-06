@@ -651,7 +651,8 @@ async fn access_ledger(b: &Value) -> Result<Vec<Value>> {
 
 async fn ledger(args: &[&str]) -> Result<Vec<Value>> {
     let bin = account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found on this computer"))?;
-    let out = super::authority::run_auth(&bin, args).await.map_err(|e| anyhow!("couldn't read the grants ledger: {e:#}"))?;
+    let out =
+        super::authority::run_auth(&bin, args).await.map_err(|e| anyhow!("couldn't read the grants ledger: {e:#}"))?;
     serde_json::from_str(&out).context("kith-auth's ledger wasn't JSON")
 }
 
@@ -672,7 +673,9 @@ async fn remove_grant(kind: &str, key: &str) -> Result<Value> {
     let bin = account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found on this computer"))?;
     {
         let _w = AUTH_WRITES.lock().await;
-        super::authority::run_auth(&bin, &["ledger", "--rm", key]).await.map_err(|e| anyhow!("couldn't remove it: {e:#}"))?;
+        super::authority::run_auth(&bin, &["ledger", "--rm", key])
+            .await
+            .map_err(|e| anyhow!("couldn't remove it: {e:#}"))?;
     }
     if ledger(&["ledger", "--json"]).await?.iter().any(|e| e["key"] == key) {
         bail!("kith-auth still lists it; it wasn't removed");

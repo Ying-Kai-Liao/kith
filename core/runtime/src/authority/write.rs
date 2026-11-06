@@ -974,7 +974,8 @@ pub(crate) fn budgets(auth: &Value, agent: &str) -> R<Value> {
     Ok(Value::Object(out))
 }
 
-const ACCESS_KINDS: [(&str, &str); 3] = [("read", "read"), ("write", "write"), ("domain", "domains")];
+const ACCESS_KINDS: [(&str, &str); 3] =
+    [("read", "read"), ("write", "write"), ("domain", "domains")];
 const LEDGER_KINDS: [&str; 6] = ["read", "write", "domain", "service", "job", "helper"];
 
 /// `grant_list`: the profiles a grant names, one string or a list of them.
@@ -1023,8 +1024,13 @@ pub(crate) fn ledger(
         }));
     };
     let by_of = |by: &Map<String, Value>, k: &str| -> Option<Value> {
-        by.get(k)
-            .map(|v| if v.is_null() { json!("owner") } else { v.clone() })
+        by.get(k).map(|v| {
+            if v.is_null() {
+                json!("owner")
+            } else {
+                v.clone()
+            }
+        })
     };
     let none = Map::new();
     for (a, rows) in auth
@@ -1135,7 +1141,9 @@ pub(crate) fn ledger(
     }
     let s = |e: &Value, k: &str| e[k].as_str().unwrap_or_default().to_owned();
     out.sort_by_key(|e| (s(e, "agent"), s(e, "person"), s(e, "kind"), s(e, "target")));
-    out.retain(|e| person.is_none_or(|p| e["person"] == p) && agent.is_none_or(|a| e["agent"] == a));
+    out.retain(|e| {
+        person.is_none_or(|p| e["person"] == p) && agent.is_none_or(|a| e["agent"] == a)
+    });
     out
 }
 
@@ -1297,12 +1305,7 @@ fn drop_agent_domain(auth: &mut Value, agent: &str, host: &str) -> bool {
 
 /// `kith-auth handle <id> <platform> <user-id>` (`uid` Some) and `handle <id> <platform> --rm` (None): binds a person to
 /// their account on a chat platform, or lets it go. The line it prints.
-pub(crate) fn handle(
-    auth: &mut Value,
-    pid: &str,
-    plat: &str,
-    uid: Option<&str>,
-) -> R<Vec<String>> {
+pub(crate) fn handle(auth: &mut Value, pid: &str, plat: &str, uid: Option<&str>) -> R<Vec<String>> {
     tables(auth);
     need_person(auth, pid)?;
     let Some(uid) = uid else {

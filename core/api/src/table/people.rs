@@ -364,7 +364,12 @@ pub(super) const ROWS: &[Method] = &[
     people(
         "people.budgets",
         "A monthly budget in dollars for each person on an agent, as `kith-auth budgets AGENT --json` has them (null for none; the `*` row is left out). A budget is set or cleared with `people.grant --budget` (an empty one clears it).",
-        &[pos("agent", "string", true, "The agent."), KERNEL, HOME, ENV],
+        &[
+            pos("agent", "string", true, "The agent."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
         &["people", "budgets"],
     ),
     people(
@@ -383,7 +388,12 @@ pub(super) const ROWS: &[Method] = &[
         "people.removeGrant",
         "Take one grants-ledger entry away, as it is written. An entry that is not there (removed already) is refused.",
         &[
-            pos("key", "string", true, "The entry's key: `<kind>:<agent>:<person>:<target>`."),
+            pos(
+                "key",
+                "string",
+                true,
+                "The entry's key: `<kind>:<agent>:<person>:<target>`.",
+            ),
             KERNEL,
             HOME,
             ENV,
@@ -395,8 +405,18 @@ pub(super) const ROWS: &[Method] = &[
         "Bind a person to their account on a chat platform (Telegram, Discord, Slack, or `kith` for their Kith account), or with --rm let it go. An account that is another person's is refused. What a person is bound to is in `people.listPeople` (`handles`, `kith`).",
         &[
             pos("person", "string", true, "The person."),
-            pos("platform", "string", true, "`telegram`, `discord`, `slack` or `kith`."),
-            pos("uid", "string", false, "Their id on the platform; not with --rm."),
+            pos(
+                "platform",
+                "string",
+                true,
+                "`telegram`, `discord`, `slack` or `kith`.",
+            ),
+            pos(
+                "uid",
+                "string",
+                false,
+                "Their id on the platform; not with --rm.",
+            ),
             sw("remove", &["--rm"], "Let the binding go."),
             KERNEL,
             HOME,

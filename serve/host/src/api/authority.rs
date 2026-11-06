@@ -592,7 +592,10 @@ fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
             let mut p = serde_json::Map::new();
             for pair in rest.chunks(2) {
                 let [flag, value] = pair else { return None };
-                p.insert(flag.strip_prefix("--").filter(|k| matches!(*k, "person" | "agent"))?.to_owned(), (*value).into());
+                p.insert(
+                    flag.strip_prefix("--").filter(|k| matches!(*k, "person" | "agent"))?.to_owned(),
+                    (*value).into(),
+                );
             }
             ("people.ledger", Value::Object(p))
         }
@@ -600,7 +603,9 @@ fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
         ["handle", person, platform, "--rm"] => {
             ("people.handle", json!({"person": person, "platform": platform, "remove": true}))
         }
-        ["handle", person, platform, uid] => ("people.handle", json!({"person": person, "platform": platform, "uid": uid})),
+        ["handle", person, platform, uid] => {
+            ("people.handle", json!({"person": person, "platform": platform, "uid": uid}))
+        }
         ["bot", id, "--rm"] => ("people.removeBot", json!({"id": id})),
         ["bot", id, "--of", owner, ..] => {
             let mut p = settings(4, &["name", "provider"])?;

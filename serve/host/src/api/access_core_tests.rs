@@ -383,7 +383,7 @@ async fn a_switched_host_reads_the_people_from_the_core_and_revokes_there() {
     members::locked_run(&r.bin, &["handle", "kai", "kith", "user_k"]).await.unwrap();
     assert_eq!(crate::remote::account::owner_handle(&r.bin).await.as_deref(), Some("user_k"));
     members::locked_run(&r.bin, &["handle", "sam", "kith", "--rm"]).await.unwrap();
-    assert_eq!(sam(core.ask("people.listPeople", json!({})).unwrap())["kith"], Value::Null);
+    assert_eq!(sam(core.ask("people.listPeople", json!({})).unwrap())["kith"], "", "unbound reads as no account");
 }
 
 #[tokio::test]

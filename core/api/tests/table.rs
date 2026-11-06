@@ -454,7 +454,10 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people retired ann", "people.retired"),
         ("people budgets echo", "people.budgets"),
         ("people ledger --person ann", "people.ledger"),
-        ("people ledger-remove read:echo:ann:/tmp/x", "people.removeGrant"),
+        (
+            "people ledger-remove read:echo:ann:/tmp/x",
+            "people.removeGrant",
+        ),
         ("people handle ann telegram 12345", "people.handle"),
         ("people handle ann telegram --rm", "people.handle"),
         (

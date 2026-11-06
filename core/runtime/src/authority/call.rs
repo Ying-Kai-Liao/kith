@@ -319,8 +319,8 @@ pub(crate) fn call_in(
         // this one's. A budget that is no number is an error, never "no limit".
         "people.budgets" => {
             let agent = need(params, "agent").map_err(|d| store::refusal(&d))?;
-            let said = store::read(core, |a| write::budgets(a, agent))?
-                .map_err(|d| store::refusal(&d))?;
+            let said =
+                store::read(core, |a| write::budgets(a, agent))?.map_err(|d| store::refusal(&d))?;
             Ok(json!({ "budgets": said, "lines": [said.to_string()] }))
         }
         // `kith-auth ledger [--person ID] [--agent AGENT] --json`: rows, and the same as the one JSON line.
@@ -328,7 +328,8 @@ pub(crate) fn call_in(
             let named = |k: &str| -> std::result::Result<Option<&str>, Die> {
                 match word(params, k) {
                     Some(v) if v.is_empty() || v.starts_with('-') => Err(Die {
-                        msg: "ledger [--person ID] [--agent AGENT] [--json] | ledger --rm <key>".into(),
+                        msg: "ledger [--person ID] [--agent AGENT] [--json] | ledger --rm <key>"
+                            .into(),
                         code: 2,
                     }),
                     v => Ok(v),

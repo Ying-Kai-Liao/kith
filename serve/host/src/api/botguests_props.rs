@@ -684,7 +684,9 @@ impl State {
             self.call(&Caller::Local, "setPersonBudget", body).await.ok();
             assert_eq!(sam(), json!(20.0), "setPersonBudget reached the core");
         }
-        self.call(&Caller::Local, "setPersonBudget", json!({"agent": "house", "person": "sam", "budget": null})).await.ok();
+        self.call(&Caller::Local, "setPersonBudget", json!({"agent": "house", "person": "sam", "budget": null}))
+            .await
+            .ok();
         assert_eq!(sam(), Value::Null, "the budget is cleared in the core");
         // The limits card's person raise (and add) set the same budget.
         let lane = Lane::main("limit-card");
@@ -717,7 +719,12 @@ impl State {
             .memberships()
             .unwrap()
             .into_iter()
-            .map(|m| Member { membership_id: m.membership_id, user_id: m.user_id, invite_id: m.invite_id, ..Default::default() })
+            .map(|m| Member {
+                membership_id: m.membership_id,
+                user_id: m.user_id,
+                invite_id: m.invite_id,
+                ..Default::default()
+            })
             .collect();
         let cy = Member {
             membership_id: "mem_cy".into(),
@@ -735,7 +742,7 @@ impl State {
         assert_eq!(handle(), Some(json!("user_cy")), "the join bound the account in the core");
         all.pop();
         members::apply(&self.r.hub, bin.as_deref(), &all, Some("user_owner")).await.unwrap();
-        assert_eq!(handle().unwrap_or(Value::Null), Value::Null, "the end of access unbound it in the core");
+        assert_eq!(handle().unwrap_or(json!("")), json!(""), "the end of access unbound it in the core");
     }
 
     /// One bot against the model; returns whether an ask of it has gone through and the conversations it made.

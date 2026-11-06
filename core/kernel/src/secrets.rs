@@ -147,7 +147,9 @@ impl Ctx {
     pub fn agent_names(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for root in [self.agents.clone(), self.kernel.join("agents")] {
-            let Ok(dir) = std::fs::read_dir(root) else { continue };
+            let Ok(dir) = std::fs::read_dir(root) else {
+                continue;
+            };
             let mut names: Vec<String> = dir
                 .filter_map(Result::ok)
                 .filter_map(|d| d.file_name().into_string().ok())
