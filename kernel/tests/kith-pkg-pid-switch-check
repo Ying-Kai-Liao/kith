@@ -74,6 +74,50 @@ reset; (cd "$T/work/proj" && "$KITH" echo --launch-json 2>/dev/null) > /dev/null
 check "project-id line removed: project-id is run, kith-pkg resolve is not" "[ \"\$(calls project-id)\" -ge 1 ] && [ \"\$(calls 'kith-pkg resolve')\" = 0 ]"
 cp "$T/switched.keep" "$T/k/lib/core-switched.txt"
 
+# 3b. The bash launch path (what a real interactive `kith AGENT` takes: bin/kith routes only --launch-json to Rust, and only
+# when `launch` is switched). With the `launch` line gone, --launch-json is answered by the script, whose pkg call
+# (bin/kith, `resolve`) and project_id function go through the same router.
+NOLAUNCH=$T/switched.nolaunch
+grep -v '^launch	' "$T/switched.keep" > "$NOLAUNCH"
+bash_launch() { # LINES-FILE [ENV=VAL...]: the script's launch in the project folder, with that switch list
+  local sw=$1; shift
+  cp "$sw" "$T/k/lib/core-switched.txt"
+  (cd "$T/work/proj" && env "$@" "$KITH" echo --launch-json 2>"$T/err")
+  local rc=$?
+  cp "$T/switched.keep" "$T/k/lib/core-switched.txt"
+  return $rc
+}
+reset; bash_launch "$NOLAUNCH" X=1 > "$T/b.out"; echo $? > "$T/b.rc"
+check "bash path, switched: exits 0" "[ \"\$(cat '$T/b.rc')\" = 0 ]"
+check "bash path, switched: kith-pkg resolve and project-id are not run" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && [ \"\$(calls project-id)\" = 0 ]"
+check "bash path, switched: the project came from the core" "grep -q demo '$T/b.out'"
+check "bash path: same launch object as the Rust launch" "[ \"\$(norm < '$T/b.out')\" = \"\$(norm < '$T/rust.out')\" ]"
+
+grep -v '^pkg	' "$NOLAUNCH" > "$T/sw.nopkg"
+reset; bash_launch "$T/sw.nopkg" X=1 > /dev/null
+check "bash path, pkg line removed: kith-pkg resolve is run, project-id is not" "[ \"\$(calls 'kith-pkg resolve')\" -ge 1 ] && [ \"\$(calls project-id)\" = 0 ]"
+grep -v '^project-id	' "$NOLAUNCH" > "$T/sw.nopid"
+reset; bash_launch "$T/sw.nopid" X=1 > /dev/null
+check "bash path, project-id line removed: project-id is run, kith-pkg resolve is not" "[ \"\$(calls project-id)\" -ge 1 ] && [ \"\$(calls 'kith-pkg resolve')\" = 0 ]"
+reset; bash_launch "$NOLAUNCH" KITH_CORE=python > "$T/b.py"
+check "bash path, KITH_CORE=python: both programs are run" "[ \"\$(calls 'kith-pkg resolve')\" -ge 1 ] && [ \"\$(calls project-id)\" -ge 1 ]"
+check "bash path, KITH_CORE=python: same launch object" "[ \"\$(norm < '$T/b.py')\" = \"\$(norm < '$T/b.out')\" ]"
+reset; bash_launch "$NOLAUNCH" KITH_RUN_TOKEN=tok KITH_RUN_SOCKET="$T/none.sock" > "$T/bg.out"
+check "bash path under a guest token: project found, core answered (token dropped for the launch's lookups)" "grep -q demo '$T/bg.out' && [ \"\$(calls project-id)\" = 0 ]"
+
+# 3c. The router asks for the program and its module list once per launch, not once per call.
+cat > "$T/bin/kith-count" <<EOF
+#!/bin/sh
+case "\$*" in "kernel version") echo v >> "$T/vcalls" ;; esac
+exec "$REAL" "\$@"
+EOF
+chmod +x "$T/bin/kith-count"
+rm -f "$T/vcalls"; touch "$T/vcalls"
+cp "$NOLAUNCH" "$T/k/lib/core-switched.txt"
+(cd "$T/work/proj" && KITH_BIN=$T/bin/kith-count "$KITH" echo --launch-json >/dev/null 2>&1)
+cp "$T/switched.keep" "$T/k/lib/core-switched.txt"
+check "bash path: kernel version is asked once for the whole launch" "[ \"\$(wc -l < '$T/vcalls' | tr -d ' ')\" = 1 ]"
+
 # 4. The other kith-pkg verbs stay Python.
 reset; "$KITH" versions echo > /dev/null 2>&1
 check "kith versions still goes to kith-pkg" "[ \"\$(calls 'kith-pkg versions')\" = 1 ]"
@@ -81,8 +125,13 @@ check "kith versions still goes to kith-pkg" "[ \"\$(calls 'kith-pkg versions')\
 # 5. A guest's project-id (run token + socket) reaches the Python, which asks the host over the socket; the core refuses
 # that branch with exit 2, so it must not be what answers.
 reset
-(cd "$T/work/proj" && KITH_RUN_TOKEN=tok KITH_RUN_SOCKET=$T/none.sock "$T/k/bin/project-id" > "$T/g.out" 2> "$T/g.err"); grc=$?
-check "guest: the Python program answers" "[ \"\$(calls project-id)\" = 1 ] && ! grep -q 'the core does not take that branch' '$T/g.err'"
+# KITH_BIN names a logger in front of the core: the guest form must make no call to it (the stub alone would answer by
+# construction), so a router added to bin/project-id later would show here.
+printf '#!/bin/sh\necho "core $*" >> "%s"\nexec "%s" "$@"\n' "$T/corelog" "$REAL" > "$T/bin/kith-log"
+chmod +x "$T/bin/kith-log"
+: > "$T/corelog"
+(cd "$T/work/proj" && KITH_BIN=$T/bin/kith-log KITH_RUN_TOKEN=tok KITH_RUN_SOCKET=$T/none.sock "$T/k/bin/project-id" > "$T/g.out" 2> "$T/g.err"); grc=$?
+check "guest: the Python program answers and the core is not called" "[ \"\$(calls project-id)\" = 1 ] && [ ! -s '$T/corelog' ] && ! grep -q 'the core does not take that branch' '$T/g.err'"
 check "guest: it went for the host's socket (not the registry)" "[ $grc != 0 ] && ! grep -q demo '$T/g.out'"
 (cd "$T/work/proj" && KITH_RUN_TOKEN=tok KITH_RUN_SOCKET=$T/none.sock "$REAL" kernel project-id > /dev/null 2> "$T/g2.err"); grc2=$?
 check "guest: the core refuses with exit 2" "[ $grc2 = 2 ]"
@@ -96,6 +145,8 @@ mv "$T/state/projects.json" "$T/projects.keep"
 reset; (cd "$T/work" && "$KITH" echo --launch-json 2>/dev/null) > "$T/np.out"; nrc=$?
 reset; (cd "$T/work" && KITH_CORE=python "$KITH" echo --launch-json 2>/dev/null) > "$T/np.py"; nprc=$?
 check "no projects.json: same exit and object as the Python" "[ $nrc = $nprc ] && [ \"\$(norm < '$T/np.out')\" = \"\$(norm < '$T/np.py')\" ]"
+# The Rust launch fails in Registry::load before the switch is consulted, so this case no longer exercises the switch: it
+# only pins that a broken registry ends the launch the same way with the lines on or off.
 printf '{not json' > "$T/state/projects.json"
 (cd "$T/work" && "$KITH" echo --launch-json >/dev/null 2>&1); mrc=$?
 # The Rust launch reads the registry itself, so the comparison is the same launch with both lines gone (the Python lookups).

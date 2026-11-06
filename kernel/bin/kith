@@ -442,6 +442,7 @@ shared=$home/memory/shared
 # `resolve` is the Rust core's when `pkg` is switched (lib/core-switched.txt); kith_core_exec returns otherwise (or with
 # KITH_CORE=python) and the Python answers. The rest of kith-pkg stays Python.
 . "$KITH/lib/kith-core.sh"
+kith_core_prime   # one program lookup for the pkg call and the project_id calls below
 pkg=$({ kith_core_exec pkg --kernel "$KITH" resolve "$agent" || "$KITH/bin/kith-pkg" resolve "$agent"; }) && [[ -f $pkg/prompt.md ]] \
   || { echo "kith: $agent: package snapshot failed; running the live folder" >&2; pkg=$src_pkg; }
 export KITH_AGENT=$agent KITH_AGENT_DIR=$pkg KITH_AGENT_HOME=$home KITH_AGENT_VERSION=${pkg##*@}

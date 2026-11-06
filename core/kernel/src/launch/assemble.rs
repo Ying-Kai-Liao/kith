@@ -194,6 +194,11 @@ fn pyrepr(x: &str) -> String {
 
 /// Whether `verb` is the core's: a line in `lib/core-switched.txt`, or `KITH_CORE=rust`; `KITH_CORE=python` is the rollback
 /// (`kith_core_exec` in lib/kith-core.sh decides the same way for the shell).
+///
+/// Bash also runs `kith_cutover_refuse` under `KITH_CORE=python`, refusing the rollback of a module whose files the core
+/// owns after its cutover. It is left out here on purpose: that refusal only matters for a module that has a cutover step,
+/// and `pkg` and `project-id` have none, so the rollback is always allowed for these two verbs. Add the refusal when one
+/// of them gets a cutover.
 fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
     match get(env, "KITH_CORE") {
         "python" => return false,
@@ -731,6 +736,8 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                 .map_or("https://github.com", String::as_str)
                 .trim_end_matches('/')
                 .to_owned(),
+            // The must-ask python runs in this process's environment, not in the launch's env map that the old kith-pkg
+            // subprocess had; the two differ only by what the launch edits (KITH_RUN_TOKEN, KITH_AGENT*).
             python: "python3".to_owned(),
         };
         let out = crate::pkg::cli::run(&ctx, &["resolve".to_owned(), agent.to_owned()]);
