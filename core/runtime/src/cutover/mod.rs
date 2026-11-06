@@ -296,15 +296,19 @@ pub(crate) fn step(
                 !tombstone::is_tombstone(p)
                     && (!tombstone::is_real(p) || tombstone::kept_since(p, s.at))
             }) {
-                return Err(Error::Refused(format!(
-                    "cutover: {name} is switched but {} {}; nothing was changed and the record stays. Put the tombstone back, or to take the file as it is run `kith rollback {name}`",
-                    p.display(),
-                    if tombstone::is_real(&p) {
-                        "is a real file beside the copy the switch kept (an old file put back?)"
-                    } else {
-                        "is missing"
-                    }
-                )));
+                return Err(Error::Refused(if tombstone::is_real(&p) {
+                    // The file may hold writes since the switch (kith-auth replaced it after the crash): putting the
+                    // tombstone over it would lose them. Rollback leaves the real file, skips secrets and clears the marker.
+                    format!(
+                        "cutover: {name} is switched but {} is a real file beside the copy the switch kept (an old file put back, or one kith-auth wrote after a crash); nothing was changed and the record stays. If the file may hold changes since the switch, run `kith rollback {name}` first: it leaves the real file as it is and clears the marker. Put the tombstone back only if you know the file is older than the switch",
+                        p.display()
+                    )
+                } else {
+                    format!(
+                        "cutover: {name} is switched but {} is missing; nothing was changed and the record stays. Put the tombstone back, or to take the file as it is run `kith rollback {name}`",
+                        p.display()
+                    )
+                }));
             }
             let s = Switch {
                 phase: Phase::Stepping,

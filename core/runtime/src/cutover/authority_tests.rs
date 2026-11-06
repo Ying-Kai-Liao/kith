@@ -1459,3 +1459,71 @@ fn a_crash_between_the_hard_link_and_the_rename_is_still_a_half_step_and_steps_a
     assert!(tombstone::is_tombstone(&r.auth()));
     assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
 }
+
+fn kept_copy_name(r: &Rig) -> PathBuf {
+    let mut name = r.auth().file_name().unwrap().to_os_string();
+    name.push(".pre-cutover-9999999999");
+    r.auth().with_file_name(name)
+}
+
+fn refusal(res: Result<Vec<String>>) -> String {
+    match res {
+        Err(Error::Refused(s)) => s,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_half_step_then_a_kith_auth_write_is_told_to_roll_back_first() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The crash came between the hard link and the rename: the kept copy is the real file's inode.
+    std::fs::hard_link(r.auth(), kept_copy_name(&r)).unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    // kith-auth's next write replaces the file (temp file, rename): a new inode with new bytes.
+    revoked_in_file(&r, "sam");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    v["people"]["sam"]["revoked"] = json!({"at": 8});
+    let tmp = r.auth().with_extension("tmp");
+    std::fs::write(&tmp, v.to_string()).unwrap();
+    std::fs::rename(&tmp, r.auth()).unwrap();
+    let bytes = std::fs::read(r.auth()).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    let (roll, back) = (
+        msg.find("kith rollback authority").expect(&msg),
+        msg.find("Put the tombstone back").expect(&msg),
+    );
+    assert!(roll < back, "rollback comes first: {msg}");
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    assert_eq!(std::fs::read(r.auth()).unwrap(), bytes, "file unchanged");
+}
+
+#[test]
+fn a_crash_before_the_link_with_differing_rows_may_use_force() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("the file is newer and wins"), "{msg}");
+    assert!(msg.contains("--force"), "{msg}");
+}
+
+#[test]
+fn a_file_equal_to_a_kept_copy_with_differing_rows_is_not_told_to_force() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The switch finished once and the owner put the kept copy back by hand (same bytes, its own inode); then the core
+    // moved on (a revoke).
+    std::fs::copy(r.auth(), kept_copy_name(&r)).unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    r.db()
+        .execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", [])
+        .unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("the core changed after it"), "{msg}");
+    assert!(msg.contains("Put the tombstone back"), "{msg}");
+    assert!(!msg.contains("newer and wins"), "{msg}");
+    assert!(!msg.contains("authority --force`"), "{msg}");
+}
