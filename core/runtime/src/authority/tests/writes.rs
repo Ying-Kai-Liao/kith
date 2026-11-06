@@ -1661,3 +1661,51 @@ fn joining_and_lineage_are_read_from_the_snapshot_the_write_runs_on() {
     assert_eq!(said["lineage"], json!(["mia-b2", "mia-b", "mia"]));
     assert!(a["people"].get("mia-b2").is_none());
 }
+
+#[test]
+fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched() {
+    use crate::cutover::state::{self, Phase, Switch};
+    let mut rig = Rig::new(&base());
+    // The rig has no folders of its own, so the write reads the caller's machine folder.
+    let layout = Layout::new(&crate::authority::revoke::Life::beside(&rig.c).machine);
+    let marked = json!({"person": "sam", "agent": "house", "preset": "member", "viaSwitch": true});
+    let unmarked = json!({"person": "sam", "agent": "house", "preset": "member"});
+    let phase = |p: Phase| {
+        let s = Switch {
+            phase: p,
+            snapshot: None,
+            at: 1,
+        };
+        state::write(&layout, "authority", &s).unwrap();
+    };
+    let rows = |rig: &mut Rig| {
+        rig.call("people.list", &json!({"person": "sam"})).unwrap()["rows"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    // No record, a rolling-back record or a stepping one: refused, no row changed.
+    for p in [None, Some(Phase::RollingBack), Some(Phase::Stepping)] {
+        match p {
+            Some(p) => phase(p),
+            None => state::clear(&layout, "authority").unwrap(),
+        }
+        let e = rig.call("people.grant", &marked).unwrap_err();
+        assert!(e.contains("not switched"), "{e}");
+        assert_eq!(rows(&mut rig), 0);
+    }
+    // A damaged record counts as not switched.
+    std::fs::write(state::path(&layout, "authority").unwrap(), "garbage").unwrap();
+    assert!(rig.call("people.grant", &marked).is_err());
+    assert_eq!(rows(&mut rig), 0);
+    // An unmarked write (kith-auth's mirror, the terminal) is as it was, whatever the phase.
+    rig.call("people.grant", &unmarked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    rig.call("people.revoke", &json!({"person": "sam", "agent": "house"}))
+        .unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    // Switched: the marked write lands.
+    phase(Phase::Switched);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+}
