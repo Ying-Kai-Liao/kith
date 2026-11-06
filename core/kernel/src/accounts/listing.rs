@@ -109,13 +109,9 @@ fn opt(v: Option<&str>) -> Value {
     v.map_or(Value::Null, |s| Value::String(s.to_owned()))
 }
 
-/// One row per account (the contract of `kith account list --json`, an array of); with an agent, `in_set`/`order` are that
-/// agent's static order (pin first) and `candidate` is its place in `pick`.
-pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Map> {
-    rows_from(ctx, s, agent, deep, now, &state::FileState)
-}
-
-/// [`rows`] over a state source (the file by default, the core's database in the core).
+/// One row per account (the contract of `kith account list --json`, an array of), over a state source (the file, or the
+/// core's database in the core); with an agent, `in_set`/`order` are that agent's static order (pin first) and `candidate` is
+/// its place in `pick`.
 pub fn rows_from(
     ctx: &Ctx<'_>,
     s: &Map,
