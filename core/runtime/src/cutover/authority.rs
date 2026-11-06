@@ -219,12 +219,6 @@ const REPAIR_FORCE: &str = "This is the repair of a switch that stopped before t
      core took its rows, so the file is newer and wins. Run `kith migrate step authority --force` to replace the core's rows \
      with the file's (a backup of core.db is taken first).";
 
-/// Replaces it when the file equals a copy the switch kept: the switch finished, so the core changed after it and holds
-/// newer rows (revokes included) than the restored copy. `--force` would lose them.
-const REPAIR_CORE_NEWER: &str = "The file equals a copy the switch kept, so the switch finished and the core changed after it: the core's rows are \
-     newer than this file. Do not use --force, it would overwrite the core's rows with the older ones and lose revokes. \
-     Put the tombstone back.";
-
 /// The SHA-256 of the file's bytes; "missing" when it does not exist.
 fn sha_of(path: &Path) -> Result<String> {
     use std::fmt::Write as _;
@@ -752,11 +746,6 @@ impl Module for AuthorityModule {
         let repair = core
             .as_deref()
             .is_some_and(|c| marker::read(c.conn(), self.name()).is_some());
-        // A copy the switch kept since its record: the tombstone got past the link, so the switch had finished.
-        let kept = crate::cutover::state::read(&env.layout, self.name())
-            .ok()
-            .flatten()
-            .is_some_and(|s| tombstone::has_copy_since(&ctx.auth, s.at));
         let rep = crate::import::run_in(
             &env.layout,
             ctx,
@@ -770,12 +759,7 @@ impl Module for AuthorityModule {
         )
         .map_err(|e| match e {
             Error::Refused(s) if repair && s.contains(crate::import::DIFFERS_HINT) => {
-                let advice = if kept {
-                    REPAIR_CORE_NEWER
-                } else {
-                    REPAIR_FORCE
-                };
-                Error::Refused(s.replace(crate::import::DIFFERS_HINT, advice))
+                Error::Refused(s.replace(crate::import::DIFFERS_HINT, REPAIR_FORCE))
             }
             e => e,
         })?;

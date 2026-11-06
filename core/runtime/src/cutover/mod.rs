@@ -310,12 +310,23 @@ pub(crate) fn step(
                     )
                 }));
             }
-            let s = Switch {
-                phase: Phase::Stepping,
-                ..s
-            };
-            state::write(&env.layout, name, &s)?;
-            Some(s)
+            // Every real file is the same as a copy kept since the switch (the crash came after the link): it holds exactly
+            // what the switch imported, made under the source lock after the sha check. Nothing to import; the record
+            // stays Switched and only the tombstone is finished below. Rows the core changed since are the newer side.
+            if m.tombstones(env)
+                .iter()
+                .filter(|p| !tombstone::is_tombstone(p))
+                .all(|p| tombstone::has_copy_since(p, s.at))
+            {
+                Some(s)
+            } else {
+                let s = Switch {
+                    phase: Phase::Stepping,
+                    ..s
+                };
+                state::write(&env.layout, name, &s)?;
+                Some(s)
+            }
         }
         c => c,
     };
