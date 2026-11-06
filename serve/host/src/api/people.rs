@@ -192,7 +192,8 @@ async fn make_invite(
             if !person_exists(bin, id).await {
                 bail!("There is no person `{id}` in kith-auth.");
             }
-            if account::who(bin, "-").await.owner_id.as_deref() == Some(id) {
+            // The same lookup `createInvite` made (the core's owner row when switched), not a kith-auth call of its own.
+            if account::person_of(bin, &Principal::Owner).await? == id {
                 bail!("That is you: the owner doesn't need an invite.");
             }
             hub.store.put_person(id, id)?;
