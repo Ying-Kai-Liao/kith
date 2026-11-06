@@ -1,5 +1,5 @@
 {
-  "fakes": "",
+  "fakes": "host-sock {\"input\": {\"command\": \"both\"}, \"method\": \"consumeOnce\", \"token\": \"ask-tok-1\", \"tool\": \"Bash\"}\n",
   "state:home/.kith/run/once/r1/": "<empty dir>\n",
   "state:home/serve/token": "fake-serve-token\n",
   "step0.exit": "0\n",

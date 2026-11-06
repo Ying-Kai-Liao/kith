@@ -43,6 +43,25 @@ fn socket_host(path: &Path, reply: &'static str) -> std::thread::JoinHandle<Stri
     })
 }
 
+/// A socket that answers each connection in turn with the next of `replies`, remembering the lines it was sent.
+fn socket_host_n(path: &Path, replies: Vec<&'static str>) -> std::thread::JoinHandle<Vec<String>> {
+    let l = UnixListener::bind(path).unwrap();
+    std::thread::spawn(move || {
+        let mut seen = Vec::new();
+        for reply in replies {
+            let (s, _) = l.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(&s).read_line(&mut line).unwrap();
+            (&s).write_all(reply.as_bytes()).unwrap();
+            seen.push(line);
+        }
+        seen
+    })
+}
+
+const YES: &str = "{\"ok\": true, \"allowed\": true}\n";
+const NO: &str = "{\"ok\": true, \"allowed\": false}\n";
+
 fn owner_env(sock: &Path) -> Env {
     Env::with(&[
         ("KITH_ASK_TOKEN", "ask-tok"),
@@ -337,9 +356,12 @@ fn denied_allows_the_retry_once_and_only_once() {
         json!({"reason": "Auto mode blocked it", "session": "s1"})
     );
     assert_eq!(sent["tool"], "Bash");
+    // the hint file is not the yes: the host is asked once (for the one call that has a hint) and says it holds it
+    let host = root.join("h");
+    let consumer = socket_host_n(&host, vec![YES]);
     let once = |c: &str| {
         go(
-            &Env::default(),
+            &owner_env(&host),
             &["once", "--dir", dir.to_str().unwrap()],
             &pre_payload(c),
         )
@@ -348,6 +370,74 @@ fn denied_allows_the_retry_once_and_only_once() {
     assert!(once("rm x").contains("\"permissionDecision\": \"allow\""));
     assert_eq!(once("rm x"), "");
     assert_eq!(once("another"), "");
+    let asked: Vec<Value> = consumer
+        .join()
+        .unwrap()
+        .iter()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0]["method"], "consumeOnce");
+    assert_eq!(asked[0]["token"], "ask-tok");
+    assert_eq!(asked[0]["tool"], "Bash");
+    assert_eq!(asked[0]["input"]["command"], "rm x");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_file_in_the_once_dir_is_a_hint_and_the_host_has_the_yes() {
+    let root = world("hint");
+    let dir = root.join("once/r1");
+    std::fs::create_dir_all(&dir).unwrap();
+    let d = dir.to_str().unwrap();
+    let key = |c: &str| hooks::once_key("Bash", &json!({"command": c}));
+    let forge = |c: &str| std::fs::write(dir.join(key(c)), "4000000000\n").unwrap();
+    // no token, no socket: never allowed, and the file is used up all the same
+    forge("a");
+    assert_eq!(
+        go(&Env::default(), &["once", "--dir", d], &pre_payload("a")).stdout,
+        ""
+    );
+    assert!(!dir.join(key("a")).exists());
+    // a token with no host behind it
+    forge("b");
+    assert_eq!(
+        go(
+            &owner_env(&root.join("nowhere")),
+            &["once", "--dir", d],
+            &pre_payload("b")
+        )
+        .stdout,
+        ""
+    );
+    // a host that holds no yes for it
+    let host = root.join("h");
+    let consumer = socket_host_n(
+        &host,
+        vec![
+            NO,
+            "{\"ok\": false, \"error\": \"not authorized\"}\n",
+            "nonsense\n",
+        ],
+    );
+    for c in ["c", "d", "e"] {
+        forge(c);
+        assert_eq!(
+            go(&owner_env(&host), &["once", "--dir", d], &pre_payload(c)).stdout,
+            ""
+        );
+    }
+    assert_eq!(consumer.join().unwrap().len(), 3);
+    // a guest's token is not the owner's pair: the host is not asked
+    forge("f");
+    let guest = Env::with(&[
+        ("KITH_RUN_TOKEN", "g"),
+        ("KITH_RUN_SOCKET", host.to_str().unwrap()),
+    ]);
+    assert_eq!(
+        go(&guest, &["once", "--dir", d], &pre_payload("f")).stdout,
+        ""
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -438,9 +528,12 @@ fn a_short_one_shot_expires() {
     std::fs::write(d.join(key("fresh")), "4000000000 short\n").unwrap();
     std::fs::write(d.join(key("old")), "1000000000 short\n").unwrap();
     std::fs::write(d.join(key("odd")), "abc short\n").unwrap();
+    // only the fresh one reaches the host
+    let host = root.join("h");
+    let consumer = socket_host_n(&host, vec![YES]);
     let once = |c: &str| {
         go(
-            &Env::default(),
+            &owner_env(&host),
             &["once", "--dir", d.to_str().unwrap()],
             &pre_payload(c),
         )
@@ -451,6 +544,7 @@ fn a_short_one_shot_expires() {
     assert_eq!(once("odd"), "");
     // used up either way
     assert!(!d.join(key("old")).exists() && !d.join(key("odd")).exists());
+    assert_eq!(consumer.join().unwrap().len(), 1);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -612,11 +706,14 @@ fn a_whole_number_beyond_64_bits_gets_no_card_and_no_allow() {
         "4000000000\n",
     )
     .unwrap();
+    let host = root.join("h");
+    let consumer = socket_host_n(&host, vec![YES]);
     assert!(
-        go(&Env::default(), &["once", "--dir", d], &small)
+        go(&owner_env(&host), &["once", "--dir", d], &small)
             .stdout
             .contains("allow")
     );
+    consumer.join().unwrap();
     let _ = std::fs::remove_dir_all(root);
 }
 

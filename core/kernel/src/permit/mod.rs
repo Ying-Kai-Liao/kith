@@ -24,6 +24,7 @@ mod decide;
 mod door;
 mod helper;
 mod hooks;
+pub use hooks::{NO_VERDICT, ONCE_KEEP_S, SHORT_ONCE_S, host_once_key};
 mod host;
 mod issue;
 mod mcp;
@@ -139,7 +140,7 @@ pub fn run(env: &Env, kernel: &Path, args: &[String], stdin: &mut dyn Read) -> O
             let out = if *hook == "denied" {
                 hooks::denied(&raw, Path::new(dir), env)
             } else {
-                hooks::once(&raw, Path::new(dir))
+                hooks::once(&raw, Path::new(dir), env)
             };
             Out {
                 stdout: if out.is_empty() {
