@@ -258,7 +258,7 @@ jobs:
             # nothing in the host depends on. Those two get their own small job (host-crates). The kernel's bin and lib
             # are not here: the host tests that run them are the host-kernel job (filter kernel_host above).
             host_core:
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/bin/kith,kernel/bin/kith-account}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -650,6 +650,8 @@ jobs:
           # `kith <agent> --launch-json` per engine against the recorded fixtures; the claude one needs this Rust program for its memory hooks.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-engines-check
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
+          # The accounts step: the account verbs and the Python readers through the core, nothing reading the tombstone.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
           # The pkg and project-id switches: the launch's two lookups are the core's, per verb, and a guest's project-id stays Python.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
           # The cost switch: the ported kith-cost verbs are the core's, tag/record stay Python, and the launch's budget checks hold on both paths.

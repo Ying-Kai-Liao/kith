@@ -1088,3 +1088,36 @@ fn a_hold_keeps_the_writers_out_and_the_holders_own_snapshot_gets_through() {
     assert!(done.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(h.state()["accounts"]["codex"]["last_started"], 2);
 }
+
+/// Answers once with the marks, then reads as no state, the way a core that went busy between two reads would.
+struct OnceThenNothing(std::cell::Cell<u32>, Map);
+
+impl StateSource for OnceThenNothing {
+    fn accounts(&self, _machine: &Path) -> Map {
+        let n = self.0.get();
+        self.0.set(n + 1);
+        if n == 0 { self.1.clone() } else { Map::new() }
+    }
+}
+
+#[test]
+fn a_verb_reads_the_state_once_so_a_second_read_cannot_show_every_account_ready() {
+    let h = Home::new("readonce");
+    h.agent("echo", "claude");
+    h.settings(r#"{"accounts": ["claude"], "agents": {}}"#);
+    let marks: Map = serde_json::from_value(
+        serde_json::json!({"claude": {"out_until": 4_102_444_800_i64, "reason": "x", "since": 1}}),
+    )
+    .unwrap();
+    let fake = Fake::new();
+    let ctx = h.ctx(&fake);
+    // Read once, as the verbs do, then hand the same map on: every use of it sees the marks.
+    let src = OnceThenNothing(std::cell::Cell::new(0), marks);
+    let fixed = Fixed(src.accounts(&h.machine()));
+    let s = settings::read(&ctx);
+    let p = pick_from(&ctx, &s, "echo", None, false, clock::now(), &fixed);
+    assert!(p.all_out, "claude is out: {p:?}");
+    assert!(pick_from(&ctx, &s, "echo", None, false, clock::now(), &fixed).all_out);
+    // the flaky source itself would have said "nothing is out" on the second read
+    assert!(src.accounts(&h.machine()).is_empty());
+}
