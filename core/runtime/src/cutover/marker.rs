@@ -17,12 +17,30 @@ fn key(module: &str) -> String {
     format!("cutover:{module}")
 }
 
-pub(crate) fn write(core: &mut Core, module: &str, at: i64, digest: &str) -> Result<()> {
+fn seed_key(module: &str) -> String {
+    format!("cutover:{module}:seed")
+}
+
+/// `seed`: what the module keeps beside the marker (see `Module::seed`); a re-step with none removes an older one.
+pub(crate) fn write(
+    core: &mut Core,
+    module: &str,
+    at: i64,
+    digest: &str,
+    seed: Option<&str>,
+) -> Result<()> {
     let tx = core.claim_tx()?;
     tx.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
         [key(module), format!("at={at};digest={digest}")],
     )?;
+    match seed {
+        Some(v) => tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            [seed_key(module), v.to_owned()],
+        )?,
+        None => tx.execute("DELETE FROM meta WHERE key = ?1", [seed_key(module)])?,
+    };
     tx.commit()?;
     Ok(())
 }
@@ -40,9 +58,20 @@ pub(crate) fn read(db: &Connection, module: &str) -> Option<(i64, String)> {
     Some((at.parse().ok()?, digest.to_owned()))
 }
 
+/// The seed written with the marker; `None` for a marker from before seeds, which is the safe answer.
+pub(crate) fn seed(db: &Connection, module: &str) -> Option<String> {
+    db.query_row(
+        "SELECT value FROM meta WHERE key = ?1",
+        [seed_key(module)],
+        |r| r.get(0),
+    )
+    .ok()
+}
+
 pub(crate) fn clear(core: &mut Core, module: &str) -> Result<()> {
     let tx = core.claim_tx()?;
     tx.execute("DELETE FROM meta WHERE key = ?1", [key(module)])?;
+    tx.execute("DELETE FROM meta WHERE key = ?1", [seed_key(module)])?;
     tx.commit()?;
     Ok(())
 }
