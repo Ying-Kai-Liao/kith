@@ -156,7 +156,8 @@ fn a_marked_ledger_handle_and_cap_write_is_refused_unless_the_phase_is_switched(
         ("people.botsCap", json!({"amount": "5", "viaSwitch": true})),
     ];
     let before = keys(&mut rig, &json!({}));
-    for p in [None, Some(Phase::RollingBack), Some(Phase::Stepping)] {
+    // RollingBack is not here: a stuck rollback keeps the tombstone and takes marked writes (removals must work).
+    for p in [None, Some(Phase::Stepping)] {
         match p {
             Some(p) => state::write(
                 &layout,

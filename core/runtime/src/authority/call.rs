@@ -141,14 +141,36 @@ fn need<'a>(params: &'a Value, key: &str) -> std::result::Result<&'a str, Die> {
 /// What a `viaSwitch` write is refused with while authority is not switched; the host reads it to fall back to kith-auth.
 pub(crate) const NOT_SWITCHED: &str = "not switched: authority is back on auth.json";
 
-/// Whether the authority module's cutover phase is `switched` (the file the switch writes first and the rollback
-/// rewrites first). Unreadable counts as not switched: the write is refused and the host falls back to the file.
-fn authority_switched(machine: &Path) -> bool {
+/// How the authority module's cutover record reads for a marked write.
+#[derive(PartialEq)]
+enum Record {
+    /// Phase `switched` or `rollingBack`. A rollback that failed or is stuck leaves the tombstone in auth.json and the
+    /// phase at `RollingBack` (a running one can not coexist with the daemon: the lifetime lock excludes it, so
+    /// `RollingBack` seen here is always a stuck one), and the core is still the only store there.
+    Switched,
+    /// The record exists but can not be read. A tombstone with a record like that means the record was damaged.
+    Damaged,
+    /// No record, or another phase (stepping, rolled back): the file is the store.
+    Other,
+}
+
+fn authority_record(machine: &Path) -> Record {
+    use crate::cutover::state::Phase;
     let layout = crate::layout::Layout::new(machine);
-    crate::cutover::state::read(&layout, "authority")
-        .ok()
-        .flatten()
-        .is_some_and(|s| s.phase == crate::cutover::state::Phase::Switched)
+    match crate::cutover::state::read(&layout, "authority") {
+        Ok(Some(s)) if matches!(s.phase, Phase::Switched | Phase::RollingBack) => Record::Switched,
+        Ok(_) => Record::Other,
+        Err(_) => Record::Damaged,
+    }
+}
+
+/// A marked method that only takes access away. On a damaged record these still go through (the host sent them
+/// because auth.json is a tombstone, and refusing one leaves access in place); a grant never does.
+fn removal_only(method: &str) -> bool {
+    matches!(
+        method,
+        "people.revoke" | "people.removeBot" | "people.removePerson" | "people.suspend"
+    )
 }
 
 fn switch(params: &Value, key: &str) -> bool {
@@ -393,12 +415,24 @@ pub(crate) fn call_in(
                 |a| write_in(m, params, c, life, a, &fresh),
                 |tx, said| {
                     // A host that routed this write here because auth.json held the tombstone says so (`viaSwitch`).
-                    // Its look at the file and this write are two steps, and `kith rollback authority` can land
-                    // between them (the phase is RollingBack before the file is put back), so the phase is checked
-                    // here, in the write's own transaction. A write without the marker (kith-auth's mirror, the
-                    // terminal) keeps today's behaviour.
-                    if switch(params, "viaSwitch") && !authority_switched(&machine) {
-                        return Err(Error::Refused(format!("authority: {NOT_SWITCHED}")));
+                    // Its look at the file and this write are two steps. The cutover lifetime lock is what
+                    // excludes `kith rollback authority` while the daemon lives (the rollback takes it before it
+                    // writes RollingBack), so this check is for a phase left behind (rolled back, never switched).
+                    // RollingBack counts as switched: a stuck rollback keeps the tombstone, and removals must work.
+                    // A tombstone with no Switched/RollingBack record, seen by a live daemon, means the record is
+                    // damaged or removed. Damaged: a write that only removes access still goes through (refusing it
+                    // would leave access in place), a grant is refused. Removed: everything is refused.
+                    // The phase is read here, in the write's own transaction. A write without the marker
+                    // (kith-auth's mirror, the terminal) keeps today's behaviour.
+                    if switch(params, "viaSwitch") {
+                        let ok = match authority_record(&machine) {
+                            Record::Switched => true,
+                            Record::Damaged => removal_only(m),
+                            Record::Other => false,
+                        };
+                        if !ok {
+                            return Err(Error::Refused(format!("authority: {NOT_SWITCHED}")));
+                        }
                     }
                     // Read inside the transaction by `write_in` (not answers): whether an add names a new id, and the
                     // bot's line of owners.
