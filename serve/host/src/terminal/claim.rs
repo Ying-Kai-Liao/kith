@@ -363,11 +363,23 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
 /// `kill`: pid and start stamp). Nothing in the daemon signals them: its holder link kills only what it started itself or
 /// an old instance's, and `end_gone` waits for the pid to leave. Like [`sweep`]: only a process positively the one that
 /// took the claim (a reused pid or a pid already gone is left alone, so a retried revoke kills nothing twice), its
-/// descendants first, SIGTERM then SIGKILL after `grace`. Blocking. Returns the pids it signalled.
+/// descendants first, SIGTERM then SIGKILL after `grace`. A claim with no recorded start is never signalled: the core
+/// may hand one out (an imported terminal claim carries none) and a pid alone could be a reused one. The SIGKILL goes
+/// only to what still has the start it had when found, and to the claimer's process group when it leads one (a session
+/// leader's group holds what it started, as the channels' `end_groups` does). Blocking. Returns the pids it signalled.
 pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -> Vec<u32> {
     let me = std::process::id();
-    let mut victims: Vec<u32> = Vec::new();
+    // (pid, start when found): the second signal is sent only to a process that still has it.
+    let mut victims: Vec<(u32, Option<String>)> = Vec::new();
+    let mut leaders: Vec<(u32, Option<String>)> = Vec::new();
     for (pid, started) in held {
+        if started.as_deref().is_none_or(|s| s.trim().is_empty()) {
+            tracing::warn!(
+                pid,
+                "a claim with no recorded start was not ended: its pid alone cannot tell it from a reused one"
+            );
+            continue;
+        }
         let claim = Claim {
             pid: *pid,
             proc_start: started.clone(),
@@ -382,19 +394,42 @@ pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -
             continue;
         }
         for p in descendants(*pid).into_iter().chain([*pid]) {
-            if p != me && !victims.contains(&p) {
-                victims.push(p);
+            if p != me && !victims.iter().any(|(v, _)| *v == p) {
+                victims.push((p, proc_start(p)));
             }
         }
+        leaders.push((*pid, started.clone()));
     }
-    signal(&victims, libc::SIGTERM);
+    let pids: Vec<u32> = victims.iter().map(|(p, _)| *p).collect();
+    signal(&pids, libc::SIGTERM);
     let deadline = std::time::Instant::now() + grace;
-    while std::time::Instant::now() < deadline && victims.iter().any(|p| pid_runs(*p)) {
+    while std::time::Instant::now() < deadline && pids.iter().any(|p| pid_runs(*p)) {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let left: Vec<u32> = victims.iter().copied().filter(|p| pid_runs(*p)).collect();
+    let same = |pid: u32, found: &Option<String>| {
+        pid_runs(pid)
+            && match (found, proc_start(pid)) {
+                (Some(then), Some(now)) => {
+                    kith_kernel::procstart::comparable(then, &now) && kith_kernel::procstart::same_process(then, &now)
+                }
+                _ => false,
+            }
+    };
+    let left: Vec<u32> = victims.iter().filter(|(p, s)| same(*p, s)).map(|(p, _)| *p).collect();
     signal(&left, libc::SIGKILL);
-    victims
+    #[cfg(unix)]
+    for (pid, started) in &leaders {
+        // The leader of its own group, still the claimer: whatever else the group holds goes with it.
+        if let Ok(p) = libc::pid_t::try_from(*pid)
+            && same(*pid, started)
+            // SAFETY: getpgid(2) only reads.
+            && unsafe { libc::getpgid(p) } == p
+        {
+            // SAFETY: killpg only sends a signal, to the group of a process just checked to be the claimer.
+            unsafe { libc::killpg(p, libc::SIGKILL) };
+        }
+    }
+    pids
 }
 
 #[cfg(unix)]

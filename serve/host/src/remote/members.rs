@@ -212,7 +212,7 @@ pub async fn auth_people_now(bin: &Path) -> Result<Vec<AuthPerson>> {
             Ok(rows) => rows,
             Err(e)
                 if e.downcast_ref::<crate::api::authority::CoreRefused>()
-                    .is_some_and(|r| r.0.starts_with("not switched")) =>
+                    .is_some_and(|r| crate::api::authority::is_not_switched(&r.0)) =>
             {
                 return Ok(people);
             }

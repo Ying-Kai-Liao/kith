@@ -709,6 +709,18 @@ async fn the_kill_list_of_a_suspend_or_removal_ends_the_claimed_process_once() {
 }
 
 #[tokio::test]
+async fn a_kill_with_no_recorded_start_is_never_signalled() {
+    let mut child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+    for started in [None, Some(String::new()), Some("  ".to_owned())] {
+        let said = json!({"kill": [{"claimId": 1, "pid": child.id(), "started": started}]});
+        assert_eq!(super::authority::finish_revoke(&said, "sam").await, "");
+        assert!(child.try_wait().unwrap().is_none(), "a pid alone is not the claimer: {started:?}");
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+#[tokio::test]
 async fn a_switched_suspend_through_the_host_reports_nothing_pending_when_the_order_finished() {
     let r = Rig::new().await;
     joined(&r).await;

@@ -187,7 +187,7 @@ pub enum Heard {
 }
 
 /// Whether the core's refusal text is its "authority is back on auth.json" (with its `authority: ` prefix or without).
-fn is_not_switched(said: &str) -> bool {
+pub(crate) fn is_not_switched(said: &str) -> bool {
     said.strip_prefix("authority: ").unwrap_or(said).starts_with("not switched")
 }
 
@@ -847,7 +847,13 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
         _ => {
             let out =
                 said["lines"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join("\n");
-            Ok((out, finish_revoke(&said, args.get(1).copied().unwrap_or_default()).await))
+            // The kills go out on their own task: the caller holds the authority write lock, which two seconds of
+            // grace must not hold.
+            let person = args.get(1).copied().unwrap_or_default().to_owned();
+            let killing = said.clone();
+            let who = person.clone();
+            tokio::spawn(async move { end_kills(&killing, &who).await });
+            Ok((out, revoke_warning(&said, &person)))
         }
     }
 }
@@ -859,22 +865,31 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
 /// claim once the pid is gone). `revokePending` is the part of the order the core could not finish (it is replayed at
 /// the daemon's start and on its supervisor's pass): the returned text is the warning kith-auth's mirror printed, so the
 /// owner is told the way they were. Empty when there was nothing to report.
+#[cfg(test)]
 pub(crate) async fn finish_revoke(said: &Value, person: &str) -> String {
+    end_kills(said, person).await;
+    revoke_warning(said, person)
+}
+
+async fn end_kills(said: &Value, person: &str) {
     let held: Vec<(u32, Option<String>)> = said["kill"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|k| Some((u32::try_from(k["pid"].as_u64()?).ok()?, k["started"].as_str().map(str::to_owned))))
         .collect();
-    if !held.is_empty() {
-        let ended =
-            tokio::task::spawn_blocking(move || crate::terminal::claim::end_claimed(&held, Duration::from_secs(2)))
-                .await
-                .unwrap_or_default();
-        if !ended.is_empty() {
-            tracing::info!(pids = ?ended, person, "ended the runs of a revoked person's core claims");
-        }
+    if held.is_empty() {
+        return;
     }
+    let ended = tokio::task::spawn_blocking(move || crate::terminal::claim::end_claimed(&held, Duration::from_secs(2)))
+        .await
+        .unwrap_or_default();
+    if !ended.is_empty() {
+        tracing::info!(pids = ?ended, person, "ended the runs of a revoked person's core claims");
+    }
+}
+
+fn revoke_warning(said: &Value, person: &str) -> String {
     match said["revokePending"].as_str() {
         Some(pending) if !pending.is_empty() => {
             format!("warning: the core updated {person} but a part of the revoke is pending: {pending}")
