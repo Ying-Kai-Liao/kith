@@ -16,6 +16,7 @@ The id is a hash of the rule text, so adding the same rule twice is one entry.
 it offers "Always allow", and again, from the same card input, when it saves.
 """
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
@@ -58,6 +59,13 @@ URL = re.compile(r'https?://', re.I)
 PKG_RUN = {'npm', 'pnpm', 'yarn', 'bun', 'uv', 'poetry', 'pipx', 'pdm', 'hatch'}
 PKG_RUN_VERBS = {'run', 'run-script', 'exec', 'x', 'dlx', 'create', 'init'}
 PKG_ALWAYS = {'npx', 'pnpx', 'bunx', 'uvx'}
+# Files that change what later runs may do, refused by name wherever they are, for Bash and Edit alike: derive cannot know
+# a command's working folder or every way it writes (a script's --out, git checkout -- <file>), nor every checkout's paths.
+TRUST_NAMES = ('allowed.json', 'settings.json', 'settings.local.json', 'capabilities.yaml', 'mcp.json', '.mcp.json') \
+    + kith_guard.HOME_FILES
+TRUST_PARTS = (r'run/+(?:\./+)*once',)  # run/once, also as run//once or run/./once
+TRUST_NAMED = re.compile(r'(?i)(?:^|[^A-Za-z0-9._-])(?:%s)(?![A-Za-z0-9_-])|%s' % (
+    '|'.join(map(re.escape, TRUST_NAMES)), '|'.join(TRUST_PARTS)))
 # `claude auto-mode defaults` hard_deny labels. A sentence in autoMode.allow only overrides soft_deny, so a block under one of
 # these is never lifted by a remembered sentence (an exact permission rule still resolves before the classifier).
 HARD_DENY = ('Data Exfiltration',)
@@ -166,6 +174,21 @@ def _first_words(command):
         return None
 
 
+def _globs_trust(words):
+    """True when a word the shell would expand (a glob or a brace) could name a trust file or run/once, matched per path
+    part as the shell does; a brace counts as a wildcard."""
+    for w in words:
+        if not re.search(r'[*?\[{]', w):
+            continue
+        w = re.sub(r'\{[^}]*\}', '*', w.lower())
+        parts = [p for p in re.split(r'[/=<>|;&(),:]', w) if p and p != '.']
+        if any(fnmatch.fnmatchcase(n.lower(), p) for p in parts for n in TRUST_NAMES):
+            return True
+        if any(fnmatch.fnmatchcase('run', a) and fnmatch.fnmatchcase('once', b) for a, b in zip(parts, parts[1:])):
+            return True
+    return False
+
+
 def prose(agent, tool, tool_input):
     action = json.dumps(tool_input, sort_keys=True, ensure_ascii=False)
     return ('The owner approved the agent "%s" doing exactly this one thing with %s: %s. It is allowed, with that input only; '
@@ -178,7 +201,10 @@ def derive(agent, tool, tool_input, reason=''):
     Narrow by construction: an exact command, one file, one host, one named MCP tool; a prose entry (naming the agent and the
     exact input) for what a permission rule cannot hold. Refused: anything in a must-ask class (kith_guard.must_ask: a
     secret, a trust file, a delete, something outward, code with no name), any delete (a remembered rule has no roots to
-    keep it inside), a bare or code-running shell, a folder, a rule that would be a wildcard. A sentence
+    keep it inside), a command or file that names a trust file anywhere (TRUST_NAMED, also unquoted or through a glob or
+    brace; not through a variable, nor a folder copy such as `cp -R tmpl/. role/`), $'…' or $"…" quoting (bash decodes
+    it, shlex does not), a bare or code-running shell, a
+    folder, a rule that would be a wildcard. A path that is not a file yet is a sentence, never an Edit rule. A sentence
     is not offered when `reason` (the classifier's) names a hard_deny rule: it would never take effect."""
     d = _derive(agent, tool, tool_input)
     if d['ok'] and d['kind'] == 'prose' and any(h in (reason or '') for h in HARD_DENY):
@@ -232,6 +258,11 @@ def _derive_bash(agent, tool_input):
     if words is None or not words:
         return no('not a command that can be remembered exactly')
     first = os.path.basename(words[0])
+    if "$'" in command or '$"' in command:
+        # bash decodes these ($'\x2e' is a dot) and shlex does not, so the words above may not be what runs.
+        return no("a command with $'…' or $\"…\" quoting is asked each time")
+    if TRUST_NAMED.search(command) or TRUST_NAMED.search(' '.join(words)) or _globs_trust(words):
+        return no(WHY['trust'])
     if re.search(r'(?:^|[\s;&|(`/])(?:rm|rmdir|unlink|trash|truncate)\s', command):
         return no(WHY['destroy'])
     if first in NEVER_FIRST:
@@ -258,8 +289,11 @@ def _derive_edit(agent, tool, tool_input):
     real = os.path.realpath(raw)
     if os.path.isdir(real) or raw.endswith('/'):
         return no('not one absolute file')
+    if TRUST_NAMED.search(raw) or TRUST_NAMED.search(real):
+        return no(WHY['trust'])
     home = str(Path.home())
-    if any(kith_guard.is_rule_w(home, x) for x in (raw, real)):
+    # An Edit rule on a path that is not a file yet would cover everything under it if it became a folder.
+    if not os.path.isfile(real) or any(kith_guard.is_rule_w(home, x) for x in (raw, real)):
         return {'ok': True, 'kind': 'prose', 'rule': prose(agent, tool, {'file_path': real})}
     return {'ok': True, 'kind': 'rule', 'rule': 'Edit(/%s)' % real}
 

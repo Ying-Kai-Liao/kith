@@ -53,8 +53,25 @@ for c in 'rm -rf /' 'rm -rf ~/work' 'rm notes.txt' 'rmdir /usr/local/x' 'cd /tmp
   r=$(printf '%s' "$(bash_in "$c")" | "$ALLOW" echo --derive)
   is "never offered: $c" "$(js "d['ok']" <<< "$r")" "False"
 done
+for c in 'echo {} > settings.json' 'cp x.json role/settings.json' 'cp x.json /some/where/allowed.json' 'mv new.json allowed.json' \
+         'cp x.yaml /w/capabilities.yaml' 'cp x /w/run/once/job' 'jq . a > /w/.claude/settings.local.json' 'ln -s x mcp.json' \
+         'git checkout other -- role/settings.json' 'python3 tools/set.py --out settings.json' 'echo x >> .zshrc' \
+         'cp x settings".json"' 'cp x allowed".json"' "cp x role/settings'.json'" 'cp x /w/run"/once/"j' 'echo {} > settings".json"' \
+         'cp x role/settings.j?on' 'cp x /w/allowed.jso[n]' 'cp x settings.js{o,}n' 'cp x /w/r?n/once/j' 'cp x /w/*/once/j' \
+         'cp x --out=Settings.J*' "cp x settings\$'.json'" 'cp x settings$".json"' "cp x settings\$'\\x2ejson'" \
+         'cp x /w/run//once/j' 'cp x /w/run/./once/j' 'cp x /w/run/.//./once/j' 'cp x /w/r?n/./once/j'; do
+  r=$(printf '%s' "$(bash_in "$c")" | "$ALLOW" echo --derive)
+  is "a command naming a trust file anywhere is never offered: $c" "$(js "d['ok']" <<< "$r")" "False"
+done
+for f in /w/settings.json /w/allowed.json /w/capabilities.yaml /w/run/once/x /w/mcp.json /w/Settings.JSON; do
+  r=$(printf '{"tool":"Edit","input":{"file_path":"%s"}}' "$f" | "$ALLOW" echo --derive)
+  is "an Edit of a trust file anywhere is never offered: $f" "$(js "d['ok']" <<< "$r")" "False"
+done
+mkdir -p "$T/notes" && : > "$T/notes/a.md"
 r=$(printf '{"tool":"Write","input":{"file_path":"%s/notes/a.md"}}' "$T" | "$ALLOW" echo --derive)
 is "a file is remembered as that one file" "$(js "d['rule']" <<< "$r")" "Edit(/$T/notes/a.md)"
+r=$(printf '{"tool":"Write","input":{"file_path":"%s/notes/new"}}' "$T" | "$ALLOW" echo --derive)
+is "a path that is not a file yet is a sentence, not a rule that would cover a folder made there" "$(js "d['kind']" <<< "$r")" "prose"
 r=$(printf '{"tool":"Edit","input":{"file_path":"%s/.git/config"}}' "$T" | "$ALLOW" echo --derive)
 is "a protected path is a sentence" "$(js "d['kind']" <<< "$r")" "prose"
 r=$(printf '{"tool":"Write","input":{"file_path":"%s"}}' "$FILE" | "$ALLOW" echo --derive)
