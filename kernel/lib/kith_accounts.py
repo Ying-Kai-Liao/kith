@@ -556,15 +556,50 @@ def _import_kernel_marks():
         pass   # read-only disk or a race that lost: the next call tries again
 
 
+class CoreUnavailable(kith_tombstone.Tombstoned):
+    """The state is in the core (`kith migrate step accounts`) and the core did not answer. A Tombstoned, so every caller
+    that stops on the tombstone stops on this too: no mark is guessed, nothing is read from the note."""
+
+    def __init__(self, why):
+        OSError.__init__(self, f'{state_file()} moved to the Kith core (module accounts), and the core gave no answer or refused: {why} '
+                               '(kith rollback accounts brings the file back)')
+        self.path, self.module = str(state_file()), 'accounts'
+
+
+def _core(*args, stdin=None):
+    """Once the state file is a tombstone the state is the core's table, and the Rust program is its only door:
+    `kith kernel account-state VERB ...` (the daemon when one runs, else an embedded core). Returns its stdout."""
+    try:
+        from kith_paths import KERNEL, kith_bin
+        bin_ = kith_bin(budget=10)
+        if not bin_:
+            raise CoreUnavailable('no kith program is installed')
+        r = subprocess.run([bin_, 'kernel', 'account-state', '--kernel', str(KERNEL), *args], input=stdin,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        if isinstance(e, CoreUnavailable):
+            raise
+        raise CoreUnavailable(str(e)) from None
+    if r.returncode:
+        raise CoreUnavailable((r.stderr or r.stdout).strip() or f'exit {r.returncode}')
+    return r.stdout
+
+
 def read_state():
-    """The state file's accounts ({} when there is none or it is corrupt), the old kernel marks imported first."""
-    _import_kernel_marks()
-    return _read_state()[0]
+    """The state file's accounts ({} when there is none or it is corrupt), the old kernel marks imported first. After the
+    cutover the file is a tombstone and the accounts come from the core."""
+    try:
+        _import_kernel_marks()
+        return _read_state()[0]
+    except kith_tombstone.Tombstoned:
+        accts = json.loads(_core('state'))
+        return {k: v for k, v in accts.items() if isinstance(k, str) and isinstance(v, dict)}
 
 
-def update_state(change):
+def update_state(change, via=None):
     """change(accounts) under the lock, then written back atomically. Returns nothing; a disk that can't be written to
-    loses the mark (the run goes on), it never fails the run."""
+    loses the mark (the run goes on), it never fails the run. `via` = (core verb args, stdin) is the same change made in the
+    core, for when the file is a tombstone; without it a tombstone stops the writer."""
     try:
         with _state_lock():
             accts, corrupt = _read_state()
@@ -576,7 +611,9 @@ def update_state(change):
             change(accts)
             _write_state(accts)
     except kith_tombstone.Tombstoned:
-        raise   # not a disk problem: the module moved, and a lost mark here would be silent
+        if via is None:
+            raise   # not a disk problem: the module moved, and a lost mark here would be silent
+        _core(*via[0], stdin=via[1])
     except OSError:
         pass
 
@@ -616,7 +653,7 @@ def mark_out(entry, until=None, reason='rate_limit', now=None, extend_only=True)
             return
         e['since'] = e.get('since', now) if isinstance(cur, (int, float)) and cur > now else now
         e['out_until'], e['reason'] = until, reason
-    update_state(change)
+    update_state(change, via=((['out', entry, '--until', str(until), '--reason', reason] + (['--extend'] if extend_only else [])), None))
 
 
 def clear_out(entry, now=None):
@@ -629,12 +666,15 @@ def clear_out(entry, now=None):
             e.pop(k, None)
         e['cleared_at'] = now
         e['cleared_host_until'] = int(float(host['out_until'])) if host else 0
-    update_state(change)
+    update_state(change, via=(['clear', entry], None))
 
 
 def record_started(entry, now=None):
     now = int(now or time.time())
-    update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('last_started', now))
+    try:
+        update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('last_started', now), via=(['started', entry], None))
+    except CoreUnavailable as e:   # a start time only feeds the spread policy: the run goes on (the Rust launch does the same)
+        print(f'kith: a start of {entry} was not noted: {e}', file=sys.stderr)
 
 
 def validate_usage(reading, now=None):
@@ -669,7 +709,8 @@ def validate_usage(reading, now=None):
 
 def record_usage(entry, reading, now=None):
     usage = validate_usage(reading, now)
-    update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('usage', usage))
+    update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('usage', usage),
+                 via=(['usage', entry, '--json', '-'], json.dumps(usage)))
     return usage
 
 
