@@ -226,12 +226,15 @@ fn rows_state(existing: &Value, desired: &Value) -> Rows {
     }
 }
 
+/// The last sentence of the plain import's refusal; a crash repair (`cutover::authority`) swaps it for its own advice.
+pub(crate) const DIFFERS_HINT: &str = "Run `kith kernel core-migrate --authority --force` to replace them with the file's rows \
+         (a backup of core.db is taken first).";
+
 fn refuse_differs(conn: &Connection) -> Error {
     let counts = authority::counts(conn).unwrap_or_default();
     Error::Refused(format!(
         "core.db already holds authority rows that differ from auth.json ({counts}), perhaps the owner's own writes or an \
-         earlier import. Nothing was changed. Run `kith kernel core-migrate --authority --force` to replace them with the file's rows \
-         (a backup of core.db is taken first)."
+         earlier import. Nothing was changed. {DIFFERS_HINT}"
     ))
 }
 

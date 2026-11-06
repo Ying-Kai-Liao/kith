@@ -808,6 +808,10 @@ fn a_damaged_record_with_no_marker_or_a_real_source_refuses_with_the_repair_line
     }
     let e = step(&r, &env, "fa", opts()).unwrap_err().to_string();
     assert!(e.contains("damaged") && e.contains("Repair"), "{e}");
+    assert!(
+        e.contains("remove the record") && e.contains("restored from before the switch"),
+        "{e}"
+    );
     // The marker is back but a source is a real file.
     {
         let mut c = crate::start_with(&env.layout, MIGRATIONS).unwrap();

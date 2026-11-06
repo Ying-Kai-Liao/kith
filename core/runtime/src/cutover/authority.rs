@@ -214,6 +214,11 @@ fn hold_auth_lock(auth: &Path, wait: Duration) -> Result<AuthLock> {
 }
 
 /// The SHA-256 of the file's bytes; "missing" when it does not exist.
+/// Replaces the import's `core-migrate --force` advice when a crash repair meets rows that differ.
+const REPAIR_FORCE: &str = "This is the repair of a switch that stopped before the tombstone: kith-auth kept writing auth.json after the \
+     core took its rows, so the file is newer and wins. Run `kith migrate step authority --force` to replace the core's rows \
+     with the file's (a backup of core.db is taken first).";
+
 fn sha_of(path: &Path) -> Result<String> {
     use std::fmt::Write as _;
     match std::fs::read(path) {
@@ -735,6 +740,11 @@ impl Module for AuthorityModule {
         } else {
             None
         };
+        // A step that finds its own marker is a crash repair (the switch got as far as the marker, then died before the
+        // tombstone): the file is newer than the core there, which changes what `--force` means.
+        let repair = core
+            .as_deref()
+            .is_some_and(|c| marker::read(c.conn(), self.name()).is_some());
         let rep = crate::import::run_in(
             &env.layout,
             ctx,
@@ -745,7 +755,13 @@ impl Module for AuthorityModule {
             self.source.as_ref(),
             &mut **self.sink.borrow_mut(),
             core,
-        )?;
+        )
+        .map_err(|e| match e {
+            Error::Refused(s) if repair && s.contains(crate::import::DIFFERS_HINT) => {
+                Error::Refused(s.replace(crate::import::DIFFERS_HINT, REPAIR_FORCE))
+            }
+            e => e,
+        })?;
         if let Some(before) = before {
             if sha_of(&ctx.auth)? != before {
                 return Err(Error::Refused(CHANGED.into()));
