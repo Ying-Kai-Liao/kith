@@ -100,7 +100,8 @@ pub fn comparable(a: &str, b: &str) -> bool {
 }
 
 /// What ending a claim's process signals: the claimer and everything below it, and its process group when it leads one.
-/// One rule for the host's `end_claimed` (the fast path) and the daemon's re-send, so both reach the same processes.
+/// The daemon's rule for its kill re-send; the host's `end_claimed` still has its own copy (no dead-leader group rule; the
+/// daemon's re-send covers it).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Victims {
     /// Descendants first, the claimer last. Never this process, never pid 1.

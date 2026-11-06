@@ -2289,6 +2289,42 @@ fn an_ending_claim_from_a_done_report_is_not_signalled() {
     d.stop();
 }
 
+/// A nameless `exit` that ran out of usage: the claim goes `ending` with `exit`, which failover rewrites to
+/// `out_of_usage`. Not a kill request.
+#[cfg(unix)]
+#[test]
+fn a_nameless_exit_that_ran_out_of_usage_is_not_signalled() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    open_claims(&d);
+    let id = take_claim(&d, "a", "one");
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, id, pid, &start, "one", 20)?;
+            crate::conversations::claims::report(c, id, "exit", r#"{"out_of_usage": true}"#, 30)?;
+            Ok(())
+        })
+        .expect("report");
+    assert_eq!(claim_state(&d, id), "ending");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    assert!(alive(pid));
+    signal(pid, "KILL");
+    d.stop();
+}
+
+/// The daemon's own tick (no holder at all in `quiet()`) kills an ending claim's process.
+#[cfg(unix)]
+#[test]
+fn the_daemons_tick_kills_an_ending_claims_process() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    ending_claim(&d, "a", crate::holder_link::HOST_INSTANCE, pid, &start);
+    until("the tick to kill it", || !alive(pid));
+    d.stop();
+}
+
 /// TERM first; the KILL goes on a later pass once the grace is over, never in the same pass and never with a sleep.
 #[cfg(unix)]
 #[test]

@@ -457,11 +457,12 @@ impl Terminals {
         }
     }
 
-    /// Whether the holder is reached through a command (the supervisor says so once, when it starts).
+    /// Whether the holder is reached through a command (a remote one: its pids are not this machine's).
     pub(crate) fn is_remote(&self) -> bool {
         self.remote.load(Ordering::SeqCst)
     }
 
+    /// Records whether the holder is reached through a command (the supervisor says so once, when it starts).
     pub(crate) fn set_remote(&self, remote: bool) {
         self.remote.store(remote, Ordering::SeqCst);
     }

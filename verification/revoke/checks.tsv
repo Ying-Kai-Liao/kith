@@ -179,6 +179,7 @@ core-kill-split	INVARIANT	TypeOK	pass
 core-kill-split	INVARIANT	OrderKept	pass
 core-kill-split	PROPERTY	Swept	pass
 core-kill-split	PROPERTY	NoLiveProc	pass
+# core-kill-resend: with ReSendNeedsLink = FALSE, KillReSend never reads link[m]; LinkFlaps would only change link, so the action stays enabled and weak fairness holds. The flap is left out of this row only for TLC's heap (512 MB).
 core-kill-resend	INVARIANT	TypeOK	pass
 core-kill-resend	INVARIANT	OrderKept	pass
 core-kill-resend	PROPERTY	NoLiveProc	pass
