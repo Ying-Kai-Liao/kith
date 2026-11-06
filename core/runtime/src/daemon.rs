@@ -354,7 +354,13 @@ impl Shared {
     }
 
     fn running_status(&self) -> Result<Value> {
-        let (generation, schema) = self.with_core(|c| Ok((c.generation(), c.schema_version())))?;
+        let (generation, schema, claims) = self.with_core(|c| {
+            Ok((
+                c.generation(),
+                c.schema_version(),
+                crate::conversations::claims::live_counts(c)?,
+            ))
+        })?;
         let h = self
             .holder
             .lock()
@@ -375,6 +381,7 @@ impl Shared {
                 "uptime_secs": self.started.elapsed().as_secs(),
             },
             "holder": holder_json(&h),
+            "claims": claims.iter().map(|(s, n)| (s.to_string(), json!(n))).collect::<serde_json::Map<_, _>>(),
         }))
     }
 }

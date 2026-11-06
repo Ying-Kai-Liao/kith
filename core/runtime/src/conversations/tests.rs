@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use tempfile::TempDir;
 
 use super::claims::{
-    Kill, Kind, NewClaim, Redeemed, Reported, claim, different_holder, end_gone, reconcile, redeem,
-    report, revoke_person, stop,
+    Kill, Kind, NewClaim, Redeemed, Reported, claim, different_holder, end_gone, live_counts,
+    reconcile, redeem, report, revoke_person, stop,
 };
 use crate::db::{Core, MIGRATIONS, RecordedProc};
 use crate::error::Error;
@@ -727,6 +727,10 @@ fn a_dead_stub_with_its_engine_still_in_the_group_keeps_the_claim() {
     stop(&mut c, id, "revoked", false, 30).expect("stop");
     assert!(end_gone(&mut c, &live, 31).expect("probe").is_empty());
     assert_eq!(state(&c, id), "ending");
+    assert_eq!(
+        live_counts(&c).expect("counts"),
+        [("claimed", 0), ("running", 0), ("ending", 1)]
+    );
     assert!(
         claim(&mut c, &new_claim("c1", None), 32).is_err(),
         "still one writer"
@@ -734,6 +738,7 @@ fn a_dead_stub_with_its_engine_still_in_the_group_keeps_the_claim() {
     live.engine.set(false);
     assert_eq!(end_gone(&mut c, &live, 33).expect("probe"), vec![id]);
     assert_eq!(state(&c, id), "ended");
+    assert_eq!(live_counts(&c).expect("counts")[2], ("ending", 0));
     claim(&mut c, &new_claim("c1", None), 34).expect("free");
 }
 

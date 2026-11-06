@@ -208,6 +208,20 @@ pub(crate) fn claim_high_water(core: &Core) -> Result<i64> {
     )?)
 }
 
+/// How many claims are live, by state, for `kith core status`. An `ending` claim is one whose stop was sent and whose
+/// process group still runs (or has not been probed since).
+pub(crate) fn live_counts(core: &Core) -> Result<[(&'static str, i64); 3]> {
+    let mut out = [("claimed", 0), ("running", 0), ("ending", 0)];
+    for (state, n) in &mut out {
+        *n = core.conn().query_row(
+            "SELECT COUNT(*) FROM claims WHERE state = ?1",
+            [*state],
+            |r| r.get(0),
+        )?;
+    }
+    Ok(out)
+}
+
 fn reconciled(tx: &Transaction<'_>) -> Result<Option<i64>> {
     let text: Option<String> = tx
         .query_row("SELECT value FROM meta WHERE key = ?1", [RECONCILED], |r| {
