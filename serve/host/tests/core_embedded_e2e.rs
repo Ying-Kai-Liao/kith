@@ -81,6 +81,7 @@ fn without_run_ids(raw: &[u8]) -> String {
 /// `kith AGENT --launch-json` is the hot path: its Rust verb (`kith kernel launch AGENT --launch-json`, what the router
 /// execs while `launch` is switched in lib/core-switched.txt) must answer the same through an embedded core as bare.
 /// (Tested through the Rust verb directly: the router script is bash and finds the program through the host install.)
+#[cfg(unix)]
 #[test]
 fn launch_json_passes_through_an_embedded_core_and_answers_the_same() {
     use std::os::unix::fs::PermissionsExt as _;
