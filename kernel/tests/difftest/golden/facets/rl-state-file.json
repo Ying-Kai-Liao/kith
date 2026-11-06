@@ -1,0 +1,11 @@
+{
+  "fakes": "",
+  "state:home/agents/echo/memory/rooms/grp1/n.md": "x",
+  "state:home/statefile": "x",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": ""
+}
