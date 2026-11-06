@@ -665,6 +665,9 @@ jobs:
           KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
       - name: Run-once cost and kernel notes
         run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
+      # The guest door check's kill -9 case (the Rust server's door goes with it) needs a built kith; the kernel shard has none.
+      - name: Guest door check with the built kith (kill -9 of the server)
+        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-guest-door-check
       # kith-sessions and the Rust threads module claiming one thread at once: never more than one writer.
       - name: Thread writers, Python and Rust as two actors
         run: kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
@@ -1222,6 +1225,10 @@ jobs:
           cargo build --locked -p kith-serve --bin kith
           cargo build --locked -p kith-holder --bin kith-holder
           cargo build --locked -p kith-stub
+      # The same on macOS (the host-build job above runs it on Linux): the door's supervisor stops with a killed server.
+      - name: Guest door check with the built kith (kill -9 of the server)
+        if: inputs.artifact && runner.os != 'Windows'
+        run: KITH_BIN="$PWD/target/debug/kith" "$GITHUB_WORKSPACE/kernel/tests/kith-guest-door-check"
       - name: Upload kith
         if: inputs.artifact && runner.os != 'Windows'
         uses: actions/upload-artifact@v4

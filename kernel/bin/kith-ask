@@ -291,6 +291,24 @@ def settle(mid, cost, state=None):
             write_reg(mid, reg)
 
 
+def stop_record(mid):
+    """The call waiting on mid is being ended (kith-permit's helper wait ran out and sent SIGTERM to this process group): the
+    record is settled `stopped` and marked ended, as `kith ask --end` leaves it, so no answer wakes anyone afterwards. A record
+    already answered or delivered stays as it is."""
+    with box_locked():
+        reg = read_reg(mid)
+        if not reg or reg.get('ended_at') or reg.get('delivered') or reg.get('woke_answer') or reg['state'] != 'open':
+            return
+        box(mid, 'parked').unlink(missing_ok=True)
+        reg.update(state='stopped', ended_at=time.time(), done=True, answered_at=reg.get('answered_at') or time.time())
+        write_reg(mid, reg)
+        box(mid, 'read').write_text(str(len(lines_of(mid))))
+
+
+def term_exits(signum, frame):
+    sys.exit(128 + signum)
+
+
 def cap_told(chain):
     """kith ask --cap-told CHAIN: the host raised the chain's cap card; it is not raised again for this cap."""
     with box_locked():
@@ -912,9 +930,13 @@ def main(argv):
         else:
             claim_pid(mid)
         code = 1
+        signal.signal(signal.SIGTERM, term_exits)
         try:
             code = subprocess.run([str(KITH / 'bin/kith-remote'), 'ask', *argv],
                                   env=dict(os.environ, KITH_ASK_RECORD=mid)).returncode
+        except BaseException:   # SIGTERM from the helper wait, or an interrupt: nothing answers into this record later
+            stop_record(mid)
+            raise
         finally:   # kith-remote settles a call it made; an early refusal or a crash must not leave the record open
             if code != 0:
                 settle(mid, 0, 'stopped')
@@ -1005,8 +1027,13 @@ def main(argv):
         env.pop(k, None)
     env['KITH_LAUNCH_ASK_ID'] = mid
     env['KITH_BACKUP_CHAIN'] = 'on'   # no host picks the account: bin/kith walks the account candidates (kith account pick)
-    proc = subprocess.run([str(KITH / 'bin/kith'), agent, *kith_opts, '--', task], env=env, stdin=subprocess.DEVNULL,
-                          capture_output=True, text=True)
+    signal.signal(signal.SIGTERM, term_exits)   # a helper wait that ran out ends this call and its record (stop_record)
+    try:
+        proc = subprocess.run([str(KITH / 'bin/kith'), agent, *kith_opts, '--', task], env=env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True)
+    except BaseException:
+        stop_record(mid)
+        raise
     if bg_id:
         kick_wakes(job_session(bg_id, wait=0))
     parked = box(mid, 'parked').exists()

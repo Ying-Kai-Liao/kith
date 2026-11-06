@@ -60,7 +60,7 @@ Which token: a guest run has KITH_RUN_TOKEN and KITH_RUN_SOCKET (the host gave t
 and KITH_ASK_SOCKET (the host gave them, or `issue` got them for a run kith started itself). Secrets and logins are
 never carded: the host denies them at once. What the agent is told: kernel/skills/kith-guests/SKILL.md.
 """
-import hashlib, json, os, re, shutil, socket, subprocess, sys, time
+import hashlib, json, os, re, shutil, signal, socket, subprocess, sys, time
 
 SERVER, TOOL = 'kithpermit', 'approve'
 # The host waits its live window (default 90 s, at most 600) before it answers; a little longer than that.
@@ -212,6 +212,7 @@ def report_bug(a, env=os.environ):
 
 HELPER = 'ask_helper'
 HELPER_WAIT_S = 900
+HELPER_GRACE_S = 3   # TERM to KILL, when the wait runs out
 
 
 def helper_def():
@@ -224,6 +225,35 @@ def helper_def():
                             'properties': {'agent': {'type': 'string', 'description': 'the helper agent, e.g. personal'},
                                            'task': {'type': 'string', 'description': 'what to ask it, self-contained'}},
                             'required': ['agent', 'task']}}
+
+
+def run_helper(argv, env):
+    """Runs kith-ask in a process group of its own and waits HELPER_WAIT_S for it. A wait that runs out ends the whole group
+    (kith-ask, the bin/kith run under it, the engine and whatever those started), not just the one process: TERM first, which
+    kith-ask answers by settling its ask record `stopped` (no answer wakes anyone later), then KILL for whoever is still
+    there after HELPER_GRACE_S. Raises subprocess.TimeoutExpired then."""
+    p = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=HELPER_WAIT_S)
+    except subprocess.TimeoutExpired:
+        # communicate() leaves the child unreaped, so p.pid (the group's id) is still ours
+        for sig, wait in ((signal.SIGTERM, HELPER_GRACE_S), (signal.SIGKILL, None)):
+            try:
+                os.killpg(p.pid, sig)
+            except OSError:
+                pass
+            try:
+                p.communicate(timeout=wait)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+        try:   # the leader may have gone on TERM with a grandchild left; the group id outlives the leader while any member runs
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        raise
+    return subprocess.CompletedProcess(argv, p.returncode, out, err)
 
 
 def ask_helper(a, env=os.environ):
@@ -243,8 +273,7 @@ def ask_helper(a, env=os.environ):
     if refused:
         return refused
     try:
-        r = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-ask'), agent, '--', task],
-                           env=child, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=HELPER_WAIT_S)
+        r = run_helper([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-ask'), agent, '--', task], child)
     except subprocess.TimeoutExpired:
         return '%s did not answer in time; carry on without it.' % agent
     except OSError as e:
