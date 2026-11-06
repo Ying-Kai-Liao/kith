@@ -1,0 +1,4 @@
+\* the same core-only change with the gate checking parity per request (what the latch approximates): a core that differs from the file never answers
+CoreGate = TRUE
+CoreOnlyWrite = TRUE
+CoreSideShutsGate = TRUE
