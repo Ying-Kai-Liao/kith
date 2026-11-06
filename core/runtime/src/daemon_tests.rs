@@ -2187,3 +2187,304 @@ fn service_keys_go_through_a_real_daemon_to_the_owner_alone() {
     }
     d.stop();
 }
+
+// --- the level-triggered re-send of a revoke's kill (M2-23 gate) ----------------------------------------------------
+
+/// A redeemed claim of `instance` on a real process, moved to `ending` the way a revoke leaves it.
+#[cfg(unix)]
+fn ending_claim(d: &Daemon, conv: &str, instance: &str, pid: u32, start: &str) -> i64 {
+    open_claims(d);
+    let id = take_claim(d, conv, instance);
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, id, pid, start, instance, 20)?;
+            c.conn().execute(
+                "UPDATE claims SET state = 'ending', end_reason = 'revoked' WHERE claim_id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
+        .expect("ending");
+    id
+}
+
+#[cfg(unix)]
+fn resend(d: &Daemon) -> Vec<u32> {
+    crate::kill_resend::pass(&d.shared, Some("one"), Duration::from_secs(60))
+}
+
+/// Like [`leader`], but the process ignores SIGTERM.
+#[cfg(unix)]
+fn stubborn_leader() -> (u32, String) {
+    let mut child = std::process::Command::new("python3")
+        .args([
+            "-c",
+            "import os,signal,time; os.setsid(); signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(120)",
+        ])
+        .spawn()
+        .expect("python3");
+    let pid = child.id();
+    std::thread::spawn(move || child.wait());
+    let mut started = None;
+    until("the process to have a start time", || {
+        started = kith_kernel::procstart::start_stamp(pid);
+        started.is_some()
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    (pid, started.expect("start time"))
+}
+
+#[cfg(unix)]
+fn set_reason(d: &Daemon, id: i64, reason: &str) {
+    d.shared
+        .with_core(|c| {
+            c.conn().execute(
+                "UPDATE claims SET end_reason = ?2 WHERE claim_id = ?1",
+                rusqlite::params![id, reason],
+            )?;
+            Ok(())
+        })
+        .expect("reason");
+}
+
+/// The host's and a no-instance claim are this Mac's with no holder connected at all (the tick has no link).
+#[cfg(unix)]
+#[test]
+fn host_and_no_instance_claims_are_killed_with_no_holder_connected() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    let (pid2, start2) = leader();
+    ending_claim(&d, "a", crate::holder_link::HOST_INSTANCE, pid, &start);
+    let none = ending_claim(&d, "b", "x", pid2, &start2);
+    d.shared
+        .with_core(|c| {
+            c.conn().execute(
+                "UPDATE claims SET holder_instance = NULL WHERE claim_id = ?1",
+                [none],
+            )?;
+            Ok(())
+        })
+        .expect("null");
+    let got = crate::kill_resend::pass(&d.shared, None, Duration::from_secs(60));
+    assert_eq!(got.len(), 2, "{got:?}");
+    until("both gone", || !alive(pid) && !alive(pid2));
+    d.stop();
+}
+
+/// A nameless done/exit report also writes `ending`; that is not a kill request.
+#[cfg(unix)]
+#[test]
+fn an_ending_claim_from_a_done_report_is_not_signalled() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    let id = ending_claim(&d, "a", "one", pid, &start);
+    set_reason(&d, id, "done");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    set_reason(&d, id, "exit");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    assert!(alive(pid));
+    signal(pid, "KILL");
+    d.stop();
+}
+
+/// A nameless `exit` that ran out of usage: the claim goes `ending` with `exit`, which failover rewrites to
+/// `out_of_usage`. Not a kill request.
+#[cfg(unix)]
+#[test]
+fn a_nameless_exit_that_ran_out_of_usage_is_not_signalled() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    open_claims(&d);
+    let id = take_claim(&d, "a", "one");
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, id, pid, &start, "one", 20)?;
+            crate::conversations::claims::report(c, id, "exit", r#"{"out_of_usage": true}"#, 30)?;
+            Ok(())
+        })
+        .expect("report");
+    assert_eq!(claim_state(&d, id), "ending");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    assert!(alive(pid));
+    signal(pid, "KILL");
+    d.stop();
+}
+
+/// The daemon's own tick (no holder at all in `quiet()`) kills an ending claim's process.
+#[cfg(unix)]
+#[test]
+fn the_daemons_tick_kills_an_ending_claims_process() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    ending_claim(&d, "a", crate::holder_link::HOST_INSTANCE, pid, &start);
+    until("the tick to kill it", || !alive(pid));
+    d.stop();
+}
+
+/// TERM first; the KILL goes on a later pass once the grace is over, never in the same pass and never with a sleep.
+#[cfg(unix)]
+#[test]
+fn a_process_that_ignores_term_gets_kill_on_a_later_pass() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = stubborn_leader();
+    ending_claim(&d, "a", "one", pid, &start);
+    let pass = || crate::kill_resend::pass(&d.shared, Some("one"), Duration::from_millis(200));
+    assert_eq!(pass(), vec![pid], "TERM");
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(alive(pid), "it ignores TERM");
+    assert_eq!(
+        pass(),
+        Vec::<u32>::new(),
+        "the grace is not over: nothing sent"
+    );
+    std::thread::sleep(Duration::from_millis(250));
+    assert_eq!(pass(), vec![pid], "KILL");
+    until("the process to be gone", || !alive(pid));
+    assert_eq!(pass(), Vec::<u32>::new());
+    d.stop();
+}
+
+/// The leader is gone, its group is not, and the stamp is from this boot: the dead leader's group is signalled (#919).
+#[cfg(unix)]
+#[test]
+fn a_dead_leaders_group_is_signalled_when_the_stamp_is_from_this_boot() {
+    use std::io::BufRead;
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let mut leader = std::process::Command::new("python3")
+        .args([
+            "-c",
+            "import os,subprocess,sys,time; os.setsid(); c=subprocess.Popen(['sleep','120']); print(c.pid, flush=True); time.sleep(1); os._exit(0)",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3");
+    let pid = leader.id();
+    let mut line = String::new();
+    std::io::BufReader::new(leader.stdout.take().expect("stdout"))
+        .read_line(&mut line)
+        .expect("child pid");
+    let child: u32 = line.trim().parse().expect("pid");
+    let start = kith_kernel::procstart::start_stamp(pid).expect("stamp");
+    ending_claim(&d, "a", "one", pid, &start);
+    leader.wait().expect("leader exits");
+    assert!(alive(child));
+    assert_eq!(resend(&d), vec![pid]);
+    until("the group's member to be gone", || !alive(child));
+    d.stop();
+}
+
+/// An unstamped ending claim is logged once, not on every pass.
+#[cfg(unix)]
+#[test]
+fn an_unstamped_ending_claim_is_logged_once() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let (pid, start) = leader();
+    let id = ending_claim(&d, "a", "one", pid, &start);
+    d.shared
+        .with_core(|c| {
+            c.conn().execute(
+                "UPDATE claims SET pid_started = NULL WHERE claim_id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
+        .expect("null");
+    for _ in 0..3 {
+        resend(&d);
+    }
+    let said = std::fs::read_dir(&p.logs).map_or(0, |rd| {
+        rd.flatten()
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .map(|t| t.matches("cannot be told from its recorded start").count())
+            .sum::<usize>()
+    });
+    assert_eq!(said, 1);
+    signal(pid, "KILL");
+    d.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_ending_claim_of_a_live_matching_process_is_killed_on_the_next_pass() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    let id = ending_claim(&d, "a", "one", pid, &start);
+    assert!(alive(pid));
+    assert_eq!(resend(&d), vec![pid]);
+    until("the process to be gone", || !alive(pid));
+    let ended = d
+        .shared
+        .with_core(|c| crate::conversations::claims::end_gone(c, &crate::gate::System, 40))
+        .expect("end_gone");
+    assert_eq!(ended, vec![id], "end_gone then ends the claim");
+    d.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_ending_claim_with_another_or_no_stamp_is_left_alone() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    let (pid2, _) = leader();
+    let (pid3, _) = leader();
+    ending_claim(&d, "a", "one", pid, &other_start());
+    let missing = ending_claim(&d, "b", "one", pid2, &start);
+    // Old `ps` text: not comparable with a live stamp, so never signalled either.
+    let old = ending_claim(&d, "c", "one", pid3, &start);
+    d.shared
+        .with_core(|c| {
+            c.conn().execute(
+                "UPDATE claims SET pid_started = NULL WHERE claim_id = ?1",
+                [missing],
+            )?;
+            c.conn().execute(
+                "UPDATE claims SET pid_started = 'Mon Jan  1 00:00:00 2024' WHERE claim_id = ?1",
+                [old],
+            )?;
+            Ok(())
+        })
+        .expect("stamps");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    assert!(alive(pid) && alive(pid2) && alive(pid3));
+    for p in [pid, pid2, pid3] {
+        signal(p, "KILL");
+    }
+    d.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_ending_claim_of_another_holder_instance_is_left_alone() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    ending_claim(&d, "a", "elsewhere", pid, &start);
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    assert!(alive(pid), "a claim another holder owns is not this pass's");
+    signal(pid, "KILL");
+    d.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_second_pass_after_the_process_is_gone_does_nothing() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    ending_claim(&d, "a", "one", pid, &start);
+    assert_eq!(resend(&d), vec![pid]);
+    until("the process to be gone", || !alive(pid));
+    assert_eq!(resend(&d), Vec::<u32>::new(), "a gone pid is left alone");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    d.stop();
+}
