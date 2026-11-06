@@ -78,6 +78,24 @@ fn inside(path: &str, root: &str) -> bool {
     path == root || path.starts_with(&format!("{}/", root.trim_end_matches('/')))
 }
 
+#[cfg(unix)]
+fn passwd_home() -> Option<String> {
+    crate::threads::os::passwd_home().map(|h| h.to_string_lossy().into_owned())
+}
+#[cfg(unix)]
+fn passwd_home_of(name: &str) -> Option<String> {
+    crate::threads::os::passwd_home_of(name).map(|h| h.to_string_lossy().into_owned())
+}
+// No password database off unix: a `~` without a known home is refused.
+#[cfg(not(unix))]
+fn passwd_home() -> Option<String> {
+    None
+}
+#[cfg(not(unix))]
+fn passwd_home_of(_name: &str) -> Option<String> {
+    None
+}
+
 /// `os.path.expanduser`, except that a `~` whose home cannot be found is an Err (Python keeps the text as a plain name).
 fn expanduser(p: &str, ctx: &Ctx) -> Result<String, ()> {
     if !p.starts_with('~') {
@@ -87,10 +105,10 @@ fn expanduser(p: &str, ctx: &Ctx) -> Result<String, ()> {
     let home = if i == 1 {
         match &ctx.home {
             Some(h) => Some(h.clone()),
-            None => crate::threads::os::passwd_home().map(|h| h.to_string_lossy().into_owned()),
+            None => passwd_home(),
         }
     } else {
-        crate::threads::os::passwd_home_of(&p[1..i]).map(|h| h.to_string_lossy().into_owned())
+        passwd_home_of(&p[1..i])
     };
     let h = home.ok_or(())?;
     let r = format!("{}{}", h.trim_end_matches('/'), &p[i..]);
