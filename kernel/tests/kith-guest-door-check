@@ -281,7 +281,7 @@ class Late(real):
         os.kill(os.getpid(), signal.SIGTERM)
 kith_door.subprocess.Popen = Late
 if sys.argv[1] == "stuck":
-    kith_door.kill = lambda claim, since, parent=None: kith_door.door_procs(claim, since, parent)
+    kith_door.kill = lambda claim, since, parent=None, limit=10: kith_door.door_procs(claim, since, parent)
 code, tail = kith_door.run("video", "bill", kith_door.declared(sys.argv[3], "render"), sys.argv[2])
 print(tail.splitlines()[-1], len(kith_door._kept), [c.get("left") for c in kith_door._claims()])
 if sys.argv[1] == "stuck":

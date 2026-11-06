@@ -332,8 +332,7 @@ def stop_record(mid):
             mark_ended(m, r)
             if m != mid:
                 todo.append((m, r))
-    for m, r in todo:
-        stop_run(m, r)
+    stop_runs(todo)
 
 
 def term_exits(signum, frame):
@@ -555,19 +554,30 @@ def descendants(pid):
     return out
 
 
-def stop_run(mid, reg):
-    """Stops the run behind mid if it still goes: the agent and what it started (the children of the kith ask process that
-    waits for it), then that process. Its pid is checked first, so a reused pid is left alone."""
+def run_victims(reg):
+    """The processes behind an ask's record: the agent and what it started (the children of the kith ask process that waits
+    for it), then that process, deepest first. Its pid is checked first, so a reused pid is left alone."""
     pid = reg.get('pid')
     if not pid or int(pid) == os.getpid() or not started_before(pid, reg.get('pid_at') or reg.get('at') or 0):
-        return False
-    victims = descendants(pid)[::-1] + [int(pid)]
+        return []
+    return descendants(pid)[::-1] + [int(pid)]
+
+
+def stop_runs(items):
+    """Stops the runs behind (mid, reg) pairs: TERM to every process of every run first, then one shared grace, then KILL for
+    whoever is still there (SIGTERM can be ignored or take its time, as kith-sessions finds). The wait is the same for one run
+    or fifty, which keeps `kith ask --end` and a helper wait's own grace inside their limits. Returns the ids stopped."""
+    stopped, victims = [], []
+    for mid, reg in items:
+        got = run_victims(reg)
+        if got:
+            stopped.append(mid)
+            victims += got
     for victim in victims:
         try:
             os.kill(victim, signal.SIGTERM)
         except OSError:
             pass
-    # SIGTERM can be ignored or take its time: whoever is still there after a short grace is killed, as kith-sessions does.
     deadline = time.time() + 2
     while time.time() < deadline and any(alive(v) for v in victims):
         time.sleep(0.1)
@@ -577,7 +587,7 @@ def stop_run(mid, reg):
                 os.kill(victim, signal.SIGKILL)
             except OSError:
                 pass
-    return True
+    return stopped
 
 
 def alive(pid):
@@ -629,13 +639,18 @@ def end_asks(sessions=(), persons=()):
             ended.append(mid)
     # The runs are stopped with the lock let go and the records already ended: a kith-ask answering TERM settles its own record
     # (stop_record), which needs this lock, and sees ended_at. Holding it through the grace would cost every ask 2 s.
-    for mid, reg in to_stop:
-        stop_run(mid, reg)
     owed.discard('')
-    for session in sorted(owed):
-        wake.withdraw(session)
-    if persons:
-        wake.withdraw_person(sorted(persons))
+
+    def withdraw():
+        for session in sorted(owed):
+            wake.withdraw(session)
+        if persons:
+            wake.withdraw_person(sorted(persons))
+    # Withdrawn before the runs are stopped as well as after: a --bg run that finishes while this goes on kicks a wake
+    # drain, and a follow-up it was owed must not be delivered after the end (kith-wake does not look at ended_at).
+    withdraw()
+    stop_runs(to_stop)
+    withdraw()
     return ended
 
 
