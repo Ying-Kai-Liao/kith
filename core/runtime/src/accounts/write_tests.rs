@@ -6,7 +6,8 @@
 use kith_kernel::accounts::{Change, apply_change};
 use serde_json::{Value, json};
 
-use super::{CORE_WRITES, read_all};
+use super::read_all;
+
 use crate::db::{Core, MIGRATIONS};
 use crate::error::Error;
 use crate::layout::Layout;
@@ -22,12 +23,9 @@ fn core() -> (tempfile::TempDir, Core) {
 }
 
 fn allow(core: &Core) {
-    core.conn()
-        .execute(
-            "INSERT INTO meta (key, value) VALUES (?1, '1')",
-            [CORE_WRITES],
-        )
-        .unwrap();
+    // A real switch is the only thing that opens these writers (the failover flag does not).
+    super::tests_switched::set(true);
+    let _ = core;
 }
 
 fn call(core: &Core, method: &str, params: &Value) -> Result<Value, Error> {

@@ -28,7 +28,11 @@ pub fn switched(folders: &Paths) -> bool {
 /// Makes the core the home of the accounts' state for the rest of this process when the module is switched. Returns
 /// whether it did.
 pub fn install(folders: &Paths) -> bool {
-    switched(folders) && kith_kernel::accounts::use_store(Box::new(CoreStore { folders: folders.clone() }))
+    // The switch file alone is not enough: between "record switched" and the tombstone (and mid-rollback) the file is still the
+    // truth and Python still writes it.
+    switched(folders)
+        && kith_kernel::accounts::tombstoned(&folders.machine)
+        && kith_kernel::accounts::use_store(Box::new(CoreStore { folders: folders.clone() }))
 }
 
 /// The core's table, reached over the owner socket or an embedded core.

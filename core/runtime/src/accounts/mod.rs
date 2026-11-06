@@ -199,10 +199,33 @@ pub(crate) fn core_writes(conn: &Connection) -> Result<bool> {
     Ok(v.as_deref() == Some("1") || switched(conn))
 }
 
+/// Whether the four writers of `kith account` (`out`, `clear`, `usage`, a start) may write: only a real switch. The flag
+/// [`CORE_WRITES`] opens the failover alone.
+pub(crate) fn user_writes(conn: &Connection) -> Result<bool> {
+    #[cfg(test)]
+    if tests_switched::get() {
+        return Ok(true);
+    }
+    let _ = conn;
+    Ok(switched(conn))
+}
+
 /// The `accounts` cutover module is switched for THIS core: the switch file, the marker in this very database and the
 /// tombstone all agree (`cutover::same_answer::may_serve`), so a core.db from another machine, a forged switch file or a
 /// rolled-back module answers no. The machine folder is found from the connection's own path; a database that is not at
 /// `<machine>/core/core.db` (memory, a test's scratch file) is never switched. Unix only, like the framework.
+#[cfg(test)]
+pub(crate) mod tests_switched {
+    use std::cell::Cell;
+    thread_local! { static ON: Cell<bool> = const { Cell::new(false) }; }
+    pub(crate) fn get() -> bool {
+        ON.with(Cell::get)
+    }
+    pub(crate) fn set(on: bool) {
+        ON.with(|c| c.set(on));
+    }
+}
+
 #[cfg(unix)]
 fn switched(conn: &Connection) -> bool {
     use crate::cutover::{Env, modules::accounts::Accounts, same_answer::may_serve};

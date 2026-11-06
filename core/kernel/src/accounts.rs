@@ -31,7 +31,8 @@ mod state;
 
 pub use change::{
     Change, OUT_FOR, Store, apply as apply_change, host_until, make as make_change,
-    now_secs as clock_secs, parse_until, read_state, reason_ok, store, use_store, validate_usage,
+    now_secs as clock_secs, parse_until, read_state, read_state_lossy, reason_ok, store, use_store,
+    validate_usage,
 };
 pub use listing::rows_from;
 mod verbs;
@@ -853,6 +854,8 @@ pub fn main_env(
 ) -> Result<String, String> {
     let mut entry = main_id(ctx, agent, Some(agent_md), None);
     if opts.state {
+        // A choice made over state that could not be read would start on an account that is out: stop instead.
+        read_state(&ctx.machine).map_err(|e| format!("can't tell which accounts are out: {e}"))?;
         let s = settings::read(ctx);
         let now = clock::now();
         let picked = pick_from(ctx, &s, agent, Some(agent_md), false, now, &FileState);

@@ -111,13 +111,12 @@ pub fn pick_value(agent: &str, cross_harness: bool, p: &super::Pick) -> Value {
     })
 }
 
-/// The state is read or written next: a tombstone (the state moved to the core and this process does not ask it) stops the
-/// verb as `Tombstoned` stops `kith-account`.
+/// The state is read next: a tombstone, or a core that does not give it, stops the verb (exit 1) instead of showing every
+/// account as ready.
 fn guard(ctx: &Ctx<'_>) -> Result<(), Verb> {
-    match change::tombstone_error(&ctx.machine) {
-        Some(e) => Err(Verb::die(&e, 1)),
-        None => Ok(()),
-    }
+    change::read_state(&ctx.machine)
+        .map(|_| ())
+        .map_err(|e| Verb::die(&e, 1))
 }
 
 /// A settings file in the older shape is rewritten in the new one before every command (`kith_settings.migrate_file()`
@@ -300,8 +299,7 @@ fn usage(ctx: &Ctx<'_>, mut args: Vec<String>, stdin: &dyn Fn() -> String) -> Re
     valid_id(&entry)?;
     let now = change::now_secs();
     let Some(reading) = reading else {
-        guard(ctx)?;
-        let state = change::read_state(&ctx.machine);
+        let state = change::read_state(&ctx.machine).map_err(|e| Verb::die(&e, 1))?;
         let shown = listing::usage_json(state.get(&entry), clock::now());
         return Ok(Verb::out(pyjson::dumps(&shown) + "\n"));
     };
@@ -319,10 +317,8 @@ fn usage(ctx: &Ctx<'_>, mut args: Vec<String>, stdin: &dyn Fn() -> String) -> Re
 
 /// Every account's state as one JSON object: the Python readers' view of it once the state is in the core.
 fn state_json(ctx: &Ctx<'_>) -> Result<Verb, Verb> {
-    guard(ctx)?;
-    Ok(Verb::out(
-        pyjson::dumps(&Value::Object(change::read_state(&ctx.machine))) + "\n",
-    ))
+    let state = change::read_state(&ctx.machine).map_err(|e| Verb::die(&e, 1))?;
+    Ok(Verb::out(pyjson::dumps(&Value::Object(state)) + "\n"))
 }
 
 /// A launch started on `<id>`: the Python launch notes it once the state is in the core.

@@ -561,7 +561,7 @@ class CoreUnavailable(kith_tombstone.Tombstoned):
     that stops on the tombstone stops on this too: no mark is guessed, nothing is read from the note."""
 
     def __init__(self, why):
-        OSError.__init__(self, f'{state_file()} moved to the Kith core (module accounts), and the core did not answer: {why} '
+        OSError.__init__(self, f'{state_file()} moved to the Kith core (module accounts), and the core gave no answer or refused: {why} '
                                '(kith rollback accounts brings the file back)')
         self.path, self.module = str(state_file()), 'accounts'
 
@@ -671,7 +671,10 @@ def clear_out(entry, now=None):
 
 def record_started(entry, now=None):
     now = int(now or time.time())
-    update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('last_started', now), via=(['started', entry], None))
+    try:
+        update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('last_started', now), via=(['started', entry], None))
+    except CoreUnavailable as e:   # a start time only feeds the spread policy: the run goes on (the Rust launch does the same)
+        print(f'kith: a start of {entry} was not noted: {e}', file=sys.stderr)
 
 
 def validate_usage(reading, now=None):

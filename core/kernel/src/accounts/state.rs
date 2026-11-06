@@ -430,7 +430,7 @@ pub struct FileState;
 impl StateSource for FileState {
     fn accounts(&self, machine: &Path) -> Map {
         // The file, or the core's table once the state moved there (the host installs its store for the verbs it runs).
-        super::change::read_state(machine)
+        super::change::read_state_lossy(machine)
     }
 }
 

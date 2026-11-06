@@ -284,15 +284,25 @@ pub fn store() -> Option<&'static dyn Store> {
 }
 
 /// The accounts' state: from the store when there is one, else the file with the old kernel marks imported. An answer that
-/// cannot be had is no state (as an unreadable file is), noted in the log.
-pub fn read_state(machine: &Path) -> Map {
-    match store() {
-        Some(s) => s.accounts().unwrap_or_else(|e| {
-            crate::log::note(&format!("accounts state: the core did not answer: {e}"));
-            Map::new()
-        }),
-        None => state::read(machine),
+/// cannot be had is an error, never "no state": a core that refuses, is busy or needs a migration must not read as every
+/// account ready. A tombstone with no store is the same error.
+pub fn read_state(machine: &Path) -> Result<Map, String> {
+    if let Some(s) = store() {
+        return s.accounts();
     }
+    if let Some(e) = tombstone_error(machine) {
+        return Err(e);
+    }
+    Ok(state::read(machine))
+}
+
+/// [`read_state`] for the readers that cannot stop (the `StateSource` of `pick`): an error is written to the log and reads as
+/// no state. The verbs and the launch's account choice check [`read_state`] first and stop.
+pub fn read_state_lossy(machine: &Path) -> Map {
+    read_state(machine).unwrap_or_else(|e| {
+        crate::log::note(&format!("accounts state: unreadable: {e}"));
+        Map::new()
+    })
 }
 
 /// `kith_tombstone.Tombstoned`'s words, when `state.json` is a tombstone and the state is not read from the core: the file may
