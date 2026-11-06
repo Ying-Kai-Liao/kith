@@ -553,7 +553,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// The guest read fence (`kernel/lib/kith_readfence.py`): the PreToolUse hook JSON on stdin, `--root DIR` for each folder the
+    /// The guest read fence (`kernel/lib/kith_readfence.py`): the `PreToolUse` hook JSON on stdin, `--root DIR` for each folder the
     /// run may read; prints a deny decision or nothing. A launch writes this as the hook when it knows a kith binary.
     #[command(disable_help_flag = true)]
     Readfence {
