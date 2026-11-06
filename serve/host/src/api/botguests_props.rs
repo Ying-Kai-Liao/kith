@@ -172,6 +172,7 @@ impl State {
             // The tombstone goes where kith-auth reads (`KITH_AUTH` of the rig), so a call left on kith-auth fails
             // closed as in production; and the real kith-auth is swapped for a stand-in that logs and fails.
             core.switched_over(&r.dir.join("auth.json"));
+            core.phase("switched");
             let log = r.dir.join("kith-auth-calls");
             let bin = r.dir.join("kith-auth-logging");
             std::fs::write(&bin, format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", log.display())).unwrap();

@@ -268,6 +268,30 @@ pub fn core_selected() -> bool {
 pub fn switched() -> bool {
     #[cfg(test)]
     {
+        // A test can pin the read answer to a stale one, as the 2 s cache is right after a rollback or a switch.
+        if let Some(stale) = *TEST_STALE_SWITCHED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
+            return stale;
+        }
+        switched_now()
+    }
+    #[cfg(not(test))]
+    {
+        static CACHE: SwitchCache = SwitchCache::new();
+        // Every live event of every stream asks: the answer is kept for one gate period, like the gate's own latch.
+        static START: OnceLock<Instant> = OnceLock::new();
+        let now = u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX - 1);
+        CACHE.get(now, switched_now)
+    }
+}
+
+/// [`switched`] from a fresh look at auth.json (one stat; `switched_at` keeps the parse by fingerprint). Every WRITE
+/// routed by [`run_auth`] and its callers asks this, never the cached answer: right after `kith rollback authority` the
+/// cache still says "switched" for up to [`GATE_EVERY`], so a revoke would go to the core only and the plain file the
+/// host is back on would never get it (a Mac with no cloud link never heals). A stale "unswitched" is no better: kith-auth
+/// would be run on the tombstone. A stale read is harmless: it goes to the core, which still holds the revoke.
+pub fn switched_now() -> bool {
+    #[cfg(test)]
+    {
         if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none() {
             return false;
         }
@@ -275,24 +299,40 @@ pub fn switched() -> bool {
         file.is_some_and(|f| switched_at(&f))
     }
     #[cfg(not(test))]
-    {
-        // Every live event of every stream asks: the answer is kept for one gate period, like the gate's own latch.
-        static AT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        static YES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        static START: OnceLock<Instant> = OnceLock::new();
+    switched_at(auth_path())
+}
+
+/// The read answer of [`switched`], kept for [`GATE_EVERY`]. Lock-free: `at_ms` is 0 until the first answer.
+#[cfg_attr(test, allow(dead_code))]
+struct SwitchCache {
+    at_ms: std::sync::atomic::AtomicU64,
+    yes: std::sync::atomic::AtomicBool,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+impl SwitchCache {
+    const fn new() -> Self {
+        Self { at_ms: std::sync::atomic::AtomicU64::new(0), yes: std::sync::atomic::AtomicBool::new(false) }
+    }
+
+    fn get(&self, now_ms: u64, ask: impl FnOnce() -> bool) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
         // +1 so a stored 0 means "never asked".
-        let now = u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX - 1) + 1;
-        let at = AT_MS.load(Relaxed);
+        let now = now_ms + 1;
+        let at = self.at_ms.load(Relaxed);
         if at != 0 && now.saturating_sub(at) < u64::try_from(GATE_EVERY.as_millis()).unwrap_or(2000) {
-            return YES.load(Relaxed);
+            return self.yes.load(Relaxed);
         }
-        let yes = switched_at(auth_path());
-        YES.store(yes, Relaxed);
-        AT_MS.store(now, Relaxed);
+        let yes = ask();
+        self.yes.store(yes, Relaxed);
+        self.at_ms.store(now, Relaxed);
         yes
     }
 }
+
+/// A test pins what the cached [`switched`] answers (writes ignore it, [`switched_now`]).
+#[cfg(test)]
+pub static TEST_STALE_SWITCHED: Mutex<Option<bool>> = Mutex::new(None);
 
 /// A test points the host at an auth.json of its own (a real tombstone file, or none) while it holds `TEST_CORE`; read
 /// only then, like `TEST_GATE_SHUT`.
@@ -630,7 +670,7 @@ fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
 /// switched (as it was), the matching `people.*` method of the core once it is ([`switched`]). A switched host whose core
 /// does not answer gets an error and nothing is written another way.
 pub(crate) async fn run_auth(bin: &Path, args: &[&str]) -> anyhow::Result<String> {
-    if !switched() {
+    if !switched_now() {
         // Today's call, with its stderr warning logged.
         return crate::remote::account::run(bin, args).await;
     }
@@ -639,7 +679,7 @@ pub(crate) async fn run_auth(bin: &Path, args: &[&str]) -> anyhow::Result<String
 
 /// [`run_auth`] with what kith-auth said on stderr (nothing from the core: its copy is the only one, so no copy can miss).
 pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<(String, String)> {
-    if !switched() {
+    if !switched_now() {
         return crate::remote::account::run_noted(bin, args).await;
     }
     let Some((method, params)) = core_form(args) else {
@@ -647,7 +687,20 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
     };
     // A read repeats harmlessly; a write is never sent twice.
     let read = matches!(method, "people.listPeople" | "people.retired");
-    let said = owner_call(method, params, read).await?;
+    let mut params = params;
+    if !read {
+        // The look at auth.json above and this write are two steps: a rollback can land between them. The core checks
+        // the cutover phase inside the write's transaction and refuses a marked write unless it is `switched`.
+        params["viaSwitch"] = true.into();
+    }
+    let said = match owner_call(method, params, read).await {
+        Ok(said) => said,
+        // The rollback got there first: the file is (or is about to be) the truth again, so the write goes to kith-auth.
+        Err(e) if !read && e.downcast_ref::<CoreRefused>().is_some_and(|r| r.0.starts_with("not switched")) => {
+            return crate::remote::account::run_noted(bin, args).await;
+        }
+        Err(e) => return Err(e),
+    };
     // `kith-auth people X` and `retired X` answer by their exit code.
     let rows = said["rows"].as_array();
     match (method, args) {
@@ -670,6 +723,21 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
 #[cfg(test)]
 mod gate_tests {
     use super::*;
+
+    #[test]
+    fn the_read_cache_holds_for_one_gate_period_and_writes_do_not_use_it() {
+        let c = SwitchCache::new();
+        assert!(c.get(5000, || true));
+        assert!(c.get(5000 + 1999, || panic!("asked inside the period")), "kept");
+        assert!(!c.get(5000 + 2000, || false), "asked again after it");
+        // A write decides from switched_now (a plain stat): the cache must not come back on these two.
+        let src = include_str!("authority.rs");
+        for f in ["run_auth(", "run_auth_noted("] {
+            let at = src.find(&format!("async fn {f}")).unwrap();
+            let body = &src[at..at + 300];
+            assert!(body.contains("!switched_now()") && !body.contains("!switched()"), "{f} decides from a fresh stat");
+        }
+    }
 
     #[test]
     fn a_denied_gate_names_how_many_changes_the_core_missed() {

@@ -138,6 +138,19 @@ fn need<'a>(params: &'a Value, key: &str) -> std::result::Result<&'a str, Die> {
     })
 }
 
+/// What a `viaSwitch` write is refused with while authority is not switched; the host reads it to fall back to kith-auth.
+pub(crate) const NOT_SWITCHED: &str = "not switched: authority is back on auth.json";
+
+/// Whether the authority module's cutover phase is `switched` (the file the switch writes first and the rollback
+/// rewrites first). Unreadable counts as not switched: the write is refused and the host falls back to the file.
+fn authority_switched(machine: &Path) -> bool {
+    let layout = crate::layout::Layout::new(machine);
+    crate::cutover::state::read(&layout, "authority")
+        .ok()
+        .flatten()
+        .is_some_and(|s| s.phase == crate::cutover::state::Phase::Switched)
+}
+
 fn switch(params: &Value, key: &str) -> bool {
     params.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -370,11 +383,23 @@ pub(crate) fn call_in(
                 String::new()
             };
             // A person cut off, removed or renamed takes their guest doors with it, in the same transaction (M2-14).
+            // The core's own machine folder (where its cutover records are), not the caller's view of it.
+            let machine = core
+                .folders()
+                .map_or_else(|| life.machine.clone(), |f| f.machine.clone());
             let said = store::run_with(
                 core,
                 c,
                 |a| write_in(m, params, c, life, a, &fresh),
                 |tx, said| {
+                    // A host that routed this write here because auth.json held the tombstone says so (`viaSwitch`).
+                    // Its look at the file and this write are two steps, and `kith rollback authority` can land
+                    // between them (the phase is RollingBack before the file is put back), so the phase is checked
+                    // here, in the write's own transaction. A write without the marker (kith-auth's mirror, the
+                    // terminal) keeps today's behaviour.
+                    if switch(params, "viaSwitch") && !authority_switched(&machine) {
+                        return Err(Error::Refused(format!("authority: {NOT_SWITCHED}")));
+                    }
                     // Read inside the transaction by `write_in` (not answers): whether an add names a new id, and the
                     // bot's line of owners.
                     let joining = take_flag(said, "joining");
