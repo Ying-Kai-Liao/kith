@@ -1512,6 +1512,10 @@ async fn main() -> Result<()> {
             if let KernelCmd::Readfence { args } = &cmd {
                 // Before the account store, the core and its log: the hook runs on every file tool call of a guest run.
                 use std::io::{Read as _, Write as _};
+                if args.len() == 1 && args[0] == "--help" {
+                    println!("usage: kith kernel readfence --root DIR ... < hook.json");
+                    std::process::exit(0);
+                }
                 let mut stdin = Vec::new();
                 let read = std::io::stdin().read_to_end(&mut stdin);
                 let ctx = kith_kernel::readfence::Ctx::from_process();

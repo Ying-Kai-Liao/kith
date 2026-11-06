@@ -138,6 +138,8 @@ pub struct Input<'a> {
     pub user_home: &'a Path,
     /// The kith program that answers `kith memory hook` (`kith_paths.py --bin`), when there is one.
     pub kith_bin: Option<&'a str>,
+    /// `kith_bin` when it also knows `kernel readfence` (the Rust read fence), else None: the fence stays the Python hook.
+    pub fence_bin: Option<&'a str>,
     /// `claude plugin list --json` (`[]` when it failed).
     pub plugins_json: &'a str,
     /// The owner at their own terminal: their plugins stay as their settings have them.
@@ -1400,8 +1402,8 @@ fn guest_sandbox(
         .collect::<Vec<_>>()
         .join(" ");
     // The Rust hook (`kith kernel readfence`) when the launch knows a kith binary, else the Python one. A hook that cannot
-    // run (a kith binary too old to know the verb, a missing script) still prints the refusal through `|| out=`.
-    let program = match i.kith_bin.filter(|b| !b.is_empty()) {
+    // run (a missing script) still prints the refusal through `|| out=`.
+    let program = match i.fence_bin.filter(|b| !b.is_empty()) {
         Some(bin) => format!("{} kernel readfence", shquote(bin)),
         None => format!(
             "{} -I {}/lib/kith_readfence.py",

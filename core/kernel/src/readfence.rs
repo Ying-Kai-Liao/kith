@@ -3,15 +3,16 @@
 //! a deny decision (one JSON line) or nothing, byte for byte what the Python prints. Fails closed like it: a payload that
 //! cannot be read, or a path that cannot be placed, is refused. The Python stays for runs that already started with it.
 //!
-//! Known gaps against the Python, all on the side of refusing or of a rare spelling: a payload with a lone surrogate or a
-//! number Python reads as `inf` is refused here (Python would check it), and `~user` is looked up in /etc/passwd only.
+//! Known gaps against the Python, all on the side of refusing: a payload with a lone surrogate or a number Python reads as
+//! `inf` is refused here (Python would check it); a `~` or `~user` with no home in the password database (Python keeps the
+//! text and reads it as a plain name), a symlink chain past 40 links and a NUL byte in a path are refused.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use crate::paths::realpath;
+use crate::paths::realpath_strict;
 
 /// What the check needs from its process.
 pub struct Ctx {
@@ -77,29 +78,23 @@ fn inside(path: &str, root: &str) -> bool {
     path == root || path.starts_with(&format!("{}/", root.trim_end_matches('/')))
 }
 
-/// `os.path.expanduser`.
-fn expanduser(p: &str, ctx: &Ctx) -> String {
+/// `os.path.expanduser`, except that a `~` whose home cannot be found is an Err (Python keeps the text as a plain name).
+fn expanduser(p: &str, ctx: &Ctx) -> Result<String, ()> {
     if !p.starts_with('~') {
-        return p.to_owned();
+        return Ok(p.to_owned());
     }
     let i = p.find('/').unwrap_or(p.len());
     let home = if i == 1 {
-        ctx.home.clone()
-    } else {
-        std::fs::read_to_string("/etc/passwd").ok().and_then(|t| {
-            t.lines().find_map(|l| {
-                let f: Vec<&str> = l.split(':').collect();
-                (f.len() > 5 && f[0] == &p[1..i]).then(|| f[5].to_owned())
-            })
-        })
-    };
-    match home {
-        Some(h) => {
-            let r = format!("{}{}", h.trim_end_matches('/'), &p[i..]);
-            if r.is_empty() { "/".to_owned() } else { r }
+        match &ctx.home {
+            Some(h) => Some(h.clone()),
+            None => crate::threads::os::passwd_home().map(|h| h.to_string_lossy().into_owned()),
         }
-        None => p.to_owned(),
-    }
+    } else {
+        crate::threads::os::passwd_home_of(&p[1..i]).map(|h| h.to_string_lossy().into_owned())
+    };
+    let h = home.ok_or(())?;
+    let r = format!("{}{}", h.trim_end_matches('/'), &p[i..]);
+    Ok(if r.is_empty() { "/".to_owned() } else { r })
 }
 
 /// Python's `repr` of a float.
@@ -189,21 +184,24 @@ fn truthy(v: &Value) -> bool {
 }
 
 /// The file Claude Code itself wrote for a long tool result: `<config>/projects/<cwd>/<session>/tool-results/<file>`.
-fn own_results(path: &str, ctx: &Ctx) -> bool {
+fn own_results(path: &str, ctx: &Ctx) -> Result<bool, ()> {
     let config = match ctx.config_dir.as_deref() {
         Some(c) if !c.is_empty() => c.to_owned(),
-        _ => expanduser("~/.claude", ctx),
+        _ => expanduser("~/.claude", ctx)?,
     };
-    let cfg = realpath(Path::new(&config)).to_string_lossy().into_owned();
+    let cfg = realpath_strict(Path::new(&config))
+        .ok_or(())?
+        .to_string_lossy()
+        .into_owned();
     let prefix = if cfg == "/" { cfg } else { format!("{cfg}/") };
     let Some(rel) = path.strip_prefix(&prefix) else {
-        return false;
+        return Ok(false);
     };
     let parts: Vec<&str> = rel.split('/').collect();
-    parts.len() == 5
+    Ok(parts.len() == 5
         && parts[0] == "projects"
         && parts[3] == "tool-results"
-        && parts.iter().all(|p| !p.is_empty())
+        && parts.iter().all(|p| !p.is_empty()))
 }
 
 /// Err is the "could not run" case; Ok(None) lets the call through.
@@ -239,7 +237,7 @@ fn check(payload: &Map<String, Value>, roots: &[String], ctx: &Ctx) -> Result<Op
     } else {
         py_str(&given)
     };
-    let given = expanduser(&given, ctx);
+    let given = expanduser(&given, ctx)?;
     let joined = if given.starts_with('/') {
         given
     } else {
@@ -257,16 +255,20 @@ fn check(payload: &Map<String, Value>, roots: &[String], ctx: &Ctx) -> Result<Op
     if joined.contains('\0') {
         return Err(());
     }
-    let path = realpath(Path::new(&joined)).to_string_lossy().into_owned();
+    let path = realpath_strict(Path::new(&joined))
+        .ok_or(())?
+        .to_string_lossy()
+        .into_owned();
     for r in roots {
         if r.contains('\0') {
             return Err(());
         }
-        if inside(&path, &realpath(&PathBuf::from(r)).to_string_lossy()) {
+        let root = realpath_strict(&PathBuf::from(r)).ok_or(())?;
+        if inside(&path, &root.to_string_lossy()) {
             return Ok(None);
         }
     }
-    if own_results(&path, ctx) {
+    if own_results(&path, ctx)? {
         return Ok(None);
     }
     Ok(Some(deny(&format!(

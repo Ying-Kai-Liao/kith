@@ -9,7 +9,13 @@ use std::process::{Command, Stdio};
 
 use kith_kernel::readfence::{Ctx, run};
 
-fn py_run(args: &[String], stdin: &[u8], cwd: &str, home: &str, config: Option<&str>) -> String {
+fn py_run(
+    args: &[String],
+    stdin: &[u8],
+    cwd: &str,
+    home: Option<&str>,
+    config: Option<&str>,
+) -> String {
     let script =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../kernel/lib/kith_readfence.py");
     let mut c = Command::new("python3");
@@ -17,8 +23,10 @@ fn py_run(args: &[String], stdin: &[u8], cwd: &str, home: &str, config: Option<&
         .arg(script)
         .args(args)
         .env_clear()
-        .env("HOME", home)
         .current_dir(cwd);
+    if let Some(h) = home {
+        c.env("HOME", h);
+    }
     if let Some(cfg) = config {
         c.env("CLAUDE_CONFIG_DIR", cfg);
     }
@@ -51,6 +59,18 @@ fn matches_the_python_for_every_payload() {
     std::fs::write(other.join("secret"), "x").unwrap();
     std::os::unix::fs::symlink(&other, wd.join("outlink")).unwrap();
     std::os::unix::fs::symlink(wd.join("sub"), wd.join("inlink")).unwrap();
+    std::os::unix::fs::symlink("../other", wd.join("rel")).unwrap();
+    // a chain of 42 links ending outside, and a loop
+    for i in 0..42 {
+        let to = if i == 41 {
+            other.clone()
+        } else {
+            wd.join(format!("c{}", i + 1))
+        };
+        std::os::unix::fs::symlink(to, wd.join(format!("c{i}"))).unwrap();
+    }
+    std::os::unix::fs::symlink(wd.join("loopb"), wd.join("loopa")).unwrap();
+    std::os::unix::fs::symlink(wd.join("loopa"), wd.join("loopb")).unwrap();
     let wd_s = wd.to_str().unwrap().to_owned();
     let other_s = other.to_str().unwrap().to_owned();
     let home_s = home.to_str().unwrap().to_owned();
@@ -94,15 +114,28 @@ fn matches_the_python_for_every_payload() {
     for (n, p) in [
         ("link out", "outlink/secret"),
         ("link in", "inlink/f.txt"),
+        ("rel link out", "rel/secret"),
+        ("dotdot after link", "outlink/../wd/sub/f.txt"),
+        ("dotdot after link out", "outlink/../x"),
         ("root itself", "."),
         ("tilde", "~/x"),
         ("tilde alone", "~"),
-        ("tilde user unknown", "~nosuchuser_zz/x"),
         ("trailing slash", "sub/"),
         ("sibling prefix", "../wdx/f"),
         ("non-ascii", "caf\u{e9}/\u{1f600}\"q\\"),
     ] {
         cases.push((n.into(), tool("Read", "file_path", &q(p))));
+    }
+    let user = std::env::var("USER").ok().filter(|u| !u.is_empty());
+    if let Some(u) = &user {
+        cases.push((
+            "tilde USER".into(),
+            tool("Read", "file_path", &q(&format!("~{u}/x"))),
+        ));
+        cases.push((
+            "tilde USER alone".into(),
+            tool("Read", "file_path", &q(&format!("~{u}"))),
+        ));
     }
     cases.push(("tool-results".into(), tool("Read", "file_path", &q(&tr))));
     cases.push((
@@ -216,11 +249,50 @@ fn matches_the_python_for_every_payload() {
     ];
     let configs: [Option<&str>; 3] = [Some(&cfg_s), Some(""), None];
     let mut n = 0;
+    // Cases the Rust refuses where the Python reads the text as a plain name or follows a long chain.
+    let stricter: Vec<(&str, String)> = vec![
+        (
+            "chain over the cap",
+            tool("Read", "file_path", &q("c0/secret")),
+        ),
+        ("link loop", tool("Read", "file_path", &q("loopa/x"))),
+        (
+            "tilde user unknown",
+            tool("Read", "file_path", &q("~nosuchuser_zz/x")),
+        ),
+    ];
+    let refused = "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"the read check could not run, so this read is refused\"}}\n";
+    for (name, payload) in &stricter {
+        let ctx = Ctx {
+            home: Some(home_s.clone()),
+            config_dir: None,
+            cwd: Some(wd_s.clone()),
+        };
+        let got = run(&ctx, &["--root".into(), wd_s.clone()], payload.as_bytes());
+        assert_eq!(got, refused, "stricter case {name:?}");
+    }
+    // HOME unset: both fall back to the password database (when the user has a home there).
+    if std::env::var("HOME").is_ok_and(|h| std::path::Path::new(&h).is_dir()) {
+        for (name, payload) in cases.iter().filter(|(n, _)| n.starts_with("tilde")) {
+            let args = vec!["--root".to_owned(), wd_s.clone()];
+            let want = py_run(&args, payload.as_bytes(), &wd_s, None, Some(&cfg_s));
+            let ctx = Ctx {
+                home: None,
+                config_dir: Some(cfg_s.clone()),
+                cwd: Some(wd_s.clone()),
+            };
+            assert_eq!(
+                run(&ctx, &args, payload.as_bytes()),
+                want,
+                "HOME unset, case {name:?}"
+            );
+        }
+    }
     for (name, payload) in &cases {
         for (ai, (an, args)) in arg_sets.iter().enumerate() {
             // The config variants matter to the tool-results rule, not to the root rules: one argument set carries them.
             for config in configs.iter().copied().take(if ai == 0 { 3 } else { 1 }) {
-                let want = py_run(args, payload.as_bytes(), &wd_s, &home_s, config);
+                let want = py_run(args, payload.as_bytes(), &wd_s, Some(&home_s), config);
                 let ctx = Ctx {
                     home: Some(home_s.clone()),
                     config_dir: config.map(str::to_owned),
