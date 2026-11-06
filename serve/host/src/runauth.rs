@@ -25,7 +25,7 @@
 //! service's key (`cards::secret`): it makes a card in the owner's chat and answers at once `{"ok": true, "carded":
 //! true, "message"}` or `{"ok": false, "error"}`. An owner token only (`TokenScope::OwnerAsk`); a guest's is "not authorized".
 //!
-//! `consumeOnce` (`{"token", "method": "consumeOnce", "tool", "input"}`) is the owner run's PreToolUse hook using up the
+//! `consumeOnce` (`{"token", "method": "consumeOnce", "tool", "input"}`) is the owner run's `PreToolUse` hook using up the
 //! yes of an auto-mode card ("Allow once"): the host noted it when `requestPermission` with `autoMode` ended in allow, under
 //! the run and the call's key, and answers `{"ok": true, "allowed": bool}`, true once. An owner token only, and only its own
 //! run's yeses; nothing in the run's folder can stand in for it.
@@ -587,8 +587,8 @@ pub enum AccessCall {
     /// An owner run asks for the card history (`kith cards history`): answered only for an agent whose package says
     /// `cards: read`, `cards::history`.
     History(usize),
-    /// The PreToolUse hook asks to use up the yes of an auto-mode card for this call (`consumeOnce`): the key of the call,
-    /// None for an input that gets no yes.
+    /// The `PreToolUse` hook asks to use up the yes of an auto-mode card for this call (`consumeOnce`): the key of the call,
+    /// `None` for an input that gets no yes.
     ConsumeOnce(Option<String>),
 }
 
@@ -1426,6 +1426,10 @@ mod tests {
         }
     }
 
+    fn a_second_ago() -> Instant {
+        Instant::now().checked_sub(Duration::from_secs(1)).expect("the clock is older than a second")
+    }
+
     #[test]
     fn a_run_that_loses_its_token_keeps_no_yes() {
         let t = open_table();
@@ -1440,7 +1444,7 @@ mod tests {
         assert!(!t.onces.locked().keys().any(|(run, _)| *run == a.run_id));
         assert!(t.onces.locked().keys().any(|(run, _)| *run == b.run_id));
         // a token past its end is reaped, and takes the run's yes with it
-        t.entries.locked().values_mut().for_each(|e| e.expires = Some(Instant::now() - Duration::from_secs(1)));
+        t.entries.locked().values_mut().for_each(|e| e.expires = Some(a_second_ago()));
         assert_eq!(t.reap(|_| true), vec![b.run_id.clone()]);
         assert!(t.onces.locked().is_empty());
         let _ = tb;
@@ -1456,9 +1460,9 @@ mod tests {
         assert!(left("long") > Duration::from_secs(23 * 3600) && left("long") <= Duration::from_secs(24 * 3600));
         assert!(left("short") > Duration::from_secs(590) && left("short") <= Duration::from_secs(600));
         // an end that has passed is no yes, and is dropped by the next one
-        t.onces.locked().insert(("run".into(), "old".into()), Instant::now() - Duration::from_secs(1));
+        t.onces.locked().insert(("run".into(), "old".into()), a_second_ago());
         assert!(!t.take_once("run", "old"));
-        t.onces.locked().insert(("run".into(), "old".into()), Instant::now() - Duration::from_secs(1));
+        t.onces.locked().insert(("run".into(), "old".into()), a_second_ago());
         t.keep_once("run", "new".into(), false);
         assert!(!t.onces.locked().contains_key(&("run".to_owned(), "old".to_owned())));
     }
