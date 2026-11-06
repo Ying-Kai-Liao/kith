@@ -62,6 +62,7 @@ for pair in "cl claude" "cx codex"; do
   out=$(launch "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["agent_version"]="<v>"; print(json.dumps(d, indent=1, sort_keys=True))')
   if [ -n "${UPDATE_GOLDEN:-}" ]; then printf '%s\n' "$out" > "$FIX/launch-$2.json"; fi
   check "$2 launch-json is the golden one" "[ \"\$out\" = \"\$(cat '$FIX/launch-$2.json')\" ]"
+  [ "$out" = "$(cat "$FIX/launch-$2.json")" ] || diff <(printf '%s\n' "$out") "$FIX/launch-$2.json" | cut -c1-400 | head -20
 done
 
 HAVE=0
