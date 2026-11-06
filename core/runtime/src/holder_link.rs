@@ -500,6 +500,8 @@ fn connected(
             shared.set_holder(|h| h.procs = live);
             continue;
         }
+        // A holder on this machine only: a remote one's pids are not this machine's, and `continue` above skips it.
+        resend_ending_kills(shared, &[&instance, HOST_INSTANCE], RESEND_GRACE);
         seen.note_all(&held);
         let now = record_procs(&held);
         if now != known {
@@ -997,6 +999,126 @@ fn end_groups(
     } else {
         Err(stuck.join("; "))
     }
+}
+
+/// How long a re-sent kill waits for SIGTERM before SIGKILL.
+#[cfg(unix)]
+const RESEND_GRACE: Duration = Duration::from_secs(1);
+#[cfg(not(unix))]
+const RESEND_GRACE: Duration = Duration::ZERO;
+
+/// The level-triggered re-send of a revoke's kill (M2-23 gate). A revoke commits the claims to `ending` and answers the
+/// kill once; the host sends the signal on a task that a restart, a failed spawn or an unreadable stamp can lose, and
+/// nothing else would signal that process again. So on every supervisor pass each `ending` claim that this machine
+/// owns (`owners`: the connected holder's instance, the serve host's, or no instance at all: a claim made before the
+/// switch or a terminal's own) is signalled when its process positively is the recorded one. A stamp that is missing,
+/// empty or not comparable with the live one is logged and never signalled; a gone pid or a reused one (another
+/// start) is left alone. A session leader is signalled by its group, anything else by its pid alone: SIGTERM, then
+/// SIGKILL after `grace` for what is still the same process. The pass is idempotent: once the process is gone it
+/// finds nothing to do, and `end_gone` ends the claim. The host's `end_claimed` stays the fast path. Returns the pids
+/// signalled.
+#[cfg(unix)]
+pub(crate) fn resend_ending_kills(shared: &Shared, owners: &[&str], grace: Duration) -> Vec<u32> {
+    type Row = (i64, i64, Option<String>, Option<String>);
+    let rows: Vec<Row> = match shared.with_core(|c| {
+        let mut st = c.conn().prepare(
+            "SELECT claim_id, pid, pid_started, holder_instance FROM claims
+             WHERE state = 'ending' AND pid IS NOT NULL",
+        )?;
+        let rows = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }) {
+        Ok(rows) => rows,
+        Err(e) => {
+            log::note(&shared.logs, &format!("daemon: kill re-send: {e}"));
+            return Vec::new();
+        }
+    };
+    let me = std::process::id();
+    // (pid, the stamp it matched, whether it leads its own session)
+    let mut victims: Vec<(u32, String, bool)> = Vec::new();
+    for (claim, pid, started, holder) in rows {
+        if holder.as_deref().is_some_and(|h| !owners.contains(&h)) {
+            continue;
+        }
+        let Ok(pid) = u32::try_from(pid) else {
+            continue;
+        };
+        if pid <= 1 || pid == me || victims.iter().any(|v| v.0 == pid) {
+            continue;
+        }
+        let recorded = started.unwrap_or_default();
+        match procstart::probe(pid) {
+            procstart::Probe::Gone => {}
+            procstart::Probe::Alive(Some(now)) if procstart::comparable(&recorded, &now) => {
+                if procstart::same_process(&recorded, &now) {
+                    let leader = procstart::session_id(pid) == Some(pid);
+                    victims.push((pid, recorded, leader));
+                }
+            }
+            procstart::Probe::Alive(_) | procstart::Probe::Unknown => log::note(
+                &shared.logs,
+                &format!(
+                    "daemon: claim {claim} is ending but pid {pid} cannot be told from its recorded start ({recorded:?}); not signalled"
+                ),
+            ),
+        }
+    }
+    if victims.is_empty() {
+        return Vec::new();
+    }
+    let send = |pid: u32, leader: bool, sig: &str| {
+        if leader {
+            signal_group(pid, sig)
+        } else {
+            signal_pid(pid, sig)
+        }
+    };
+    for (pid, _, leader) in &victims {
+        send(*pid, *leader, "TERM");
+    }
+    let same = |pid: u32, recorded: &str| {
+        matches!(procstart::probe(pid), procstart::Probe::Alive(Some(n))
+            if procstart::comparable(recorded, &n) && procstart::same_process(recorded, &n))
+    };
+    let begun = Instant::now();
+    while begun.elapsed() < grace && victims.iter().any(|(p, s, _)| same(*p, s)) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for (pid, recorded, leader) in &victims {
+        if same(*pid, recorded) {
+            send(*pid, *leader, "KILL");
+        }
+    }
+    let pids: Vec<u32> = victims.iter().map(|v| v.0).collect();
+    log::note(
+        &shared.logs,
+        &format!(
+            "daemon: re-sent the kill to {} process(es) of ending claims: {pids:?}",
+            pids.len()
+        ),
+    );
+    pids
+}
+
+#[cfg(not(unix))]
+pub(crate) fn resend_ending_kills(_: &Shared, _: &[&str], _: Duration) -> Vec<u32> {
+    Vec::new()
+}
+
+#[cfg(unix)]
+fn signal_pid(pid: u32, signal: &str) -> bool {
+    let kill = ["/bin/kill", "/usr/bin/kill"]
+        .into_iter()
+        .find(|p| Path::new(p).is_file())
+        .unwrap_or("/bin/kill");
+    std::process::Command::new(kill)
+        .args(["-s", signal, "--"])
+        .arg(pid.to_string())
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 /// Windows needs no extra step: each spawn's job object ends with the holder (runtime-design section 4, step 7).

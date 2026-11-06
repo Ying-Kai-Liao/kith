@@ -2187,3 +2187,110 @@ fn service_keys_go_through_a_real_daemon_to_the_owner_alone() {
     }
     d.stop();
 }
+
+// --- the level-triggered re-send of a revoke's kill (M2-23 gate) ----------------------------------------------------
+
+/// A redeemed claim of `instance` on a real process, moved to `ending` the way a revoke leaves it.
+#[cfg(unix)]
+fn ending_claim(d: &Daemon, conv: &str, instance: &str, pid: u32, start: &str) -> i64 {
+    open_claims(d);
+    let id = take_claim(d, conv, instance);
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, id, pid, start, instance, 20)?;
+            c.conn().execute(
+                "UPDATE claims SET state = 'ending', end_reason = 'revoked' WHERE claim_id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
+        .expect("ending");
+    id
+}
+
+#[cfg(unix)]
+fn resend(d: &Daemon) -> Vec<u32> {
+    crate::holder_link::resend_ending_kills(
+        &d.shared,
+        &["one", crate::holder_link::HOST_INSTANCE],
+        Duration::from_secs(5),
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn an_ending_claim_of_a_live_matching_process_is_killed_on_the_next_pass() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    let id = ending_claim(&d, "a", "one", pid, &start);
+    assert!(alive(pid));
+    assert_eq!(resend(&d), vec![pid]);
+    until("the process to be gone", || !alive(pid));
+    let ended = d
+        .shared
+        .with_core(|c| crate::conversations::claims::end_gone(c, &crate::gate::System, 40))
+        .expect("end_gone");
+    assert_eq!(ended, vec![id], "end_gone then ends the claim");
+    d.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_ending_claim_with_another_or_no_stamp_is_left_alone() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    let (pid2, _) = leader();
+    let (pid3, _) = leader();
+    ending_claim(&d, "a", "one", pid, &other_start());
+    let missing = ending_claim(&d, "b", "one", pid2, &start);
+    // Old `ps` text: not comparable with a live stamp, so never signalled either.
+    let old = ending_claim(&d, "c", "one", pid3, &start);
+    d.shared
+        .with_core(|c| {
+            c.conn().execute(
+                "UPDATE claims SET pid_started = NULL WHERE claim_id = ?1",
+                [missing],
+            )?;
+            c.conn().execute(
+                "UPDATE claims SET pid_started = 'Mon Jan  1 00:00:00 2024' WHERE claim_id = ?1",
+                [old],
+            )?;
+            Ok(())
+        })
+        .expect("stamps");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    assert!(alive(pid) && alive(pid2) && alive(pid3));
+    for p in [pid, pid2, pid3] {
+        signal(p, "KILL");
+    }
+    d.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_ending_claim_of_another_holder_instance_is_left_alone() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    ending_claim(&d, "a", "elsewhere", pid, &start);
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    assert!(alive(pid), "a claim another holder owns is not this pass's");
+    signal(pid, "KILL");
+    d.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_second_pass_after_the_process_is_gone_does_nothing() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    ending_claim(&d, "a", "one", pid, &start);
+    assert_eq!(resend(&d), vec![pid]);
+    until("the process to be gone", || !alive(pid));
+    assert_eq!(resend(&d), Vec::<u32>::new(), "a gone pid is left alone");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    d.stop();
+}

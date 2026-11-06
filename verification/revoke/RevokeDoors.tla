@@ -76,6 +76,10 @@ CONSTANTS
                         \*   the model, and the asks are ended only after it (revoke_order.rs); FALSE = no claim sweep. Triggered by a removal and by a suspend in the code
                         \*   (people.suspend records the order and runs it after the commit)
     AsksFirst,          \* the asks are ended before the claims are swept (the wrong order)
+    KillSplit,          \* TRUE = the claim sweep is two steps: ClaimEnding (the core commits the claim to `ending`) and KillSent
+                        \*   (the host sends the signal once, after the commit); FALSE = one step that also stops the process
+    HostCrash,          \* the host may die, or its spawn fail, between ClaimEnding and KillSent: the signal is lost (`stuck`)
+    ReSendKills,        \* the daemon's supervisor pass signals every `ending` claim whose process matches its start stamp
     SkipBots,           \* the claim sweep covers P's own claims only, not B's (the bot principal holds its own)
     NoWakeWithdraw,     \* a revoke leaves the wake owed to P's session
     AnswerIgnoresEnd,   \* an answer to an ended (stopped) ask is still kept and wakes its caller
@@ -117,9 +121,11 @@ Nets    == {"offline", "cloudDown", "online"}
 Doors   == {"none", "app", "bridge"}
 \* P's slot: idle; queued = waiting in Telegram's queue (sent while the Mac was offline);
 \* held = the bridge has it and waits until the Mac is in sync; then a turn.
-Status  == {"idle", "queued", "held", "running", "helping", "delivered", "aborted"}
+Status  == {"idle", "queued", "held", "running", "helping", "delivered", "aborted", "ending", "stuck"}
 Waiting == {"idle", "queued", "held"}
 Live    == {"running", "helping"}
+\* A process still alive behind a claim the core has already moved to `ending` (`stuck`: its one kill was lost).
+Proc    == Live \cup {"ending", "stuck"}
 \* P's guest door on a Mac: idle; checked (DoorSplit only: access read, no claim yet); running (claimed, so the
 \* sweep sees it); killed by the sweep; done (it ended by itself).
 GDoor   == {"idle", "checked", "running", "killed", "done"}
@@ -570,11 +576,32 @@ WakeStart(m) ==
 \* (people.suspend records the order in open_removals and runs it after the commit). The starts are already
 \* refused by the fence, this stops the ones that began before it.
 SweptWho == IF SkipBots THEN {"P"} ELSE Who
-ClaimSweep(m) ==
+\* ClaimEnding: the core's commit. With KillSplit the process is still running, behind a claim that is `ending`.
+ClaimEnding(m) ==
     /\ CoreSweep
     /\ revoked[m]
     /\ \E w \in SweptWho : turn[m][w] \in Live
-    /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF w \in SweptWho /\ turn[m][w] \in Live THEN "aborted" ELSE turn[m][w]]]
+    /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF w \in SweptWho /\ turn[m][w] \in Live
+                                                   THEN (IF KillSplit THEN "ending" ELSE "aborted") ELSE turn[m][w]]]
+    /\ UNCHANGED <<auth, door, gdoor, ext>>
+\* KillSent: the host's one signal (end_kills -> end_claimed on a detached task) lands.
+KillSent(m) ==
+    /\ KillSplit
+    /\ \E w \in Who : turn[m][w] = "ending"
+    /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF turn[m][w] = "ending" THEN "aborted" ELSE turn[m][w]]]
+    /\ UNCHANGED <<auth, door, gdoor, ext>>
+\* The host restarts, or the spawn fails, before the signal goes: nothing remembers the kill.
+KillLost(m, w) ==
+    /\ KillSplit /\ HostCrash
+    /\ turn[m][w] = "ending"
+    /\ turn' = [turn EXCEPT ![m][w] = "stuck"]
+    /\ UNCHANGED <<auth, door, gdoor, ext>>
+\* KillReSend: each supervisor pass signals every `ending` claim whose process positively matches its stamp (level-triggered:
+\* it reads the claims table, not what the host remembers). A gone or reused pid is left alone, so it is not a model step.
+KillReSend(m) ==
+    /\ KillSplit /\ ReSendKills
+    /\ \E w \in Who : turn[m][w] \in {"ending", "stuck"}
+    /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF turn[m][w] \in {"ending", "stuck"} THEN "aborted" ELSE turn[m][w]]]
     /\ UNCHANGED <<auth, door, gdoor, ext>>
 \* A revoke on m (cut_off -> sweep_asks): P's open delegation ends (kith ask --end) ...
 \* With the core's order (revoke_order.rs) only after the claims are swept; AsksFirst drops that wait.
@@ -713,7 +740,9 @@ Next ==
           \/ AskAnswer(m)
           \/ WakeStart(m)
           \/ AskSweep(m)
-          \/ ClaimSweep(m)
+          \/ ClaimEnding(m)
+          \/ KillSent(m)
+          \/ KillReSend(m)
           \/ WakeWithdraw(m)
           \/ HChange(m)
           \/ HForge(m)
@@ -723,11 +752,12 @@ Next ==
           \/ Helper(m, w)
           \/ Deliver(m, w)
           \/ Stop(m, w)
+          \/ KillLost(m, w)
 
 \* The sweep loop runs every 60 s: weak fairness (only DoorD1, a liveness property, depends on it).
 Spec == Init /\ [][Next]_vars
         /\ (\A m \in Macs : WF_vars(DoorSweep(m)))
-        /\ (\A m \in Macs : WF_vars(AskSweep(m)) /\ WF_vars(WakeWithdraw(m)) /\ WF_vars(ClaimSweep(m)))
+        /\ (\A m \in Macs : WF_vars(AskSweep(m)) /\ WF_vars(WakeWithdraw(m)) /\ WF_vars(ClaimEnding(m)) /\ WF_vars(KillSent(m)) /\ WF_vars(KillReSend(m)))
         /\ WF_vars(SetNet("m2", "online")) /\ WF_vars(\E a, b \in Macs : HExchange(a, b))
 
 (* ---- properties ---- *)
@@ -818,6 +848,9 @@ AsksEnded == \A m \in Macs : (revoked[m] /\ ask[m] = "open") ~> (ask[m] # "open"
 OrderKept == \A m \in Macs : (revoked[m] /\ ask[m] = "stopped") => (\A w \in Who : turn[m][w] \notin Live)
 \* Swept (M3-10d): a live turn of a revoked P or B is stopped (or the revoke is undone). Fails when the sweep skips B.
 Swept == \A m \in Macs, w \in Who : (revoked[m] /\ turn[m][w] \in Live) ~> (turn[m][w] \notin Live \/ ~revoked[m])
+\* NoLiveProc (M2-23 gate): a revoked person's turn or claim process, live or behind an `ending` claim, is gone (or the revoke is
+\* undone). Needs KillReSend when the host can lose its one kill (HostCrash).
+NoLiveProc == \A m \in Macs, w \in Who : (revoked[m] /\ turn[m][w] \in Proc) ~> (turn[m][w] \notin Proc \/ ~revoked[m])
 \* WakesWithdrawn: the wake owed to a revoked P is dropped (or the revoke is undone).
 WakesWithdrawn == \A m \in Macs : (revoked[m] /\ wakeOwed[m]) ~> (~wakeOwed[m] \/ ~revoked[m])
 \* HandleConverges: the Macs end up agreeing on Q, the Mac that was off included.
