@@ -183,3 +183,4 @@ core-kill-resend	INVARIANT	TypeOK	pass
 core-kill-resend	INVARIANT	OrderKept	pass
 core-kill-resend	PROPERTY	NoLiveProc	pass
 broken-no-kill-resend	PROPERTY	NoLiveProc	fail
+broken-resend-needs-link	PROPERTY	NoLiveProc	fail

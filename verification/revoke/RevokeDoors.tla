@@ -79,6 +79,8 @@ CONSTANTS
     KillSplit,          \* TRUE = the claim sweep is two steps: ClaimEnding (the core commits the claim to `ending`) and KillSent
                         \*   (the host sends the signal once, after the commit); FALSE = one step that also stops the process
     HostCrash,          \* the host may die, or its spawn fail, between ClaimEnding and KillSent: the signal is lost (`stuck`)
+    LinkFlaps,          \* the holder link on a Mac may go down (and stay down): a remote, absent or failing holder
+    ReSendNeedsLink,    \* the WRONG design: the re-send runs inside the holder link, so only while it is up
     ReSendKills,        \* the daemon's supervisor pass signals every `ending` claim whose process matches its start stamp
     SkipBots,           \* the claim sweep covers P's own claims only, not B's (the bot principal holds its own)
     NoWakeWithdraw,     \* a revoke leaves the wake owed to P's session
@@ -164,15 +166,18 @@ VARIABLES
     cardhit,       \* cardhit[m]: a revoke has landed on m while the card was open or unused (the oracle; no step reads it)
     crev,          \* crev[m].v: the core's copy of P's revoked fact on m (people.suspend / people.undo), written after auth.json;
                    \*   crev[m].side: a core-only write left the gate's latch open on it (until the gate's next parity ask)
+    link,          \* link[m]: a local holder is connected on m (the daemon's tick does not need it)
     ptick          \* P holds the door's job (P's tick on P's own row), given and taken back by the owner
 
 CardSt == {"none", "open", "approved", "used", "withdrawn"}
 AskState == {"none", "open", "answered", "stopped"}
 
 vars == <<rows, revoked, crev, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor,
-          items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+          items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, link>>
+nolink == <<rows, revoked, crev, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor,
+            items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 ext4 == <<items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, hat, clk, hops>>
-ext == <<ext4, bdoor, ptick>>
+ext == <<ext4, bdoor, ptick, link>>
 auth == <<rows, revoked, crev, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos>>
 
 (* ---- access ---- *)
@@ -220,19 +225,19 @@ Publish(m, val) ==
          /\ ver' = [ver EXCEPT ![m] = cloudVer + 1]
          /\ outbox' = [outbox EXCEPT ![m] = FALSE]
     ELSE /\ outbox' = [outbox EXCEPT ![m] = TRUE]
-         /\ UNCHANGED <<cloudRevoked, cloudVer, ver>>
+         /\ UNCHANGED <<cloudRevoked, cloudVer, ver, link>>
 
 \* A revoke landing on m (people.rs cut_off -> store.suspend_person): what grants access is parked, not deleted. Landing
 \* twice changes nothing more. The undo (restore_person) gives back exactly what was parked.
 ItemsRevoke(m) ==
     IF ~ItemsOn \/ revoked[m]
-    THEN UNCHANGED <<items, parked, gone>>
+    THEN UNCHANGED <<items, parked, gone, link>>
     ELSE /\ items' = [items EXCEPT ![m] = {}]
          /\ parked' = [parked EXCEPT ![m] = IF DeleteItems THEN {} ELSE items[m]]
          /\ gone' = gone
 ItemsUndo(m) ==
     IF ~ItemsOn \/ ~revoked[m]
-    THEN UNCHANGED <<items, parked, gone>>
+    THEN UNCHANGED <<items, parked, gone, link>>
     ELSE /\ items' = [items EXCEPT ![m] = items[m] \union parked[m]]
          /\ parked' = [parked EXCEPT ![m] = {}]
          /\ gone' = gone
@@ -263,6 +268,7 @@ Init ==
     /\ hops = 0
     /\ bdoor = [m \in Macs |-> "idle"]
     /\ ptick = FALSE
+    /\ link = [m \in Macs |-> TRUE]
     /\ cardst = [m \in Macs |-> "none"]
     /\ cardhit = [m \in Macs |-> FALSE]
 
@@ -326,7 +332,7 @@ CliRevoke(m) ==
     /\ bdoor' = DoorsSwept(bdoor, m, TRUE)
     /\ cardst' = CardsAfter(m, TRUE)
     /\ cardhit' = CardHitAfter(m, TRUE)
-    /\ UNCHANGED <<net, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<net, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick, link>>
 
 CliUndo(m) ==
     /\ OwnerCli
@@ -343,7 +349,7 @@ CliUndo(m) ==
     /\ bdoor' = DoorsUndone(bdoor, m, FALSE)
     /\ cardst' = CardsAfter(m, FALSE)
     /\ cardhit' = cardhit
-    /\ UNCHANGED <<rows, net, revokes, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<rows, net, revokes, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick, link>>
 
 \* kith-auth's mirror (kernel/bin/kith-auth mirror_to_core, after save_auth; the embedded core when no daemon runs): the core's
 \* copy takes the revoked fact once auth.json has it. One try, no queue; a try that fails (a warning, exit 0) is the step not taken,
@@ -395,7 +401,7 @@ CloudDeliver(m) ==
     /\ bdoor' = DoorsUndone(DoorsSwept(bdoor, m, cloudRevoked), m, cloudRevoked)
     /\ cardst' = CardsAfter(m, cloudRevoked)
     /\ cardhit' = CardHitAfter(m, cloudRevoked)
-    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
+    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick, link>>
 
 \* Internet lost, Kith cloud lost (or unreachable from m), or back.
 SetNet(m, n) ==
@@ -524,7 +530,7 @@ BotDoorGate(m) == BotDoorGrant(m) /\ InSync(m)
 OwnerTick ==
     /\ BotDoor
     /\ ptick' = ~ptick
-    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, bdoor>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, bdoor, link>>
 BotDoorStart(m) ==
     /\ BotDoor
     /\ m \in BotMacs
@@ -532,18 +538,18 @@ BotDoorStart(m) ==
     /\ turn[m]["B"] \in Live
     /\ BotDoorGate(m)
     /\ bdoor' = [bdoor EXCEPT ![m] = "running"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick, link>>
 BotDoorEnd(m) ==
     /\ bdoor[m] = "running"
     /\ bdoor' = [bdoor EXCEPT ![m] = "done"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick, link>>
 \* The same sweep: a claim whose `kith-auth door` is no longer ok (held excepted) is killed.
 BotDoorSweep(m) ==
     /\ ~NoDoorSweep
     /\ bdoor[m] = "running"
     /\ ~BotDoorGrant(m)
     /\ bdoor' = [bdoor EXCEPT ![m] = "killed"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick, link>>
 
 (* ---- delegations and the wakes their answers make (kith-ask, kith-wake, cards/resume.rs) ---- *)
 \* A live turn of P starts a `kith ask`: its record names P's session as the caller.
@@ -554,14 +560,14 @@ AskStart(m) ==
     /\ turn[m]["P"] \in Live
     /\ MayP(m)
     /\ ask' = [ask EXCEPT ![m] = "open"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, link>>
 \* The asked agent answers; nobody waits, so the answer is a wake of P's session. An ended ask keeps nothing (R8).
 AskAnswer(m) ==
     /\ Asks
     /\ ask[m] = "open" \/ (AnswerIgnoresEnd /\ ask[m] = "stopped")
     /\ ask' = [ask EXCEPT ![m] = IF ask[m] = "open" THEN "answered" ELSE ask[m]]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = TRUE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, hrev, hat, clk, hops, bdoor, ptick, link>>
 \* The owed wake starts P's turn: the host's Recheck reads may().
 WakeStart(m) ==
     /\ Asks
@@ -570,7 +576,7 @@ WakeStart(m) ==
     /\ MayP(m)
     /\ turn' = [turn EXCEPT ![m]["P"] = "running"]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick, link>>
 \* The core's claim sweep (revoke_person, M3-10d): once the revoked fact is on m, P's live turns there, and B's unless
 \* SkipBots, are stopped. A later step than the revoke itself (two transactions). For a removal and for a suspend this is the code
 \* (people.suspend records the order in open_removals and runs it after the commit). The starts are already
@@ -600,9 +606,15 @@ KillLost(m, w) ==
 \* it reads the claims table, not what the host remembers). A gone or reused pid is left alone, so it is not a model step.
 KillReSend(m) ==
     /\ KillSplit /\ ReSendKills
+    /\ ~ReSendNeedsLink \/ link[m]
     /\ \E w \in Who : turn[m][w] \in {"ending", "stuck"}
     /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF turn[m][w] \in {"ending", "stuck"} THEN "aborted" ELSE turn[m][w]]]
     /\ UNCHANGED <<auth, door, gdoor, ext>>
+\* The holder link on m goes down or comes back (a remote holder, an absent one, a failing one).
+LinkFlip(m) ==
+    /\ LinkFlaps
+    /\ link' = [link EXCEPT ![m] = ~link[m]]
+    /\ UNCHANGED nolink
 \* A revoke on m (cut_off -> sweep_asks): P's open delegation ends (kith ask --end) ...
 \* With the core's order (revoke_order.rs) only after the claims are swept; AsksFirst drops that wait.
 AskSweep(m) ==
@@ -612,7 +624,7 @@ AskSweep(m) ==
     /\ ~CoreSweep \/ AsksFirst \/ (\A w \in Who : turn[m][w] \notin Live)
     /\ ask[m] = "open"
     /\ ask' = [ask EXCEPT ![m] = "stopped"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, link>>
 \* ... and the wake owed to P's session is withdrawn (kith-wake withdraw-person).
 WakeWithdraw(m) ==
     /\ Asks
@@ -620,7 +632,7 @@ WakeWithdraw(m) ==
     /\ revoked[m]
     /\ wakeOwed[m]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick, link>>
 
 (* ---- a person known only by a chat handle (remote/handle_revokes.rs) ---- *)
 \* The owner revokes or undoes Q on m's terminal or app: stamped, kept. With no catch-up the change is sent only now.
@@ -637,7 +649,7 @@ HChange(m) ==
            toAll(n) == n = m \/ (HandleNoCatchup /\ net[m] = "online" /\ net[n] = "online")
        IN /\ hrev' = [n \in Macs |-> IF toAll(n) THEN v ELSE hrev[n]]
           /\ hat' = [n \in Macs |-> IF kept /\ toAll(n) THEN st ELSE hat[n]]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, bdoor, ptick, link>>
 \* Two paired Macs, both online, exchange their lists (peerRevokes): the latest stamp wins on both.
 HExchange(a, b) ==
     /\ HandleSync
@@ -650,7 +662,7 @@ HExchange(a, b) ==
        ELSE \* the newer stamp wins; an equal one changes nothing (the receiver knows it already)
             /\ hrev' = [n \in Macs |-> IF hat[a] > hat[b] THEN hrev[a] ELSE IF hat[b] > hat[a] THEN hrev[b] ELSE hrev[n]]
             /\ hat' = [n \in Macs |-> IF hat[a] > hat[b] THEN hat[a] ELSE hat[b]]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, clk, hops, bdoor, ptick, link>>
 \* The same exchange where applying a's newer change on b fails: with the stamp kept first, b then believes it has it.
 HExchangeFails(a, b) ==
     /\ HandleSync
@@ -660,7 +672,7 @@ HExchangeFails(a, b) ==
     /\ net[a] = "online" /\ net[b] = "online"
     /\ hat[a] > hat[b]
     /\ hat' = IF HandleStoreFirst THEN [hat EXCEPT ![b] = hat[a]] ELSE hat
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, clk, hops, bdoor, ptick, link>>
 \* A peer sends a stamp from the far future; only a computer that does not bound stamps takes it.
 HForge(m) ==
     /\ HandleSync
@@ -669,7 +681,7 @@ HForge(m) ==
     /\ hat[m] < 9
     /\ hrev' = [hrev EXCEPT ![m] = TRUE]
     /\ hat' = [hat EXCEPT ![m] = 9]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, clk, hops, bdoor, ptick, link>>
 
 (* ---- removing a revoked person ---- *)
 \* kith-auth `--rm` (or the owner dropping them) while P is revoked: what the revoke parked goes with them, on whichever
@@ -682,7 +694,7 @@ Remove(m) ==
     /\ parked' = [parked EXCEPT ![m] = IF RemoveKeeps THEN parked[m] ELSE {}]
     /\ cardst' = CardsAfter(m, TRUE)
     /\ cardhit' = CardHitAfter(m, TRUE)
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, link>>
 
 (* ---- P's card and its once grant (core/runtime/src/cards) ---- *)
 \* A live turn of P asks the owner (bound: m1, once, before any revoke, so every card is a pre-revoke one).
@@ -693,19 +705,19 @@ CardAsk(m) ==
     /\ cardst[m] = "none"
     /\ turn[m]["P"] \in Live
     /\ cardst' = [cardst EXCEPT ![m] = "open"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, link>>
 \* The owner's yes (cards::answer): only an open card takes one; it becomes a once grant.
 CardYes(m) ==
     /\ CardsOn
     /\ cardst[m] = "open"
     /\ cardst' = [cardst EXCEPT ![m] = "approved"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, link>>
 \* The session asks again: the unused grant is handed to it and spent (cards::raise, `Granted`). It reads no access.
 CardPickup(m) ==
     /\ CardsOn
     /\ cardst[m] = "approved"
     /\ cardst' = [cardst EXCEPT ![m] = "used"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, link>>
 
 \* Host restart (round 1's Restart) is left out here: it only aborts live turns, which no property depends on.
 
@@ -743,6 +755,7 @@ Next ==
           \/ ClaimEnding(m)
           \/ KillSent(m)
           \/ KillReSend(m)
+          \/ LinkFlip(m)
           \/ WakeWithdraw(m)
           \/ HChange(m)
           \/ HForge(m)
@@ -787,6 +800,7 @@ TypeOK ==
     /\ hops \in 0..2
     /\ bdoor \in [Macs -> GDoor]
     /\ ptick \in BOOLEAN
+    /\ link \in [Macs -> BOOLEAN]
     /\ cardst \in [Macs -> CardSt]
     /\ cardhit \in [Macs -> BOOLEAN]
 
