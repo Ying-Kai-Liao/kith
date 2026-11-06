@@ -936,3 +936,420 @@ pub(crate) fn list(auth: &Value, c: &Ctx, agent: Option<&str>, person: Option<&s
     }
     out
 }
+
+/// `kith-auth budgets <agent> --json`: each person's monthly budget on the agent in dollars, null for none; the `*` row
+/// is left out. A budget that is no number is an error here as it is a crash there: a spending limit that cannot be read
+/// is never "no limit".
+pub(crate) fn budgets(auth: &Value, agent: &str) -> R<Value> {
+    let mut out = Map::new();
+    let rows = auth
+        .get("members")
+        .and_then(|m| m.get(agent))
+        .and_then(Value::as_object);
+    for (pid, row) in rows.into_iter().flatten().filter(|(p, _)| *p != EVERYONE) {
+        let raw = row.get("budget").filter(|b| truthy(Some(b)));
+        let amount = match raw {
+            None => Value::Null,
+            Some(b) => {
+                let f = match b {
+                    Value::String(s) => py_float(s),
+                    Value::Number(n) => n.as_f64(),
+                    _ => None,
+                };
+                match f
+                    .filter(|f| f.is_finite())
+                    .and_then(serde_json::Number::from_f64)
+                {
+                    Some(n) => Value::Number(n),
+                    None => {
+                        return die(format!(
+                            "the budget of {pid} on {agent} is not a number: {b}"
+                        ));
+                    }
+                }
+            }
+        };
+        out.insert(pid.clone(), amount);
+    }
+    Ok(Value::Object(out))
+}
+
+const ACCESS_KINDS: [(&str, &str); 3] = [("read", "read"), ("write", "write"), ("domain", "domains")];
+const LEDGER_KINDS: [&str; 6] = ["read", "write", "domain", "service", "job", "helper"];
+
+/// `grant_list`: the profiles a grant names, one string or a list of them.
+fn grant_list(g: &Value) -> Vec<&str> {
+    match g {
+        Value::String(s) if !s.is_empty() => vec![s.as_str()],
+        Value::Array(a) => a.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `access_of(row)` for one field: the strings of the places or websites the row holds.
+fn access_field<'a>(row: &'a Value, field: &str) -> Vec<&'a str> {
+    row.get("access")
+        .and_then(|a| a.get(field))
+        .and_then(Value::as_array)
+        .map(|l| l.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+/// `ledger(auth)`: every grant that outlives one run, for anyone but the owner, sorted by agent, person, kind, target.
+/// `person` is canonical already (`ledger --person` names an old id as well).
+pub(crate) fn ledger(
+    auth: &Value,
+    c: &Ctx,
+    person: Option<&str>,
+    agent: Option<&str>,
+) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    let mut add = |kind: &str,
+                   agent: &str,
+                   pid: &str,
+                   target: &str,
+                   since: Option<&Value>,
+                   by: Option<Value>| {
+        let name = people(auth)
+            .get(pid)
+            .and_then(|p| p.get("name"))
+            .cloned()
+            .unwrap_or_else(|| json!(""));
+        out.push(json!({
+            "key": format!("{kind}:{agent}:{pid}:{target}"), "kind": kind, "agent": agent, "person": pid,
+            "name": name, "target": target,
+            "since": since.filter(|s| s.is_i64() || s.is_u64()).cloned().unwrap_or(Value::Null),
+            "approved_by": by.unwrap_or(Value::Null),
+        }));
+    };
+    let by_of = |by: &Map<String, Value>, k: &str| -> Option<Value> {
+        by.get(k)
+            .map(|v| if v.is_null() { json!("owner") } else { v.clone() })
+    };
+    let none = Map::new();
+    for (a, rows) in auth
+        .get("members")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        for (pid, row) in rows.as_object().into_iter().flatten() {
+            if !row.is_object() {
+                continue;
+            }
+            let since = row
+                .get("access_since")
+                .and_then(Value::as_object)
+                .unwrap_or(&none);
+            let by = row
+                .get("access_by")
+                .and_then(Value::as_object)
+                .unwrap_or(&none);
+            for (kind, field) in ACCESS_KINDS {
+                for v in access_field(row, field) {
+                    let k = format!("{kind}:{v}");
+                    add(kind, a, pid, v, since.get(&k), by_of(by, &k));
+                }
+            }
+            for (name, tick) in row
+                .get("jobs")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                add("job", a, pid, name, tick.get("since"), None);
+            }
+            let hsince = row
+                .get("helper_since")
+                .and_then(Value::as_object)
+                .unwrap_or(&none);
+            for h in row
+                .get("helpers")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                add("helper", a, pid, h, hsince.get(h), None);
+            }
+        }
+    }
+    // the hosts every guest of an agent reaches: person `*`; approved_by `package` for the ones its package declares
+    let mut agents: Vec<String> = auth
+        .get("agent_access")
+        .and_then(Value::as_object)
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default();
+    for n in c.agent_names() {
+        if !agents.contains(&n) {
+            agents.push(n);
+        }
+    }
+    agents.sort();
+    for a in &agents {
+        let kept = auth
+            .get("agent_access")
+            .and_then(|k| k.get(a.as_str()))
+            .filter(|k| k.is_object());
+        let since = kept
+            .and_then(|k| k.get("since"))
+            .and_then(Value::as_object)
+            .unwrap_or(&none);
+        let by = kept
+            .and_then(|k| k.get("by"))
+            .and_then(Value::as_object)
+            .unwrap_or(&none);
+        let kept_domains: Vec<&str> = kept
+            .and_then(|k| k.get("domains"))
+            .and_then(Value::as_array)
+            .map(|l| l.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        for d in Rules::new(c, auth).agent_domains(a) {
+            if kept_domains.contains(&d.as_str()) {
+                add("domain", a, EVERYONE, &d, since.get(&d), by_of(by, &d));
+            } else {
+                add("domain", a, EVERYONE, &d, None, Some(json!("package")));
+            }
+        }
+    }
+    for (k, svcs) in auth
+        .get("grants")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        let Some((a, pid)) = k.split_once('@') else {
+            continue;
+        };
+        let Some(svcs) = svcs.as_object() else {
+            continue;
+        };
+        if secrets::is_owner(auth, &secrets::canonical(auth, pid)) {
+            continue;
+        }
+        for g in svcs.values() {
+            for profile in grant_list(g) {
+                add("service", a, pid, profile, None, None);
+            }
+        }
+    }
+    let s = |e: &Value, k: &str| e[k].as_str().unwrap_or_default().to_owned();
+    out.sort_by_key(|e| (s(e, "agent"), s(e, "person"), s(e, "kind"), s(e, "target")));
+    out.retain(|e| person.is_none_or(|p| e["person"] == p) && agent.is_none_or(|a| e["agent"] == a));
+    out
+}
+
+/// `kith-auth ledger --rm <key>`: that one entry goes, as it is written (a path that moved since must still go). Nothing
+/// removed is an error, never a success.
+pub(crate) fn remove_grant(auth: &mut Value, c: &Ctx, key: &str) -> R<Vec<String>> {
+    let mut parts = key.splitn(4, ':');
+    let (kind, agent, pid, target) = (
+        parts.next().unwrap_or_default(),
+        parts.next().unwrap_or_default(),
+        parts.next().unwrap_or_default(),
+        parts.next().unwrap_or_default(),
+    );
+    if !LEDGER_KINDS.contains(&kind) || agent.is_empty() || pid.is_empty() || target.is_empty() {
+        return usage(format!(
+            "not a ledger key: {key} (<kind>:<agent>:<person>:<target>)"
+        ));
+    }
+    tables(auth);
+    // Service grants are lane B's table, which a database imported before that lane may not hold in full: it would say
+    // "removed already" for a grant that is there. Refused until a re-import.
+    if kind == "service" && truthy(auth.get("secrets_stale")) {
+        return die(
+            "the core has not imported the service grants yet (kith kernel core-migrate --authority --force)",
+        );
+    }
+    let mut gone = false;
+    if kind == "service" {
+        let gkey = format!("{agent}@{pid}");
+        let mut emptied = false;
+        if let Some(svcs) = auth
+            .get_mut("grants")
+            .and_then(|g| g.get_mut(&gkey))
+            .and_then(Value::as_object_mut)
+        {
+            for svc in svcs.keys().cloned().collect::<Vec<_>>() {
+                let have: Vec<String> = grant_list(&svcs[&svc])
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect();
+                if have.iter().any(|p| p == target) {
+                    gone = true;
+                    let left: Vec<String> = have.into_iter().filter(|p| p != target).collect();
+                    match left.len() {
+                        0 => {
+                            svcs.remove(&svc);
+                        }
+                        1 => {
+                            svcs.insert(svc, json!(left[0]));
+                        }
+                        _ => {
+                            svcs.insert(svc, json!(left));
+                        }
+                    }
+                }
+            }
+            emptied = gone && svcs.is_empty();
+        }
+        if emptied && let Some(g) = auth.get_mut("grants").and_then(Value::as_object_mut) {
+            g.remove(&gkey);
+        }
+    } else if kind == "job" || kind == "helper" {
+        let row = auth
+            .get_mut("members")
+            .and_then(|m| m.get_mut(agent))
+            .and_then(|r| r.get_mut(pid))
+            .and_then(Value::as_object_mut);
+        if let Some(row) = row {
+            if kind == "job" {
+                if let Some(jobs) = row.get_mut("jobs").and_then(Value::as_object_mut)
+                    && jobs.remove(target).is_some()
+                {
+                    gone = true;
+                }
+            } else if let Some(hs) = row.get_mut("helpers").and_then(Value::as_array_mut)
+                && let Some(i) = hs.iter().position(|h| h.as_str() == Some(target))
+            {
+                gone = true;
+                hs.remove(i);
+                if let Some(since) = row.get_mut("helper_since").and_then(Value::as_object_mut) {
+                    since.remove(target);
+                }
+            }
+        }
+    } else {
+        if kind == "domain" && pid == EVERYONE {
+            gone = drop_agent_domain(auth, agent, target);
+            if !gone
+                && Rules::new(c, auth)
+                    .agent_domains(agent)
+                    .iter()
+                    .any(|d| d == target)
+            {
+                return die(format!(
+                    "{target} is declared by the package of {agent} (guest_domains in capabilities.yaml), not kept by a card"
+                ));
+            }
+        }
+        let field = ACCESS_KINDS
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map_or("", |(_, f)| *f);
+        let row = auth
+            .get_mut("members")
+            .and_then(|m| m.get_mut(agent))
+            .and_then(|r| r.get_mut(pid))
+            .and_then(Value::as_object_mut);
+        if let Some(row) = row
+            && let Some(listed) = row
+                .get_mut("access")
+                .and_then(|a| a.get_mut(field))
+                .and_then(Value::as_array_mut)
+            && let Some(i) = listed.iter().position(|x| x.as_str() == Some(target))
+        {
+            gone = true;
+            listed.remove(i);
+            for meta in ["access_since", "access_by"] {
+                if let Some(m) = row.get_mut(meta).and_then(Value::as_object_mut) {
+                    m.remove(&format!("{kind}:{target}"));
+                }
+            }
+        }
+    }
+    if !gone {
+        return die(format!("the ledger has no {key} (removed already?)"));
+    }
+    Ok(vec![format!(
+        "{pid} no longer has {kind} {target} for {agent}"
+    )])
+}
+
+/// `drop_agent_domain`: takes one host out of the agent's kept guest domains (as written: nothing else is checked). True
+/// if it was there.
+fn drop_agent_domain(auth: &mut Value, agent: &str, host: &str) -> bool {
+    let Some(kept) = auth.get_mut("agent_access").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let Some(row) = kept.get_mut(agent).and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let Some(domains) = row.get_mut("domains").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let Some(i) = domains.iter().position(|d| d.as_str() == Some(host)) else {
+        return false;
+    };
+    domains.remove(i);
+    let empty = domains.is_empty();
+    for meta in ["since", "by"] {
+        if let Some(m) = row.get_mut(meta).and_then(Value::as_object_mut) {
+            m.remove(host);
+        }
+    }
+    if empty {
+        kept.remove(agent);
+    }
+    true
+}
+
+/// `kith-auth handle <id> <platform> <user-id>` (`uid` Some) and `handle <id> <platform> --rm` (None): binds a person to
+/// their account on a chat platform, or lets it go. The line it prints.
+pub(crate) fn handle(
+    auth: &mut Value,
+    pid: &str,
+    plat: &str,
+    uid: Option<&str>,
+) -> R<Vec<String>> {
+    tables(auth);
+    need_person(auth, pid)?;
+    let Some(uid) = uid else {
+        if let Some(h) = auth["people"][pid]
+            .get_mut("handles")
+            .and_then(Value::as_object_mut)
+        {
+            h.remove(plat);
+        }
+        return Ok(vec![format!("{pid}: no {plat} account")]);
+    };
+    // a Kith account id is the Clerk user id; the others are numbers (Telegram, Discord) or Slack ids. ASCII only: a
+    // lookalike digit is no id
+    let ok = if plat == "kith" {
+        uid.strip_prefix("user_")
+            .is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric()))
+    } else {
+        let digits = uid.strip_prefix('-').unwrap_or(uid);
+        (!digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+            || (!uid.is_empty()
+                && uid
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()))
+    };
+    if !ok {
+        return usage(format!(
+            "{plat} user ids are numbers (Telegram, Discord) or Slack ids like U0123ABC, not usernames{}",
+            if plat == "kith" {
+                "; kith ids are Kith account ids (user_...)"
+            } else {
+                ""
+            }
+        ));
+    }
+    for (other, p) in people(auth) {
+        if other != pid
+            && p.get("handles")
+                .and_then(|h| h.get(plat))
+                .and_then(Value::as_str)
+                == Some(uid)
+        {
+            return die(format!("{plat} {uid} is already {other}"));
+        }
+    }
+    let p = auth["people"][pid]
+        .as_object_mut()
+        .expect("need_person found it");
+    entry(p, "handles").insert(plat.to_owned(), json!(uid));
+    Ok(vec![format!("{pid} is {plat} {uid}")])
+}

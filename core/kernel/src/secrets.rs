@@ -143,6 +143,26 @@ impl Ctx {
         plain && self.package_dir(agent).join("agent.md").is_file()
     }
 
+    /// `agent_dirs()` in `kith-auth`: the names of the agents that have a package, in the user's agents and the kernel's.
+    pub fn agent_names(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for root in [self.agents.clone(), self.kernel.join("agents")] {
+            let Ok(dir) = std::fs::read_dir(root) else { continue };
+            let mut names: Vec<String> = dir
+                .filter_map(Result::ok)
+                .filter_map(|d| d.file_name().into_string().ok())
+                .filter(|n| !n.starts_with('.') && self.agent_exists(n))
+                .collect();
+            names.sort();
+            for n in names {
+                if !out.contains(&n) {
+                    out.push(n);
+                }
+            }
+        }
+        out
+    }
+
     /// `builtin()` in `kith-auth`: one of the kernel's own agents (scratch ...): found under `<kernel>/agents` and not in
     /// the user's agents folder. Its life folder is one for everyone who runs it, so only the owner does.
     pub fn is_builtin(&self, agent: &str) -> bool {
@@ -822,7 +842,7 @@ impl<'a> Rules<'a> {
     /// `agent_domains`: the hosts every guest of `agent` may reach, whoever they are: the ones its package declares
     /// (`guest_domains:` in capabilities.yaml, the owner's consent at install) and the ones the owner kept for everyone
     /// on a card (`agent_access`). Plain host names only.
-    fn agent_domains(&self, agent: &str) -> Vec<String> {
+    pub fn agent_domains(&self, agent: &str) -> Vec<String> {
         let mut all = jobs::guest_domains(&self.c.package_dir(agent).join("capabilities.yaml"));
         if let Some(kept) = get(get(get(self.auth, "agent_access"), agent), "domains").as_array() {
             all.extend(kept.iter().filter_map(Value::as_str).map(str::to_owned));

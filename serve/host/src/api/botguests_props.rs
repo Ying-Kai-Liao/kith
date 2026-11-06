@@ -669,6 +669,75 @@ impl State {
         Ok(())
     }
 
+    fn core_ask(&self, method: &str, params: Value) -> Value {
+        self.core.as_ref().unwrap().ask(method, params).unwrap_or_else(|| panic!("the core did not answer {method}"))
+    }
+
+    /// (switched gaps) The spending limits, the grants ledger and the chat handles on a switched host: each reaches the
+    /// core, and the stand-in for kith-auth is never run (the caller checks its log). The answers of `setPersonBudget`
+    /// and `setBotsCap` end in a kith-cost read the rig has no kernel for, so only what the core holds is asserted.
+    async fn switched_gaps(&self) {
+        let sam = || self.core_ask("people.budgets", json!({"agent": "house"}))["budgets"]["sam"].clone();
+        // setPersonBudget: set, set again, clear.
+        for _ in 0..2 {
+            let body = json!({"agent": "house", "person": "sam", "budget": 20});
+            self.call(&Caller::Local, "setPersonBudget", body).await.ok();
+            assert_eq!(sam(), json!(20.0), "setPersonBudget reached the core");
+        }
+        self.call(&Caller::Local, "setPersonBudget", json!({"agent": "house", "person": "sam", "budget": null})).await.ok();
+        assert_eq!(sam(), Value::Null, "the budget is cleared in the core");
+        // The limits card's person raise (and add) set the same budget.
+        let lane = Lane::main("limit-card");
+        let card = crate::limits::guest_card("limit-card", "house", "sam", "Sam", 20.0, 20.0, Some("November"), &[]);
+        let entry = self.r.hub.add_entry(&lane, EntryKind::Permission, 0, &card).expect("the card");
+        crate::limits::respond(&self.r.hub, &entry, Some("raise"), "owner").await.unwrap();
+        assert_eq!(sam(), json!(40.0), "the card's raise reached the core");
+        // setBotsCap (what the card's bots raise does too).
+        self.call(&Caller::Local, "setBotsCap", json!({"cap": 50})).await.ok();
+        let cap = self.core_ask("people.botsCap", json!({}));
+        assert_eq!(cap["lines"][0], "your bots together: at most $50 a month", "{cap}");
+        // listGrants and removeGrant: a host kept for every guest of an agent is a ledger entry.
+        self.core_ask("people.agentAccess", json!({"agent": "house", "domain": "kept.example"}));
+        let listed = self.call(&Caller::Local, "accessLedger", json!({"agent": "house"})).await.unwrap();
+        let key = "domain:house:*:kept.example";
+        assert!(listed["grants"].as_array().unwrap().iter().any(|g| g["key"] == key), "{listed}");
+        let gone = self.call(&Caller::Local, "removeGrant", json!({"kind": "domain", "key": key})).await.unwrap();
+        assert_eq!(gone["removed"]["key"], key, "{gone}");
+        let again = self.call(&Caller::Local, "removeGrant", json!({"kind": "domain", "key": key})).await;
+        assert!(again.is_err(), "the second removal is refused");
+        // A member's join binds their account to the person, and the end of their access lets it go.
+        let made = self
+            .call(&Caller::Local, "createInvite", json!({"name": "Cy", "agents": {"house": "member"}}))
+            .await
+            .unwrap();
+        let mut all: Vec<Member> = self
+            .r
+            .hub
+            .store
+            .memberships()
+            .unwrap()
+            .into_iter()
+            .map(|m| Member { membership_id: m.membership_id, user_id: m.user_id, invite_id: m.invite_id, ..Default::default() })
+            .collect();
+        let cy = Member {
+            membership_id: "mem_cy".into(),
+            user_id: "user_cy".into(),
+            invite_id: made["inviteId"].as_str().unwrap().to_owned(),
+            ..Default::default()
+        };
+        all.push(cy);
+        let bin = crate::remote::account::bin().await;
+        members::apply(&self.r.hub, bin.as_deref(), &all, Some("user_owner")).await.unwrap();
+        let handle = || {
+            let rows = self.core_ask("people.listPeople", json!({}));
+            rows["rows"].as_array().unwrap().iter().find(|p| p["id"] == "cy").map(|p| p["kith"].clone())
+        };
+        assert_eq!(handle(), Some(json!("user_cy")), "the join bound the account in the core");
+        all.pop();
+        members::apply(&self.r.hub, bin.as_deref(), &all, Some("user_owner")).await.unwrap();
+        assert_eq!(handle().unwrap_or(Value::Null), Value::Null, "the end of access unbound it in the core");
+    }
+
     /// One bot against the model; returns whether an ask of it has gone through and the conversations it made.
     async fn check_bot(&self, bi: usize, base: &str) -> Result<(bool, Vec<(String, usize)>), String> {
         let (id, owner, state) = (self.bots[bi].id.clone(), self.bots[bi].owner, self.bots[bi].state);
@@ -900,6 +969,7 @@ fn a_switched_host_never_runs_kith_auth() {
         assert!(state.bots[1].served, "the bot is served while the core is up");
         state.step(&Op::MyBots { actor: 1 }).await.unwrap();
         state.step(&Op::MyBots { actor: 0 }).await.unwrap();
+        state.switched_gaps().await;
         // setPersonAccess, a bot's revoke by its owner and by Kai, a person's removal.
         state.step(&Op::SetAccess { person: 2, roles: [2, 0] }).await.unwrap();
         state.step(&Op::RevokeBot { actor: 1, bot: 1 }).await.unwrap();
@@ -983,6 +1053,47 @@ fn a_switched_host_with_the_core_down_refuses_every_bot_call() {
         );
     });
     assert_eq!(tomb(), before, "nothing is written to the tombstone");
+    state.check_kith_auth_untouched().unwrap();
+}
+
+/// (switched gaps) A switched host whose core is down fails the spending limit CLOSED: setPersonBudget, setBotsCap, the
+/// limits card's raise, the ledger and a chat handle all error, nothing is written to the tombstone, and kith-auth is
+/// never run (a budget that could not be written or read is never "no limit").
+#[test]
+fn a_switched_host_with_the_core_down_refuses_the_spending_limit_and_the_ledger() {
+    let (rt, pool) = sim();
+    let mut state = rt.block_on(State::build(pool, true));
+    let tomb =
+        || std::fs::read_to_string(crate::api::authority::TEST_AUTH_FILE.lock().unwrap().clone().unwrap()).unwrap();
+    let before = tomb();
+    state.core.as_mut().unwrap().stop();
+    rt.block_on(async {
+        let owner = &Caller::Local;
+        let writes = [
+            ("setPersonBudget", json!({"agent": "house", "person": "sam", "budget": 20})),
+            ("setPersonBudget", json!({"agent": "house", "person": "sam", "budget": null})),
+            ("setBotsCap", json!({"cap": 50})),
+            ("setBotsCap", json!({"cap": null})),
+            ("accessLedger", json!({})),
+            ("removeGrant", json!({"kind": "domain", "key": "domain:house:*:kept.example"})),
+        ];
+        for (method, body) in writes {
+            let res = state.call(owner, method, body).await;
+            assert!(res.is_err(), "{method} went through with the core down: {res:?}");
+        }
+        let res = state.call(owner, "setPersonBudget", json!({"agent": "house", "person": "sam", "budget": 20})).await;
+        assert!(res.err().is_some_and(|e| e.is::<crate::api::authority::CoreDown>()), "the budget write says why");
+        let lane = Lane::main("limit-card");
+        let card = crate::limits::guest_card("limit-card", "house", "sam", "Sam", 20.0, 20.0, Some("November"), &[]);
+        let entry = state.r.hub.add_entry(&lane, EntryKind::Permission, 0, &card).expect("the card");
+        let res = crate::limits::respond(&state.r.hub, &entry, Some("raise"), "owner").await;
+        assert!(res.is_err(), "the card's raise went through with the core down");
+        let bin = crate::remote::account::bin().await.unwrap();
+        for args in [&["handle", "sam", "kith", "user_x"][..], &["handle", "sam", "kith", "--rm"][..]] {
+            assert!(members::locked_run(&bin, args).await.is_err(), "{args:?}");
+        }
+        assert_eq!(tomb(), before, "nothing is written to the tombstone");
+    });
     state.check_kith_auth_untouched().unwrap();
 }
 

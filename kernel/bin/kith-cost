@@ -538,10 +538,17 @@ def members(c, agent):
         out = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth'), 'budgets', agent,
                               '--json'], capture_output=True, text=True, timeout=20, check=True).stdout
         budgets = json.loads(out)
+        error = None
     except (OSError, ValueError, subprocess.SubprocessError):
-        budgets = {}
-    print(json.dumps({'agent': agent, 'month': period_label('month'), 'people': {p: round(x or 0, 4) for p, x in rows},
-                      'budgets': budgets}))
+        # Not "nobody has a budget": kith-auth exits 3 on a switched Mac (auth.json is a note) and also fails when it is
+        # broken, and from here the two look the same. `budgetsError` lets the app say it can't read them instead of
+        # "no budget" (the limit itself is enforced at launch, which fails closed on its own).
+        budgets, error = {}, "can't read budgets"
+    out = {'agent': agent, 'month': period_label('month'), 'people': {p: round(x or 0, 4) for p, x in rows},
+           'budgets': budgets}
+    if error:
+        out['budgetsError'] = error
+    print(json.dumps(out))
 
 
 def bots_json(c):

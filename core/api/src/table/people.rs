@@ -362,6 +362,49 @@ pub(super) const ROWS: &[Method] = &[
         &["people", "agent-access"],
     ),
     people(
+        "people.budgets",
+        "A monthly budget in dollars for each person on an agent, as `kith-auth budgets AGENT --json` has them (null for none; the `*` row is left out). A budget is set or cleared with `people.grant --budget` (an empty one clears it).",
+        &[pos("agent", "string", true, "The agent."), KERNEL, HOME, ENV],
+        &["people", "budgets"],
+    ),
+    people(
+        "people.ledger",
+        "The grants ledger: every grant that outlives one run, for anyone but the owner (always answers of escape cards, ticked jobs, listed helpers, a person's own service grants, the hosts kept for every guest of an agent), one row each with the `key` that `people.removeGrant` takes.",
+        &[
+            flag("person", "string", &["--person"], "Only this person."),
+            flag("agent", "string", &["--agent"], "Only this agent."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "ledger"],
+    ),
+    people(
+        "people.removeGrant",
+        "Take one grants-ledger entry away, as it is written. An entry that is not there (removed already) is refused.",
+        &[
+            pos("key", "string", true, "The entry's key: `<kind>:<agent>:<person>:<target>`."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "ledger-remove"],
+    ),
+    people(
+        "people.handle",
+        "Bind a person to their account on a chat platform (Telegram, Discord, Slack, or `kith` for their Kith account), or with --rm let it go. An account that is another person's is refused. What a person is bound to is in `people.listPeople` (`handles`, `kith`).",
+        &[
+            pos("person", "string", true, "The person."),
+            pos("platform", "string", true, "`telegram`, `discord`, `slack` or `kith`."),
+            pos("uid", "string", false, "Their id on the platform; not with --rm."),
+            sw("remove", &["--rm"], "Let the binding go."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "handle"],
+    ),
+    people(
         "people.requests",
         "The devices asking this computer for access, waiting for the owner (with the code to compare once the device has shown it).",
         &[

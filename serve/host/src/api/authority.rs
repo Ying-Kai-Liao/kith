@@ -584,6 +584,23 @@ fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
             p["agent"] = (*agent).into();
             ("people.grant", p)
         }
+        // The spending limits and the grants ledger (`limits.rs`, `people.rs`): kith-auth's own reads and writes of them.
+        ["bots-cap", amount] => ("people.botsCap", json!({"amount": amount})),
+        ["budgets", agent, "--json"] => ("people.budgets", json!({"agent": agent})),
+        ["ledger", "--rm", key] => ("people.removeGrant", json!({"key": key})),
+        ["ledger", "--json", rest @ ..] => {
+            let mut p = serde_json::Map::new();
+            for pair in rest.chunks(2) {
+                let [flag, value] = pair else { return None };
+                p.insert(flag.strip_prefix("--").filter(|k| matches!(*k, "person" | "agent"))?.to_owned(), (*value).into());
+            }
+            ("people.ledger", Value::Object(p))
+        }
+        // A chat handle (a member's join binds the account, the end of access lets it go).
+        ["handle", person, platform, "--rm"] => {
+            ("people.handle", json!({"person": person, "platform": platform, "remove": true}))
+        }
+        ["handle", person, platform, uid] => ("people.handle", json!({"person": person, "platform": platform, "uid": uid})),
         ["bot", id, "--rm"] => ("people.removeBot", json!({"id": id})),
         ["bot", id, "--of", owner, ..] => {
             let mut p = settings(4, &["name", "provider"])?;
