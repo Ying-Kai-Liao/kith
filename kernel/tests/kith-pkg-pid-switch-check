@@ -98,8 +98,11 @@ reset; (cd "$T/work" && KITH_CORE=python "$KITH" echo --launch-json 2>/dev/null)
 check "no projects.json: same exit and object as the Python" "[ $nrc = $nprc ] && [ \"\$(norm < '$T/np.out')\" = \"\$(norm < '$T/np.py')\" ]"
 printf '{not json' > "$T/state/projects.json"
 (cd "$T/work" && "$KITH" echo --launch-json >/dev/null 2>&1); mrc=$?
-(cd "$T/work" && KITH_CORE=python "$KITH" echo --launch-json >/dev/null 2>&1); mprc=$?
-check "malformed projects.json: same exit as the Python" "[ $mrc = $mprc ]"
+# The Rust launch reads the registry itself, so the comparison is the same launch with both lines gone (the Python lookups).
+grep -v -e '^pkg	' -e '^project-id	' "$T/switched.keep" > "$T/k/lib/core-switched.txt"
+(cd "$T/work" && "$KITH" echo --launch-json >/dev/null 2>&1); mprc=$?
+cp "$T/switched.keep" "$T/k/lib/core-switched.txt"
+check "malformed projects.json: same exit as with the Python lookups" "[ $mrc = $mprc ]"
 mv "$T/projects.keep" "$T/state/projects.json"
 
 echo
