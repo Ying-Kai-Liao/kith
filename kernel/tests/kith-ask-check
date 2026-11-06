@@ -405,4 +405,46 @@ expect "and the --bg run's session" "$(rec "$bk" session)" "sbrief"
 expect "a foreground ask keeps its text, with no session" "$(cd "$T" && "$ASK" echo "plain ask" >/dev/null 2>&1; rec "$(lastid)" brief session | tr '\n' ' ')" "plain ask None "
 expect "an old registration has neither" "$(rec ask-old-2 brief session | tr '\n' ' ')" "None None "
 
+# Ending many asks for one person costs no grace per ask: the records are ended before the runs are stopped, so each kith-ask
+# settling itself on TERM finds the box lock free (a host's `kith ask --end` has 20 s).
+regf() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1] + "/" + sys.argv[2] + ".reg")).get(sys.argv[3]) or "")' "$BOX" "$1" "$2"; }
+export STUB_SLEEP=60
+many=""
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  id=$(cd "$T" && KITH_PERSON=bulk "$ASK" --bg echo "many $i" | idof); many="$many $id"
+done
+for id in $many; do hassid "$id"; done
+sleep 1
+t0=$(date +%s)
+"$ASK" --end --person bulk >/dev/null
+took=$(( $(date +%s) - t0 ))
+expect "ending ten asks for one person takes well under the host's 20 s" "$([ "$took" -lt 12 ] && echo fast || echo "slow: ${took}s")" fast
+stopped=0
+for id in $many; do [ "$(rstate "$id")" = stopped ] && [ -n "$(regf "$id" ended_at)" ] && stopped=$((stopped + 1)); done
+expect "every one of them is stopped and marked ended" "$stopped" 10
+sleep 1
+gone=0
+for id in $many; do pid=$(regf "$id" pid); kill -0 "$pid" 2>/dev/null || gone=$((gone + 1)); done
+expect "and every kith-ask is gone" "$gone" 10
+
+# A helper asking a helper: the outer ask's end (its kith-ask gets TERM from the helper wait) ends the ask below it too.
+outer=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-chain KITH_AGENT=architect "$ASK" --bg echo "outer" | idof)
+hassid "$outer"
+inner=$(cd "$T" && KITH_ASK_ID=$outer CLAUDE_CODE_SESSION_ID=sess-chain-in KITH_AGENT=echo "$ASK" --bg echo "inner" | idof)
+hassid "$inner"
+expect "the inner ask hangs below the outer" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["reply_to"]["ask"])' "$BOX/$inner.reg")" "$outer"
+ipid=$(regf "$inner" pid)
+opid=$(regf "$outer" pid)
+okids=$(pgrep -P "$opid" | tr '\n' ' ')   # the outer stub's own run: TERM reaches the kith-ask only, so it is cleaned up below
+okids="$okids $(for k in $okids; do pgrep -P "$k"; done | tr '\n' ' ')"
+kill -TERM "$opid"
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(rstate "$inner")" = stopped ] && break; sleep 1; done
+expect "the outer ask ended: so is the ask below it" "$(rstate "$outer") $(rstate "$inner")" "stopped stopped"
+expect "the inner record is marked ended" "$([ -n "$(regf "$inner" ended_at)" ] && echo yes)" yes
+sleep 1
+expect "and its kith-ask is gone" "$(kill -0 "$ipid" 2>/dev/null && echo alive || echo gone)" gone
+# shellcheck disable=SC2086
+[ -n "$okids" ] && kill $okids 2>/dev/null
+export STUB_SLEEP=0
+
 [ "$fails" = 0 ] && echo "all kith-ask checks passed" || { echo "$fails check(s) failed"; exit 1; }

@@ -564,6 +564,38 @@ fn ask_helper_gives_up_after_its_wait() {
 }
 
 #[test]
+fn ask_helper_wait_ending_stops_the_whole_group() {
+    let root = world("helper-group");
+    let r = root.display();
+    // the fake kith-ask starts a grandchild that outlives it, and notes the TERM it gets
+    let body = format!(
+        "trap 'echo termed > \"{r}/termed\"; exit 143' TERM\nsleep 60 &\necho $! > \"{r}/grandchild\"\nwait"
+    );
+    let k = kernel(&root, "guest front\nguest helper via front", &body);
+    let env = guest(&root, &root.join("no-host"));
+    let a = json!({"agent": "helper", "task": "x"});
+    let said = super::helper::ask_helper_within(
+        a.as_object().unwrap(),
+        &env,
+        &k,
+        // long enough for the script to start on a busy machine
+        Duration::from_secs(4),
+    );
+    assert_eq!(said, "helper did not answer in time; carry on without it.");
+    let pid: i64 = std::fs::read_to_string(root.join("grandchild"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let end = std::time::Instant::now() + Duration::from_secs(5);
+    while crate::threads::os::pid_runs(pid) && std::time::Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!crate::threads::os::pid_runs(pid), "the grandchild lives");
+    assert!(root.join("termed").exists(), "the helper got no TERM first");
+}
+
+#[test]
 fn ask_helper_refuses_before_anything_runs() {
     let root = world("helper-args");
     let k = kernel(&root, "", "echo ran");

@@ -3,10 +3,14 @@
 
 use super::{Env, scrub};
 use std::io::{Read, Write};
+use std::os::unix::process::CommandExt as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+/// TERM to KILL, when a program outlives its wait.
+const GRACE: Duration = Duration::from_secs(3);
 
 /// What a finished program printed.
 pub struct Ran {
@@ -53,10 +57,13 @@ fn drain<R: Read + Send + 'static>(s: Option<R>) -> mpsc::Receiver<Vec<u8>> {
 
 /// Runs `cmd` with exactly the environment `env` holds, `stdin` on its standard input (nothing when `None`), and both output
 /// streams captured. Everything, the output pipes after the child exits included, is bounded by `limit`: the child is killed when
-/// it outlives it, and a program that handed its pipes to a grandchild gives `Timeout` rather than a hang.
+/// it outlives it, and a program that handed its pipes to a grandchild gives `Timeout` rather than a hang. The program runs in a
+/// process group of its own, and a wait that runs out ends the whole group (TERM, a few seconds' grace, KILL): what it started
+/// does not outlive the call. Same as `run_helper` in kernel/bin/kith-permit.
 pub fn run(cmd: Command, env: &Env, stdin: Option<&str>, limit: Duration) -> Result<Ran, Failed> {
     let mut cmd = cmd;
-    cmd.env_clear()
+    cmd.process_group(0)
+        .env_clear()
         .envs(env.vars())
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -68,7 +75,8 @@ pub fn run(cmd: Command, env: &Env, stdin: Option<&str>, limit: Duration) -> Res
     let mut child = cmd.spawn().map_err(|e| Failed::Os(strerror(&e)))?;
     let deadline = Instant::now() + limit;
     if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
-        // a thread, so a child that never reads cannot hold the server; a child that exits early closes the pipe
+        // a thread, so a child that never reads cannot hold the server; a child that exits closes the pipe, and the write ends
+        // with EPIPE (Rust ignores SIGPIPE), so the thread ends at the child's exit even when the child never read
         let bytes = text.as_bytes().to_vec();
         std::thread::spawn(move || {
             let _ = pipe.write_all(&bytes);
@@ -81,12 +89,19 @@ pub fn run(cmd: Command, env: &Env, stdin: Option<&str>, limit: Duration) -> Res
     std::thread::spawn(move || {
         let _ = tx.send(child.wait());
     });
-    let status = match waited.recv_timeout(limit) {
+    // `child.wait()` may return just as the wait expires: look once more before ending anything, so a child that is already
+    // reaped is not signalled by a pid that may be someone else's by now
+    let waited_for = waited.recv_timeout(limit).or_else(|_| waited.try_recv());
+    let status = match waited_for {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => return Err(Failed::Os(strerror(&e))),
         Err(_) => {
-            // the waiter thread reaps the child, so the pid is still ours
-            crate::threads::os::signal(i64::from(pid), crate::threads::os::SIGKILL);
+            // Not reaped (the waiter thread reaps it when it exits), so the leader's pid is ours, and the group id is the
+            // leader's pid. TERM lets kith-ask settle its record; whoever is still there after the grace is killed. The KILL
+            // goes to the group even when the leader is gone: a group id is not reused while a member runs.
+            crate::threads::os::signal_group(i64::from(pid), crate::threads::os::SIGTERM);
+            let _ = waited.recv_timeout(GRACE);
+            crate::threads::os::signal_group(i64::from(pid), crate::threads::os::SIGKILL);
             return Err(Failed::Timeout);
         }
     };
