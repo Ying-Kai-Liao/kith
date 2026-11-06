@@ -1331,3 +1331,183 @@ fn a_marker_from_before_seeds_brings_no_copy_only_keys_back() {
         "the core's keys are there"
     );
 }
+
+// ---- the preflight (M2-23 P4c) ----
+
+fn dry() -> Opts {
+    Opts {
+        dry_run: true,
+        ..opts()
+    }
+}
+
+/// The dry run's error text (not ready) or its lines.
+fn dry_text(r: &Rig, reg: &[Box<dyn Module>]) -> std::result::Result<String, String> {
+    step(reg, &r.env, "authority", dry())
+        .map(|l| l.join("\n"))
+        .map_err(|e| e.to_string())
+}
+
+fn claim(r: &Rig, id: i64, person: &str, state: &str) {
+    let db = r.db();
+    db.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+    db.execute(
+            "INSERT INTO claims (claim_id, conversation, generation, kind, state, person, created_at) VALUES (?1, ?2, 1, 'turn', ?3, ?4, 1)",
+            rusqlite::params![id, format!("c{id}"), state, person],
+        )
+        .unwrap();
+}
+
+fn ask(r: &Rig, id: &str, person: &str, state: &str) {
+    r.db()
+        .execute(
+            "INSERT INTO asks (id, chain, caller_person, state) VALUES (?1, ?1, ?2, ?3)",
+            rusqlite::params![id, person, state],
+        )
+        .unwrap();
+}
+
+#[test]
+fn preflight_reads_zero_on_an_imported_core_and_prints_every_item() {
+    let (r, reg) = imported();
+    let t = dry_text(&r, &reg).expect("ready");
+    for n in 1..=6 {
+        assert!(t.contains(&format!("preflight {n}.")), "{t}");
+    }
+    assert!(t.contains("preflight: ready"), "{t}");
+    assert!(t.contains("nothing was changed"), "{t}");
+    // Repeats change nothing.
+    assert_eq!(dry_text(&r, &reg).unwrap(), t);
+    assert!(phase(&r.env, "authority").is_none());
+}
+
+#[test]
+fn preflight_with_no_core_db_counts_the_import_only() {
+    let (r, reg) = rig();
+    assert!(!r.env.layout.db.exists());
+    let t = dry_text(&r, &reg).expect("ready");
+    assert!(t.contains("no core.db yet"), "{t}");
+    assert!(t.contains("preflight 1. the import refuses: 0"), "{t}");
+    assert!(!r.env.layout.db.exists(), "a dry run makes no core.db");
+}
+
+#[test]
+fn preflight_item_1_counts_a_refusal_of_the_dry_run_import() {
+    let (r, reg) = rig();
+    r.edit(|v| v["people"]["kai"]["revoked"] = json!(true));
+    let e = dry_text(&r, &reg).unwrap_err();
+    assert!(e.contains("preflight 1. the import refuses: 1"), "{e}");
+    assert!(
+        e.contains("owner and revoked") && e.contains("NOT ready"),
+        "{e}"
+    );
+}
+
+#[test]
+fn preflight_item_2_counts_the_differences_once_the_core_holds_people() {
+    let (r, reg) = imported();
+    r.edit(|v| v["people"]["mia"]["revoked"] = json!({"at": 5}));
+    let e = dry_text(&r, &reg).unwrap_err();
+    assert!(
+        e.contains("preflight 2.")
+            && !e.contains("differences between the core and auth.json (check authority): 0"),
+        "{e}"
+    );
+    assert!(e.contains("mia"), "{e}");
+}
+
+#[test]
+fn preflight_item_3_names_an_open_removal() {
+    let (r, reg) = imported();
+    r.db()
+        .execute(
+            "INSERT INTO open_removals (person, bots, at) VALUES ('sam', '[]', 1)",
+            [],
+        )
+        .unwrap();
+    let e = dry_text(&r, &reg).unwrap_err();
+    assert!(e.contains("preflight 3. open removals: 1 (sam)"), "{e}");
+}
+
+#[test]
+fn preflight_item_4_names_a_vault_row_that_has_not_moved() {
+    let (r, reg) = imported();
+    serve_with(&r, &[("router.key", "vault:v1:AAAA")]);
+    let e = dry_text(&r, &reg).unwrap_err();
+    assert!(
+        e.contains("have not moved into the vault: 1 (router.key)"),
+        "{e}"
+    );
+}
+
+#[test]
+fn preflight_item_5_names_live_holders_that_are_not_people_and_skips_ended_claims() {
+    let (r, reg) = imported();
+    claim(&r, 1, "ghost", "running");
+    claim(&r, 2, "gone", "ended");
+    claim(&r, 3, "mia", "claimed");
+    ask(&r, "a1", "ghost-ask", "open");
+    ask(&r, "a2", "gone-ask", "answered");
+    let e = dry_text(&r, &reg).unwrap_err();
+    let line = e.lines().find(|l| l.starts_with("preflight 5.")).unwrap();
+    assert!(
+        line.contains(": 2 (") && line.contains("ghost:") && line.contains("ghost-ask:"),
+        "{line}"
+    );
+    assert!(!line.contains("gone") && !line.contains("mia"), "{line}");
+}
+
+#[test]
+fn preflight_item_6_lists_a_bots_live_claim_without_stopping() {
+    let (r, reg) = imported();
+    claim(&r, 1, "mia-bot", "running");
+    ask(&r, "a1", "mia-bot", "open");
+    claim(&r, 2, "kai", "running");
+    let t = dry_text(&r, &reg).expect("a listing does not stop");
+    let line = t.lines().find(|l| l.starts_with("preflight 6.")).unwrap();
+    assert!(
+        line.contains(": 1 (mia-bot: 1 claim(s), 1 ask(s))"),
+        "{line}"
+    );
+    assert!(!line.contains("kai"), "{line}");
+    assert!(t.contains("preflight: ready"), "{t}");
+}
+
+#[test]
+fn preflight_on_a_switched_module_says_so_and_counts_nothing() {
+    let (r, reg) = imported();
+    claim(&r, 1, "ghost", "running");
+    super::state::write(
+        &r.env.layout,
+        "authority",
+        &Switch {
+            phase: Phase::Switched,
+            snapshot: None,
+            at: 1,
+        },
+    )
+    .unwrap();
+    let t = dry_text(&r, &reg).expect("ready");
+    assert!(
+        t.contains("already switched") && !t.contains("preflight 5."),
+        "{t}"
+    );
+}
+
+#[test]
+fn a_real_step_stops_on_the_preflight_before_it_writes_anything() {
+    let (r, reg) = imported();
+    claim(&r, 1, "ghost", "running");
+    let e = step(&reg, &r.env, "authority", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("preflight not ready") && e.contains("ghost"),
+        "{e}"
+    );
+    assert!(
+        phase(&r.env, "authority").is_none(),
+        "no record was written"
+    );
+    assert!(!tombstone::is_tombstone(&r.auth()));
+}

@@ -51,6 +51,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 use zeroize::{Zeroize as _, Zeroizing};
 
+use super::authority_preflight::{Preflight, run as run_preflight};
 use super::secrets_back::{self, OsStore};
 use super::{Env, Module, Opts, SourceLock, marker, tombstone};
 use crate::AuthorityOptions;
@@ -232,7 +233,7 @@ const CHANGED: &str =
 /// The slots of serve.db's old vault records that the core's envelope does not hold yet. The host moves them at its first
 /// unlock (M2-7) and leaves the old rows in place, so a row counts only while its slot is missing from the envelope; an
 /// old-format record whose key cannot be read stays unmoved for good. `None`: there is no serve.db (or no `kv` table).
-fn unmoved_vault_rows(ctx: &Ctx, core: &Connection) -> Result<Option<Vec<String>>> {
+pub(super) fn unmoved_vault_rows(ctx: &Ctx, core: &Connection) -> Result<Option<Vec<String>>> {
     let db = serve_db(ctx);
     if !db.exists() {
         return Ok(None);
@@ -753,6 +754,41 @@ impl Module for AuthorityModule {
             *self.imported.borrow_mut() = Some(before);
         }
         Ok(rep.lines)
+    }
+
+    fn preflight(
+        &self,
+        env: &Env,
+        import: Option<&Result<Vec<String>>>,
+    ) -> Result<Option<Preflight>> {
+        let switched = super::state::read(&env.layout, "authority")?
+            .is_some_and(|s| s.phase == super::state::Phase::Switched);
+        if switched {
+            return Ok(Some(Preflight {
+                items: Vec::new(),
+                notes: vec![
+                    "preflight: authority is already switched; the core is the only store, nothing to count"
+                        .to_owned(),
+                ],
+            }));
+        }
+        let db = env
+            .layout
+            .db
+            .exists()
+            .then(|| {
+                Connection::open_with_flags(
+                    &env.layout.db,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                )
+                .map_err(|e| Error::Io(format!("authority: core.db cannot be read: {e}")))
+            })
+            .transpose()?;
+        let refusal = import
+            .and_then(|r| r.as_ref().err())
+            .map(ToString::to_string);
+        // A real step has no import to ask yet, and its own import refuses by itself.
+        run_preflight(self, env, refusal, db.as_ref(), import.is_some()).map(Some)
     }
 
     fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
