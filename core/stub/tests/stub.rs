@@ -3,7 +3,7 @@
 #![cfg(unix)]
 
 use kith_stub::{Taken, take};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -49,12 +49,16 @@ fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
     }
 }
 
+/// One line of the child's stdout, read a byte at a time: a `BufReader` made per call could take the next line into
+/// its buffer and drop it with itself (two pids printed together lost the second).
 fn first_line(child: &mut Child) -> String {
-    let mut s = String::new();
-    BufReader::new(child.stdout.as_mut().unwrap())
-        .read_line(&mut s)
-        .unwrap();
-    s.trim().to_string()
+    let out = child.stdout.as_mut().unwrap();
+    let mut line = Vec::new();
+    let mut b = [0u8; 1];
+    while out.read(&mut b).unwrap() == 1 && b[0] != b'\n' {
+        line.push(b[0]);
+    }
+    String::from_utf8(line).unwrap().trim().to_string()
 }
 
 fn kill(pid: i32, sig: i32) {
