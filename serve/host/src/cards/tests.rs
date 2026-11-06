@@ -212,6 +212,26 @@ async fn secrets_and_logins_are_denied_with_no_card() {
     assert!(!d.allow && r.hub.store.cards_open(None).is_empty());
 }
 
+/// A `kith ask` that ended (Stop, a revoke, a timeout, a chain end) leaves no open card behind: the card its run parked on
+/// is withdrawn, a card of another ask is left alone.
+#[tokio::test]
+async fn an_ended_asks_open_card_is_withdrawn_and_another_asks_is_not() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let reply = |id: &str| Some(crate::runauth::AskReply { to: id.into(), asked_by: None });
+    let call = ask(&r.hub, ask_identity("house", "s1", reply("ask-1")), "Bash", json!({"command": "ls /etc"}));
+    let card = shown(&r.hub).await;
+    assert_eq!(card.reply_to.as_deref(), Some("ask-1"));
+    withdraw_asks(&r.hub, &["ask-2"]);
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Live, "another ask's end leaves it");
+    withdraw_asks(&r.hub, &["ask-1"]);
+    let d = call.await.unwrap();
+    assert!(!d.allow && d.message.contains("stopped"), "{d:?}");
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn);
+    assert_eq!(entry_status(&r.hub, &card), "cancelled");
+    assert!(r.hub.store.cards_open(None).is_empty(), "no open card is left");
+}
+
 #[tokio::test]
 async fn a_guests_card_goes_to_the_owner_a_members_to_themself_and_a_revoke_applies_at_answer_time() {
     let r = Rig::new().await;
