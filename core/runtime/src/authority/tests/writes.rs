@@ -1694,8 +1694,9 @@ fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched_or
         assert!(e.contains("not switched"), "{e}");
         assert_eq!(rows(&mut rig), 0);
     }
-    // A damaged record counts as not switched.
-    std::fs::write(state::path(&layout, "authority").unwrap(), "garbage").unwrap();
+    // A damaged record refuses a grant, no row changed.
+    let damage = || std::fs::write(state::path(&layout, "authority").unwrap(), "garbage").unwrap();
+    damage();
     assert!(rig.call("people.grant", &marked).is_err());
     assert_eq!(rows(&mut rig), 0);
     // An unmarked write (kith-auth's mirror, the terminal) is as it was, whatever the phase.
@@ -1716,6 +1717,18 @@ fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched_or
     assert_eq!(rows(&mut rig), 0);
     rig.call("people.revoke", &rm).unwrap();
     assert_eq!(rows(&mut rig), 0);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // A damaged record takes a removal (access only goes away; a retry changes nothing) and still refuses a grant.
+    damage();
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    let e = rig.call("people.grant", &marked).unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
+    assert_eq!(rows(&mut rig), 0);
+    phase(Phase::RollingBack);
     rig.call("people.grant", &marked).unwrap();
     assert_eq!(rows(&mut rig), 1);
     // Once the rollback is done (no record) the same marked write is refused again, a suspend among them.

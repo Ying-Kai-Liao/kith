@@ -605,7 +605,7 @@ pub async fn owner_call(method: &'static str, mut params: Value, repeatable: boo
 
 /// What a kith-auth call comes to in the core: the `people.*` method and its params, or None for a call the core has no
 /// method for (a switched host refuses those; it never runs kith-auth on a tombstone).
-fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
+fn core_form(args: &[&str]) -> Option<(CoreMethod, Value)> {
     let settings = |from: usize, keys: &[&str]| -> Option<Value> {
         let mut m = serde_json::Map::new();
         for a in &args[from..] {
@@ -615,53 +615,87 @@ fn core_form(args: &[&str]) -> Option<(&'static str, Value)> {
         Some(Value::Object(m))
     };
     Some(match args {
-        ["people", "--json" | _] => ("people.listPeople", json!({})),
-        ["retired", id] => ("people.retired", json!({"id": id})),
-        ["member", agent, person, "--rm"] => ("people.revoke", json!({"person": person, "agent": agent})),
+        ["people", "--json" | _] => (CoreMethod::ListPeople, json!({})),
+        ["retired", id] => (CoreMethod::Retired, json!({"id": id})),
+        ["member", agent, person, "--rm"] => (CoreMethod::Revoke, json!({"person": person, "agent": agent})),
         ["member", agent, person, ..] => {
             let mut p = settings(3, &["preset", "mode", "budget", "deny", "model"])?;
             p["person"] = (*person).into();
             p["agent"] = (*agent).into();
-            ("people.grant", p)
+            (CoreMethod::Grant, p)
         }
-        ["bot", id, "--rm"] => ("people.removeBot", json!({"id": id})),
+        ["bot", id, "--rm"] => (CoreMethod::RemoveBot, json!({"id": id})),
         ["bot", id, "--of", owner, ..] => {
             let mut p = settings(4, &["name", "provider"])?;
             p["id"] = (*id).into();
             p["of"] = (*owner).into();
-            ("people.addBot", p)
+            (CoreMethod::AddBot, p)
         }
-        ["person", id, "--rm", "--unused"] => ("people.removePerson", json!({"id": id, "unused": true})),
-        ["person", id, "--revoke", "--local"] => ("people.suspend", json!({"id": id})),
-        ["person", id, "--unrevoke", "--local"] => ("people.undo", json!({"id": id})),
-        ["person", id, "--clear-temp"] => ("people.clearTemp", json!({"id": id})),
+        ["person", id, "--rm", "--unused"] => (CoreMethod::RemovePerson, json!({"id": id, "unused": true})),
+        ["person", id, "--revoke", "--local"] => (CoreMethod::Suspend, json!({"id": id})),
+        ["person", id, "--unrevoke", "--local"] => (CoreMethod::Undo, json!({"id": id})),
+        ["person", id, "--clear-temp"] => (CoreMethod::ClearTemp, json!({"id": id})),
         ["person", id, ..] => {
             let mut p = settings(2, &["name", "lang", "tz"])?;
             p["id"] = (*id).into();
-            ("people.addPerson", p)
+            (CoreMethod::AddPerson, p)
         }
         _ => return None,
     })
 }
 
-/// The `people.*` writes that carry `viaSwitch`, so the core refuses them once authority is back on auth.json and the
-/// host runs them through kith-auth instead. `people.clearTemp` is not here on purpose: it only clears a guest's
-/// temporary grants and a retry on kith-auth would find nothing to clear. A new write method must be put in this list or
-/// in [`SWITCH_UNMARKED`] (a test fails until it is).
-const SWITCH_MARKED: &[&str] = &[
-    "people.revoke",
-    "people.grant",
-    "people.removeBot",
-    "people.addBot",
-    "people.removePerson",
-    "people.suspend",
-    "people.undo",
-    "people.addPerson",
-];
+/// Every `people.*` method `core_form` routes to. A new arm of `core_form` needs a variant here, and a variant needs a
+/// decision in [`CoreMethod::marked`] (an exhaustive match), so a method added without one does not compile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CoreMethod {
+    ListPeople,
+    Retired,
+    Revoke,
+    Grant,
+    RemoveBot,
+    AddBot,
+    RemovePerson,
+    Suspend,
+    Undo,
+    ClearTemp,
+    AddPerson,
+}
 
-/// The writes `core_form` produces that do not carry the marker, and the reads.
-#[cfg(test)]
-const SWITCH_UNMARKED: &[&str] = &["people.clearTemp", "people.listPeople", "people.retired"];
+impl CoreMethod {
+    fn name(self) -> &'static str {
+        match self {
+            Self::ListPeople => "people.listPeople",
+            Self::Retired => "people.retired",
+            Self::Revoke => "people.revoke",
+            Self::Grant => "people.grant",
+            Self::RemoveBot => "people.removeBot",
+            Self::AddBot => "people.addBot",
+            Self::RemovePerson => "people.removePerson",
+            Self::Suspend => "people.suspend",
+            Self::Undo => "people.undo",
+            Self::ClearTemp => "people.clearTemp",
+            Self::AddPerson => "people.addPerson",
+        }
+    }
+
+    /// Whether the write carries `viaSwitch`, so the core refuses it once authority is back on auth.json and the host
+    /// runs it through kith-auth instead. `people.clearTemp` is unmarked on purpose: it only removes the guest's
+    /// `<machine>/run/t/<id>` folders and touches no auth row, so there is nothing for a rollback to lose or for
+    /// kith-auth to repeat. The reads are unmarked too.
+    fn marked(self) -> bool {
+        match self {
+            Self::Revoke
+            | Self::Grant
+            | Self::RemoveBot
+            | Self::AddBot
+            | Self::RemovePerson
+            | Self::Suspend
+            | Self::Undo
+            | Self::AddPerson => true,
+            Self::ClearTemp | Self::ListPeople | Self::Retired => false,
+        }
+    }
+}
 
 /// The host's kith-auth calls for people, members and bots (`people.rs`, `botguests.rs`): kith-auth while the host is not
 /// switched (as it was), the matching `people.*` method of the core once it is ([`switched`]). A switched host whose core
@@ -679,13 +713,14 @@ pub(crate) async fn run_auth_noted(bin: &Path, args: &[&str]) -> anyhow::Result<
     if !switched_now() {
         return crate::remote::account::run_noted(bin, args).await;
     }
-    let Some((method, params)) = core_form(args) else {
+    let Some((core_method, params)) = core_form(args) else {
         anyhow::bail!("`kith-auth {}` has no core method: authority is on the core", args.join(" "));
     };
+    let method = core_method.name();
     // A read repeats harmlessly; a write is never sent twice.
-    let read = matches!(method, "people.listPeople" | "people.retired");
+    let read = matches!(core_method, CoreMethod::ListPeople | CoreMethod::Retired);
     let mut params = params;
-    if SWITCH_MARKED.contains(&method) {
+    if core_method.marked() {
         // The look at auth.json above and this write are two steps. The core checks the cutover phase inside the
         // write's transaction and refuses a marked write unless it is `switched` or `rollingBack` (a stuck rollback
         // keeps the tombstone, so removals must work). The lifetime lock is what excludes a rollback while the daemon
@@ -735,28 +770,26 @@ mod gate_tests {
 
     #[test]
     fn the_marked_writes_are_exactly_the_intended_people_writes() {
-        // Every kith-auth call shape core_form knows, one per arm.
-        let shapes: &[&[&str]] = &[
-            &["people", "--json"],
-            &["retired", "x"],
-            &["member", "house", "sam", "--rm"],
-            &["member", "house", "sam", "preset=guest"],
-            &["bot", "b", "--rm"],
-            &["bot", "b", "--of", "kai", "name=B"],
-            &["person", "p", "--rm", "--unused"],
-            &["person", "p", "--revoke", "--local"],
-            &["person", "p", "--unrevoke", "--local"],
-            &["person", "p", "--clear-temp"],
-            &["person", "p", "name=P"],
+        // Every kith-auth call shape core_form knows, one per arm. A new method needs a CoreMethod variant, which
+        // `marked` forces a decision for at compile time; this checks the decisions themselves.
+        let shapes: &[(&[&str], CoreMethod, bool)] = &[
+            (&["people", "--json"], CoreMethod::ListPeople, false),
+            (&["retired", "x"], CoreMethod::Retired, false),
+            (&["member", "house", "sam", "--rm"], CoreMethod::Revoke, true),
+            (&["member", "house", "sam", "preset=guest"], CoreMethod::Grant, true),
+            (&["bot", "b", "--rm"], CoreMethod::RemoveBot, true),
+            (&["bot", "b", "--of", "kai", "name=B"], CoreMethod::AddBot, true),
+            (&["person", "p", "--rm", "--unused"], CoreMethod::RemovePerson, true),
+            (&["person", "p", "--revoke", "--local"], CoreMethod::Suspend, true),
+            (&["person", "p", "--unrevoke", "--local"], CoreMethod::Undo, true),
+            (&["person", "p", "--clear-temp"], CoreMethod::ClearTemp, false),
+            (&["person", "p", "name=P"], CoreMethod::AddPerson, true),
         ];
-        let methods: std::collections::BTreeSet<&str> = shapes.iter().map(|a| core_form(a).unwrap().0).collect();
-        let marked: std::collections::BTreeSet<&str> = SWITCH_MARKED.iter().copied().collect();
-        let unmarked: std::collections::BTreeSet<&str> = SWITCH_UNMARKED.iter().copied().collect();
-        assert!(marked.is_disjoint(&unmarked));
-        // Set equality: a method added to core_form must be decided one way or the other.
-        let decided: std::collections::BTreeSet<&str> = marked.union(&unmarked).copied().collect();
-        assert_eq!(methods, decided);
-        assert!(!marked.contains("people.clearTemp"));
+        for (args, want, marked) in shapes {
+            let (got, _) = core_form(args).unwrap();
+            assert_eq!(got, *want, "{args:?}");
+            assert_eq!(got.marked(), *marked, "{args:?}");
+        }
     }
 
     #[test]

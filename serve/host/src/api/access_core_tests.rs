@@ -516,7 +516,7 @@ async fn a_removal_during_a_stuck_rollback_is_done_by_the_core_and_repeats_harml
     // The rollback failed half-way: RollingBack and the tombstone still in auth.json.
     core.phase("rolling-back");
     super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
-    assert!(core.rows().is_empty(), "the core took the removal, not kith-auth (which would exit 3)");
+    assert!(core.rows().is_empty(), "the core took the removal (a kith-auth run would leave the core's row)");
     // A retry changes nothing and still answers.
     super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
     assert_eq!(core.rows().len(), 0);
@@ -549,6 +549,12 @@ async fn a_write_decides_from_a_fresh_stat_not_the_read_cache() {
     core.switched();
     assert!(!super::authority::switched());
     super::authority::run_auth_noted(&r.bin, &["member", "house", "sam", "preset=guest"]).await.unwrap();
+    assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
+    // run_auth decides the same way: stale-false on a tombstoned host, the write still goes to the core (a kith-auth
+    // run on the tombstone would fail, and would leave the core's row).
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+    assert!(core.rows().is_empty(), "run_auth wrote to the core");
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "preset=guest"]).await.unwrap();
     assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
     // Right after a rollback the cache still says "switched" but the file is back: the write goes to kith-auth.
     let auth = core.tmp.path().join("auth.json");
