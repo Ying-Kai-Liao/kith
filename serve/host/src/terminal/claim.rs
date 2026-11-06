@@ -359,6 +359,101 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
     ended
 }
 
+/// Ends the processes of core claims a revoke sent to `ending` (`people.suspend` / `people.removePerson` answer them as
+/// `kill`: pid and start stamp). Nothing in the daemon signals them: its holder link kills only what it started itself or
+/// an old instance's, and `end_gone` waits for the pid to leave. Like [`sweep`]: only a process positively the one that
+/// took the claim (a reused pid or a pid already gone is left alone, so a retried revoke kills nothing twice), its
+/// descendants first, SIGTERM then SIGKILL after `grace`. A claim with no recorded start is never signalled: the core
+/// may hand one out (an imported terminal claim carries none) and a pid alone could be a reused one. The SIGKILL goes
+/// only to what still has the start it had when found, and to the claimer's process group when it leads one (a session
+/// leader's group holds what it started, as the channels' `end_groups` does). Blocking. Returns the pids it signalled.
+pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -> Vec<u32> {
+    let me = std::process::id();
+    // (pid, start when found): the second signal is sent only to a process that still has it.
+    let mut victims: Vec<(u32, Option<String>)> = Vec::new();
+    // Groups the claimer led when it was verified (decided then: by the SIGKILL it is dead).
+    let mut groups: Vec<u32> = Vec::new();
+    for (pid, started) in held {
+        if started.as_deref().is_none_or(|s| s.trim().is_empty()) {
+            tracing::warn!(
+                pid,
+                "a claim with no recorded start was not ended: its pid alone cannot tell it from a reused one"
+            );
+            continue;
+        }
+        let claim = Claim {
+            pid: *pid,
+            proc_start: started.clone(),
+            at: String::new(),
+            kind: Kind::Other,
+            takeover: false,
+            person: None,
+            agent: None,
+        };
+        // A start that cannot be compared is not enough to signal: `is_claimer` wants a positive match.
+        if *pid == me || *pid <= 1 || !pid_runs(*pid) || !claim.is_claimer() {
+            continue;
+        }
+        for p in descendants(*pid).into_iter().chain([*pid]) {
+            if p != me && !victims.iter().any(|(v, _)| *v == p) {
+                victims.push((p, proc_start(p)));
+            }
+        }
+        if leads_group(*pid) && !groups.contains(pid) {
+            groups.push(*pid);
+        }
+    }
+    let pids: Vec<u32> = victims.iter().map(|(p, _)| *p).collect();
+    signal(&pids, libc::SIGTERM);
+    signal_groups(&groups, libc::SIGTERM);
+    let deadline = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < deadline && pids.iter().any(|p| pid_runs(*p)) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let same = |pid: u32, found: &Option<String>| {
+        pid_runs(pid)
+            && match (found, proc_start(pid)) {
+                (Some(then), Some(now)) => {
+                    kith_kernel::procstart::comparable(then, &now) && kith_kernel::procstart::same_process(then, &now)
+                }
+                _ => false,
+            }
+    };
+    let left: Vec<u32> = victims.iter().filter(|(p, s)| same(*p, s)).map(|(p, _)| *p).collect();
+    signal(&left, libc::SIGKILL);
+    // Whether or not the leader is still alive: POSIX does not reuse a pid as a process or group id while a group with
+    // that id exists, and a group that is gone answers ESRCH, which is ignored. A nohup'd or double-forked child of the
+    // claimer stays in the group and goes with it.
+    signal_groups(&groups, libc::SIGKILL);
+    pids
+}
+
+/// Whether `pid` leads its own process group (checked right after its start was verified). Never the host's own group:
+/// a host started from the claimer's shell would be in it.
+#[cfg(unix)]
+fn leads_group(pid: u32) -> bool {
+    // SAFETY: getpgid(2) and getpgrp(2) only read.
+    libc::pid_t::try_from(pid).is_ok_and(|p| unsafe { libc::getpgid(p) == p && libc::getpgrp() != p })
+}
+
+#[cfg(not(unix))]
+fn leads_group(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn signal_groups(groups: &[u32], sig: libc::c_int) {
+    for g in groups {
+        if let Ok(p) = libc::pid_t::try_from(*g) {
+            // SAFETY: killpg only sends a signal; ESRCH for a group that is gone is ignored.
+            unsafe { libc::killpg(p, sig) };
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_groups(_groups: &[u32], _sig: i32) {}
+
 #[cfg(unix)]
 fn signal(pids: &[u32], sig: libc::c_int) {
     for pid in pids {
