@@ -611,7 +611,10 @@ fn read_budgets(p: &Paths, agent: &str) -> Option<Value> {
     if code != 0 {
         return None;
     }
-    let budgets = serde_json::from_str::<Value>(&out).ok()?.get("budgets")?.clone();
+    let budgets = serde_json::from_str::<Value>(&out)
+        .ok()?
+        .get("budgets")?
+        .clone();
     budgets.is_object().then_some(budgets)
 }
 
@@ -620,7 +623,11 @@ fn run_code(mut cmd: Command, input: Option<String>, limit: Wait) -> Option<(i32
     use std::io::{Read as _, Write as _};
     use std::process::Stdio;
     let mut child = cmd
-        .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()

@@ -267,7 +267,11 @@ fn kernel_with_auth(p: &Paths, code: i32, body: &str) {
     let bin = p.kernel.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let f = bin.join("kith-auth");
-    std::fs::write(&f, format!("#!/bin/sh\nprintf '%s' '{body}'\nexit {code}\n")).unwrap();
+    std::fs::write(
+        &f,
+        format!("#!/bin/sh\nprintf '%s' '{body}'\nexit {code}\n"),
+    )
+    .unwrap();
     std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
@@ -288,7 +292,11 @@ fn members_says_when_the_budgets_cannot_be_read() {
         kernel_with_auth(&p, code, body);
         let bad = members(&p);
         assert_eq!(bad["budgets"], json!({}), "exit {code}");
-        assert_eq!(bad["budgetsError"], json!("can't read budgets"), "exit {code}");
+        assert_eq!(
+            bad["budgetsError"],
+            json!("can't read budgets"),
+            "exit {code}"
+        );
     }
     let _ = std::fs::remove_dir_all(root);
 }
