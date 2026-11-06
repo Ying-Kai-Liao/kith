@@ -101,6 +101,15 @@ impl Core {
     /// auth.json is a tombstone: the core is the only store, with or without the env.
     pub(super) fn switched(&self) {
         self.switched_over(&self.tmp.path().join("auth.json"));
+        self.phase("switched");
+    }
+
+    /// The core's cutover record for authority (`state=` of `core/cutover/authority.switch`): what it checks a
+    /// `viaSwitch` write against.
+    pub(super) fn phase(&self, state: &str) {
+        let dir = self.tmp.path().join("machine/core/cutover");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("authority.switch"), format!("state={state}\nat=1\n")).unwrap();
     }
 
     /// The tombstone is the file `auth` (the one kith-auth reads in the rig), so anything that still runs kith-auth finds it.
@@ -122,6 +131,7 @@ impl Drop for Core {
     fn drop(&mut self) {
         crate::api::authority::TEST_GATE_SHUT.store(false, std::sync::atomic::Ordering::SeqCst);
         *crate::api::authority::TEST_AUTH_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         *TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.stop();
     }
@@ -409,4 +419,83 @@ async fn a_tombstone_file_is_what_switches_the_host_and_taking_it_away_switches_
     assert!(super::authority::switched());
     std::fs::remove_dir(&auth).unwrap();
     assert!(!super::authority::switched(), "missing is the unswitched rules");
+}
+
+#[tokio::test]
+async fn a_revoke_just_after_a_rollback_reaches_the_file_the_host_is_back_on() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    core.switched();
+    // The cached read still says switched (the 2 s window after `kith rollback authority`), the file is plain again.
+    *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap() = Some(true);
+    let auth = crate::api::authority::TEST_AUTH_FILE.lock().unwrap().clone().unwrap();
+    std::fs::remove_file(&auth).unwrap();
+    std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
+    assert!(super::authority::switched() && !super::authority::switched_now(), "reads are stale, writes are not");
+    assert!(r.allowed("sam", "house"));
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+    assert!(!r.allowed("sam", "house"), "kith-auth took the revoke");
+    // A second write in quick succession goes the same way.
+    super::authority::run_auth_noted(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_write_just_after_the_switch_goes_to_the_core_not_to_kith_auth() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap() = Some(false);
+    core.switched();
+    assert!(!super::authority::switched() && super::authority::switched_now());
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "preset=guest"]).await.unwrap();
+    assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
+}
+
+#[tokio::test]
+async fn the_core_refuses_a_switched_route_write_once_the_phase_is_not_switched() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    let marked = |preset: &str| json!({"person": "sam", "agent": "house", "preset": preset, "viaSwitch": true});
+    // No record at all (rolled back and cleared): refused, nothing written.
+    assert!(core.ask("people.grant", marked("guest")).is_none());
+    assert_eq!(core.rows().len(), 0);
+    core.phase("switched");
+    assert!(core.ask("people.grant", marked("guest")).is_some());
+    assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
+    core.phase("rolling-back");
+    assert!(core.ask("people.grant", marked("member")).is_none(), "RollingBack");
+    assert_eq!(core.rows(), [("house".to_owned(), "guest".to_owned())]);
+    // Unmarked (kith-auth's mirror, the terminal) is as it was.
+    let plain = json!({"person": "sam", "agent": "house", "preset": "member"});
+    assert!(core.ask("people.grant", plain).is_some());
+    assert_eq!(core.rows(), [("house".to_owned(), "member".to_owned())]);
+}
+
+#[tokio::test]
+async fn the_host_falls_back_to_kith_auth_when_the_core_says_the_rollback_got_there_first() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let core = Core::start(&r);
+    core.on();
+    core.switched();
+    // The host's look at the file saw the tombstone; the rollback then wrote its phase (the file is not back yet in
+    // this test, as in the race: kith-auth is the rig's own file).
+    core.phase("rolling-back");
+    assert!(r.allowed("sam", "house"));
+    super::authority::run_auth(&r.bin, &["member", "house", "sam", "--rm"]).await.unwrap();
+    assert!(!r.allowed("sam", "house"), "the plain file got the revoke");
+}
+
+#[tokio::test]
+async fn a_failed_revoke_while_unswitched_still_cuts_the_person_off() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let nowhere = r.dir.join("no-such-kith-auth");
+    assert!(super::people::local_revoke(&r.hub, &nowhere, "sam", true).await.is_err());
+    assert!(r.hub.store.suspended_people().unwrap().contains(&"sam".to_owned()), "cut_off ran");
 }
