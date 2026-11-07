@@ -391,7 +391,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                     end(hub, &conv.id, ConvState::Ended, EndedWhy::Quiet)?;
                     break;
                 }
-                let since_user = since_last_user_message(hub, &lane)?;
+                let since_user = since_last_user_message(hub, conv)?;
                 let mut speakers: Vec<String> =
                     responders(&members, &since_user).into_iter().map(|m| m.id.clone()).collect();
                 // The person message this round answers: an outside bot that joined after it never saw it.
@@ -789,12 +789,15 @@ fn outside_member(guest: &BotGuest) -> BotConfig {
     cfg
 }
 
-/// The lane's messages since the user last wrote there, that message included.
-/// Late replies (stored after a newer message moved the lane on) are left out: their
-/// @-mentions wake nobody (C3).
-fn since_last_user_message(hub: &Hub, lane: &Lane) -> Result<Vec<Entry>> {
-    let mut recent = hub.store.messages_after(lane, 0, HISTORY_LINES)?;
-    recent.retain(|e| e.data["late"] != true);
+/// The lane's messages since a person last wrote there, that message included, that pick who answers in `conv`: person
+/// messages, and lines tagged with `conv` and its epoch that aren't late. A reply to an older conversation (late, or
+/// stored between the next message and its conversation opening) and an untagged line wake nobody (C3).
+fn since_last_user_message(hub: &Hub, conv: &Conversation) -> Result<Vec<Entry>> {
+    let mut recent = hub.store.messages_after(&conv.lane, 0, HISTORY_LINES)?;
+    recent.retain(|e| {
+        is_person_message(e)
+            || (e.data["conversation"] == conv.id.as_str() && e.data["epoch"] == conv.epoch && e.data["late"] != true)
+    });
     let start = recent.iter().rposition(is_person_message).unwrap_or(0);
     Ok(recent[start..].to_vec())
 }
@@ -949,12 +952,44 @@ mod tests {
         hub.add_entry(&main, EntryKind::Agent, 2, &json!({"text": "hi", "author": "a"})).unwrap();
         let guest = json!({"text": "psst", "sender": {"botId": room.bg.as_str(), "name": "Grok"}});
         let ask = hub.add_entry(&main, EntryKind::User, 3, &guest).unwrap();
-        let since = since_last_user_message(hub, &main).unwrap();
+        let conv = hub.store.open_conversation(&main, 3, "owner").unwrap();
+        let since = since_last_user_message(hub, &conv).unwrap();
         assert_eq!(since.first().map(|e| e.id.clone()), Some(user.id), "the guest's ask is not the user's message");
         assert_eq!(
             line(hub, &hub.store.bot(&room.group).unwrap().unwrap().config, &ask, &bot("a", "Alice")),
             "Grok (bot guest): psst"
         );
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn only_person_messages_and_this_conversations_lines_pick_who_answers() {
+        let room = Room::new();
+        let main = Lane::main(&room.group);
+        let hub = &room.hub;
+        let older = hub.store.open_conversation(&main, 3, "owner").unwrap();
+        hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "@a start"})).unwrap();
+        // The next person message is stored; a reply to the older conversation lands before the newer one opens (send
+        // stores the message, then start opens the conversation), so nothing marked it late.
+        hub.add_entry(&main, EntryKind::User, 2, &json!({"text": "@a go on"})).unwrap();
+        let stray =
+            json!({"text": "@b look", "author": "a", "final": true, "conversation": older.id, "epoch": older.epoch});
+        hub.add_entry(&main, EntryKind::Agent, 2, &stray).unwrap();
+        let conv = hub.store.open_conversation(&main, 3, "owner").unwrap();
+        // An outside bot's post naming this conversation but another epoch is not this conversation's line either.
+        let guest = json!({"text": "@b me too", "sender": {"botId": room.bg.as_str()}, "conversation": conv.id,
+            "epoch": conv.epoch + 1});
+        hub.add_entry(&main, EntryKind::User, 3, &guest).unwrap();
+        let members = [bot("a", "a"), bot("b", "b")];
+        let who = |since: &[Entry]| -> Vec<String> {
+            responders(&members, since).into_iter().map(|m| m.id.clone()).collect()
+        };
+        assert_eq!(who(&since_last_user_message(hub, &conv).unwrap()), ["a"], "the stray @b wakes nobody");
+        // A reply of this conversation does pick who answers next.
+        let own =
+            json!({"text": "@b your turn", "author": "a", "final": true, "conversation": conv.id, "epoch": conv.epoch});
+        hub.add_entry(&main, EntryKind::Agent, 3, &own).unwrap();
+        assert_eq!(who(&since_last_user_message(hub, &conv).unwrap()), ["a", "b"]);
         room.shutdown().await;
     }
 
@@ -2503,6 +2538,7 @@ mod tests {
         );
         let fresh = replies.iter().find(|e| e.data["late"].is_null()).expect("a current reply");
         assert!(fresh.data["conversation"].is_string() && fresh.data["lateWhy"].is_null());
+        assert!(fresh.data["epoch"].is_u64(), "a room reply names its epoch: {fresh:?}");
         room.shutdown().await;
     }
 }
