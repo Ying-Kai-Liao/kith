@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# kith-ci-names-check — every kernel/tests/kith-*-check is run by CI: named in .github/workflows/ci.yml, or listed in
+# kernel/tests/ci-exempt.txt with the reason it can't run there. A check dropped from ci.yml, or a new one never added,
+# fails here instead of going quiet. An exempt line for a check that is gone, or that ci.yml names after all, fails too.
+#
+#   kernel/tests/kith-ci-names-check              a second; exits 1 naming each check CI doesn't run
+#   kernel/tests/kith-ci-names-check --selftest   drops one check from a copy of ci.yml and expects this check to fail
+#   kernel/tests/kith-ci-names-check --ci FILE    check FILE instead of the repo's ci.yml
+set -uo pipefail
+
+TESTS="$(cd "$(dirname "$0")" && pwd)"
+CI="$TESTS/../../.github/workflows/ci.yml"
+EXEMPT="$TESTS/ci-exempt.txt"
+
+if [ "${1:-}" = "--selftest" ]; then
+  T=$(mktemp -d "${TMPDIR:-/tmp}/kith-ci-names-check.XXXXXX")
+  trap 'rm -rf "$T"' EXIT
+  grep -v 'kernel/tests/kith-footguns-check' "$CI" > "$T/ci.yml"
+  out=$("$0" --ci "$T/ci.yml" 2>&1)
+  code=$?
+  if [ "$code" = 1 ] && printf '%s\n' "$out" | grep -q 'kith-footguns-check'; then
+    echo "ok   a check dropped from ci.yml fails the check, by name"
+  else
+    echo "FAIL a check dropped from ci.yml was not caught (exit $code): $out"
+    exit 1
+  fi
+  { cat "$EXEMPT"; printf 'kith-no-such-check gone\n'; } > "$T/exempt.txt"
+  out=$(EXEMPT_FILE="$T/exempt.txt" "$0" 2>&1)
+  code=$?
+  if [ "$code" = 1 ] && printf '%s\n' "$out" | grep -q 'kith-no-such-check'; then
+    echo "ok   an exempt line for a check that doesn't exist fails"
+  else
+    echo "FAIL a stale exempt line was not caught (exit $code): $out"
+    exit 1
+  fi
+  exit 0
+fi
+[ "${1:-}" = "--ci" ] && CI=$2
+EXEMPT=${EXEMPT_FILE:-$EXEMPT}
+
+# A check named only in a comment is not run, so comment lines don't count.
+named() { grep -qE "^[^#]*kernel/tests/$1([^A-Za-z0-9_-]|\$)" "$CI"; }
+exempt() { grep -qE "^$1([[:space:]]|\$)" "$EXEMPT"; }
+
+failed=0
+for f in "$TESTS"/kith-*-check; do
+  n=$(basename "$f")
+  named "$n" || exempt "$n" || { echo "FAIL $n: not in ci.yml (add it to a job, or to ci-exempt.txt with why)"; failed=1; }
+done
+while read -r n reason; do
+  case "$n" in ''|'#'*) continue ;; esac
+  [ -e "$TESTS/$n" ] || { echo "FAIL $n: in ci-exempt.txt but there is no kernel/tests/$n"; failed=1; continue; }
+  named "$n" && { echo "FAIL $n: in ci-exempt.txt and named in ci.yml; drop the exempt line"; failed=1; }
+  [ -n "$reason" ] || { echo "FAIL $n: ci-exempt.txt gives no reason"; failed=1; }
+done < "$EXEMPT"
+[ "$failed" = 0 ] && echo "ok   every kernel/tests/kith-*-check is run by CI or exempt with a reason"
+exit "$failed"
