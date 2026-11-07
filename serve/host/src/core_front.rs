@@ -415,12 +415,6 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.revoke",
 ];
 
-/// The writes `core_call` runs in an embedded core when no daemon answers (the revoke stopgap before M2-23: a revoke made
-/// in kith-auth must reach the core even with `kith serve` stopped). The terminal methods need the daemon's sockets.
-#[cfg(unix)]
-const EMBEDDED_METHODS: &[&str] =
-    &["people.suspend", "people.undo", "people.removePerson", "people.removeBot", "people.revoke"];
-
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
 /// Inside kith-auth's `CORE_CALL_SECS`, which it waits under auth.json.lock.
 #[cfg(unix)]
@@ -515,7 +509,9 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
             4
         }
         #[cfg(unix)]
-        kith_core::Reached::NoDaemon if EMBEDDED_METHODS.contains(&method) => {
+        // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
+        // The terminal methods need the daemon's sockets.
+        kith_core::Reached::NoDaemon if kith_core::EMBEDDED_WRITES.contains(&method) => {
             core_call_embedded(&folders, method, &params)
         }
         kith_core::Reached::NoDaemon => {
