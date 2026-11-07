@@ -4,7 +4,7 @@
 //!
 //! | file                              | core.db                                                                          |
 //! |-----------------------------------|----------------------------------------------------------------------------------|
-//! | `<sid>.claim`, claimer alive      | a `running` claim row (`terminal` for `kind: "terminal"`, `external` for the rest)  |
+//! | `<sid>.claim`, claimer alive      | a `running` `external` claim row, whatever the file's kind (see below)             |
 //! |   `pid`, `procStart`              | `pid`, `pid_started` (a stamp or the old `ps` text, kept as written: the old text   |
 //! |                                   | reads unknown, so it ends only when the pid is gone, as `claims::end_gone` rules)   |
 //! |   `person`                        | `person` (empty when the file has none)                                            |
@@ -19,6 +19,10 @@
 //! - Idempotent: a conversation that already has a live claim row on the file's pid is left alone, and nothing is written
 //!   (not even a log row) when nothing is to be added. A live row on another pid is never replaced: it is listed.
 //! - A session that is no conversation in core.db (the transcripts import has not run) is skipped and listed.
+//! - Every row is `external`, a terminal's too (H1): no holder started these processes, so a holder's hello never ends
+//!   them (`release_unlisted` skips external claims) and only a revoke or a stop sends them a kill. A `terminal` row with
+//!   no holder instance would move to `ending` on the next holder change and the kill re-send would signal the owner's
+//!   own claude.
 
 use std::path::Path;
 
@@ -43,7 +47,6 @@ pub(crate) struct Report {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Wanted {
     sid: String,
-    external: bool,
     pid: i64,
     started: Option<String>,
     person: String,
@@ -91,7 +94,6 @@ fn read_files(state: &Path) -> Result<(Vec<Wanted>, Vec<String>)> {
         }
         wanted.push(Wanted {
             sid,
-            external: claim.kind != "terminal",
             pid,
             started: claim.proc_start,
             person: claim.person.unwrap_or_default(),
@@ -227,18 +229,13 @@ fn into(core: &mut Core, state: &Path, wanted: &[Wanted], rep: &mut Report) -> R
     let now = now_ms();
     for w in &add {
         let id = Core::next_claim_id(&tx)?;
-        let kind = if w.external { "external" } else { "terminal" };
         // An `external` row needs a start text; a file without one reads as an unknown start (empty), never as a match.
-        let started = if w.external {
-            Some(w.started.clone().unwrap_or_default())
-        } else {
-            w.started.clone()
-        };
+        let started = w.started.clone().unwrap_or_default();
         tx.execute(
             "INSERT INTO claims (claim_id, conversation, generation, kind, state, person, pid, pid_started,
                                  created_at, claimed_at, running_at)
-             VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?6, ?7, ?8, ?8, ?8)",
-            params![id, w.sid, generation, kind, w.person, w.pid, started, now],
+             VALUES (?1, ?2, ?3, 'external', 'running', ?4, ?5, ?6, ?7, ?7, ?7)",
+            params![id, w.sid, generation, w.person, w.pid, started, now],
         )?;
     }
     tx.execute(
