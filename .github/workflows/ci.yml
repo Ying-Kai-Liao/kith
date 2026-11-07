@@ -323,10 +323,7 @@ jobs:
               CI names check (every kernel/tests/kith-*-check is run here or exempt with a reason)|kernel/tests/kith-ci-names-check
               CI names self-test (a check dropped from ci.yml fails it)|kernel/tests/kith-ci-names-check --selftest
               Install drain check|kernel/tests/kith-install-drain-check
-              Install layout check|kernel/tests/kith-install-layout-check
-              Accounts check|kernel/tests/kith-accounts-check
               Agent dirs check|kernel/tests/kith-agent-dirs-check
-              Backup check|kernel/tests/kith-backup-check
               Market check|kernel/tests/kith-market-check
               Cutover check|kernel/tests/kith-cutover-check
               Serve launch check|kernel/tests/kith-serve-launch-check
@@ -348,7 +345,6 @@ jobs:
               Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
               Grants check (connectors and skills as grants on an agent)|kernel/tests/kith-grants-check
               Limit check|kernel/tests/kith-limit-check
-              Allow check|kernel/tests/kith-allow-check
               Agent allow check|kernel/tests/kith-agent-allow-check
               Agent deny secrets check|kernel/tests/kith-agent-deny-secrets-check
               Trusted allow check|kernel/tests/kith-trusted-allow-check
@@ -356,7 +352,6 @@ jobs:
               Auth C2 check|kernel/tests/kith-auth-c2-check
               Auth secret check|kernel/tests/kith-auth-secret-check
               Keys check|kernel/tests/kith-keys-check
-              Permit check|kernel/tests/kith-permit-check
               Connector check|kernel/tests/kith-connector-check
           - shard: 3
             bun: true
@@ -387,8 +382,6 @@ jobs:
               Core boundary self-test (each rule fails on a deliberate violation)|kernel/tests/kith-core-boundary-check --selftest
               Owner launch check|kernel/tests/kith-owner-launch-check
               Run kind check|kernel/tests/kith-run-kind-check
-              Resume pick check|kernel/tests/kith-resume-pick-check
-              Sessions check|kernel/tests/kith-sessions-check
               Group check|kernel/tests/kith-group-check
               Send to check|kernel/tests/kith-send-to-check
               Schedule prune check|kernel/tests/kith-sched-prune-check

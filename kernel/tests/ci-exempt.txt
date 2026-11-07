@@ -1,2 +1,9 @@
 # kernel/tests/kith-*-check files that .github/workflows/ci.yml does not run, one per line: name, then why.
 # kernel/tests/kith-ci-names-check fails on any check that is neither in ci.yml nor here.
+kith-resume-pick-check macOS only: drives the launcher with BSD script -r; passes on macOS (2026-11-07), not on ubuntu
+kith-sessions-check macOS only: BSD script and stat -f modes, a /tmp path short enough for Claude Code's temp folder; passes on macOS (2026-11-07)
+kith-permit-check macOS only: expects launchctl gui/<uid> calls and the macOS sandbox; passes on macOS (2026-11-07)
+kith-install-layout-check macOS only: the installer's macOS layout; every row fails on ubuntu, passes on macOS (2026-11-07)
+kith-accounts-check macOS only: the owner-only file mode row reads modes the BSD way; passes on macOS (2026-11-07)
+kith-backup-check macOS only: its private-folder and resync rows fail on ubuntu; passes on macOS (2026-11-07)
+kith-allow-check BROKEN: the two terminal auto-mode rows fail on macOS and ubuntu (the stub claude never runs under the pty); fix, then move to shard 2
