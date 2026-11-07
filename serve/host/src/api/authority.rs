@@ -488,12 +488,12 @@ fn auth_file_at(auth: &Path) -> AuthFile {
 /// `kith_tombstone`). Only a missing file is plain without reading; one that exists but can't be opened or read is
 /// [`AuthFile::Unreadable`]. Bytes that aren't UTF-8 or JSON are no tombstone: kith-auth refuses those on its own.
 fn read_auth_file(auth: &Path) -> AuthFile {
+    const KEY: &[u8] = b"\"kith_tombstone\"";
     let bytes = match std::fs::read(auth) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AuthFile::Plain,
         Err(_) => return AuthFile::Unreadable,
     };
-    const KEY: &[u8] = b"\"kith_tombstone\"";
     if !bytes.windows(KEY.len()).any(|w| w == KEY) {
         return AuthFile::Plain;
     }
@@ -1078,6 +1078,7 @@ mod gate_tests {
 
     #[test]
     fn an_auth_json_that_cant_be_read_is_unreadable_and_never_cached() {
+        use std::os::unix::fs::PermissionsExt as _;
         let dir = std::env::temp_dir().join(format!("kith-unreadable-auth-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let auth = dir.join("auth.json");
@@ -1086,7 +1087,6 @@ mod gate_tests {
         assert_eq!(auth_file_at(&auth), AuthFile::Unreadable);
         std::fs::remove_dir(&auth).unwrap();
         std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
-        use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o000)).unwrap();
         // Root reads a 000 file; only assert where the mode bites.
         if std::fs::read(&auth).is_err() {
