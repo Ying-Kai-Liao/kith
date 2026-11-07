@@ -547,6 +547,7 @@ impl Actor {
                     if let Some(conversation) = &g.conversation {
                         e.data["conversation"] = conversation.clone().into();
                     }
+                    e.data["epoch"] = g.epoch.into();
                     if !crate::chat::group::current(&self.hub.store, &g.lane, g.epoch) {
                         e.data["late"] = true.into();
                         let stopped = g
