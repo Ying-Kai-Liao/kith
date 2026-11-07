@@ -527,31 +527,24 @@ pub(super) fn removals(conn: &Connection, auth: &Value) -> Result<Vec<(String, V
     let rows: Vec<(String, Option<String>, i64, Option<String>)> = st
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<std::result::Result<_, _>>()?;
-    // The `was` core.db already holds for each id: a rename it has already imported.
-    let had: std::collections::BTreeMap<&str, Vec<String>> = rows
+    // Every id some core.db row's `was` already lists: renames it has already imported. `was` carries earlier ids forward
+    // (samuel{was:[sam]} renamed to sammy is sammy{was:[sam,samuel]}), so this is a set over all rows, not the new id's row.
+    let had: std::collections::BTreeSet<String> = rows
         .iter()
-        .map(|(id, _, _, was)| {
-            let was = was
-                .as_deref()
-                .and_then(|w| serde_json::from_str(w).ok())
-                .unwrap_or_default();
-            (id.as_str(), was)
-        })
+        .filter_map(|(.., was)| serde_json::from_str::<Vec<String>>(was.as_deref()?).ok())
+        .flatten()
         .collect();
     // An id in a kept person's `was` is a rename (`kith-auth rename`), not a removal: the person lives on under the new id.
     // Moving its claims and asks to the new id is a follow-up; revoking a live person's work is the wrong failure.
-    // Only while core.db does not already hold the new id with that `was`: then the rename was imported before, and a row
-    // under the old id is someone who took it again, whose removal must end their work.
+    // Only while no core.db row's `was` lists it yet: then the rename was imported before, and a row under the old id is
+    // someone who took it again, whose removal must end their work.
     let renamed: std::collections::BTreeSet<&str> = table(auth, "people")?
         .into_iter()
         .flatten()
-        .filter_map(|(new, p)| Some((new, p.get("was").and_then(Value::as_array)?)))
-        .flat_map(|(new, was)| {
-            let had = had.get(new.as_str());
-            was.iter()
-                .filter_map(Value::as_str)
-                .filter(move |old| !had.is_some_and(|h| h.iter().any(|x| x == old)))
-        })
+        .filter_map(|(_, p)| p.get("was").and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|old| !had.contains(*old))
         .collect();
     let gone: std::collections::BTreeMap<&str, Option<&str>> = rows
         .iter()

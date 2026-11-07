@@ -1570,6 +1570,52 @@ fn an_old_id_taken_again_after_the_rename_was_imported_is_revoked_when_it_goes()
 }
 
 #[test]
+fn an_old_id_taken_again_is_revoked_when_its_renamed_person_is_renamed_again() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    let renamed = json!({
+        "sam": null,
+        "samuel": {"name": "Sam", "was": ["sam"]},
+        "sam-bot": {"bot_of": "samuel"},
+        "sam-bot2": {"bot_of": "samuel"}
+    });
+    f.auth(&crew(&renamed));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    let mut back = renamed.clone();
+    back["sam"] = json!({"name": "Other Sam"});
+    f.auth(&crew(&back));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    ask_of(&f, "a-new-sam", "sam");
+    // samuel is renamed again and the new sam removed: `was` carries sam forward onto sammy, whose row core.db does not
+    // have yet, but samuel's row already lists sam, so this sam is still not the rename.
+    f.auth(&crew(&json!({
+        "sam": null,
+        "samuel": null,
+        "sammy": {"name": "Sam", "was": ["sam", "samuel"]},
+        "sam-bot": {"bot_of": "sammy"},
+        "sam-bot2": {"bot_of": "sammy"}
+    })));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the removal of sam")),
+        "{:?}",
+        rep.lines
+    );
+    assert!(
+        !rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the removal of samuel")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(ask_state(&f, "a-new-sam"), "stopped");
+}
+
+#[test]
 fn a_person_the_file_has_suspended_and_core_db_has_not_gets_the_order_from_the_reimport() {
     let f = Fixture::new();
     let mut sink = MemSink::default();
