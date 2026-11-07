@@ -1020,4 +1020,21 @@ mod embedded_authority {
         let e = call_authority_embedded(&paths(&m), "terminal.open", &json!({})).unwrap_err();
         assert!(matches!(e, crate::Error::NoSuchMethod(_)), "{e}");
     }
+
+    #[test]
+    fn a_write_that_widens_access_never_runs_embedded() {
+        let (_t, m) = machine();
+        let l = Layout::new(&m);
+        drop(open_all(&l));
+        let env = json!({"kernel": m.join("kernel"), "home": m, "env": {}});
+        let mut grant = env.clone();
+        grant["person"] = json!("sam");
+        grant["agent"] = json!("coder");
+        let mut add = env;
+        add["id"] = json!("sam");
+        for (method, params) in [("people.grant", grant), ("people.addPerson", add)] {
+            let e = call_authority_embedded(&paths(&m), method, &params).unwrap_err();
+            assert!(matches!(e, crate::Error::NoSuchMethod(_)), "{method}: {e}");
+        }
+    }
 }

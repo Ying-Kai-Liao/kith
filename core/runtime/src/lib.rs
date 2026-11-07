@@ -15,6 +15,13 @@
 //!   and runs no claim transactions. If the lock is held it does not wait: it answers [`Embedded::DaemonRunning`]
 //!   (the caller then asks the daemon). Two embedded commands at once behave the same way: the second one finds the
 //!   lock held.
+//!
+//!   The one exception, until M2-18: [`call_authority_embedded`] runs the five writes in [`EMBEDDED_WRITES`] (kith-auth's
+//!   mirror of a revoke, with no daemon up). Each is a claim transaction, and a removal ends the person's claims
+//!   (`revoke_everywhere`). That is safe because they only narrow access: four take it away, and `people.undo` puts
+//!   back exactly what a suspension took. They run under the lock at the current generation, take no claim and say no
+//!   hello to a holder. The kills they return are dropped, and the next daemon's `end_gone` sends them again. Any
+//!   other method, a write that widens access included, is refused there. (docs/plans/runtime-design.md, M0a.)
 
 // M3-9a: account state in core.db and the read-only `account.*` rows; nothing writes it but the import and the tests.
 #[allow(
@@ -248,19 +255,28 @@ pub enum EmbeddedCall {
     NoCore(std::path::PathBuf),
 }
 
-/// Runs one owner `people.*` write (`people.suspend`, `people.undo`, `people.removePerson`, `people.removeBot`) inside an
-/// embedded core, for a caller that found no daemon (kith-auth's mirror of a revoke). The same door as the daemon's:
-/// the method must exist and be open to the owner, the lock is the one lock, and the generation is bumped. Never creates
-/// a core.db and never migrates one: those stay with the daemon and `kith migrate`.
+/// The `people.*` writes [`call_authority_embedded`] runs: the ones that only narrow access (the M0a exception above).
+pub const EMBEDDED_WRITES: &[&str] = &[
+    "people.suspend",
+    "people.undo",
+    "people.removePerson",
+    "people.removeBot",
+    "people.revoke",
+];
+
+/// Runs one owner write from [`EMBEDDED_WRITES`] inside an embedded core, for a caller that found no daemon (kith-auth's
+/// mirror of a revoke). The same door as the daemon's: the method must exist and be open to the owner, the lock is the
+/// one lock, and the generation is bumped. Never creates a core.db and never migrates one: those stay with the daemon
+/// and `kith migrate`.
 #[cfg(unix)]
 pub fn call_authority_embedded(
     paths: &Paths,
     method: &str,
     params: &serde_json::Value,
 ) -> Result<EmbeddedCall, Error> {
-    if !authority::call::serves(method) {
+    if !EMBEDDED_WRITES.contains(&method) {
         return Err(Error::NoSuchMethod(format!(
-            "kith-core: {method} is not an authority method"
+            "kith-core: {method} is not a write that only narrows access, so only the daemon runs it"
         )));
     }
     call::check(kith_api::Principal::Owner, method, params)?;
