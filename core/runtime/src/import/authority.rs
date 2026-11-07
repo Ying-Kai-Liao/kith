@@ -523,27 +523,44 @@ pub(super) fn removals(conn: &Connection, auth: &Value) -> Result<Vec<(String, V
         .flatten()
         .map(|(id, _)| id.as_str())
         .collect();
-    let mut st = conn.prepare("SELECT id, bot_of, owner FROM people ORDER BY id")?;
-    let rows: Vec<(String, Option<String>, i64)> = st
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+    let mut st = conn.prepare("SELECT id, bot_of, owner, was FROM people ORDER BY id")?;
+    let rows: Vec<(String, Option<String>, i64, Option<String>)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<std::result::Result<_, _>>()?;
+    // The `was` core.db already holds for each id: a rename it has already imported.
+    let had: std::collections::BTreeMap<&str, Vec<String>> = rows
+        .iter()
+        .map(|(id, _, _, was)| {
+            let was = was
+                .as_deref()
+                .and_then(|w| serde_json::from_str(w).ok())
+                .unwrap_or_default();
+            (id.as_str(), was)
+        })
+        .collect();
     // An id in a kept person's `was` is a rename (`kith-auth rename`), not a removal: the person lives on under the new id.
     // Moving its claims and asks to the new id is a follow-up; revoking a live person's work is the wrong failure.
+    // Only while core.db does not already hold the new id with that `was`: then the rename was imported before, and a row
+    // under the old id is someone who took it again, whose removal must end their work.
     let renamed: std::collections::BTreeSet<&str> = table(auth, "people")?
         .into_iter()
         .flatten()
-        .filter_map(|(_, p)| p.get("was").and_then(Value::as_array))
-        .flatten()
-        .filter_map(Value::as_str)
+        .filter_map(|(new, p)| Some((new, p.get("was").and_then(Value::as_array)?)))
+        .flat_map(|(new, was)| {
+            let had = had.get(new.as_str());
+            was.iter()
+                .filter_map(Value::as_str)
+                .filter(move |old| !had.is_some_and(|h| h.iter().any(|x| x == old)))
+        })
         .collect();
     let gone: std::collections::BTreeMap<&str, Option<&str>> = rows
         .iter()
         .filter(|(id, ..)| !keep.contains(id.as_str()) && !renamed.contains(id.as_str()))
-        .map(|(id, bot_of, _)| (id.as_str(), bot_of.as_deref()))
+        .map(|(id, bot_of, ..)| (id.as_str(), bot_of.as_deref()))
         .collect();
     if let Some((id, ..)) = rows
         .iter()
-        .find(|(id, _, owner)| *owner == 1 && gone.contains_key(id.as_str()))
+        .find(|(id, _, owner, _)| *owner == 1 && gone.contains_key(id.as_str()))
     {
         return Err(Error::Refused(format!(
             "auth.json: the owner {id} is in core.db and not in the file; removing the owner is never right, so nothing was \
