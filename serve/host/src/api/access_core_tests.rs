@@ -426,10 +426,12 @@ async fn a_tombstone_file_is_what_switches_the_host_and_taking_it_away_switches_
     std::fs::remove_file(&auth).unwrap();
     std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
     assert!(!super::authority::switched());
-    // An auth.json that exists but can't be read is not "not a tombstone": it fails closed.
+    // An auth.json that exists but can't be read is neither: no access, and never the core (M1, 2026-11-06).
     std::fs::remove_file(&auth).unwrap();
     std::fs::create_dir(&auth).unwrap();
-    assert!(super::authority::switched());
+    assert!(!super::authority::switched() && !super::authority::switched_now());
+    assert!(!super::authority::guard_on_core(), "an unreadable file is not handed to the core");
+    assert!(matches!(super::authority::Selected::now(), super::authority::Selected::Closed));
     std::fs::remove_dir(&auth).unwrap();
     assert!(!super::authority::switched(), "missing is the unswitched rules");
 }

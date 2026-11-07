@@ -56,6 +56,16 @@ pub trait Authority {
     fn granted(&self, person: &str, agent: &str) -> bool;
 }
 
+/// The answer while auth.json can't be read ([`AuthFile::Unreadable`]): nobody is granted anything, as kith-auth
+/// refuses a file it can't read. Neither the host's mirror nor the core speaks for a file nobody can read.
+pub struct NoAccess;
+
+impl Authority for NoAccess {
+    fn granted(&self, _person: &str, _agent: &str) -> bool {
+        false
+    }
+}
+
 /// Today's answer: the host's people mirror.
 pub struct HostData<'a>(pub &'a Store);
 
@@ -270,18 +280,32 @@ impl Authority for CoreData {
 pub enum Selected {
     Host,
     Core(Arc<CoreData>),
+    /// auth.json can't be read: no invitee is granted anything ([`NoAccess`]).
+    Closed,
 }
 
 impl Selected {
     #[cfg(test)]
     pub fn from_env() -> Self {
-        if guard_on_core() { Self::Core(Arc::new(CoreData::from_process())) } else { Self::Host }
+        if guard_on_core() {
+            Self::Core(Arc::new(CoreData::from_process()))
+        } else if auth_file() == AuthFile::Unreadable {
+            Self::Closed
+        } else {
+            Self::Host
+        }
     }
 
     /// The answer for this moment: a live event asks again so a gate that closes mid-stream (a file-only write) or a
     /// switch that lands moves the next event, not the next stream (M2-18 gate 10).
     pub fn now() -> Self {
-        if guard_on_core() { Self::Core(process_core()) } else { Self::Host }
+        if guard_on_core() {
+            Self::Core(process_core())
+        } else if auth_file() == AuthFile::Unreadable {
+            Self::Closed
+        } else {
+            Self::Host
+        }
     }
 
     pub fn is_core(&self) -> bool {
@@ -294,6 +318,7 @@ impl Selected {
         match self {
             Self::Host => Self::Host,
             Self::Core(c) => Self::Core(Arc::new(c.with_memo())),
+            Self::Closed => Self::Closed,
         }
     }
 
@@ -301,6 +326,7 @@ impl Selected {
         match self {
             Self::Host => roles::event_for_with(&HostData(store), store, who, v),
             Self::Core(c) => roles::event_for_with(c.as_ref(), store, who, v),
+            Self::Closed => roles::event_for_with(&NoAccess, store, who, v),
         }
     }
 }
@@ -312,20 +338,60 @@ impl Selected {
 /// A SWITCHED host (auth.json holds the core's tombstone, [`switched`]) needs neither: the core is the only store, so it
 /// answers, and a core that does not answer gives no access. It never falls back to the tombstone through kith-auth.
 pub fn core_selected() -> bool {
-    switched() || (opted_in() && gate_open(&fingerprint_of(auth_path())))
+    match auth_file() {
+        AuthFile::Tombstone => true,
+        // Nobody can say what the file holds, the core included (the gate's fingerprint can still match).
+        AuthFile::Unreadable => false,
+        AuthFile::Plain => opted_in() && gate_open(&fingerprint_of(auth_path())),
+    }
+}
+
+/// What auth.json says about where authority is: a plain file (or none: kith-auth's rules), the core's tombstone, or a
+/// file that exists and can't be read to the end (permissions, I/O). Unreadable is no access at all, as kith-auth refuses
+/// such a file: never the core, which may lack a file-only write, and never the host's mirror ([`NoAccess`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuthFile {
+    Plain,
+    Tombstone,
+    Unreadable,
+}
+
+impl AuthFile {
+    #[cfg_attr(test, allow(dead_code))]
+    const fn code(self) -> u8 {
+        match self {
+            Self::Plain => 0,
+            Self::Tombstone => 1,
+            Self::Unreadable => 2,
+        }
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
+    const fn of(code: u8) -> Self {
+        match code {
+            0 => Self::Plain,
+            1 => Self::Tombstone,
+            _ => Self::Unreadable,
+        }
+    }
 }
 
 /// Whether authority has moved to the core: auth.json is a tombstone (`kith migrate step authority`; the way back,
 /// `kith rollback authority`, puts the file back). Read from the file kith-auth reads, so the host and kith-auth agree on
 /// which side is the truth; cached by the file's fingerprint, so a call costs one stat.
 pub fn switched() -> bool {
+    auth_file() == AuthFile::Tombstone
+}
+
+/// [`AuthFile`] as [`switched`] reads it, kept for [`GATE_EVERY`].
+pub fn auth_file() -> AuthFile {
     #[cfg(test)]
     {
         // A test can pin the read answer to a stale one, as the 2 s cache is right after a rollback or a switch.
         if let Some(stale) = *TEST_STALE_SWITCHED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            return stale;
+            return if stale { AuthFile::Tombstone } else { AuthFile::Plain };
         }
-        switched_now()
+        auth_file_now()
     }
     #[cfg(not(test))]
     {
@@ -333,53 +399,58 @@ pub fn switched() -> bool {
         // Every live event of every stream asks: the answer is kept for one gate period, like the gate's own latch.
         static START: OnceLock<Instant> = OnceLock::new();
         let now = u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX - 1);
-        CACHE.get(now, switched_now)
+        CACHE.get(now, auth_file_now)
     }
 }
 
-/// [`switched`] from a fresh look at auth.json (one stat; `switched_at` keeps the parse by fingerprint). Every WRITE
+/// [`switched`] from a fresh look at auth.json (one stat; `auth_file_at` keeps the parse by fingerprint). Every WRITE
 /// routed by [`run_auth`] and its callers asks this, never the cached answer: right after `kith rollback authority` the
 /// cache still says "switched" for up to [`GATE_EVERY`], so a revoke would go to the core only and the plain file the
 /// host is back on would never get it (a Mac with no cloud link never heals). A stale "unswitched" is no better: kith-auth
-/// would be run on the tombstone. A stale read is harmless: it goes to the core, which still holds the revoke.
+/// would be run on the tombstone. A stale read is harmless: it goes to the core, which still holds the revoke. An
+/// unreadable file is not switched: the write goes to kith-auth, which refuses it.
 pub fn switched_now() -> bool {
+    auth_file_now() == AuthFile::Tombstone
+}
+
+fn auth_file_now() -> AuthFile {
     #[cfg(test)]
     {
         if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none() {
-            return false;
+            return AuthFile::Plain;
         }
         let file = TEST_AUTH_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
-        file.is_some_and(|f| switched_at(&f))
+        file.map_or(AuthFile::Plain, |f| auth_file_at(&f))
     }
     #[cfg(not(test))]
-    switched_at(auth_path())
+    auth_file_at(auth_path())
 }
 
-/// The read answer of [`switched`], kept for [`GATE_EVERY`]. Lock-free: `at_ms` is 0 until the first answer.
+/// The read answer of [`auth_file`], kept for [`GATE_EVERY`]. Lock-free: `at_ms` is 0 until the first answer.
 #[cfg_attr(test, allow(dead_code))]
 struct SwitchCache {
     at_ms: std::sync::atomic::AtomicU64,
-    yes: std::sync::atomic::AtomicBool,
+    file: std::sync::atomic::AtomicU8,
 }
 
 #[cfg_attr(test, allow(dead_code))]
 impl SwitchCache {
     const fn new() -> Self {
-        Self { at_ms: std::sync::atomic::AtomicU64::new(0), yes: std::sync::atomic::AtomicBool::new(false) }
+        Self { at_ms: std::sync::atomic::AtomicU64::new(0), file: std::sync::atomic::AtomicU8::new(0) }
     }
 
-    fn get(&self, now_ms: u64, ask: impl FnOnce() -> bool) -> bool {
+    fn get(&self, now_ms: u64, ask: impl FnOnce() -> AuthFile) -> AuthFile {
         use std::sync::atomic::Ordering::Relaxed;
         // +1 so a stored 0 means "never asked".
         let now = now_ms + 1;
         let at = self.at_ms.load(Relaxed);
         if at != 0 && now.saturating_sub(at) < u64::try_from(GATE_EVERY.as_millis()).unwrap_or(2000) {
-            return self.yes.load(Relaxed);
+            return AuthFile::of(self.file.load(Relaxed));
         }
-        let yes = ask();
-        self.yes.store(yes, Relaxed);
+        let file = ask();
+        self.file.store(file.code(), Relaxed);
         self.at_ms.store(now, Relaxed);
-        yes
+        file
     }
 }
 
@@ -392,41 +463,43 @@ pub static TEST_STALE_SWITCHED: Mutex<Option<bool>> = Mutex::new(None);
 #[cfg(test)]
 pub static TEST_AUTH_FILE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-fn switched_at(auth: &Path) -> bool {
-    static SEEN: Mutex<Option<(String, bool)>> = Mutex::new(None);
+fn auth_file_at(auth: &Path) -> AuthFile {
+    static SEEN: Mutex<Option<(String, AuthFile)>> = Mutex::new(None);
     let fingerprint = fingerprint_of(auth);
     // A file that can't be statted is read each time (cheap, and the answer differs by why).
     if fingerprint == "none" {
-        return tombstoned(auth);
+        return read_auth_file(auth);
     }
     let mut seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((fp, yes)) = seen.as_ref()
+    if let Some((fp, file)) = seen.as_ref()
         && *fp == fingerprint
     {
-        return *yes;
+        return *file;
     }
-    let yes = tombstoned(auth);
-    *seen = Some((fingerprint, yes));
-    yes
+    let file = read_auth_file(auth);
+    // A chmod does not move the fingerprint, so an unreadable file is read again next time rather than remembered.
+    if file != AuthFile::Unreadable {
+        *seen = Some((fingerprint, file));
+    }
+    file
 }
 
-/// Whether the file holds a tombstone (`kith_tombstone.py`: a JSON object with `kith_tombstone`). Only a missing file is
-/// "not one" (the unswitched rules stay). A file that exists but can't be opened or read (permissions, I/O, not UTF-8)
-/// counts as switched: it fails closed, as kith-auth's `load_auth` refuses a file it can't read.
-fn tombstoned(auth: &Path) -> bool {
-    use std::io::Read as _;
-    let mut text = String::new();
-    let f = match std::fs::File::open(auth) {
-        Ok(f) => f,
-        Err(e) => return e.kind() != std::io::ErrorKind::NotFound,
+/// What the file holds, from its raw bytes read to the end (`kith_tombstone.py`: a tombstone is a JSON object with
+/// `kith_tombstone`). Only a missing file is plain without reading; one that exists but can't be opened or read is
+/// [`AuthFile::Unreadable`]. Bytes that aren't UTF-8 or JSON are no tombstone: kith-auth refuses those on its own.
+fn read_auth_file(auth: &Path) -> AuthFile {
+    let bytes = match std::fs::read(auth) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AuthFile::Plain,
+        Err(_) => return AuthFile::Unreadable,
     };
-    if f.take(65536).read_to_string(&mut text).is_err() {
-        return true;
+    const KEY: &[u8] = b"\"kith_tombstone\"";
+    if !bytes.windows(KEY.len()).any(|w| w == KEY) {
+        return AuthFile::Plain;
     }
-    if !text.contains("\"kith_tombstone\"") {
-        return false;
-    }
-    serde_json::from_str::<Value>(&text).is_ok_and(|v| v.as_object().is_some_and(|o| o.contains_key("kith_tombstone")))
+    let tomb = serde_json::from_slice::<Value>(&bytes)
+        .is_ok_and(|v| v.as_object().is_some_and(|o| o.contains_key("kith_tombstone")));
+    if tomb { AuthFile::Tombstone } else { AuthFile::Plain }
 }
 
 pub fn opted_in() -> bool {
@@ -582,7 +655,11 @@ pub fn start_gate() {
 pub fn guard_on_core() -> bool {
     #[cfg(test)]
     if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
-        return switched() || !TEST_GATE_SHUT.load(std::sync::atomic::Ordering::SeqCst);
+        return match auth_file() {
+            AuthFile::Tombstone => true,
+            AuthFile::Unreadable => false,
+            AuthFile::Plain => !TEST_GATE_SHUT.load(std::sync::atomic::Ordering::SeqCst),
+        };
     }
     core_selected()
 }
@@ -905,9 +982,10 @@ mod gate_tests {
     #[test]
     fn the_read_cache_holds_for_one_gate_period_and_writes_do_not_use_it() {
         let c = SwitchCache::new();
-        assert!(c.get(5000, || true));
-        assert!(c.get(5000 + 1999, || panic!("asked inside the period")), "kept");
-        assert!(!c.get(5000 + 2000, || false), "asked again after it");
+        assert_eq!(c.get(5000, || AuthFile::Tombstone), AuthFile::Tombstone);
+        assert_eq!(c.get(5000 + 1999, || panic!("asked inside the period")), AuthFile::Tombstone, "kept");
+        assert_eq!(c.get(5000 + 2000, || AuthFile::Unreadable), AuthFile::Unreadable, "asked again after it");
+        assert_eq!(c.get(5000 + 2001, || panic!("asked inside the period")), AuthFile::Unreadable, "kept too");
         // That writes ask switched_now, not the cache, is tested by behaviour in access_core_tests
         // (`a_write_decides_from_a_fresh_stat_not_the_read_cache`).
     }
@@ -964,17 +1042,64 @@ mod gate_tests {
         let dir = std::env::temp_dir().join(format!("kith-switched-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let auth = dir.join("auth.json");
-        assert!(!switched_at(&auth), "a missing file is not a tombstone");
+        assert_eq!(auth_file_at(&auth), AuthFile::Plain, "a missing file is not a tombstone");
         std::fs::write(&auth, r#"{"people": {}, "mentions": "kith_tombstone"}"#).unwrap();
-        assert!(!switched_at(&auth), "the word alone is not the key");
+        assert_eq!(auth_file_at(&auth), AuthFile::Plain, "the word alone is not the key");
         std::fs::write(&auth, r#"{"kith_tombstone": 1, "module": "authority", "rollback": "kith rollback authority"}"#)
             .unwrap();
-        assert!(switched_at(&auth));
+        assert_eq!(auth_file_at(&auth), AuthFile::Tombstone);
         // The way back puts the file back (a new inode, as kith-auth writes it).
         std::fs::remove_file(&auth).unwrap();
         std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
-        assert!(!switched_at(&auth));
+        assert_eq!(auth_file_at(&auth), AuthFile::Plain);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A real auth.json bigger than 64 KiB whose byte 65536 falls inside a multi-byte character: plain, not switched.
+    /// The key past the old 64 KiB cut still switches.
+    #[test]
+    fn a_big_auth_json_is_read_to_the_end() {
+        let dir = std::env::temp_dir().join(format!("kith-big-auth-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let auth = dir.join("auth.json");
+        let head = r#"{"people": {"sam": {"name": ""#;
+        // "é" is two bytes: pad so the first one is byte 65535 and the second byte 65536.
+        let pad = "a".repeat(65535 - head.len());
+        let name = format!("{pad}{}", "é".repeat(3500));
+        let plain = format!(r#"{head}{name}"}}}}}}"#);
+        assert!(plain.len() > 70 * 1024 && !plain.is_char_boundary(65536));
+        std::fs::write(&auth, &plain).unwrap();
+        assert_eq!(read_auth_file(&auth), AuthFile::Plain, "a split character is not a tombstone");
+        let tomb = format!(r#"{{"note": "{name}", "kith_tombstone": 1, "module": "authority"}}"#);
+        std::fs::write(&auth, &tomb).unwrap();
+        assert_eq!(read_auth_file(&auth), AuthFile::Tombstone, "the key after 64 KiB is read");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_auth_json_that_cant_be_read_is_unreadable_and_never_cached() {
+        let dir = std::env::temp_dir().join(format!("kith-unreadable-auth-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let auth = dir.join("auth.json");
+        // A folder where the file should be: it exists, and reading it fails.
+        std::fs::create_dir(&auth).unwrap();
+        assert_eq!(auth_file_at(&auth), AuthFile::Unreadable);
+        std::fs::remove_dir(&auth).unwrap();
+        std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads a 000 file; only assert where the mode bites.
+        if std::fs::read(&auth).is_err() {
+            assert_eq!(auth_file_at(&auth), AuthFile::Unreadable);
+            std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600)).unwrap();
+            assert_eq!(auth_file_at(&auth), AuthFile::Plain, "a chmod back is seen though the fingerprint is the same");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn no_access_grants_nothing() {
+        assert!(!NoAccess.granted("sam", "house"));
     }
 
     #[test]
