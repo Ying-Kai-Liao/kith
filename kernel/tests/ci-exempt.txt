@@ -1,0 +1,2 @@
+# kernel/tests/kith-*-check files that .github/workflows/ci.yml does not run, one per line: name, then why.
+# kernel/tests/kith-ci-names-check fails on any check that is neither in ci.yml nor here.
