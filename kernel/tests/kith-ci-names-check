@@ -24,7 +24,7 @@ if [ "${1:-}" = "--selftest" ]; then
     echo "FAIL a check dropped from ci.yml was not caught (exit $code): $out"
     exit 1
   fi
-  printf 'kith-no-such-check gone\n' > "$T/exempt.txt"
+  { cat "$EXEMPT"; printf 'kith-no-such-check gone\n'; } > "$T/exempt.txt"
   out=$(EXEMPT_FILE="$T/exempt.txt" "$0" 2>&1)
   code=$?
   if [ "$code" = 1 ] && printf '%s\n' "$out" | grep -q 'kith-no-such-check'; then
@@ -38,7 +38,8 @@ fi
 [ "${1:-}" = "--ci" ] && CI=$2
 EXEMPT=${EXEMPT_FILE:-$EXEMPT}
 
-named() { grep -qE "kernel/tests/$1([^A-Za-z0-9_-]|\$)" "$CI"; }
+# A check named only in a comment is not run, so comment lines don't count.
+named() { grep -qE "^[^#]*kernel/tests/$1([^A-Za-z0-9_-]|\$)" "$CI"; }
 exempt() { grep -qE "^$1([[:space:]]|\$)" "$EXEMPT"; }
 
 failed=0

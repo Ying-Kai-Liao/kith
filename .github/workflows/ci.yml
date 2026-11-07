@@ -258,8 +258,9 @@ jobs:
             # nothing in the host depends on. Those two get their own small job (host-crates). The kernel's bin and lib
             # are not here: the host tests that run them are the host-kernel job (filter kernel_host above).
             host_core:
-              # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks).
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
+              # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
+              # memory and summary), and the libs those programs load on every call.
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
