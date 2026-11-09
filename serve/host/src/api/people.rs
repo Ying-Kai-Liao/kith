@@ -11,7 +11,7 @@ use crate::LockExt;
 use crate::agent::bot::Cmd;
 use crate::hub::Hub;
 use crate::remote::{account, cloud, crypto};
-use crate::store::{Invite, PersonRow, now_ms};
+use crate::store::{Invite, Moved, PersonRow, now_ms};
 use anyhow::{Context, Result, anyhow, bail};
 use kith_wire::cloud::{CreateInvite, PersonRevoke, path};
 use serde_json::{Value, json};
@@ -427,38 +427,45 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
 /// their devices, memberships and open invites for undo (R1, R2); an undo gives them back. Either repeats harmlessly.
 pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<()> {
     {
+        // The park in the same hold as the flip, so a cloud pull never parks to a flag this change is about to replace.
         let _w = AUTH_WRITES.lock().await;
         account::run(bin, &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"]).await?;
+        park(hub, id, revoke);
     }
     if revoke {
         cut_off(hub, id).await;
     } else {
-        restored(hub, id);
+        hub.auth_changed();
     }
     Ok(())
 }
 
-/// Undo: what the revoke kept is back as it was.
-pub(crate) fn restored(hub: &Hub, person: &str) {
-    match hub.store.restore_person(person) {
-        Ok(m) => tracing::info!(person, ?m, "an undone revoke gave back what it kept"),
-        Err(e) => tracing::warn!(
-            error = format!("{e:#}"),
-            person,
-            "couldn't give back a revoked person's devices and invites"
-        ),
+/// Parks `person`'s devices, memberships and open invites while `revoked` (they stop granting anything and wait for an
+/// undo, R1, R2), or gives back what a revoke parked. Either repeats harmlessly. Callers hold [`AUTH_WRITES`] from the
+/// flag's flip (or read) to here, and call `hub.auth_changed()` once it is released. Whether anything moved.
+pub(crate) fn park(hub: &Hub, person: &str, revoked: bool) -> bool {
+    let done = if revoked { hub.store.suspend_person(person) } else { hub.store.restore_person(person) };
+    match done {
+        Ok(m) if m == Moved::default() => false,
+        Ok(m) => {
+            tracing::info!(
+                person,
+                revoked,
+                ?m,
+                "a revoked person's devices, memberships and invites parked or given back"
+            );
+            true
+        }
+        Err(e) => {
+            tracing::warn!(error = format!("{e:#}"), person, revoked, "couldn't park or give back a person's devices");
+            false
+        }
     }
-    hub.auth_changed();
 }
 
-/// After `person` was revoked here (by the owner or from the cloud): every turn of theirs and of their bots stops, and
-/// their devices go; their cards are withdrawn (R5).
+/// After `person` was revoked here (by the owner or from the cloud) and parked: every turn of theirs and of their bots
+/// stops; their cards are withdrawn (R5).
 pub(crate) async fn cut_off(hub: &Hub, person: &str) {
-    // Their devices, memberships and open invites stop granting anything now and wait for an undo (R1, R2).
-    match hub.store.suspend_person(person) {
-        Ok(m) => tracing::info!(person, ?m, "a revoked person's devices, memberships and invites are kept for undo"),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), person, "couldn't set aside a revoked person's devices"),
-    }
     hub.auth_changed();
     super::botguests::enforce(hub, person).await;
     stop_runs(hub, person, false).await;
