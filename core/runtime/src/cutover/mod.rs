@@ -194,6 +194,13 @@ pub(crate) trait Module {
     fn before_tombstone(&self, _env: &Env) -> Result<()> {
         Ok(())
     }
+    /// Under the source lock, for a switched (or stepping-with-marker) record whose source is still a real file with no copy
+    /// kept at the switch: is it exactly what the switch imported (`Imported`: finish only the tombstone, the core's newer
+    /// rows stay), a file written since (`Changed`: import again), or a state no import can be told safe (`Refuse`)? Default:
+    /// `Changed`, the old behaviour.
+    fn switched_file(&self, _env: &Env, _db: &rusqlite::Connection) -> Result<SwitchedFile> {
+        Ok(SwitchedFile::Changed)
+    }
     /// The lock the old store's writers take, held by `rollback` from before the rolling-back record to the end: a
     /// refusal at the lock then writes nothing (no record, no secret restored). Default: none.
     fn rollback_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
@@ -246,6 +253,13 @@ fn phase_of(env: &Env, name: &str) -> Result<Option<Phase>> {
 /// Takes the lifetime lock (a daemon or another shell refuses: stop it first).
 fn lock(env: &Env) -> Result<Core> {
     crate::start_with(&env.layout, MIGRATIONS)
+}
+
+/// What `Module::switched_file` finds.
+pub(crate) enum SwitchedFile {
+    Imported,
+    Changed,
+    Refuse(String),
 }
 
 pub(crate) fn step(
@@ -344,13 +358,37 @@ pub(crate) fn step(
             {
                 Some(s)
             } else {
-                let s = Switch {
-                    phase: Phase::Stepping,
-                    ..s
-                };
-                state::write(&env.layout, name, &s)?;
-                Some(s)
+                // The module may know the file is the one the switch imported (nothing to import, as with a kept copy), or
+                // that neither side can be preferred; the refusal comes before the record moves to Stepping.
+                match m.switched_file(env, core.conn())? {
+                    SwitchedFile::Imported => Some(s),
+                    SwitchedFile::Refuse(why) => {
+                        return Err(Error::Refused(format!("cutover: {name}: {why}")));
+                    }
+                    SwitchedFile::Changed => {
+                        let s = Switch {
+                            phase: Phase::Stepping,
+                            ..s
+                        };
+                        state::write(&env.layout, name, &s)?;
+                        Some(s)
+                    }
+                }
             }
+        }
+        // A crash between the marker and the switched record leaves Stepping with this step's marker beside it: when the
+        // source is still exactly what the marker's import read, it is a finished import, not one to run over the core.
+        Some(s)
+            if s.phase == Phase::Stepping
+                && marker::read(core.conn(), name).is_some_and(|(at, _)| at == s.at)
+                && matches!(m.switched_file(env, core.conn())?, SwitchedFile::Imported) =>
+        {
+            let s = Switch {
+                phase: Phase::Switched,
+                ..s
+            };
+            state::write(&env.layout, name, &s)?;
+            Some(s)
         }
         c => c,
     };

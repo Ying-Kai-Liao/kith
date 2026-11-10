@@ -53,7 +53,7 @@ use zeroize::{Zeroize as _, Zeroizing};
 
 use super::authority_preflight::{Preflight, run as run_preflight};
 use super::secrets_back::{self, OsStore};
-use super::{Env, Module, Opts, SourceLock, marker, tombstone};
+use super::{Env, Module, Opts, SourceLock, SwitchedFile, marker, tombstone};
 use crate::AuthorityOptions;
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -220,11 +220,46 @@ const REPAIR_FORCE: &str = "This is the repair of a switch that stopped before t
      core took its rows, so the file is newer and wins. Run `kith migrate step authority --force` to replace the core's rows \
      with the file's (a backup of core.db is taken first).";
 
-/// What a crash repair tells the owner when the file is the one the step imported (or the seed has no sha to tell): the
-/// core has taken revokes since, so `--force` would put the older file over them.
-const REPAIR_ROLLBACK: &str = "This is the repair of a switch that stopped before the tombstone, and auth.json is the file the step imported, so the \
-     core is the newer side and forcing the file in would put an older file over its rows. Run `kith rollback authority` first, \
-     then step again.";
+/// A crash repair that finds auth.json written since the step and the core moved as well: either side holds changes the
+/// other lacks, so neither `--force` (file over core) nor a rollback (core lost) is safe to suggest.
+const REPAIR_BOTH: &str = "both sides changed since the switch (auth.json was written by kith-auth, and the core took changes of its own); nothing was changed. Compare with `kith migrate check authority` and settle it by hand";
+
+/// The same refusal for a marker with no `auth_sha`. No shipped Mac has such a marker (the step refusal was never lifted, so
+/// none has stepped); it can only come from a development core.
+const REPAIR_UNKNOWN: &str = "the marker has no record of the file the step imported and the core has changed since, so it can't be told which side is newer; nothing was changed. Can't tell: compare by hand with `kith migrate check authority`";
+
+fn core_digest(db: &Connection) -> Result<String> {
+    Ok(hex16(
+        crate::authority::snapshot(db)?.to_string().as_bytes(),
+    ))
+}
+
+/// What a real auth.json (sha `now`) means against the marker the switch left. The same sha as the seed's `auth_sha` is the
+/// file the switch imported: the core is the newer side and only the tombstone is left. A changed file is `--force`'s to
+/// import only while the core's digest is still the marker's; with both moved, neither side may win.
+fn repair_verdict(db: &Connection, module: &str, now: &str) -> SwitchedFile {
+    let sha = marker::seed(db, module)
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["auth_sha"].as_str().map(str::to_owned));
+    if sha.as_deref() == Some(now) {
+        return SwitchedFile::Imported;
+    }
+    let Some((_, at_switch)) = marker::read(db, module) else {
+        return SwitchedFile::Changed;
+    };
+    if core_digest(db).is_ok_and(|d| d == at_switch) {
+        // An older marker with no sha lands here too: rows that differ from an unmoved core can only be the file's.
+        return SwitchedFile::Changed;
+    }
+    SwitchedFile::Refuse(
+        if sha.is_some() {
+            REPAIR_BOTH
+        } else {
+            REPAIR_UNKNOWN
+        }
+        .to_owned(),
+    )
+}
 
 /// The SHA-256 of the file's bytes; "missing" when it does not exist.
 fn sha_of(path: &Path) -> Result<String> {
@@ -293,10 +328,9 @@ pub(crate) struct AuthorityModule {
     lifted: bool,
     /// How long to wait for `auth.json.lock`.
     lock_wait: Duration,
-    /// What the import read: auth.json's sha, checked again just before the tombstone. (`None` outside a step.)
+    /// What the import read: auth.json's sha, checked again just before the tombstone and written into the seed beside the
+    /// marker. (`None` outside a step.)
     imported: RefCell<Option<String>>,
-    /// The same sha, kept until `seed` writes it beside the marker (`before_tombstone` takes `imported` first).
-    imported_sha: RefCell<Option<String>>,
     /// Where `import` reads the Keychain items the profiles name.
     source: Box<dyn ItemSource>,
     /// Where `import` seals them.
@@ -347,7 +381,6 @@ impl AuthorityModule {
             lifted: true,
             lock_wait: LOCK_WAIT,
             imported: RefCell::new(None),
-            imported_sha: RefCell::new(None),
             source,
             sink: RefCell::new(sink),
             vault: RefCell::new(vault),
@@ -713,7 +746,6 @@ impl Module for AuthorityModule {
             refuse_unmoved_vault(ctx, &db)?;
         }
         *self.imported.borrow_mut() = None;
-        *self.imported_sha.borrow_mut() = None;
         Ok(Some(Box::new(held)))
     }
 
@@ -725,7 +757,7 @@ impl Module for AuthorityModule {
     }
 
     fn before_tombstone(&self, env: &Env) -> Result<()> {
-        let Some(want) = self.imported.borrow_mut().take() else {
+        let Some(want) = self.imported.borrow().clone() else {
             // A real step always recorded the sha at its import; none means the guard was skipped. Fail closed, so a
             // file that was never checked is never tombstoned. (The unlifted module never reaches a real step.)
             return if self.lifted {
@@ -762,13 +794,13 @@ impl Module for AuthorityModule {
         let repair = core
             .as_deref()
             .is_some_and(|c| marker::read(c.conn(), self.name()).is_some());
-        // `--force` is offered only for a file that changed since the step; a seed with no sha (an older marker) is not one.
-        let file_newer = match (&before, core.as_deref()) {
-            (Some(now), Some(c)) => marker::seed(c.conn(), self.name())
-                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-                .and_then(|v| v["auth_sha"].as_str().map(|s| s != now))
-                .unwrap_or(false),
-            _ => false,
+        // The advice for rows that differ in a repair: `--force` only while the core has not moved since the switch.
+        let advice = match (&before, core.as_deref()) {
+            (Some(now), Some(c)) => match repair_verdict(c.conn(), self.name(), now) {
+                SwitchedFile::Refuse(why) => format!("{why}."),
+                _ => REPAIR_FORCE.to_owned(),
+            },
+            _ => REPAIR_FORCE.to_owned(),
         };
         let rep = crate::import::run_in(
             &env.layout,
@@ -783,12 +815,7 @@ impl Module for AuthorityModule {
         )
         .map_err(|e| match e {
             Error::Refused(s) if repair && s.contains(crate::import::DIFFERS_HINT) => {
-                let advice = if file_newer {
-                    REPAIR_FORCE
-                } else {
-                    REPAIR_ROLLBACK
-                };
-                Error::Refused(s.replace(crate::import::DIFFERS_HINT, advice))
+                Error::Refused(s.replace(crate::import::DIFFERS_HINT, &advice))
             }
             e => e,
         })?;
@@ -796,7 +823,6 @@ impl Module for AuthorityModule {
             if sha_of(&ctx.auth)? != before {
                 return Err(Error::Refused(CHANGED.into()));
             }
-            *self.imported_sha.borrow_mut() = Some(before.clone());
             *self.imported.borrow_mut() = Some(before);
         }
         Ok(rep.lines)
@@ -971,15 +997,17 @@ impl Module for AuthorityModule {
         Ok(lines)
     }
 
+    fn switched_file(&self, env: &Env, db: &Connection) -> Result<SwitchedFile> {
+        Ok(repair_verdict(db, self.name(), &sha_of(&ctx(env)?.auth)?))
+    }
+
     fn seed(&self, _env: &Env, db: &Connection) -> Result<Option<String>> {
-        let sha = self.imported_sha.borrow_mut().take();
+        let sha = self.imported.borrow().clone();
         seed_of(db, sha.as_deref()).map(Some)
     }
 
     fn digest(&self, _env: &Env, db: &Connection) -> Result<String> {
-        Ok(hex16(
-            crate::authority::snapshot(db)?.to_string().as_bytes(),
-        ))
+        core_digest(db)
     }
 
     /// The old stores' stat lines and the number of vault rows, plus a digest of core.db's own authority tables. The
