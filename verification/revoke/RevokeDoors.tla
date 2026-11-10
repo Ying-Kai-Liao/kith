@@ -82,6 +82,10 @@ CONSTANTS
     LinkFlaps,          \* the holder link on a Mac may go down (and stay down): a remote, absent or failing holder
     ReSendNeedsLink,    \* the WRONG design: the re-send runs inside the holder link, so only while it is up
     ReSendKills,        \* the daemon's supervisor pass signals every `ending` claim whose process matches its start stamp
+                        \*   and whose end_reason is a kill's (not done / exit / out_of_usage, kill_resend.rs)
+    NamelessReport,     \* a live claim's stub reports done/exit naming no pid: the claim goes `ending` with that reason while the
+                        \*   process may still run (`reported`, claims.rs apply)
+    RevokeKeepsReason,  \* BROKEN (before L1012): the revoke lists a `reported` claim's kill but leaves its reason, so the re-send skips it
     SkipBots,           \* the claim sweep covers P's own claims only, not B's (the bot principal holds its own)
     NoWakeWithdraw,     \* a revoke leaves the wake owed to P's session
     AnswerIgnoresEnd,   \* an answer to an ended (stopped) ask is still kept and wakes its caller
@@ -115,6 +119,7 @@ CONSTANTS
     CoreSideShutsGate   \* ... and the gate sees it at once (parity checked per request); FALSE = the latch stays open until its next ask
 
 ASSUME (Switched => CoreGate) /\ (SwitchLag => Switched) /\ (CoreSideShutsGate => CoreOnlyWrite)
+ASSUME NamelessReport => KillSplit
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -123,11 +128,14 @@ Nets    == {"offline", "cloudDown", "online"}
 Doors   == {"none", "app", "bridge"}
 \* P's slot: idle; queued = waiting in Telegram's queue (sent while the Mac was offline);
 \* held = the bridge has it and waits until the Mac is in sync; then a turn.
-Status  == {"idle", "queued", "held", "running", "helping", "delivered", "aborted", "ending", "stuck"}
+Status  == {"idle", "queued", "held", "running", "helping", "delivered", "aborted", "ending", "stuck",
+            "reported", "rending", "rstuck"}
 Waiting == {"idle", "queued", "held"}
 Live    == {"running", "helping"}
 \* A process still alive behind a claim the core has already moved to `ending` (`stuck`: its one kill was lost).
-Proc    == Live \cup {"ending", "stuck"}
+\* reported: `ending` with a done/exit reason (NamelessReport), process alive; rending / rstuck: the same row after a
+\* revoke that kept that reason (RevokeKeepsReason), its one kill pending / lost.
+Proc    == Live \cup {"ending", "stuck", "reported", "rending", "rstuck"}
 \* P's guest door on a Mac: idle; checked (DoorSplit only: access read, no claim yet); running (claimed, so the
 \* sweep sees it); killed by the sweep; done (it ended by itself).
 GDoor   == {"idle", "checked", "running", "killed", "done"}
@@ -583,24 +591,28 @@ WakeStart(m) ==
 \* refused by the fence, this stops the ones that began before it.
 SweptWho == IF SkipBots THEN {"P"} ELSE Who
 \* ClaimEnding: the core's commit. With KillSplit the process is still running, behind a claim that is `ending`.
+\* A `reported` claim is in the revoke's kill list too; the revoke rewrites its reason to `revoked` (claims.rs revoke_person).
 ClaimEnding(m) ==
     /\ CoreSweep
     /\ revoked[m]
-    /\ \E w \in SweptWho : turn[m][w] \in Live
+    /\ \E w \in SweptWho : turn[m][w] \in Live \cup {"reported"}
     /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF w \in SweptWho /\ turn[m][w] \in Live
-                                                   THEN (IF KillSplit THEN "ending" ELSE "aborted") ELSE turn[m][w]]]
+                                                   THEN (IF KillSplit THEN "ending" ELSE "aborted")
+                                                   ELSE IF w \in SweptWho /\ turn[m][w] = "reported"
+                                                   THEN (IF RevokeKeepsReason THEN "rending" ELSE "ending")
+                                                   ELSE turn[m][w]]]
     /\ UNCHANGED <<auth, door, gdoor, ext>>
 \* KillSent: the host's one signal (end_kills -> end_claimed on a detached task) lands.
 KillSent(m) ==
     /\ KillSplit
-    /\ \E w \in Who : turn[m][w] = "ending"
-    /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF turn[m][w] = "ending" THEN "aborted" ELSE turn[m][w]]]
+    /\ \E w \in Who : turn[m][w] \in {"ending", "rending"}
+    /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF turn[m][w] \in {"ending", "rending"} THEN "aborted" ELSE turn[m][w]]]
     /\ UNCHANGED <<auth, door, gdoor, ext>>
 \* The host restarts, or the spawn fails, before the signal goes: nothing remembers the kill.
 KillLost(m, w) ==
     /\ KillSplit /\ HostCrash
-    /\ turn[m][w] = "ending"
-    /\ turn' = [turn EXCEPT ![m][w] = "stuck"]
+    /\ turn[m][w] \in {"ending", "rending"}
+    /\ turn' = [turn EXCEPT ![m][w] = IF turn[m][w] = "ending" THEN "stuck" ELSE "rstuck"]
     /\ UNCHANGED <<auth, door, gdoor, ext>>
 \* KillReSend: each supervisor pass signals every `ending` claim whose process positively matches its stamp (level-triggered:
 \* it reads the claims table, not what the host remembers). A gone or reused pid is left alone, so it is not a model step.
@@ -609,6 +621,12 @@ KillReSend(m) ==
     /\ ~ReSendNeedsLink \/ link[m]
     /\ \E w \in Who : turn[m][w] \in {"ending", "stuck"}
     /\ turn' = [turn EXCEPT ![m] = [w \in Who |-> IF turn[m][w] \in {"ending", "stuck"} THEN "aborted" ELSE turn[m][w]]]
+    /\ UNCHANGED <<auth, door, gdoor, ext>>
+\* A nameless done/exit: the claim leaves the live set for `ending` with that reason; the process is the claimer's own business.
+Report(m, w) ==
+    /\ NamelessReport
+    /\ turn[m][w] \in Live
+    /\ turn' = [turn EXCEPT ![m][w] = "reported"]
     /\ UNCHANGED <<auth, door, gdoor, ext>>
 \* The holder link on m goes down or comes back (a remote holder, an absent one, a failing one).
 LinkFlip(m) ==
@@ -766,6 +784,7 @@ Next ==
           \/ Deliver(m, w)
           \/ Stop(m, w)
           \/ KillLost(m, w)
+          \/ Report(m, w)
 
 \* The sweep loop runs every 60 s: weak fairness (only DoorD1, a liveness property, depends on it).
 Spec == Init /\ [][Next]_vars

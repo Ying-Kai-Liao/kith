@@ -864,6 +864,13 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
         )?;
         if n == 1 {
             cancel_turn(&tx, id, now)?;
+        } else {
+            // Already `ending` from a nameless done/exit (or out of usage): that reason is not a kill, so the daemon's
+            // re-send would skip this process after a lost signal. The revoke makes it one.
+            tx.execute(
+                "UPDATE claims SET end_reason = 'revoked' WHERE claim_id = ?1 AND state = 'ending'",
+                [id],
+            )?;
         }
         kill.push(kill_of(id, pid, started));
     }

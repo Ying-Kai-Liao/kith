@@ -2355,6 +2355,31 @@ fn an_ending_claim_from_a_done_report_is_not_signalled() {
     d.stop();
 }
 
+/// A nameless done leaves the claim `ending` with `done`; a revoke after it makes it a kill the re-send owns.
+#[cfg(unix)]
+#[test]
+fn a_revoke_after_a_nameless_done_is_re_sent() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    open_claims(&d);
+    let id = take_claim(&d, "a", "one");
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, id, pid, &start, "one", 20)?;
+            crate::conversations::claims::report(c, id, "done", "{}", 30)?;
+            Ok(())
+        })
+        .expect("report");
+    assert_eq!(claim_state(&d, id), "ending");
+    d.shared
+        .with_core(|c| crate::conversations::claims::revoke_person(c, "sam", 40))
+        .expect("revoke");
+    assert_eq!(resend(&d), vec![pid]);
+    until("the process to be gone", || !alive(pid));
+    d.stop();
+}
+
 /// A nameless `exit` that ran out of usage: the claim goes `ending` with `exit`, which failover rewrites to
 /// `out_of_usage`. Not a kill request.
 #[cfg(unix)]
