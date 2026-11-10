@@ -392,6 +392,24 @@ pub(crate) fn usable_kith_bin(bin: &Path) -> bool {
     .is_some_and(|o| o.to_lowercase().contains("phase"))
 }
 
+/// Whether `bin` has the `kernel readfence` verb: the running program, or one that answers `kernel readfence --help`. An older
+/// kith would read `kernel` as an agent name, so the launch keeps the Python fence for it.
+pub(crate) fn knows_readfence(bin: &Path) -> bool {
+    let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    if std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .is_ok_and(|me| me == real)
+    {
+        return true;
+    }
+    secrets::run_with_timeout(
+        bin,
+        &["kernel", "readfence", "--help"],
+        std::time::Duration::from_secs(10),
+    )
+    .is_some_and(|o| o.contains("kith kernel readfence"))
+}
+
 /// `kith_paths.guest_tmp_ready`: the guest's Claude Code temp folder, made.
 fn guest_tmp_ready(p: &paths::Paths, id: &str, uid: u32) -> Option<String> {
     use sha2::{Digest as _, Sha256};
@@ -1248,6 +1266,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .filter(|b| usable_kith_bin(Path::new(b)))
         .map(str::to_owned)
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
+    let fence_bin = kith_bin.clone().filter(|b| knows_readfence(Path::new(b)));
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
@@ -1277,6 +1296,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             cwd: &cwd_logical,
             user_home: &home_dir,
             kith_bin: kith_bin.as_deref(),
+            fence_bin: fence_bin.as_deref(),
             plugins_json: &plugins_json,
             owner_terminal: false,
             api_helper: &bget(&be, "backup_api_helper"),
@@ -1615,6 +1635,38 @@ mod tests {
         assert!(!usable_kith_bin(Path::new("")));
         // The running program is taken without asking it anything (the test binary has no `memory hook`).
         assert!(usable_kith_bin(&std::env::current_exe().unwrap()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn readfence_verb_is_asked_for() {
+        let dir = std::env::temp_dir().join(format!("kith-fence-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let script = |name: &str, body: &str| {
+            let p = dir.join(name);
+            fs::write(&p, body).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        let new = script(
+            "new",
+            "#!/bin/sh\necho 'usage: kith kernel readfence --root DIR'\n",
+        );
+        let old = script("old", "#!/bin/sh\necho 'no agent named kernel'\nexit 1\n");
+        // A script just written can still be "text file busy" while another test forks: ask again.
+        let mut knows = false;
+        for _ in 0..20 {
+            knows = knows_readfence(&new);
+            if knows {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        assert!(knows);
+        assert!(!knows_readfence(&old));
+        assert!(!knows_readfence(&dir.join("missing")));
+        assert!(knows_readfence(&std::env::current_exe().unwrap()));
         let _ = fs::remove_dir_all(&dir);
     }
 

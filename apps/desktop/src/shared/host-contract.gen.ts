@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '8c73c5229c55c9757a5ac051d498a77ba8bf5e5e585e05c2bd50aacb209264ae'
+export const CONTRACT_SHA256 = '98263f4dab0b900f53daf4ee5f6a9af81e8a02c4b97eb674d57fa292e411f863'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -533,11 +533,12 @@ export interface BotPosted {
   duplicate?: boolean | null
 }
 
-/** A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next. */
+/** A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), the bot's membership generation gen (what a post or room ask names; it rises each time the bot is put back in the room), and the cursor to read from next. */
 export interface BotRoom {
   room: string
   conversation?: string | null
   epoch?: number | null
+  gen?: number | null
   entries: BotEntry[]
   cursor: number
   secrets?: BotRoomSecret[] | null
@@ -854,6 +855,7 @@ export interface BotAskParams {
   conversation?: string | null
   ref?: string | null
   room?: string | null
+  gen?: number | null
   speaker?: string | null
   clientNonce: string
   noQueue?: boolean | null
@@ -865,6 +867,7 @@ export interface BotPostParams {
   conversation: string
   epoch: number
   turnKey?: string | null
+  gen?: number | null
   text: string
   clientNonce: string
 }
@@ -1295,7 +1298,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
     BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?', room: 'string?' }, mayOmit: ['duplicate', 'room'] },
     BotPosted: { fields: { entryId: 'string', seq: 'int', turn: 'int', room: 'string', conversation: 'string', replied: 'bool', late: 'bool', lateWhy: 'string?', unprompted: 'bool?', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
-    BotRoom: { fields: { room: 'string', conversation: 'string?', epoch: 'int?', entries: '[BotEntry]', cursor: 'int', secrets: '[BotRoomSecret]?' } },
+    BotRoom: { fields: { room: 'string', conversation: 'string?', epoch: 'int?', gen: 'int?', entries: '[BotEntry]', cursor: 'int', secrets: '[BotRoomSecret]?' } },
     BotRoomSecret: { fields: { id: 'string', from: 'string', label: 'string?', expiresAt: 'int' } },
     BotSecret: { fields: { id: 'string', room: 'string', from: 'string', label: 'string?', value: 'string' } },
     BotSender: { fields: { botId: 'string', name: 'string', speaker: 'string?' } },
@@ -1342,8 +1345,8 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     ProveInviteParams: { fields: { inviteId: 'string', token: 'string' } },
     BotStatusParams: { fields: {} },
     ProveBotInviteParams: { fields: { inviteId: 'string', token: 'string' } },
-    BotAskParams: { fields: { agent: 'string?', text: 'string', conversation: 'string?', ref: 'string?', room: 'string?', speaker: 'string?', clientNonce: 'string', noQueue: 'bool?' } },
-    BotPostParams: { fields: { room: 'string', conversation: 'string', epoch: 'int', turnKey: 'string?', text: 'string', clientNonce: 'string' } },
+    BotAskParams: { fields: { agent: 'string?', text: 'string', conversation: 'string?', ref: 'string?', room: 'string?', gen: 'int?', speaker: 'string?', clientNonce: 'string', noQueue: 'bool?' } },
+    BotPostParams: { fields: { room: 'string', conversation: 'string', epoch: 'int', turnKey: 'string?', gen: 'int?', text: 'string', clientNonce: 'string' } },
     BotRoomReadParams: { fields: { room: 'string', since: 'int?', limit: 'int?' } },
     BotSecretFetchParams: { fields: { id: 'string' } },
     BotThreadParams: { fields: { conversation: 'string', afterSeq: 'int?', limit: 'int?' } },

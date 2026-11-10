@@ -148,6 +148,16 @@ fn expanduser(home: &Path, s: &str) -> PathBuf {
 
 /// `os.path.realpath` (not strict): symlinks resolved as far as the path exists, the rest kept as written.
 pub fn realpath(p: &Path) -> PathBuf {
+    resolve(p, false).unwrap_or_default()
+}
+
+/// [`realpath`] that gives up (None) when the links run past the cap instead of reading the next link as a plain name, for
+/// callers that must not guess (the read fence).
+pub fn realpath_strict(p: &Path) -> Option<PathBuf> {
+    resolve(p, true)
+}
+
+fn resolve(p: &Path, strict: bool) -> Option<PathBuf> {
     let abs = if p.is_absolute() {
         p.to_path_buf()
     } else {
@@ -167,6 +177,7 @@ pub fn realpath(p: &Path) -> PathBuf {
         } else {
             let next = out.join(&c);
             match std::fs::read_link(&next) {
+                Ok(_) if strict && hops >= 40 => return None,
                 Ok(target) if hops < 40 => {
                     hops += 1;
                     if target.is_absolute() {
@@ -184,7 +195,7 @@ pub fn realpath(p: &Path) -> PathBuf {
             }
         }
     }
-    out
+    Some(out)
 }
 
 fn is_link(p: &Path) -> bool {

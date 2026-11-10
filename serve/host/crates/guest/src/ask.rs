@@ -68,6 +68,7 @@ pub fn ask_body(args: &AskArgs, agent: &str, text: &str, nonce: &str) -> Value {
         conversation: args.thread.clone(),
         r#ref: args.r#ref.clone(),
         room: args.room.clone(),
+        r#gen: args.r#gen,
         speaker: args.speaker.clone(),
         client_nonce: nonce.to_string(),
         no_queue: args.no_queue.then_some(true),

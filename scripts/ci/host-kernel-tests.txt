@@ -9,6 +9,7 @@ src/cards/access_tests.rs	cards::access_tests::
 src/cards/autoallow_tests.rs	cards::autoallow_tests::
 src/cards/resume_tests.rs	cards::resume_tests::
 src/delegation.rs	delegation::tests::
+src/limits.rs	limits::tests::
 src/remote/account.rs	remote::account::tests::
 src/remote/owner.rs	remote::owner::tests::
 # Use api::rig::Rig, which runs the real kernel/bin/kith-auth.

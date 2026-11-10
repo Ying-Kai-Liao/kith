@@ -78,6 +78,10 @@ pub struct RoomQueue {
     /// An outside bot's turn (`current`) is posted under this key.
     #[serde(default)]
     pub turn_key: Option<String>,
+    /// The bot's membership generation in the room when that turn was charged: a bot taken out and put back since is
+    /// not woken for it.
+    #[serde(default)]
+    pub turn_gen: Option<i64>,
     /// That bot's wake went out already: a restart waits for the post again but does not wake it twice.
     #[serde(default)]
     pub woke: bool,

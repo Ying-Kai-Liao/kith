@@ -173,3 +173,15 @@ switched-order	PROPERTY	AsksEnded	pass
 switched-order	PROPERTY	StoppedNeverWakes	pass
 # the origin Mac itself serves P while the cloud has the revoke (Publish made it look in sync)
 broken-switch-lag	PROPERTY	R6c	fail
+
+# --- the kill after the revoke commit (M2-23 gate): ClaimEnding (core) then KillSent (host); the host may lose it; the supervisor pass re-sends ---
+core-kill-split	INVARIANT	TypeOK	pass
+core-kill-split	INVARIANT	OrderKept	pass
+core-kill-split	PROPERTY	Swept	pass
+core-kill-split	PROPERTY	NoLiveProc	pass
+# core-kill-resend: with ReSendNeedsLink = FALSE, KillReSend never reads link[m]; LinkFlaps would only change link, so the action stays enabled and weak fairness holds. The flap is left out of this row only for TLC's heap (512 MB).
+core-kill-resend	INVARIANT	TypeOK	pass
+core-kill-resend	INVARIANT	OrderKept	pass
+core-kill-resend	PROPERTY	NoLiveProc	pass
+broken-no-kill-resend	PROPERTY	NoLiveProc	fail
+broken-resend-needs-link	PROPERTY	NoLiveProc	fail
