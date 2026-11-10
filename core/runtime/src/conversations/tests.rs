@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use tempfile::TempDir;
 
 use super::claims::{
-    Kill, Kind, NewClaim, Redeemed, Reported, claim, different_holder, end_gone, group_held, live_counts,
-    reconcile, redeem, report, revoke_person, stop,
+    Kill, Kind, NewClaim, Redeemed, Reported, claim, different_holder, end_gone, group_held,
+    live_counts, reconcile, redeem, report, revoke_person, stop,
 };
 use crate::db::{Core, MIGRATIONS, RecordedProc};
 use crate::error::Error;
