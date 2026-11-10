@@ -414,10 +414,11 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    local_revoke(hub, &bin, id, revoke).await?;
     if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
-        crate::remote::handle_revokes::changed(hub, &who, revoke);
+        crate::remote::handle_revokes::owner_change(hub, &bin, &who, revoke).await?;
+    } else {
+        local_revoke(hub, &bin, id, revoke).await?;
     }
     Ok(json!({"revoked": revoke, "everywhere": everywhere}))
 }

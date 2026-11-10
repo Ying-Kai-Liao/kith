@@ -379,6 +379,51 @@ async fn a_revoke_made_on_a_clock_behind_the_kept_stamp_is_still_newer_than_it()
     assert!(mine[0].revoked && mine[0].at > ahead, "a stamp that is not newer is ignored and no computer would hear");
 }
 
+/// tom, known only by telegram:42, revoked here; stamps newer than the legacy revoke.
+fn revoked_tom(r: &Rig) -> i64 {
+    r.auth(&["person", "tom"]);
+    r.auth(&["member", "house", "tom"]);
+    r.auth(&["handle", "tom", "telegram", "42"]);
+    r.auth(&["person", "tom", "--revoke", "--local"]);
+    crate::store::now_ms() + 1_000
+}
+
+/// Whether kith-auth and the kept stamp agree on tom.
+fn tom_agrees(r: &Rig) -> bool {
+    let kept = r.hub.store.handle_revokes().unwrap();
+    kept.len() == 1 && kept[0].revoked == !r.allowed("tom", "house")
+}
+
+#[tokio::test]
+async fn two_handle_exchanges_at_once_leave_kith_auth_on_the_newest_stamp() {
+    use crate::remote::handle_revokes::exchange_in;
+    use crate::store::HandleRevoke;
+    let r = Rig::new().await;
+    let t = revoked_tom(&r);
+    let rev = |revoked, at| HandleRevoke { handle: "telegram:42".into(), revoked, at };
+    // Another computer undid, then revoked again; each arrives in its own exchange, at once (HandleExchange hx_broken_two).
+    let (a, b) = tokio::join!(exchange_in(&r.hub, vec![rev(false, t)]), exchange_in(&r.hub, vec![rev(true, t + 1)]));
+    a.unwrap();
+    b.unwrap();
+    assert_eq!(r.hub.store.handle_revokes().unwrap(), vec![rev(true, t + 1)]);
+    assert!(!r.allowed("tom", "house"), "the newest change, the revoke, holds in kith-auth too");
+}
+
+#[tokio::test]
+async fn a_handle_exchange_racing_the_owners_undo_ends_with_kith_auth_and_the_stamp_agreeing() {
+    use crate::remote::handle_revokes::exchange_in;
+    use crate::store::HandleRevoke;
+    let r = Rig::new().await;
+    let t = revoked_tom(&r);
+    let revoke = HandleRevoke { handle: "telegram:42".into(), revoked: true, at: t };
+    // HandleExchange hx_broken_owner: the exchange must not keep a revoke it decided on before the owner's undo.
+    let (a, b) =
+        tokio::join!(exchange_in(&r.hub, vec![revoke]), call(&r, "unrevokePerson", json!({"personId": "tom"})));
+    a.unwrap();
+    b.unwrap();
+    assert!(tom_agrees(&r), "kept {:?}, allowed {}", r.hub.store.handle_revokes().unwrap(), r.allowed("tom", "house"));
+}
+
 #[tokio::test]
 async fn a_stamp_from_far_in_the_future_is_refused() {
     use crate::remote::handle_revokes::exchange_in;
