@@ -82,15 +82,18 @@ A preset member mode=default >/dev/null
 A preset ghost mode=default >/dev/null
 A bot samuelbot --of samuel >/dev/null
 A person samuelbot id=botty >/dev/null               # a bot with `was`
+A bot timbot --of tim >/dev/null
 A bot kaibot --of kai >/dev/null
 A person kaibot id=kaib >/dev/null                   # one of the owner's bots, renamed (bots-cap --json lists its old id too)
 # the core keeps memberships ordered by agent and person, not as the file was written: the rows of an agent go in in that
 # order, so the verbs that list a table (budgets, ledger) read the same on both sides
+A member house '*' preset=member >/dev/null          # everyone: "member (everyone)" for a person, never for a bot
 A member house amy preset=member helpers=writer >/dev/null
 A member house botty >/dev/null
 A member house dan preset=ghost >/dev/null
 A member house eve preset=member >/dev/null
 A member house samuel preset=member budget=5 >/dev/null
+A member house timbot >/dev/null                     # a bot of the revoked tim: cut off through bot_of
 A member writer samuel preset=member >/dev/null
 A helper house amy helper --once >/dev/null          # a "just this once" on a helper
 A job house eve edit >/dev/null                      # a ticked job that grants the helper
@@ -111,13 +114,15 @@ json.dump(a, open(p, 'w'), indent=2)
 PY
 [[ -f $AUTHJ ]] && ok "setup: the fixture auth.json is there" || bad "setup: no auth.json"
 
-PERSONS=(kai samuel sam tim amy dan eve botty samuelbot kaib kaibot zed nobody)
+PERSONS=(kai samuel sam tim timbot amy dan eve botty samuelbot kaib kaibot zed nobody)
 AGENTS=(house writer helper nothere)
 [[ -n ${ROUTER_QUICK:-} ]] && { PERSONS=(kai samuel); AGENTS=(house writer); }   # while writing the check
 # matrix OUTFILE: every routed verb over the fixture, "$ command", stdout, "rc=N". Stderr is left out (it names paths).
 matrix() {
   local out=$1 p a v
   : > "$out"; : > "$out.err"
+  # a linked Mac whose lease ran out: `held` is true for everyone but the owner (the serve folder is the caller's KITH_SERVE_DIR)
+  printf '{"linked": true, "until": 1}\n' > "$KITH_SERVE_DIR/cloud-sync.json"
   run() { { echo "\$ $*"; "$@" 2>>"$out.err"; echo "rc=$?"; } >> "$out"; }
   run_as() { local who=$1; shift; { echo "\$ KITH_PERSON=$who $*"; KITH_PERSON=$who "$@" 2>>"$out.err"; echo "rc=$?"; } >> "$out"; }
   for p in "${PERSONS[@]}"; do
@@ -158,12 +163,15 @@ matrix() {
   run A ledger --person sam --agent house --json
   run A ledger --agent house --json
   run A ledger --agent nobody --json
+  rm -f "$KITH_SERVE_DIR/cloud-sync.json"
+  for p in kai samuel tim; do run A resolve house --person "$p"; done   # and once more with no cloud-sync file: never linked
 }
 matrix "$T/golden.out"
 rows=$(grep -c '^\$' "$T/golden.out")
 [[ $rows -gt 300 || -n ${ROUTER_QUICK:-} ]] && ok "golden: $rows routed calls over the file" || bad "golden: too few calls ($rows)"
 grep -q 'rc=2$' "$T/golden.out" && bad "golden: a call was a usage error" "$(grep -B2 'rc=2$' "$T/golden.out" | head -6)"
 grep -q '^{"person": "samuel"' "$T/golden.out" && ok "golden: who finds the renamed person" || bad "golden: who"
+grep -q '"held": true' "$T/golden.out" && grep -q '"held": false' "$T/golden.out" && ok "golden: held is true and false in the matrix" || bad "golden: held"
 grep -qi 'just this once' "$T/golden.out" && bad "golden: matrix must not use up a once" || ok "golden: no once used by the matrix"
 
 # --- the switched copies -------------------------------------------------------------------------------------------------------
@@ -171,7 +179,7 @@ grep -qi 'just this once' "$T/golden.out" && bad "golden: matrix must not use up
 TOMB='{"kith_tombstone": 1, "module": "authority", "message": "this data moved to the Kith core (module authority); the old reader must not use this file", "rollback": "kith rollback authority"}'
 switch_copy() {   # NAME
   local d=$T/$1
-  mkdir -p "$d" && cp -R "$G/home" "$d/home" && mkdir -p "$d/serve"
+  mkdir -p "$d" && cp -R "$G/home" "$d/home" && cp -R "$G/serve" "$d/serve"
   use_home "$d"
   local mig
   mig=$("$BIN" kernel core-migrate --authority 2>&1) || { bad "setup $1: core-migrate --authority" "$mig"; return 1; }
@@ -214,7 +222,7 @@ seq_once() {   # OUT
     echo "\$ after";  A may amy helper --via house --once 2>/dev/null; echo "rc=$?"
     echo "\$ no caller"; A resolve helper --person amy --take-once 2>/dev/null; echo "rc=$?"; } >> "$out"
 }
-mkdir -p "$T/gs" && cp -R "$G/home" "$T/gs/home" && mkdir -p "$T/gs/serve"
+mkdir -p "$T/gs" && cp -R "$G/home" "$T/gs/home" && cp -R "$G/serve" "$T/gs/serve"
 use_home "$T/gs"; seq_once "$T/once.golden"
 if grep -q 'just this once' "$T/once.golden" && [[ $(grep -c '"allowed": true' "$T/once.golden") == 1 ]]; then
   ok "take-once, file: the first launch is allowed on the once, the second is refused"
@@ -291,7 +299,7 @@ out=$(A ls --json 2>/dev/null); rc=$?   # --json puts the refusal on stdout, as 
 [[ $(calls "$T/w1") == 0 ]] && ok "no route: the core was never asked" || bad "no route: a call went out" "$(cat "$T/w1/calls")"
 
 # a tombstone of another module is not authority's: no call, today's text
-mkdir -p "$T/sw5" && cp -R "$T/sw4/home" "$T/sw5/home" && mkdir -p "$T/sw5/serve"
+mkdir -p "$T/sw5" && cp -R "$T/sw4/home" "$T/sw5/home" && cp -R "$G/serve" "$T/sw5/serve"
 printf '%s\n' "${TOMB//authority/accounts}" > "$T/sw5/home/.kith/secrets/auth.json"
 mkwrap "$T/w5" pass
 use_home "$T/sw5" "$T/w5/kith"
@@ -306,7 +314,7 @@ out=$(KITH_AUTH=$T/other-auth.json A may samuel house 2>"$T/e"); rc=$?
 
 # the core cannot say yes: no core file, not switched, stepping, damaged; rolling back still answers reads
 sw_variant() {   # NAME
-  mkdir -p "$T/$1" && cp -R "$T/sw4/home" "$T/$1/home" && mkdir -p "$T/$1/serve"
+  mkdir -p "$T/$1" && cp -R "$T/sw4/home" "$T/$1/home" && cp -R "$G/serve" "$T/$1/serve"
 }
 sw_variant v1; rm -f "$T/v1/home/.kith/core/$DBF"
 mkwrap "$T/wv1" pass; use_home "$T/v1" "$T/wv1/kith"; refuses "no core file (noCore)" A may samuel house
@@ -353,6 +361,11 @@ for mode in sleep garbage array nocore exit3 exit4 exit5; do
   [[ $(grep -c 'people.resolve' "$T/m-$mode/calls") == 1 ]] && ok "core-call $mode: the take-once was sent once" \
     || bad "core-call $mode: the take-once was repeated" "$(cat "$T/m-$mode/calls")"
 done
+
+# --json mode: a refusal is the {"ok": false, "error"} on stdout that json_run gives, with the same exit code
+use_home "$T/sw4" "$T/m-exit3/kith"
+out=$(A granted fly --json 2>/dev/null); rc=$?
+[[ $rc == 3 && $out == '{"ok": false, "error": '* ]] && ok "granted --json refused: JSON error on stdout, exit 3" || bad "granted --json refused" "rc=$rc out=$out"
 
 # what is sent: viaSwitch on every call, takeOnce only with a caller, the person only when named
 mkwrap "$T/ws" pass

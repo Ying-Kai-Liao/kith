@@ -427,7 +427,8 @@ const CORE_CALL_METHODS: &[&str] = &[
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
 /// refuses it unless authority is switched (a rollback leaves the file the truth); core-call refuses one without it, and a
-/// `people.botsCap` that sets the cap, which is a write the mirror never sends.
+/// `people.botsCap` that sets the cap, which is a write the mirror never sends. (`people.resolve` with `takeOnce` uses up a
+/// grant, so it is a write too; the core fences it the same way.)
 const ROUTED_READS: &[&str] = &[
     "people.who",
     "people.granted",
@@ -546,7 +547,7 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         && (params.get("viaSwitch").and_then(Value::as_bool) != Some(true)
             || params.get("amount").is_some_and(|a| !a.is_null()))
     {
-        eprintln!("core-call: {method} is routed only as a read with viaSwitch: true");
+        eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true and no amount");
         return 2;
     }
     let folders = kernel::folders(&kith_kernel::paths::process_home());
@@ -681,6 +682,16 @@ pub fn print_status(json: bool) {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    /// The three lists are written by hand; a routed method missing from one would only show on a switched Mac.
+    #[test]
+    fn every_routed_read_is_on_core_call_and_the_embedded_list() {
+        for m in ROUTED_READS {
+            assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(EMBEDDED_METHODS.contains(m), "{m} is not on EMBEDDED_METHODS");
+        }
+    }
 
     fn args(line: &str) -> Vec<OsString> {
         std::iter::once("kith serve").chain(line.split(' ')).map(OsString::from).collect()

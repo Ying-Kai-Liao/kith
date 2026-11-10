@@ -3018,8 +3018,13 @@ def do_grant(who, svc, profile, known_only=False):
 # --- authority in the core (M2-23): the reads kith-auth answers from the core once auth.json is a tombstone ---------------
 
 def route_fail(why):
-    """The core can't be asked, or didn't answer: exit 3, as the tombstone's own refusal. Never a guess."""
-    print(f'kith-auth: authority moved to the core, and it gave no answer: {why}', file=sys.stderr)
+    """The core can't be asked, or didn't answer: exit 3, as the tombstone's own refusal. Never a guess. In --json mode the
+    refusal is the {"ok": false, "error"} on stdout that json_run gives."""
+    msg = f'authority moved to the core, and it gave no answer: {why}'
+    if _ROUTE and _ROUTE[2]:
+        print(json.dumps({'ok': False, 'error': msg}))
+    else:
+        print(f'kith-auth: {msg}', file=sys.stderr)
     sys.exit(3)
 
 
@@ -3038,7 +3043,7 @@ def core_ask(method, params):
     if not bin_:
         route_fail('no kith program to ask')
     body = {**params, 'viaSwitch': True, 'kernel': str(KITH), 'home': str(Path.home()),
-            'env': {k: os.environ[k] for k in MIRROR_ENV if os.environ.get(k)}}
+            'env': {k: os.environ[k] for k in MIRROR_ENV + ('KITH_SERVE_DIR',) if os.environ.get(k)}}   # the serve dir holds cloud-sync.json: `held`
     try:
         r = subprocess.run([bin_, 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(body),
                            capture_output=True, text=True, timeout=CORE_CALL_SECS)
