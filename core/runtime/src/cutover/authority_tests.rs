@@ -1748,3 +1748,157 @@ fn a_kith_auth_write_after_a_kept_copy_keeps_the_record_switched_and_says_rollba
     assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
     assert!(!tombstone::is_tombstone(&r.auth()));
 }
+
+fn revoke_in_core(r: &Rig, id: &str) {
+    r.db()
+        .execute("UPDATE people SET revoked = 1 WHERE id = ?1", [id])
+        .unwrap();
+}
+
+/// A marker from before the sha was kept.
+fn drop_auth_sha(r: &Rig) {
+    let seed: String = r
+        .db()
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'cutover:authority:seed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut v: Value = serde_json::from_str(&seed).unwrap();
+    v.as_object_mut().unwrap().remove("auth_sha");
+    r.db()
+        .execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'cutover:authority:seed'",
+            [v.to_string()],
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_repair_over_a_never_touched_file_finishes_the_tombstone_and_keeps_the_core_revoke() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The core moved on (a revoke) while auth.json stayed the file the step imported: the core is the newer side.
+    revoke_in_core(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(revoked_in_core(&r, "sam"), "the core's revoke stays");
+    // Running it again is the finished switch.
+    let out = step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(said(&out, "already switched"), "{out:?}");
+    assert!(revoked_in_core(&r, "sam"));
+}
+
+#[test]
+fn a_changed_file_over_an_unmoved_core_is_told_to_force_and_force_imports_it() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("kith migrate step authority --force"), "{msg}");
+    let force = Opts {
+        force: true,
+        ..opts()
+    };
+    step(&reg, &r.env, "authority", force).unwrap();
+    assert!(revoked_in_core(&r, "sam"), "the file's revoke was imported");
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+}
+
+#[test]
+fn a_changed_file_and_a_moved_core_refuse_without_force_advice_and_leave_the_record() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    revoke_in_core(&r, "mia");
+    std::fs::remove_dir(blocker).unwrap();
+    let bytes = std::fs::read(r.auth()).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("both sides changed"), "{msg}");
+    assert!(msg.contains("kith migrate check authority"), "{msg}");
+    assert!(!msg.contains("--force"), "{msg}");
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    assert_eq!(std::fs::read(r.auth()).unwrap(), bytes);
+    assert!(revoked_in_core(&r, "mia"));
+}
+
+#[test]
+fn an_older_marker_with_no_sha_is_told_to_force_only_while_the_core_is_unmoved() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    drop_auth_sha(&r);
+    std::fs::remove_dir(blocker).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("kith migrate step authority --force"), "{msg}");
+    // Once the core has moved too, nothing says which side is newer.
+    revoke_in_core(&r, "mia");
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("compare by hand"), "{msg}");
+    assert!(!msg.contains("--force"), "{msg}");
+}
+
+fn force() -> Opts {
+    Opts {
+        force: true,
+        ..opts()
+    }
+}
+
+#[test]
+fn force_on_a_stepping_record_is_refused_once_the_core_has_moved() {
+    for old_marker in [false, true] {
+        let (r, reg) = rig();
+        let blocker = crash_before_tombstone(&r, &reg);
+        revoked_in_file(&r, "sam");
+        if old_marker {
+            drop_auth_sha(&r);
+        }
+        std::fs::remove_dir(blocker).unwrap();
+        // The first repair sees an unmoved core: it advises --force and leaves the record Stepping.
+        let msg = refusal(step(&reg, &r.env, "authority", opts()));
+        assert!(msg.contains("--force"), "{msg}");
+        assert_eq!(phase(&r.env, "authority"), Some(Phase::Stepping));
+        // Then the core takes a revoke of its own.
+        revoke_in_core(&r, "mia");
+        let bytes = std::fs::read(r.auth()).unwrap();
+        let msg = refusal(step(&reg, &r.env, "authority", force()));
+        assert!(!msg.contains("--force"), "{msg}");
+        assert!(revoked_in_core(&r, "mia"), "the core's revoke is kept");
+        assert!(!revoked_in_core(&r, "sam"), "the file was not imported");
+        assert_eq!(std::fs::read(r.auth()).unwrap(), bytes);
+        assert!(!tombstone::is_tombstone(&r.auth()));
+    }
+}
+
+#[test]
+fn a_stepping_record_with_the_same_marker_and_file_finishes_the_tombstone_without_importing() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The crash came after the marker and before the switched record.
+    let s = state::read(&r.env.layout, "authority").unwrap().unwrap();
+    state::write(
+        &r.env.layout,
+        "authority",
+        &Switch {
+            phase: Phase::Stepping,
+            ..s
+        },
+    )
+    .unwrap();
+    revoke_in_core(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(
+        revoked_in_core(&r, "sam"),
+        "no import over the core's revoke"
+    );
+}

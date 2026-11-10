@@ -11,7 +11,8 @@
 //!   report that names no process also writes `ending`, a nameless exit that ran out of usage is rewritten to
 //!   `out_of_usage`, and that process is the claimer's own business), and whose holder instance is this
 //!   Mac's: the serve host's ([`HOST_INSTANCE`]), none (a claim made before the switch, a terminal's own), or the
-//!   connected local holder's. Claims of an older local holder instance are skipped and left to the next hello's
+//!   connected local holder's. A claim with no instance counts only for a kill the core decided (a revoke, a stop), never
+//!   for `holder_changed`: no holder started that process (H1), so a holder's hello is no reason to signal it. Claims of an older local holder instance are skipped and left to the next hello's
 //!   `reconcile`; a remote holder's pids are not this Mac's, so its instance is never an owner.
 //! - Which process: the pid must be alive with a stamp that [`procstart::comparable`] and [`procstart::same_process`]
 //!   say is the recorded one. A missing, empty or incomparable stamp is logged once per claim and never signalled; a gone
@@ -31,6 +32,9 @@ use kith_kernel::procstart::{self, Sig};
 use crate::conversations::claims::HOST_INSTANCE;
 use crate::daemon::Shared;
 use crate::log;
+
+/// The end reason `release_unlisted` writes when a holder's hello did not list a claim.
+const HOLDER_CHANGED: &str = "holder_changed";
 
 /// How often the daemon's tick looks.
 pub(crate) const EVERY: Duration = Duration::from_secs(5);
@@ -63,16 +67,16 @@ pub(crate) fn connected_instance(shared: &Shared) -> Option<String> {
 
 /// One tick. `holder` is [`connected_instance`]. Returns the claimer pids signalled on this pass.
 pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Vec<u32> {
-    type Row = (i64, i64, Option<String>, Option<String>);
+    type Row = (i64, i64, Option<String>, Option<String>, String);
     let rows: Vec<Row> = match shared.with_core(|c| {
         let mut st = c.conn().prepare(
-            "SELECT claim_id, pid, pid_started, holder_instance FROM claims
+            "SELECT claim_id, pid, pid_started, holder_instance, end_reason FROM claims
              WHERE state = 'ending' AND pid IS NOT NULL
                AND end_reason IS NOT NULL AND end_reason NOT IN ('done', 'exit', ?1)",
         )?;
         let rows = st
             .query_map([crate::accounts::failover::OUT_OF_USAGE], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
@@ -91,10 +95,10 @@ pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Ve
     let mut live: HashSet<(u32, String)> = HashSet::new();
     let mut touched = Vec::new();
     let mut claims: HashSet<i64> = HashSet::new();
-    for (claim, pid, started, holder_instance) in rows {
+    for (claim, pid, started, holder_instance, reason) in rows {
         claims.insert(claim);
         let mine = match holder_instance.as_deref() {
-            None => true,
+            None => reason != HOLDER_CHANGED,
             Some(h) => h == HOST_INSTANCE || Some(h) == holder,
         };
         let Ok(pid) = u32::try_from(pid) else {

@@ -185,3 +185,8 @@ core-kill-resend	INVARIANT	OrderKept	pass
 core-kill-resend	PROPERTY	NoLiveProc	pass
 broken-no-kill-resend	PROPERTY	NoLiveProc	fail
 broken-resend-needs-link	PROPERTY	NoLiveProc	fail
+# --- a nameless done/exit before the revoke (L1012): the claim is already `ending` with a reason the re-send skips; the revoke rewrites it to revoked ---
+core-kill-nameless	INVARIANT	TypeOK	pass
+core-kill-nameless	INVARIANT	OrderKept	pass
+core-kill-nameless	PROPERTY	NoLiveProc	pass
+broken-revoke-keeps-reason	PROPERTY	NoLiveProc	fail
