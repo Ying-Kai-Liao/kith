@@ -469,7 +469,7 @@ impl Actor {
             crate::cards::resource::Classified::Card { key, shown } => Some((key, shown)),
             crate::cards::resource::Classified::Never => None,
             crate::cards::resource::Classified::Malformed(_) => {
-                Some((format!("{name}:{}", crate::cards::resource::digest(raw)), title.to_owned()))
+                Some((crate::cards::resource::input_key(name, raw), title.to_owned()))
             }
         }
     }
