@@ -1897,5 +1897,8 @@ fn a_stepping_record_with_the_same_marker_and_file_finishes_the_tombstone_withou
     step(&reg, &r.env, "authority", opts()).unwrap();
     assert!(tombstone::is_tombstone(&r.auth()));
     assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
-    assert!(revoked_in_core(&r, "sam"), "no import over the core's revoke");
+    assert!(
+        revoked_in_core(&r, "sam"),
+        "no import over the core's revoke"
+    );
 }
