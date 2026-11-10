@@ -1843,3 +1843,59 @@ fn an_older_marker_with_no_sha_is_told_to_force_only_while_the_core_is_unmoved()
     assert!(msg.contains("compare by hand"), "{msg}");
     assert!(!msg.contains("--force"), "{msg}");
 }
+
+fn force() -> Opts {
+    Opts {
+        force: true,
+        ..opts()
+    }
+}
+
+#[test]
+fn force_on_a_stepping_record_is_refused_once_the_core_has_moved() {
+    for old_marker in [false, true] {
+        let (r, reg) = rig();
+        let blocker = crash_before_tombstone(&r, &reg);
+        revoked_in_file(&r, "sam");
+        if old_marker {
+            drop_auth_sha(&r);
+        }
+        std::fs::remove_dir(blocker).unwrap();
+        // The first repair sees an unmoved core: it advises --force and leaves the record Stepping.
+        let msg = refusal(step(&reg, &r.env, "authority", opts()));
+        assert!(msg.contains("--force"), "{msg}");
+        assert_eq!(phase(&r.env, "authority"), Some(Phase::Stepping));
+        // Then the core takes a revoke of its own.
+        revoke_in_core(&r, "mia");
+        let bytes = std::fs::read(r.auth()).unwrap();
+        let msg = refusal(step(&reg, &r.env, "authority", force()));
+        assert!(!msg.contains("--force"), "{msg}");
+        assert!(revoked_in_core(&r, "mia"), "the core's revoke is kept");
+        assert!(!revoked_in_core(&r, "sam"), "the file was not imported");
+        assert_eq!(std::fs::read(r.auth()).unwrap(), bytes);
+        assert!(!tombstone::is_tombstone(&r.auth()));
+    }
+}
+
+#[test]
+fn a_stepping_record_with_the_same_marker_and_file_finishes_the_tombstone_without_importing() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The crash came after the marker and before the switched record.
+    let s = state::read(&r.env.layout, "authority").unwrap().unwrap();
+    state::write(
+        &r.env.layout,
+        "authority",
+        &Switch {
+            phase: Phase::Stepping,
+            ..s
+        },
+    )
+    .unwrap();
+    revoke_in_core(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(revoked_in_core(&r, "sam"), "no import over the core's revoke");
+}

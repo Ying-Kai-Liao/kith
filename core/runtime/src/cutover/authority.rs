@@ -795,13 +795,22 @@ impl Module for AuthorityModule {
             .as_deref()
             .is_some_and(|c| marker::read(c.conn(), self.name()).is_some());
         // The advice for rows that differ in a repair: `--force` only while the core has not moved since the switch.
-        let advice = match (&before, core.as_deref()) {
-            (Some(now), Some(c)) => match repair_verdict(c.conn(), self.name(), now) {
-                SwitchedFile::Refuse(why) => format!("{why}."),
-                _ => REPAIR_FORCE.to_owned(),
+        let refuse = match (&before, core.as_deref()) {
+            (Some(now), Some(c)) if repair => match repair_verdict(c.conn(), self.name(), now) {
+                SwitchedFile::Refuse(why) => Some(why),
+                _ => None,
             },
-            _ => REPAIR_FORCE.to_owned(),
+            _ => None,
         };
+        // A record left Stepping by an earlier refusal can meet a core that has moved since; `--force` would replace those
+        // rows with the file's, so it is refused here too. A plain re-run still passes when the rows already agree.
+        if opts.force
+            && !opts.dry_run
+            && let Some(why) = &refuse
+        {
+            return Err(Error::Refused(format!("{why}.")));
+        }
+        let advice = refuse.map_or_else(|| REPAIR_FORCE.to_owned(), |why| format!("{why}."));
         let rep = crate::import::run_in(
             &env.layout,
             ctx,
