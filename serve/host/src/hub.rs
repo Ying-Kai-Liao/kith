@@ -14,7 +14,7 @@ use anyhow::{Result, anyhow, bail};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{broadcast, watch};
 
@@ -73,7 +73,8 @@ pub struct Hub {
     runtime: Mutex<HashMap<String, Runtime>>,
     /// This hub, for starting actors from `&self`.
     me: Weak<Hub>,
-    pub phone_clients: AtomicUsize,
+    /// Connected phone apps by person (`None` is the owner): see `phone_connected_for`.
+    phone_clients: Mutex<HashMap<Option<String>, usize>>,
     pub usage: Mutex<Usage>,
     /// Which backup subscriptions are out of usage until when (see `agent::backups`).
     pub backups: Arc<crate::agent::backups::Backups>,
@@ -161,7 +162,7 @@ impl Hub {
             emit_lock: Mutex::new(()),
             bots: Mutex::default(),
             runtime: Mutex::default(),
-            phone_clients: AtomicUsize::new(0),
+            phone_clients: Mutex::default(),
             usage: Mutex::default(),
             backups: Arc::new(crate::agent::backups::Backups::new(service::data_dir().join("backups.json"))),
             keep_awake: Mutex::default(),
@@ -819,8 +820,31 @@ impl Hub {
         Ok(removed)
     }
 
+    /// A phone app of `person` (`None` is the owner) connected: it counts until `phone_left`.
+    pub fn phone_joined(&self, person: Option<&str>) {
+        *self.phone_clients.locked().entry(person.map(str::to_owned)).or_default() += 1;
+    }
+
+    pub fn phone_left(&self, person: Option<&str>) {
+        let mut clients = self.phone_clients.locked();
+        let key = person.map(str::to_owned);
+        if let Some(n) = clients.get_mut(&key) {
+            *n -= 1;
+            if *n == 0 {
+                clients.remove(&key);
+            }
+        }
+    }
+
+    /// Any person's phone app is connected (a chat alert is held while one is: it shows the chat itself).
     pub fn phone_connected(&self) -> bool {
-        self.phone_clients.load(Ordering::Relaxed) > 0
+        !self.phone_clients.locked().is_empty()
+    }
+
+    /// This person's own phone app is connected. A call rings only its person's devices, so another person's open
+    /// app must not hold it back.
+    pub fn phone_connected_for(&self, person: Option<&str>) -> bool {
+        self.phone_clients.locked().contains_key(&person.map(str::to_owned))
     }
 }
 
