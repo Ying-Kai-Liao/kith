@@ -862,6 +862,21 @@ for rules in (allow, s["permissions"]["deny"]):
         q = "Bash(\"%s%s\"%s" % (kbin[5:], name, r[len(kbin) + len(name):])
         if q not in rules:
             rules.insert(rules.index(r) + 1, q)
+# Every owner run may run its own package tools and learned-skill scripts, and the kernel commands PROTOCOL.md tells it
+# to use, without a prompt or the auto classifier. Bare and quoted path spellings (Claude Code itself refuses a
+# backslash-escaped space). The must-ask classes still win: ask beats allow, so python3 -c still asks.
+if os.environ["P_OWNER"] == "1":
+    own = []
+    learned = os.environ["PKG"] + "/skills/learned"
+    for root in dict.fromkeys((os.environ["KITH_AGENT_DIR"] + "/tools", learned, os.path.realpath(learned))):
+        for spell in (root, "\"" + root):
+            own += ["Bash(%s/*)" % spell, "Bash(python3 %s/*)" % spell]
+    kb = os.environ["KITH_ROOT"] + "/bin/"
+    for tool, rest in (("kith-send", "--as " + os.environ["KITH_AGENT"]), ("kith", "ask"), ("kith-wake", "wait"),
+                       ("project-id", ""), ("kith-memory", "search"), ("kith-recall", ""), ("kith", "bug"), ("kith-who", "")):
+        for spell in (kb + tool, "\"%s%s\"" % (kb, tool)):
+            own.append("Bash(%s%s:*)" % (spell, " " + rest if rest else ""))
+    allow.extend(r for r in own if r not in allow)
 allow.extend(r for r in dict.fromkeys("Edit(/%s/**)" % d for d in os.environ["WRITABLE"].split("\n") if d.strip()) if r not in allow)
 sys.path.insert(0, os.environ["KITH_ROOT"] + "/lib")
 from kith_settings import current, get
