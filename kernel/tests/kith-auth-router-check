@@ -109,6 +109,7 @@ import json, sys
 p = sys.argv[1]
 a = json.load(open(p))
 a['presets'].pop('ghost', None)
+a['members']['house']['amy']['helper_once']['helper'] = 4102444800000   # year 2100: the verb's five minutes would run out in a slow CI run
 a['grants'] = {'house': {'github': 'work', 'fly': ['a', 'b']}, 'writer': {'github': 'other'}}
 json.dump(a, open(p, 'w'), indent=2)
 PY
@@ -333,7 +334,7 @@ out=$(A may samuel house 2>/dev/null); rc=$?
 
 # the core held by another process that is no daemon: nothing answers, exit 3 (never an answer from the file)
 sw_variant v6
-python3 - "$T/v6/home/.kith/core/core.lock" <<'PY' &
+python3 - "$T/v6/home/.kith/core/core."lock <<'PY' &
 import fcntl, sys, time
 f = open(sys.argv[1], 'a')
 fcntl.flock(f, fcntl.LOCK_EX)
