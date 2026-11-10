@@ -1748,3 +1748,48 @@ fn a_kith_auth_write_after_a_kept_copy_keeps_the_record_switched_and_says_rollba
     assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
     assert!(!tombstone::is_tombstone(&r.auth()));
 }
+
+#[test]
+fn a_repair_over_a_never_touched_file_is_told_to_roll_back_not_to_force() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The core moved on (a revoke) while auth.json stayed the file the step imported: --force would undo the revoke.
+    r.db()
+        .execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", [])
+        .unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("kith rollback authority"), "{msg}");
+    assert!(!msg.contains("--force"), "{msg}");
+    // The same advice the second time.
+    let again = refusal(step(&reg, &r.env, "authority", opts()));
+    assert_eq!(msg, again);
+}
+
+#[test]
+fn a_repair_with_a_seed_that_has_no_sha_is_told_to_roll_back_not_to_force() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    // A marker from before the sha was kept.
+    let seed: String = r
+        .db()
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'cutover:authority:seed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut v: Value = serde_json::from_str(&seed).unwrap();
+    v.as_object_mut().unwrap().remove("auth_sha");
+    r.db()
+        .execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'cutover:authority:seed'",
+            [v.to_string()],
+        )
+        .unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("kith rollback authority"), "{msg}");
+    assert!(!msg.contains("--force"), "{msg}");
+}

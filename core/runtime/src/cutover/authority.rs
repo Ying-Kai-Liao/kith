@@ -220,6 +220,12 @@ const REPAIR_FORCE: &str = "This is the repair of a switch that stopped before t
      core took its rows, so the file is newer and wins. Run `kith migrate step authority --force` to replace the core's rows \
      with the file's (a backup of core.db is taken first).";
 
+/// What a crash repair tells the owner when the file is the one the step imported (or the seed has no sha to tell): the
+/// core has taken revokes since, so `--force` would put the older file over them.
+const REPAIR_ROLLBACK: &str = "This is the repair of a switch that stopped before the tombstone, and auth.json is the file the step imported, so the \
+     core is the newer side and forcing the file in would put an older file over its rows. Run `kith rollback authority` first, \
+     then step again.";
+
 /// The SHA-256 of the file's bytes; "missing" when it does not exist.
 fn sha_of(path: &Path) -> Result<String> {
     use std::fmt::Write as _;
@@ -289,6 +295,8 @@ pub(crate) struct AuthorityModule {
     lock_wait: Duration,
     /// What the import read: auth.json's sha, checked again just before the tombstone. (`None` outside a step.)
     imported: RefCell<Option<String>>,
+    /// The same sha, kept until `seed` writes it beside the marker (`before_tombstone` takes `imported` first).
+    imported_sha: RefCell<Option<String>>,
     /// Where `import` reads the Keychain items the profiles name.
     source: Box<dyn ItemSource>,
     /// Where `import` seals them.
@@ -339,6 +347,7 @@ impl AuthorityModule {
             lifted: true,
             lock_wait: LOCK_WAIT,
             imported: RefCell::new(None),
+            imported_sha: RefCell::new(None),
             source,
             sink: RefCell::new(sink),
             vault: RefCell::new(vault),
@@ -435,7 +444,9 @@ pub(crate) struct Keep {
 }
 
 /// The seed `step` leaves beside the marker: each person's `seq`, the memberships and the presets at the switch.
-fn seed_of(db: &Connection) -> Result<String> {
+/// `auth_sha` is the sha of the auth.json bytes the step imported, so a crash repair can tell a never-touched file from one
+/// `kith-auth` wrote after.
+fn seed_of(db: &Connection, auth_sha: Option<&str>) -> Result<String> {
     let mut people = Map::new();
     let mut q = db.prepare("SELECT id, seq FROM people")?;
     for r in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
@@ -458,7 +469,10 @@ fn seed_of(db: &Connection) -> Result<String> {
     for r in q.query_map([], |r| r.get::<_, String>(0))? {
         presets.push(Value::String(r?));
     }
-    Ok(json!({"people": people, "members": members, "presets": presets}).to_string())
+    Ok(
+        json!({"people": people, "members": members, "presets": presets, "auth_sha": auth_sha})
+            .to_string(),
+    )
 }
 
 /// What the seed lets back now. No seed (a marker from before seeds) or one that does not parse: nothing comes back,
@@ -699,6 +713,7 @@ impl Module for AuthorityModule {
             refuse_unmoved_vault(ctx, &db)?;
         }
         *self.imported.borrow_mut() = None;
+        *self.imported_sha.borrow_mut() = None;
         Ok(Some(Box::new(held)))
     }
 
@@ -747,6 +762,14 @@ impl Module for AuthorityModule {
         let repair = core
             .as_deref()
             .is_some_and(|c| marker::read(c.conn(), self.name()).is_some());
+        // `--force` is offered only for a file that changed since the step; a seed with no sha (an older marker) is not one.
+        let file_newer = match (&before, core.as_deref()) {
+            (Some(now), Some(c)) => marker::seed(c.conn(), self.name())
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .and_then(|v| v["auth_sha"].as_str().map(|s| s != now))
+                .unwrap_or(false),
+            _ => false,
+        };
         let rep = crate::import::run_in(
             &env.layout,
             ctx,
@@ -760,7 +783,12 @@ impl Module for AuthorityModule {
         )
         .map_err(|e| match e {
             Error::Refused(s) if repair && s.contains(crate::import::DIFFERS_HINT) => {
-                Error::Refused(s.replace(crate::import::DIFFERS_HINT, REPAIR_FORCE))
+                let advice = if file_newer {
+                    REPAIR_FORCE
+                } else {
+                    REPAIR_ROLLBACK
+                };
+                Error::Refused(s.replace(crate::import::DIFFERS_HINT, advice))
             }
             e => e,
         })?;
@@ -768,6 +796,7 @@ impl Module for AuthorityModule {
             if sha_of(&ctx.auth)? != before {
                 return Err(Error::Refused(CHANGED.into()));
             }
+            *self.imported_sha.borrow_mut() = Some(before.clone());
             *self.imported.borrow_mut() = Some(before);
         }
         Ok(rep.lines)
@@ -943,7 +972,8 @@ impl Module for AuthorityModule {
     }
 
     fn seed(&self, _env: &Env, db: &Connection) -> Result<Option<String>> {
-        seed_of(db).map(Some)
+        let sha = self.imported_sha.borrow_mut().take();
+        seed_of(db, sha.as_deref()).map(Some)
     }
 
     fn digest(&self, _env: &Env, db: &Connection) -> Result<String> {
