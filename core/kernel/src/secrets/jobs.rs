@@ -18,8 +18,6 @@ const TOOLS: [&str; 3] = ["node", "ffmpeg", "ffprobe"];
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Job {
     pub name: String,
-    /// What the share sheet and the cards say (`label:`, else the name).
-    pub label: String,
     pub domains: Vec<String>,
     pub helpers: Vec<String>,
     pub doors: Vec<String>,
@@ -524,13 +522,8 @@ pub fn read(caps: &Path) -> Vec<Job> {
             }
             out
         };
-        let label = match field(&j, "label") {
-            Some(V::Str(l)) if !l.is_empty() => l.clone(),
-            _ => name.clone(),
-        };
         jobs.push(Job {
             name,
-            label,
             domains: dedupe(domains),
             helpers: dedupe(hs),
             doors: dedupe(ds)
@@ -568,46 +561,5 @@ pub fn effective(tick: &Value, job: Option<&Job>) -> [Vec<Value>; 3] {
                     .collect()
             })
             .unwrap_or_default()
-    })
-}
-
-/// `kith_jobs.widening`'s hash: what a package update added to a ticked job since the tick, as the 16 hex digits the
-/// widening card is asked once per. Empty when nothing was added.
-pub fn widening_hash(tick: &Value, job: Option<&Job>) -> String {
-    let have = tick.get("snapshot").filter(|s| s.is_object());
-    // sorted by key, as json.dumps(sort_keys=True) writes them
-    let added: Vec<(&str, Vec<Value>)> = ["domains", "doors", "helpers"]
-        .iter()
-        .map(|k| {
-            let new: Vec<Value> = job
-                .map(|j| {
-                    j.piece(k)
-                        .iter()
-                        .filter(|v| {
-                            !have
-                                .and_then(|h| h.get(*k))
-                                .and_then(Value::as_array)
-                                .is_some_and(|hs| hs.iter().any(|x| x.as_str() == Some(v.as_str())))
-                        })
-                        .cloned()
-                        .map(Value::String)
-                        .collect()
-                })
-                .unwrap_or_default();
-            (*k, new)
-        })
-        .collect();
-    if added.iter().all(|(_, v)| v.is_empty()) {
-        return String::new();
-    }
-    let map: serde_json::Map<String, Value> = added
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), Value::Array(v)))
-        .collect();
-    let digest = Sha256::digest(super::pyjson::dumps(&Value::Object(map)).as_bytes());
-    digest.iter().take(8).fold(String::new(), |mut out, b| {
-        use std::fmt::Write as _;
-        let _ = write!(out, "{b:02x}");
-        out
     })
 }

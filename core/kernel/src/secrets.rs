@@ -1144,7 +1144,14 @@ impl<'a> Rules<'a> {
 
     /// `kith-auth who <platform> <user-id>` (M2-23): which person owns a chat handle, with the owner, whether the owner is
     /// linked on that platform, and the revoke and held flags the channels gate on.
-    pub fn who(&self, platform: &str, uid: &str) -> Value {
+    pub fn who(&self, platform: &str, uid: &str) -> R<Value> {
+        // A database imported before `people.handles` existed has none for anyone: a chat sender would match nobody (or the
+        // wrong person), so it says so and refuses until the import is run again.
+        if truthy(get(self.auth, "handles_stale")) {
+            return die(
+                "cannot match a chat handle to a person: this database was imported before people.handles existed; import again first",
+            );
+        }
         let people = get(self.auth, "people");
         let pid = people.as_object().and_then(|o| {
             o.iter()
@@ -1154,7 +1161,10 @@ impl<'a> Rules<'a> {
         let me = owner(self.auth);
         let flag = |f: &dyn Fn(&str) -> bool| pid.as_deref().is_some_and(f);
         let mut out = Map::new();
-        out.insert("person".into(), pid.clone().map_or(Value::Null, Value::String));
+        out.insert(
+            "person".into(),
+            pid.clone().map_or(Value::Null, Value::String),
+        );
         out.insert("owner".into(), flag(&|p| is_owner(self.auth, p)).into());
         out.insert(
             "was".into(),
@@ -1163,7 +1173,10 @@ impl<'a> Rules<'a> {
                 |p| get_or(get(people, p), "was", Value::Array(Vec::new())),
             ),
         );
-        out.insert("owner_id".into(), me.clone().map_or(Value::Null, Value::String));
+        out.insert(
+            "owner_id".into(),
+            me.clone().map_or(Value::Null, Value::String),
+        );
         out.insert(
             "owner_linked".into(),
             me.as_deref()
@@ -1172,120 +1185,24 @@ impl<'a> Rules<'a> {
         );
         out.insert("revoked".into(), flag(&|p| cut_off(self.auth, p)).into());
         out.insert("held".into(), flag(&|p| self.bridge_held(p)).into());
-        Value::Object(out)
+        Ok(Value::Object(out))
     }
 
     /// `kith-auth granted [--for AGENT] <service>`: the profiles an agent holds for a service, as written (one name or a
     /// list).
-    pub fn granted(&self, agent: &str, service: &str) -> Vec<Value> {
+    pub fn granted(&self, agent: &str, service: &str) -> R<Vec<Value>> {
+        // `grants` is filled by the authority import; a database imported before it did has none, which says nothing.
+        if truthy(get(self.auth, "secrets_stale")) {
+            return die(
+                "cannot read the grants: this database was imported before they were kept; import again first",
+            );
+        }
         let g = get(get(get(self.auth, "grants"), agent), service);
-        match g {
+        Ok(match g {
             Value::Array(items) => items.clone(),
             g if truthy(g) => vec![g.clone()],
             _ => Vec::new(),
-        }
-    }
-
-    /// `door_state` (`kith-auth door`): whether the person's runs of agent may start the door `piece` (`name@digest`) now.
-    /// Read-only; `{ok, job, label, state, why}` in the order the Python gives them.
-    pub fn door(&self, agent: &str, person: &str, piece: &str) -> R<Value> {
-        let person = canonical(self.auth, person);
-        let name = piece.split('@').next().unwrap_or_default();
-        let verdict = |ok: bool, job: Option<&Job>, state: &str, why: String| {
-            let mut m = Map::new();
-            m.insert("ok".into(), ok.into());
-            m.insert("job".into(), job.map_or(Value::Null, |j| j.name.clone().into()));
-            m.insert("label".into(), job.map_or(Value::Null, |j| j.label.clone().into()));
-            m.insert("state".into(), state.into());
-            m.insert("why".into(), why.into());
-            Value::Object(m)
-        };
-        if is_owner(self.auth, &person) {
-            return Ok(verdict(
-                false,
-                None,
-                "owner",
-                "doors are for the people an agent is shared with".into(),
-            ));
-        }
-        let (ok, why) = self.may(&person, agent, None, false)?;
-        if !ok {
-            let state = if cut_off(self.auth, &person) { "revoked" } else { "not-allowed" };
-            return Ok(verdict(false, None, state, why));
-        }
-        if self.bridge_held(&person) {
-            return Ok(verdict(
-                false,
-                None,
-                "held",
-                "this Mac is not in sync with the Kith cloud; try again in a minute".into(),
-            ));
-        }
-        let listed = self.jobs_of(agent);
-        let Some(job) = listed.iter().find(|j| j.doors.iter().any(|d| d == piece)) else {
-            let stale = listed
-                .iter()
-                .any(|j| j.doors.iter().any(|d| d == name || d.split('@').next() == Some(name)));
-            return Ok(verdict(
-                false,
-                None,
-                if stale { "stale" } else { "no-job" },
-                if stale {
-                    format!("{agent} was updated since this chat started; start a new chat to use {name}")
-                } else {
-                    format!("no job of {agent} includes the door {name}")
-                },
-            ));
-        };
-        let [domains, helpers, doors] = self.job_grants(agent, &person);
-        let mut mine = Map::new();
-        mine.insert("domains".into(), Value::Array(domains));
-        mine.insert("helpers".into(), Value::Array(helpers));
-        mine.insert("doors".into(), Value::Array(doors));
-        let has_piece = |m: &Map<String, Value>| {
-            m.get("doors")
-                .is_some_and(|d| arr(d).iter().any(|x| x.as_str() == Some(piece)))
-        };
-        let cut = self.owner_cut(agent, &person, mine.clone(), None, None)?;
-        if has_piece(&cut) {
-            return Ok(verdict(true, Some(job), "ok", format!("part of {}", job.label)));
-        }
-        if has_piece(&mine) {
-            // a bot's own tick has it, its owner (an invitee) doesn't: the bot gets no more than they do
-            let parent = parent_of(self.auth, &person).unwrap_or_default();
-            return Ok(verdict(
-                false,
-                Some(job),
-                "owner-lacks",
-                format!("{} was not given to {parent}, whose bot {person} is", job.label),
-            ));
-        }
-        let tick = ticks(self.auth, agent, &person)
-            .and_then(|t| t.get(&job.name))
-            .filter(|t| t.is_object());
-        let Some(tick) = tick else {
-            return Ok(verdict(
-                false,
-                Some(job),
-                "not-ticked",
-                format!("{} was not given to {person}", job.label),
-            ));
-        };
-        let hash = jobs::widening_hash(tick, Some(job));
-        let declined = !hash.is_empty()
-            && arr(get(tick, "declined"))
-                .iter()
-                .any(|h| h.as_str() == Some(&hash));
-        Ok(verdict(
-            false,
-            Some(job),
-            if declined { "declined" } else { "widened" },
-            format!(
-                "{name} changed since {} was given{}",
-                job.label,
-                if declined { ", and the owner kept it as it was" } else { "" }
-            ),
-        ))
+        })
     }
 
     /// `cloud_sync` and `bridge_held`: kith serve's channels serve a person other than the owner only while this Mac is

@@ -659,6 +659,8 @@ jobs:
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
           # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.
           KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-embedded-check
+          # The authority router (M2-23): on the tombstone kith-auth answers its read verbs from the core, the same as the file, and refuses the rest.
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-router-check
           # A direct run holds its conversation's lock under kith-stub (M1-3).
           cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
           KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check

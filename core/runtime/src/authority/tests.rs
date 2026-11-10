@@ -21,6 +21,7 @@ mod gaps;
 mod guest;
 mod requests;
 mod revoke;
+mod router;
 mod runs;
 mod writes;
 

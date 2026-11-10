@@ -413,13 +413,52 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.removePerson",
     "people.removeBot",
     "people.revoke",
+    // the reads `kith-auth` routes here once auth.json is a tombstone (M2-23), see `ROUTED_READS`
+    "people.who",
+    "people.granted",
+    "people.may",
+    "people.resolve",
+    "people.listPeople",
+    "people.retired",
+    "people.budgets",
+    "people.ledger",
+    "people.botsCap",
+];
+
+/// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
+/// refuses it unless authority is switched (a rollback leaves the file the truth); core-call refuses one without it, and a
+/// `people.botsCap` that sets the cap, which is a write the mirror never sends.
+const ROUTED_READS: &[&str] = &[
+    "people.who",
+    "people.granted",
+    "people.may",
+    "people.resolve",
+    "people.listPeople",
+    "people.retired",
+    "people.budgets",
+    "people.ledger",
+    "people.botsCap",
 ];
 
 /// The writes `core_call` runs in an embedded core when no daemon answers (the revoke stopgap before M2-23: a revoke made
 /// in kith-auth must reach the core even with `kith serve` stopped). The terminal methods need the daemon's sockets.
 #[cfg(unix)]
-const EMBEDDED_METHODS: &[&str] =
-    &["people.suspend", "people.undo", "people.removePerson", "people.removeBot", "people.revoke"];
+const EMBEDDED_METHODS: &[&str] = &[
+    "people.suspend",
+    "people.undo",
+    "people.removePerson",
+    "people.removeBot",
+    "people.revoke",
+    "people.who",
+    "people.granted",
+    "people.may",
+    "people.resolve",
+    "people.listPeople",
+    "people.retired",
+    "people.budgets",
+    "people.ledger",
+    "people.botsCap",
+];
 
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
 /// Inside kith-auth's `CORE_CALL_SECS`, which it waits under auth.json.lock.
@@ -501,6 +540,13 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         if text.trim().is_empty() { json!({}) } else { serde_json::from_str(&text).unwrap_or(Value::Null) };
     if !params.is_object() {
         eprintln!("core-call: params must be a JSON object");
+        return 2;
+    }
+    if ROUTED_READS.contains(&method)
+        && (params.get("viaSwitch").and_then(Value::as_bool) != Some(true)
+            || params.get("amount").is_some_and(|a| !a.is_null()))
+    {
+        eprintln!("core-call: {method} is routed only as a read with viaSwitch: true");
         return 2;
     }
     let folders = kernel::folders(&kith_kernel::paths::process_home());

@@ -4833,6 +4833,30 @@
           }
         },
         {
+          "name": "via",
+          "summary": "The agent whose membership the call rides on (as a helper of it).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "once",
+          "summary": "Count a \"just this once\" grant on the caller's row that is not used up yet.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules (a member on a deleted preset) as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -4894,6 +4918,224 @@
           "agent": {
             "kind": "positional"
           },
+          "via": {
+            "kind": "flag",
+            "spellings": [
+              "--via"
+            ]
+          },
+          "once": {
+            "kind": "switch",
+            "spellings": [
+              "--once"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.who",
+      "summary": "Which person owns a chat handle (`kith-auth who`): the person, whether they are the owner, their old ids (`was`), the owner and whether the owner is linked on that platform, and whether the person's access is removed or held. Refused on a database imported before handles were kept.",
+      "params": [
+        {
+          "name": "platform",
+          "summary": "The chat platform (telegram, slack, discord ...).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The user id on that platform.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "by-handle"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "platform": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.granted",
+      "summary": "The profiles an agent holds for a service, as written (`kith-auth granted`). Refused on a database imported before grants were kept.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "granted"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "service": {
+            "kind": "positional"
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -4943,6 +5185,14 @@
         {
           "name": "takeOnce",
           "summary": "Count a \"just this once\" grant on the caller's row, and use it up when it lets the launch through.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules (a member on a deleted preset) as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error.",
           "required": false,
           "schema": {
             "type": "boolean"
@@ -5023,6 +5273,12 @@
             "kind": "switch",
             "spellings": [
               "--take-once"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
             ]
           },
           "kernel": {
@@ -5367,6 +5623,14 @@
           }
         },
         {
+          "name": "json",
+          "summary": "With no amount: the cap as a number (or null) and every id the owner's bots spend under, as `kith-auth bots-cap --json`.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -5424,6 +5688,12 @@
         "args": {
           "amount": {
             "kind": "positional"
+          },
+          "json": {
+            "kind": "switch",
+            "spellings": [
+              "--json"
+            ]
           },
           "kernel": {
             "kind": "flag",
