@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use tempfile::TempDir;
 
 use super::claims::{
-    Kill, Kind, NewClaim, Redeemed, Reported, claim, different_holder, end_gone, reconcile, redeem,
-    report, revoke_person, stop,
+    Kill, Kind, NewClaim, Redeemed, Reported, claim, different_holder, end_gone, group_held, live_counts,
+    reconcile, redeem, report, revoke_person, stop,
 };
 use crate::db::{Core, MIGRATIONS, RecordedProc};
 use crate::error::Error;
@@ -701,6 +701,123 @@ fn a_reused_pid_counts_as_gone_and_a_probe_that_cannot_tell_does_not() {
     assert_eq!(state(&c, id2), "ending");
 }
 
+/// The stub (the recorded pid) leads its process group and the engine runs in it. On macOS the engine can outlive the
+/// stub: the claim is still the writer's until no process is left in the group.
+#[test]
+fn a_dead_stub_with_its_engine_still_in_the_group_keeps_the_claim() {
+    struct Group {
+        engine: std::cell::Cell<bool>,
+    }
+    impl Liveness for Group {
+        fn start(&self, _: u32) -> Option<String> {
+            None
+        }
+        fn gone(&self, _: u32) -> bool {
+            true
+        }
+        fn orphan_group(&self, _: u32, _: &str) -> bool {
+            self.engine.get()
+        }
+    }
+    let (_t, mut c) = open();
+    let live = Group {
+        engine: std::cell::Cell::new(true),
+    };
+    let (id, _) = running(&mut c, "c1", 100);
+    stop(&mut c, id, "revoked", false, 30).expect("stop");
+    assert!(end_gone(&mut c, &live, 31).expect("probe").is_empty());
+    assert_eq!(state(&c, id), "ending");
+    assert_eq!(
+        live_counts(&c).expect("counts"),
+        [("claimed", 0), ("running", 0), ("ending", 1)]
+    );
+    assert!(
+        claim(&mut c, &new_claim("c1", None), 32).is_err(),
+        "still one writer"
+    );
+    live.engine.set(false);
+    assert_eq!(end_gone(&mut c, &live, 33).expect("probe"), vec![id]);
+    assert_eq!(state(&c, id), "ended");
+    assert_eq!(live_counts(&c).expect("counts")[2], ("ending", 0));
+    claim(&mut c, &new_claim("c1", None), 34).expect("free");
+}
+
+/// The same on the real system: a group leader that has exited and been reaped, with its child still in the group.
+#[cfg(unix)]
+#[test]
+fn on_the_real_system_a_claim_ends_only_once_its_group_is_empty() {
+    use std::os::unix::process::CommandExt as _;
+    let mut leader = std::process::Command::new("sh")
+        .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+        .stdout(std::process::Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .expect("spawn");
+    let pgid = leader.id();
+    let mut out = String::new();
+    std::io::Read::read_to_string(leader.stdout.as_mut().expect("stdout"), &mut out).expect("read");
+    leader.wait().expect("reaped");
+    let (_t, mut c) = open();
+    // The leader's own stamp is gone with it; this process started in the same boot, which is all the rule asks.
+    let this_boot = kith_kernel::procstart::start_stamp(std::process::id()).expect("own start");
+    let (id, _) = take(&mut c, "c1");
+    redeem(&mut c, id, pgid, &this_boot, "h1", 20).expect("redeem");
+    stop(&mut c, id, "revoked", false, 30).expect("stop");
+    let system = crate::gate::System;
+    assert!(
+        end_gone(&mut c, &system, 31).expect("probe").is_empty(),
+        "the child {out} runs on"
+    );
+    assert_eq!(state(&c, id), "ending");
+    let killed = std::process::Command::new("/bin/kill")
+        .args(["-s", "KILL", "--"])
+        .arg(format!("-{pgid}"))
+        .status()
+        .expect("kill");
+    assert!(killed.success());
+    let mut ended = Vec::new();
+    for at in 32..132 {
+        ended = end_gone(&mut c, &system, at).expect("probe");
+        if !ended.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(ended, vec![id]);
+}
+
+/// After a reboot a stranger's group can sit at the recorded id: a record that is not from this boot never holds an
+/// `ending` claim, whatever runs at that id now.
+#[cfg(unix)]
+#[test]
+fn a_live_group_at_a_dead_pid_with_a_record_from_another_boot_does_not_hold_the_claim() {
+    use std::os::unix::process::CommandExt as _;
+    let mut leader = std::process::Command::new("sh")
+        .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+        .stdout(std::process::Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .expect("spawn");
+    let pgid = leader.id();
+    let mut out = String::new();
+    std::io::Read::read_to_string(leader.stdout.as_mut().expect("stdout"), &mut out).expect("read");
+    leader.wait().expect("reaped");
+    let (_t, mut c) = open();
+    let (id, _) = running(&mut c, "c1", pgid); // recorded as `e<pgid>`: an epoch long before this boot
+    stop(&mut c, id, "revoked", false, 30).expect("stop");
+    assert_eq!(
+        end_gone(&mut c, &crate::gate::System, 31).expect("probe"),
+        vec![id],
+        "the group is a stranger's"
+    );
+    let killed = std::process::Command::new("/bin/kill")
+        .args(["-s", "KILL", "--"])
+        .arg(format!("-{pgid}"))
+        .status()
+        .expect("kill");
+    assert!(killed.success(), "child {out}");
+}
+
 #[test]
 fn stop_requeues_or_cancels_the_turn_and_ignores_a_claim_that_is_not_live() {
     let (_t, mut c) = open();
@@ -1195,6 +1312,34 @@ fn a_direct_claim_survives_reconcile_and_a_holder_change_and_ends_when_its_pid_i
     assert_eq!(state(&c, id), "claimed");
     let none = Procs::default();
     assert_eq!(end_gone(&mut c, &none, 24).expect("gone"), vec![id]);
+    assert_eq!(state(&c, id), "ended");
+}
+
+/// A `--direct` claimer leads its terminal job's group and its MCP children share it: with the claimer dead and a child
+/// still in the group, the claim stays live; it ends once the group is empty.
+#[test]
+fn a_direct_claim_with_a_dead_pid_and_a_live_group_stays_live() {
+    struct Group(std::cell::Cell<bool>);
+    impl Liveness for Group {
+        fn start(&self, _: u32) -> Option<String> {
+            None
+        }
+        fn gone(&self, _: u32) -> bool {
+            true
+        }
+        fn orphan_group(&self, _: u32, _: &str) -> bool {
+            self.0.get()
+        }
+    }
+    let (_t, mut c) = open();
+    let id = direct(&mut c, "c1", 700);
+    let live = Group(std::cell::Cell::new(true));
+    assert!(end_gone(&mut c, &live, 23).expect("probe").is_empty());
+    assert_eq!(state(&c, id), "claimed");
+    assert_eq!(group_held(&c, &live).expect("held"), 1, "shown in status");
+    live.0.set(false);
+    assert_eq!(group_held(&c, &live).expect("held"), 0);
+    assert_eq!(end_gone(&mut c, &live, 24).expect("probe"), vec![id]);
     assert_eq!(state(&c, id), "ended");
 }
 

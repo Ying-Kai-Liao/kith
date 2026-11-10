@@ -629,6 +629,21 @@ pub fn print_status(json: bool) {
             status["holder"]["tied_to_starter"]
         );
     }
+    if status["claims"].is_object() {
+        let n = |k: &str| status["claims"][k].as_i64().unwrap_or(0);
+        println!(
+            "claims: {} claimed, {} running, {} ending (stopped, process group not yet gone)",
+            n("claimed"),
+            n("running"),
+            n("ending")
+        );
+        if n("held_by_group") > 0 {
+            println!(
+                "claims held only by a live process group: {} (a background job keeps the conversation)",
+                n("held_by_group")
+            );
+        }
+    }
 }
 
 #[cfg(test)]

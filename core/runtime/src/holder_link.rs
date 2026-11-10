@@ -905,8 +905,10 @@ pub(crate) fn reconcile(
     Ok(())
 }
 
-/// Ends the process group of each recorded process whose pid still has the recorded start stamp, and waits for the
-/// groups to be empty. A pid that is gone, or has another start in the same form, is not ours: left alone. So is a
+/// Ends the process group of each recorded process whose pid still has the recorded start stamp, or whose pid is gone
+/// while its group still has a process and its record is a start from this boot, and waits for the groups to be empty. A
+/// pid that is gone with its group, gone with a record from an earlier boot or of unknown form, or has another start in
+/// the same form, is not ours: left alone. So is a
 /// live pid that is not a session leader: every holder spawn calls `setsid`, so the recorded process leads its session
 /// and anything else at that pid is a stranger, whatever the record says. A start that cannot be told otherwise (the
 /// pid's own cannot be read, or the record is empty, old `ps` text, or of another form) is neither: nothing is
@@ -922,9 +924,18 @@ fn end_groups(
     let mut stuck: Vec<String> = Vec::new();
     for p in procs {
         match procstart::probe(p.pid) {
-            procstart::Probe::Gone => {
-                notes.push(format!("holder: pid {} is gone; nothing to end", p.pid));
-            }
+            // The leader died but its group may not have: the engine it started runs on in it. Whether that group is
+            // still the recorded one is `procstart::orphan_group`'s one rule (this boot, group not ours, still held).
+            procstart::Probe::Gone => match procstart::orphan_group(p.pid, &p.started) {
+                Some(group) => {
+                    notes.push(format!(
+                        "holder: pid {} is gone but its process group still runs; ending the group",
+                        p.pid
+                    ));
+                    mine.push(group);
+                }
+                None => notes.push(format!("holder: pid {} is gone; nothing to end", p.pid)),
+            },
             procstart::Probe::Alive(Some(now)) if procstart::comparable(&p.started, &now) => {
                 if !procstart::same_process(&p.started, &now) {
                     notes.push(format!(
