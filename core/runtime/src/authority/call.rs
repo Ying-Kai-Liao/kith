@@ -29,6 +29,8 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.may"
             | "people.resolve"
             | "people.bridgeHeld"
+            | "people.who"
+            | "people.granted"
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
@@ -182,6 +184,8 @@ fn is_read(method: &str, params: &Value) -> bool {
             | "people.may"
             | "people.resolve"
             | "people.bridgeHeld"
+            | "people.who"
+            | "people.granted"
             | "people.invites"
             | "people.budgets"
             | "people.ledger"
@@ -244,7 +248,12 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
         let wants = take && res.get("allowed") == Some(&Value::Bool(false)) && !held;
         Ok((res, held, wants))
     };
-    let (res, held, wants) = store::read(core, |a| asked(a))?.map_err(|d| store::refusal(&d))?;
+    let dies = switch(params, "dies");
+    let (res, held, wants) = match store::read(core, |a| asked(a))? {
+        Ok(asked) => asked,
+        Err(d) if dies => return Ok(died(&d)),
+        Err(d) => return Err(store::refusal(&d)),
+    };
     if !wants {
         return Ok(answer(res, held));
     }
@@ -259,6 +268,12 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
         Ok((res, held))
     })?;
     Ok(answer(res, held))
+}
+
+/// The rules have no answer (a member on a deleted preset): where `kith-auth` dies with this line and exit code, a caller that
+/// asks with `dies` (its router, on the tombstone) is told them, so it can print the same and exit the same.
+fn died(d: &Die) -> Value {
+    json!({ "died": d.code, "why": d.msg })
 }
 
 fn answer(mut res: serde_json::Map<String, Value>, held: bool) -> Value {
@@ -316,9 +331,14 @@ pub(crate) fn call_in(
                 need(params, "person").map_err(|d| store::refusal(&d))?,
                 need(params, "agent").map_err(|d| store::refusal(&d))?,
             );
+            // `via` and `once` as `kith-auth may --via CALLER --once` takes them (kith-permit asks whether the caller may
+            // call a helper for the person, a "just this once" counted); the answer is still a read.
+            let via = word(params, "via").filter(|v| !v.is_empty());
+            let once = switch(params, "once");
+            let dies = switch(params, "dies");
             store::read(core, |a| {
                 let rules = Rules::new(c, a);
-                match rules.may(person, agent, None, false) {
+                match rules.may(person, agent, via, once) {
                     Ok((allowed, why)) => {
                         // M2-16: the host's guard also needs to know the owner (never a guest) and the preset (a
                         // member answers their own cards), so `resolve`'s preset rides along. No preset when the
@@ -333,7 +353,11 @@ pub(crate) fn call_in(
                         json!({ "allowed": allowed, "why": why, "owner": owner, "preset": preset })
                     }
                     Err(d) => {
-                        json!({ "allowed": false, "why": d.msg, "owner": false, "preset": null })
+                        if dies {
+                            died(&d)
+                        } else {
+                            json!({ "allowed": false, "why": d.msg, "owner": false, "preset": null })
+                        }
                     }
                 }
             })
@@ -377,6 +401,24 @@ pub(crate) fn call_in(
                 |a| json!({ "held": Rules::new(c, a).bridge_held(person) }),
             )
         }
+        // `kith-auth who <platform> <user-id>` and `granted` (M2-23): the reads kith-auth routes here on the tombstone.
+        "people.who" => {
+            let (platform, id) = (
+                need(params, "platform").map_err(|d| store::refusal(&d))?,
+                need(params, "id").map_err(|d| store::refusal(&d))?,
+            );
+            store::read(core, |a| Rules::new(c, a).who(platform, id))?
+                .map_err(|d| store::refusal(&d))
+        }
+        "people.granted" => {
+            let (agent, service) = (
+                need(params, "agent").map_err(|d| store::refusal(&d))?,
+                need(params, "service").map_err(|d| store::refusal(&d))?,
+            );
+            let grants = store::read(core, |a| Rules::new(c, a).granted(agent, service))?
+                .map_err(|d| store::refusal(&d))?;
+            Ok(json!({ "grants": grants }))
+        }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         // `kith-auth budgets AGENT --json`: the lines are that one JSON line, so a caller that reads the CLI's output reads
         // this one's. A budget that is no number is an error, never "no limit".
@@ -407,6 +449,10 @@ pub(crate) fn call_in(
                 write::ledger(a, c, person.as_deref(), agent)
             })?;
             Ok(json!({ "rows": rows, "lines": [Value::Array(rows.clone()).to_string()] }))
+        }
+        // `bots-cap --json` (kith-cost bots): the cap as written and every id the owner's bots spend under.
+        "people.botsCap" if word(params, "amount").is_none() && switch(params, "json") => {
+            store::read(core, write::bots_cap_json)?.map_err(|d| store::refusal(&d))
         }
         "people.botsCap" if word(params, "amount").is_none() => {
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))
