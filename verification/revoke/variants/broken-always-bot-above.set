@@ -1,6 +1,6 @@
-\* a bot's always is not held to its owner's
+\* a bot's always is written without its owner's entry (the held() cap dropped)
 CoreGate = TRUE
 Switched = TRUE
 AlwaysOn = TRUE
 RouterDoor = TRUE
-BotIgnoresOwner = TRUE
+AlwaysBotNoCut = TRUE

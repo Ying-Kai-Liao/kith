@@ -127,11 +127,12 @@ CONSTANTS
     RouterDoor,         \* TRUE = the always is the core's write (people.access): it reads the core's fact in its own locked step
     AlwaysNoMay,        \* BROKEN: the always is written with no may() in its step (the check was dropped)
     AlwaysSplit,        \* BROKEN: the always checks may() in one step and writes in a later one (a revoke can land between)
+    AlwaysBotNoCut,     \* BROKEN: the always on B's row is written without the owner's entry being there (the held() cap dropped)
     DemoteKeeps         \* BROKEN: a demotion leaves the entries the demoted member approved (no drop_self_approved)
 
 ASSUME (Switched => CoreGate) /\ (SwitchLag => Switched) /\ (CoreSideShutsGate => CoreOnlyWrite)
 ASSUME NamelessReport => KillSplit
-ASSUME (RouterDoor => (Switched /\ AlwaysOn)) /\ ((AlwaysNoMay \/ AlwaysSplit \/ DemoteKeeps) => AlwaysOn)
+ASSUME (RouterDoor => (Switched /\ AlwaysOn)) /\ ((AlwaysNoMay \/ AlwaysSplit \/ AlwaysBotNoCut \/ DemoteKeeps) => AlwaysOn)
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -295,7 +296,7 @@ Init ==
     /\ cardst = [m \in Macs |-> "none"]
     /\ cardhit = [m \in Macs |-> FALSE]
     /\ alw = [m \in Macs |-> [mem |-> TRUE, e |-> [w \in Who |-> "none"], chk |-> [w \in Who |-> "none"],
-                              bad |-> [w \in Who |-> FALSE]]]
+                              bad |-> [w \in Who |-> FALSE], botAbove |-> FALSE]]
 
 (* ---- owner ---- *)
 \* From the phone app: the cloud record first; Macs learn by cloud delivery.
@@ -764,14 +765,15 @@ AlwaysBy == {"owner", "self"}
 AlwaysMayNow(m, w) == IF RouterDoor THEN GuardMay(m, w) ELSE May(m, w)
 AlwaysOK(m, w, by) ==
     /\ AlwaysNoMay \/ AlwaysMayNow(m, w)
-    /\ w = "P" \/ BotIgnoresOwner \/ alw[m].e["P"] # "none"
+    /\ w = "P" \/ AlwaysBotNoCut \/ alw[m].e["P"] # "none"
     /\ by = "owner" \/ alw[m].mem
 
 \* The owner's yes outlasts a person's; a person's never replaces the owner's.
 AlwaysSet(m, w, by) ==
     alw' = [alw EXCEPT ![m].e[w] = IF alw[m].e[w] = "owner" THEN "owner" ELSE by,
                        ![m].chk[w] = "none",
-                       ![m].bad[w] = alw[m].bad[w] \/ ~May(m, w)]
+                       ![m].bad[w] = alw[m].bad[w] \/ ~May(m, w),
+                       ![m].botAbove = alw[m].botAbove \/ (w = "B" /\ alw[m].e["P"] = "none")]
 
 AlwaysWrite(m, w) ==
     /\ AlwaysOn
@@ -903,7 +905,7 @@ TypeOK ==
     /\ cardst \in [Macs -> CardSt]
     /\ cardhit \in [Macs -> BOOLEAN]
     /\ alw \in [Macs -> [mem : BOOLEAN, e : [Who -> AlwaysBy \cup {"none"}], chk : [Who -> AlwaysBy \cup {"none"}],
-                         bad : [Who -> BOOLEAN]]]
+                         bad : [Who -> BOOLEAN], botAbove : BOOLEAN]]
 
 \* Lemma the fix rests on: a Mac with nothing to push that has the cloud's latest version agrees with the cloud.
 SyncAgrees == \A m \in Macs : (~outbox[m] /\ ver[m] = cloudVer) => revoked[m] = cloudRevoked
@@ -992,9 +994,9 @@ CardNoResurrect == [][\A m \in Macs : cardst[m] = "withdrawn" => cardst'[m] = "w
 \* AlwaysOnlyIfMay (C-a): no always was written while may() was false (R4 for the new rows of a person: an entry written while
 \* revoked would come back with the undo). Fails in broken-always-no-may and broken-always-split.
 AlwaysOnlyIfMay == \A m \in Macs, w \in Who : ~alw[m].bad[w]
-\* AlwaysBotBelowOwner: a bot's entry counts only with its owner's (owner_cut); fails when the bot ignores its owner.
-AlwaysBotBelowOwner == \A m \in Macs :
-    (alw[m].e["B"] # "none" /\ (BotIgnoresOwner \/ alw[m].e["P"] # "none")) => alw[m].e["P"] # "none"
+\* AlwaysBotBelowOwner: a bot's always is never written while its owner's entry is absent (the oracle `botAbove` is set at write
+\* time, in the step that writes; no step reads it). Fails when the cap is dropped (AlwaysBotNoCut).
+AlwaysBotBelowOwner == \A m \in Macs : ~alw[m].botAbove
 \* ApproverDemoted (M3): an entry a member approved for themselves stays only while they are a member. Fails in broken-demote-keeps.
 ApproverDemoted == \A m \in Macs, w \in Who : alw[m].e[w] = "self" => alw[m].mem
 

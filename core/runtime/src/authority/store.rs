@@ -33,9 +33,13 @@ pub(super) fn run_with<T>(
     let mut after = before.clone();
     write::tables(&mut after);
     let mut said = f(&mut after).map_err(|d| refusal(&d))?;
-    write::prune_invites(&mut after, c);
     let mut before = before;
     write::tables(&mut before);
+    // A write that changed nothing (a router's refused card write answers as an answer, with the tables put back) saves
+    // nothing in kith-auth either, so the codes that ran out are not dropped by it.
+    if after != before {
+        write::prune_invites(&mut after, c);
+    }
     store(&tx, &before, &after)?;
     follow(&tx, &mut said)?;
     tx.commit()?;

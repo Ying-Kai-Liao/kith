@@ -56,3 +56,4 @@ RouterDoor = FALSE
 AlwaysNoMay = FALSE
 AlwaysSplit = FALSE
 DemoteKeeps = FALSE
+AlwaysBotNoCut = FALSE
