@@ -259,3 +259,11 @@ Not run as breaks: property 21's run-card branch failed on the real code before 
 Re-run 2026-11-03 (review cleanup PR, F8): `roles_props`, `botguests_props`, `room_secrets_props` and related tests pass (35); `kith-auth-props` passes. Sync commit above not moved. Read: members.rs mirror now takes AUTH_WRITES and mirrors `*` rows (event_for sees a `*` agent, built-ins never listed by kith-auth); new tests in roles_tests.rs.
 
 Re-run 2026-11-05 (M2-3 requests fix, flow/rust-folder-rules-10-m2-3-requests): `kernel/tests/kith-auth-props` passes; `kernel/tests/kith-guest-helper-check` and `kernel/tests/kith-auth-revoke-check` pass. The host property tests (`roles_props`, `botguests_props`, `room_secrets_props`, `access_requests_reach`) run in the kith-serve CI run for this branch (see the PR). Property 32 now covers bots and the owner (neither is ever a member device, `a_bot_is_never_a_member_device`, `the_owners_own_id_is_never_a_member_device`) and the split of the parity script (`suspend` is parity; `membership_gone` is a known difference the core cannot see until M2-17). Sync commit not moved: the covered files changed by far more than this PR and were not read against the properties.
+
+Re-run 2026-11-12 (S-b, the secret writers behind the router): `kith-auth-props` gained `set --stdin-json [--grant]`, `grant`, `revoke
+[--profile]`, `connect`, `disconnect`, `env` and hand-edited profiles (`*`, someone's own, lent). Properties: a profile that is
+there keeps its `person` and `with` through every writer; only a host connector's mark (`{"store": "host"}`) is ever dropped, and
+only by a disconnect; a profile no one is named for is the owner's on a personal service and shared otherwise; a guest (or a
+guest's bot) is never handed the owner's login unless it was lent to them; a refusal writes nothing. The same rules are held on
+the core by `core/runtime/src/authority/tests/secret_writes.rs`, and `kernel/tests/kith-auth-router-check` runs the writers on the
+file and through a daemon with equal lines, refusals, exit codes and state.

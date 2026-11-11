@@ -1998,3 +1998,37 @@ fn a_stepping_record_with_the_same_marker_and_file_finishes_the_tombstone_withou
         "no import over the core's revoke"
     );
 }
+
+#[test]
+fn a_rollback_writes_the_cores_helper_since_back_unless_the_database_is_from_before_it() {
+    let base = json!({
+        "people": {"kai": {"owner": true}, "sam": {}},
+        "members": {"house": {"sam": {"helpers": ["garden"], "helper_since": {"garden": 1}}}},
+    });
+    let mut snap = json!({
+        "people": {"kai": {"owner": true}, "sam": {}},
+        "members": {"house": {"sam": {"helpers": ["garden"], "helper_since": {"garden": 2}}}},
+        "presets": {}, "invites": {}, "retired": {}, "agent_access": {},
+    });
+    // the core's value wins
+    let out = authority::merge_back(Some(base.clone()), &snap);
+    assert_eq!(
+        out["members"]["house"]["sam"]["helper_since"],
+        json!({"garden": 2})
+    );
+    // a helper removed in the core does not come back from the old copy
+    snap["members"]["house"]["sam"]["helpers"] = json!([]);
+    snap["members"]["house"]["sam"]
+        .as_object_mut()
+        .unwrap()
+        .remove("helper_since");
+    let out = authority::merge_back(Some(base.clone()), &snap);
+    assert!(out["members"]["house"]["sam"].get("helper_since").is_none());
+    // a database imported before the column existed has NULLs that say nothing: the old copy's stays
+    snap["helper_since_stale"] = json!(true);
+    let out = authority::merge_back(Some(base), &snap);
+    assert_eq!(
+        out["members"]["house"]["sam"]["helper_since"],
+        json!({"garden": 1})
+    );
+}

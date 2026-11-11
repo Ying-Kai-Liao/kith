@@ -14,8 +14,9 @@ use super::card;
 use super::people_json;
 use super::requests;
 use super::revoke::{self, Life};
+use super::secret_writes;
 use super::store;
-use super::write::{self, Settings};
+use super::write::{self, Settings, usage};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -60,14 +61,28 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.access"
             | "people.helper"
             | "people.job"
+            | "people.secretSet"
+            | "people.secretGrant"
+            | "people.secretRevoke"
+            | "people.secretEnv"
             | "people.revision"
     )
 }
 
-/// The card writes `kith-auth` routes here on the tombstone (C-a, C-b). They widen access, so they run only for a caller
-/// that says `viaSwitch` and only through the daemon (`kith_core::EMBEDDED_WRITES` does not list them).
+/// The card writes (C-a, C-b) and the secret writers (S-b) `kith-auth` routes here on the tombstone. They widen access,
+/// so they run only for a caller that says `viaSwitch` and only through the daemon (`kith_core::EMBEDDED_WRITES` does
+/// not list them).
 fn routed_write(method: &str) -> bool {
-    matches!(method, "people.access" | "people.helper" | "people.job")
+    matches!(
+        method,
+        "people.access"
+            | "people.helper"
+            | "people.job"
+            | "people.secretSet"
+            | "people.secretGrant"
+            | "people.secretRevoke"
+            | "people.secretEnv"
+    )
 }
 
 /// Where kith serve keeps `cloud-sync.json` for this caller: its `KITH_SERVE_DIR`, else `<its home>/.kith/serve`
@@ -113,7 +128,19 @@ pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let home = home_of(params, kith_kernel::paths::known_home())?;
     let mut ctx = ctx_from(&folders, kernel);
     ctx.serve = ServeDir::Fixed(serve_dir_of(params, &home));
+    ctx.person = person_of(params);
     Ok(ctx)
+}
+
+/// The `KITH_PERSON` of the caller's environment (`env`), which only the secret writers send: they are the owner's, and a
+/// guest's MCP server runs outside the box with its own. Anything else leaves it unset (the owner), as before.
+pub(super) fn person_of(params: &Value) -> Option<String> {
+    params
+        .get("env")
+        .and_then(|e| e.get("KITH_PERSON"))
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned)
 }
 
 /// The rules' context over a caller's folders (also the cutover module's, which has no params to read them from; its
@@ -152,6 +179,39 @@ fn need<'a>(params: &'a Value, key: &str) -> std::result::Result<&'a str, Die> {
     })
 }
 
+/// A required list of names: its absence or a wrong shape is the request's fault.
+fn names<'a>(params: &'a Value, key: &str) -> std::result::Result<Vec<&'a str>, Die> {
+    let bad = || Die {
+        msg: format!("{key} must be a list of names"),
+        code: 2,
+    };
+    params
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(bad)?
+        .iter()
+        .map(|v| v.as_str().ok_or_else(bad))
+        .collect()
+}
+
+/// `pairs`: `[[VAR, value], ...]` in the order `kith-auth env` was given them (an empty value clears the variable).
+fn pairs(params: &Value) -> std::result::Result<Vec<(&str, &str)>, Die> {
+    let bad = || Die {
+        msg: "pairs must be a list of [variable, value]".to_owned(),
+        code: 2,
+    };
+    params
+        .get("pairs")
+        .and_then(Value::as_array)
+        .ok_or_else(bad)?
+        .iter()
+        .map(|p| match p.as_array().map(Vec::as_slice) {
+            Some([Value::String(k), Value::String(v)]) => Ok((k.as_str(), v.as_str())),
+            _ => Err(bad()),
+        })
+        .collect()
+}
+
 /// What a `viaSwitch` write is refused with while authority is not switched; the host reads it to fall back to kith-auth.
 pub(crate) const NOT_SWITCHED: &str = "not switched: authority is back on auth.json";
 
@@ -183,7 +243,11 @@ fn authority_record(machine: &Path) -> Record {
 fn removal_only(method: &str, params: &Value) -> bool {
     matches!(
         method,
-        "people.revoke" | "people.removeBot" | "people.removePerson" | "people.suspend"
+        "people.revoke"
+            | "people.removeBot"
+            | "people.removePerson"
+            | "people.suspend"
+            | "people.secretRevoke"
     ) || (switch(params, "remove")
         && matches!(
             method,
@@ -579,7 +643,8 @@ pub(crate) fn call_in(
                 |a| {
                     // A router (`dies`) is told a refusal as an answer, to print it the way `kith-auth` does; the
                     // tables are put back, so nothing of a half-done verb stays.
-                    if !(routed_write(m) && switch(params, "dies")) {
+                    // (`agent-access ... domain` is a routed write too, though an owner may still ask for it unmarked)
+                    if !((routed_write(m) || m == "people.agentAccess") && switch(params, "dies")) {
                         return write_in(m, params, c, life, a, &fresh);
                     }
                     let before = a.clone();
@@ -838,6 +903,58 @@ pub(super) fn write_in(
                 name,
                 need(params, "decline")?,
             )?))
+        }
+        "people.secretSet" => {
+            // names only: the Keychain has the value, and nothing of it may reach core.db (or a log of this call)
+            if ["value", "values", "secret"]
+                .iter()
+                .any(|k| params.get(*k).is_some())
+            {
+                return usage("the core takes the names of the variables, never a value");
+            }
+            let vars = names(params, "vars")?;
+            secret_writes::secret_set(
+                a,
+                c,
+                life,
+                need(params, "profile")?,
+                &vars,
+                word(params, "grant"),
+            )
+        }
+        "people.secretGrant" => {
+            let (agents, profiles) = (names(params, "agents")?, names(params, "profiles")?);
+            secret_writes::secret_grant(
+                a,
+                c,
+                life,
+                &secret_writes::GrantArgs {
+                    agents: &agents,
+                    service: need(params, "service")?,
+                    profiles: &profiles,
+                    known_only: switch(params, "knownOnly"),
+                    if_have: params.get("ifHave").and_then(Value::as_object),
+                },
+            )
+        }
+        "people.secretRevoke" => secret_writes::secret_revoke(
+            a,
+            c,
+            need(params, "agent")?,
+            need(params, "service")?,
+            word(params, "profile"),
+            switch(params, "dropHostProfiles"),
+        ),
+        "people.secretEnv" => {
+            let pairs = pairs(params)?;
+            secret_writes::secret_env(
+                a,
+                c,
+                life,
+                need(params, "agent")?,
+                need(params, "service")?,
+                &pairs,
+            )
         }
         "people.removeGrant" => Ok(lines(write::remove_grant(a, c, need(params, "key")?)?)),
         "people.handle" => {
