@@ -23,22 +23,18 @@
 //! - A secret that cannot go back: `restore_secrets` checks every item (name, size) before it writes any, and the
 //!   framework runs it before `export_back`, so the file stays a tombstone and the record stays `rolling-back`.
 //!
-//! # Blocks the flip of the verbs (M2-18), not this module
-//! `kith-auth` moves to the core's `people.*` rows later; until each of these is done, that verb must stay on Python:
-//! - `people.addBot` / `people.removeBot`: the same transaction must clear the removed id's `agent@<id>` grants and its
-//!   place in profiles' `with` (Python `forget`), else a bot handed over by remove-and-re-add gets its old logins back
-//!   (test `forget_also_clears_grants_and_profiles`, ignored until then).
-//! - `people.removePerson --unused` and the `retired` check: `handles` (m0015), `agent@<id>` grants and owned or lent
-//!   profiles (`secret_grants` / `secret_profiles`, filled by the import now) are checked. A core imported before the
-//!   import kept them (`secrets_stale`, m0022) refuses both until it is imported again. The writers still have to keep
-//!   the tables current (`forget`, `bot_add` / `bot_remove`: another package) before these verbs are switched.
-//! - `kith-auth agent-access ... [--rm]`: `people.agentAccess` writes the `agent_access` table (and `merge_back` takes it
-//!   from the core), but only the write half is ported: the listing (`agent-access <agent> [--json]`, with the
-//!   package-declared hosts) has no core row, and the CLI words differ (`domain <host>` there, positional here), so the
-//!   verb stays on Python until the listing and the switch.
+//! # What the step refuses at run time
+//! The step is open (the M2-18 gates are closed: the readers and writers of `kith-auth` answer from the core on the
+//! tombstone, the host decides from the gate, `forget` clears an id's grants and profiles in the same transaction and its
+//! test runs, `removePerson --unused` and `retired` check handles, grants and profiles, the revoke order is recorded in
+//! `open_removals`, and the crash repair compares the file's sha). It refuses only for what a run finds:
+//! - auth.json's `once` holds one-time secrets (they live only in the file and the Keychain; wait until they are used or
+//!   expire, at most an hour). Looked at under the source lock, which is held through the tombstone;
+//! - the core is stale (`secrets_stale`, `helper_since_stale`, `handles_stale`): refused before the import, "import again";
+//! - the preflight is not zero (open removals, unmoved vault rows, live holders that are not people, a refusing import);
+//! - auth.json changed between the import and the tombstone, or its lock is held by a writer.
 //!
-//! These do not change what the gate (`may_serve`) serves, which is the READ side (`may`, `resolve`, the request guard);
-//! they are why `step` stays refused. (Since the import fills `profiles` and `grants`, `export_back` takes them from the core.)
+//! `KITH_CORE_AUTHORITY` stays OFF by default; turning it on is a separate decision (M2-24), not the step.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -177,9 +173,6 @@ const LOCK_WAIT: Duration = Duration::from_secs(30);
 /// The old vault's records in serve.db's `kv` table: the value starts with this (the key is the slot's name).
 const OLD_VAULT_PREFIX: &str = "vault:v1:";
 
-/// Why a step is refused until M2-18 lifts it (the architect's gate list for #793: 1, 2, 4-8).
-const STEP_REFUSAL: &str = "not stepped: the M2-18 gates are open: kith-auth does not read the tombstone or answer from the core, and the host does not decide from the gate once switched (1, 2); addBot/removeBot and removePerson --unused do not clear grants, profiles and handles in one transaction (4, 5); no core writer for agent_access, profiles, grants or env (6, 7); the revoke bridge (8); the 'already switched' branch re-tombstones a file a writer put back after the switch, with no sha check and no import (9); no core read verb with kith-auth `people --json`'s row shape (id, name, owner, bot_of, root, revoked/cut_off, revoked_at, agent rows, handles) for its readers: serve/host/src/remote/members.rs (revoke path), api/people.rs, kith_recall.py, kith-cost, kith people (10). `step authority --dry-run` and `check authority` work now";
-
 /// `auth.json.lock`, held (flock, exclusive): the lock `kith-auth` and `kith_kernel::secrets` take for a read-modify-write.
 /// Dropping it lets the lock go.
 struct AuthLock(#[allow(dead_code, reason = "held for its flock")] std::fs::File);
@@ -225,7 +218,7 @@ const REPAIR_FORCE: &str = "This is the repair of a switch that stopped before t
 /// other lacks, so neither `--force` (file over core) nor a rollback (core lost) is safe to suggest.
 const REPAIR_BOTH: &str = "both sides changed since the switch (auth.json was written by kith-auth, and the core took changes of its own); nothing was changed. Compare with `kith migrate check authority` and settle it by hand";
 
-/// The same refusal for a marker with no `auth_sha`. No shipped Mac has such a marker (the step refusal was never lifted, so
+/// The same refusal for a marker with no `auth_sha`. No shipped Mac has such a marker (the step was refused until the lift, so
 /// none has stepped); it can only come from a development core.
 const REPAIR_UNKNOWN: &str = "the marker has no record of the file the step imported and the core has changed since, so it can't be told which side is newer; nothing was changed. Can't tell: compare by hand with `kith migrate check authority`";
 
@@ -328,9 +321,53 @@ fn refuse_unmoved_vault(ctx: &Ctx, core: &Connection) -> Result<()> {
     }
 }
 
+/// `kith-auth` keeps one-time secrets (`once`) only in auth.json, and the core has no table for them, so a tombstone would
+/// strand each one with its Keychain item. Looked at under `auth.json.lock`, which the step holds through the tombstone
+/// (`before_tombstone` checks the file's sha, so a `once` written after this read refuses the step instead of being lost).
+fn refuse_open_once(auth: &Path) -> Result<()> {
+    // A file that cannot be read or parsed is the import's refusal to make, not this one's.
+    let Ok(bytes) = std::fs::read(auth) else {
+        return Ok(());
+    };
+    let n = serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|v| v.get("once").and_then(Value::as_object).map(Map::len))
+        .unwrap_or(0);
+    if n == 0 {
+        return Ok(());
+    }
+    Err(Error::Refused(format!(
+        "authority: auth.json holds {n} one-time secret(s) (`once`) that only kith-auth can use; wait until they are used or expire (at most an hour), then step. Nothing was changed"
+    )))
+}
+
+/// A core imported before the import kept handles, profiles, grants, env or a helper's `since` holds empty tables that say
+/// "none", and the router would answer from them. Said before the import is asked (which would only say that the rows
+/// differ); `--force` is the import again, so it passes.
+fn refuse_stale_core(db: &Path, force: bool) -> Result<()> {
+    if force || !db.exists() {
+        return Ok(());
+    }
+    let Ok(conn) = Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
+        return Ok(());
+    };
+    let marked = |sql: &str| conn.query_row(sql, [], |_| Ok(())).is_ok();
+    let what = if marked("SELECT 1 FROM secret_stale LIMIT 1") {
+        "profiles, grants and env"
+    } else if marked("SELECT 1 FROM authority_settings WHERE key = 'helper_since_stale'") {
+        "a helper's `since`"
+    } else if marked("SELECT 1 FROM authority_settings WHERE key = 'handles_stale'") {
+        "people's handles"
+    } else {
+        return Ok(());
+    };
+    Err(Error::Refused(format!(
+        "authority: core.db was imported before {what} were kept; import again (kith kernel core-migrate --authority --force), then step. Nothing was changed"
+    )))
+}
+
 pub(crate) struct AuthorityModule {
-    /// False in the real module: `step` refuses until M2-18 lifts it. The tests build a lifted one to run the inner step.
-    lifted: bool,
     /// How long to wait for `auth.json.lock`.
     lock_wait: Duration,
     /// What the import read: auth.json's sha, checked again just before the tombstone and written into the seed beside the
@@ -350,23 +387,13 @@ pub(crate) struct AuthorityModule {
 
 impl AuthorityModule {
     pub(crate) fn real() -> Self {
-        Self {
-            lifted: false,
-            ..Self::with(
-                Box::new(Keychain),
-                Box::new(OsEnvelope::default()),
-                Box::new(EnvelopeVault::default()),
-                Box::new(KeychainStore),
-                None,
-            )
-        }
-    }
-
-    /// The same module with the step refusal back (tests of the refusal).
-    #[cfg(test)]
-    pub(crate) fn refusing(mut self) -> Self {
-        self.lifted = false;
-        self
+        Self::with(
+            Box::new(Keychain),
+            Box::new(OsEnvelope::default()),
+            Box::new(EnvelopeVault::default()),
+            Box::new(KeychainStore),
+            None,
+        )
     }
 
     #[cfg(test)]
@@ -383,7 +410,6 @@ impl AuthorityModule {
         limit: Option<usize>,
     ) -> Self {
         Self {
-            lifted: true,
             lock_wait: LOCK_WAIT,
             imported: RefCell::new(None),
             source,
@@ -744,20 +770,13 @@ impl Module for AuthorityModule {
         env.ctx.iter().map(|c| c.auth.clone()).collect()
     }
 
-    fn step_refusal(&self, _env: &Env) -> Option<String> {
-        (!self.lifted).then(|| STEP_REFUSAL.to_owned())
-    }
-
-    fn dry_run_despite_refusal(&self) -> bool {
-        true
-    }
-
     /// `auth.json.lock` from before the import reads the file until the tombstone is in place. The vault rows are looked
     /// at under it, before the framework writes a snapshot or a record.
     fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
         let ctx = ctx(env)?;
         let held = hold_auth_lock(&ctx.auth, self.lock_wait)?;
         if !tombstone::is_tombstone(&ctx.auth) {
+            refuse_open_once(&ctx.auth)?;
             let db = Connection::open_with_flags(
                 &env.layout.db,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -779,14 +798,10 @@ impl Module for AuthorityModule {
     fn before_tombstone(&self, env: &Env) -> Result<()> {
         let Some(want) = self.imported.borrow().clone() else {
             // A real step always recorded the sha at its import; none means the guard was skipped. Fail closed, so a
-            // file that was never checked is never tombstoned. (The unlifted module never reaches a real step.)
-            return if self.lifted {
-                Err(Error::Refused(
-                    "authority: the import did not record auth.json's sha, so the file cannot be checked before the tombstone; nothing was tombstoned, run it again".into(),
-                ))
-            } else {
-                Ok(())
-            };
+            // file that was never checked is never tombstoned.
+            return Err(Error::Refused(
+                "authority: the import did not record auth.json's sha, so the file cannot be checked before the tombstone; nothing was tombstoned, run it again".into(),
+            ));
         };
         if sha_of(&ctx(env)?.auth)? == want {
             Ok(())
@@ -803,6 +818,7 @@ impl Module for AuthorityModule {
                 ctx.auth.display()
             )));
         }
+        refuse_stale_core(&env.layout.db, opts.force)?;
         // Recorded only for a real step (under the source lock); a file that moves while it is read is not imported.
         let before = if core.is_some() {
             Some(sha_of(&ctx.auth)?)

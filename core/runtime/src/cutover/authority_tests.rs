@@ -106,11 +106,6 @@ fn original() -> Value {
 }
 
 fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
-    rig_full(limit, false)
-}
-
-/// `refuse`: the module as the real one is, with the step refused until M2-18 lifts it.
-fn rig_full(limit: Option<usize>, refuse: bool) -> (Rig, Vec<Box<dyn Module>>) {
     let (t, m) = machine();
     let root = t.path().to_path_buf();
     std::fs::create_dir_all(&m).unwrap();
@@ -149,7 +144,6 @@ fn rig_full(limit: Option<usize>, refuse: bool) -> (Rig, Vec<Box<dyn Module>>) {
         limit,
     )
     .waiting(std::time::Duration::from_millis(300));
-    let module = if refuse { module.refusing() } else { module };
     let rig = Rig {
         env: Env::new(&m).with_ctx(ctx),
         dir: t,
@@ -794,32 +788,8 @@ fn a_rollback_writes_auth_json_private_and_keeps_a_newer_keychain_value() {
 // --- M2-18 step guard: the refusal, the lock with its sha check, the vault rows ---------------------------------------
 
 #[test]
-fn a_real_step_is_refused_with_the_open_gates_and_auth_json_is_untouched() {
-    let (r, reg) = rig_full(None, true);
-    let before = std::fs::read(r.auth()).unwrap();
-    for _ in 0..2 {
-        let e = step(&reg, &r.env, "authority", opts())
-            .unwrap_err()
-            .to_string();
-        assert!(
-            e.contains("M2-18 gates are open")
-                && e.contains("revoke bridge")
-                && e.contains("'already switched' branch")
-                && e.contains("people --json"),
-            "{e}"
-        );
-    }
-    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
-    assert!(!tombstone::is_tombstone(&r.auth()));
-    assert!(
-        phase(&r.env, "authority").is_none(),
-        "no record was written"
-    );
-}
-
-#[test]
-fn a_dry_run_and_check_still_work_while_the_step_is_refused() {
-    let (r, reg) = rig_full(None, true);
+fn a_dry_run_and_check_leave_the_file_alone() {
+    let (r, reg) = rig();
     let dry = Opts {
         dry_run: true,
         ..opts()
@@ -970,13 +940,10 @@ fn the_lock_is_held_throughout_the_step_and_the_rollback() {
 }
 
 #[test]
-fn a_lifted_step_that_recorded_no_sha_does_not_tombstone() {
+fn a_step_that_recorded_no_sha_does_not_tombstone() {
     let (r, reg) = rig();
     let e = reg[0].before_tombstone(&r.env).unwrap_err().to_string();
     assert!(e.contains("did not record auth.json's sha"), "{e}");
-    // The unlifted module is never in a real step, so it has nothing to check.
-    let (r, reg) = rig_full(None, true);
-    reg[0].before_tombstone(&r.env).expect("not lifted");
 }
 
 #[test]
@@ -2031,4 +1998,115 @@ fn a_rollback_writes_the_cores_helper_since_back_unless_the_database_is_from_bef
         out["members"]["house"]["sam"]["helper_since"],
         json!({"garden": 1})
     );
+}
+
+fn put_once(r: &Rig) {
+    r.edit(|v| {
+        v["once"] = json!({"o1": {"agent": "house", "created": 1, "expires": 4_102_444_800_000_i64}});
+    });
+}
+
+#[test]
+fn a_step_with_one_time_secrets_in_auth_json_is_refused_and_changes_nothing() {
+    let (r, reg) = rig();
+    put_once(&r);
+    let before = std::fs::read(r.auth()).unwrap();
+    for _ in 0..2 {
+        let e = refusal(step(&reg, &r.env, "authority", opts()));
+        assert!(
+            e.contains("1 one-time secret(s)")
+                && e.contains("wait until they are used or expire (at most an hour), then step"),
+            "{e}"
+        );
+    }
+    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    assert!(
+        phase(&r.env, "authority").is_none(),
+        "no record was written"
+    );
+    // used or expired: the file has none, and the step goes through
+    r.edit(|v| v["once"] = json!({}));
+    step(&reg, &r.env, "authority", opts()).expect("step");
+    assert!(tombstone::is_tombstone(&r.auth()));
+}
+
+/// Wraps a module and has a `kith-auth once put` land in auth.json after the once check (inside `same_answer`), as a writer
+/// that got in between would.
+struct OnceInBetween(Box<dyn Module>, PathBuf);
+
+impl Module for OnceInBetween {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
+        self.0.tombstones(env)
+    }
+    fn import(&self, env: &Env, core: Option<&mut Core>, o: Opts) -> Result<Vec<String>> {
+        self.0.import(env, core, o)
+    }
+    fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
+        let out = self.0.same_answer(env, db);
+        let mut v: Value = serde_json::from_slice(&std::fs::read(&self.1).unwrap()).unwrap();
+        v["once"] = json!({"late": {"agent": "house", "created": 1, "expires": 4_102_444_800_000_i64}});
+        std::fs::write(&self.1, v.to_string()).unwrap();
+        out
+    }
+    fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
+        self.0.export_back(env, core)
+    }
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        self.0.source_lock(env)
+    }
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        self.0.before_tombstone(env)
+    }
+    fn digest(&self, env: &Env, db: &Connection) -> Result<String> {
+        self.0.digest(env, db)
+    }
+}
+
+#[test]
+fn a_one_time_secret_written_after_the_check_is_not_lost_to_the_tombstone() {
+    let (r, mut reg) = rig();
+    let inner = reg.remove(0);
+    let reg: Vec<Box<dyn Module>> = vec![Box::new(OnceInBetween(inner, r.auth()))];
+    let e = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(e.contains("auth.json changed during the step"), "{e}");
+    assert!(
+        !tombstone::is_tombstone(&r.auth()),
+        "auth.json is still the file"
+    );
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert!(v["once"]["late"].is_object(), "the late once is kept");
+}
+
+#[test]
+fn a_core_imported_before_secrets_or_helper_since_were_kept_is_told_to_import_again() {
+    for (sql, word) in [
+        (
+            "INSERT INTO secret_stale VALUES ('before secret_grants')",
+            "profiles, grants and env",
+        ),
+        (
+            "INSERT INTO authority_settings (key, value) VALUES ('helper_since_stale', '1')",
+            "a helper's `since`",
+        ),
+        (
+            "INSERT INTO authority_settings (key, value) VALUES ('handles_stale', '1')",
+            "people's handles",
+        ),
+    ] {
+        let (r, reg) = rig();
+        {
+            let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+            reg[0].import(&r.env, Some(&mut core), opts()).unwrap();
+        }
+        r.db().execute_batch(sql).unwrap();
+        let before = std::fs::read(r.auth()).unwrap();
+        let e = refusal(step(&reg, &r.env, "authority", opts()));
+        assert!(e.contains("import again") && e.contains(word), "{e}");
+        assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+        assert!(!tombstone::is_tombstone(&r.auth()));
+    }
 }
