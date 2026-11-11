@@ -423,6 +423,7 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.budgets",
     "people.ledger",
     "people.botsCap",
+    "people.secretsView",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
@@ -439,6 +440,7 @@ const ROUTED_READS: &[&str] = &[
     "people.budgets",
     "people.ledger",
     "people.botsCap",
+    "people.secretsView",
 ];
 
 /// The writes `core_call` runs in an embedded core when no daemon answers (the revoke stopgap before M2-23: a revoke made
@@ -459,6 +461,7 @@ const EMBEDDED_METHODS: &[&str] = &[
     "people.budgets",
     "people.ledger",
     "people.botsCap",
+    "people.secretsView",
 ];
 
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.

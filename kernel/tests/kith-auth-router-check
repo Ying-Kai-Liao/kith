@@ -110,9 +110,32 @@ p = sys.argv[1]
 a = json.load(open(p))
 a['presets'].pop('ghost', None)
 a['members']['house']['amy']['helper_once']['helper'] = 4102444800000   # year 2100: the verb's five minutes would run out in a slow CI run
-a['grants'] = {'house': {'github': 'work', 'fly': ['a', 'b']}, 'writer': {'github': 'other'}}
+a['grants'] = {'house': {'github': 'work', 'fly': ['a', 'b'], 'echo': 'echo/work', 'login': 'login/main'},
+               'writer': {'github': 'other', 'echo': ['echo/kai', 'echo/work']},
+               'house@samuel': {'login': 'login/samuel', 'echo': 'echo/kai'},   # a person's own grants, looked up first
+               'house@amy': {'login': 'login/lent'},                            # the owner's login, lent to amy
+               'house@eve': {'login': 'login/main'},                            # the owner's login, NOT lent: refused
+               'oldagent': {'echo': 'echo/work'}}                               # an agent that is gone
+# S-a: the profiles (where a value lives, here `env:` references the check exports), a login that is personal (the owner's
+# unless named), one lent to amy, a shared one, and the env that mcp-config and exec read (an agent that is gone too)
+a['profiles'] = {'echo/work': {'TOKEN': 'env:RT_WORK'},
+                 'echo/kai': {'TOKEN': 'env:RT_KAI', 'person': 'kai'},
+                 'echo/team': {'TOKEN': 'env:RT_TEAM', 'person': '*'},
+                 'login/main': {'PASS': 'env:RT_OWNER_PASS'},
+                 'login/samuel': {'PASS': 'env:RT_SAM_PASS', 'person': 'samuel'},
+                 'login/lent': {'PASS': 'env:RT_LENT_PASS', 'with': ['amy']},
+                 'login/shared': {'PASS': 'env:RT_SHARED_PASS', 'person': '*'},
+                 'login/unset': {}}
+a['env'] = {'house': {'echo': {'Z': 'z-$KITH_AGENT', 'A': 'a', 'M': '3'}}, 'writer': {'echo': {'W': 'w'}},
+            'oldagent': {'echo': {'Q': 'q'}}}
 json.dump(a, open(p, 'w'), indent=2)
 PY
+mkdir -p "$KITH_HOME/services"
+printf '{"kind": "mcp", "secrets": ["TOKEN"], "mcp": {"command": "echo", "args": ["serve", "$KITH_AGENT"], "env": {"BASE": "b-$KITH_AGENT"}}}\n' > "$KITH_HOME/services/echo.json"
+printf '{"kind": "login", "secrets": ["PASS"]}\n' > "$KITH_HOME/services/login.json"
+printf 'needs: [echo]\nhelpers: [helper]\njobs:\n  - name: edit\n    label: Edit things\n    helpers: [helper]\n' > "$KITH_HOME/agents/house/role/capabilities.yaml"
+printf 'needs: [echo]\n' > "$KITH_HOME/agents/writer/role/capabilities.yaml"
+export RT_WORK=sec-work RT_KAI=sec-kai RT_TEAM=sec-team RT_OWNER_PASS=pass-owner RT_SAM_PASS=pass-sam RT_LENT_PASS=pass-lent RT_SHARED_PASS=pass-shared
 [[ -f $AUTHJ ]] && ok "setup: the fixture auth.json is there" || bad "setup: no auth.json"
 
 PERSONS=(kai samuel sam tim timbot amy dan eve botty samuelbot kaib kaibot zed nobody)
@@ -164,6 +187,28 @@ matrix() {
   run A ledger --person sam --agent house --json
   run A ledger --agent house --json
   run A ledger --agent nobody --json
+  # S-a, the secret reads: who sees which profile, whose env, over owner / a person with their own grant / a guest lent the
+  # owner's login / a guest refused it / a bot / nobody. keys comes first and the hand-out log starts empty, so `last_used`
+  # is the same on both sides (the log names the second, which differs from run to run).
+  rm -f "$(dirname "$AUTHJ")/auth.log"
+  run A keys --json
+  run A holders echo
+  run A holders login --json
+  for p in kai samuel amy eve botty samuelbot nobody; do
+    run_as "$p" A holders echo --json
+    run_as "$p" A holders login
+    for a in house writer helper oldagent; do
+      run_as "$p" A mcp-config "$a"
+      run_as "$p" A account-state "$a" echo --json
+      run_as "$p" A account-state "$a" login --json
+      for s in "echo TOKEN" "login PASS" "echo PASS"; do run_as "$p" A get --for "$a" $s; done
+      run_as "$p" A exec --for "$a" echo -- sh -c 'echo "T=$TOKEN B=$BASE Z=$Z A=$A M=$M W=$W Q=$Q"'
+      run_as "$p" A exec --for "$a" login -- sh -c 'echo "P=$PASS"'
+    done
+  done
+  KITH_AUTH_PROFILE=echo/work run A get --for writer echo TOKEN
+  run A get --for writer --profile echo/kai echo TOKEN
+  run A account-state house nothere --json
   rm -f "$KITH_SERVE_DIR/cloud-sync.json"
   for p in kai samuel tim; do run A resolve house --person "$p"; done   # and once more with no cloud-sync file: never linked
 }
@@ -223,16 +268,43 @@ seq_once() {   # OUT
     echo "\$ after";  A may amy helper --via house --once 2>/dev/null; echo "rc=$?"
     echo "\$ no caller"; A resolve helper --person amy --take-once 2>/dev/null; echo "rc=$?"; } >> "$out"
 }
+# Guest isolation: a guest run never gets a profile that is the owner's unless it was lent to them. `get` hands out the value,
+# so the answers are compared with what each person may have: the owner's login for the owner, the lent one for amy, samuel's
+# own grant for samuel (looked up before the agent's), and nothing for eve (the owner's login, not lent) or a stranger.
+iso() {   # WHERE
+  local where=$1 who want got rc
+  for row in "kai:pass-owner" "amy:pass-lent" "samuel:pass-sam" "eve:" "nobody:" "botty:"; do
+    who=${row%%:*}; want=${row#*:}
+    got=$(KITH_PERSON=$who A get --for house login PASS 2>/dev/null); rc=$?
+    if [[ -n $want ]]; then
+      [[ $got == "$want" && $rc == 0 ]] && ok "isolation, $where: $who gets $want" || bad "isolation, $where: $who" "rc=$rc got=$got"
+    else
+      [[ -z $got && $rc != 0 ]] && ok "isolation, $where: $who gets no login" || bad "isolation, $where: $who was handed something" "rc=$rc got=$got"
+    fi
+  done
+  got=$(KITH_PERSON=eve A exec --for house login -- sh -c 'echo "P=$PASS"' 2>/dev/null); rc=$?
+  [[ -z $got && $rc != 0 ]] && ok "isolation, $where: exec for eve starts nothing with the owner's login" || bad "isolation, $where: exec for eve" "rc=$rc got=$got"
+  got=$(KITH_PERSON=samuel A exec --for writer echo -- sh -c 'echo "T=$TOKEN"' 2>/dev/null); rc=$?
+  [[ -z $got && $rc != 0 ]] && ok "isolation, $where: exec for samuel is refused the owner's key" || bad "isolation, $where: exec for samuel" "rc=$rc got=$got"
+}
 mkdir -p "$T/gs" && cp -R "$G/home" "$T/gs/home" && cp -R "$G/serve" "$T/gs/serve"
 use_home "$T/gs"; seq_once "$T/once.golden"
 if grep -q 'just this once' "$T/once.golden" && [[ $(grep -c '"allowed": true' "$T/once.golden") == 1 ]]; then
   ok "take-once, file: the first launch is allowed on the once, the second is refused"
 else bad "take-once, file" "$(cat "$T/once.golden")"; fi
+iso "the file"
 use_home "$T/sw1"; seq_once "$T/once.sw1"
 cmp -s "$T/once.golden" "$T/once.sw1" && ok "take-once, embedded core: the same answers" || bad "take-once, embedded core" "$(diff "$T/once.golden" "$T/once.sw1")"
+iso "embedded core"
 if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   use_home "$T/sw2"; seq_once "$T/once.sw2"
   cmp -s "$T/once.golden" "$T/once.sw2" && ok "take-once, daemon: the same answers" || bad "take-once, daemon" "$(diff "$T/once.golden" "$T/once.sw2")"
+  iso "daemon"
+  # the core says where a value lives, never the value: no secret, no invite code, no chat handle in what it answers
+  printf '{"viaSwitch": true, "kernel": "%s", "home": "%s"}' "$KERNEL" "$HOME" | "$BIN" kernel core-call people.secretsView --params-stdin > "$T/view.out" 2>/dev/null
+  if grep -q 'env:RT_WORK' "$T/view.out" && ! grep -Eq 'sec-work|sec-kai|pass-owner|pass-sam|pass-lent|"handles"|telegram' "$T/view.out"; then
+    ok "secretsView: references and env only, no value, no handle"
+  else bad "secretsView: what the core answers" "$(head -c 600 "$T/view.out")"; fi
   exec 7>&-; wait "$DPID" 2>/dev/null; DPID=
 fi
 
@@ -251,6 +323,14 @@ out=$(A may samuel house 2>/dev/null); rc=$?
 sqlite3 "$T/sw3/home/.kith/core/$DBF" "INSERT INTO secret_stale (reason) VALUES ('test')"
 out=$(A granted github 2>/dev/null); rc=$?
 [[ $rc == 3 && -z $out ]] && ok "granted with secrets_stale: exit 3" || bad "granted with secrets_stale" "rc=$rc out=$out"
+# the secret reads on such a database: exit 3 and the way out, never "no grant" or an empty env (a core imported before profiles,
+# grants and env were kept says nothing)
+for v in "keys --json" "mcp-config house" "get --for house echo TOKEN" "holders echo" "account-state house echo --json" "exec --for house echo -- true"; do
+  # shellcheck disable=SC2086
+  out=$(A $v 2>"$T/e"); rc=$?
+  [[ $rc == 3 && -z $out ]] && grep -q 'import again before the step' "$T/e" && ok "$v with secrets_stale: exit 3, import again" \
+    || bad "$v with secrets_stale" "rc=$rc out=$out err=$(cat "$T/e")"
+done
 
 # --- 3. negatives --------------------------------------------------------------------------------------------------------------------
 # A kith program that logs what it was asked to do for core-call (the params on stdin) and then does as MODE says.
@@ -289,7 +369,7 @@ calls() { wc -l < "$1/calls" | tr -d ' '; }
 mkwrap "$T/w1" pass
 use_home "$T/sw4" "$T/w1/kith"
 for v in "ls" "link telegram 5 ABC123" "door house samuel x@y" "people" "people --matrix" "person samuel name=X" "member house amy" \
-         "bots-cap" "bots-cap 60" "invite amy" "mcp-config house" "ledger" "ledger --rm job:house:eve:edit" "revoke house notion" "grant house notion work" \
+         "bots-cap" "bots-cap 60" "invite amy" "exec --secret rs_0123456789abcdef -- true" "ledger" "ledger --rm job:house:eve:edit" "revoke house notion" "grant house notion work" \
          "preset p mode=default" "bot samuelbot --rm" "handle samuel telegram 5" "job house eve edit --rm" "jobs house"; do
   # shellcheck disable=SC2086
   refuses "no route: $v" A $v
@@ -358,6 +438,10 @@ for mode in sleep garbage array nocore exit3 exit4 exit5; do
   use_home "$T/sw4" "$T/m-$mode/kith"
   refuses "core-call $mode: may" A may samuel house
   refuses "core-call $mode: who" A who telegram 222
+  refuses "core-call $mode: mcp-config" A mcp-config house
+  refuses "core-call $mode: get" A get --for house echo TOKEN
+  refuses "core-call $mode: exec (the command does not run)" A exec --for house echo -- touch "$T/ran-$mode"
+  [[ ! -e $T/ran-$mode ]] || bad "core-call $mode: exec ran its command"
   refuses "core-call $mode: take-once" A resolve helper --person amy --via house --take-once
   [[ $(grep -c 'people.resolve' "$T/m-$mode/calls") == 1 ]] && ok "core-call $mode: the take-once was sent once" \
     || bad "core-call $mode: the take-once was repeated" "$(cat "$T/m-$mode/calls")"
@@ -375,10 +459,13 @@ A may samuel house >/dev/null 2>&1; A who telegram 111 >/dev/null 2>&1; A grante
 A people --json >/dev/null 2>&1; A retired zed >/dev/null 2>&1; A budgets house --json >/dev/null 2>&1; A ledger --json >/dev/null 2>&1
 A resolve house --person samuel --via writer --take-once >/dev/null 2>&1
 A resolve house --person samuel --take-once >/dev/null 2>&1
+A mcp-config house >/dev/null 2>&1; A get --for house echo TOKEN >/dev/null 2>&1; A holders echo >/dev/null 2>&1
+A keys --json >/dev/null 2>&1; A account-state house echo --json >/dev/null 2>&1; A exec --for house echo -- true >/dev/null 2>&1
 if python3 - "$T/ws/calls" <<'PY'
 import json, sys
 rows = [l.split(' ', 1) for l in open(sys.argv[1]).read().splitlines()]
-assert len(rows) == 10, len(rows)
+assert len(rows) == 16, len(rows)
+assert [m for m, _ in rows].count('people.secretsView') == 6, rows
 for method, body in rows:
     p = json.loads(body)
     assert p['viaSwitch'] is True, (method, p)

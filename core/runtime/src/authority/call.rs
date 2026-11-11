@@ -31,6 +31,7 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.bridgeHeld"
             | "people.who"
             | "people.granted"
+            | "people.secretsView"
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
@@ -186,6 +187,7 @@ fn is_read(method: &str, params: &Value) -> bool {
             | "people.bridgeHeld"
             | "people.who"
             | "people.granted"
+            | "people.secretsView"
             | "people.invites"
             | "people.budgets"
             | "people.ledger"
@@ -268,6 +270,49 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
         Ok((res, held))
     })?;
     Ok(answer(res, held))
+}
+
+/// What the secret-read verbs of `kith-auth` read, from the tables as auth.json's value. Refused on a database imported
+/// before profiles, grants and env were kept: its empty tables say nothing, and answering "no grant" or "no env" from
+/// them would start a service without what the file gave it.
+fn secrets_view(a: &Value) -> std::result::Result<Value, Die> {
+    if a.get("secrets_stale").is_some() {
+        return Err(Die {
+            msg: "cannot read the secrets: this database was imported before profiles, grants and env were kept; \
+                  import again before the step (kith kernel core-migrate --authority --force)"
+                .into(),
+            code: 1,
+        });
+    }
+    let mut view = a.clone();
+    if let Some(top) = view.as_object_mut() {
+        top.shift_remove("invites");
+        top.shift_remove("handles_stale");
+    }
+    for p in view
+        .get_mut("people")
+        .and_then(Value::as_object_mut)
+        .into_iter()
+        .flat_map(|o| o.values_mut())
+    {
+        if let Some(p) = p.as_object_mut() {
+            p.shift_remove("handles");
+        }
+    }
+    // A profile with no `person` is shared on purpose (`*`) or belongs to a service that is not personal; kith-auth reads
+    // both as no one's, but an unnamed profile of a personal service as the owner's, so the core's NULL is said as `*`.
+    for p in view
+        .get_mut("profiles")
+        .and_then(Value::as_object_mut)
+        .into_iter()
+        .flat_map(|o| o.values_mut())
+    {
+        if let Some(p) = p.as_object_mut() {
+            p.entry("person")
+                .or_insert_with(|| Value::String("*".into()));
+        }
+    }
+    Ok(view)
 }
 
 /// The rules have no answer (a member on a deleted preset): where `kith-auth` dies with this line and exit code, a caller that
@@ -418,6 +463,13 @@ pub(crate) fn call_in(
             let grants = store::read(core, |a| Rules::new(c, a).granted(agent, service))?
                 .map_err(|d| store::refusal(&d))?;
             Ok(json!({ "grants": grants }))
+        }
+        // The tables `kith-auth mcp-config`, `exec`, `get`, `holders`, `keys` and `account-state` decide from, in
+        // auth.json's shape, so its router runs the verb's own code over them (S-a). Where a value lives (`keychain:..`),
+        // never the value; no invite codes, no chat handles.
+        "people.secretsView" => {
+            let view = store::read(core, secrets_view)?.map_err(|d| store::refusal(&d))?;
+            Ok(json!({ "auth": view }))
         }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         // `kith-auth budgets AGENT --json`: the lines are that one JSON line, so a caller that reads the CLI's output reads

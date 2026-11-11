@@ -198,7 +198,8 @@ fn a_real_shaped_file_goes_in_with_a_backup_a_log_row_and_the_keychain_item() {
     let said = rep.lines.join("\n");
     assert!(!said.contains("left behind: profiles"), "{said}");
     assert!(!said.contains("left behind: grants"), "{said}");
-    assert!(said.contains("left behind: env"), "{said}");
+    assert!(!said.contains("left behind: env"), "{said}");
+    assert_eq!(f.count("secret_env"), 1, "env is kept since m0023");
     assert!(said.contains("person keys"), "{said}");
     assert!(
         !said.contains("tok\n") && !said.contains("plain-value"),
@@ -1084,7 +1085,7 @@ fn a_database_imported_before_the_tables_were_filled_is_stale_until_it_is_import
         .unwrap()
         .join("\n");
     assert!(
-        said.contains("imported before profiles and grants"),
+        said.contains("imported before profiles, grants and env"),
         "{said}"
     );
     let e = f.import(&mut MemSink::default()).unwrap_err();

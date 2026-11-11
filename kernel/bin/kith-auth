@@ -270,6 +270,7 @@ class Routed(Exception):
 
 
 _ROUTE = None   # (verb, args, as_json) of a verb in ROUTES, set by main; read by load_auth
+_VIEW = None    # the core's tables in auth.json's shape (people.secretsView), set by route_secret_read; read by load_auth
 
 
 def load_auth(write=False):
@@ -277,7 +278,10 @@ def load_auth(write=False):
     if write:
         lock_auth()
     try:
-        data = json.loads(kith_tombstone.read_text(AUTH))
+        if _VIEW is not None and not write:   # a secret-read verb on the tombstone: the core's tables, not the note
+            data = _VIEW
+        else:
+            data = json.loads(kith_tombstone.read_text(AUTH))
     except FileNotFoundError:
         data = {}
     except kith_tombstone.Tombstoned as e:   # authority moved to the core: never answer from the note (fail closed)
@@ -3200,9 +3204,37 @@ def route_ledger(args, as_json):
     return 'people.ledger', {k[2:]: v for k, v in opts.items()}, lambda ans: _say(json.dumps(_field(ans, 'rows', list)))
 
 
+def route_secret_read(cmd, wants):
+    """The secret-read verbs (S-a) decide from profiles, grants, env and who the run is for. On the tombstone the core gives
+    those tables in auth.json's shape (`people.secretsView`: where a value lives, never the value), and the verb runs its own
+    code over them, so its output is the file's byte for byte. The caller still reads the value from the Keychain itself.
+    `wants(args)`: whether this shape of the verb reads the tables (else it keeps the tombstone's refusal)."""
+    def route(args, as_json):
+        if not wants(args):
+            return None
+
+        def render(ans):
+            global _VIEW
+            _VIEW = _field(ans, 'auth', dict)
+            dispatch(cmd, args)   # exits itself, or execs (`exec`)
+            return None, '', 0
+        return 'people.secretsView', {}, render
+    return route
+
+
+def _exec_reads(args):
+    return take_for(args)[1][:1] != ['--secret']   # a one-time secret is the `once` table, which the core does not hold yet
+
+
 ROUTES = {'who': route_who, 'whois': route_whois, 'may': route_may_resolve('may'), 'resolve': route_may_resolve('resolve'),
           'granted': route_granted, 'bots-cap': route_bots_cap, 'people': route_people, 'retired': route_retired,
-          'budgets': route_budgets, 'ledger': route_ledger}
+          'budgets': route_budgets, 'ledger': route_ledger,
+          'mcp-config': route_secret_read('mcp-config', lambda args: len(args) == 1),
+          'get': route_secret_read('get', lambda args: True),
+          'exec': route_secret_read('exec', _exec_reads),
+          'holders': route_secret_read('holders', lambda args: True),
+          'keys': route_secret_read('keys', lambda args: args == ['--json']),
+          'account-state': route_secret_read('account-state', lambda args: len(args) == 3 and args[2] == '--json')}
 
 
 def run_routed(tombstone):

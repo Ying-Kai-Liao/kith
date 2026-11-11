@@ -7115,6 +7115,84 @@
       }
     },
     {
+      "name": "people.secretsView",
+      "summary": "The tables `kith-auth mcp-config`, `exec`, `get`, `holders`, `keys` and `account-state` read, in auth.json's shape (`auth`): people, memberships and presets for who a run is for, the secret profiles (where each variable's value lives, `keychain:..`, never the value), the grants and the per-service `env`. No invite codes and no chat handles. Refused on a database imported before profiles, grants and env were kept (import again first).",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secrets-view"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "people.ledger",
       "summary": "The grants ledger: every grant that outlives one run, for anyone but the owner (always answers of escape cards, ticked jobs, listed helpers, a person's own service grants, the hosts kept for every guest of an agent), one row each with the `key` that `people.removeGrant` takes.",
       "params": [
