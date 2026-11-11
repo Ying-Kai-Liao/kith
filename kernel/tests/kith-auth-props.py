@@ -571,6 +571,15 @@ def home_copy(name):
     return env, kh / 'secrets' / 'auth.json'
 
 
+def same(out):
+    """An answer as data when it is JSON: the core keeps a table's rows in its own order (an agent's members by person), so the
+    keys of an object (`budgets`) can come in another order than the file's; the lists (`people --json`) keep theirs."""
+    try:
+        return json.loads(out)
+    except ValueError:
+        return out
+
+
 def answers(env):
     import subprocess
     out = []
@@ -609,14 +618,14 @@ def test_a_stepped_home_answers_as_the_file(ops):
     want, got = answers(file_env), answers(core_env)
     STEPPED['answers'] += len(want)
     for (cmd, rc, out), (_, rc2, out2) in zip(want, got):
-        assert (rc, out) == (rc2, out2), f'{cmd}: the file says rc={rc} {out!r}, the stepped home rc={rc2} {out2!r}\nops {ops}'
+        assert (rc, same(out)) == (rc2, same(out2)), f'{cmd}: the file says rc={rc} {out!r}, the stepped home rc={rc2} {out2!r}\nops {ops}'
     # and back: the rollback gives a file that answers the same
     rb = subprocess.run([STEP_BIN, 'rollback', 'authority'], env={**core_env, 'KITH_KERNEL': str(KERNEL)},
                         capture_output=True, text=True, timeout=300)
     assert rb.returncode == 0 and b'kith_tombstone' not in core_auth.read_bytes(), f'rollback: {rb.stderr}'
     back = answers(core_env)
     for (cmd, rc, out), (_, rc2, out2) in zip(want, back):
-        assert (rc, out) == (rc2, out2), f'{cmd}: after the rollback rc={rc2} {out2!r}, the file said rc={rc} {out!r}\nops {ops}'
+        assert (rc, same(out)) == (rc2, same(out2)), f'{cmd}: after the rollback rc={rc2} {out2!r}, the file said rc={rc} {out!r}\nops {ops}'
 
 
 if __name__ == '__main__':
