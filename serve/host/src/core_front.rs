@@ -11,7 +11,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 
 use kith_kernel::paths::Paths;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::kernel;
 
