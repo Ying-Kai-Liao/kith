@@ -273,8 +273,20 @@ _ROUTE = None   # (verb, args, as_json) of a verb in ROUTES, set by main; read b
 _VIEW = None    # the core's tables in auth.json's shape (people.secretsView), set by route_secret_read; read by load_auth
 
 
+ROUTED_WRITES = ('access', 'helper', 'job')   # the card writes the core answers on the tombstone (C-a, C-b)
+
+
 def load_auth(write=False):
     """auth.json as a dict. write=True: the caller will save_auth, so take the lock first."""
+    if write and _ROUTE and _ROUTE[0] in ROUTED_WRITES:
+        # A card write on the tombstone goes to the core, which is the one lock there: look before taking auth.json's own.
+        try:
+            kith_tombstone.read_text(AUTH)
+        except kith_tombstone.Tombstoned as e:
+            if e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
+                raise Routed(str(e))
+        except (OSError, ValueError):
+            pass   # the plain path below says what is wrong with the file
     if write:
         lock_auth()
     try:
@@ -3222,6 +3234,58 @@ def route_secret_read(cmd, wants):
     return route
 
 
+def _write_render(ans):
+    """What a card write printed: its line, or the refusal the verb died with (`dies`: the core tells it as an answer)."""
+    if ans.get('died') is not None:
+        return None, f"kith-auth: {_field(ans, 'why', str)}\n", _field(ans, 'died', int)
+    lines = _field(ans, 'lines', list)
+    if not lines or any(not isinstance(x, str) for x in lines):
+        route_fail('the answer has no usable line')
+    return _say('\n'.join(lines))
+
+
+def route_access(args, as_json):
+    """`access <agent> <id> read|write|domain <path|host> [--by <id>] [--rm]` (the always of an escape card): one core call
+    that checks and writes in a single locked step, the same refusals as `cmd_access`. Its usage and static checks have run."""
+    opts, rest = take_opts(args, {'--by'})
+    if len(rest) not in (4, 5) or rest[2] not in ACCESS_KINDS or (len(rest) == 5 and (rest[4] != '--rm' or opts)):
+        return None
+    params = {'agent': rest[0], 'person': rest[1], 'kind': rest[2], 'value': rest[3], 'dies': True}
+    if len(rest) == 5:
+        params['remove'] = True
+    elif opts.get('--by'):
+        params['by'] = opts['--by']
+    return 'people.access', params, _write_render
+
+
+def route_helper(args, as_json):
+    """`helper <agent> <id> <helper> [--once | --rm]` (the always of a helper card)."""
+    rest = [a for a in args if a not in ('--rm', '--once')]
+    flags = [a for a in args if a in ('--rm', '--once')]
+    if len(rest) != 3 or len(flags) > 1:
+        return None
+    params = {'agent': rest[0], 'person': rest[1], 'helper': rest[2], 'dies': True}
+    if flags:
+        params['remove' if flags[0] == '--rm' else 'once'] = True
+    return 'people.helper', params, _write_render
+
+
+def route_job(args, as_json):
+    """`job <agent> <id> <job> --decline HASH | --rm` (the No of a widening card). A tick (`--shown`, or none) is the
+    share sheet's and stays on the file: it needs the package's snapshot."""
+    opts, rest = take_opts(args, {'--shown', '--decline'})
+    if len(rest) not in (3, 4):
+        return None
+    params = {'agent': rest[0], 'person': rest[1], 'job': rest[2], 'dies': True}
+    if rest[3:] == ['--rm'] and not opts:
+        params['remove'] = True
+    elif len(rest) == 3 and list(opts) == ['--decline']:
+        params['decline'] = opts['--decline']
+    else:
+        return None
+    return 'people.job', params, _write_render
+
+
 def _exec_reads(args):
     return take_for(args)[1][:1] != ['--secret']   # a one-time secret is the `once` table, which the core does not hold yet
 
@@ -3234,7 +3298,12 @@ ROUTES = {'who': route_who, 'whois': route_whois, 'may': route_may_resolve('may'
           'exec': route_secret_read('exec', _exec_reads),
           'holders': route_secret_read('holders', lambda args: True),
           'keys': route_secret_read('keys', lambda args: args == ['--json']),
-          'account-state': route_secret_read('account-state', lambda args: len(args) == 3 and args[2] == '--json')}
+          'account-state': route_secret_read('account-state', lambda args: len(args) == 3 and args[2] == '--json'),
+          # the edge card's listing and the jobs lists the launch reads: kith-auth's own code over the core's tables
+          'agent-access': route_secret_read('agent-access', lambda args: len(args) == 1 or args[1:] == ['--json']),
+          'jobs': route_secret_read('jobs', lambda args: True),
+          # the card writes: one call of the core, which checks and writes in a single locked step
+          'access': route_access, 'helper': route_helper, 'job': route_job}
 
 
 def run_routed(tombstone):

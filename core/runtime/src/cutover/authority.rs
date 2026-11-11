@@ -229,9 +229,13 @@ const REPAIR_BOTH: &str = "both sides changed since the switch (auth.json was wr
 const REPAIR_UNKNOWN: &str = "the marker has no record of the file the step imported and the core has changed since, so it can't be told which side is newer; nothing was changed. Can't tell: compare by hand with `kith migrate check authority`";
 
 fn core_digest(db: &Connection) -> Result<String> {
-    Ok(hex16(
-        crate::authority::snapshot(db)?.to_string().as_bytes(),
-    ))
+    Ok(tables_digest(&crate::authority::snapshot(db)?))
+}
+
+/// The digest of authority tables already read as one value: what the step marker and the gate fingerprint hold, and what
+/// `people.revision` gives the host's cards (a counter a writer forgot to bump would leave a hole; a hash of the rows can't).
+pub(crate) fn tables_digest(tables: &Value) -> String {
+    hex16(tables.to_string().as_bytes())
 }
 
 /// What a real auth.json (sha `now`) means against the marker the switch left. The same sha as the seed's `auth_sha` is the

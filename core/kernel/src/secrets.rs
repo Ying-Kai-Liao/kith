@@ -609,7 +609,7 @@ fn access_of(row: &Value) -> Map<String, Value> {
 }
 
 /// Whether `have` (an access dict) covers value: a path inside a held folder (write covers read), a domain it lists.
-fn held(have: &Value, kind: &str, value: &Value) -> bool {
+pub fn held(have: &Value, kind: &str, value: &Value) -> bool {
     if kind == "domains" {
         return arr(get(have, "domains")).contains(value);
     }
@@ -669,6 +669,11 @@ impl<'a> Rules<'a> {
                 &self.c.package_dir(pkg).join("capabilities.yaml"),
             ))
         }))
+    }
+
+    /// Whether the agent's package declares a job of this name (capabilities.yaml `jobs:`).
+    pub fn declares_job(&self, agent: &str, name: &str) -> bool {
+        self.jobs_of(agent).iter().any(|j| j.name == name)
     }
 
     /// `acting`: the person this run works for; never the owner inside a guest's sandbox: then it is no one (`-`).
