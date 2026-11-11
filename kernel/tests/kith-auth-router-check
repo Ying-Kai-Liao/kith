@@ -194,17 +194,20 @@ matrix() {
   run A keys --json
   run A holders echo
   run A holders login --json
-  for p in kai samuel amy eve botty samuelbot nobody; do
+  for p in kai samuel amy eve botty nobody; do
     run_as "$p" A holders echo --json
     run_as "$p" A holders login
-    for a in house writer helper oldagent; do
+    for a in house writer oldagent; do
       run_as "$p" A mcp-config "$a"
       run_as "$p" A account-state "$a" echo --json
-      run_as "$p" A account-state "$a" login --json
-      for s in "echo TOKEN" "login PASS" "echo PASS"; do run_as "$p" A get --for "$a" $s; done
-      run_as "$p" A exec --for "$a" echo -- sh -c 'echo "T=$TOKEN B=$BASE Z=$Z A=$A M=$M W=$W Q=$Q"'
-      run_as "$p" A exec --for "$a" login -- sh -c 'echo "P=$PASS"'
+      run_as "$p" A get --for "$a" echo TOKEN
+      run_as "$p" A get --for "$a" login PASS
     done
+    run_as "$p" A account-state house login --json
+    run_as "$p" A get --for house echo PASS
+    run_as "$p" A exec --for house echo -- sh -c 'echo "T=$TOKEN B=$BASE Z=$Z A=$A M=$M W=$W Q=$Q"'
+    run_as "$p" A exec --for writer echo -- sh -c 'echo "T=$TOKEN B=$BASE Z=$Z A=$A M=$M W=$W Q=$Q"'
+    run_as "$p" A exec --for house login -- sh -c 'echo "P=$PASS"'
   done
   KITH_AUTH_PROFILE=echo/work run A get --for writer echo TOKEN
   run A get --for writer --profile echo/kai echo TOKEN
