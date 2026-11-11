@@ -523,27 +523,37 @@ pub(super) fn removals(conn: &Connection, auth: &Value) -> Result<Vec<(String, V
         .flatten()
         .map(|(id, _)| id.as_str())
         .collect();
-    let mut st = conn.prepare("SELECT id, bot_of, owner FROM people ORDER BY id")?;
-    let rows: Vec<(String, Option<String>, i64)> = st
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+    let mut st = conn.prepare("SELECT id, bot_of, owner, was FROM people ORDER BY id")?;
+    let rows: Vec<(String, Option<String>, i64, Option<String>)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<std::result::Result<_, _>>()?;
+    // Every id some core.db row's `was` already lists: renames it has already imported. `was` carries earlier ids forward
+    // (samuel{was:[sam]} renamed to sammy is sammy{was:[sam,samuel]}), so this is a set over all rows, not the new id's row.
+    let had: std::collections::BTreeSet<String> = rows
+        .iter()
+        .filter_map(|(.., was)| serde_json::from_str::<Vec<String>>(was.as_deref()?).ok())
+        .flatten()
+        .collect();
     // An id in a kept person's `was` is a rename (`kith-auth rename`), not a removal: the person lives on under the new id.
     // Moving its claims and asks to the new id is a follow-up; revoking a live person's work is the wrong failure.
+    // Only while no core.db row's `was` lists it yet: then the rename was imported before, and a row under the old id is
+    // someone who took it again, whose removal must end their work.
     let renamed: std::collections::BTreeSet<&str> = table(auth, "people")?
         .into_iter()
         .flatten()
         .filter_map(|(_, p)| p.get("was").and_then(Value::as_array))
         .flatten()
         .filter_map(Value::as_str)
+        .filter(|old| !had.contains(*old))
         .collect();
     let gone: std::collections::BTreeMap<&str, Option<&str>> = rows
         .iter()
         .filter(|(id, ..)| !keep.contains(id.as_str()) && !renamed.contains(id.as_str()))
-        .map(|(id, bot_of, _)| (id.as_str(), bot_of.as_deref()))
+        .map(|(id, bot_of, ..)| (id.as_str(), bot_of.as_deref()))
         .collect();
     if let Some((id, ..)) = rows
         .iter()
-        .find(|(id, _, owner)| *owner == 1 && gone.contains_key(id.as_str()))
+        .find(|(id, _, owner, _)| *owner == 1 && gone.contains_key(id.as_str()))
     {
         return Err(Error::Refused(format!(
             "auth.json: the owner {id} is in core.db and not in the file; removing the owner is never right, so nothing was \

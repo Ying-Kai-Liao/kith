@@ -49,3 +49,5 @@ Switched = FALSE
 SwitchLag = FALSE
 CoreOnlyWrite = FALSE
 CoreSideShutsGate = FALSE
+NamelessReport = FALSE
+RevokeKeepsReason = FALSE

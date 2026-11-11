@@ -1220,7 +1220,73 @@ fn a_running_claim_with_no_holder_instance_is_never_signalled_by_a_hello() {
     crate::holder_link::reconcile(&d.shared, "two", &[], &[], i64::MAX, &cfg).expect("hello");
     assert!(alive(pid), "a process no holder started is not signalled");
     assert_eq!(claim_state(&d, id), "ending");
+    assert_eq!(
+        crate::kill_resend::pass(&d.shared, Some("two"), Duration::from_secs(60)),
+        Vec::<u32>::new(),
+        "nor by the kill re-send: holder_changed is no kill the core decided"
+    );
+    assert!(alive(pid));
     signal(pid, "KILL");
+}
+
+/// H1: the owner's interactive claude, imported from its live terminal claim file, is no holder's to end. A hello under
+/// a new holder instance and then the daemon's kill re-send leave it running.
+#[cfg(unix)]
+#[test]
+fn an_imported_terminal_claim_survives_a_holder_change_and_the_kill_resend() {
+    use crate::db::HolderRecord;
+    let (t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let cfg = HolderConfig {
+        kill_wait: Duration::from_secs(2),
+        ..HolderConfig::default()
+    };
+    open_claims(&d);
+    let (pid, start) = leader();
+    let state = t.path().join("state");
+    let dir = state.join("live").join("terminal");
+    std::fs::create_dir_all(&dir).expect("claim dir");
+    std::fs::write(
+        dir.join("s-term.claim"),
+        json!({"pid": pid, "procStart": start, "at": "t", "kind": "terminal"}).to_string(),
+    )
+    .expect("claim file");
+    let id = d
+        .shared
+        .with_core(|c| {
+            c.conn().execute(
+                "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('s-term', 'a', 'claude', 1, 1)",
+                [],
+            )?;
+            crate::import::claims::run_in(c, &state, false)?;
+            c.save_holder_record(&HolderRecord {
+                instance: Some("one".into()),
+                procs: Vec::new(),
+            })?;
+            Ok(c.conn().query_row(
+                "SELECT claim_id FROM claims WHERE conversation = 's-term'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+        .expect("import");
+    crate::holder_link::reconcile(&d.shared, "two", &[], &[], i64::MAX, &cfg).expect("hello");
+    assert_eq!(
+        crate::kill_resend::pass(&d.shared, Some("two"), Duration::from_secs(60)),
+        Vec::<u32>::new()
+    );
+    assert!(
+        alive(pid),
+        "the imported terminal's process is not signalled"
+    );
+    assert_eq!(
+        claim_state(&d, id),
+        "running",
+        "a hello leaves it the writer"
+    );
+    signal(pid, "KILL");
+    d.stop();
 }
 
 /// A pid the holder listed that has exited before the start is read is not recorded: with no start it could be a
@@ -2286,6 +2352,31 @@ fn an_ending_claim_from_a_done_report_is_not_signalled() {
     assert_eq!(resend(&d), Vec::<u32>::new());
     assert!(alive(pid));
     signal(pid, "KILL");
+    d.stop();
+}
+
+/// A nameless done leaves the claim `ending` with `done`; a revoke after it makes it a kill the re-send owns.
+#[cfg(unix)]
+#[test]
+fn a_revoke_after_a_nameless_done_is_re_sent() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    open_claims(&d);
+    let id = take_claim(&d, "a", "one");
+    d.shared
+        .with_core(|c| {
+            crate::conversations::claims::redeem(c, id, pid, &start, "one", 20)?;
+            crate::conversations::claims::report(c, id, "done", "{}", 30)?;
+            Ok(())
+        })
+        .expect("report");
+    assert_eq!(claim_state(&d, id), "ending");
+    d.shared
+        .with_core(|c| crate::conversations::claims::revoke_person(c, "sam", 40))
+        .expect("revoke");
+    assert_eq!(resend(&d), vec![pid]);
+    until("the process to be gone", || !alive(pid));
     d.stop();
 }
 

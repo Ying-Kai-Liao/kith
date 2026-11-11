@@ -681,6 +681,68 @@ echo $$ > "$lock/$key.pid"
         );
     }
 
+    /// An exit whose claim report does not commit is not acked: the holder keeps it, the next listing offers it again,
+    /// and once core.db takes the write the claim ends (decisions 2026-11-06 M3: a claim never outlives its process).
+    #[test]
+    fn an_exit_the_core_could_not_record_is_offered_again_and_then_ends_the_claim() {
+        let rig = Rig::new(RUNNING);
+        rig.d
+            .shared()
+            .with_core(|c| {
+                c.conn().execute(
+                    "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('sess-x', 'a', 'claude', 1, 1)",
+                    [],
+                )?;
+                crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+                // The daemon's own connection refuses the exit report, as a full disk or a locked file would.
+                c.conn().execute_batch(
+                    "CREATE TEMP TRIGGER refuse_exit BEFORE INSERT ON reports WHEN NEW.kind = 'exit'
+                     BEGIN SELECT RAISE(ABORT, 'test: core.db refused the write'); END;",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let a = answered(open(
+            &rig.m,
+            "sess-x",
+            &["sh", "-c", "sleep 2"],
+            &json!({"PATH": std::env::var("PATH").unwrap_or_default()}),
+        ));
+        assert_eq!(a["status"], "open", "{a}");
+        let log = rig.d.shared().logs.join(crate::log::FILE);
+        until("the failed exit report", || {
+            std::fs::read_to_string(&log)
+                .unwrap_or_default()
+                .contains("could not report the exit")
+        });
+        // Several listings later the claim still names the process: nothing was recorded over it.
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(
+            scalar(
+                &rig,
+                "SELECT state FROM claims WHERE conversation = 'sess-x'"
+            ),
+            "running"
+        );
+        rig.d
+            .shared()
+            .with_core(|c| Ok(c.conn().execute_batch("DROP TRIGGER refuse_exit;")?))
+            .unwrap();
+        until("the claim to end once the exit is offered again", || {
+            scalar(
+                &rig,
+                "SELECT state FROM claims WHERE conversation = 'sess-x'",
+            ) == "ended"
+        });
+        assert_eq!(
+            scalar(
+                &rig,
+                "SELECT end_reason FROM claims WHERE conversation = 'sess-x'"
+            ),
+            "exit"
+        );
+    }
+
     /// The claim counter starts at 0, and older cores sent the holder epoch milliseconds: a holder that outlived one
     /// answers every lower claim `Stale`. The first terminal of this core moves the counter up to the clock, once.
     #[test]

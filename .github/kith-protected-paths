@@ -51,7 +51,6 @@ kernel/tests/kith-auth-secret-check
 kernel/tests/kith-recall-check
 kernel/tests/kith-auth-revoke-check
 kernel/tests/kith-auth-core-mirror-check
-kernel/tests/kith-auth-embedded-check
 kernel/tests/kith-guest-sandbox-check
 kernel/tests/kith-guest-helper-check
 kernel/tests/kith-guest-door-check
