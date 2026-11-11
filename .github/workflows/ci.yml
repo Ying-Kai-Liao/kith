@@ -644,6 +644,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
       - name: Install pinned toolchain
         working-directory: serve
         run: rustup show active-toolchain || rustup toolchain install
@@ -691,6 +692,8 @@ jobs:
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-settings-switch-check
           # The authority router (M2-23): on the tombstone kith-auth answers its read verbs from the core, the same as the file, and refuses the rest.
           KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-router-check
+          # The access properties again on a home stepped for real (kith migrate step authority): the same answers as the file, and back after a rollback.
+          PROPS_EXAMPLES=40 PROPS_STEPPED_EXAMPLES=10 KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-props
           # A direct run holds its conversation's lock under kith-stub (M1-3).
           cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
           KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check

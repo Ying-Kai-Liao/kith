@@ -1,0 +1,6 @@
+\* the router with the core's door table and the guest door: kith-auth's door_state reads the core
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE

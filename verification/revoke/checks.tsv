@@ -222,3 +222,29 @@ broken-grant-no-person	INVARIANT	NoGrantForGone	fail
 broken-forget-keeps-grant	INVARIANT	NoGrantForGone	fail
 # probe: a grant is written
 switched-grant	INVARIANT	NeverGrantWritten	fail
+# --- the router (M2-23 lift, 2026-11-12): kith-auth on the tombstone has no file; resolve/may/door/exec and the C/S-b writes answer from the core (RouterDoor). Run with the Switched rows, the door rows and NoLiveProc ---
+switched-router	INVARIANT	TypeOK	pass
+switched-router	INVARIANT	CoreInStep	pass
+switched-router	INVARIANT	R2	pass
+switched-router	INVARIANT	R4	pass
+switched-router	INVARIANT	SyncAgrees	pass
+switched-router	INVARIANT	BotBelowOwner	pass
+switched-router	PROPERTY	R1	pass
+switched-router	PROPERTY	R5	pass
+switched-router	PROPERTY	R5c	pass
+switched-router	PROPERTY	R6	pass
+switched-router	PROPERTY	R6c	pass
+switched-router	PROPERTY	R6cDown	pass
+switched-router	PROPERTY	R6cWake	pass
+switched-router-door	INVARIANT	TypeOK	pass
+switched-router-door	PROPERTY	DoorD2	pass
+switched-router-door	PROPERTY	DoorD2c	pass
+switched-router-door	PROPERTY	DoorD1	pass
+switched-router-door	INVARIANT	DoorsCutWithRevoke	pass
+switched-router-kill	INVARIANT	TypeOK	pass
+switched-router-kill	PROPERTY	NoLiveProc	pass
+# a router that answers from the file it replaced (frozen at the switch, never revoked) lets a revoked person in
+broken-router-stale	INVARIANT	R2	fail
+broken-router-stale	PROPERTY	R1	fail
+broken-router-stale	PROPERTY	R6	fail
+broken-router-stale-door	PROPERTY	DoorD2	fail

@@ -2002,7 +2002,8 @@ fn a_rollback_writes_the_cores_helper_since_back_unless_the_database_is_from_bef
 
 fn put_once(r: &Rig) {
     r.edit(|v| {
-        v["once"] = json!({"o1": {"agent": "house", "created": 1, "expires": 4_102_444_800_000_i64}});
+        v["once"] =
+            json!({"o1": {"agent": "house", "created": 1, "expires": 4_102_444_800_000_i64}});
     });
 }
 
@@ -2048,7 +2049,8 @@ impl Module for OnceInBetween {
     fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
         let out = self.0.same_answer(env, db);
         let mut v: Value = serde_json::from_slice(&std::fs::read(&self.1).unwrap()).unwrap();
-        v["once"] = json!({"late": {"agent": "house", "created": 1, "expires": 4_102_444_800_000_i64}});
+        v["once"] =
+            json!({"late": {"agent": "house", "created": 1, "expires": 4_102_444_800_000_i64}});
         std::fs::write(&self.1, v.to_string()).unwrap();
         out
     }

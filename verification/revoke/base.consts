@@ -53,6 +53,7 @@ NamelessReport = FALSE
 RevokeKeepsReason = FALSE
 AlwaysOn = FALSE
 RouterDoor = FALSE
+RouterStale = FALSE
 AlwaysNoMay = FALSE
 AlwaysSplit = FALSE
 DemoteKeeps = FALSE

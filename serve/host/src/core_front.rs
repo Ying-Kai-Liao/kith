@@ -161,6 +161,13 @@ impl TestDaemon {
     }
 }
 
+/// `kith migrate step authority` over `folders` (the file at `folders.secrets/auth.json`), in this process; the lines it
+/// prints. Not while a daemon holds the core.
+#[cfg(test)]
+pub fn step_authority_for_test(folders: &Paths, kernel: &std::path::Path) -> Result<Vec<String>, String> {
+    kith_core::cutover(folders, kernel, &["step".to_owned(), "authority".to_owned()]).map_err(|e| e.to_string())
+}
+
 /// Starts a daemon on `folders`, ready before it returns.
 #[cfg(test)]
 pub fn serve_for_test(folders: &Paths) -> TestDaemon {

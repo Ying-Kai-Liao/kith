@@ -248,6 +248,36 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - Independent packages run in parallel, one outcome per worker brief.
 - `rust-rebuild` goes to `main` later through one normal PR with full CI.
 
+## Runbook: stepping a Mac's authority to the core (G6)
+
+For the operator (Kai), once per Mac. `kith migrate step authority` moves who may use what out of `auth.json` into the core.
+The step is open (the M2-18 gates are closed); it refuses only for what it finds on the Mac, and every refusal leaves the file
+as it was. `KITH_CORE_AUTHORITY` stays unset: turning the host's switch on by default is a separate decision (M2-24).
+
+1. **Back up.** Copy `~/.kith/secrets/auth.json` and the core (`~/.kith/core/`) somewhere safe. (The step also keeps
+   `auth.json.pre-cutover-<time>` beside the file and a `VACUUM INTO` snapshot of the core, but those are the step's, not yours.)
+2. **Quiet one-time secrets.** `once` in `auth.json` holds one-time secrets that live only in the file and the Keychain. The
+   step refuses while there are any ("wait until they are used or expire (at most an hour), then step"). Nothing to do but wait.
+3. **Import again, and compare.** A core imported before handles (m0015), profiles, grants and env (m0021, m0023) or a helper's
+   `since` (m0016) were kept is *stale*: it says "none" where the file says something, and the router would answer from it.
+   The step refuses it with "import again". So always re-import first, with the same-answer check:
+   `kith kernel core-migrate --authority --force`, then `kith migrate check authority`. It must say 0 differences. A difference
+   is a finding, not something to step past: read the lines (they name the person, the profile or the agent, never a value).
+4. **Dry run.** `kith migrate step authority --dry-run` prints the preflight: open removals, credential records in serve.db that
+   have not moved into the vault (unlock the vault in the app first), live claims or asks held by an id that is not a person.
+   Each non-zero item stops the step and names its ids; fix them, run the dry run again.
+5. **Step.** `kith migrate step authority`. It takes `auth.json.lock`, imports, compares again, writes the marker and the record,
+   and only then turns `auth.json` into the tombstone, holding the lock to the end. If it stops half way ("auth.json changed
+   during the step", a held lock) nothing was tombstoned: run it again. A crash between the record and the tombstone is
+   finished by running the same command (it keeps the core's newer rows when the file is the one the step imported).
+6. **Check.** `kith migrate status` says authority is switched. `kith-auth may`, `resolve`, `people --json` and `keys --json` now
+   answer from the core (the same words as before); `kith doctor` says authority is switched and lists any profile that has no owner
+   in the core on a service that is personal now. The writers (`access`, `helper`, `job --decline`, `set`, `grant`, `revoke`,
+   `env`, `connect`, `disconnect`) need the core's daemon (`kith serve` runs it); with none they exit 3 and change nothing.
+7. **Back out.** `kith rollback authority` takes the lock, writes the Keychain items back, and gives you an `auth.json` that holds
+   what the core holds now (grants, profiles, env and a helper's `since` included), laid over the file the step kept. Run
+   `kith migrate step authority` again whenever you want to go forward again.
+
 ## Log
 
 - 2026-11-03: plan written; decisions recorded. B0 done in PR #582. Issue #578 opened for a model per backup entry.
