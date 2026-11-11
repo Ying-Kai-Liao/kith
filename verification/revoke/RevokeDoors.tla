@@ -555,7 +555,7 @@ BotDoorGate(m) == BotDoorGrant(m) /\ InSync(m)
 OwnerTick ==
     /\ BotDoor
     /\ ptick' = ~ptick
-    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, bdoor, link>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, bdoor, alw, link>>
 BotDoorStart(m) ==
     /\ BotDoor
     /\ m \in BotMacs
