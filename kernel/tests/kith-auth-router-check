@@ -680,7 +680,8 @@ assert sg[0]['agents'] == ['writer'] and sg[0]['profiles'] == ['echo/sent'] and 
 assert sg[1]['agents'] == ['writer'] and sg[1]['profiles'] == ['echo/work'] and sg[1]['ifHave'] == {'writer': ['echo/sent']}, sg[1]
 rv = [json.loads(b) for m, b in rows if m == 'people.secretRevoke']
 assert rv[0]['profile'] == 'echo/work' and 'dropHostProfiles' not in rv[0], rv[0]
-assert rv[1]['dropHostProfiles'] is True and 'profile' not in rv[1], rv[1]
+# the stub daemon holds no grants, so disconnect has nothing held and sends nothing; its call is in the daemon comparison
+assert len(rv) == 1, rv
 PY
   then ok "secret writers: the probe comes first; viaSwitch and dies on every write, names and never a value"; else bad "secret writers: what was sent" "$(cat "$T/wsb/calls" | head -c 2500)"; fi
   exec 7>&-; wait "$DPID" 2>/dev/null; DPID=
