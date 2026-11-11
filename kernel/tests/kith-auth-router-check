@@ -174,7 +174,7 @@ printf '{"kind": "mcp", "secrets": ["TOKEN"], "mcp": {"command": "echo", "args":
 printf '{"kind": "login", "secrets": ["PASS"]}\n' > "$KITH_HOME/services/login.json"
 printf '{"kind": "cli", "secrets": ["K"]}\n' > "$KITH_HOME/services/later.json"   # not personal, until iso turns it
 printf '{"kind": "connector", "description": "a host connector"}\n' > "$KITH_HOME/services/calendar.json"   # no secrets: its profile is the host's
-house_caps 'needs: [echo]\n'
+house_caps $'needs: [echo]\n'
 printf 'needs: [echo]\n' > "$KITH_HOME/agents/writer/role/capabilities.yaml"
 export RT_WORK=sec-work RT_KAI=sec-kai RT_TEAM=sec-team RT_OWNER_PASS=pass-owner RT_SAM_PASS=pass-sam RT_LENT_PASS=pass-lent RT_SHARED_PASS=pass-shared RT_LATER=sec-later
 [[ -f $AUTHJ ]] && ok "setup: the fixture auth.json is there" || bad "setup: no auth.json"
@@ -492,6 +492,14 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   # set, grant, revoke, connect, disconnect, env and `agent-access ... domain` on the file, through the daemon (must be the
   # file's, state included) and on the embedded core (every write exits 3, nothing changes). A fake `security` keeps the
   # Keychain's items in a folder, so `set` runs for real and the check can see what was stored and where.
+  profile_names() {   # the profiles the home holds: auth.json's, or on the tombstone the core's
+    if grep -q kith_tombstone "$AUTHJ" 2>/dev/null; then
+      printf '{"viaSwitch": true, "kernel": "%s", "home": "%s"}' "$KERNEL" "$HOME" | "$BIN" kernel core-call people.secretsView --params-stdin 2>/dev/null \
+        | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["auth"]["profiles"])))'
+    else
+      python3 -c 'import json,sys; print(" ".join(sorted(json.load(open(sys.argv[1]))["profiles"])))' "$AUTHJ"
+    fi
+  }
   sb() {   # OUT: the writers, then the reads that show their effect
     local out=$1
     : > "$out"
@@ -551,6 +559,10 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
     run A disconnect house@x echo
     run A connect writer calendar
     run A disconnect writer calendar
+    echo "host profiles: $(profile_names | tr ' ' '\n' | grep '/host$' | tr '\n' ' ')" >> "$out"   # calendar/host, held by house
+    run A disconnect house calendar                                                # the last holder: the host profile goes with it
+    echo "host profiles: $(profile_names | tr ' ' '\n' | grep '/host$' | tr '\n' ' ')" >> "$out"
+    run A disconnect house calendar                                                # nothing held now
     run A revoke writer echo --profile echo/work
     run A revoke writer echo --profile echo/work --json
     run A revoke house echo --profile echo/new --json
@@ -594,6 +606,9 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   sb "$T/sb.golden"
   rows=$(grep -c '^\$' "$T/sb.golden")
   [[ $rows -gt 70 ]] && ok "secret writers, file: $rows calls" || bad "secret writers, file: too few calls ($rows)"
+  [[ $(grep -c '^host profiles: .*calendar/host' "$T/sb.golden") == 1 ]] && [[ $(grep -c '^host profiles: $' "$T/sb.golden") == 1 ]] \
+    && ok "secret writers, file: the last holder of calendar/host takes the host profile with it" \
+    || bad "secret writers, file: the host profile's drop is not in the sequence" "$(grep '^host profiles' "$T/sb.golden")"
   grep -q '"profile": "echo/new", "service": "echo", "vars": \["TOKEN"\], "granted": "house"' "$T/sb.golden" \
     && grep -q 'writer may use echo as echo/kai, echo/work, echo/new\|may use echo as' "$T/sb.golden" \
     && grep -q 'helper may now use calendar as calendar/host' "$T/sb.golden" \
@@ -708,7 +723,9 @@ EOF
   A grant writer echo echo/sent >/dev/null 2>&1
   A connect writer echo --profile echo/work >/dev/null 2>&1
   A revoke writer echo --profile echo/work >/dev/null 2>&1
-  A disconnect writer echo >/dev/null 2>&1
+  A connect helper calendar >/dev/null 2>&1                                         # a grant that is held ...
+  A disconnect helper calendar >/dev/null 2>&1                                      # ... and taken back
+  A disconnect writer echo >/dev/null 2>&1                                          # nothing held: nothing sent
   A env house echo K=v >/dev/null 2>&1
   A agent-access house domain sent.example.com >/dev/null 2>&1
   if python3 - "$T/wsb/calls" "$SENT" <<'PY'
@@ -730,10 +747,44 @@ assert sg[0]['agents'] == ['writer'] and sg[0]['profiles'] == ['echo/sent'] and 
 assert sg[1]['agents'] == ['writer'] and sg[1]['profiles'] == ['echo/work'] and sg[1]['ifHave'] == {'writer': ['echo/sent']}, sg[1]
 rv = [json.loads(b) for m, b in rows if m == 'people.secretRevoke']
 assert rv[0]['profile'] == 'echo/work' and 'dropHostProfiles' not in rv[0], rv[0]
-# the stub daemon holds no grants, so disconnect has nothing held and sends nothing; its call is in the daemon comparison
-assert len(rv) == 1, rv
+# `disconnect` sends a call only for a grant that is held: the one of helper's calendar (connected just before), with the
+# host profile to go with its last grant; the second, of a writer that holds nothing, sent none
+assert len(rv) == 2, rv
+assert rv[1] == {**rv[1], 'agent': 'helper', 'service': 'calendar', 'dropHostProfiles': True} and 'profile' not in rv[1], rv[1]
 PY
   then ok "secret writers: the probe comes first; viaSwitch and dies on every write, names and never a value"; else bad "secret writers: what was sent" "$(cat "$T/wsb/calls" | head -c 2500)"; fi
+  # --- 2d. the door follows a revoke -------------------------------------------------------------------------------------------
+  # A revoked person's door is closed on the routed path exactly as on the file (revoke-access: door_state is in its scope).
+  # The answers of `door` before a revoke, after it, after its undo and after the person is removed, on the file (kith-auth
+  # person --revoke) and through the daemon (the host's people.suspend / undo / removePerson: kith-auth is app-only there).
+  door_rows() {   # OUT HEADING: the door of five people, text and --json
+    local out=$1 who
+    echo "== $2" >> "$out"
+    for who in eve amy botty samuel kai; do
+      { echo "\$ door $who"; A door house "$who" "$DOOR" 2>&1; echo "rc=$?"; A door house "$who" "$DOOR" --json 2>&1; echo "rc=$?"; } >> "$out"
+    done
+  }
+  door_seq() {   # OUT file|core
+    local out=$1 way=$2
+    cc() { printf '{"viaSwitch": true, "id": "eve", "kernel": "%s", "home": "%s"}' "$KERNEL" "$HOME" | "$BIN" kernel core-call "$1" --params-stdin >/dev/null 2>&1; }
+    : > "$out"
+    door_rows "$out" before
+    if [[ $way == file ]]; then A person eve --revoke >/dev/null 2>&1; else cc people.suspend; fi
+    door_rows "$out" revoked
+    if [[ $way == file ]]; then A person eve --unrevoke >/dev/null 2>&1; else cc people.undo; fi
+    door_rows "$out" restored
+    if [[ $way == file ]]; then A person eve --rm >/dev/null 2>&1; else cc people.removePerson; fi
+    door_rows "$out" removed
+  }
+  use_home "$T/gs"; door_seq "$T/door.golden" file
+  section() { sed -n "/^== $2\$/,/^== /p" "$1" | grep -A3 '^\$ door eve$'; }
+  if section "$T/door.golden" before | grep -q '"state": "ok"' && section "$T/door.golden" revoked | grep -q '"state": "revoked"' \
+     && section "$T/door.golden" restored | grep -q '"state": "ok"' && section "$T/door.golden" removed | grep -q '"state": "not-allowed"'; then
+    ok "doors, file: eve's door is ok, closed by a revoke, back after the undo, and gone with the person"
+  else bad "doors, file: the sequence does not show a revoke closing the door" "$(cat "$T/door.golden" | head -40)"; fi
+  use_home "$T/sw2"; door_seq "$T/door.sw2" core
+  if cmp -s "$T/door.golden" "$T/door.sw2"; then ok "doors, through a daemon: a revoke, its undo and a removal close and open the door as on the file"; else
+    bad "doors, through a daemon: differs from the file" "$(diff "$T/door.golden" "$T/door.sw2" | head -30)"; fi
   exec 7>&-; wait "$DPID" 2>/dev/null; DPID=
 fi
 
@@ -798,10 +849,8 @@ calls() { wc -l < "$1/calls" | tr -d ' '; }
 mkwrap "$T/w1" pass
 use_home "$T/sw4" "$T/w1/kith"
 # (the lift list in docs/plans/one-bot-model.md: each of these is exit 3 on purpose, with its callers)
-for v in "ls extra" "door house samuel" "door house samuel x@y --json extra" "mcp-names" "mcp-names house extra" "people" "people --matrix" "people samuel" \
-         "bots-cap" "bots-cap 60" "exec --secret rs_0123456789abcdef -- true" "ledger" "ledger --rm job:house:eve:edit" "browser work chrome" \
-         "owner echo/work samuel" "share echo/work samuel" "once put" "mcp-config house extra" "keys" "account-state house echo" \
-         "job house eve" "job house eve edit --shown {} --decline h"; do
+for v in "ls extra" "people" "people --matrix" "people samuel" "bots-cap" "bots-cap 60" "exec --secret rs_0123456789abcdef -- true" "ledger" \
+         "ledger --rm job:house:eve:edit" "browser work chrome" "owner echo/work samuel" "share echo/work samuel" "once put"; do
   # shellcheck disable=SC2086
   refuses "no route: $v" A $v
   grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "no route: $v: not today's text" "$(cat "$T/e")"
@@ -814,8 +863,15 @@ for v in "link telegram 5 ABC123" "person samuel name=X" "person samuel --revoke
   grep -q 'is app-only now that authority moved to the core: on a switched Mac, manage people in the Kith app' "$T/e" \
     && grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "app-only: $v: not the app-only line" "$(cat "$T/e")"
 done
-out=$(A ls --json extra 2>/dev/null); rc=$?   # --json puts the refusal on stdout, as it does today
-[[ $rc == 3 && $out == *'"ok": false'*'moved to the Kith core (module authority)'* ]] && ok "no route: ls --json extra: exit 3, today's JSON error" || bad "no route: ls --json extra" "rc=$rc $out"
+# a wrong shape of a routed verb is the usage error (exit 2) the file gives, before the tombstone is looked at: no call goes out
+for v in "door house samuel" "door house samuel x@y --json extra" "mcp-names" "mcp-names house extra" "mcp-config house extra" \
+         "keys" "account-state house echo" "job house eve" "job house eve edit --shown {} --decline h"; do
+  # shellcheck disable=SC2086
+  out=$(A $v 2>"$T/e"); rc=$?
+  [[ $rc == 2 && -z $out && -s $T/e ]] && ok "usage: $v: exit 2, as on the file" || bad "usage: $v" "rc=$rc out=$out err=$(cat "$T/e")"
+done
+out=$(A ls --json extra 2>/dev/null); rc=$?   # --json puts the refusal on stdout, as it does on the file
+[[ $rc == 2 && $out == '{"ok": false, "error": "ls [--json]"}' ]] && ok "usage: ls --json extra: exit 2, the JSON error" || bad "usage: ls --json extra" "rc=$rc $out"
 [[ $(calls "$T/w1") == 0 ]] && ok "no route: the core was never asked" || bad "no route: a call went out" "$(cat "$T/w1/calls")"
 
 # a tombstone of another module is not authority's: no call, today's text
