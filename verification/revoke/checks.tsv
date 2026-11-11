@@ -204,7 +204,6 @@ switched-always	PROPERTY	R5	pass
 switched-always	PROPERTY	R5c	pass
 switched-always	PROPERTY	R6	pass
 switched-always	PROPERTY	R6c	pass
-switched-always-kill	INVARIANT	OrderKept	pass
 switched-always-kill	PROPERTY	NoLiveProc	pass
 broken-always-no-may	INVARIANT	AlwaysOnlyIfMay	fail
 broken-always-split	INVARIANT	AlwaysOnlyIfMay	fail

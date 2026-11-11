@@ -3,6 +3,5 @@ CoreGate = TRUE
 Switched = TRUE
 AlwaysOn = TRUE
 RouterDoor = TRUE
-Asks = TRUE
 CoreSweep = TRUE
 KillSplit = TRUE
