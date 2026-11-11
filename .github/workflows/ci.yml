@@ -220,6 +220,7 @@ jobs:
               - 'kernel/bin/kith-auth'
               - 'core/runtime/src/cards/**'
               - 'core/runtime/src/secrets/**'
+              - 'core/runtime/src/authority/secret_writes.rs'
               - 'core/api/src/table/cards.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ model of the holder lease and the code it covers (the list in the holder-lease skill).
