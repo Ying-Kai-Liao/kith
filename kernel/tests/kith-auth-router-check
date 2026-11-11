@@ -728,7 +728,11 @@ assert a.get('once', {}) == {}, a.get('once')
 assert any(isinstance(m, dict) and m.get('helper_once') for m in a['members']['house'].values()) or True
 PY
   then ok "rollback: what the core wrote (profiles, env) is in the file"; else bad "rollback: what is in the file"; fi
-  # and forward again: the file steps again, and the core answers what it did before
+  # and forward again, as the runbook says: import again (the rolled-back file names the owner of a profile the core held with none,
+  # `later/main`, so the core's rows differ from the file's and a plain step refuses), then step; the core answers what it did before
+  out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+  [[ $rc != 0 && $out == *'differ from auth.json'* ]] && ok "rollback: a plain step over a core that differs from the file refuses and says to import again" || bad "rollback: step before the re-import" "rc=$rc $out"
+  "$BIN" kernel core-migrate --authority --force >"$T/reimport" 2>&1 || bad "rollback: the re-import" "$(cat "$T/reimport")"
   KITH_KERNEL="$KERNEL" "$BIN" migrate step authority >"$T/restep" 2>&1 && grep -q '"kith_tombstone"' "$AUTHJ" && ok "rollback: stepping again works" || bad "rollback: stepping again" "$(cat "$T/restep")"
   rm -f "$(dirname "$AUTHJ")/auth.log"
   post_state "$T/post.again"

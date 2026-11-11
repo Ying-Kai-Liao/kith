@@ -276,7 +276,9 @@ as it was. `KITH_CORE_AUTHORITY` stays unset: turning the host's switch on by de
    `env`, `connect`, `disconnect`) need the core's daemon (`kith serve` runs it); with none they exit 3 and change nothing.
 7. **Back out.** `kith rollback authority` takes the lock, writes the Keychain items back, and gives you an `auth.json` that holds
    what the core holds now (grants, profiles, env and a helper's `since` included), laid over the file the step kept. Run
-   `kith migrate step authority` again whenever you want to go forward again.
+   `kith kernel core-migrate --authority --force` and then `kith migrate step authority` again when you want to go forward (step 3
+   again: the rolled-back file can name an owner for a profile that the core held with none, so a plain step refuses with
+   "differ from auth.json" until the core is imported again).
 
 ## Log
 
