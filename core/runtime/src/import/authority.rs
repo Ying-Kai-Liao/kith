@@ -23,7 +23,7 @@
 //! |   every other key (VAR -> source)           |   `secret_vars (profile, var, source)`: the reference (`keychain:..`, `env:..`, `env-file:..`), never a value |
 //! | `grants.<agent>.<service>` (`coder`, `coder@<person>`) | `secret_grants` rows, `seq` = the place in a list of profiles |
 //!
-//! A profile's `person` is what `kith-auth`'s `owner_of` answers: the named person; `*` (shared on purpose) is NULL; with
+//! A profile's `person` is what `kith-auth`'s `owner_of` answers: the named person, `*` (shared on purpose) included; with
 //! none named, the owner's id (the text `the owner` while the file has no owner) when the service is personal (its
 //! `"personal"` or else a `login`/`browser` `kind`, read from the kernel's `services/` then this Mac's), else NULL. The
 //! core has no service specs of its own, so this is worked out here, once; a file whose service spec cannot be read is
@@ -238,7 +238,8 @@ fn parse_profiles(auth: &Value, services: &Services) -> Result<Vec<ProfileRow>> 
         let row = Value::Object(p.clone());
         let named = text(&row, "person", &what)?.filter(|s| !s.is_empty());
         let person = match named.as_deref() {
-            Some("*") => None,
+            // Kept as `*`, not NULL: NULL means "none named", which `kith-auth` decides from the service's current
+            // `personal` setting, so a shared login never turns into a default owner's.
             Some(_) => named,
             None if services.personal(name.split('/').next().unwrap_or(name))? => {
                 Some(owner.clone().unwrap_or_else(|| "the owner".to_owned()))

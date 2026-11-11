@@ -163,6 +163,9 @@ fn secrets_view_is_the_tables_in_auth_shape_without_values_handles_or_invite_cod
         "presets": {"member": {"mode": "default"}},
         "members": {"house": {"sam": {"preset": "member"}}},
         "invites": {"ABC234": {"person": "sam", "expires": FUTURE}},
+        "retired": {"old": {"at": 1}},
+        "agent_access": {"house": {"domains": ["a.example"]}},
+        "owner_bots_budget": "50",
     }));
     rig.core
         .conn()
@@ -187,9 +190,15 @@ fn secrets_view_is_the_tables_in_auth_shape_without_values_handles_or_invite_cod
     );
     assert_eq!(
         auth["profiles"]["github/work"],
-        json!({"person": "*", "TOKEN": "keychain:kith/github/work#TOKEN"}),
-        "a profile with no owner reads as shared, not as the owner's"
+        json!({"TOKEN": "keychain:kith/github/work#TOKEN"}),
+        "no owner named: kith-auth decides from the service's current `personal`, which fails closed"
     );
+    // exactly the keys the six verbs read, whatever else the core holds
+    let mut got: Vec<&str> = keys(auth);
+    got.sort_unstable();
+    let mut want: Vec<&str> = crate::authority::call::VIEW_KEYS.to_vec();
+    want.sort_unstable();
+    assert_eq!(got, want);
     assert_eq!(
         auth["profiles"]["chrome/main"],
         json!({"person": "kai", "with": ["sam"], "browser": "chrome"})
@@ -207,6 +216,9 @@ fn secrets_view_is_the_tables_in_auth_shape_without_values_handles_or_invite_cod
         .unwrap();
     let e = rig.call("people.secretsView", &json!({})).unwrap_err();
     assert!(e.contains("import again before the step"), "{e}");
+    // on a switched core auth.json is a tombstone: there is nothing to import again
+    let said = crate::authority::call::secrets_view(&json!({"secrets_stale": true}), true);
+    assert!(said.unwrap_err().msg.contains("roll back and step again"));
 }
 
 #[test]

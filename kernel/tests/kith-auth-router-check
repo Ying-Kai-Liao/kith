@@ -110,7 +110,7 @@ p = sys.argv[1]
 a = json.load(open(p))
 a['presets'].pop('ghost', None)
 a['members']['house']['amy']['helper_once']['helper'] = 4102444800000   # year 2100: the verb's five minutes would run out in a slow CI run
-a['grants'] = {'house': {'github': 'work', 'fly': ['a', 'b'], 'echo': 'echo/work', 'login': 'login/main'},
+a['grants'] = {'house': {'github': 'work', 'fly': ['a', 'b'], 'echo': 'echo/work', 'login': 'login/main', 'later': 'later/main'},
                'writer': {'github': 'other', 'echo': ['echo/kai', 'echo/work']},
                'house@samuel': {'login': 'login/samuel', 'echo': 'echo/kai'},   # a person's own grants, looked up first
                'house@amy': {'login': 'login/lent'},                            # the owner's login, lent to amy
@@ -125,7 +125,8 @@ a['profiles'] = {'echo/work': {'TOKEN': 'env:RT_WORK'},
                  'login/samuel': {'PASS': 'env:RT_SAM_PASS', 'person': 'samuel'},
                  'login/lent': {'PASS': 'env:RT_LENT_PASS', 'with': ['amy']},
                  'login/shared': {'PASS': 'env:RT_SHARED_PASS', 'person': '*'},
-                 'login/unset': {}}
+                 'login/unset': {},
+                 'later/main': {'K': 'env:RT_LATER'}}   # unmarked, on a service that is not personal yet
 a['env'] = {'house': {'echo': {'Z': 'z-$KITH_AGENT', 'A': 'a', 'M': '3'}}, 'writer': {'echo': {'W': 'w'}},
             'oldagent': {'echo': {'Q': 'q'}}}
 json.dump(a, open(p, 'w'), indent=2)
@@ -133,9 +134,10 @@ PY
 mkdir -p "$KITH_HOME/services"
 printf '{"kind": "mcp", "secrets": ["TOKEN"], "mcp": {"command": "echo", "args": ["serve", "$KITH_AGENT"], "env": {"BASE": "b-$KITH_AGENT"}}}\n' > "$KITH_HOME/services/echo.json"
 printf '{"kind": "login", "secrets": ["PASS"]}\n' > "$KITH_HOME/services/login.json"
+printf '{"kind": "cli", "secrets": ["K"]}\n' > "$KITH_HOME/services/later.json"   # not personal, until iso turns it
 printf 'needs: [echo]\nhelpers: [helper]\njobs:\n  - name: edit\n    label: Edit things\n    helpers: [helper]\n' > "$KITH_HOME/agents/house/role/capabilities.yaml"
 printf 'needs: [echo]\n' > "$KITH_HOME/agents/writer/role/capabilities.yaml"
-export RT_WORK=sec-work RT_KAI=sec-kai RT_TEAM=sec-team RT_OWNER_PASS=pass-owner RT_SAM_PASS=pass-sam RT_LENT_PASS=pass-lent RT_SHARED_PASS=pass-shared
+export RT_WORK=sec-work RT_KAI=sec-kai RT_TEAM=sec-team RT_OWNER_PASS=pass-owner RT_SAM_PASS=pass-sam RT_LENT_PASS=pass-lent RT_SHARED_PASS=pass-shared RT_LATER=sec-later
 [[ -f $AUTHJ ]] && ok "setup: the fixture auth.json is there" || bad "setup: no auth.json"
 
 PERSONS=(kai samuel sam tim timbot amy dan eve botty samuelbot kaib kaibot zed nobody)
@@ -285,6 +287,12 @@ iso() {   # WHERE
       [[ -z $got && $rc != 0 ]] && ok "isolation, $where: $who gets no login" || bad "isolation, $where: $who was handed something" "rc=$rc got=$got"
     fi
   done
+  # a profile nobody named, on a service that turns personal after the import: it is the owner's now, never a guest's
+  printf '{"kind": "cli", "personal": true, "secrets": ["K"]}\n' > "$KITH_HOME/services/later.json"
+  got=$(KITH_PERSON=eve A get --for house later K 2>/dev/null); rc=$?
+  [[ -z $got && $rc != 0 ]] && ok "isolation, $where: an unmarked profile of a service that turned personal is not eve's" || bad "isolation, $where: later, eve" "rc=$rc got=$got"
+  got=$(KITH_PERSON=kai A get --for house later K 2>/dev/null); rc=$?
+  [[ $got == sec-later && $rc == 0 ]] && ok "isolation, $where: ... and is still the owner's" || bad "isolation, $where: later, kai" "rc=$rc got=$got"
   got=$(KITH_PERSON=eve A exec --for house login -- sh -c 'echo "P=$PASS"' 2>/dev/null); rc=$?
   [[ -z $got && $rc != 0 ]] && ok "isolation, $where: exec for eve starts nothing with the owner's login" || bad "isolation, $where: exec for eve" "rc=$rc got=$got"
   got=$(KITH_PERSON=samuel A exec --for writer echo -- sh -c 'echo "T=$TOKEN"' 2>/dev/null); rc=$?
@@ -326,12 +334,12 @@ out=$(A may samuel house 2>/dev/null); rc=$?
 sqlite3 "$T/sw3/home/.kith/core/$DBF" "INSERT INTO secret_stale (reason) VALUES ('test')"
 out=$(A granted github 2>/dev/null); rc=$?
 [[ $rc == 3 && -z $out ]] && ok "granted with secrets_stale: exit 3" || bad "granted with secrets_stale" "rc=$rc out=$out"
-# the secret reads on such a database: exit 3 and the way out, never "no grant" or an empty env (a core imported before profiles,
+# the secret reads on such a (switched) database: exit 3 and the way out, never "no grant" or an empty env (a core imported before profiles,
 # grants and env were kept says nothing)
 for v in "keys --json" "mcp-config house" "get --for house echo TOKEN" "holders echo" "account-state house echo --json" "exec --for house echo -- true"; do
   # shellcheck disable=SC2086
   out=$(A $v 2>"$T/e"); rc=$?
-  [[ $rc == 3 && -z $out ]] && grep -q 'import again before the step' "$T/e" && ok "$v with secrets_stale: exit 3, import again" \
+  [[ $rc == 3 && -z $out ]] && grep -q 'roll back and step again' "$T/e" && ok "$v with secrets_stale: exit 3, roll back and step again" \
     || bad "$v with secrets_stale" "rc=$rc out=$out err=$(cat "$T/e")"
 done
 

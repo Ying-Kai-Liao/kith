@@ -8,7 +8,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::people_json;
 use super::requests;
@@ -275,20 +275,34 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
 /// What the secret-read verbs of `kith-auth` read, from the tables as auth.json's value. Refused on a database imported
 /// before profiles, grants and env were kept: its empty tables say nothing, and answering "no grant" or "no env" from
 /// them would start a service without what the file gave it.
-fn secrets_view(a: &Value) -> std::result::Result<Value, Die> {
+/// The keys of the view, and no others: what `mcp-config`, `get`, `exec`, `holders`, `keys` and `account-state` read
+/// (`may` and its rules over people, memberships and presets; the profiles, grants and env). Anything the core holds
+/// later (`once`, the retired ids, kept hosts, the bots' cap) joins only when someone decides a verb needs it.
+pub(super) const VIEW_KEYS: &[&str] =
+    &["people", "members", "presets", "profiles", "grants", "env"];
+
+pub(super) fn secrets_view(a: &Value, switched: bool) -> std::result::Result<Value, Die> {
     if a.get("secrets_stale").is_some() {
+        // On a switched home auth.json is the tombstone, so there is no file to import again.
+        let way_out = if switched {
+            "roll back and step again (kith rollback authority, then kith migrate step authority)"
+        } else {
+            "import again before the step (kith kernel core-migrate --authority --force)"
+        };
         return Err(Die {
-            msg: "cannot read the secrets: this database was imported before profiles, grants and env were kept; \
-                  import again before the step (kith kernel core-migrate --authority --force)"
-                .into(),
+            msg: format!(
+                "cannot read the secrets: this database was imported before profiles, grants and env were kept; {way_out}"
+            ),
             code: 1,
         });
     }
-    let mut view = a.clone();
-    if let Some(top) = view.as_object_mut() {
-        top.shift_remove("invites");
-        top.shift_remove("handles_stale");
+    let mut view = Map::new();
+    for key in VIEW_KEYS {
+        if let Some(v) = a.get(*key) {
+            view.insert((*key).to_owned(), v.clone());
+        }
     }
+    // no chat handles (nothing here reads them)
     for p in view
         .get_mut("people")
         .and_then(Value::as_object_mut)
@@ -299,20 +313,7 @@ fn secrets_view(a: &Value) -> std::result::Result<Value, Die> {
             p.shift_remove("handles");
         }
     }
-    // A profile with no `person` is shared on purpose (`*`) or belongs to a service that is not personal; kith-auth reads
-    // both as no one's, but an unnamed profile of a personal service as the owner's, so the core's NULL is said as `*`.
-    for p in view
-        .get_mut("profiles")
-        .and_then(Value::as_object_mut)
-        .into_iter()
-        .flat_map(|o| o.values_mut())
-    {
-        if let Some(p) = p.as_object_mut() {
-            p.entry("person")
-                .or_insert_with(|| Value::String("*".into()));
-        }
-    }
-    Ok(view)
+    Ok(Value::Object(view))
 }
 
 /// The rules have no answer (a member on a deleted preset): where `kith-auth` dies with this line and exit code, a caller that
@@ -468,7 +469,12 @@ pub(crate) fn call_in(
         // auth.json's shape, so its router runs the verb's own code over them (S-a). Where a value lives (`keychain:..`),
         // never the value; no invite codes, no chat handles.
         "people.secretsView" => {
-            let view = store::read(core, secrets_view)?.map_err(|d| store::refusal(&d))?;
+            let machine = core
+                .folders()
+                .map_or_else(|| life.machine.clone(), |f| f.machine.clone());
+            let switched = authority_record(&machine) == Record::Switched;
+            let view = store::read(core, |a| secrets_view(a, switched))?
+                .map_err(|d| store::refusal(&d))?;
             Ok(json!({ "auth": view }))
         }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),

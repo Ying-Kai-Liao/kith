@@ -832,7 +832,7 @@ fn profiles_vars_and_grants_go_in_as_the_file_has_them() {
         ),
         vec![
             vec![s("chrome-agent/main"), s("kai"), None, s("chrome")],
-            vec![s("chrome-agent/team"), None, None, None],
+            vec![s("chrome-agent/team"), s("*"), None, None],
             vec![s("github/bare"), None, None, None],
             vec![s("github/work"), s("sam"), s(r#"["kai","mia"]"#), None],
             vec![s("host/svc"), None, None, None],
@@ -1183,6 +1183,8 @@ fn the_cores_owners_and_grants_are_what_kith_auth_account_state_answers() {
                     |r| r.get(0),
                 )
                 .unwrap();
+            // the core keeps a shared profile as `*`; `account-state` says no owner
+            let owner = owner.filter(|o| o != "*");
             let agents = col(
                 "SELECT DISTINCT agent FROM secret_grants WHERE profile = ?1 ORDER BY agent",
                 &[&p],
@@ -1221,7 +1223,7 @@ fn the_cores_owners_and_grants_are_what_kith_auth_account_state_answers() {
         [
             "chrome-agent/kai:kai",
             "chrome-agent/sam:sam",
-            "chrome-agent/shared:-"
+            "chrome-agent/shared:*"
         ]
     );
 }
