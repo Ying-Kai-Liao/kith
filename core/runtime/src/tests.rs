@@ -1099,6 +1099,12 @@ mod embedded_authority {
             "people.access",
             "people.helper",
             "people.job",
+            // the secret writers (S-b) and `agent-access ... domain`
+            "people.secretSet",
+            "people.secretGrant",
+            "people.secretRevoke",
+            "people.secretEnv",
+            "people.agentAccess",
             "people.revision",
         ] {
             let e = call_authority_embedded(&paths(&m), method, &card).unwrap_err();

@@ -270,6 +270,7 @@ class Routed(Exception):
 
 
 _ROUTE = None   # (verb, args, as_json) of a verb in ROUTES, set by main; read by load_auth
+_AS_JSON = False   # a secret writer was asked for --json (connect, disconnect): route_fail says it as JSON
 _VIEW = None    # the core's tables in auth.json's shape (people.secretsView), set by route_secret_read; read by load_auth
 
 
@@ -955,7 +956,9 @@ def connector_row(auth, agent, svc, declared=False):
 
 
 def connect_args(args):
+    global _AS_JSON
     as_json = '--json' in args
+    _AS_JSON = as_json
     opts, rest = take_opts([a for a in args if a != '--json'], {'--profile'})
     return as_json, opts, rest
 
@@ -979,7 +982,7 @@ def cmd_connect(args):
     spec = json.loads(f.read_text())
     if spec.get('kind') in ('login', 'browser'):
         jfail(f"{svc} is not a connector (kind {spec.get('kind')}); kith-auth grant {agent} {svc} <profile>", as_json)
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     have = grant_list(auth['grants'].get(agent, {}).get(svc))
     profile = opts.get('--profile')
     if profile is None and not have:
@@ -1002,7 +1005,9 @@ def cmd_connect(args):
             auth['grants'].setdefault(agent, {})[svc] = profile
             changed = True
         if changed or profile not in auth['profiles']:
-            save_auth(auth)
+            # a grant that changed since it looked is refused by the core, not overwritten
+            commit(auth, in_core, 'people.secretGrant',
+                   {'agents': [agent], 'service': svc, 'profiles': [profile], 'ifHave': {agent: have}})
     row = connector_row(auth, agent, svc, svc in needs(agent))
     if as_json:
         print(json.dumps({'ok': True, 'agent': agent, 'connector': svc, 'changed': changed, 'profile': row['profile'],
@@ -1021,7 +1026,7 @@ def cmd_disconnect(args):
         jfail('disconnect <agent> <connector> [--json]', as_json, 2)
     agent, svc = rest
     known_agent(agent, as_json)
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     grants = auth['grants'].get(agent)
     held = grant_list(grants.get(svc)) if isinstance(grants, dict) else []
     if held:
@@ -1031,7 +1036,7 @@ def cmd_disconnect(args):
         for p in held:   # a host profile nobody else holds goes with its last grant; keyed profiles are the owner's to keep
             if auth['profiles'].get(p) == HOST_STORE and not agents_granted(auth, p):
                 auth['profiles'].pop(p)
-        save_auth(auth)
+        commit(auth, in_core, 'people.secretRevoke', {'agent': agent, 'service': svc, 'dropHostProfiles': True})
     msg = f'{agent} may no longer use {svc}' if held else f'{agent} had no {svc} connected; nothing to do'
     if as_json:
         print(json.dumps({'ok': True, 'agent': agent, 'connector': svc, 'changed': bool(held), 'message': msg}))
@@ -1174,6 +1179,10 @@ def cmd_set(profile, var):
     svc, _ = split_profile(profile)
     if not VAR_RE.match(var) or var not in service(svc).get('secrets', []):
         die(f'{svc} declares no secret by that name')
+    core = core_store()
+    if core:
+        probe_core()   # before the prompt and the Keychain: no daemon, or not switched, is exit 3 with nothing stored
+        once_owner_only(core_tables())   # a guest's MCP server runs outside the box: the file's permissions stood in
     value = getpass.getpass(f'{profile} {var}: ')
     if not value:
         die('nothing entered; unchanged')
@@ -1182,9 +1191,12 @@ def cmd_set(profile, var):
     kc = f'kith/{profile}'
     if not keychain_put(kc, var, value):
         die('the Keychain did not take the key; nothing stored')
-    auth = load_auth(write=True)
-    auth['profiles'].setdefault(profile, {})[var] = f'keychain:{kc}#{var}'
-    save_auth(auth)
+    if core:
+        set_in_core(profile, [var], None)
+    else:
+        auth = load_auth(write=True)
+        auth['profiles'].setdefault(profile, {})[var] = f'keychain:{kc}#{var}'
+        save_auth(auth)
     print(f'stored in Keychain as {kc} / {var}; {profile} now reads it from there')
 
 
@@ -1213,21 +1225,28 @@ def cmd_set_stdin(profile, grant_agent):
         if bad_value(value):
             die(f'refused: each key is text, non-empty, no NUL, at most {MAX_VALUE} bytes; nothing stored', 2)
     kc = f'kith/{profile}'
+    core = core_store()
+    if core:
+        probe_core()   # before any Keychain item is written: no daemon, or not switched, is exit 3 with nothing stored
+        once_owner_only(core_tables())   # a guest's MCP server runs outside the box: the file's permissions stood in
     for var, value in values.items():
         if not keychain_put(kc, var, value):
             die('the Keychain did not take the key; auth.json unchanged')
     names = list(values)
     values = None
-    auth = load_auth(write=True)
-    refs = auth['profiles'].setdefault(profile, {})
-    for var in names:
-        refs[var] = f'keychain:{kc}#{var}'
-    if grant_agent is not None:
-        have = grant_list(auth['grants'].setdefault(grant_agent, {}).get(svc))
-        if profile not in have:
-            have.append(profile)
-        auth['grants'][grant_agent][svc] = have if len(have) > 1 else have[0]   # one profile stays the plain string
-    save_auth(auth)
+    if core:
+        set_in_core(profile, names, grant_agent)
+    else:
+        auth = load_auth(write=True)
+        refs = auth['profiles'].setdefault(profile, {})
+        for var in names:
+            refs[var] = f'keychain:{kc}#{var}'
+        if grant_agent is not None:
+            have = grant_list(auth['grants'].setdefault(grant_agent, {}).get(svc))
+            if profile not in have:
+                have.append(profile)
+            auth['grants'][grant_agent][svc] = have if len(have) > 1 else have[0]   # one profile stays the plain string
+        save_auth(auth)
     print(json.dumps({'profile': profile, 'service': svc, 'vars': names, 'granted': grant_agent}))
 
 
@@ -1492,11 +1511,11 @@ def cmd_keys(args):
 
 def cmd_revoke(args, as_json=False):
     if as_json and len(args) in (2, 4):   # a retired agent's row can still be revoked; one that never existed can't
-        if args[0] not in agents() and args[0] not in load_auth()['grants']:
+        if args[0] not in agents() and args[0] not in read_auth()['grants']:
             die(f"no agent '{args[0]}' (kith ls)")
     if len(args) == 4 and args[2] == '--profile':
         agent, svc, profile = args[0], args[1], args[3]
-        auth = load_auth(write=True)
+        auth, in_core = load_for_write()
         before = json.dumps(auth, sort_keys=True)
         grants = auth['grants'].get(agent, {})
         left = [p for p in grant_list(grants.get(svc)) if p != profile]
@@ -1507,7 +1526,7 @@ def cmd_revoke(args, as_json=False):
         if not grants:
             auth['grants'].pop(agent, None)
         changed = json.dumps(auth, sort_keys=True) != before
-        save_auth(auth)
+        commit(auth, in_core, 'people.secretRevoke', {'agent': agent, 'service': svc, 'profile': profile})
         if as_json:
             print(json.dumps({'ok': True, 'agent': agent, 'service': svc, 'profile': profile, 'changed': changed}))
             return
@@ -1515,10 +1534,10 @@ def cmd_revoke(args, as_json=False):
         return
     if len(args) != 2:
         die('revoke <agent> <service> [--profile P]', 2)
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     held = args[1] in auth['grants'].get(args[0], {})
     auth['grants'].get(args[0], {}).pop(args[1], None)
-    save_auth(auth)
+    commit(auth, in_core, 'people.secretRevoke', {'agent': args[0], 'service': args[1]})
     if as_json:
         print(json.dumps({'ok': True, 'agent': args[0], 'service': args[1], 'profile': None, 'changed': held}))
         return
@@ -1741,21 +1760,21 @@ def cmd_agent_access(args):
     agent, _, host = args[:3]
     import kith_guard
     if len(args) == 4:
-        auth = load_auth(write=True)
+        auth, in_core = load_for_write()
         if drop_agent_domain(auth, agent, host):
-            save_auth(auth)
+            commit(auth, in_core, 'people.agentAccess', {'agent': agent, 'domain': host, 'remove': True})
         print(f'{host} is no longer kept for everyone {agent} is shared with')
         return
     if not kith_guard.valid_domain(host):
         die(f"'{host}' is not a plain host name (no wildcard, address or port)", 2)
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     kept = auth['agent_access'].setdefault(agent, {})
     have = kept.setdefault('domains', [])
     if host not in have:
         have.append(host)
         kept.setdefault('since', {})[host] = int(time.time() * 1000)
         kept.setdefault('by', {})[host] = None
-    save_auth(auth)
+    commit(auth, in_core, 'people.agentAccess', {'agent': agent, 'domain': host})
     print(f'every guest of {agent} may reach {host} beyond the box')
 
 
@@ -3014,7 +3033,7 @@ def do_grant(who, svc, profile, known_only=False):
         for a in names:
             if base(a) not in agents() and a not in ('bridge', 'serve'):
                 die(f"no agent '{a}' (kith ls)")
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     before = json.dumps(auth, sort_keys=True)
     for a in names:
         if '@' in a:
@@ -3027,7 +3046,8 @@ def do_grant(who, svc, profile, known_only=False):
     for agent in names:
         auth['grants'].setdefault(agent, {})[svc] = profiles if len(profiles) > 1 else profiles[0]
     changed = json.dumps(auth, sort_keys=True) != before
-    save_auth(auth)
+    commit(auth, in_core, 'people.secretGrant',
+           {'agents': names, 'service': svc, 'profiles': profiles, 'knownOnly': known_only})
     return names, profiles, changed, uses
 
 
@@ -3037,46 +3057,58 @@ def route_fail(why):
     """The core can't be asked, or didn't answer: exit 3, as the tombstone's own refusal. Never a guess. In --json mode the
     refusal is the {"ok": false, "error"} on stdout that json_run gives."""
     msg = f'authority moved to the core, and it gave no answer: {why}'
-    if _ROUTE and _ROUTE[2]:
+    if (_ROUTE and _ROUTE[2]) or _AS_JSON:
         print(json.dumps({'ok': False, 'error': msg}))
     else:
         print(f'kith-auth: {msg}', file=sys.stderr)
     sys.exit(3)
 
 
-def core_ask(method, params):
+def _core_call(method, params, person=False):
     """One call of the core, as the mirror makes it (`kith kernel core-call`: the daemon first, an embedded core when none
-    answers), always marked viaSwitch: the core refuses it unless authority is switched. The answer as a dict; anything
-    else (no program, a timeout, a refusal, a lost answer, no core, an answer that is no object) is route_fail. It is
-    never sent again: a take-once may have been used up by a call whose answer was lost."""
+    answers), always marked viaSwitch: the core refuses it unless authority is switched. (answer dict, None, 0), or
+    (None, why, code) for no program, a timeout, a refusal, a lost answer, no core, an answer that is no object. The code
+    is core-call's own: 3 no daemon answers (nothing ran), 4 the core refused (nothing ran), 5 the call went out and the
+    answer was lost (it may have run), 1 anything else. Never sent again: a take-once may have been used up by a call
+    whose answer was lost."""
     if guest_sandbox():
-        route_fail('a guest run does not reach the core')
+        return None, 'a guest run does not reach the core', 3
     try:
         from kith_paths import kith_bin
         bin_ = kith_bin(budget=MIRROR_PROBE_SECS)
     except Exception:
         bin_ = ''
     if not bin_:
-        route_fail('no kith program to ask')
+        return None, 'no kith program to ask', 3
+    # the serve dir holds cloud-sync.json: `held`; the secret writers also say whose run they are (the core refuses a guest's)
+    names = MIRROR_ENV + ('KITH_SERVE_DIR',) + (('KITH_PERSON',) if person else ())
     body = {**params, 'viaSwitch': True, 'kernel': str(KITH), 'home': str(Path.home()),
-            'env': {k: os.environ[k] for k in MIRROR_ENV + ('KITH_SERVE_DIR',) if os.environ.get(k)}}   # the serve dir holds cloud-sync.json: `held`
+            'env': {k: os.environ[k] for k in names if os.environ.get(k)}}
     try:
         r = subprocess.run([bin_, 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(body),
                            capture_output=True, text=True, timeout=CORE_CALL_SECS)
     except subprocess.TimeoutExpired:
-        route_fail('the core did not answer in time')
+        return None, 'the core did not answer in time', 5
     except OSError as e:
-        route_fail(str(e))
+        return None, str(e), 3
     if r.returncode != 0:
-        route_fail((r.stderr or r.stdout).strip().removeprefix('kith-auth: ') or f'core-call exited {r.returncode}')
+        return None, (r.stderr or r.stdout).strip().removeprefix('kith-auth: ') or f'core-call exited {r.returncode}', r.returncode
     try:
         ans = json.loads(r.stdout)
     except ValueError:
         ans = None
     if not isinstance(ans, dict):
-        route_fail('the answer is not a JSON object')
+        return None, 'the answer is not a JSON object', 5
     if ans.get('noCore'):
-        route_fail('there is no core database')   # impossible on a switched home: never read as empty or allowed
+        return None, 'there is no core database', 3   # impossible on a switched home: never read as empty or allowed
+    return ans, None, 0
+
+
+def core_ask(method, params, person=False):
+    """_core_call, with anything but an answer as route_fail (exit 3)."""
+    ans, why, _ = _core_call(method, params, person)
+    if ans is None:
+        route_fail(why)
     return ans
 
 
@@ -3092,6 +3124,107 @@ def _field(ans, key, kind):
 def _say(text=None, code=0):
     """(stdout line or None, stderr, exit code) of a routed verb."""
     return text, '', code
+
+
+# --- the secret writers on the tombstone (S-b) ----------------------------------------------------------------------------
+# set, grant, revoke, env, connect, disconnect and `agent-access ... domain` change profiles, grants and env. On the
+# tombstone each reads the core's tables (people.secretsView), changes that copy exactly as it would auth.json's, and sends
+# the change to the core in ONE call that checks and writes in a locked step. The core never sees a value: `set` writes the
+# Keychain item first (and reads it back) and tells the core the variable NAMES, so a crash leaves an orphan item and never
+# a grant without one. No daemon, or authority back on auth.json: exit 3 before anything is written.
+
+def core_store():
+    """Whether this home's authority is the core's: auth.json is the tombstone. A tombstone anywhere else fails closed."""
+    try:
+        kith_tombstone.read_text(AUTH)
+    except kith_tombstone.Tombstoned as e:
+        if e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
+            return True
+        die(str(e), 3)
+    except (OSError, ValueError):
+        pass   # the plain path says what is wrong with the file
+    return False
+
+
+def probe_core():
+    """Before a Keychain item is written: a daemon that is switched answers, or this is exit 3 with nothing stored."""
+    core_ask('people.revision', {})
+
+
+def core_tables():
+    """The core's tables in auth.json's shape (people.secretsView: where each value lives, never the value)."""
+    auth = dict(_field(core_ask('people.secretsView', {}), 'auth', dict))
+    for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites', 'retired', 'once', 'agent_access'):
+        auth.setdefault(table, {})
+    return auth
+
+
+def load_for_write():
+    """(auth, in_core) for a verb that changes secrets: auth.json under its lock, or on the tombstone the core's tables.
+    The verb changes the copy as it always did and then calls commit()."""
+    if core_store():
+        return core_tables(), True
+    return load_auth(write=True), False
+
+
+def read_auth():
+    return core_tables() if core_store() else load_auth()
+
+
+def core_write(method, params):
+    """One secret write of the core. A refusal of its rules is printed as kith-auth prints its own (the same line, the same
+    exit code); a core that gives no answer is exit 3."""
+    ans = core_ask(method, {**params, 'dies': True}, person=True)
+    if ans.get('died') is not None:
+        die(_field(ans, 'why', str), _field(ans, 'died', int))
+    if ans.get('ok') is not True and not isinstance(ans.get('lines'), list):   # (agentAccess answers its line)
+        route_fail('the answer has no usable ok')
+
+
+def commit(auth, in_core, method, params):
+    """Where save_auth(auth) was: the file, or one call of the core."""
+    if in_core:
+        core_write(method, params)
+    else:
+        save_auth(auth)
+
+
+def set_in_core(profile, names, grant_agent):
+    """The core half of `set`, after the Keychain took the values. The references are recorded in one transaction. A core
+    that refuses or gives no answer leaves an orphan item (or a rotated value), never a grant without one; an answer that
+    was lost is checked once against the core's tables, and `set` is the same call again, so the owner may retry."""
+    params = {'profile': profile, 'vars': names, 'dies': True}
+    if grant_agent is not None:
+        params['grant'] = grant_agent
+    ans, why, code = _core_call('people.secretSet', params, person=True)
+    if ans is not None:
+        if ans.get('died') is not None:
+            die(f"{_field(ans, 'why', str)} (the key is in the Keychain; nothing was recorded in the core: set it again)",
+                _field(ans, 'died', int))
+        if ans.get('ok') is not True:
+            route_fail('the answer has no usable ok')
+        return
+    if code == 5 and core_has(profile, names, grant_agent):
+        return   # the core took it and the answer was lost
+    if code == 5:
+        die('the key is in the Keychain, but the core did not say whether it took it; set it again', 5)
+    die(f'the key is in the Keychain, but the core did not take it ({why}); nothing was recorded or granted: set it again',
+        code if code in (3, 4) else 3)
+
+
+def core_has(profile, names, grant_agent):
+    """Whether the core holds what `set` would have recorded (after a lost answer). Any doubt is no."""
+    ans, _, _ = _core_call('people.secretsView', {})
+    auth = ans.get('auth') if isinstance(ans, dict) else None
+    if not isinstance(auth, dict):
+        return False
+    refs = (auth.get('profiles') or {}).get(profile)
+    if not isinstance(refs, dict) or any(refs.get(v) != f'keychain:kith/{profile}#{v}' for v in names):
+        return False
+    if grant_agent is None:
+        return True
+    svc = profile.partition('/')[0]
+    return profile in grant_list(((auth.get('grants') or {}).get(grant_agent) or {}).get(svc))
 
 
 WHO_KEYS = (('person', (str, type(None))), ('owner', bool), ('was', list), ('owner_id', (str, type(None))),
@@ -3387,12 +3520,14 @@ def dispatch(cmd, rest):
     elif cmd == 'env' and len(rest) >= 2:
         agent, svc, pairs = rest[0], rest[1], rest[2:]
         service(svc, agent)
-        auth = load_auth(write=True)
+        auth, in_core = load_for_write()
         mine = auth['env'].setdefault(agent, {}).setdefault(svc, {})
+        sent = []
         for pair in pairs:
             var, eq, value = pair.partition('=')
             if not eq or not var:
                 die(f'expected VAR=value, got {pair!r}', 2)
+            sent.append([var, value])
             if value:
                 mine[var] = value
             else:
@@ -3402,7 +3537,7 @@ def dispatch(cmd, rest):
         if not auth['env'][agent]:
             auth['env'].pop(agent)
         if pairs:
-            save_auth(auth)
+            commit(auth, in_core, 'people.secretEnv', {'agent': agent, 'service': svc, 'pairs': sent})
         for var, value in settings(auth, agent, svc).items():
             print(f'{var}={value}')
     elif cmd == 'browser' and len(rest) in (1, 2):

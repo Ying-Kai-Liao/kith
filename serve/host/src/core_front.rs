@@ -482,6 +482,14 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.access",
     "people.helper",
     "people.job",
+    // the secret writers and `agent-access ... domain` (S-b), see `ROUTED_WRITES`
+    "people.secretSet",
+    "people.secretGrant",
+    "people.secretRevoke",
+    "people.secretEnv",
+    "people.agentAccess",
+    // the probe before a Keychain write: only a daemon that is switched answers it, see `DAEMON_ONLY_READS`
+    "people.revision",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
@@ -504,7 +512,20 @@ const ROUTED_READS: &[&str] = &[
 /// The card writes `kith-auth` routes to the core on the tombstone: an escape card's always, a helper's, the No of a job.
 /// They widen access, so core-call refuses one without `viaSwitch: true` (the core refuses it unless authority is
 /// switched), and none is on `kith_core::EMBEDDED_WRITES`: a write with no daemon exits 3 and nothing runs.
-const ROUTED_WRITES: &[&str] = &["people.access", "people.helper", "people.job"];
+const ROUTED_WRITES: &[&str] = &[
+    "people.access",
+    "people.helper",
+    "people.job",
+    "people.secretSet",
+    "people.secretGrant",
+    "people.secretRevoke",
+    "people.secretEnv",
+    "people.agentAccess",
+];
+
+/// A read that only a switched daemon answers: `kith-auth set` asks it before it writes a Keychain item, so that no daemon,
+/// or authority back on auth.json, stops it with exit 3 before anything is stored. Not on `kith_core::EMBEDDED_READS`.
+const DAEMON_ONLY_READS: &[&str] = &["people.revision"];
 
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
 /// Inside kith-auth's `CORE_CALL_SECS`, which it waits under auth.json.lock.
@@ -589,6 +610,10 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         return 2;
     }
     if ROUTED_WRITES.contains(&method) && params.get("viaSwitch").and_then(Value::as_bool) != Some(true) {
+        eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true");
+        return 2;
+    }
+    if DAEMON_ONLY_READS.contains(&method) && params.get("viaSwitch").and_then(Value::as_bool) != Some(true) {
         eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true");
         return 2;
     }
@@ -766,6 +791,11 @@ mod tests {
             assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
         }
         assert!(!ROUTED_READS.iter().any(|m| ROUTED_WRITES.contains(m)));
+        for m in DAEMON_ONLY_READS {
+            assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
+        }
     }
 
     fn args(line: &str) -> Vec<OsString> {

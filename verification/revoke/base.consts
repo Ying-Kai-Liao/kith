@@ -56,3 +56,6 @@ RouterDoor = FALSE
 AlwaysNoMay = FALSE
 AlwaysSplit = FALSE
 DemoteKeeps = FALSE
+GrantOn = FALSE
+GrantNoPerson = FALSE
+ForgetKeepsGrant = FALSE

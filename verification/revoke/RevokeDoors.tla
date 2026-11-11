@@ -127,11 +127,15 @@ CONSTANTS
     RouterDoor,         \* TRUE = the always is the core's write (people.access): it reads the core's fact in its own locked step
     AlwaysNoMay,        \* BROKEN: the always is written with no may() in its step (the check was dropped)
     AlwaysSplit,        \* BROKEN: the always checks may() in one step and writes in a later one (a revoke can land between)
-    DemoteKeeps         \* BROKEN: a demotion leaves the entries the demoted member approved (no drop_self_approved)
+    DemoteKeeps,        \* BROKEN: a demotion leaves the entries the demoted member approved (no drop_self_approved)
+    GrantOn,            \* TRUE = the secret grant for P's own account (agent@P, S-b) is in the model
+    GrantNoPerson,      \* BROKEN: the grant is written with no need_person(P) in its step (a removed P gets one)
+    ForgetKeepsGrant    \* BROKEN: removing P leaves the grants made for P (no forget)
 
 ASSUME (Switched => CoreGate) /\ (SwitchLag => Switched) /\ (CoreSideShutsGate => CoreOnlyWrite)
 ASSUME NamelessReport => KillSplit
 ASSUME (RouterDoor => (Switched /\ AlwaysOn)) /\ ((AlwaysNoMay \/ AlwaysSplit \/ DemoteKeeps) => AlwaysOn)
+ASSUME (GrantNoPerson \/ ForgetKeepsGrant) => GrantOn
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -295,7 +299,7 @@ Init ==
     /\ cardst = [m \in Macs |-> "none"]
     /\ cardhit = [m \in Macs |-> FALSE]
     /\ alw = [m \in Macs |-> [mem |-> TRUE, e |-> [w \in Who |-> "none"], chk |-> [w \in Who |-> "none"],
-                              bad |-> [w \in Who |-> FALSE]]]
+                              bad |-> [w \in Who |-> FALSE], gr |-> FALSE, grbad |-> FALSE]]
 
 (* ---- owner ---- *)
 \* From the phone app: the cloud record first; Macs learn by cloud delivery.
@@ -729,7 +733,9 @@ Remove(m) ==
     /\ parked' = [parked EXCEPT ![m] = IF RemoveKeeps THEN parked[m] ELSE {}]
     /\ cardst' = CardsAfter(m, TRUE)
     /\ cardhit' = CardHitAfter(m, TRUE)
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, alw, link>>
+    \* forget (write.rs forget): the grants made for agent@P go with the person
+    /\ alw' = IF ForgetKeepsGrant THEN alw ELSE [alw EXCEPT ![m].gr = FALSE]
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick, link>>
 
 (* ---- P's card and its once grant (core/runtime/src/cards) ---- *)
 \* A live turn of P asks the owner (bound: m1, once, before any revoke, so every card is a pre-revoke one).
@@ -802,6 +808,17 @@ AlwaysRemove(m, w) ==
     /\ alw' = [alw EXCEPT ![m].e[w] = "none", ![m].bad[w] = FALSE]
     /\ UNCHANGED <<auth, turn, door, gdoor, ext4, bdoor, ptick, link>>
 
+(* ---- the secret grant for P's own account (S-b): kith-auth grant AGENT@P SERVICE PROFILE, the core's people.secretGrant ---- *)
+\* need_person(P) is read in the same locked step that writes the grant, so it cannot land for an id that was just removed
+\* (a removed id taken again by someone else would otherwise inherit the profile). grbad is the oracle (no step reads it).
+GrantMacs == IF GrantOn THEN {"m1"} ELSE {}
+GrantWrite(m) ==
+    /\ GrantOn
+    /\ m \in GrantMacs
+    /\ GrantNoPerson \/ ~gone[m]
+    /\ alw' = [alw EXCEPT ![m].gr = TRUE, ![m].grbad = (alw[m].grbad \/ gone[m])]
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, bdoor, ptick, link>>
+
 \* P is made a guest (or leaves the agent): the entries P approved go in the same step (write.rs drop_self_approved, M3).
 Demote(m) ==
     /\ AlwaysOn
@@ -854,6 +871,7 @@ Next ==
           \/ HForge(m)
           \/ Remove(m)
           \/ Demote(m)
+          \/ GrantWrite(m)
     \/ \E a, b \in Macs : HExchange(a, b) \/ HExchangeFails(a, b)
     \/ \E m \in Macs, w \in Who :
           \/ Helper(m, w)
@@ -903,7 +921,7 @@ TypeOK ==
     /\ cardst \in [Macs -> CardSt]
     /\ cardhit \in [Macs -> BOOLEAN]
     /\ alw \in [Macs -> [mem : BOOLEAN, e : [Who -> AlwaysBy \cup {"none"}], chk : [Who -> AlwaysBy \cup {"none"}],
-                         bad : [Who -> BOOLEAN]]]
+                         bad : [Who -> BOOLEAN], gr : BOOLEAN, grbad : BOOLEAN]]
 
 \* Lemma the fix rests on: a Mac with nothing to push that has the cloud's latest version agrees with the cloud.
 SyncAgrees == \A m \in Macs : (~outbox[m] /\ ver[m] = cloudVer) => revoked[m] = cloudRevoked
@@ -979,6 +997,11 @@ HandleStampsMove == [][\A m \in Macs : hrev'[m] # hrev[m] => hat'[m] > hat[m]]_v
 HandleBounded == \A m \in Macs : hat[m] <= clk
 \* NoOrphan: a removed P leaves nothing parked.
 NoOrphan == \A m \in Macs : gone[m] => parked[m] = {}
+\* NoGrantForGone (S-b): a grant is never written for a person who is gone, and removing a person takes their grants.
+\* Fails in broken-grant-no-person and broken-forget-keeps-grant.
+NoGrantForGone == \A m \in Macs : ~alw[m].grbad /\ (gone[m] => ~alw[m].gr)
+\* A grant for P is written (probe: reachable).
+NeverGrantWritten == \A m \in Macs : ~alw[m].gr
 \* HandleNoCloud: a handle revoke changes nothing in the cloud.
 HandleNoCloud == [][(hrev' # hrev) => (cloudRevoked' = cloudRevoked /\ cloudVer' = cloudVer)]_vars
 

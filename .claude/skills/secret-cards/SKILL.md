@@ -172,3 +172,21 @@ first four host variants have the last four at FALSE FALSE TRUE TRUE.
 | `verification/secrets/checks.tsv` | variant, kind, property, expected verdict |
 | `verification/secrets/run.sh` | runs every row (the switches per variant are in its `switches`); `--show`, `--list` |
 | `verification/secrets/drift.sh` | the covered files changed since the sync commit |
+
+## The switched write path (2026-11-12, S-b)
+
+On the authority tombstone `kith-auth set <profile> --stdin-json [--grant AGENT]` (what a card's `provide` runs through
+`write_key`) writes the Keychain item first (`keychain_put`, read back), then makes ONE core call, `people.secretSet`
+(`core/runtime/src/authority/secret_writes.rs`), which records the reference `keychain:kith/<profile>#VAR` and the grant in
+one transaction. The core gets variable NAMES, never a value. Before the Keychain write kith-auth probes `people.revision`:
+no daemon, or authority back on auth.json, is exit 3 with nothing stored. The card's claim stays held across the whole call,
+so it covers both steps; nothing in `cards/secret.rs` changes.
+
+The model has it as the `switched` variant (`Switched`): `KcWrite`, then `CoreCommit` / `CoreFail` / `CoreLostApplied`
+(`CoreLostNotApplied` is `CoreFail`: the read-back finds nothing and kith-auth exits 5), and the invariant `GrantHasItem`
+(`ref => kc`). `writes` counts what the core recorded, so an orphan item left by a refusal is not a second write (a retry
+reuses the item, `add-generic-password -U`); the value changing under the same reference is the `fail-writes` gap again.
+Breaks that must fail: `switched-core-first` (`GrantHasItem`: a crash between leaves a grant with no key),
+`switched-lost-as-fail` (`WrittenEndsSaved`: no read-back after a lost answer), `switched-claim-gap` (`AtMostOneWrite`: the
+claim let go between the two steps). The host's own save after the write (`Finish`) is not a place kith-auth's process
+dies, so `Crash` is only before the core commit in these rows.

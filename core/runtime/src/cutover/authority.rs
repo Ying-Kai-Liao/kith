@@ -80,6 +80,7 @@ const MEMBER_KEYS: &[&str] = &[
     "helper_once",
     "access_by",
     "access_since",
+    "helper_since",
 ];
 const PRESET_KEYS: &[&str] = &["mode", "trusted", "deny"];
 /// Tables `export_back` writes even when no old copy has them (a file `kith-auth` can load).
@@ -587,6 +588,13 @@ pub(crate) fn merge_back_with(base: Option<Value>, snap: &Value, keep: Option<&K
         );
     }
     out.insert("people".into(), Value::Object(people));
+    // m0016: a core imported before `helper_since` was kept holds NULLs that say nothing, so the old copy's stay.
+    let member_keys: Vec<&str> = MEMBER_KEYS
+        .iter()
+        .copied()
+        .filter(|k| *k != "helper_since" || snap.get("helper_since_stale").is_none())
+        .collect();
+    let member_keys = member_keys.as_slice();
     let mut members = Map::new();
     for (agent, rows) in snap
         .get("members")
@@ -602,7 +610,7 @@ pub(crate) fn merge_back_with(base: Option<Value>, snap: &Value, keep: Option<&K
                 .filter(|_| {
                     keep.is_none_or(|k| k.members.contains(&(agent.clone(), person.clone())))
                 });
-            kept.insert(person.clone(), overlay(was, r, MEMBER_KEYS));
+            kept.insert(person.clone(), overlay(was, r, member_keys));
         }
         members.insert(agent.clone(), Value::Object(kept));
     }

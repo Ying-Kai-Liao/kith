@@ -118,7 +118,7 @@ impl Ctx {
 
     /// Where an agent's package is (`agent_dirs()` in `kith-auth`): `<agent>/role` when that holds an `agent.md`, else the
     /// agent's own folder, in the user's agents then the kernel's; else where it would be.
-    fn package_dir(&self, agent: &str) -> PathBuf {
+    pub fn package_dir(&self, agent: &str) -> PathBuf {
         let plain = !agent.is_empty() && !agent.contains('/') && !agent.starts_with('.');
         if plain {
             for root in [self.agents.clone(), self.kernel.join("agents")] {

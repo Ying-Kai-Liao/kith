@@ -37,6 +37,7 @@ FILES=(
   core/runtime/src/revoke_order.rs        # M3-10d/M2-18c: the order (claims of P and B, then the asks), open_removals, replay_open (ClaimSweep, AskSweep)
   core/runtime/src/authority/call.rs      # which writes run the order (a removal does; a suspend does not yet), the open-removal join refusal
   core/runtime/src/authority/card.rs      # C-a/C-b: the always, helper and job writes of the router (AlwaysWrite, AlwaysRemove, Demote's approver rule)
+  core/runtime/src/authority/secret_writes.rs  # S-b: the secret grant for agent@P (GrantWrite: need_person in the one locked step)
   serve/host/src/api/authority.rs         # the host's gate for KITH_CORE_AUTHORITY=1: fingerprint latch (CoreGate, GuardP)
   core/runtime/src/import/authority.rs    # M2-18c: record_suspends (a revoke the file has and the core missed gets the open_removals row), record_removals
   core/runtime/src/authority/mod.rs       # the readers: snapshot (revoked), may/resolve/cut_off over secrets
