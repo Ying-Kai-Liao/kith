@@ -264,7 +264,26 @@ pub const EMBEDDED_WRITES: &[&str] = &[
     "people.revoke",
 ];
 
-/// Runs one owner write from [`EMBEDDED_WRITES`] inside an embedded core, for a caller that found no daemon (kith-auth's
+/// The reads `kith-auth` routes to the core on the authority tombstone (`ROUTED_READS` in the host's core_front.rs, which
+/// a test holds to this list). They change nothing, so the embedded door answers them with no daemon too.
+pub const EMBEDDED_READS: &[&str] = &[
+    "people.who",
+    "people.granted",
+    "people.may",
+    "people.resolve",
+    "people.listPeople",
+    "people.retired",
+    "people.budgets",
+    "people.ledger",
+    "people.botsCap",
+];
+
+/// Whether [`call_authority_embedded`] runs `method`: a narrowing write or a routed read.
+pub fn embedded(method: &str) -> bool {
+    EMBEDDED_WRITES.contains(&method) || EMBEDDED_READS.contains(&method)
+}
+
+/// Runs one owner write from [`EMBEDDED_WRITES`] or read from [`EMBEDDED_READS`] inside an embedded core, for a caller that found no daemon (kith-auth's
 /// mirror of a revoke). The same door as the daemon's: the method must exist and be open to the owner, the lock is the
 /// one lock, and the generation is bumped. Never creates a core.db and never migrates one: those stay with the daemon
 /// and `kith migrate`.
@@ -274,9 +293,9 @@ pub fn call_authority_embedded(
     method: &str,
     params: &serde_json::Value,
 ) -> Result<EmbeddedCall, Error> {
-    if !EMBEDDED_WRITES.contains(&method) {
+    if !embedded(method) {
         return Err(Error::NoSuchMethod(format!(
-            "kith-core: {method} is not a write that only narrows access, so only the daemon runs it"
+            "kith-core: {method} is not a read or a write that only narrows access, so only the daemon runs it"
         )));
     }
     call::check(kith_api::Principal::Owner, method, params)?;

@@ -265,6 +265,13 @@ def lock_auth():
     return _LOCK
 
 
+class Routed(Exception):
+    """load_auth met the authority tombstone for a verb the core can answer (main set _ROUTE): main sends it there."""
+
+
+_ROUTE = None   # (verb, args, as_json) of a verb in ROUTES, set by main; read by load_auth
+
+
 def load_auth(write=False):
     """auth.json as a dict. write=True: the caller will save_auth, so take the lock first."""
     if write:
@@ -274,6 +281,10 @@ def load_auth(write=False):
     except FileNotFoundError:
         data = {}
     except kith_tombstone.Tombstoned as e:   # authority moved to the core: never answer from the note (fail closed)
+        # A read of this home's own auth.json for a verb in ROUTES goes to the core instead (M2-23); run_routed exits 3
+        # with this text when the shape of the verb has no route.
+        if _ROUTE and not write and e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
+            raise Routed(str(e))
         die(str(e), 3)
     except ValueError as e:
         die(f'{AUTH}: invalid JSON ({e})')
@@ -3004,6 +3015,212 @@ def do_grant(who, svc, profile, known_only=False):
     return names, profiles, changed, uses
 
 
+# --- authority in the core (M2-23): the reads kith-auth answers from the core once auth.json is a tombstone ---------------
+
+def route_fail(why):
+    """The core can't be asked, or didn't answer: exit 3, as the tombstone's own refusal. Never a guess. In --json mode the
+    refusal is the {"ok": false, "error"} on stdout that json_run gives."""
+    msg = f'authority moved to the core, and it gave no answer: {why}'
+    if _ROUTE and _ROUTE[2]:
+        print(json.dumps({'ok': False, 'error': msg}))
+    else:
+        print(f'kith-auth: {msg}', file=sys.stderr)
+    sys.exit(3)
+
+
+def core_ask(method, params):
+    """One call of the core, as the mirror makes it (`kith kernel core-call`: the daemon first, an embedded core when none
+    answers), always marked viaSwitch: the core refuses it unless authority is switched. The answer as a dict; anything
+    else (no program, a timeout, a refusal, a lost answer, no core, an answer that is no object) is route_fail. It is
+    never sent again: a take-once may have been used up by a call whose answer was lost."""
+    if guest_sandbox():
+        route_fail('a guest run does not reach the core')
+    try:
+        from kith_paths import kith_bin
+        bin_ = kith_bin(budget=MIRROR_PROBE_SECS)
+    except Exception:
+        bin_ = ''
+    if not bin_:
+        route_fail('no kith program to ask')
+    body = {**params, 'viaSwitch': True, 'kernel': str(KITH), 'home': str(Path.home()),
+            'env': {k: os.environ[k] for k in MIRROR_ENV + ('KITH_SERVE_DIR',) if os.environ.get(k)}}   # the serve dir holds cloud-sync.json: `held`
+    try:
+        r = subprocess.run([bin_, 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(body),
+                           capture_output=True, text=True, timeout=CORE_CALL_SECS)
+    except subprocess.TimeoutExpired:
+        route_fail('the core did not answer in time')
+    except OSError as e:
+        route_fail(str(e))
+    if r.returncode != 0:
+        route_fail((r.stderr or r.stdout).strip().removeprefix('kith-auth: ') or f'core-call exited {r.returncode}')
+    try:
+        ans = json.loads(r.stdout)
+    except ValueError:
+        ans = None
+    if not isinstance(ans, dict):
+        route_fail('the answer is not a JSON object')
+    if ans.get('noCore'):
+        route_fail('there is no core database')   # impossible on a switched home: never read as empty or allowed
+    return ans
+
+
+def _field(ans, key, kind):
+    """ans[key] when it is of the kind (a bool is no number); anything else fails closed."""
+    v = ans.get(key)
+    kinds = kind if isinstance(kind, tuple) else (kind,)
+    if not isinstance(v, kinds) or (isinstance(v, bool) and bool not in kinds):
+        route_fail(f'the answer has no usable {key}')
+    return v
+
+
+def _say(text=None, code=0):
+    """(stdout line or None, stderr, exit code) of a routed verb."""
+    return text, '', code
+
+
+WHO_KEYS = (('person', (str, type(None))), ('owner', bool), ('was', list), ('owner_id', (str, type(None))),
+            ('owner_linked', bool), ('revoked', bool), ('held', bool))
+
+
+def route_who(args, as_json):
+    if len(args) != 2:
+        return None
+
+    def render(ans):
+        for k, kind in WHO_KEYS:
+            _field(ans, k, kind)
+        return _say(json.dumps({k: ans[k] for k, _ in WHO_KEYS}))
+    return 'people.who', {'platform': args[0], 'id': args[1]}, render
+
+
+def route_whois(args, as_json):
+    if len(args) != 2:
+        return None
+
+    def render(ans):
+        who = _field(ans, 'person', (str, type(None)))
+        return _say(who) if who else _say(code=1)
+    return 'people.who', {'platform': args[0], 'id': args[1]}, render
+
+
+def route_may_resolve(cmd):
+    def route(args, as_json):
+        once = '--take-once' in args if cmd == 'resolve' else '--once' in args
+        args = [a for a in args if a not in ('--take-once', '--once')]
+        opts, args = take_opts(args, {'--via', '--person'})
+        via = opts.get('--via') or None
+        if cmd == 'may' and len(args) == 2:
+            def render(ans):
+                if ans.get('died') is not None:   # the rules have no answer: kith-auth dies with the line, no "no"
+                    return None, f"kith-auth: {_field(ans, 'why', str)}\n", _field(ans, 'died', int)
+                allowed, why = _field(ans, 'allowed', bool), _field(ans, 'why', str)
+                return _say(why, 0 if allowed else 1)
+            params = {'person': args[0], 'agent': args[1], 'once': once, 'dies': True}
+            if via:
+                params['via'] = via
+            return 'people.may', params, render
+        if cmd == 'resolve' and len(args) == 1:
+            def render(ans):
+                if ans.get('died') is not None:   # the rules have no answer (a deleted preset): the line and code kith-auth dies with
+                    return None, f"kith-auth: {_field(ans, 'why', str)}\n", _field(ans, 'died', int)
+                _field(ans, 'allowed', bool)
+                _field(ans, 'held', bool)
+                _field(ans, 'person', str)
+                return _say(json.dumps(ans))
+            params = {'agent': args[0], 'dies': True}
+            person = opts.get('--person') or os.environ.get('KITH_PERSON')
+            if person:   # else the core's own default, the owner (acting() for a run with no KITH_PERSON)
+                params['person'] = person
+            if via:
+                params['via'] = via
+                if once:   # decided and used up in one transaction of the core; sent with a caller only, never again
+                    params['takeOnce'] = True
+            return 'people.resolve', params, render
+        die(f'{cmd}: see kith-auth --help', 2)
+    return route
+
+
+def route_granted(args, as_json):
+    agent, args = take_for(args)
+    if len(args) != 1:
+        return None
+
+    def render(ans):
+        grants = _field(ans, 'grants', list)
+        if as_json:
+            return _say(json.dumps({'service': args[0], 'grants': grants}))
+        return _say('\n'.join(str(g) for g in grants))
+    return 'people.granted', {'agent': agent, 'service': args[0]}, render
+
+
+def route_bots_cap(args, as_json):
+    if args != ['--json']:
+        return None   # bare `bots-cap` takes auth.json's lock, `bots-cap N` writes
+
+    def render(ans):
+        cap = ans.get('cap')
+        if isinstance(cap, bool) or not (cap is None or isinstance(cap, (int, float))):
+            route_fail('the answer has no usable cap')
+        return _say(json.dumps({'cap': float(cap) if cap else None, 'bots': _field(ans, 'bots', list)}))
+    return 'people.botsCap', {'json': True}, render
+
+
+def route_people(args, as_json):
+    if '--json' not in args or '--matrix' in args:
+        return None   # the text list and the matrix stay on the file
+    return 'people.listPeople', {}, lambda ans: _say(json.dumps(_field(ans, 'rows', list)))
+
+
+def route_retired(args, as_json):
+    if len(args) != 1:
+        return None
+
+    def render(ans):
+        lines = _field(ans, 'lines', list)
+        if not _field(ans, 'retired', bool):
+            return _say(code=1)
+        if len(lines) != 1 or not isinstance(lines[0], str):
+            route_fail('the answer has no usable line')
+        return _say(lines[0])
+    return 'people.retired', {'id': args[0]}, render
+
+
+def route_budgets(args, as_json):
+    if args[1:] != ['--json']:
+        return None
+    return 'people.budgets', {'agent': args[0]}, lambda ans: _say(json.dumps(_field(ans, 'budgets', dict)))
+
+
+def route_ledger(args, as_json):
+    if len(args) == 2 and args[0] == '--rm':
+        return None
+    opts, rest = take_opts(args, {'--person', '--agent'})
+    if rest != ['--json'] or any(not v or v.startswith('-') for v in opts.values()):
+        return None   # the text form, or a usage error the verb gives itself
+    return 'people.ledger', {k[2:]: v for k, v in opts.items()}, lambda ans: _say(json.dumps(_field(ans, 'rows', list)))
+
+
+ROUTES = {'who': route_who, 'whois': route_whois, 'may': route_may_resolve('may'), 'resolve': route_may_resolve('resolve'),
+          'granted': route_granted, 'bots-cap': route_bots_cap, 'people': route_people, 'retired': route_retired,
+          'budgets': route_budgets, 'ledger': route_ledger}
+
+
+def run_routed(tombstone):
+    """The verb in _ROUTE on a tombstone of authority: asked of the core, or exit 3 with the tombstone's text when this
+    shape of the verb has no route (the writers, the text lists, anything that needs auth.json's other tables)."""
+    cmd, args, as_json = _ROUTE
+    plan = ROUTES[cmd](args, as_json)
+    if plan is None:
+        die(tombstone, 3)
+    method, params, render = plan
+    out, err, code = render(core_ask(method, params))
+    if err:
+        sys.stderr.write(err)
+    if out is not None:
+        print(out)
+    sys.exit(code)
+
+
 def main_json(cmd, rest):
     if cmd == 'ls':
         if rest:
@@ -3026,10 +3243,22 @@ def main_json(cmd, rest):
 
 
 def main(argv):
+    global _ROUTE
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
         return
     cmd, rest = argv[0], argv[1:]
+    if cmd in ROUTES:
+        _ROUTE = (cmd, [a for a in rest if a != '--json'] if cmd == 'granted' else rest, cmd == 'granted' and '--json' in rest)
+        try:
+            return dispatch(cmd, rest)
+        except Routed as e:
+            return run_routed(str(e))
+    return dispatch(cmd, rest)
+
+
+def dispatch(cmd, rest):
+    argv = [cmd, *rest]
     if cmd in ('ls', 'grant', 'revoke', 'granted') and '--json' in rest:
         rest = [a for a in rest if a != '--json']
         json_run(lambda: main_json(cmd, rest))

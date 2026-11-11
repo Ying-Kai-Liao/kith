@@ -413,6 +413,32 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.removePerson",
     "people.removeBot",
     "people.revoke",
+    // the reads `kith-auth` routes here once auth.json is a tombstone (M2-23), see `ROUTED_READS`
+    "people.who",
+    "people.granted",
+    "people.may",
+    "people.resolve",
+    "people.listPeople",
+    "people.retired",
+    "people.budgets",
+    "people.ledger",
+    "people.botsCap",
+];
+
+/// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
+/// refuses it unless authority is switched (a rollback leaves the file the truth); core-call refuses one without it, and a
+/// `people.botsCap` that sets the cap, which is a write the mirror never sends. (`people.resolve` with `takeOnce` uses up a
+/// grant, so it is a write too; the core fences it the same way.)
+const ROUTED_READS: &[&str] = &[
+    "people.who",
+    "people.granted",
+    "people.may",
+    "people.resolve",
+    "people.listPeople",
+    "people.retired",
+    "people.budgets",
+    "people.ledger",
+    "people.botsCap",
 ];
 
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
@@ -497,6 +523,13 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         eprintln!("core-call: params must be a JSON object");
         return 2;
     }
+    if ROUTED_READS.contains(&method)
+        && (params.get("viaSwitch").and_then(Value::as_bool) != Some(true)
+            || params.get("amount").is_some_and(|a| !a.is_null()))
+    {
+        eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true and no amount");
+        return 2;
+    }
     let folders = kernel::folders(&kith_kernel::paths::process_home());
     // Only a list is repeated when the connection breaks: an open or a ticket may have run.
     match kith_core::reach(&folders, method, &params, method == "terminal.list") {
@@ -511,7 +544,7 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         #[cfg(unix)]
         // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
         // The terminal methods need the daemon's sockets.
-        kith_core::Reached::NoDaemon if kith_core::EMBEDDED_WRITES.contains(&method) => {
+        kith_core::Reached::NoDaemon if kith_core::embedded(method) => {
             core_call_embedded(&folders, method, &params)
         }
         kith_core::Reached::NoDaemon => {
@@ -625,12 +658,37 @@ pub fn print_status(json: bool) {
             status["holder"]["tied_to_starter"]
         );
     }
+    if status["claims"].is_object() {
+        let n = |k: &str| status["claims"][k].as_i64().unwrap_or(0);
+        println!(
+            "claims: {} claimed, {} running, {} ending (stopped, process group not yet gone)",
+            n("claimed"),
+            n("running"),
+            n("ending")
+        );
+        if n("held_by_group") > 0 {
+            println!(
+                "claims held only by a live process group: {} (a background job keeps the conversation)",
+                n("held_by_group")
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
+
+    /// The lists are written by hand; a routed method missing from one would only show on a switched Mac.
+    #[test]
+    fn every_routed_read_is_on_core_call_and_the_embedded_reads() {
+        for m in ROUTED_READS {
+            assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(kith_core::EMBEDDED_READS.contains(m), "{m} is not on EMBEDDED_READS");
+        }
+    }
 
     fn args(line: &str) -> Vec<OsString> {
         std::iter::once("kith serve").chain(line.split(' ')).map(OsString::from).collect()
