@@ -1,0 +1,6 @@
+\* a bot's always is not held to its owner's
+CoreGate = TRUE
+Switched = TRUE
+AlwaysOn = TRUE
+RouterDoor = TRUE
+BotIgnoresOwner = TRUE

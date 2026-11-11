@@ -190,3 +190,29 @@ core-kill-nameless	INVARIANT	TypeOK	pass
 core-kill-nameless	INVARIANT	OrderKept	pass
 core-kill-nameless	PROPERTY	NoLiveProc	pass
 broken-revoke-keeps-reason	PROPERTY	NoLiveProc	fail
+# --- C-a (2026-11-12): the escape card's always, written by kith-auth through the core on the tombstone: one locked step guarded by may() now (R4: an entry written while revoked would come back with the undo), a bot within its owner's, a self-approval only while a member; a demotion drops the member's approvals ---
+switched-always	INVARIANT	TypeOK	pass
+switched-always	INVARIANT	R2	pass
+switched-always	INVARIANT	R4	pass
+switched-always	INVARIANT	BotBelowOwner	pass
+switched-always	INVARIANT	SyncAgrees	pass
+switched-always	INVARIANT	AlwaysOnlyIfMay	pass
+switched-always	INVARIANT	AlwaysBotBelowOwner	pass
+switched-always	INVARIANT	ApproverDemoted	pass
+switched-always	PROPERTY	R1	pass
+switched-always	PROPERTY	R5	pass
+switched-always	PROPERTY	R5c	pass
+switched-always	PROPERTY	R6	pass
+switched-always	PROPERTY	R6c	pass
+switched-always-kill	INVARIANT	TypeOK	pass
+switched-always-kill	INVARIANT	OrderKept	pass
+switched-always-kill	INVARIANT	AlwaysOnlyIfMay	pass
+switched-always-kill	PROPERTY	NoLiveProc	pass
+broken-always-no-may	INVARIANT	AlwaysOnlyIfMay	fail
+broken-always-split	INVARIANT	AlwaysOnlyIfMay	fail
+broken-demote-keeps	INVARIANT	ApproverDemoted	fail
+broken-always-bot-above	INVARIANT	AlwaysBotBelowOwner	fail
+# probes: an always is written, one P approved for themselves, and a demotion happens
+switched-always	INVARIANT	NeverAlwaysWritten	fail
+switched-always	INVARIANT	NeverSelfAlways	fail
+switched-always	INVARIANT	NeverMemberLost	fail

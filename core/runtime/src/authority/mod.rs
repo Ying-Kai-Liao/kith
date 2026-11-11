@@ -21,6 +21,7 @@ use serde_json::{Map, Value};
 use crate::error::{Error, Result};
 
 pub(crate) mod call;
+mod card;
 #[cfg(test)]
 mod load;
 mod people_json;

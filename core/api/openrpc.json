@@ -7193,6 +7193,554 @@
       }
     },
     {
+      "name": "people.access",
+      "summary": "The always half of an escape card: the person's runs of the agent may reach a place or website beyond the box, kept on their own row (`--rm` takes it away, as it is written, with no check). Refused, in the one locked step that writes: the owner, a person with no row of their own (never the `*` row), someone who may not use the agent now, a secret or a place a boxed run never writes (rule W), a bot asking for more than its owner holds, and a `--by` that is not the person or the bot's owner, or is not a member now. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kind",
+          "summary": "`read`, `write` or `domain`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "value",
+          "summary": "An absolute path, or a plain host name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "by",
+          "summary": "Who approved it: the person or the bot's owner (no flag: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Take the entry away.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "access-always"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "kind": {
+            "kind": "positional"
+          },
+          "value": {
+            "kind": "positional"
+          },
+          "by": {
+            "kind": "flag",
+            "spellings": [
+              "--by"
+            ]
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.helper",
+      "summary": "The always (or, with --once, the just-this-once) of a helper card: the person's runs of the agent may call the helper. `--rm` takes it away, as it is written, with no check. A bot is never given a helper its owner lacks. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "helper",
+          "summary": "The agent it may call.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "once",
+          "summary": "Only for the launch that follows.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Take the entry away.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "helper"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "helper": {
+            "kind": "positional"
+          },
+          "once": {
+            "kind": "switch",
+            "spellings": [
+              "--once"
+            ]
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.job",
+      "summary": "The No of a widening card for a ticked job (`--decline HASH`: that package update is not asked again), or with --rm the tick goes, as it is written, with no check. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "job",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "decline",
+          "summary": "The hash of the update that was declined.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Take the tick away.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "job"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "job": {
+            "kind": "positional"
+          },
+          "decline": {
+            "kind": "flag",
+            "spellings": [
+              "--decline"
+            ]
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.revision",
+      "summary": "A digest of the authority tables (the first 16 hex characters of the SHA-256 of their snapshot), which changes with any write to them. The host's cards compare it between polls to see authority change once auth.json is a tombstone.",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "revision"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "people.ledger",
       "summary": "The grants ledger: every grant that outlives one run, for anyone but the owner (always answers of escape cards, ticked jobs, listed helpers, a person's own service grants, the hosts kept for every guest of an agent), one row each with the `key` that `people.removeGrant` takes.",
       "params": [

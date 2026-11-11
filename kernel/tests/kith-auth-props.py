@@ -47,6 +47,7 @@ ALL = [OWNER] + PEOPLE + BOTS + ['ghost']
 BEYOND = [('read', '/work/a'), ('read', '/work/a/b'), ('write', '/work/a'), ('write', '/work/c'),
           ('domain', 'a.example'), ('domain', 'b.example')]
 KINDS = {'read': 'read', 'write': 'write', 'domain': 'domains'}
+HOSTS = ['kept.example', 'other.example']   # hosts the owner keeps for every guest of an agent (agent-access)
 FREE_SHELL = {'bypassPermissions', 'auto'}
 # env a membership may set, and names that would change how the run starts or which kith it talks to
 ENV_OK, ENV_BAD = ['FOO'], ['PATH', 'KITH_HOME', 'DYLD_INSERT_LIBRARIES']
@@ -98,6 +99,14 @@ OPS = st.one_of(
     st.tuples(st.just('job'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE])),
     st.tuples(st.just('job-rm'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS)),
     st.tuples(st.just('helper'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(['', '--once'])),
+    # C-a / C-b, the card writes the router sends to the core on the tombstone: an always with --by, the removals of a helper
+    # and a tick (on anyone, revoked people included), the No of a widening card, the hosts kept for every guest
+    st.tuples(st.just('access-by'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(BEYOND),
+              st.sampled_from(ALL)),
+    st.tuples(st.just('helper-rm'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE])),
+    st.tuples(st.just('job-decline'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(['h1', 'h2'])),
+    st.tuples(st.just('agent-access'), st.sampled_from(AGENTS), st.sampled_from(HOSTS)),
+    st.tuples(st.just('agent-access-rm'), st.sampled_from(AGENTS), st.sampled_from(HOSTS)),
 )
 
 
@@ -167,6 +176,14 @@ def apply(op):
         return True
     if kind in ('access', 'access-rm'):
         return run('access', op[1], op[2], op[3][0], op[3][1], *(['--rm'] if kind == 'access-rm' else []))
+    if kind == 'access-by':
+        return run('access', op[1], op[2], op[3][0], op[3][1], '--by', op[4])
+    if kind == 'helper-rm':
+        return run('helper', op[1], op[2], 'garden', '--rm')
+    if kind == 'job-decline':
+        return run('job', op[1], op[2], 'work', '--decline', op[3])
+    if kind in ('agent-access', 'agent-access-rm'):
+        return run('agent-access', op[1], 'domain', op[2], *(['--rm'] if kind == 'agent-access-rm' else []))
     if kind in ('job', 'job-rm'):
         return run('job', op[1], op[2], 'work', *(['--rm'] if kind == 'job-rm' else []))
     if kind == 'helper':
@@ -197,6 +214,10 @@ def state_properties():
             assert r['allowed'] is False, f'{who} may use the built-in scratch: {r}'
     for agent in AGENTS:
         rows = a['members'].get(agent, {})
+        kept = (a.get('agent_access', {}).get(agent) or {}).get('domains') or []
+        # (C-b) a host kept for every guest of an agent is never the owner's to be boxed by
+        assert not set(ka.resolve(a, agent, OWNER).get('access', {}).get('domains', [])) & set(kept), \
+            f'the owner is given the kept hosts {kept} of {agent}'
         for who in ALL:
             r = ka.resolve(a, agent, who)
             if who == OWNER:
@@ -345,6 +366,59 @@ def test_access_never_exceeds_the_grant(ops):
                 assert others == olds, f'{op}: changed another row'
             else:
                 assert a == before, f'{op}: refused but wrote'
+        if op[0] == 'access-by':
+            # (C-a, M3) --by names the person or the bot's owner, and only while a member of the agent now; the owner (or no
+            # --by) is always fine. A refusal here is any of the access refusals above, or this one, and writes nothing.
+            _, agent, who, (kind, value), by = op
+            p = before['people'].get(who)
+            parent = ka.parent_of(before, who) if p else None
+            approver = ka.canonical(before, by)
+            owner_said = ka.is_owner(before, approver)
+            member_now = (by in before['people'] and ka.resolve(before, agent, approver)['allowed'] is True
+                          and ka.resolve(before, agent, approver).get('preset') == 'member')
+            by_ok = owner_said or (approver in (who, parent) and member_now)
+            if ok:
+                assert by_ok, f'{op}: accepted, but {by} may not approve for {who}'
+                got = a['members'][agent][who]['access_by'].get(f'{kind}:{value}')
+                assert got in (None, approver), f'{op}: the entry says {got!r} approved it'
+                if not owner_said:
+                    assert got in (approver, None), f'{op}: approver lost'
+            elif by_ok:
+                pass   # refused for another reason (checked by the plain access op's property)
+            else:
+                assert a == before, f'{op}: refused but wrote'
+        if op[0] == 'helper-rm':
+            # (C-b) taking a helper away takes it as written, from anyone, a revoked person or a stranger included: it
+            # never refuses, and the helper is not on the row afterwards.
+            assert ok, f'{op}: a removal was refused'
+            row = a['members'].get(op[1], {}).get(ka.canonical(a, op[2]))
+            assert not isinstance(row, dict) or 'garden' not in (row.get('helpers') or []), f'{op}: still listed'
+        if op[0] == 'job-decline':
+            # (C-b) the No of a widening card writes only on a person's own row, only for a job that is ticked, and only
+            # the declined hash; a refusal writes nothing.
+            _, agent, who, h = op
+            row = before['members'].get(agent, {}).get(who)
+            ticked = isinstance(row, dict) and isinstance((row.get('jobs') or {}).get('work'), dict)
+            p = before['people'].get(who)
+            want = (ticked and p is not None and not p.get('owner') and ka.may(before, who, agent)[0]
+                    and 'work' in ka.jobs_of(agent))
+            assert ok == bool(want), f'{op}: accepted {ok}, expected {bool(want)}'
+            if ok:
+                assert h in a['members'][agent][who]['jobs']['work']['declined'], f'{op}: not recorded'
+                a2 = json.loads(json.dumps(a))
+                del a2['members'][agent][who]['jobs']['work']['declined']
+                b2 = json.loads(json.dumps(before))
+                b2['members'][agent][who]['jobs']['work'].pop('declined', None)
+                assert a2 == b2, f'{op}: changed more than the declined hashes'
+            else:
+                assert a == before, f'{op}: refused but wrote'
+        if op[0] in ('agent-access', 'agent-access-rm'):
+            # (C-b) a host kept for every guest is the agent's, never on a person's row; a removal always goes through.
+            _, agent, host = op
+            assert ok, f'{op}: refused'
+            kept = (a.get('agent_access', {}).get(agent) or {}).get('domains') or []
+            assert (host in kept) == (op[0] == 'agent-access'), f'{op}: kept {kept}'
+            assert a['members'] == before['members'], f'{op}: touched a person\'s row'
         if op[0] == 'access-rm' and ok:
             _, agent, who, (kind, value) = op
             row = a['members'].get(agent, {}).get(who, {})
