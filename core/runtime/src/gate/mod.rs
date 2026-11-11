@@ -40,7 +40,7 @@ const MAX_KEY: &str = "max_running";
 
 mod proc;
 
-pub(crate) use proc::{Liveness, System, holder_alive, pid_gone};
+pub(crate) use proc::{Liveness, System, holder_alive, pid_gone, same_process};
 
 /// One request for a slot.
 pub(crate) struct Take<'a> {

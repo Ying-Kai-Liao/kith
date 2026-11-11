@@ -713,6 +713,43 @@ pub(crate) fn bots_cap_line(auth: &Value) -> String {
     }
 }
 
+/// `kith-auth bots-cap --json` (kith-cost bots): the cap as a number (null when none) and every id the owner's bots spend
+/// under, a renamed bot's old ids too.
+pub(crate) fn bots_cap_json(auth: &Value) -> R<Value> {
+    let cap = match auth.get("owner_bots_budget").filter(|c| truthy(Some(c))) {
+        None => Value::Null,
+        Some(c) => c
+            .as_f64()
+            .or_else(|| c.as_str().and_then(py_float))
+            .filter(|f| f.is_finite())
+            .and_then(serde_json::Number::from_f64)
+            .map(Value::Number)
+            .ok_or_else(|| Die {
+                msg: "bots-cap: the cap in the database is no number".into(),
+                code: 1,
+            })?,
+    };
+    let mut ids: Vec<String> = Vec::new();
+    if let Some(me) = secrets::owner(auth) {
+        for b in bots_of(auth, &me) {
+            let was = people(auth)
+                .get(&b)
+                .and_then(|p| p.get("was"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_owned);
+            for id in std::iter::once(b.clone()).chain(was) {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+    Ok(json!({ "cap": cap, "bots": ids }))
+}
+
 /// `kith-auth invite <id> [minutes]`. The code is the caller's: the OS's randomness is not this module's.
 pub(crate) fn invite_create(
     auth: &mut Value,
