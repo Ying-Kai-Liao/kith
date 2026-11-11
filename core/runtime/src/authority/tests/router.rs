@@ -157,6 +157,71 @@ fn granted_gives_the_profiles_as_a_list() {
 }
 
 #[test]
+fn secrets_view_is_the_tables_in_auth_shape_without_values_handles_or_invite_codes() {
+    let mut rig = Rig::new(&json!({
+        "people": {"kai": {"owner": true, "handles": {"telegram": "1"}}, "sam": {"handles": {"telegram": "2"}}},
+        "presets": {"member": {"mode": "default"}},
+        "members": {"house": {"sam": {"preset": "member"}}},
+        "invites": {"ABC234": {"person": "sam", "expires": FUTURE}},
+        "retired": {"old": {"at": 1}},
+        "agent_access": {"house": {"domains": ["a.example"]}},
+        "owner_bots_budget": "50",
+    }));
+    rig.core
+        .conn()
+        .execute_batch(
+            "INSERT INTO secret_profiles (profile, person, lent, browser) VALUES \
+               ('github/work', NULL, NULL, NULL), ('chrome/main', 'kai', '[\"sam\"]', 'chrome'); \
+             INSERT INTO secret_vars (profile, var, source) VALUES ('github/work', 'TOKEN', 'keychain:kith/github/work#TOKEN'); \
+             INSERT INTO secret_grants (agent, service, profile, seq) VALUES ('house', 'github', 'github/work', 0), \
+               ('house@sam', 'chrome', 'chrome/main', 0); \
+             INSERT INTO secret_env (agent, service, var, value, seq) VALUES \
+               ('house', 'svc', 'B', '\"2\"', 0), ('house', 'svc', 'A', '1', 1);",
+        )
+        .unwrap();
+    let r = rig.call("people.secretsView", &json!({})).unwrap();
+    assert_eq!(keys(&r), ["auth"]);
+    let auth = &r["auth"];
+    assert_eq!(auth["env"], json!({"house": {"svc": {"B": "2", "A": 1}}}));
+    assert_eq!(
+        keys(&auth["env"]["house"]["svc"]),
+        ["B", "A"],
+        "the file's order"
+    );
+    assert_eq!(
+        auth["profiles"]["github/work"],
+        json!({"TOKEN": "keychain:kith/github/work#TOKEN"}),
+        "no owner named: kith-auth decides from the service's current `personal`, which fails closed"
+    );
+    // exactly the keys the six verbs read, whatever else the core holds
+    let mut got: Vec<&str> = keys(auth);
+    got.sort_unstable();
+    let mut want: Vec<&str> = crate::authority::call::VIEW_KEYS.to_vec();
+    want.sort_unstable();
+    assert_eq!(got, want);
+    assert_eq!(
+        auth["profiles"]["chrome/main"],
+        json!({"person": "kai", "with": ["sam"], "browser": "chrome"})
+    );
+    assert_eq!(
+        auth["grants"]["house@sam"],
+        json!({"chrome": "chrome/main"})
+    );
+    assert!(auth["people"]["sam"].get("handles").is_none());
+    assert!(auth.get("invites").is_none(), "no invite codes");
+    // a database imported before profiles, grants and env were kept cannot say what is granted: refused, with the way out
+    rig.core
+        .conn()
+        .execute("INSERT INTO secret_stale (reason) VALUES ('x')", [])
+        .unwrap();
+    let e = rig.call("people.secretsView", &json!({})).unwrap_err();
+    assert!(e.contains("import again before the step"), "{e}");
+    // on a switched core auth.json is a tombstone: there is nothing to import again
+    let said = crate::authority::call::secrets_view(&json!({"secrets_stale": true}), true);
+    assert!(said.unwrap_err().msg.contains("roll back and step again"));
+}
+
+#[test]
 fn bots_cap_json_is_the_cap_and_every_id_of_the_owners_bots() {
     let mut rig = Rig::new(&world());
     let r = rig.call("people.botsCap", &json!({"json": true})).unwrap();

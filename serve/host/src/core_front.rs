@@ -261,6 +261,60 @@ fn secrets_call_at(folders: &Paths, method: &str, params: &Value, wait: std::tim
     }
 }
 
+/// The vault's typed client of the envelope: one function per `secrets.*` row, with the refusal text callers show.
+/// `vault.rs` keeps the rules (moving old records, ordering); the way to the core is only here.
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+pub mod secrets {
+    use super::{secrets_call, secrets_has_waiting};
+    use anyhow::{Result, anyhow};
+    use serde_json::{Value, json};
+    use std::time::Duration;
+
+    #[allow(clippy::needless_pass_by_value, reason = "used as a map_err callback")]
+    pub(super) fn refused(e: anyhow::Error) -> anyhow::Error {
+        anyhow!(
+            "Secure credential storage refused: {e:#}. Credentials are never saved as plain text, and nothing was changed."
+        )
+    }
+
+    fn call(method: &str, params: &Value, wait: Duration) -> Result<Value> {
+        secrets_call(method, params, wait).map_err(refused)
+    }
+
+    /// Loads the machine's key (making it on a first use), waiting up to `wait` for a daemon that is starting.
+    pub fn open(wait: Duration) -> Result<()> {
+        call("secrets.open", &json!({}), wait).map(drop)
+    }
+
+    /// One try: `has` runs on message paths, which must not wait for a core that is not there.
+    pub fn has(name: &str) -> Result<bool> {
+        Ok(call("secrets.has", &json!({"name": name}), Duration::ZERO)?["has"] == true)
+    }
+
+    pub fn has_waiting(name: &str, wait: Duration) -> Result<bool> {
+        secrets_has_waiting(name, wait).map_err(refused)
+    }
+
+    pub fn delete(name: &str) -> Result<bool> {
+        Ok(call("secrets.delete", &json!({"name": name}), Duration::ZERO)?["deleted"] == true)
+    }
+
+    pub fn get(name: &str) -> Result<Option<String>> {
+        let answer = call("secrets.get", &json!({"name": name}), Duration::ZERO)?;
+        if answer["found"] != true {
+            return Ok(None);
+        }
+        answer["value"]
+            .as_str()
+            .map(|s| Some(s.to_owned()))
+            .ok_or_else(|| anyhow!("The credential store answered without a value"))
+    }
+
+    pub fn put(name: &str, value: &str) -> Result<()> {
+        call("secrets.put", &json!({"name": name, "value": value}), Duration::ZERO).map(drop)
+    }
+}
+
 /// Whether the envelope holds `name`, for the paths that decide whether a secret must be unlocked (a bot starting).
 /// Unlike [`secrets_call`] it never reads "cannot ask" as "no": it waits up to `wait` while the daemon is not yet
 /// answering (starting, or a command holding the core) and then fails, with the reason. The one honest "no" without an
@@ -423,6 +477,7 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.budgets",
     "people.ledger",
     "people.botsCap",
+    "people.secretsView",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
@@ -439,6 +494,7 @@ const ROUTED_READS: &[&str] = &[
     "people.budgets",
     "people.ledger",
     "people.botsCap",
+    "people.secretsView",
 ];
 
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
@@ -861,6 +917,24 @@ mod tests {
         let bad = secrets_call_at(&folders, "secrets.has", &json!({}), wait);
         assert!(bad.is_err(), "missing params are refused: {bad:?}");
         daemon.stop();
+        let _ = std::fs::remove_dir_all(&folders.home);
+    }
+
+    /// The vault's typed client refuses with the vault's text when no daemon is up (a write goes through `core_front`
+    /// and stores nothing).
+    #[cfg(unix)]
+    #[test]
+    fn secrets_client_refuses_without_a_daemon() {
+        let folders = short_folders("sn");
+        let err =
+            secrets_call_at(&folders, "secrets.put", &json!({"name": "a", "value": "v"}), std::time::Duration::ZERO)
+                .map_err(secrets::refused)
+                .expect_err("no daemon");
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("Secure credential storage refused") && text.contains("never saved as plain text"),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(&folders.home);
     }
 

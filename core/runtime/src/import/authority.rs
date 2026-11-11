@@ -23,7 +23,7 @@
 //! |   every other key (VAR -> source)           |   `secret_vars (profile, var, source)`: the reference (`keychain:..`, `env:..`, `env-file:..`), never a value |
 //! | `grants.<agent>.<service>` (`coder`, `coder@<person>`) | `secret_grants` rows, `seq` = the place in a list of profiles |
 //!
-//! A profile's `person` is what `kith-auth`'s `owner_of` answers: the named person; `*` (shared on purpose) is NULL; with
+//! A profile's `person` is what `kith-auth`'s `owner_of` answers: the named person, `*` (shared on purpose) included; with
 //! none named, the owner's id (the text `the owner` while the file has no owner) when the service is personal (its
 //! `"personal"` or else a `login`/`browser` `kind`, read from the kernel's `services/` then this Mac's), else NULL. The
 //! core has no service specs of its own, so this is worked out here, once; a file whose service spec cannot be read is
@@ -33,11 +33,15 @@
 //! A key that is absent stays NULL (the reader leaves the key out, so the rules' default applies); a key that is JSON
 //! `null` is read as absent. A key of the wrong type refuses the whole file (`Error::Refused`) rather than guess.
 //!
+//! | `env.<agent>.<service>.<VAR>`               | `secret_env (agent, service, var, value, seq)`: `value` as JSON text, `seq` = the place among the service's variables |
+//!
+//! `env` is the plain settings an agent's service starts with (`kith-auth mcp-config` and `exec` read it); a secret is a
+//! profile's variable and never goes there. A level that is no object refuses the file, as `kith-auth` would fail on it.
+//! An agent or service with no variable is nothing to keep.
+//!
 //! Left behind, on purpose (the report lists which of these the file at hand has):
-//! - `env`: the plaintext values agents' env keeps in auth.json. No table holds them (m0021 has profiles, variables and
-//!   grants only) and a plaintext value does not belong in core.db; they move with kith-auth itself (M2-18).
-//!   A `keychain:` reference in a profile has its Keychain item sealed into the envelope (`items.rs`).
 //! - `once`: one-time secrets that live at most an hour; they are not worth a copy.
+//!   (A `keychain:` reference in a profile has its Keychain item sealed into the envelope, `items.rs`.)
 //! - a person's `root`, `kith` (it is in `handles`), `agents`: derived by `kith-auth people --json`; the decision reads
 //!   none of them. (`handles` is kept since m0015: `people.listPeople`, `retired` and `--rm --unused` read it.)
 //! - any other key, at any level: not read by the decision, so not copied.
@@ -78,9 +82,10 @@ const TOP_KEYS: &[&str] = &[
     "agent_access",
     "profiles",
     "grants",
+    "env",
 ];
 /// Top-level tables left behind by design.
-const LEFT_TOP: &[&str] = &["env", "once"];
+const LEFT_TOP: &[&str] = &["once"];
 /// The keys of a profile that are not variables.
 const PROFILE_KEYS: &[&str] = &["person", "with", "browser"];
 
@@ -233,7 +238,8 @@ fn parse_profiles(auth: &Value, services: &Services) -> Result<Vec<ProfileRow>> 
         let row = Value::Object(p.clone());
         let named = text(&row, "person", &what)?.filter(|s| !s.is_empty());
         let person = match named.as_deref() {
-            Some("*") => None,
+            // Kept as `*`, not NULL: NULL means "none named", which `kith-auth` decides from the service's current
+            // `personal` setting, so a shared login never turns into a default owner's.
             Some(_) => named,
             None if services.personal(name.split('/').next().unwrap_or(name))? => {
                 Some(owner.clone().unwrap_or_else(|| "the owner".to_owned()))
@@ -320,6 +326,37 @@ fn parse_grants(auth: &Value) -> Result<Vec<(String, String, String, i64)>> {
     Ok(out)
 }
 
+/// `env` as `(agent, service, var, value as JSON text, seq)`. A level that is no object refuses the file; an agent or a
+/// service with no variable keeps nothing.
+fn parse_env(auth: &Value) -> Result<Vec<EnvRow>> {
+    let mut out = Vec::new();
+    for (agent, by_service) in table(auth, "env")?.into_iter().flatten() {
+        let what = format!("env.{agent}");
+        for (service, vars) in object(by_service, &what)? {
+            let what = format!("{what}.{service}");
+            for (seq, (var, value)) in object(vars, &what)?.iter().enumerate() {
+                out.push(EnvRow {
+                    agent: agent.clone(),
+                    service: service.clone(),
+                    var: var.clone(),
+                    value: value.to_string(),
+                    seq: i64::try_from(seq).unwrap_or(i64::MAX),
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// One `secret_env` row.
+struct EnvRow {
+    agent: String,
+    service: String,
+    var: String,
+    value: String,
+    seq: i64,
+}
+
 /// A file the import can store faithfully, or the reason it cannot. Run before anything is written.
 pub(super) fn refuse_what_it_cannot_keep(auth: &Value, services: &Services) -> Result<()> {
     object(auth, "the file")?;
@@ -358,6 +395,7 @@ pub(super) fn refuse_what_it_cannot_keep(auth: &Value, services: &Services) -> R
     // `profiles` and `grants` are kept (m0021): a wrong shape, or a variable that could be a plain secret, refuses the file.
     parse_profiles(auth, services)?;
     parse_grants(auth)?;
+    parse_env(auth)?;
     Ok(())
 }
 
@@ -505,6 +543,12 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value, services: &Services) -
         conn.execute(
             "INSERT INTO secret_grants (agent, service, profile, seq) VALUES (?1, ?2, ?3, ?4)",
             params![agent, service, profile, seq],
+        )?;
+    }
+    for e in parse_env(auth)? {
+        conn.execute(
+            "INSERT INTO secret_env (agent, service, var, value, seq) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![e.agent, e.service, e.var, e.value, e.seq],
         )?;
     }
     Ok(())
@@ -660,7 +704,7 @@ pub(super) fn record_suspends(conn: &Connection, auth: &Value, now_ms: f64) -> R
 pub(super) fn clear(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "DELETE FROM people; DELETE FROM memberships; DELETE FROM presets; DELETE FROM invites; DELETE FROM retired; DELETE FROM agent_access; \
-         DELETE FROM secret_profiles; DELETE FROM secret_vars; DELETE FROM secret_grants; DELETE FROM secret_stale; \
+         DELETE FROM secret_profiles; DELETE FROM secret_vars; DELETE FROM secret_grants; DELETE FROM secret_env; DELETE FROM secret_stale; \
          DELETE FROM authority_settings WHERE key IN ('owner_bots_budget', 'handles_stale');",
     )?;
     Ok(())
@@ -733,13 +777,9 @@ pub(super) fn left_behind(auth: &Value) -> Vec<String> {
     out
 }
 
-fn why(key: &str) -> &'static str {
-    match key {
-        "env" => {
-            "agent env values (plaintext in auth.json today) have no table in core.db and move with kith-auth (M2-18); never copied here"
-        }
-        _ => "one-time secrets expire within the hour",
-    }
+/// Why a left-behind table is not copied (`once` is the only one).
+fn why(_key: &str) -> &'static str {
+    "one-time secrets expire within the hour"
 }
 
 /// A short count line for the log and the report.

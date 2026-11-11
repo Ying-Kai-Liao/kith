@@ -453,6 +453,7 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people person clear-temp ann", "people.clearTemp"),
         ("people retired ann", "people.retired"),
         ("people budgets echo", "people.budgets"),
+        ("people secrets-view", "people.secretsView"),
         ("people ledger --person ann", "people.ledger"),
         (
             "people ledger-remove read:echo:ann:/tmp/x",

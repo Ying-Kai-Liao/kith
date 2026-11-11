@@ -198,7 +198,8 @@ fn a_real_shaped_file_goes_in_with_a_backup_a_log_row_and_the_keychain_item() {
     let said = rep.lines.join("\n");
     assert!(!said.contains("left behind: profiles"), "{said}");
     assert!(!said.contains("left behind: grants"), "{said}");
-    assert!(said.contains("left behind: env"), "{said}");
+    assert!(!said.contains("left behind: env"), "{said}");
+    assert_eq!(f.count("secret_env"), 1, "env is kept since m0023");
     assert!(said.contains("person keys"), "{said}");
     assert!(
         !said.contains("tok\n") && !said.contains("plain-value"),
@@ -831,7 +832,7 @@ fn profiles_vars_and_grants_go_in_as_the_file_has_them() {
         ),
         vec![
             vec![s("chrome-agent/main"), s("kai"), None, s("chrome")],
-            vec![s("chrome-agent/team"), None, None, None],
+            vec![s("chrome-agent/team"), s("*"), None, None],
             vec![s("github/bare"), None, None, None],
             vec![s("github/work"), s("sam"), s(r#"["kai","mia"]"#), None],
             vec![s("host/svc"), None, None, None],
@@ -1084,7 +1085,7 @@ fn a_database_imported_before_the_tables_were_filled_is_stale_until_it_is_import
         .unwrap()
         .join("\n");
     assert!(
-        said.contains("imported before profiles and grants"),
+        said.contains("imported before profiles, grants and env"),
         "{said}"
     );
     let e = f.import(&mut MemSink::default()).unwrap_err();
@@ -1182,6 +1183,8 @@ fn the_cores_owners_and_grants_are_what_kith_auth_account_state_answers() {
                     |r| r.get(0),
                 )
                 .unwrap();
+            // the core keeps a shared profile as `*`; `account-state` says no owner
+            let owner = owner.filter(|o| o != "*");
             let agents = col(
                 "SELECT DISTINCT agent FROM secret_grants WHERE profile = ?1 ORDER BY agent",
                 &[&p],
@@ -1220,7 +1223,7 @@ fn the_cores_owners_and_grants_are_what_kith_auth_account_state_answers() {
         [
             "chrome-agent/kai:kai",
             "chrome-agent/sam:sam",
-            "chrome-agent/shared:-"
+            "chrome-agent/shared:*"
         ]
     );
 }

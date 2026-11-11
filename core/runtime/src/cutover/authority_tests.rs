@@ -412,6 +412,102 @@ fn a_step_switches_and_a_rollback_gives_the_same_auth_json_back() {
 }
 
 #[test]
+fn env_is_imported_compared_and_written_back_from_the_core() {
+    let (r, reg) = rig();
+    r.edit(|v| {
+        v["env"] = json!({"house": {"svc": {"B": "2", "A": 1}, "other": {"X": "y"}}, "gone-agent": {"svc": {"Z": "z"}}});
+    });
+    let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+    reg[0].import(&r.env, Some(&mut core), opts()).unwrap();
+    drop(core);
+    assert_eq!(
+        r.count("secret_env"),
+        4,
+        "an agent that no longer exists too"
+    );
+    let d = r.diffs(reg[0].as_ref());
+    assert!(d.is_empty(), "same answer after the import: {d:?}");
+    // a different value, a missing variable and one only the core has are all differences, named but never shown
+    r.db()
+        .execute_batch(
+            "UPDATE secret_env SET value = '\"3\"' WHERE agent = 'house' AND service = 'svc' AND var = 'B'; \
+             DELETE FROM secret_env WHERE agent = 'house' AND service = 'other'; \
+             INSERT INTO secret_env VALUES ('house', 'svc', 'C', '\"c\"', 2);",
+        )
+        .unwrap();
+    let d = r.diffs(reg[0].as_ref());
+    assert!(said(&d, "env house/svc: differs in variable B"), "{d:?}");
+    assert!(said(&d, "variable C (only in core.db)"), "{d:?}");
+    assert!(
+        said(&d, "env house/other: in auth.json, not in core.db"),
+        "{d:?}"
+    );
+    assert!(
+        !d.iter().any(|l| l.contains("\"3\"")),
+        "no value is shown: {d:?}"
+    );
+    // the same variables in another order is a difference too (`mcp-config` prints them in the file's order)
+    r.db()
+        .execute_batch(
+            "DELETE FROM secret_env WHERE var = 'C'; \
+             UPDATE secret_env SET value = '\"2\"' WHERE var = 'B'; \
+             INSERT INTO secret_env VALUES ('house', 'other', 'X', '\"y\"', 0); \
+             UPDATE secret_env SET seq = 1 WHERE var = 'B'; UPDATE secret_env SET seq = 0 WHERE var = 'A';",
+        )
+        .unwrap();
+    let d = r.diffs(reg[0].as_ref());
+    assert!(
+        said(&d, "env house/svc: differs in the order of the variables"),
+        "{d:?}"
+    );
+}
+
+#[test]
+fn a_rollback_writes_the_cores_env_in_its_order_and_not_the_old_copys() {
+    let (r, reg) = rig();
+    r.edit(|v| {
+        v["env"] = json!({"house": {"svc": {"A": "plain"}}, "gone-agent": {"svc": {"Z": "z"}}});
+    });
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert_eq!(r.count("secret_env"), 2);
+    r.db()
+        .execute_batch(
+            "DELETE FROM secret_env WHERE agent = 'gone-agent'; \
+             UPDATE secret_env SET seq = 1 WHERE var = 'A'; \
+             INSERT INTO secret_env VALUES ('house', 'svc', 'B', '\"2\"', 0), ('house', 'svc', 'N', '1', 2), ('house', 'other', 'X', '\"y\"', 0);",
+        )
+        .unwrap();
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    let after: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(
+        after["env"],
+        json!({"house": {"svc": {"B": "2", "A": "plain", "N": 1}, "other": {"X": "y"}}})
+    );
+    let order: Vec<&String> = after["env"]["house"]["svc"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
+    assert_eq!(order, ["B", "A", "N"], "the core's order");
+}
+
+#[test]
+fn a_file_whose_env_is_not_an_object_per_service_is_refused() {
+    let (r, reg) = rig();
+    r.edit(|v| v["env"] = json!({"house": {"svc": "plain"}}));
+    let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+    let e = reg[0]
+        .import(&r.env, Some(&mut core), opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("env.house.svc") && e.contains("not an object"),
+        "{e}"
+    );
+    assert_eq!(r.count("people"), 0, "nothing was imported");
+}
+
+#[test]
 fn a_host_the_owner_stopped_keeping_stays_gone_after_a_rollback() {
     let (r, reg) = rig();
     r.edit(|v| {

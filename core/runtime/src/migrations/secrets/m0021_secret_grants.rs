@@ -9,7 +9,8 @@
 //!   `person` is its owner as `kith-auth`'s
 //!   `owner_of` answers it, which the import stores (and the later `kith-auth` writers must): the named person; the
 //!   owner's id (or 'the owner' when none is named) for an unmarked profile of a personal service (login, browser, or
-//!   `"personal": true`); NULL only for '*' (shared on purpose) or a service that is not personal. A change to a
+//!   `"personal": true`); NULL only for a service that is not personal (a `*` is kept as `*` since m0023, so a shared login never turns into
+//!   a default owner's when its service later becomes personal). A change to a
 //!   service's `personal` setting re-derives the column. The core has no service specs, so it cannot work this out
 //!   itself. `lent` is a JSON list of people it is lent to (`with`), `browser` its browser.
 //! - `secret_vars` is one row per variable of a profile.
