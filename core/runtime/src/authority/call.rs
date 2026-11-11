@@ -177,7 +177,7 @@ fn removal_only(method: &str) -> bool {
 }
 
 /// The methods that only look, which the host's guard marks with `viaSwitch` (`CoreMethod::marked`, `core_verdict`).
-fn is_read(method: &str, params: &Value) -> bool {
+pub(crate) fn is_read(method: &str, params: &Value) -> bool {
     matches!(
         method,
         "people.list"

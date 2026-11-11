@@ -64,6 +64,15 @@ for pair in "cl claude" "cx codex"; do
   if [ -n "${UPDATE_GOLDEN:-}" ]; then printf '%s\n' "$out" > "$FIX/launch-$2.json"; fi
   check "$2 launch-json is the golden one" "[ \"\$out\" = \"\$(cat '$FIX/launch-$2.json')\" ]"
   [ "$out" = "$(cat "$FIX/launch-$2.json")" ] || diff <(printf '%s\n' "$out") "$FIX/launch-$2.json" | cut -c1-400 | head -20
+  # The cut above hides a difference deep inside a long line (the hooks settings string): show each differing line around its first difference.
+  [ "$out" = "$(cat "$FIX/launch-$2.json")" ] || python3 -c '
+import sys
+a = sys.argv[1].splitlines(); b = open(sys.argv[2]).read().splitlines()
+for n, (x, y) in enumerate(zip(a, b), 1):
+    if x != y:
+        i = next((k for k, (c, d) in enumerate(zip(x, y)) if c != d), min(len(x), len(y)))
+        print("line %d differs at char %d" % (n, i)); print("  got:    " + x[max(0, i - 150):i + 250]); print("  golden: " + y[max(0, i - 150):i + 250])
+if len(a) != len(b): print("line counts differ: %d vs %d" % (len(a), len(b)))' "$out" "$FIX/launch-$2.json"
 done
 
 HAVE=0
