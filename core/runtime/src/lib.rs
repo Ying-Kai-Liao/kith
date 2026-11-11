@@ -264,7 +264,7 @@ pub const EMBEDDED_WRITES: &[&str] = &[
     "people.revoke",
 ];
 
-/// The reads `kith-auth` routes to the core on the authority tombstone (`ROUTED_READS` in the host's core_front.rs, which
+/// The reads `kith-auth` routes to the core on the authority tombstone (`ROUTED_READS` in the host's `core_front.rs`, which
 /// a test holds to this list), answered with no daemon too. [`call_authority_embedded`] runs one only as a read
 /// (`people.botsCap` with an `amount` sets the cap and is refused) and only with `viaSwitch: true`, so the core refuses it
 /// unless authority is switched. `people.resolve` with `takeOnce` uses up a grant: a write that only narrows access, run
