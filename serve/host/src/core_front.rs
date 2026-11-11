@@ -441,26 +441,6 @@ const ROUTED_READS: &[&str] = &[
     "people.botsCap",
 ];
 
-/// The writes `core_call` runs in an embedded core when no daemon answers (the revoke stopgap before M2-23: a revoke made
-/// in kith-auth must reach the core even with `kith serve` stopped). The terminal methods need the daemon's sockets.
-#[cfg(unix)]
-const EMBEDDED_METHODS: &[&str] = &[
-    "people.suspend",
-    "people.undo",
-    "people.removePerson",
-    "people.removeBot",
-    "people.revoke",
-    "people.who",
-    "people.granted",
-    "people.may",
-    "people.resolve",
-    "people.listPeople",
-    "people.retired",
-    "people.budgets",
-    "people.ledger",
-    "people.botsCap",
-];
-
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
 /// Inside kith-auth's `CORE_CALL_SECS`, which it waits under auth.json.lock.
 #[cfg(unix)]
@@ -562,7 +542,9 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
             4
         }
         #[cfg(unix)]
-        kith_core::Reached::NoDaemon if EMBEDDED_METHODS.contains(&method) => {
+        // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
+        // The terminal methods need the daemon's sockets.
+        kith_core::Reached::NoDaemon if kith_core::embedded(method) => {
             core_call_embedded(&folders, method, &params)
         }
         kith_core::Reached::NoDaemon => {
@@ -698,13 +680,13 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    /// The three lists are written by hand; a routed method missing from one would only show on a switched Mac.
+    /// The lists are written by hand; a routed method missing from one would only show on a switched Mac.
     #[test]
-    fn every_routed_read_is_on_core_call_and_the_embedded_list() {
+    fn every_routed_read_is_on_core_call_and_the_embedded_reads() {
         for m in ROUTED_READS {
             assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
             #[cfg(unix)]
-            assert!(EMBEDDED_METHODS.contains(m), "{m} is not on EMBEDDED_METHODS");
+            assert!(kith_core::EMBEDDED_READS.contains(m), "{m} is not on EMBEDDED_READS");
         }
     }
 
