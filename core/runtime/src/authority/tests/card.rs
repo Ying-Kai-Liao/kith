@@ -529,3 +529,31 @@ fn the_revision_moves_with_any_write_and_is_a_read_through_the_switch() {
     let e = rig.call("people.revision", &ask).unwrap_err();
     assert!(e.contains("not switched"), "{e}");
 }
+
+#[test]
+fn a_refused_card_write_does_not_drop_the_invites_that_ran_out() {
+    let mut w = world();
+    w["invites"] = json!({"OLD123": {"person": "sam", "expires": 1}});
+    let mut rig = Rig::new(&w);
+    switched(&rig, Phase::Switched);
+    // refused: the owner has no row of their own; kith-auth saves nothing then, so nothing is pruned either
+    let e = said(
+        &mut rig,
+        "people.access",
+        &access("kai", "domain", "a.example.com", &json!({})),
+    )
+    .unwrap_err();
+    assert_eq!(e.1, 1);
+    assert!(
+        rig.tables()["invites"].get("OLD123").is_some(),
+        "the refusal pruned"
+    );
+    // a write that lands saves the file, and with it the prune
+    said(
+        &mut rig,
+        "people.access",
+        &access("ann", "domain", "a.example.com", &json!({})),
+    )
+    .unwrap();
+    assert!(rig.tables()["invites"].get("OLD123").is_none());
+}
