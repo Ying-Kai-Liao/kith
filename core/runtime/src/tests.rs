@@ -1093,5 +1093,12 @@ mod embedded_authority {
             let e = call_authority_embedded(&paths(&m), method, &params).unwrap_err();
             assert!(matches!(e, crate::Error::NoSuchMethod(_)), "{method}: {e}");
         }
+        // A routed read's name is not enough: with an amount `people.botsCap` sets the cap, and a read needs `viaSwitch`.
+        let cap = json!({"amount": "5", "viaSwitch": true});
+        let plain = json!({});
+        for (method, params) in [("people.botsCap", cap), ("people.who", plain)] {
+            let e = call_authority_embedded(&paths(&m), method, &params).unwrap_err();
+            assert!(matches!(e, crate::Error::Refused(_)), "{method}: {e}");
+        }
     }
 }

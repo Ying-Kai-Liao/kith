@@ -17,11 +17,11 @@
 //!   lock held.
 //!
 //!   The one exception, until M2-18: [`call_authority_embedded`] runs the five writes in [`EMBEDDED_WRITES`] (kith-auth's
-//!   mirror of a revoke, with no daemon up). Each is a claim transaction, and a removal ends the person's claims
+//!   mirror of a revoke, with no daemon up) and the nine routed reads in [`EMBEDDED_READS`] (as reads, through the switch). Each is a claim transaction, and a removal ends the person's claims
 //!   (`revoke_everywhere`). That is safe because they only narrow access: four take it away, and `people.undo` puts
 //!   back exactly what a suspension took. They run under the lock at the current generation, take no claim and say no
 //!   hello to a holder. The kills they return are dropped, and the next daemon's `end_gone` sends them again. Any
-//!   other method, a write that widens access included, is refused there. (docs/plans/runtime-design.md, M0a.)
+//!   other method, a write that widens access included (and `people.botsCap` with an amount), is refused there. (docs/plans/runtime-design.md, M0a.)
 
 // M3-9a: account state in core.db and the read-only `account.*` rows; nothing writes it but the import and the tests.
 #[allow(
@@ -265,7 +265,10 @@ pub const EMBEDDED_WRITES: &[&str] = &[
 ];
 
 /// The reads `kith-auth` routes to the core on the authority tombstone (`ROUTED_READS` in the host's core_front.rs, which
-/// a test holds to this list). They change nothing, so the embedded door answers them with no daemon too.
+/// a test holds to this list), answered with no daemon too. [`call_authority_embedded`] runs one only as a read
+/// (`people.botsCap` with an `amount` sets the cap and is refused) and only with `viaSwitch: true`, so the core refuses it
+/// unless authority is switched. `people.resolve` with `takeOnce` uses up a grant: a write that only narrows access, run
+/// under the lock like the writes above.
 pub const EMBEDDED_READS: &[&str] = &[
     "people.who",
     "people.granted",
@@ -278,13 +281,14 @@ pub const EMBEDDED_READS: &[&str] = &[
     "people.botsCap",
 ];
 
-/// Whether [`call_authority_embedded`] runs `method`: a narrowing write or a routed read.
+/// Whether `method` is one [`call_authority_embedded`] may run: a narrowing write or a routed read. A name check only
+/// (the host's routing); the call itself also holds a read to its params.
 pub fn embedded(method: &str) -> bool {
     EMBEDDED_WRITES.contains(&method) || EMBEDDED_READS.contains(&method)
 }
 
-/// Runs one owner write from [`EMBEDDED_WRITES`] or read from [`EMBEDDED_READS`] inside an embedded core, for a caller that found no daemon (kith-auth's
-/// mirror of a revoke). The same door as the daemon's: the method must exist and be open to the owner, the lock is the
+/// Runs one owner write from [`EMBEDDED_WRITES`] or routed read from [`EMBEDDED_READS`] inside an embedded core, for a
+/// caller that found no daemon (kith-auth's mirror of a revoke, and its routed reads). The same door as the daemon's: the method must exist and be open to the owner, the lock is the
 /// one lock, and the generation is bumped. Never creates a core.db and never migrates one: those stay with the daemon
 /// and `kith migrate`.
 #[cfg(unix)]
@@ -297,6 +301,16 @@ pub fn call_authority_embedded(
         return Err(Error::NoSuchMethod(format!(
             "kith-core: {method} is not a read or a write that only narrows access, so only the daemon runs it"
         )));
+    }
+    // A read goes through only as a read and only through the switch; the name alone would let `people.botsCap` with an
+    // `amount` (a write that widens access) run here.
+    if EMBEDDED_READS.contains(&method) {
+        let via_switch = params.get("viaSwitch").and_then(serde_json::Value::as_bool) == Some(true);
+        if !(via_switch && authority::call::is_read(method, params)) {
+            return Err(Error::Refused(format!(
+                "kith-core: {method} runs without a daemon only as a read through the switch (viaSwitch)"
+            )));
+        }
     }
     call::check(kith_api::Principal::Owner, method, params)?;
     let layout = Layout::new(&paths.machine);

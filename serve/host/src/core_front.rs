@@ -11,7 +11,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 
 use kith_kernel::paths::Paths;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::kernel;
 
@@ -544,9 +544,7 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         #[cfg(unix)]
         // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
         // The terminal methods need the daemon's sockets.
-        kith_core::Reached::NoDaemon if kith_core::embedded(method) => {
-            core_call_embedded(&folders, method, &params)
-        }
+        kith_core::Reached::NoDaemon if kith_core::embedded(method) => core_call_embedded(&folders, method, &params),
         kith_core::Reached::NoDaemon => {
             eprintln!("no core daemon answers");
             3
