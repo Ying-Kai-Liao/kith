@@ -478,6 +478,10 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.ledger",
     "people.botsCap",
     "people.secretsView",
+    // the card writes `kith-auth` routes here (C-a, C-b), see `ROUTED_WRITES`
+    "people.access",
+    "people.helper",
+    "people.job",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
@@ -496,6 +500,11 @@ const ROUTED_READS: &[&str] = &[
     "people.botsCap",
     "people.secretsView",
 ];
+
+/// The card writes `kith-auth` routes to the core on the tombstone: an escape card's always, a helper's, the No of a job.
+/// They widen access, so core-call refuses one without `viaSwitch: true` (the core refuses it unless authority is
+/// switched), and none is on `kith_core::EMBEDDED_WRITES`: a write with no daemon exits 3 and nothing runs.
+const ROUTED_WRITES: &[&str] = &["people.access", "people.helper", "people.job"];
 
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
 /// Inside kith-auth's `CORE_CALL_SECS`, which it waits under auth.json.lock.
@@ -577,6 +586,10 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         if text.trim().is_empty() { json!({}) } else { serde_json::from_str(&text).unwrap_or(Value::Null) };
     if !params.is_object() {
         eprintln!("core-call: params must be a JSON object");
+        return 2;
+    }
+    if ROUTED_WRITES.contains(&method) && params.get("viaSwitch").and_then(Value::as_bool) != Some(true) {
+        eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true");
         return 2;
     }
     if ROUTED_READS.contains(&method)
@@ -742,6 +755,17 @@ mod tests {
             #[cfg(unix)]
             assert!(kith_core::EMBEDDED_READS.contains(m), "{m} is not on EMBEDDED_READS");
         }
+    }
+
+    /// A card write that no embedded core may run, and that the host's door marks: the router's writes widen access.
+    #[test]
+    fn every_routed_write_is_on_core_call_and_never_embedded() {
+        for m in ROUTED_WRITES {
+            assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
+        }
+        assert!(!ROUTED_READS.iter().any(|m| ROUTED_WRITES.contains(m)));
     }
 
     fn args(line: &str) -> Vec<OsString> {

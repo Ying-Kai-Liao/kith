@@ -33,9 +33,13 @@ pub(super) fn run_with<T>(
     let mut after = before.clone();
     write::tables(&mut after);
     let mut said = f(&mut after).map_err(|d| refusal(&d))?;
-    write::prune_invites(&mut after, c);
     let mut before = before;
     write::tables(&mut before);
+    // A write that changed nothing (a router's refused card write answers as an answer, with the tables put back) saves
+    // nothing in kith-auth either, so the codes that ran out are not dropped by it.
+    if after != before {
+        write::prune_invites(&mut after, c);
+    }
     store(&tx, &before, &after)?;
     follow(&tx, &mut said)?;
     tx.commit()?;
@@ -49,6 +53,14 @@ pub(super) fn read<T>(core: &mut Core, f: impl FnOnce(&Value) -> T) -> Result<T>
     let mut now = read_tables(&tx, &mut || {})?;
     write::tables(&mut now);
     Ok(f(&now))
+}
+
+/// The digest of the tables in one snapshot, under the same door as a write: `people.revision`, which the host's cards
+/// compare to see authority change on a tombstone (the file's change time never moves there).
+pub(super) fn digest(core: &mut Core) -> Result<String> {
+    let tx = core.claim_tx()?;
+    let tables = read_tables(&tx, &mut || {})?;
+    Ok(crate::cutover::authority::tables_digest(&tables))
 }
 
 /// A refusal of the rules, as the readers give theirs: `Refused`, or `BadParams` for the ones `kith-auth` gives exit

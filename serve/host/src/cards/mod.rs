@@ -825,23 +825,55 @@ pub fn start(hub: &Arc<Hub>) {
     let weak = Arc::downgrade(hub);
     tokio::spawn(async move {
         // kith-auth writes its file from outside the host (a revoke, a new grant): who answers follows within seconds.
-        let mut seen = auth_stamp();
+        // Once authority is on the core the file is a tombstone that never changes, so the core's revision is watched.
+        let mut seen = authority_stamp().await;
         let mut tick = tokio::time::interval(AUTH_POLL);
         loop {
             tick.tick().await;
-            let now = auth_stamp();
-            if now == seen {
-                continue;
-            }
-            seen = now;
             let Some(hub) = weak.upgrade() else { return };
-            crate::access::rederive(&hub).await;
+            poll_authority(&hub, &mut seen).await;
         }
     });
 }
 
-/// How often kith-auth's file is looked at for a change.
+/// How often authority is looked at for a change.
 const AUTH_POLL: Duration = Duration::from_secs(3);
+
+/// What the poll compares between ticks: kith-auth's file change times, or, once authority is on the core, the digest of
+/// its tables (`people.revision`). A change of side is a change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AuthStamp {
+    File(Vec<Option<std::time::SystemTime>>),
+    Core(String),
+}
+
+/// The stamp now. None: the host is switched and the core could not be asked, so this tick learns nothing (and, with
+/// nothing to compare, re-derives nothing: `may_use_checked` gives no answer then either). A core that refuses the read
+/// (`not switched`: a rollback just ended and the host's cached switch is stale) leaves the file as the signal.
+pub(crate) async fn authority_stamp() -> Option<AuthStamp> {
+    use crate::api::authority::{CoreRefused, is_not_switched, owner_call, switched};
+    if !switched() {
+        return Some(AuthStamp::File(auth_stamp()));
+    }
+    match owner_call("people.revision", serde_json::json!({"viaSwitch": true}), true).await {
+        Ok(v) => v["digest"].as_str().map(|d| AuthStamp::Core(d.to_owned())),
+        Err(e) if e.downcast_ref::<CoreRefused>().is_some_and(|r| is_not_switched(&r.0)) => {
+            Some(AuthStamp::File(auth_stamp()))
+        }
+        Err(_) => None,
+    }
+}
+
+/// One tick of the poll: re-derives who answers each card when authority changed since `seen`. True when it did.
+pub(crate) async fn poll_authority(hub: &Arc<Hub>, seen: &mut Option<AuthStamp>) -> bool {
+    let Some(now) = authority_stamp().await else { return false };
+    if seen.as_ref() == Some(&now) {
+        return false;
+    }
+    *seen = Some(now);
+    crate::access::rederive(hub).await;
+    true
+}
 
 /// When kith-auth's file last changed: `KITH_AUTH`, else every place `kernel/lib/kith_paths.py` may put it.
 fn auth_stamp() -> Vec<Option<std::time::SystemTime>> {

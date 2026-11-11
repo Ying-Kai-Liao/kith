@@ -199,6 +199,19 @@ fn secrets_view_is_the_tables_in_auth_shape_without_values_handles_or_invite_cod
     let mut want: Vec<&str> = crate::authority::call::VIEW_KEYS.to_vec();
     want.sort_unstable();
     assert_eq!(got, want);
+    // written out, so adding a key is a decision someone reads here: no invites, no retired ids, no bots' cap
+    assert_eq!(
+        want,
+        [
+            "agent_access",
+            "env",
+            "grants",
+            "members",
+            "people",
+            "presets",
+            "profiles"
+        ]
+    );
     assert_eq!(
         auth["profiles"]["chrome/main"],
         json!({"person": "kai", "with": ["sam"], "browser": "chrome"})

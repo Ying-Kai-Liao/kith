@@ -1089,6 +1089,21 @@ mod embedded_authority {
         grant["agent"] = json!("coder");
         let mut add = env;
         add["id"] = json!("sam");
+        // the card writes of the router widen access too (an always, a helper): only the daemon runs them, marked or not
+        let card = json!({
+            "viaSwitch": true, "agent": "coder", "person": "sam",
+            "kind": "read", "value": "/tmp", "helper": "scratch", "job": "j", "decline": "h",
+        });
+        // (and the revision is a read, but the host asks the daemon it runs, never an embedded core)
+        for method in [
+            "people.access",
+            "people.helper",
+            "people.job",
+            "people.revision",
+        ] {
+            let e = call_authority_embedded(&paths(&m), method, &card).unwrap_err();
+            assert!(matches!(e, crate::Error::NoSuchMethod(_)), "{method}: {e}");
+        }
         for (method, params) in [("people.grant", grant), ("people.addPerson", add)] {
             let e = call_authority_embedded(&paths(&m), method, &params).unwrap_err();
             assert!(matches!(e, crate::Error::NoSuchMethod(_)), "{method}: {e}");

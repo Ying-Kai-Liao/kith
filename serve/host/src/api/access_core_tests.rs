@@ -801,3 +801,60 @@ async fn a_revoke_the_core_could_not_finish_is_told_to_the_owner() {
     let gone = json!({"kill": [kill_entry(999_999, "e1"), {"claimId": 2, "pid": null}]});
     assert_eq!(super::authority::finish_revoke(&gone, "sam").await, "");
 }
+
+/// C-b: once authority is on the core, auth.json is a tombstone whose change time never moves, so the cards watch the
+/// core's revision. A write made in the core (never through kith-auth) re-derives who answers each open card on the next
+/// poll, and a poll that sees nothing new does not.
+#[tokio::test]
+async fn a_core_side_write_changes_who_answers_a_card_within_one_poll() {
+    let r = Rig::new().await;
+    let mut core = Core::start(&r);
+    core.on();
+    core.switched();
+    core.ask("people.grant", json!({"person": "sam", "agent": "house", "preset": "member", "viaSwitch": true}))
+        .expect("grant");
+    let new = crate::store::NewCard {
+        session: "s-poll".into(),
+        source: "acp",
+        bot_id: None,
+        run_id: None,
+        person: "sam".into(),
+        agent: "house".into(),
+        answerable_by: Some("sam".into()),
+        in_grants: true,
+        tool: "WebFetch".into(),
+        input: "{}".into(),
+        resource: "k-poll".into(),
+        shown: String::new(),
+        deadline: i64::MAX,
+        reply_to: None,
+        asked_by: None,
+    };
+    let (crate::store::Opened::New(row) | crate::store::Opened::Joined(row) | crate::store::Opened::Granted(row)) =
+        r.hub.store.card_open(&new, 1).unwrap();
+    let answerable = || r.hub.store.card(&row.id).unwrap().answerable_by;
+    let mut seen = crate::cards::authority_stamp().await;
+    assert!(
+        matches!(seen, Some(crate::cards::AuthStamp::Core(_))),
+        "a tombstone is watched through the core: {seen:?}"
+    );
+    assert!(!crate::cards::poll_authority(&r.hub, &mut seen).await, "nothing changed: nothing re-derived");
+    // an always written in the core moves the revision
+    core.ask(
+        "people.access",
+        json!({"person": "sam", "agent": "house", "kind": "domain", "value": "docs.example.com", "viaSwitch": true}),
+    )
+    .expect("always");
+    assert!(crate::cards::poll_authority(&r.hub, &mut seen).await, "the next poll sees the write");
+    assert_eq!(answerable().as_deref(), Some("sam"), "a member still answers");
+    // sam is made a guest in the core: within one poll the card is the owner's alone
+    core.ask("people.grant", json!({"person": "sam", "agent": "house", "preset": "guest", "viaSwitch": true}))
+        .expect("demote");
+    assert!(crate::cards::poll_authority(&r.hub, &mut seen).await);
+    assert_eq!(answerable(), None, "the owner alone answers now");
+    assert!(!crate::cards::poll_authority(&r.hub, &mut seen).await);
+    // the core down: this tick learns nothing, and re-derives nothing
+    core.stop();
+    assert_eq!(crate::cards::authority_stamp().await, None);
+    assert!(!crate::cards::poll_authority(&r.hub, &mut seen).await);
+}

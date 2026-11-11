@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
 use serde_json::{Map, Value, json};
 
+use super::card;
 use super::people_json;
 use super::requests;
 use super::revoke::{self, Life};
@@ -56,7 +57,17 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.approve"
             | "people.deny"
             | "people.fileRequest"
+            | "people.access"
+            | "people.helper"
+            | "people.job"
+            | "people.revision"
     )
+}
+
+/// The card writes `kith-auth` routes here on the tombstone (C-a, C-b). They widen access, so they run only for a caller
+/// that says `viaSwitch` and only through the daemon (`kith_core::EMBEDDED_WRITES` does not list them).
+fn routed_write(method: &str) -> bool {
+    matches!(method, "people.access" | "people.helper" | "people.job")
 }
 
 /// Where kith serve keeps `cloud-sync.json` for this caller: its `KITH_SERVE_DIR`, else `<its home>/.kith/serve`
@@ -169,11 +180,15 @@ fn authority_record(machine: &Path) -> Record {
 
 /// A marked method that only takes access away. On a damaged record these still go through (the host sent them
 /// because auth.json is a tombstone, and refusing one leaves access in place); a grant never does.
-fn removal_only(method: &str) -> bool {
+fn removal_only(method: &str, params: &Value) -> bool {
     matches!(
         method,
         "people.revoke" | "people.removeBot" | "people.removePerson" | "people.suspend"
-    )
+    ) || (switch(params, "remove")
+        && matches!(
+            method,
+            "people.access" | "people.helper" | "people.job" | "people.agentAccess"
+        ))
 }
 
 /// The methods that only look, which the host's guard marks with `viaSwitch` (`CoreMethod::marked`, `core_verdict`).
@@ -192,6 +207,7 @@ pub(crate) fn is_read(method: &str, params: &Value) -> bool {
             | "people.budgets"
             | "people.ledger"
             | "people.retired"
+            | "people.revision"
     ) || (method == "people.botsCap" && word(params, "amount").is_none())
 }
 
@@ -276,10 +292,18 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
 /// before profiles, grants and env were kept: its empty tables say nothing, and answering "no grant" or "no env" from
 /// them would start a service without what the file gave it.
 /// The keys of the view, and no others: what `mcp-config`, `get`, `exec`, `holders`, `keys` and `account-state` read
-/// (`may` and its rules over people, memberships and presets; the profiles, grants and env). Anything the core holds
+/// (`may` and its rules over people, memberships and presets; the profiles, grants and env), and the hosts kept for every
+/// guest of an agent (`agent_access`: what `agent-access` and the guest's rules over `agent_domains` read; C-b). Anything the core holds
 /// later (`once`, the retired ids, kept hosts, the bots' cap) joins only when someone decides a verb needs it.
-pub(super) const VIEW_KEYS: &[&str] =
-    &["people", "members", "presets", "profiles", "grants", "env"];
+pub(super) const VIEW_KEYS: &[&str] = &[
+    "people",
+    "members",
+    "presets",
+    "profiles",
+    "grants",
+    "env",
+    "agent_access",
+];
 
 pub(super) fn secrets_view(a: &Value, switched: bool) -> std::result::Result<Value, Die> {
     if a.get("secrets_stale").is_some() {
@@ -360,6 +384,11 @@ pub(crate) fn call_in(
         if authority_record(&machine) != Record::Switched {
             return Err(Error::Refused(format!("authority: {NOT_SWITCHED}")));
         }
+    }
+    if routed_write(method) && !switch(params, "viaSwitch") {
+        return Err(Error::Refused(format!(
+            "authority: {method} is for kith-auth's router: it needs viaSwitch"
+        )));
     }
     match method {
         "people.list" => store::read(
@@ -477,6 +506,9 @@ pub(crate) fn call_in(
                 .map_err(|d| store::refusal(&d))?;
             Ok(json!({ "auth": view }))
         }
+        // The authority revision (C-b): a digest of the tables, which changes with any write to them. The host's cards
+        // compare it between polls to re-derive who answers a card once auth.json is a tombstone that never changes.
+        "people.revision" => Ok(json!({ "digest": store::digest(core)? })),
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         // `kith-auth budgets AGENT --json`: the lines are that one JSON line, so a caller that reads the CLI's output reads
         // this one's. A budget that is no number is an error, never "no limit".
@@ -544,7 +576,18 @@ pub(crate) fn call_in(
             let said = store::run_with(
                 core,
                 c,
-                |a| write_in(m, params, c, life, a, &fresh),
+                |a| {
+                    // A router (`dies`) is told a refusal as an answer, to print it the way `kith-auth` does; the
+                    // tables are put back, so nothing of a half-done verb stays.
+                    if !(routed_write(m) && switch(params, "dies")) {
+                        return write_in(m, params, c, life, a, &fresh);
+                    }
+                    let before = a.clone();
+                    write_in(m, params, c, life, a, &fresh).or_else(|d| {
+                        *a = before;
+                        Ok(died(&d))
+                    })
+                },
                 |tx, said| {
                     // A host that routed this write here because auth.json held the tombstone says so (`viaSwitch`).
                     // Its look at the file and this write are two steps. The cutover lifetime lock is what
@@ -559,7 +602,7 @@ pub(crate) fn call_in(
                     if switch(params, "viaSwitch") {
                         let ok = match authority_record(&machine) {
                             Record::Switched => true,
-                            Record::Damaged => removal_only(m),
+                            Record::Damaged => removal_only(m, params),
                             Record::Other => false,
                         };
                         if !ok {
@@ -738,6 +781,64 @@ pub(super) fn write_in(
             need(params, "domain")?,
             switch(params, "remove"),
         )?)),
+        "people.access" => {
+            let (agent, person, kind, value) = (
+                need(params, "agent")?,
+                need(params, "person")?,
+                need(params, "kind")?,
+                need(params, "value")?,
+            );
+            if switch(params, "remove") {
+                return Ok(lines(card::access_remove(a, agent, person, kind, value)?));
+            }
+            let home = home_of(params, kith_kernel::paths::known_home()).map_err(|e| Die {
+                msg: e.to_string(),
+                code: 1,
+            })?;
+            Ok(lines(card::access_grant(
+                a,
+                c,
+                life,
+                &home.to_string_lossy(),
+                (agent, person, kind, value),
+                word(params, "by"),
+            )?))
+        }
+        "people.helper" => {
+            let mode = if switch(params, "remove") {
+                card::HelperMode::Remove
+            } else if switch(params, "once") {
+                card::HelperMode::Once
+            } else {
+                card::HelperMode::Always
+            };
+            Ok(lines(card::helper_set(
+                a,
+                c,
+                need(params, "agent")?,
+                need(params, "person")?,
+                need(params, "helper")?,
+                &mode,
+            )?))
+        }
+        "people.job" => {
+            let (agent, person, name) = (
+                need(params, "agent")?,
+                need(params, "person")?,
+                need(params, "job")?,
+            );
+            if switch(params, "remove") {
+                return Ok(lines(card::job_remove(a, agent, person, name)));
+            }
+            Ok(lines(card::job_decline(
+                a,
+                c,
+                agent,
+                person,
+                name,
+                need(params, "decline")?,
+            )?))
+        }
         "people.removeGrant" => Ok(lines(write::remove_grant(a, c, need(params, "key")?)?)),
         "people.handle" => {
             let uid = if switch(params, "remove") {

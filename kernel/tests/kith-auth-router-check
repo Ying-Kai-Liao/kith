@@ -11,6 +11,10 @@
 #      here, as a step leaves them.
 #   2. Sequences: the take-once (the first launch is allowed "(just this once)", the second refused, on both homes) and `who`
 #      with `handles_stale` set (exit 3 on a switched home, never a wrong person).
+#   2b. C-a / C-b, the card writes: `access` (the always of an escape card, with --by and its refusals), `helper`, `job
+#      --decline`/`--rm` and the removals. The same sequence runs on the file, on the daemon (the lines and refusals must be
+#      the file's, state included), and on the embedded core, where every write exits 3 and changes nothing. The reads
+#      `agent-access` and `jobs` are in the matrix above.
 #   3. Negatives: no route (the writers, the lists that need the file, `door`, bare `bots-cap`), a tombstone of another
 #      module, no core, a core that is not switched, a core held by another process, no kith program, a timeout, a lost
 #      answer, a refusal, a malformed answer, `noCore`: all exit 3 and never an answer. A take-once is sent once and never
@@ -98,6 +102,7 @@ A member writer samuel preset=member >/dev/null
 A helper house amy helper --once >/dev/null          # a "just this once" on a helper
 A job house eve edit >/dev/null                      # a ticked job that grants the helper
 A person tim --revoke >/dev/null
+A agent-access house domain kept.example.com >/dev/null   # a host kept for every guest of house
 A bots-cap 50 >/dev/null
 A handle kai telegram 111 >/dev/null
 A handle samuel telegram 222 >/dev/null
@@ -211,6 +216,16 @@ matrix() {
     run_as "$p" A exec --for writer echo -- sh -c 'echo "T=$TOKEN B=$BASE Z=$Z A=$A M=$M W=$W Q=$Q"'
     run_as "$p" A exec --for house login -- sh -c 'echo "P=$PASS"'
   done
+  # C-b: the edge card's listing and the jobs lists the launch reads, over kith-auth's own code
+  for a in house writer nothere; do
+    run A agent-access "$a"
+    run A agent-access "$a" --json
+    run A jobs "$a"
+    run A jobs "$a" --json
+    for p in eve samuel amy; do run A jobs "$a" --person "$p" --json; done
+  done
+  run A jobs house --domain a.example --json
+  run A jobs house --helper helper --person eve
   KITH_AUTH_PROFILE=echo/work run A get --for writer echo TOKEN
   run A get --for writer --profile echo/kai echo TOKEN
   run A account-state house nothere --json
@@ -307,6 +322,82 @@ iso "the file"
 use_home "$T/sw1"; seq_once "$T/once.sw1"
 cmp -s "$T/once.golden" "$T/once.sw1" && ok "take-once, embedded core: the same answers" || bad "take-once, embedded core" "$(diff "$T/once.golden" "$T/once.sw1")"
 iso "embedded core"
+# --- 2b. the card writes ----------------------------------------------------------------------------------------------------------
+# One sequence of writes and the reads that show their effect. Stdout, exit code and stderr (with the home's path taken out and
+# the clock's milliseconds) are what is compared: the file, then the daemon, must give the same.
+cw() {   # OUT
+  local out=$1
+  : > "$out"
+  run() {
+    local o rc
+    o=$("$@" 2>"$out.e"); rc=$?
+    { echo "\$ $*"; [[ -n $o ]] && echo "$o"; echo "rc=$rc"; sed 's/^/err: /' "$out.e"; } | sed -e "s#$HOME#<H>#g" -e "s#$KERNEL#<K>#g" >> "$out"
+  }
+  mkdir -p "$HOME/shared"
+  run A access house samuel domain docs.example.com
+  run A access house samuel domain docs.example.com                     # the same always twice: one entry
+  run A access house samuel read "$HOME/shared"
+  run A access house samuel write "$HOME/shared/out"
+  run A access house samuel read "$HOME/shared/out/x" --by samuel       # a member approves for themselves
+  run A access house samuel read "$HOME/shared/y" --by kai              # the owner's yes outlasts a person's
+  run A access house kai domain a.example.com                           # the owner: refused
+  run A access house '*' domain a.example.com                           # the everyone row: refused
+  run A access house amy domain a.example.com --by samuel               # only for themselves or their own bot
+  run A access house eve domain a.example.com --by eve
+  run A access house dan domain a.example.com --by dan                  # on a deleted preset: the rules have no answer
+  run A access house tim domain a.example.com                           # revoked, no row of their own
+  run A access house timbot domain a.example.com                        # a bot of a revoked person
+  run A access house botty domain docs.example.com                      # samuel's bot, within what samuel holds
+  run A access house botty domain other.example.com                     # above its owner: refused
+  run A access house botty read "$HOME/shared/out/z" --by samuel
+  run A access house nobody domain a.example.com
+  run A access house samuel domain '*.example.com'                      # not a plain host
+  run A access house samuel read relative/path
+  run A access house samuel read "$KITH_HOME/secrets/auth.json"         # a secret
+  run A access house samuel write "$HOME/.cargo/bin/x"                  # rule W
+  run A access house samuel read "$KERNEL/bin"                          # the kernel is rule W
+  run A access house samuel --by samuel
+  run A access house samuel domain docs.example.com --rm
+  run A access house samuel read "$HOME/shared/out/x" --rm
+  run A access house tim read /nowhere --rm                             # a removal checks nothing
+  run A helper house amy helper
+  run A helper house amy helper                                         # twice: one entry
+  run A helper house amy writer --once
+  run A helper house botty writer                                       # more than samuel holds: refused
+  run A helper house kai helper
+  run A helper house amy nothere
+  run A helper house amy house
+  run A helper house tim helper
+  run A helper house amy helper --rm
+  run A helper house tim helper --rm
+  run A helper house amy
+  run A job house eve edit --decline h1
+  run A job house eve edit --decline h1
+  run A job house eve edit --decline h2
+  run A job house eve nope --decline h1
+  run A job house amy edit --decline h1                                 # amy never ticked it
+  run A job house kai edit --decline h1
+  run A job house eve edit --rm
+  run A job house eve edit --rm
+  run A agent-access house --json
+  run A jobs house --person eve --json
+  run A ledger --json
+  sed -i.bak -E 's/[0-9]{13}/<ms>/g' "$out" && rm -f "$out.bak" "$out.e"
+}
+cw_ledger() { A ledger --json 2>&1 | sed -E 's/[0-9]{13}/<ms>/g'; }
+use_home "$T/gs"; cw "$T/cw.golden"
+[[ $(grep -c '^\$' "$T/cw.golden") -gt 40 ]] && ok "card writes, file: $(grep -c '^\$' "$T/cw.golden") calls" || bad "card writes, file: too few calls"
+grep -q 'samuel may domain docs.example.com beyond the box for house' "$T/cw.golden" && grep -q "kai is the owner" "$T/cw.golden" \
+  && grep -q 'rule W' "$T/cw.golden" && grep -q 'is a secret' "$T/cw.golden" && grep -q 'more than its owner' "$T/cw.golden" \
+  && grep -q 'approves only for themselves' "$T/cw.golden" && grep -q 'stays as it was ticked' "$T/cw.golden" \
+  && ok "card writes, file: the grants and every kind of refusal are in the sequence" || bad "card writes, file: the sequence misses a case"
+# embedded: no daemon, so every write exits 3 and nothing changes (a grant must never run in an embedded core)
+use_home "$T/sw1"
+before=$(cw_ledger)
+cw "$T/cw.sw1"
+if [[ $(cw_ledger) == "$before" ]] && ! grep -q 'may domain\|may call\|stays as it was' "$T/cw.sw1" && grep -c '^rc=3$' "$T/cw.sw1" | grep -q '^[1-9]'; then
+  ok "card writes, embedded core: the writes exit 3 and change nothing"
+else bad "card writes, embedded core: a write ran" "$(grep -B1 -A2 'may domain\|may call' "$T/cw.sw1" | head; diff <(echo "$before") <(cw_ledger) | head -5)"; fi
 if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   use_home "$T/sw2"; seq_once "$T/once.sw2"
   cmp -s "$T/once.golden" "$T/once.sw2" && ok "take-once, daemon: the same answers" || bad "take-once, daemon" "$(diff "$T/once.golden" "$T/once.sw2")"
@@ -316,6 +407,11 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   if grep -q 'env:RT_WORK' "$T/view.out" && ! grep -Eq 'sec-work|sec-kai|pass-owner|pass-sam|pass-lent|"handles"|telegram' "$T/view.out"; then
     ok "secretsView: references and env only, no value, no handle"
   else bad "secretsView: what the core answers" "$(head -c 600 "$T/view.out")"; fi
+  # the card writes through the daemon: after everything above, which reads the home it changes
+  use_home "$T/sw2"
+  cw "$T/cw.sw2"
+  if cmp -s "$T/cw.golden" "$T/cw.sw2"; then ok "card writes, through a daemon: every line, refusal and exit code is the file's"; else
+    bad "card writes, through a daemon: differs from the file" "$(diff "$T/cw.golden" "$T/cw.sw2" | head -30)"; fi
   exec 7>&-; wait "$DPID" 2>/dev/null; DPID=
 fi
 
@@ -381,7 +477,7 @@ mkwrap "$T/w1" pass
 use_home "$T/sw4" "$T/w1/kith"
 for v in "ls" "link telegram 5 ABC123" "door house samuel x@y" "people" "people --matrix" "person samuel name=X" "member house amy" \
          "bots-cap" "bots-cap 60" "invite amy" "exec --secret rs_0123456789abcdef -- true" "ledger" "ledger --rm job:house:eve:edit" "revoke house notion" "grant house notion work" \
-         "preset p mode=default" "bot samuelbot --rm" "handle samuel telegram 5" "job house eve edit --rm" "jobs house"; do
+         "preset p mode=default" "bot samuelbot --rm" "handle samuel telegram 5" "job house eve edit" "agent-access house domain x.example.com"; do
   # shellcheck disable=SC2086
   refuses "no route: $v" A $v
   grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "no route: $v: not today's text" "$(cat "$T/e")"
@@ -453,6 +549,11 @@ for mode in sleep garbage array nocore exit3 exit4 exit5; do
   refuses "core-call $mode: get" A get --for house echo TOKEN
   refuses "core-call $mode: exec (the command does not run)" A exec --for house echo -- touch "$T/ran-$mode"
   [[ ! -e $T/ran-$mode ]] || bad "core-call $mode: exec ran its command"
+  refuses "core-call $mode: access" A access house samuel domain a.example.com --by samuel
+  refuses "core-call $mode: helper --rm" A helper house amy helper --rm
+  refuses "core-call $mode: job --decline" A job house eve edit --decline h1
+  refuses "core-call $mode: agent-access" A agent-access house
+  refuses "core-call $mode: jobs" A jobs house --json
   refuses "core-call $mode: take-once" A resolve helper --person amy --via house --take-once
   [[ $(grep -c 'people.resolve' "$T/m-$mode/calls") == 1 ]] && ok "core-call $mode: the take-once was sent once" \
     || bad "core-call $mode: the take-once was repeated" "$(cat "$T/m-$mode/calls")"
@@ -472,6 +573,33 @@ A resolve house --person samuel --via writer --take-once >/dev/null 2>&1
 A resolve house --person samuel --take-once >/dev/null 2>&1
 A mcp-config house >/dev/null 2>&1; A get --for house echo TOKEN >/dev/null 2>&1; A holders echo >/dev/null 2>&1
 A keys --json >/dev/null 2>&1; A account-state house echo --json >/dev/null 2>&1; A exec --for house echo -- true >/dev/null 2>&1
+# the card writes: every call is a write the core fences (viaSwitch), asked to answer a refusal as an answer (dies), never
+# repeated; a read of the view carries viaSwitch too
+mkwrap "$T/wc" pass
+use_home "$T/sw4" "$T/wc/kith"
+A access house samuel domain a.example.com --by samuel >/dev/null 2>&1
+A access house samuel read /nowhere/x --rm >/dev/null 2>&1
+A helper house amy helper --once >/dev/null 2>&1
+A job house eve edit --decline h9 >/dev/null 2>&1
+A agent-access house --json >/dev/null 2>&1; A jobs house >/dev/null 2>&1
+if python3 - "$T/wc/calls" <<'PY'
+import json, sys
+rows = [l.split(' ', 1) for l in open(sys.argv[1]).read().splitlines()]
+assert [m for m, _ in rows] == ['people.access', 'people.access', 'people.helper', 'people.job', 'people.secretsView', 'people.secretsView'], rows
+for method, body in rows:
+    p = json.loads(body)
+    assert p['viaSwitch'] is True, (method, p)
+    assert 'kernel' in p and 'home' in p, (method, p)
+    if method != 'people.secretsView':
+        assert p['dies'] is True, (method, p)
+a, rm, h, j = [json.loads(b) for m, b in rows[:4]]
+assert (a['agent'], a['person'], a['kind'], a['value'], a['by']) == ('house', 'samuel', 'domain', 'a.example.com', 'samuel') and 'remove' not in a, a
+assert rm['remove'] is True and 'by' not in rm, rm
+assert h['once'] is True and 'remove' not in h, h
+assert j['decline'] == 'h9' and j['job'] == 'edit', j
+PY
+then ok "card writes: viaSwitch and dies on every call, the removal marked remove, by and once only when given"; else bad "card writes: what was sent" "$(cat "$T/wc/calls")"; fi
+
 if python3 - "$T/ws/calls" <<'PY'
 import json, sys
 rows = [l.split(' ', 1) for l in open(sys.argv[1]).read().splitlines()]
