@@ -1015,9 +1015,90 @@ mod embedded_authority {
     }
 
     #[test]
+    fn an_embedded_removal_sends_the_persons_live_claim_to_ending() {
+        use crate::conversations::claims::{
+            Kind, NewClaim, NewTurn, claim, enqueue_turn, reconcile, redeem,
+        };
+        let (_t, m) = machine();
+        let l = Layout::new(&m);
+        let mut core = open_all(&l);
+        reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
+        core.conn()
+            .execute("INSERT INTO people (id) VALUES ('sam')", [])
+            .unwrap();
+        let turn = enqueue_turn(
+            &mut core,
+            &NewTurn {
+                conversation: "c1",
+                agent: "a",
+                engine: "claude",
+                source: "app",
+                person: "sam",
+                prompt: "p",
+                deadline: None,
+                revoke_seen: 0,
+            },
+            2,
+        )
+        .unwrap();
+        let new = NewClaim {
+            conversation: "c1",
+            kind: Kind::Turn,
+            person: "sam",
+            turn: Some(turn),
+            holder_instance: Some("h1"),
+            account: None,
+            process: None,
+            revoke_seen: 0,
+        };
+        let id = claim(&mut core, &new, 3).unwrap().claim_id;
+        redeem(&mut core, id, 4242, "e4242", "h1", 4).unwrap();
+        drop(core);
+
+        let params = json!({"id": "sam", "kernel": m.join("kernel"), "home": m, "env": {}});
+        let out = call_authority_embedded(&paths(&m), "people.removePerson", &params).unwrap();
+        assert!(matches!(out, EmbeddedCall::Answered(_)), "{out:?}");
+        let core = open_all(&l);
+        let state: String = core
+            .conn()
+            .query_row("SELECT state FROM claims WHERE claim_id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            state, "ending",
+            "the removal stops the run; the next daemon re-sends the kill"
+        );
+    }
+
+    #[test]
     fn only_authority_writes_run_embedded() {
         let (_t, m) = machine();
         let e = call_authority_embedded(&paths(&m), "terminal.open", &json!({})).unwrap_err();
         assert!(matches!(e, crate::Error::NoSuchMethod(_)), "{e}");
+    }
+
+    #[test]
+    fn a_write_that_widens_access_never_runs_embedded() {
+        let (_t, m) = machine();
+        let l = Layout::new(&m);
+        drop(open_all(&l));
+        let env = json!({"kernel": m.join("kernel"), "home": m, "env": {}});
+        let mut grant = env.clone();
+        grant["person"] = json!("sam");
+        grant["agent"] = json!("coder");
+        let mut add = env;
+        add["id"] = json!("sam");
+        for (method, params) in [("people.grant", grant), ("people.addPerson", add)] {
+            let e = call_authority_embedded(&paths(&m), method, &params).unwrap_err();
+            assert!(matches!(e, crate::Error::NoSuchMethod(_)), "{method}: {e}");
+        }
+        // A routed read's name is not enough: with an amount `people.botsCap` sets the cap, and a read needs `viaSwitch`.
+        let cap = json!({"amount": "5", "viaSwitch": true});
+        let plain = json!({});
+        for (method, params) in [("people.botsCap", cap), ("people.who", plain)] {
+            let e = call_authority_embedded(&paths(&m), method, &params).unwrap_err();
+            assert!(matches!(e, crate::Error::Refused(_)), "{method}: {e}");
+        }
     }
 }
