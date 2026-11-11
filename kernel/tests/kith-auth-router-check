@@ -63,6 +63,31 @@ use_home() {
   CORE=$KITH_HOME/core
 }
 A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
+DBF=core."db"   # the boundary check keeps that file's name out of source outside core/runtime
+SENT=sentinel-4c1d9e7a   # a key's value: it must reach the (fake) Keychain and no row, call or answer of the core
+# A `security` that keeps items in $FAKE_KC_DIR (FAKE_KC_FAIL=1: it takes nothing), so `set` runs for real.
+mkdir -p "$T/bin"
+cat > "$T/bin/fakesec" <<'PY'
+#!/usr/bin/env python3
+import os, sys
+d = os.environ.get('FAKE_KC_DIR') or '/nonexistent'
+def path(kc, var):
+    return os.path.join(d, (kc + '#' + var).replace('/', '_'))
+if sys.argv[1:2] == ['-i']:
+    t = sys.stdin.read().split()
+    if os.environ.get('FAKE_KC_FAIL'):
+        sys.exit(0)
+    kc, var, hx = t[t.index('-s') + 1], t[t.index('-a') + 1], t[t.index('-X') + 1]
+    open(path(kc, var), 'w').write(bytes.fromhex(hx).decode())
+elif sys.argv[1:2] == ['find-generic-password']:
+    kc, var = sys.argv[sys.argv.index('-s') + 1], sys.argv[sys.argv.index('-a') + 1]
+    try:
+        print(open(path(kc, var)).read())
+    except OSError:
+        sys.exit(44)
+PY
+chmod +x "$T/bin/fakesec"
+export KITH_SECURITY_BIN=$T/bin/fakesec
 
 # --- the fixture, as a real auth.json ---------------------------------------------------------------------------------------
 G=$T/g
@@ -140,6 +165,7 @@ mkdir -p "$KITH_HOME/services"
 printf '{"kind": "mcp", "secrets": ["TOKEN"], "mcp": {"command": "echo", "args": ["serve", "$KITH_AGENT"], "env": {"BASE": "b-$KITH_AGENT"}}}\n' > "$KITH_HOME/services/echo.json"
 printf '{"kind": "login", "secrets": ["PASS"]}\n' > "$KITH_HOME/services/login.json"
 printf '{"kind": "cli", "secrets": ["K"]}\n' > "$KITH_HOME/services/later.json"   # not personal, until iso turns it
+printf '{"kind": "connector", "description": "a host connector"}\n' > "$KITH_HOME/services/calendar.json"   # no secrets: its profile is the host's
 printf 'needs: [echo]\nhelpers: [helper]\njobs:\n  - name: edit\n    label: Edit things\n    helpers: [helper]\n' > "$KITH_HOME/agents/house/role/capabilities.yaml"
 printf 'needs: [echo]\n' > "$KITH_HOME/agents/writer/role/capabilities.yaml"
 export RT_WORK=sec-work RT_KAI=sec-kai RT_TEAM=sec-team RT_OWNER_PASS=pass-owner RT_SAM_PASS=pass-sam RT_LENT_PASS=pass-lent RT_SHARED_PASS=pass-shared RT_LATER=sec-later
@@ -412,6 +438,252 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   cw "$T/cw.sw2"
   if cmp -s "$T/cw.golden" "$T/cw.sw2"; then ok "card writes, through a daemon: every line, refusal and exit code is the file's"; else
     bad "card writes, through a daemon: differs from the file" "$(diff "$T/cw.golden" "$T/cw.sw2" | head -30)"; fi
+  # --- 2c. S-b, the secret writers --------------------------------------------------------------------------------------------
+  # set, grant, revoke, connect, disconnect, env and `agent-access ... domain` on the file, through the daemon (must be the
+  # file's, state included) and on the embedded core (every write exits 3, nothing changes). A fake `security` keeps the
+  # Keychain's items in a folder, so `set` runs for real and the check can see what was stored and where.
+  sb() {   # OUT: the writers, then the reads that show their effect
+    local out=$1
+    : > "$out"
+    export FAKE_KC_DIR=$out.kc
+    rm -rf "$FAKE_KC_DIR"; mkdir -p "$FAKE_KC_DIR"
+    run() {
+      local o rc
+      o=$("$@" 2>"$out.e"); rc=$?
+      { echo "\$ $*"; [[ -n $o ]] && echo "$o"; echo "rc=$rc"; sed 's/^/err: /' "$out.e"; } | sed -e "s#$HOME#<H>#g" -e "s#$KERNEL#<K>#g" >> "$out"
+    }
+    runi() {   # STDIN-TEXT command...: the text is never printed (it holds a value)
+      local in=$1 o rc; shift
+      o=$(printf '%s' "$in" | "$@" 2>"$out.e"); rc=$?
+      { echo "\$ <stdin> $*"; [[ -n $o ]] && echo "$o"; echo "rc=$rc"; sed 's/^/err: /' "$out.e"; } | sed -e "s#$HOME#<H>#g" -e "s#$KERNEL#<K>#g" >> "$out"
+    }
+    runi "{\"TOKEN\": \"$SENT-1\"}" A set echo/new --stdin-json
+    runi "{\"TOKEN\": \"$SENT-1\"}" A set echo/new --stdin-json                    # the same set twice: the same result
+    runi "{\"TOKEN\": \"$SENT-2\"}" A set echo/new --stdin-json --grant house
+    runi "{\"TOKEN\": \"$SENT-2\"}" A set echo/new --stdin-json --grant house      # ... and the same grant
+    runi "{\"TOKEN\": \"$SENT-3\"}" A set echo/second --stdin-json --grant writer  # a list of three after the fixture's two
+    runi "{\"PASS\": \"$SENT-4\"}" A set login/mine --stdin-json                   # a personal service: the owner's profile
+    runi "{\"PASS\": \"$SENT-4\"}" A set login/mine --stdin-json --grant helper
+    runi "{\"TOKEN\": \"$SENT-5\"}" A set echo/team --stdin-json                   # an existing profile keeps what it has
+    runi "{\"TOKEN\": \"$SENT-6\"}" A set echo --stdin-json                        # not <service>/<account>
+    runi "{\"TOKEN\": \"$SENT-6\"}" A set Echo/x --stdin-json
+    runi "{\"NOPE\": \"$SENT-6\"}" A set echo/x --stdin-json                       # a name the service does not declare
+    runi "{\"TOKEN\": \"\"}" A set echo/x --stdin-json
+    runi "{\"TOKEN\": 5}" A set echo/x --stdin-json
+    runi 'not json' A set echo/x --stdin-json
+    runi "{\"TOKEN\": \"$SENT-6\"}" A set echo/x --stdin-json --grant 'no good'
+    runi "{\"TOKEN\": \"$SENT-6\"}" A set nosuch/x --stdin-json
+    run A grant house echo echo/work,echo/kai
+    run A grant writer@samuel echo echo/kai
+    run A grant writer@nobody echo echo/kai                                        # no such person now
+    run A grant house echo login/x                                                 # not an echo profile
+    run A grant house nosuch work
+    run A grant --all echo echo/new
+    run A grant house,helper echo echo/new,echo/second --json
+    run A grant nobody echo echo/new --json                                        # an agent this Mac has no package for
+    run A grant nobody echo echo/new                                               # (the text form never refused it)
+    run A grant house calendar calendar/host
+    run A grant house echo echo/ghost --json
+    run A connect house echo
+    run A connect writer echo --profile echo/work
+    run A connect writer echo --profile echo/work --json
+    run A connect writer echo --profile bad
+    run A connect house echo --profile echo/nothing
+    run A connect house nothere
+    run A connect house login
+    run A connect helper calendar
+    run A connect helper calendar --json
+    run A connect writer@samuel echo
+    run A disconnect helper calendar
+    run A disconnect helper calendar --json
+    run A disconnect writer echo
+    run A disconnect house nothere --json
+    run A disconnect house@x echo
+    run A connect writer calendar
+    run A disconnect writer calendar
+    run A revoke writer echo --profile echo/work
+    run A revoke writer echo --profile echo/work --json
+    run A revoke house echo --profile echo/new --json
+    run A revoke helper echo
+    run A revoke helper echo --json
+    run A revoke ghost echo --json                                                 # an agent that never existed
+    run A revoke oldagent echo --json                                              # a retired agent's row can still go
+    run A revoke house
+    run A env house echo
+    run A env house echo NEW=1 Z=zz A=
+    run A env house echo M= NEW=2 B=b
+    run A env house echo NEW= NEW=again
+    run A env house nothere X=1
+    run A env house echo bad
+    run A env writer echo W=
+    run A env oldagent echo Q=
+    run A agent-access house domain new.example.com
+    run A agent-access house domain new.example.com
+    run A agent-access house domain '*.example.com'
+    run A agent-access house domain new.example.com --rm
+    run A agent-access house domain never.example.com --rm
+    run A agent-access house
+    run A keys --json
+    run A holders echo
+    run A holders login --json
+    run A granted echo
+    run A granted --for writer echo
+    run A granted --for house echo --json
+    run A mcp-config house
+    run A account-state house echo --json
+    run A account-state helper login --json
+    run A ledger --json
+    run A agent-access house --json
+    echo "kc: $(ls "$FAKE_KC_DIR" | sort | tr '\n' ' ')" >> "$out"
+    sed -i.bak -E -e 's/[0-9]{13}/<ms>/g' -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}/<t>/g' "$out" && rm -f "$out.bak" "$out.e"
+  }
+  sb_state() { { A keys --json; A ledger --json; A granted echo; A holders login; A mcp-config house; A agent-access house --json; } 2>&1 | sed -E -e 's/[0-9]{13}/<ms>/g' -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}/<t>/g'; }
+
+  # the file's answers (gs is a file home), then the daemon's
+  use_home "$T/gs"
+  sb "$T/sb.golden"
+  rows=$(grep -c '^\$' "$T/sb.golden")
+  [[ $rows -gt 70 ]] && ok "secret writers, file: $rows calls" || bad "secret writers, file: too few calls ($rows)"
+  grep -q '"profile": "echo/new", "service": "echo", "vars": \["TOKEN"\], "granted": "house"' "$T/sb.golden" \
+    && grep -q 'writer may use echo as echo/kai, echo/work, echo/new\|may use echo as' "$T/sb.golden" \
+    && grep -q 'helper may now use calendar as calendar/host' "$T/sb.golden" \
+    && grep -q 'helper may no longer use calendar' "$T/sb.golden" \
+    && grep -q 'declares' "$T/sb.golden" && grep -q "no person 'nobody'" "$T/sb.golden" \
+    && grep -q 'every guest of house may reach new.example.com' "$T/sb.golden" \
+    && ok "secret writers, file: the writes, the host connector and every kind of refusal are in the sequence" \
+    || bad "secret writers, file: the sequence misses a case" "$(head -c 1500 "$T/sb.golden")"
+  # the embedded core: no daemon, so every write exits 3 and changes nothing, and no Keychain item is written
+  use_home "$T/sw1"
+  before=$(sb_state)
+  sb "$T/sb.sw1"
+  if [[ $(sb_state) == "$before" ]] && [[ -z $(ls "$T/sb.sw1.kc") ]] && grep -c '^rc=3$' "$T/sb.sw1" | grep -q '^[1-9]' \
+     && ! grep -q 'may now use\|may use echo as\|may no longer use\|"vars": \["[A-Z]*"\], "granted"\|may reach new' "$T/sb.sw1"; then
+    ok "secret writers, embedded core: the writes exit 3, change nothing and store no key"
+  else bad "secret writers, embedded core: a write ran" "$(grep -B1 -A2 'may now use\|"vars": \["[A-Z]*"\], "granted"' "$T/sb.sw1" | head; diff <(echo "$before") <(sb_state) | head -5; ls "$T/sb.sw1.kc")"; fi
+  # through the daemon: every line, refusal, exit code and the state the reads show are the file's
+  use_home "$T/sw2"
+  sb "$T/sb.sw2"
+  if cmp -s "$T/sb.golden" "$T/sb.sw2"; then ok "secret writers, through a daemon: every line, refusal and exit code is the file's, state included"; else
+    bad "secret writers, through a daemon: differs from the file" "$(diff "$T/sb.golden" "$T/sb.sw2" | head -40)"; fi
+  # the core never holds a value: not in a row, not in what was sent (the Keychain has them), and the references are there
+  if ! grep -rqa --exclude='*.sock' "$SENT" "$T/sw2/home/.kith/core"; then ok "secret writers: no value is in the core's files"; else bad "secret writers: a value reached the core's files"; fi
+  [[ $(sqlite3 "$T/sw2/home/.kith/core/$DBF" "SELECT source FROM secret_vars WHERE profile = 'echo/new'") == "keychain:kith/echo/new#TOKEN" ]] \
+    && grep -q "$SENT-2" "$T/sb.sw2.kc/kith_echo_new#TOKEN" && ok "secret writers: the core holds the reference and the Keychain the value" \
+    || bad "secret writers: reference and value" "$(sqlite3 "$T/sw2/home/.kith/core/$DBF" "SELECT * FROM secret_vars" | head -5)"
+  # the core refuses a guest's run itself (the file never did; a guest's MCP server runs outside the box)
+  use_home "$T/sw2"
+  before=$(sb_state)
+  KITH_PERSON=samuel A grant house echo echo/work >"$T/o-g" 2>"$T/e-g"; rc=$?
+  KITH_PERSON=samuel A env house echo GUEST=1 >"$T/o-g2" 2>"$T/e-g2"; rc2=$?
+  if [[ $rc == 2 && $rc2 == 2 && $(sb_state) == "$before" ]] && grep -q 'not available to this run' "$T/e-g" "$T/e-g2"; then
+    ok "secret writers: a guest's run is refused by the core (exit 2), nothing changes"
+  else bad "secret writers: a guest's run" "rc=$rc rc2=$rc2 $(cat "$T/e-g" "$T/e-g2")"; fi
+  # the order: the Keychain item first, the core after, and what each failure leaves
+  mkwrap_set() {   # DIR MODE: the probe answers (a switched daemon); the core's set does as MODE says; the rest goes to the real program
+    mkdir -p "$1"
+    cat > "$1/kith" <<EOF
+#!/bin/sh
+if [ "\$1 \$2" = "kernel core-call" ]; then
+  params=\$(cat)
+  printf '%s %s\n' "\$3" "\$params" >> "$1/calls"
+  case "\$3" in
+    people.revision) echo '{"digest":"0123456789abcdef"}'; exit 0 ;;
+    people.secretSet)
+      case "$2" in
+        refuse) echo 'authority: not switched: authority is back on auth.json' >&2; exit 4 ;;
+        nodaemon) echo 'no core daemon answers' >&2; exit 3 ;;
+        lost) exit 5 ;;
+        applied-lost) printf '%s' "\$params" | "$BIN" "\$@" > /dev/null; exit 5 ;;
+      esac ;;
+  esac
+  printf '%s' "\$params" | "$BIN" "\$@"; exit \$?
+fi
+exec "$BIN" "\$@"
+EOF
+    chmod +x "$1/kith"
+    : > "$1/calls"
+  }
+  setone() {   # NAME PROFILE: one `set` with a fresh Keychain folder; the exit code
+    export FAKE_KC_DIR=$T/kc-$1; rm -rf "$FAKE_KC_DIR"; mkdir -p "$FAKE_KC_DIR"
+    printf '{"TOKEN": "%s-%s"}' "$SENT" "$1" | A set "$2" --stdin-json >"$T/o-$1" 2>"$T/e-$1"; echo $?
+  }
+  use_home "$T/sw2"
+  # the Keychain refuses: nothing is written in the core, and the core was never asked to write
+  mkwrap_set "$T/wo1" pass
+  use_home "$T/sw2" "$T/wo1/kith"
+  rc=$(FAKE_KC_FAIL=1 setone kcfail echo/kcfail)
+  if [[ $rc == 1 ]] && grep -q 'Keychain did not take the key' "$T/e-kcfail" && ! grep -q 'people.secretSet' "$T/wo1/calls" \
+     && [[ -z $(sqlite3 "$T/sw2/home/.kith/core/$DBF" "SELECT profile FROM secret_profiles WHERE profile = 'echo/kcfail'") ]]; then
+    ok "set, the Keychain refuses: exit 1, the core is untouched and was not asked"
+  else bad "set, the Keychain refuses" "rc=$rc $(cat "$T/e-kcfail") $(cat "$T/wo1/calls")"; fi
+  # a guest's run is refused before the Keychain
+  : > "$T/wo1/calls"
+  export FAKE_KC_DIR=$T/kc-guest; rm -rf "$FAKE_KC_DIR"; mkdir -p "$FAKE_KC_DIR"
+  printf '{"TOKEN": "%s-guest"}' "$SENT" | KITH_PERSON=samuel A set echo/guest --stdin-json >"$T/o-guest" 2>"$T/e-guest"; rc=$?
+  if [[ $rc == 2 && -z $(ls "$FAKE_KC_DIR") ]] && grep -q 'not available to this run' "$T/e-guest" && ! grep -q 'people.secretSet' "$T/wo1/calls"; then
+    ok "set, a guest's run: exit 2 before any Keychain write"
+  else bad "set, a guest's run" "rc=$rc $(cat "$T/e-guest") $(ls "$FAKE_KC_DIR")"; fi
+  # the core refuses after the Keychain took the key: an orphan item, reported, nothing in the core
+  mkwrap_set "$T/wo2" refuse
+  use_home "$T/sw2" "$T/wo2/kith"
+  rc=$(setone refuse echo/refuse)
+  if [[ $rc == 4 && -n $(ls "$T/kc-refuse") ]] && grep -q 'the key is in the Keychain' "$T/e-refuse" && [[ $(grep -c 'people.secretSet' "$T/wo2/calls") == 1 ]]; then
+    ok "set, the core refuses: the Keychain item stays, exit 4, said, and the call was sent once"
+  else bad "set, the core refuses" "rc=$rc $(cat "$T/e-refuse") $(cat "$T/wo2/calls")"; fi
+  mkwrap_set "$T/wo3" nodaemon
+  use_home "$T/sw2" "$T/wo3/kith"
+  rc=$(setone nodaemon echo/nodaemon)
+  [[ $rc == 3 && -n $(ls "$T/kc-nodaemon") ]] && grep -q 'the key is in the Keychain' "$T/e-nodaemon" \
+    && ok "set, the daemon goes away after the Keychain: exit 3, said" || bad "set, the daemon goes away" "rc=$rc $(cat "$T/e-nodaemon")"
+  # a lost answer: the call is not sent again; one look at the core's tables says whether it took it
+  mkwrap_set "$T/wo4" lost
+  use_home "$T/sw2" "$T/wo4/kith"
+  rc=$(setone lost echo/lost)
+  if [[ $rc == 5 ]] && grep -q 'did not say whether' "$T/e-lost" && [[ $(grep -c 'people.secretSet' "$T/wo4/calls") == 1 ]]; then
+    ok "set, a lost answer the core never applied: exit 5, sent once"
+  else bad "set, a lost answer (not applied)" "rc=$rc $(cat "$T/e-lost") $(cat "$T/wo4/calls")"; fi
+  mkwrap_set "$T/wo5" applied-lost
+  use_home "$T/sw2" "$T/wo5/kith"
+  rc=$(setone appliedlost echo/appliedlost)
+  if [[ $rc == 0 ]] && grep -q '"profile": "echo/appliedlost"' "$T/o-appliedlost" && [[ $(grep -c 'people.secretSet' "$T/wo5/calls") == 1 ]]; then
+    ok "set, a lost answer the core did apply: reported as done, sent once"
+  else bad "set, a lost answer (applied)" "rc=$rc $(cat "$T/o-appliedlost") $(cat "$T/e-appliedlost")"; fi
+  # no value ever crosses the socket: nothing the wrappers logged holds one
+  if ! grep -qa "$SENT" "$T"/wo*/calls; then ok "set: no call to the core carries a value"; else bad "set: a value was sent to the core" "$(grep -a "$SENT" "$T"/wo*/calls | head -2)"; fi
+  # what every write sends: viaSwitch, dies, the names and never a value
+  mkwrap_set "$T/wsb" pass
+  use_home "$T/sw2" "$T/wsb/kith"
+  export FAKE_KC_DIR=$T/kc-sent; mkdir -p "$FAKE_KC_DIR"
+  printf '{"TOKEN": "%s-sent"}' "$SENT" | A set echo/sent --stdin-json --grant house >/dev/null 2>&1
+  A grant writer echo echo/sent >/dev/null 2>&1
+  A connect writer echo --profile echo/work >/dev/null 2>&1
+  A revoke writer echo --profile echo/work >/dev/null 2>&1
+  A disconnect writer echo >/dev/null 2>&1
+  A env house echo K=v >/dev/null 2>&1
+  A agent-access house domain sent.example.com >/dev/null 2>&1
+  if python3 - "$T/wsb/calls" "$SENT" <<'PY'
+import json, sys
+text = open(sys.argv[1]).read()
+assert sys.argv[2] not in text
+rows = [l.split(' ', 1) for l in text.splitlines()]
+methods = [m for m, _ in rows]
+assert methods.count('people.revision') == 1 and methods.index('people.revision') < methods.index('people.secretSet'), methods
+writes = {m: json.loads(b) for m, b in rows if m not in ('people.secretsView', 'people.revision')}
+for m, p in writes.items():
+    assert p['viaSwitch'] is True and p['dies'] is True, (m, p)
+assert methods.count('people.secretSet') == 1 and methods.count('people.secretEnv') == 1 and methods.count('people.agentAccess') == 1
+s = writes['people.secretSet']
+assert s['profile'] == 'echo/sent' and s['vars'] == ['TOKEN'] and s['grant'] == 'house', s
+assert writes['people.secretEnv']['pairs'] == [['K', 'v']], writes['people.secretEnv']
+sg = [json.loads(b) for m, b in rows if m == 'people.secretGrant']
+assert sg[0]['agents'] == ['writer'] and sg[0]['profiles'] == ['echo/sent'] and 'ifHave' not in sg[0] and not sg[0]['knownOnly'], sg[0]
+assert sg[1]['agents'] == ['writer'] and sg[1]['profiles'] == ['echo/work'] and sg[1]['ifHave'] == {'writer': ['echo/sent']}, sg[1]
+rv = [json.loads(b) for m, b in rows if m == 'people.secretRevoke']
+assert rv[0]['profile'] == 'echo/work' and 'dropHostProfiles' not in rv[0], rv[0]
+# the stub daemon holds no grants, so disconnect has nothing held and sends nothing; its call is in the daemon comparison
+assert len(rv) == 1, rv
+PY
+  then ok "secret writers: the probe comes first; viaSwitch and dies on every write, names and never a value"; else bad "secret writers: what was sent" "$(cat "$T/wsb/calls" | head -c 2500)"; fi
   exec 7>&-; wait "$DPID" 2>/dev/null; DPID=
 fi
 
@@ -476,8 +748,8 @@ calls() { wc -l < "$1/calls" | tr -d ' '; }
 mkwrap "$T/w1" pass
 use_home "$T/sw4" "$T/w1/kith"
 for v in "ls" "link telegram 5 ABC123" "door house samuel x@y" "people" "people --matrix" "person samuel name=X" "member house amy" \
-         "bots-cap" "bots-cap 60" "invite amy" "exec --secret rs_0123456789abcdef -- true" "ledger" "ledger --rm job:house:eve:edit" "revoke house notion" "grant house notion work" \
-         "preset p mode=default" "bot samuelbot --rm" "handle samuel telegram 5" "job house eve edit" "agent-access house domain x.example.com"; do
+         "bots-cap" "bots-cap 60" "invite amy" "exec --secret rs_0123456789abcdef -- true" "ledger" "ledger --rm job:house:eve:edit" "browser work chrome" \
+         "preset p mode=default" "bot samuelbot --rm" "handle samuel telegram 5" "job house eve edit" "once put"; do
   # shellcheck disable=SC2086
   refuses "no route: $v" A $v
   grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "no route: $v: not today's text" "$(cat "$T/e")"

@@ -211,3 +211,14 @@ broken-always-bot-above	INVARIANT	AlwaysBotBelowOwner	fail
 switched-always	INVARIANT	NeverAlwaysWritten	fail
 switched-always	INVARIANT	NeverSelfAlways	fail
 switched-always	INVARIANT	NeverMemberLost	fail
+# --- S-b (2026-11-12): the secret grant for a person's own account (agent@P), written by kith-auth through the core on the tombstone: need_person in the one locked step; a removal takes the grants ---
+switched-grant	INVARIANT	TypeOK	pass
+switched-grant	INVARIANT	NoGrantForGone	pass
+switched-grant	INVARIANT	R4	pass
+switched-grant	INVARIANT	NoOrphan	pass
+switched-grant	PROPERTY	R1	pass
+switched-grant	PROPERTY	R6	pass
+broken-grant-no-person	INVARIANT	NoGrantForGone	fail
+broken-forget-keeps-grant	INVARIANT	NoGrantForGone	fail
+# probe: a grant is written
+switched-grant	INVARIANT	NeverGrantWritten	fail

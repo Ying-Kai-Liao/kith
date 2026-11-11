@@ -1,0 +1,7 @@
+\* the grant is written with no need_person(P) in its step
+CoreGate = TRUE
+Switched = TRUE
+ItemsOn = TRUE
+Removal = TRUE
+GrantOn = TRUE
+GrantNoPerson = TRUE

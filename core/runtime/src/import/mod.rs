@@ -644,6 +644,40 @@ pub(crate) fn same_answer(ctx: &Ctx, layout: &Layout, conn: &Connection) -> Resu
     Ok(out)
 }
 
+/// The `helper_since` of every membership row of the file against the core's (m0016): when each helper was allowed.
+fn helper_since_diffs(want: &Value, have: &Value) -> Vec<String> {
+    let flat = |v: &Value| -> std::collections::BTreeMap<(String, String), Value> {
+        let mut out = std::collections::BTreeMap::new();
+        for (agent, rows) in v
+            .get("members")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
+            for (person, r) in rows.as_object().into_iter().flatten() {
+                if let Some(h) = r.get("helper_since") {
+                    out.insert((agent.clone(), person.clone()), h.clone());
+                }
+            }
+        }
+        out
+    };
+    let (w, h) = (flat(want), flat(have));
+    w.keys()
+        .chain(h.keys().filter(|k| !w.contains_key(*k)))
+        .filter(|k| w.get(*k) != h.get(*k))
+        .map(|(agent, person)| {
+            format!(
+                "members {agent}/{person}: helper_since (auth.json {}, core.db {})",
+                w.get(&(agent.clone(), person.clone()))
+                    .unwrap_or(&Value::Null),
+                h.get(&(agent.clone(), person.clone()))
+                    .unwrap_or(&Value::Null)
+            )
+        })
+        .collect()
+}
+
 /// The `env` of the file against the core's (m0023), by agent, service and variable name, and the order a service's
 /// variables come in (`mcp-config` prints them so). The values are settings, but the line says only that one differs.
 fn env_diffs(want: &Value, have: &Value) -> Vec<String> {
@@ -709,6 +743,13 @@ fn secret_diffs(want: &Value, have: &Value) -> Vec<String> {
                 .into(),
         );
     }
+    if have.get("helper_since_stale").is_some() {
+        out.push(
+            "core.db was imported before a helper's `since` was kept (memberships.helper_since); import again (kith kernel core-migrate --authority --force)"
+                .into(),
+        );
+    }
+    out.extend(helper_since_diffs(want, have));
     out.extend(env_diffs(want, have));
     let table = |v: &Value, t: &str| {
         v.get(t)

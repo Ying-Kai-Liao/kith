@@ -12,7 +12,7 @@
 //! | `members.<agent>.<person>`                  | `memberships (agent, person)`; a `null` row is REFUSED (it means no row and no `*` fallback) |
 //! |   `preset` `mode` `model` `budget`          |   text columns                                       |
 //! |   `trusted`                                 |   `trusted` 0/1                                      |
-//! |   `deny` `env` `helpers` `access` `jobs` `helper_once` `access_by` `access_since` | JSON text columns, order kept |
+//! |   `deny` `env` `helpers` `access` `jobs` `helper_once` `access_by` `access_since` `helper_since` | JSON text columns, order kept |
 //! | `presets.<name>` `mode` `trusted` `deny`    | `presets`                                            |
 //! | `invites.<code>` `person` `expires`         | `invites` (every code, expired ones too: the owner's next write prunes them) |
 //! | `retired.<id>` `at`                         | `retired`                                            |
@@ -71,6 +71,7 @@ const MEMBER_KEYS: &[&str] = &[
     "helper_once",
     "access_by",
     "access_since",
+    "helper_since",
 ];
 const TOP_KEYS: &[&str] = &[
     "people",
@@ -442,8 +443,8 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value, services: &Services) -
             object(r, &what)?;
             conn.execute(
                 "INSERT INTO memberships (agent, person, preset, mode, trusted, deny, model, env, helpers, budget, \
-                 access, jobs, helper_once, access_by, access_since) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                 access, jobs, helper_once, access_by, access_since, helper_since) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
                     agent,
                     person,
@@ -460,6 +461,7 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value, services: &Services) -
                     json(r, "helper_once"),
                     json(r, "access_by"),
                     json(r, "access_since"),
+                    json(r, "helper_since"),
                 ],
             )?;
         }
@@ -705,7 +707,7 @@ pub(super) fn clear(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "DELETE FROM people; DELETE FROM memberships; DELETE FROM presets; DELETE FROM invites; DELETE FROM retired; DELETE FROM agent_access; \
          DELETE FROM secret_profiles; DELETE FROM secret_vars; DELETE FROM secret_grants; DELETE FROM secret_env; DELETE FROM secret_stale; \
-         DELETE FROM authority_settings WHERE key IN ('owner_bots_budget', 'handles_stale');",
+         DELETE FROM authority_settings WHERE key IN ('owner_bots_budget', 'handles_stale', 'helper_since_stale');",
     )?;
     Ok(())
 }

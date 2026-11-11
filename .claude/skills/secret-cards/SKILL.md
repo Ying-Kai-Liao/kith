@@ -57,7 +57,7 @@ written-iff-saved after every step.
 
 ## Sync commit
 
-**732dfef5fa4a31a190277b2ffb02895d3da3ff1a** (2026-11-04, M2-12: the core's secret cards, `core/runtime/src/cards/{mod,secret}.rs` over `secrets/`, covered from here; the model gained `Withdraw`, `Crash`, `Lapse`, `Commit` and three switches, 26 rows pass. The host rows gained `Withdraw` too; it found a host gap, fixed in the same change: the host's `card_withdraw` (from `delivered` and `withdraw_entry`) closed a card whose key was being written. Both callers now skip a card whose `Slot` is held, `secret::claimed`; test `a_withdrawal_waits_for_a_key_being_written`). Before that: **0872ea58892e0f648d4206bd64e455b25cdf2d5c** (2026-11-03: rust-rebuild at 0872ea58892e with F5 (kith-auth refuses built-in agents; narrower only). Re-run: `run.sh` every row as expected (14 rows), `cargo test cards::secret` and `a_secret_card_is_written_at_most_once` pass, `kith-auth-secret-check` passes. Read since the last sync: `secret.rs` gained the holder redirect, `openKeyCard` (an owner-opened card through the same `card_open`/provide write path), `answerable_by` and the card lane; the claim, slot, `write_key` and deny steps are unchanged. The resume claim added in `store/cards.rs` is a different claim from the write claim. Earlier: **b241d7bbd3372fb6bd31bf1024c10b179ef2645b** (origin/main on 2026-10-28; first written at ed2ceb63, after the secret
+**f5b92e19daddcfdfc92162abfc38be2b63dd3e4d** (2026-11-12, M2-23 S-b: kith-auth set/grant/revoke/env/connect/disconnect route to the core on the tombstone, Keychain first then core; the secret-cards model gained the `switched*` rows (the Keychain is written at most once while the card is open; a core failure leaves an orphan item only); `run.sh` every row as expected.) Earlier: **732dfef5fa4a31a190277b2ffb02895d3da3ff1a** (2026-11-04, M2-12: the core's secret cards, `core/runtime/src/cards/{mod,secret}.rs` over `secrets/`, covered from here; the model gained `Withdraw`, `Crash`, `Lapse`, `Commit` and three switches, 26 rows pass. The host rows gained `Withdraw` too; it found a host gap, fixed in the same change: the host's `card_withdraw` (from `delivered` and `withdraw_entry`) closed a card whose key was being written. Both callers now skip a card whose `Slot` is held, `secret::claimed`; test `a_withdrawal_waits_for_a_key_being_written`). Before that: **0872ea58892e0f648d4206bd64e455b25cdf2d5c** (2026-11-03: rust-rebuild at 0872ea58892e with F5 (kith-auth refuses built-in agents; narrower only). Re-run: `run.sh` every row as expected (14 rows), `cargo test cards::secret` and `a_secret_card_is_written_at_most_once` pass, `kith-auth-secret-check` passes. Read since the last sync: `secret.rs` gained the holder redirect, `openKeyCard` (an owner-opened card through the same `card_open`/provide write path), `answerable_by` and the card lane; the claim, slot, `write_key` and deny steps are unchanged. The resume claim added in `store/cards.rs` is a different claim from the write claim. Earlier: **b241d7bbd3372fb6bd31bf1024c10b179ef2645b** (origin/main on 2026-10-28; first written at ed2ceb63, after the secret
 cards, host d8713608 and kernel 7863e2e9, and the limit cards, adcfb2f7, which only add a branch after the secret
 routing in `respondPermission`). Between the two, the covered files changed only around access cards (the escape
 card's once grants in `store/cards.rs`, `cards::answer` writing the entry first), the grants ledger and other
@@ -172,3 +172,21 @@ first four host variants have the last four at FALSE FALSE TRUE TRUE.
 | `verification/secrets/checks.tsv` | variant, kind, property, expected verdict |
 | `verification/secrets/run.sh` | runs every row (the switches per variant are in its `switches`); `--show`, `--list` |
 | `verification/secrets/drift.sh` | the covered files changed since the sync commit |
+
+## The switched write path (2026-11-12, S-b)
+
+On the authority tombstone `kith-auth set <profile> --stdin-json [--grant AGENT]` (what a card's `provide` runs through
+`write_key`) writes the Keychain item first (`keychain_put`, read back), then makes ONE core call, `people.secretSet`
+(`core/runtime/src/authority/secret_writes.rs`), which records the reference `keychain:kith/<profile>#VAR` and the grant in
+one transaction. The core gets variable NAMES, never a value. Before the Keychain write kith-auth probes `people.revision`:
+no daemon, or authority back on auth.json, is exit 3 with nothing stored. The card's claim stays held across the whole call,
+so it covers both steps; nothing in `cards/secret.rs` changes.
+
+The model has it as the `switched` variant (`Switched`): `KcWrite`, then `CoreCommit` / `CoreFail` / `CoreLostApplied`
+(`CoreLostNotApplied` is `CoreFail`: the read-back finds nothing and kith-auth exits 5), and the invariant `GrantHasItem`
+(`ref => kc`). `writes` counts what the core recorded, so an orphan item left by a refusal is not a second write (a retry
+reuses the item, `add-generic-password -U`); the value changing under the same reference is the `fail-writes` gap again.
+Breaks that must fail: `switched-core-first` (`GrantHasItem`: a crash between leaves a grant with no key),
+`switched-lost-as-fail` (`WrittenEndsSaved`: no read-back after a lost answer), `switched-claim-gap` (`AtMostOneWrite`: the
+claim let go between the two steps). The host's own save after the write (`Finish`) is not a place kith-auth's process
+dies, so `Crash` is only before the core commit in these rows.

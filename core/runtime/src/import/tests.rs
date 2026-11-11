@@ -1728,3 +1728,58 @@ fn the_dry_run_lists_the_suspensions_it_would_record() {
     );
     assert_eq!(f.count("open_removals"), 0);
 }
+
+// --- helper_since (m0016) ----------------------------------------------------------------------------------------------
+
+#[test]
+fn a_helpers_since_goes_in_is_compared_and_a_database_from_before_is_stale() {
+    let f = Fixture::new();
+    let file = json!({
+        "people": {"kai": {"owner": true}, "sam": {"name": "Sam"}},
+        "members": {"house": {"sam": {"preset": "member", "helpers": ["garden"], "helper_since": {"garden": 1_700_000_000_000_i64}}}},
+    });
+    f.auth(&file.to_string());
+    f.import(&mut MemSink::default()).unwrap();
+    assert_eq!(
+        query(
+            &f,
+            "SELECT helper_since FROM memberships WHERE person = 'sam'"
+        ),
+        [[s(r#"{"garden":1700000000000}"#)]]
+    );
+    let diffs =
+        |f: &Fixture| super::same_answer(&f.ctx, &f.layout, open_all(&f.layout).conn()).unwrap();
+    assert_eq!(diffs(&f), Vec::<String>::new());
+    // the file moves on: a later "since"
+    let mut later = file.clone();
+    later["members"]["house"]["sam"]["helper_since"]["garden"] = json!(1_700_000_000_001_i64);
+    f.auth(&later.to_string());
+    let said = diffs(&f).join("\n");
+    assert!(said.contains("members house/sam: helper_since"), "{said}");
+    // what m0016 leaves on a database that had memberships: the mark, which a forced re-import clears
+    let core = open_all(&f.layout);
+    core.conn()
+        .execute_batch(
+            "UPDATE memberships SET helper_since = NULL; \
+             INSERT INTO authority_settings (key, value) VALUES ('helper_since_stale', '1');",
+        )
+        .unwrap();
+    drop(core);
+    f.auth(&file.to_string());
+    let said = diffs(&f).join("\n");
+    assert!(
+        said.contains("imported before a helper's `since` was kept"),
+        "{said}"
+    );
+    f.run(
+        AuthorityOptions {
+            dry_run: false,
+            force: true,
+        },
+        &FakeKeychain::default(),
+        &mut MemSink::default(),
+    )
+    .unwrap();
+    assert_eq!(diffs(&f), Vec::<String>::new());
+    assert_eq!(f.count("authority_settings"), 0);
+}

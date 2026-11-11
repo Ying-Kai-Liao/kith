@@ -8,6 +8,7 @@ import io
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -20,6 +21,10 @@ os.environ.update(KITH_AUTH=str(T / 'auth.json'), HOME=str(T / 'home'), KITH_HOM
                   KITH_SERVE_DIR=str(T / 'serve'), KITH_SERVE_PORT='1')
 for k in ('KITH_STATE', 'HQ_STATE', 'KITH_PERSON', 'KITH_AGENT', 'HQ_HOME'):
     os.environ.pop(k, None)
+# this Mac's own folder, fixed: `env` expands $KITH_* from paths() into the environment, which would otherwise move it
+os.environ['KITH_STATE'] = str(T / 'machine')
+# no Keychain tool (CI is Linux): every item reads as absent
+os.environ['KITH_SECURITY_BIN'] = '/usr/bin/false'
 (T / 'home').mkdir()
 AGENTS = ['house', 'garden']
 for a in AGENTS:
@@ -36,6 +41,13 @@ loader = importlib.machinery.SourceFileLoader('kith_auth', str(KERNEL / 'bin' / 
 spec = importlib.util.spec_from_loader('kith_auth', loader)
 ka = importlib.util.module_from_spec(spec)
 loader.exec_module(ka)
+ka.keychain_put = lambda kc, var, value: True   # no real Keychain: what is checked is what the writers record
+# S-b, the secret writers: an API-key service, a login (personal: its profiles are the owner's unless named) and a host
+# connector with no secrets (its `<id>/host` profile is marked as the host's own), on this Mac's services folder
+ka.mac_services().mkdir(parents=True, exist_ok=True)
+for _name, _spec in {'sk': {'kind': 'cli', 'secrets': ['KEY']}, 'lg': {'kind': 'login', 'secrets': ['PASS']},
+                     'hc': {'kind': 'connector'}}.items():
+    (ka.mac_services() / f'{_name}.json').write_text(json.dumps(_spec))
 
 OWNER = 'kai'
 PEOPLE = ['sam', 'amy']
@@ -63,6 +75,16 @@ def run(*argv):
     return True
 
 
+def run_stdin(values, *argv):
+    """run(), with a JSON object on stdin (set --stdin-json)."""
+    real = sys.stdin
+    sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps(values).encode()))
+    try:
+        return run(*argv)
+    finally:
+        sys.stdin = real
+
+
 def reset():
     if ka.AUTH.exists():
         ka.AUTH.unlink()
@@ -82,6 +104,21 @@ def allowed(agent, who):
 HAND = ['row', 'row-auto', 'grant', 'invite']
 SETTINGS = ['', '', 'preset=guest', 'preset=member', 'helpers=garden', 'deny=Bash', 'budget=7', 'mode=auto',
             'mode=bypassPermissions'] + [f'env.{k}=x' for k in ENV_OK + ENV_BAD]
+SECRET_SVCS = ['sk', 'lg', 'hc']
+SECRET_PROFILES = ['sk/a', 'sk/b', 'lg/main', 'lg/alt']
+# who a grant names: an agent, or an agent for one person's own account (a person who may not exist, too)
+GRANT_WHO = AGENTS + [f'{a}@{p}' for a in AGENTS for p in PEOPLE + ['ghost']]
+SECRET_OPS = [
+    st.tuples(st.just('sset'), st.sampled_from(SECRET_PROFILES), st.sampled_from([None] + AGENTS)),
+    st.tuples(st.just('sgrant'), st.sampled_from(GRANT_WHO), st.sampled_from(SECRET_SVCS), st.sampled_from(['a', 'b', 'main', 'alt', 'host'])),
+    st.tuples(st.just('srevoke'), st.sampled_from(AGENTS), st.sampled_from(SECRET_SVCS), st.sampled_from([None, 'a', 'main', 'host'])),
+    st.tuples(st.just('connect'), st.sampled_from(AGENTS), st.sampled_from(SECRET_SVCS), st.sampled_from([None, 'a', 'main', 'host'])),
+    st.tuples(st.just('disconnect'), st.sampled_from(AGENTS), st.sampled_from(SECRET_SVCS)),
+    st.tuples(st.just('senv'), st.sampled_from(AGENTS), st.sampled_from(SECRET_SVCS), st.sampled_from(['FOO=1', 'FOO=', 'BAR=2'])),
+    # hand edits of a profile: shared on purpose (`*`), someone's own, lent to amy, or nobody's in particular
+    st.tuples(st.just('hand-profile'), st.sampled_from(SECRET_PROFILES), st.sampled_from(['*', 'sam', 'lent', 'plain'])),
+]
+SECRET_KINDS = {'sset', 'sgrant', 'srevoke', 'connect', 'disconnect', 'senv'}
 OPS = st.one_of(
     st.tuples(st.just('person'), st.sampled_from(PEOPLE)),
     st.tuples(st.just('person-rm'), st.sampled_from(PEOPLE)),
@@ -107,6 +144,8 @@ OPS = st.one_of(
     st.tuples(st.just('job-decline'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(['h1', 'h2'])),
     st.tuples(st.just('agent-access'), st.sampled_from(AGENTS), st.sampled_from(HOSTS)),
     st.tuples(st.just('agent-access-rm'), st.sampled_from(AGENTS), st.sampled_from(HOSTS)),
+    # S-b, the secret writers the router sends to the core on the tombstone
+    *SECRET_OPS,
 )
 
 
@@ -129,6 +168,13 @@ JOBS = st.tuples(st.sampled_from(PEOPLE), st.booleans(), st.sampled_from(['job',
                  st.sampled_from(['', '--once']), st.sampled_from(['', '', 'revoke', 'member-rm'])).map(
     lambda t: {'': [], 'revoke': [('revoke', t[0])], 'member-rm': [('member-rm', 'house', t[0])]}[t[4]]
     + [(t[2], 'house', who) + ((t[3],) if t[2] == 'helper' else ()) for who in ([t[0]] if t[1] else []) + BOTS])
+# a profile that is shared on purpose, someone's own or lent, and then a writer that names it again: the owner, the `*` and the
+# people it is lent to must survive (random commands alone rarely hit the same profile twice)
+SECRET_PAIR = st.tuples(st.sampled_from(SECRET_PROFILES), st.sampled_from(['*', 'sam', 'lent', 'plain']),
+                        st.sampled_from(['sset', 'sgrant', 'connect', 'srevoke']), st.sampled_from(AGENTS)).map(
+    lambda t: [('hand-profile', t[0], t[1]),
+               {'sset': ('sset', t[0], t[3]), 'sgrant': ('sgrant', t[3], *t[0].split('/')),
+                'connect': ('connect', t[3], *t[0].split('/')), 'srevoke': ('srevoke', t[3], *t[0].split('/'))}[t[2]]])
 # A table first (people, their bots, rows with settings), then anything: random commands alone rarely build one.
 SEQUENCES = st.tuples(
     st.lists(st.tuples(st.just('hand'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(HAND)),
@@ -143,6 +189,7 @@ SEQUENCES = st.tuples(
     st.sampled_from([[], [('cap', '50')]]),
     st.lists(ACCESS, max_size=3).map(lambda xs: [op for x in xs for op in x]),
     st.lists(JOBS, max_size=2).map(lambda xs: [op for x in xs for op in x]),
+    st.lists(SECRET_PAIR, max_size=3).map(lambda xs: [op for x in xs for op in x]),
     st.lists(OPS, max_size=8),
 ).map(lambda parts: [op for part in parts for op in part])
 
@@ -172,6 +219,30 @@ def apply(op):
             a.setdefault('invites', {})[f'HAND{who.upper()}'] = {'person': who, 'expires': time.time() + 600}
         else:
             a.setdefault('members', {}).setdefault(agent, {})[who] = {'mode': 'auto'} if what == 'row-auto' else {}
+        ka.AUTH.write_text(json.dumps(a))
+        return True
+    if kind == 'sset':
+        _, profile, grant_agent = op
+        var = 'KEY' if profile.startswith('sk/') else 'PASS'
+        return run_stdin({var: f'v-{profile}'}, 'set', profile, '--stdin-json', *(['--grant', grant_agent] if grant_agent else []))
+    if kind == 'sgrant':
+        return run('grant', op[1], op[2], f'{op[2]}/{op[3]}')
+    if kind == 'srevoke':
+        return run('revoke', op[1], op[2], *(['--profile', f'{op[2]}/{op[3]}'] if op[3] else []))
+    if kind == 'connect':
+        return run('connect', op[1], op[2], *(['--profile', f'{op[2]}/{op[3]}'] if op[3] else []))
+    if kind == 'disconnect':
+        return run('disconnect', op[1], op[2])
+    if kind == 'senv':
+        return run('env', op[1], op[2], op[3])
+    if kind == 'hand-profile':
+        _, profile, what = op
+        a = json.loads(ka.AUTH.read_text())
+        prof = a.setdefault('profiles', {}).setdefault(profile, {})
+        if what == 'lent':
+            prof['with'] = ['amy']
+        elif what in ('*', 'sam'):
+            prof['person'] = what
         ka.AUTH.write_text(json.dumps(a))
         return True
     if kind in ('access', 'access-rm'):
@@ -274,6 +345,20 @@ def state_properties():
             else:
                 # (c) the owner's bots together are capped by owner_bots_budget, when set.
                 assert r['budget'] == (a.get('owner_bots_budget') or ''), f'owner bot {who}: budget {r["budget"]!r}'
+    # (S-b) a profile no one is named for is the owner's on a personal service (a login) and shared otherwise; and a guest is
+    # never handed the owner's login unless it was lent to them (a bot of a guest has the guest's say, not the owner's)
+    for name, prof in a['profiles'].items():
+        if not prof.get('person'):
+            want = OWNER if name.startswith('lg/') else None
+            assert ka.owner_of(a, name) == want, f'{name}: owner {ka.owner_of(a, name)!r}, expected {want!r}'
+    for agent in AGENTS:
+        for who in PEOPLE + BOTS:
+            profile, _why, _ = ka.granted(a, agent, 'lg', who)
+            if profile and who in a['people']:
+                belongs = ka.owner_of(a, profile)
+                lent = a['profiles'].get(profile, {}).get('with', [])
+                assert belongs in (None, ka.canonical(a, who)) or ka.canonical(a, who) in lent, \
+                    f'{who} is handed {profile}, which is {belongs}\'s and not lent to them'
     for b in bot_ids(a):
         # a bot belongs to a person who still exists.
         assert ka.canonical(a, a['people'][b]['bot_of']) in a['people'], f'bot {b} outlived its owner'
@@ -300,6 +385,34 @@ def test_access_never_exceeds_the_grant(ops):
             p = before['people'].get(op[1])
             assert (op[1] in a['retired']) == (p is not None and not p.get('bot_of')) or op[1] in before['retired'], \
                 f'{op[1]}: retired {op[1] in a["retired"]}'
+        if op[0] in SECRET_KINDS:
+            # (S-b) the secret writers change profiles, grants and env and nothing else; a profile that is there keeps its owner,
+            # its `*` and the people it is lent to; only a host connector's mark is ever dropped, and only by a disconnect;
+            # a refusal writes nothing.
+            for table in ('people', 'members', 'presets', 'invites', 'retired', 'agent_access'):
+                assert a[table] == before[table], f'{op}: changed {table}'
+            for name, prof in before['profiles'].items():
+                if name in a['profiles']:
+                    for k in ('person', 'with'):
+                        assert a['profiles'][name].get(k) == prof.get(k), f'{op}: {name} lost its {k}'
+                else:
+                    assert op[0] == 'disconnect' and prof == ka.HOST_STORE, f'{op}: dropped the profile {name}: {prof}'
+            if op[0] == 'senv':
+                assert a['grants'] == before['grants'] and a['profiles'] == before['profiles'], f'{op}: env touched more'
+            else:
+                assert a['env'] == before['env'], f'{op}: touched env'
+            if not ok:
+                assert a == before, f'{op}: refused but wrote'
+            if op[0] == 'sset' and ok:
+                _, profile, grant_agent = op
+                var = 'KEY' if profile.startswith('sk/') else 'PASS'
+                assert a['profiles'][profile][var] == f'keychain:kith/{profile}#{var}', f'{op}: no reference'
+                assert all(v == f'keychain:kith/{profile}#{var}' for k, v in a['profiles'][profile].items()
+                           if k == var), f'{op}: the reference is not the Keychain item'
+                if grant_agent:
+                    assert profile in ka.grant_list(a['grants'].get(grant_agent, {}).get(profile.split('/')[0])), f'{op}: not granted'
+            if op[0] == 'disconnect' and ok:
+                assert op[2] not in a['grants'].get(op[1], {}), f'{op}: still connected'
         if op[0] in ('person', 'bot') and op[1] not in before['people'] and op[1] in before['retired']:
             assert not ok and op[1] not in a['people'], f'{op}: a retired id was given to someone new'
         if op[0] == 'member-rm' and ok and op[2] != EVERYONE:

@@ -57,3 +57,6 @@ AlwaysNoMay = FALSE
 AlwaysSplit = FALSE
 DemoteKeeps = FALSE
 AlwaysBotNoCut = FALSE
+GrantOn = FALSE
+GrantNoPerson = FALSE
+ForgetKeepsGrant = FALSE

@@ -464,6 +464,19 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ),
         ("people helper echo ann scratch --once", "people.helper"),
         ("people job echo ann tidy --decline abc", "people.job"),
+        (
+            "people secret-set github/work --grant echo",
+            "people.secretSet",
+        ),
+        (
+            "people secret-grant github --known-only",
+            "people.secretGrant",
+        ),
+        (
+            "people secret-revoke echo github --profile github/work",
+            "people.secretRevoke",
+        ),
+        ("people secret-env echo github", "people.secretEnv"),
         ("people revision", "people.revision"),
         ("people ledger --person ann", "people.ledger"),
         (

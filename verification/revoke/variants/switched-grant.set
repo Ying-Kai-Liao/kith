@@ -1,0 +1,6 @@
+\* switched (#875) with the secret grant for P's own account (S-b): kith-auth on the tombstone writes it through the core, need_person in the step
+CoreGate = TRUE
+Switched = TRUE
+ItemsOn = TRUE
+Removal = TRUE
+GrantOn = TRUE
