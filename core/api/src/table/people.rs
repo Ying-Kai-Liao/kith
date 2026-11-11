@@ -484,6 +484,12 @@ pub(super) const ROWS: &[Method] = &[
         &["people", "budgets"],
     ),
     people(
+        "people.secretsView",
+        "The tables `kith-auth mcp-config`, `exec`, `get`, `holders`, `keys` and `account-state` read, in auth.json's shape (`auth`): people, memberships and presets for who a run is for, the secret profiles (where each variable's value lives, `keychain:..`, never the value), the grants and the per-service `env`. No invite codes and no chat handles. Refused on a database imported before profiles, grants and env were kept (import again first).",
+        &[KERNEL, HOME, ENV, VIA],
+        &["people", "secrets-view"],
+    ),
+    people(
         "people.ledger",
         "The grants ledger: every grant that outlives one run, for anyone but the owner (always answers of escape cards, ticked jobs, listed helpers, a person's own service grants, the hosts kept for every guest of an agent), one row each with the `key` that `people.removeGrant` takes.",
         &[

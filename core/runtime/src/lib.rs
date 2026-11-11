@@ -17,7 +17,7 @@
 //!   lock held.
 //!
 //!   The one exception, until M2-18: [`call_authority_embedded`] runs the five writes in [`EMBEDDED_WRITES`] (kith-auth's
-//!   mirror of a revoke, with no daemon up) and the nine routed reads in [`EMBEDDED_READS`] (as reads, through the switch). Each is a claim transaction, and a removal ends the person's claims
+//!   mirror of a revoke, with no daemon up) and the ten routed reads in [`EMBEDDED_READS`] (as reads, through the switch). Each is a claim transaction, and a removal ends the person's claims
 //!   (`revoke_everywhere`). That is safe because they only narrow access: four take it away, and `people.undo` puts
 //!   back exactly what a suspension took. They run under the lock at the current generation, take no claim and say no
 //!   hello to a holder. The kills they return are dropped, and the next daemon's `end_gone` sends them again. Any
@@ -279,6 +279,7 @@ pub const EMBEDDED_READS: &[&str] = &[
     "people.budgets",
     "people.ledger",
     "people.botsCap",
+    "people.secretsView",
 ];
 
 /// Whether `method` is one [`call_authority_embedded`] may run: a narrowing write or a routed read. A name check only

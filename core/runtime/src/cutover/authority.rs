@@ -6,15 +6,15 @@
 //! |------------------|------------------------------------------------------------------------------------------------------|
 //! | `tombstones`     | the caller's `auth.json`. (The host vault's rows in serve.db are not tombstoned: the host moves them itself at its first unlock, M2-7.) |
 //! | `import`         | `import::run_in` (M2-8, `kith kernel core-migrate --authority`): idempotent, a snapshot first, `--dry-run`, `--force`, the Keychain items sealed into the envelope |
-//! | `same_answer`    | `import::same_answer`: per person owner, revoked (yes/no), `bot_of`, `was`; the `retired` ids; the order of people; then `check.rs`: `may`, `resolve`, `resolve_bot`, `cut_off` over every person x agent x via x once, at the caller's "now" (so a grant that has expired or not started yet counts as the answer it gives now). Also compared, by name: the profiles (person, lent to, browser, which variables and whether each source differs; never a value) and the grants (agent -> service -> profiles in order); the host guard does not read them, but `retired`, `person --rm --unused` and the rollback rest on them, and a core imported before they were kept (`secrets_stale`) is a difference. NOT compared: the contents of invites, presets, `owner_bots_budget`, a bot's caps, `env`, and when a revoke or a grant was written. None of them is read by the host guard today (`may`, `resolve`, `resolve_bot`, `cut_off`); the host reading one of them is the point at which it joins the compare |
+//! | `same_answer`    | `import::same_answer`: per person owner, revoked (yes/no), `bot_of`, `was`; the `retired` ids; the order of people; then `check.rs`: `may`, `resolve`, `resolve_bot`, `cut_off` over every person x agent x via x once, at the caller's "now" (so a grant that has expired or not started yet counts as the answer it gives now). Also compared, by name: the profiles (person, lent to, browser, which variables and whether each source differs; never a value), the grants (agent -> service -> profiles in order) and `env` (agent, service and variable names, and the order of a service's variables; a value is only said to differ) since m0023; the host guard does not read them, but `retired`, `person --rm --unused` and the rollback rest on them, and a core imported before they were kept (`secrets_stale`) is a difference. NOT compared: the contents of invites, presets, `owner_bots_budget`, a bot's caps, and when a revoke or a grant was written. None of them is read by the host guard today (`may`, `resolve`, `resolve_bot`, `cut_off`); the host reading one of them is the point at which it joins the compare |
 //! | `fingerprint`    | serve.db and its WAL (size, mtime), the number of vault rows in it, and the digest of core.db's authority tables (so a write made only through the core changes it); the framework adds auth.json's inode, size and mtime |
 //! | `digest`         | the first 16 hex of the SHA-256 of core.db's authority tables, as the marker stores it                |
-//! | `export_back`    | core.db -> auth.json, the shape `kith-auth` reads: the tables from core.db (people, members, presets, invites, retired, `agent_access`, the budget, `profiles` and `grants`) over the pre-cutover copy's other keys (`env`, `once`, a person's `root` / `kith` / `agents` ...). The core wins for every key it holds: a profile or a grant deleted in the core does not come back from the copy. Only a core imported before lane B's tables were filled (`secrets_stale`) keeps the copy's `profiles` and `grants` |
+//! | `export_back`    | core.db -> auth.json, the shape `kith-auth` reads: the tables from core.db (people, members, presets, invites, retired, `agent_access`, the budget, `profiles`, `grants` and `env`) over the pre-cutover copy's other keys (`once`, a person's `root` / `kith` / `agents` ...). The core wins for every key it holds: a profile or a grant deleted in the core does not come back from the copy. Only a core imported before lane B's tables were filled (`secrets_stale`) keeps the copy's `profiles`, `grants` and `env` |
 //! | `restore_secrets`| the envelope's `keychain:` records -> the OS store, before `export_back`                              |
 //!
 //! # What the file cannot say once it is a tombstone
-//! `export_back` needs the keys the core never held (`env`, `once`, a person's `root` / `kith` / `agents`; and `profiles` /
-//! `grants` for a core imported before they were kept). They come from the copy `tombstone::ensure` kept beside the file
+//! `export_back` needs the keys the core never held (`once`, a person's `root` / `kith` / `agents`; and `profiles` /
+//! `grants` and `env` for a core imported before they were kept). They come from the copy `tombstone::ensure` kept beside the file
 //! (`auth.json.pre-cutover-<time>`, the newest); with none, those tables are written empty and the report says so.
 //!
 //! # Refused on purpose
@@ -652,6 +652,14 @@ pub(crate) fn merge_back_with(base: Option<Value>, snap: &Value, keep: Option<&K
         out.insert(
             "grants".into(),
             grants_back(old("grants"), snap.get("grants")),
+        );
+        // m0023: the core holds `env` too (the snapshot leaves it out when empty), so one it no longer has does not come
+        // back from the old copy either.
+        out.insert(
+            "env".into(),
+            snap.get("env")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(Map::new())),
         );
     }
     Value::Object(out)

@@ -321,6 +321,10 @@ fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
     if !grants.is_empty() {
         auth.insert("grants".to_owned(), Value::Object(grants));
     }
+    let env = read_env(tx)?;
+    if !env.is_empty() {
+        auth.insert("env".to_owned(), Value::Object(env));
+    }
     auth.insert("agent_access".to_owned(), Value::Object(agent_access));
     auth.insert("invites".to_owned(), Value::Object(invites));
     auth.insert("retired".to_owned(), Value::Object(retired));
@@ -415,6 +419,33 @@ fn read_grants(tx: &Connection) -> Result<Map<String, Value>> {
             }
             Some(Value::Array(list)) => list.push(Value::String(profile)),
             Some(first) => *first = Value::Array(vec![first.clone(), Value::String(profile)]),
+        }
+    }
+    Ok(out)
+}
+
+/// `env` of auth.json from `secret_env`: agent -> service -> VAR -> value, the variables of a service in the order the
+/// file wrote them (`seq`; `mcp-config` prints them in that order). Plain settings, never a secret.
+fn read_env(tx: &Connection) -> Result<Map<String, Value>> {
+    let mut out = Map::new();
+    let mut q = tx.prepare(
+        "SELECT agent, service, var, value FROM secret_env ORDER BY agent, service, seq, var",
+    )?;
+    let mut rows = q.query([])?;
+    while let Some(r) = rows.next()? {
+        let (agent, service, var): (String, String, String) = (r.get(0)?, r.get(1)?, r.get(2)?);
+        let value = json(r, 3, "secret_env.value")?.unwrap_or(Value::Null);
+        let Value::Object(by_service) = out
+            .entry(agent)
+            .or_insert_with(|| Value::Object(Map::new()))
+        else {
+            continue;
+        };
+        if let Value::Object(vars) = by_service
+            .entry(service)
+            .or_insert_with(|| Value::Object(Map::new()))
+        {
+            vars.insert(var, value);
         }
     }
     Ok(out)

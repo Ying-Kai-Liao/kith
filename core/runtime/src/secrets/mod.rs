@@ -270,7 +270,9 @@ impl Envelope {
                 "kith-core: no profile '{profile}' (granted to {agent} for {service}; kith-auth set {profile} <var>)"
             )));
         };
-        if let (Some(owner), lent, false) = (&row.0, &row.1, person.is_empty()) {
+        // `*` is shared on purpose (the import keeps it since m0023; NULL said it before)
+        let owned_by = row.0.as_ref().filter(|o| o.as_str() != "*");
+        if let (Some(owner), lent, false) = (owned_by, &row.1, person.is_empty()) {
             let lent: Vec<String> = lent
                 .as_deref()
                 .and_then(|t| serde_json::from_str(t).ok())

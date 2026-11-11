@@ -1096,7 +1096,12 @@ mod embedded_authority {
         // A routed read's name is not enough: with an amount `people.botsCap` sets the cap, and a read needs `viaSwitch`.
         let cap = json!({"amount": "5", "viaSwitch": true});
         let plain = json!({});
-        for (method, params) in [("people.botsCap", cap), ("people.who", plain)] {
+        for (method, params) in [
+            ("people.botsCap", cap),
+            ("people.who", plain.clone()),
+            // the secret view hands out where each login lives: through the switch only
+            ("people.secretsView", plain),
+        ] {
             let e = call_authority_embedded(&paths(&m), method, &params).unwrap_err();
             assert!(matches!(e, crate::Error::Refused(_)), "{method}: {e}");
         }
