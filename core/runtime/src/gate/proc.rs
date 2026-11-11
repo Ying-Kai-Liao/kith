@@ -17,6 +17,12 @@ pub(crate) trait Liveness {
     /// True only when the system says there is no such process. An error, a refusal or a missing record is not "gone":
     /// a failed probe must never free a live holder.
     fn gone(&self, pid: u32) -> bool;
+    /// True when the process `pid` (recorded with start `recorded`) is gone but its process group still has a
+    /// process and the record is from this boot: the one rule `procstart::orphan_group`. A test double whose processes
+    /// have no groups has none.
+    fn orphan_group(&self, _pid: u32, _recorded: &str) -> bool {
+        false
+    }
 }
 
 /// The real system.
@@ -28,6 +34,9 @@ impl Liveness for System {
     }
     fn gone(&self, pid: u32) -> bool {
         pid_gone(pid)
+    }
+    fn orphan_group(&self, pid: u32, recorded: &str) -> bool {
+        procstart::orphan_group(pid, recorded).is_some()
     }
 }
 

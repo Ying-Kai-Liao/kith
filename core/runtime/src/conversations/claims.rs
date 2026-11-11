@@ -10,7 +10,7 @@
 //! | 5 reconcile after a generation bump | [`reconcile`] |
 //! | 6 revoke a person | [`revoke_person`] |
 //! | 7 a different holder instance | [`different_holder`] |
-//! | `ending` -> `ended` once the pid is gone | [`end_gone`] |
+//! | `ending` -> `ended` once the pid and its process group are gone | [`end_gone`] |
 //! | an exit on a usage limit: mark out, requeue | [`report`] -> `accounts::failover` (M3-9b) |
 //!
 //! The rules the writer-lock model (`verification/writer-lock/Holder.tla`, switch `RedeemWrite`) checks, and the
@@ -21,15 +21,16 @@
 //! - **Release on a new holder instance** is a CAS too: an unlisted `claimed` claim becomes `ended`, so a later redeem
 //!   fails (`release_unlisted`).
 //! - A `running` claim the holder does not list is never `ended` straight away: it goes to `ending` and stays the writer
-//!   (the partial unique index `claims_one_writer` blocks a second claim) until its recorded pid is confirmed gone
-//!   ([`end_gone`]) or the holder reports the exit of that same pid ([`report`]).
+//!   (the partial unique index `claims_one_writer` blocks a second claim) until its recorded pid and the process group
+//!   it led are confirmed gone ([`end_gone`]) or the holder reports the exit of that same pid ([`report`]).
 //! - A `done` or `exit` report ends a `running` or `ending` claim only when it names the recorded pid. One that names
 //!   another pid (a respawn that lost the lock) changes nothing. One that names no pid on a claim with a recorded pid
 //!   moves it to `ending` (still the writer): [`end_gone`] then ends it once that pid is gone. `busy` follows the same
 //!   pid rule. Reports are keyed by `(claim_id, kind, pid)` (migration 81), so the real writer's own report is
 //!   never shadowed by another process's.
 //! - A `--direct` (`external`) claim has no stub and no holder entry: reconcile and a holder change leave it alone, and
-//!   only its recorded pid being gone ends it ([`end_gone`]).
+//!   only its recorded pid and that pid's process group being gone end it ([`end_gone`]): a terminal claimer leads its
+//!   job's group and the MCP servers it started share it, so a live group is still the writer's.
 //! - The may check is the caller's, but the revoke it saw is carried in: [`revoke_epoch`] before the check, passed in
 //!   [`NewClaim::revoke_seen`], refused in the transaction if [`revoke_person`] bumped it since. [`redeem`] needs no
 //!   epoch: [`revoke_person`] moves live claims off `claimed`, so a later redeem fails its CAS.
@@ -47,7 +48,7 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 
 use crate::db::{Core, RecordedProc};
 use crate::error::{Error, Result};
-use crate::gate::{Liveness, holder_alive};
+use crate::gate::{Liveness, same_process};
 
 /// `meta` key: the core generation whose reconcile has committed. Claims are refused until it equals the core's.
 pub(super) const RECONCILED: &str = "claims_reconciled_generation";
@@ -206,6 +207,41 @@ pub(crate) fn claim_high_water(core: &Core) -> Result<i64> {
         [],
         |r| r.get(0),
     )?)
+}
+
+/// How many claims are live, by state, for `kith core status`. An `ending` claim is one whose stop was sent and whose
+/// process group still runs (or has not been probed since).
+pub(crate) fn live_counts(core: &Core) -> Result<[(&'static str, i64); 3]> {
+    let mut out = [("claimed", 0), ("running", 0), ("ending", 0)];
+    for (state, n) in &mut out {
+        *n = core.conn().query_row(
+            "SELECT COUNT(*) FROM claims WHERE state = ?1",
+            [*state],
+            |r| r.get(0),
+        )?;
+    }
+    Ok(out)
+}
+
+/// How many external (`--direct`) claims are held only by a live process group: the claimer is gone but the group it
+/// led still runs in this boot (a background job keeping the conversation). For `kith core status`.
+pub(crate) fn group_held(core: &Core, live: &dyn Liveness) -> Result<i64> {
+    let mut st = core.conn().prepare(
+        "SELECT pid, pid_started FROM claims
+         WHERE kind = 'external' AND state IN ('claimed', 'running', 'ending')
+           AND pid IS NOT NULL AND pid_started IS NOT NULL",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+    let mut n = 0;
+    for r in rows {
+        let (pid, started) = r?;
+        if u32::try_from(pid)
+            .is_ok_and(|p| live.start(p).is_none() && live.orphan_group(p, &started))
+        {
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 fn reconciled(tx: &Transaction<'_>) -> Result<Option<i64>> {
@@ -881,14 +917,19 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
     })
 }
 
-/// True when the system says this recorded process is gone: no such pid, or the pid now has another start time (reused).
-/// A probe that cannot tell is not "gone", and neither is a claim whose start time is the old `lstart` text (the stub
-/// still records it): that only ends when the pid is gone.
+/// True when the system says this recorded process and everything it started in its group are gone: the pid has another
+/// start time (reused, which the system does not do while a group of that id has a process left), or there is no such
+/// pid and no orphan group of it ([`Liveness::orphan_group`]: a holder spawn's stub leads its group; its engine runs in
+/// it and may outlive it). A group at a gone pid whose record is not from this boot (a reboot, an empty or `lstart`
+/// record) is a stranger's and holds nothing. A probe that cannot tell is not "gone".
 fn recorded_gone(live: &dyn Liveness, pid: u32, started: &str) -> bool {
-    !holder_alive(live, pid, started)
+    match live.start(pid) {
+        Some(current) => !same_process(started, &current),
+        None => live.gone(pid) && !live.orphan_group(pid, started),
+    }
 }
 
-/// `ending -> ended` (and a `--direct` run's `claimed -> ended`), only once the recorded process is confirmed gone. Reads, probes outside any transaction, then one
+/// `ending -> ended` (and a `--direct` run's `claimed -> ended`), only once the recorded process and its group are confirmed gone. Reads, probes outside any transaction, then one
 /// CAS per claim that still names the same process. Returns the claims it ended.
 pub(crate) fn end_gone(core: &mut Core, live: &dyn Liveness, now: i64) -> Result<Vec<i64>> {
     let mut candidates: Vec<(i64, i64, String)> = Vec::new();
