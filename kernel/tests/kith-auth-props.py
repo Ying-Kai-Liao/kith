@@ -23,7 +23,8 @@ for k in ('KITH_STATE', 'HQ_STATE', 'KITH_PERSON', 'KITH_AGENT', 'HQ_HOME'):
     os.environ.pop(k, None)
 # this Mac's own folder, fixed: `env` expands $KITH_* from paths() into the environment, which would otherwise move it
 os.environ['KITH_STATE'] = str(T / 'machine')
-# no Keychain tool (CI is Linux): every item reads as absent
+# no Keychain tool, on every OS so a run reads the same on a Mac and in CI (a developer's real Keychain must not leak in):
+# every item reads as absent
 os.environ['KITH_SECURITY_BIN'] = '/usr/bin/false'
 (T / 'home').mkdir()
 AGENTS = ['house', 'garden']

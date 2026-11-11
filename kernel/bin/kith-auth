@@ -270,6 +270,10 @@ class Routed(Exception):
 
 
 _ROUTE = None   # (verb, args, as_json) of a verb in ROUTES, set by main; read by load_auth
+_APP_ONLY = None   # the verb, when it is one of APP_ONLY and was asked of this home's own auth.json; set by main, read by load_auth
+# The people-admin writes. Once auth.json is the authority tombstone the Kith app (the host's people methods) is how people
+# are added, changed and removed: the host sends these to the core, and kith-auth on the tombstone says so and exits 3.
+APP_ONLY = ('member', 'person', 'bot', 'invite', 'preset', 'handle', 'link')
 _AS_JSON = False   # a secret writer was asked for --json (connect, disconnect): route_fail says it as JSON
 _VIEW = None    # the core's tables in auth.json's shape (people.secretsView), set by route_secret_read; read by load_auth
 
@@ -302,6 +306,9 @@ def load_auth(write=False):
         # with this text when the shape of the verb has no route.
         if _ROUTE and not write and e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
             raise Routed(str(e))
+        if _APP_ONLY and e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
+            die(f'{_APP_ONLY} is app-only now that authority moved to the core: on a switched Mac, manage people in the Kith '
+                f'app. ({e})', 3)
         die(str(e), 3)
     except ValueError as e:
         die(f'{AUTH}: invalid JSON ({e})')
@@ -874,7 +881,7 @@ def cmd_helper_mcp(agent, decision):
         f = files.get(server)
         if not f or json.loads(f.read_text()).get('kind') != 'mcp':
             return
-        if granted(load_auth(), agent, f.stem)[0]:
+        if granted(read_auth(), agent, f.stem)[0]:   # on the tombstone: the core's tables, or the check fails and the tool gets `decision`
             return
         why = f'{agent} has no grant for {f.stem} in this run (kith-auth grant {agent} {f.stem} <profile>)'
     except (Exception, SystemExit):
@@ -3404,8 +3411,9 @@ def route_helper(args, as_json):
 
 
 def route_job(args, as_json):
-    """`job <agent> <id> <job> --decline HASH | --rm` (the No of a widening card). A tick (`--shown`, or none) is the
-    share sheet's and stays on the file: it needs the package's snapshot."""
+    """`job <agent> <id> <job> [--shown JSON | --decline HASH | --rm]`: the No of a widening card, or a tick (the share sheet's,
+    and the Yes of a card that offers the job). The core reads the package's job as it is now and cuts the tick to it, in
+    the same locked step that checks the person."""
     opts, rest = take_opts(args, {'--shown', '--decline'})
     if len(rest) not in (3, 4):
         return None
@@ -3414,6 +3422,10 @@ def route_job(args, as_json):
         params['remove'] = True
     elif len(rest) == 3 and list(opts) == ['--decline']:
         params['decline'] = opts['--decline']
+    elif len(rest) == 3 and list(opts) in ([], ['--shown']):
+        params['tick'] = True
+        if opts:
+            params['shown'] = opts['--shown']   # the core parses it where the file did: after the person is checked
     else:
         return None
     return 'people.job', params, _write_render
@@ -3435,6 +3447,12 @@ ROUTES = {'who': route_who, 'whois': route_whois, 'may': route_may_resolve('may'
           # the edge card's listing and the jobs lists the launch reads: kith-auth's own code over the core's tables
           'agent-access': route_secret_read('agent-access', lambda args: len(args) == 1 or args[1:] == ['--json']),
           'jobs': route_secret_read('jobs', lambda args: True),
+          # the servers mcp-config would start (kith-info lists them), the owner's listings, and a guest's door (kith_door's
+          # start and sweep): all kith-auth's own code over the core's tables, so the answer is the file's byte for byte
+          'mcp-names': route_secret_read('mcp-names', lambda args: len(args) == 1),
+          'ls': route_secret_read('ls', lambda args: args in ([], ['--json'])),
+          'connectors': route_secret_read('connectors', lambda args: True),
+          'door': route_secret_read('door', lambda args: len(args) in (3, 4)),
           # the card writes: one call of the core, which checks and writes in a single locked step
           'access': route_access, 'helper': route_helper, 'job': route_job}
 
@@ -3477,11 +3495,13 @@ def main_json(cmd, rest):
 
 
 def main(argv):
-    global _ROUTE
+    global _ROUTE, _APP_ONLY
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
         return
     cmd, rest = argv[0], argv[1:]
+    if cmd in APP_ONLY:
+        _APP_ONLY = cmd
     if cmd in ROUTES:
         _ROUTE = (cmd, [a for a in rest if a != '--json'] if cmd == 'granted' else rest, cmd == 'granted' and '--json' in rest)
         try:

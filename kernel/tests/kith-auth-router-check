@@ -97,7 +97,12 @@ for a in house writer helper; do
   mkdir -p "$KITH_HOME/agents/$a/role"
   printf -- '---\nname: %s\ndescription: test\n---\nbody\n' "$a" > "$KITH_HOME/agents/$a/role/agent.md"
 done
-printf 'helpers: [helper]\njobs:\n  - name: edit\n    label: Edit things\n    helpers: [helper]\n' > "$KITH_HOME/agents/house/role/capabilities.yaml"
+# house's package: a helper, a job, and a job that holds a door (a guest's box; doors are for people an agent is shared with)
+house_caps() {   # [needs-line]
+  printf '%shelpers: [helper]\ndoors:\n  - name: render\n    npm: [hyperframes@0.4.1]\n    lockfile: render.lock.json\n    tools: [node]\n    bin: hyperframes/bin/hyperframes.mjs\n    args: [render]\n    writes: [renders]\njobs:\n  - name: edit\n    label: Edit things\n    helpers: [helper]\n  - name: draw\n    label: Draw things\n    doors: [render]\n' "${1:-}" > "$KITH_HOME/agents/house/role/capabilities.yaml"
+}
+house_caps
+echo '{"lockfileVersion":3}' > "$KITH_HOME/agents/house/role/render.lock.json"
 A person kai owner name=Kai >/dev/null
 A person sam name=Sam >/dev/null
 A person sam id=samuel >/dev/null                    # renamed: sam is an old id of samuel
@@ -126,6 +131,9 @@ A member house timbot >/dev/null                     # a bot of the revoked tim:
 A member writer samuel preset=member >/dev/null
 A helper house amy helper --once >/dev/null          # a "just this once" on a helper
 A job house eve edit >/dev/null                      # a ticked job that grants the helper
+A job house eve draw >/dev/null                      # ... and one that grants the door: eve may start it
+A job house amy draw --shown '{"doors": []}' >/dev/null   # ticked when it showed no door: the package has one now (widened)
+A job house botty draw >/dev/null                    # a bot's own tick, its owner (samuel) has none: owner-lacks
 A person tim --revoke >/dev/null
 A agent-access house domain kept.example.com >/dev/null   # a host kept for every guest of house
 A bots-cap 50 >/dev/null
@@ -166,10 +174,13 @@ printf '{"kind": "mcp", "secrets": ["TOKEN"], "mcp": {"command": "echo", "args":
 printf '{"kind": "login", "secrets": ["PASS"]}\n' > "$KITH_HOME/services/login.json"
 printf '{"kind": "cli", "secrets": ["K"]}\n' > "$KITH_HOME/services/later.json"   # not personal, until iso turns it
 printf '{"kind": "connector", "description": "a host connector"}\n' > "$KITH_HOME/services/calendar.json"   # no secrets: its profile is the host's
-printf 'needs: [echo]\nhelpers: [helper]\njobs:\n  - name: edit\n    label: Edit things\n    helpers: [helper]\n' > "$KITH_HOME/agents/house/role/capabilities.yaml"
+house_caps 'needs: [echo]\n'
 printf 'needs: [echo]\n' > "$KITH_HOME/agents/writer/role/capabilities.yaml"
 export RT_WORK=sec-work RT_KAI=sec-kai RT_TEAM=sec-team RT_OWNER_PASS=pass-owner RT_SAM_PASS=pass-sam RT_LENT_PASS=pass-lent RT_SHARED_PASS=pass-shared RT_LATER=sec-later
 [[ -f $AUTHJ ]] && ok "setup: the fixture auth.json is there" || bad "setup: no auth.json"
+
+DOOR=$(A jobs house --json | python3 -c 'import json,sys; print(next(d for j in json.load(sys.stdin)["jobs"] for d in j["doors"]))')
+[[ $DOOR == render@* ]] && ok "setup: the door piece is $DOOR" || bad "setup: no door piece" "$DOOR"
 
 PERSONS=(kai samuel sam tim timbot amy dan eve botty samuelbot kaib kaibot zed nobody)
 AGENTS=(house writer helper nothere)
@@ -251,12 +262,36 @@ matrix() {
     for p in eve samuel amy; do run A jobs "$a" --person "$p" --json; done
   done
   run A jobs house --domain a.example --json
+  # the routed listings: the owner's `ls`, the connectors, the servers an agent would start (kith-info lists them)
+  run A ls
+  run A ls --json
+  run A connectors
+  run A connectors --json
+  for a in house writer helper; do
+    run A connectors "$a"
+    run A connectors "$a" --json
+    for p in kai amy; do run_as "$p" A mcp-names "$a"; done
+  done
+  run A mcp-names oldagent
+  run A mcp-names nothere
+  # the door: may this person's run of the agent start it now (a guest's door, the start and the sweep of kith_door.py). On a
+  # linked Mac whose lease ran out (here) every guest is `held`; the rows after the lease is back show the real states.
+  for p in "${PERSONS[@]}"; do run A door house "$p" "$DOOR"; run A door house "$p" "$DOOR" --json; done
   run A jobs house --helper helper --person eve
   KITH_AUTH_PROFILE=echo/work run A get --for writer echo TOKEN
   run A get --for writer --profile echo/kai echo TOKEN
   run A account-state house nothere --json
   rm -f "$KITH_SERVE_DIR/cloud-sync.json"
   for p in kai samuel tim; do run A resolve house --person "$p"; done   # and once more with no cloud-sync file: never linked
+  # the door with the lease back: ok (eve), widened (amy), owner-lacks (botty), not-ticked (samuel), the owner, a revoked person
+  # and the bot of one (their door is closed), a person that does not exist, and the pieces the package does not hold
+  for p in "${PERSONS[@]}"; do run A door house "$p" "$DOOR"; run A door house "$p" "$DOOR" --json; done
+  run A door house eve render@000000000000 --json    # the package changed since this chat started
+  run A door house eve render@000000000000
+  run A door house eve nodoor@abc123 --json          # no job of the agent has it
+  run A door house eve render --json                 # a name is no piece
+  run A door writer eve "$DOOR" --json               # an agent that holds no such door
+  run A door nothere eve "$DOOR" --json
 }
 matrix "$T/golden.out"
 rows=$(grep -c '^\$' "$T/golden.out")
@@ -405,6 +440,21 @@ cw() {   # OUT
   run A job house kai edit --decline h1
   run A job house eve edit --rm
   run A job house eve edit --rm
+  run A job house amy edit                                              # a tick at share: the job as the package declares it
+  run A jobs house --person amy --json
+  run A job house amy edit --shown '{"helpers": ["helper", "gone"], "domains": ["x.example"]}'   # cut to what the package holds now
+  run A jobs house --person amy --json
+  run A job house amy edit --shown 'nope'                               # not JSON
+  run A job house amy edit --shown '[1]'                                # not an object
+  run A job house amy nope                                              # no such job
+  run A job house kai edit                                              # the owner
+  run A job house tim edit                                              # revoked, no row of their own
+  run A job house nobody edit
+  run A job house '*' edit                                              # the everyone row is no row of their own
+  run A job 'bad name' amy edit
+  run A job house botty edit                                            # a bot's own tick, within its owner
+  run A job house amy edit --rm
+  run A job house botty edit --rm
   run A agent-access house --json
   run A jobs house --person eve --json
   run A ledger --json
@@ -747,15 +797,25 @@ calls() { wc -l < "$1/calls" | tr -d ' '; }
 # no route: the verbs and shapes the core is not asked about keep today's text, and no call goes out
 mkwrap "$T/w1" pass
 use_home "$T/sw4" "$T/w1/kith"
-for v in "ls" "link telegram 5 ABC123" "door house samuel x@y" "people" "people --matrix" "person samuel name=X" "member house amy" \
-         "bots-cap" "bots-cap 60" "invite amy" "exec --secret rs_0123456789abcdef -- true" "ledger" "ledger --rm job:house:eve:edit" "browser work chrome" \
-         "preset p mode=default" "bot samuelbot --rm" "handle samuel telegram 5" "job house eve edit" "once put"; do
+# (the lift list in docs/plans/one-bot-model.md: each of these is exit 3 on purpose, with its callers)
+for v in "ls extra" "door house samuel" "door house samuel x@y --json extra" "mcp-names" "mcp-names house extra" "people" "people --matrix" "people samuel" \
+         "bots-cap" "bots-cap 60" "exec --secret rs_0123456789abcdef -- true" "ledger" "ledger --rm job:house:eve:edit" "browser work chrome" \
+         "owner echo/work samuel" "share echo/work samuel" "once put" "mcp-config house extra" "keys" "account-state house echo" \
+         "job house eve" "job house eve edit --shown {} --decline h"; do
   # shellcheck disable=SC2086
   refuses "no route: $v" A $v
   grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "no route: $v: not today's text" "$(cat "$T/e")"
 done
-out=$(A ls --json 2>/dev/null); rc=$?   # --json puts the refusal on stdout, as it does today
-[[ $rc == 3 && $out == *'"ok": false'*'moved to the Kith core (module authority)'* ]] && ok "no route: ls --json: exit 3, today's JSON error" || bad "no route: ls --json" "rc=$rc $out"
+# the people-admin writes are app-only on the tombstone: exit 3 with the app's name in the line, today's text after it
+for v in "link telegram 5 ABC123" "person samuel name=X" "person samuel --revoke" "member house amy" "member house amy --rm" "invite amy" \
+         "preset p mode=default" "bot samuelbot --rm" "bot b --of samuel" "handle samuel telegram 5"; do
+  # shellcheck disable=SC2086
+  refuses "app-only: $v" A $v
+  grep -q 'is app-only now that authority moved to the core: on a switched Mac, manage people in the Kith app' "$T/e" \
+    && grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "app-only: $v: not the app-only line" "$(cat "$T/e")"
+done
+out=$(A ls --json extra 2>/dev/null); rc=$?   # --json puts the refusal on stdout, as it does today
+[[ $rc == 3 && $out == *'"ok": false'*'moved to the Kith core (module authority)'* ]] && ok "no route: ls --json extra: exit 3, today's JSON error" || bad "no route: ls --json extra" "rc=$rc $out"
 [[ $(calls "$T/w1") == 0 ]] && ok "no route: the core was never asked" || bad "no route: a call went out" "$(cat "$T/w1/calls")"
 
 # a tombstone of another module is not authority's: no call, today's text
@@ -826,6 +886,11 @@ for mode in sleep garbage array nocore exit3 exit4 exit5; do
   refuses "core-call $mode: job --decline" A job house eve edit --decline h1
   refuses "core-call $mode: agent-access" A agent-access house
   refuses "core-call $mode: jobs" A jobs house --json
+  refuses "core-call $mode: door" A door house eve "$DOOR" --json
+  refuses "core-call $mode: mcp-names" A mcp-names house
+  refuses "core-call $mode: ls" A ls
+  refuses "core-call $mode: connectors" A connectors --json
+  refuses "core-call $mode: job tick" A job house amy edit
   refuses "core-call $mode: take-once" A resolve helper --person amy --via house --take-once
   [[ $(grep -c 'people.resolve' "$T/m-$mode/calls") == 1 ]] && ok "core-call $mode: the take-once was sent once" \
     || bad "core-call $mode: the take-once was repeated" "$(cat "$T/m-$mode/calls")"

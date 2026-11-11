@@ -428,6 +428,78 @@ fn a_job_is_declined_by_its_hash_and_a_tick_goes_as_written() {
 }
 
 #[test]
+fn a_job_is_ticked_as_the_owner_saw_it_and_a_second_tick_replaces_the_first() {
+    let mut rig = rig();
+    let tick = |person: &str, name: &str, shown: Option<&str>| {
+        let mut p = json!({"agent": "house", "person": person, "job": name, "viaSwitch": true, "dies": true, "tick": true});
+        if let Some(s) = shown {
+            p["shown"] = json!(s);
+        }
+        p
+    };
+    // no --shown: the job as the package declares it now, the pieces in the order kith_jobs lists them
+    assert_eq!(
+        said(&mut rig, "people.job", &tick("ann", "work", None)).unwrap(),
+        ["ann has the job work for house"]
+    );
+    let ann = row(&mut rig, "ann");
+    assert_eq!(
+        ann["jobs"]["work"]["snapshot"],
+        json!({"domains": ["a.example"], "helpers": ["garden"], "doors": []})
+    );
+    assert!(ann["jobs"]["work"]["since"].as_i64().unwrap() > 0);
+    // --shown: what the sheet listed, cut to what the package declares now (b.example is not declared)
+    said(
+        &mut rig,
+        "people.job",
+        &tick(
+            "ann",
+            "work",
+            Some(r#"{"domains": ["a.example", "b.example"], "helpers": []}"#),
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        row(&mut rig, "ann")["jobs"]["work"]["snapshot"],
+        json!({"domains": ["a.example"], "helpers": [], "doors": []})
+    );
+    // a tick again is the same tick: the decline of the one before is gone, as in the file
+    let decline = json!({"agent": "house", "person": "sam", "job": "work", "decline": "h1", "viaSwitch": true, "dies": true});
+    said(&mut rig, "people.job", &decline).unwrap();
+    said(&mut rig, "people.job", &tick("sam", "work", None)).unwrap();
+    assert!(
+        row(&mut rig, "sam")["jobs"]["work"]
+            .get("declined")
+            .is_none()
+    );
+    // the refusals are kith-auth's, in its order: the job, then the person, then the JSON
+    let e = said(&mut rig, "people.job", &tick("ann", "nope", None)).unwrap_err();
+    assert_eq!(
+        e,
+        (
+            "house declares no job 'nope' (capabilities.yaml jobs:)".to_owned(),
+            2
+        )
+    );
+    let e = said(&mut rig, "people.job", &tick("kai", "work", None)).unwrap_err();
+    assert_eq!(e.0, "kai is the owner: nothing is boxed for them");
+    let e = said(&mut rig, "people.job", &tick("pat", "work", None)).unwrap_err();
+    assert_eq!(e.0, "pat may not use house now");
+    let before = rig.tables();
+    for bad in ["not json", "[1]", "5"] {
+        let e = said(&mut rig, "people.job", &tick("ann", "work", Some(bad))).unwrap_err();
+        assert_eq!(
+            e,
+            (
+                r#"--shown is JSON: {"domains": [..], "helpers": [..], "doors": [..]}"#.to_owned(),
+                2
+            )
+        );
+    }
+    assert_eq!(rig.tables(), before, "a refusal writes nothing");
+}
+
+#[test]
 fn a_refusal_leaves_the_tables_as_they_were_and_an_unmarked_call_is_refused() {
     let mut rig = rig();
     let before = rig.tables();

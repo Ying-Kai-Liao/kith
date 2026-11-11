@@ -464,6 +464,7 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ),
         ("people helper echo ann scratch --once", "people.helper"),
         ("people job echo ann tidy --decline abc", "people.job"),
+        ("people job echo ann tidy --tick", "people.job"),
         (
             "people secret-set github/work --grant echo",
             "people.secretSet",

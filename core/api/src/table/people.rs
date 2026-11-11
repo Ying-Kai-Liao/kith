@@ -549,7 +549,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     people(
         "people.job",
-        "The No of a widening card for a ticked job (`--decline HASH`: that package update is not asked again), or with --rm the tick goes, as it is written, with no check. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+        "The tick of a job (`--tick`, the share sheet's or the Yes of a card that offers it: the pieces the owner saw, `--shown JSON`, else the job as the package declares it now, cut to what the package declares now), the No of a widening card for a ticked job (`--decline HASH`: that package update is not asked again), or with --rm the tick goes, as it is written, with no check. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
         &[
             pos("agent", "string", true, "The agent."),
             pos("person", "string", true, "The person."),
@@ -561,6 +561,13 @@ pub(super) const ROWS: &[Method] = &[
                 "The hash of the update that was declined.",
             ),
             sw("remove", &["--rm"], "Take the tick away."),
+            sw("tick", &["--tick"], "Tick the job for the person."),
+            flag(
+                "shown",
+                "string",
+                &["--shown"],
+                "With --tick: the pieces the owner saw, as JSON `{\"domains\": [..], \"helpers\": [..], \"doors\": [..]}`.",
+            ),
             sw(
                 "dies",
                 &["--dies"],
