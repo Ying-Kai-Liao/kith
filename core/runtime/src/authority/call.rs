@@ -322,7 +322,7 @@ fn died(d: &Die) -> Value {
     json!({ "died": d.code, "why": d.msg })
 }
 
-fn answer(mut res: serde_json::Map<String, Value>, held: bool) -> Value {
+fn answer(mut res: Map<String, Value>, held: bool) -> Value {
     res.insert("held".to_owned(), held.into());
     Value::Object(res)
 }
