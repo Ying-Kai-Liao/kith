@@ -124,7 +124,9 @@ CONSTANTS
     CoreSideShutsGate,  \* ... and the gate sees it at once (parity checked per request); FALSE = the latch stays open until its next ask
     \* ---- the card writes behind the router (C-a, 2026-11-12): kith-auth on the tombstone writes through the core ----
     AlwaysOn,           \* TRUE = the escape card's always (P's row and B's) and the demotion that drops P's approvals are in the model
-    RouterDoor,         \* TRUE = the always is the core's write (people.access): it reads the core's fact in its own locked step
+    RouterDoor,         \* TRUE = kith-auth on the tombstone answers from the core (M2-23): resolve/may/door/exec read the core's copy of the
+                        \*   revoked fact (people.resolve, people.may, ...), and the C/S-b writes (the always, the grant) read it in their own locked step
+    RouterStale,        \* BROKEN: the router answers from the file it replaced (the copy the step kept, frozen at the switch: not revoked)
     AlwaysNoMay,        \* BROKEN: the always is written with no may() in its step (the check was dropped)
     AlwaysSplit,        \* BROKEN: the always checks may() in one step and writes in a later one (a revoke can land between)
     AlwaysBotNoCut,     \* BROKEN: the always on B's row is written without the owner's entry being there (the held() cap dropped)
@@ -135,7 +137,7 @@ CONSTANTS
 
 ASSUME (Switched => CoreGate) /\ (SwitchLag => Switched) /\ (CoreSideShutsGate => CoreOnlyWrite)
 ASSUME NamelessReport => KillSplit
-ASSUME (RouterDoor => (Switched /\ AlwaysOn)) /\ ((AlwaysNoMay \/ AlwaysSplit \/ AlwaysBotNoCut \/ DemoteKeeps) => AlwaysOn)
+ASSUME (RouterDoor => Switched) /\ (RouterStale => RouterDoor) /\ ((AlwaysNoMay \/ AlwaysSplit \/ AlwaysBotNoCut \/ DemoteKeeps) => AlwaysOn)
 ASSUME (GrantNoPerson \/ ForgetKeepsGrant) => GrantOn
 
 Macs    == {"m1", "m2"}
@@ -209,8 +211,13 @@ ext == <<ext4, bdoor, ptick, alw, link>>
 auth == <<rows, revoked, crev, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos>>
 
 (* ---- access ---- *)
-MayP(m) == \/ StarIgnoresRevoke /\ "star" \in rows[m]
-           \/ ~revoked[m] /\ rows[m] # {}
+\* On the tombstone kith-auth has no file to read: `resolve`, `may`, `door_state` and `exec` ask the core (RouterDoor), whose copy is the
+\* one fact (`crev` follows `revoked` in the same step, CrevAfter). RouterStale is the router that reads the replaced file instead:
+\* the rows it was switched with, never revoked.
+MayP(m) == IF RouterStale THEN rows[m] # {}
+           ELSE IF RouterDoor THEN ~crev[m].v /\ rows[m] # {}
+           ELSE \/ StarIgnoresRevoke /\ "star" \in rows[m]
+                \/ ~revoked[m] /\ rows[m] # {}
 MayB(m) == BotRow[m] /\ (BotIgnoresOwner \/ MayP(m))
 May(m, w) == IF w = "P" THEN MayP(m) ELSE MayB(m)
 

@@ -7,8 +7,8 @@
 #      grants, budgets, chat handles) answers every routed verb over persons x agents x `--via` as a real file. A copy of the
 #      home is imported into a core (`kith kernel core-migrate --authority`), given the switched record and the tombstone, and
 #      must answer byte for byte the same (stdout and exit code): once with no daemon (the embedded core) and once through a
-#      daemon. `kith migrate step authority` is refused until M2-18 lifts it, so the record and the tombstone are written
-#      here, as a step leaves them.
+#      daemon. The copies are stepped for real (`kith migrate step authority`: import, same answer, marker, tombstone), and
+#      section 4 rolls one back after the core's own writes: the file must then answer what the core did.
 #   2. Sequences: the take-once (the first launch is allowed "(just this once)", the second refused, on both homes) and `who`
 #      with `handles_stale` set (exit 3 on a switched home, never a wrong person).
 #   2b. C-a / C-b, the card writes: `access` (the always of an escape card, with --by and its refusals), `helper`, `job
@@ -302,17 +302,16 @@ grep -q '"held": true' "$T/golden.out" && grep -q '"held": false' "$T/golden.out
 grep -qi 'just this once' "$T/golden.out" && bad "golden: matrix must not use up a once" || ok "golden: no once used by the matrix"
 
 # --- the switched copies -------------------------------------------------------------------------------------------------------
-# A copy of the home, imported, given the switched record and the tombstone, as `kith migrate step authority` leaves them.
+# A copy of the home, stepped for real.
 TOMB='{"kith_tombstone": 1, "module": "authority", "message": "this data moved to the Kith core (module authority); the old reader must not use this file", "rollback": "kith rollback authority"}'
 switch_copy() {   # NAME
   local d=$T/$1
   mkdir -p "$d" && cp -R "$G/home" "$d/home" && cp -R "$G/serve" "$d/serve"
   use_home "$d"
   local mig
-  mig=$("$BIN" kernel core-migrate --authority 2>&1) || { bad "setup $1: core-migrate --authority" "$mig"; return 1; }
-  mkdir -p "$CORE/cutover"
-  printf 'state=switched\nat=%s\n' "$(date +%s)" > "$CORE/cutover/authority.switch"
-  printf '%s\n' "$TOMB" > "$AUTHJ"
+  # The real step (M2-23 lift): import, same answer, the marker, the record and the tombstone, under auth.json's lock.
+  mig=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1) || { bad "setup $1: migrate step authority" "$mig"; return 1; }
+  grep -q '"kith_tombstone"' "$AUTHJ" || { bad "setup $1: auth.json is not a tombstone after the step" "$mig"; return 1; }
 }
 switch_copy sw1 && ok "setup: the embedded copy is switched" || exit 1
 switch_copy sw2 && ok "setup: the daemon copy is switched" || exit 1
@@ -478,6 +477,14 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   use_home "$T/sw2"; seq_once "$T/once.sw2"
   cmp -s "$T/once.golden" "$T/once.sw2" && ok "take-once, daemon: the same answers" || bad "take-once, daemon" "$(diff "$T/once.golden" "$T/once.sw2")"
   iso "daemon"
+  # `kith doctor` on the stepped home: iso turned the service of `later/main` personal after the import stored it with no owner, so the
+  # core reads it as shared, where the file read it as the owner's: doctor says so. The file home (iso did the same there) says nothing.
+  python3 "$KERNEL/bin/kith-doctor" > "$T/doctor.sw2" 2>&1
+  if grep -q 'profiles: later/main has no owner in the core' "$T/doctor.sw2"; then ok "doctor: a profile with no owner on a service that is personal now is flagged on the stepped home"; else
+    bad "doctor: later/main not flagged" "$(grep -i 'profile\|switched\|core' "$T/doctor.sw2" | head -5)"; fi
+  use_home "$T/gs"; python3 "$KERNEL/bin/kith-doctor" > "$T/doctor.gs" 2>&1
+  ! grep -q 'has no owner in the core' "$T/doctor.gs" && ok "doctor: the file home has no such warning" || bad "doctor: the file home was flagged"
+  use_home "$T/sw2"
   # the core says where a value lives, never the value: no secret, no invite code, no chat handle in what it answers
   printf '{"viaSwitch": true, "kernel": "%s", "home": "%s"}' "$KERNEL" "$HOME" | "$BIN" kernel core-call people.secretsView --params-stdin > "$T/view.out" 2>/dev/null
   if grep -q 'env:RT_WORK' "$T/view.out" && ! grep -Eq 'sec-work|sec-kai|pass-owner|pass-sam|pass-lent|"handles"|telegram' "$T/view.out"; then
@@ -786,7 +793,83 @@ PY
   if cmp -s "$T/door.golden" "$T/door.sw2"; then ok "doors, through a daemon: a revoke, its undo and a removal close and open the door as on the file"; else
     bad "doors, through a daemon: differs from the file" "$(diff "$T/door.golden" "$T/door.sw2" | head -30)"; fi
   exec 7>&-; wait "$DPID" 2>/dev/null; DPID=
+
+  # --- 4. the way back: rollback after the core's own writes --------------------------------------------------------------------
+  # sw2 took the card writes, the secret writers and their env through the daemon. The core's answers (embedded: the daemon is
+  # gone) are recorded, `kith rollback authority` puts auth.json back, and the file must answer every one of them the same: the
+  # export back carries what the core wrote (grants, profiles, env, helper_since), and the keys only the file kept stay.
+  post_state() {   # OUT
+    local out=$1 p a
+    : > "$out"
+    for p in kai samuel amy eve tim botty nobody; do
+      for a in house writer; do
+        { echo "\$ may $p $a"; A may "$p" "$a" 2>&1; echo "rc=$?"; echo "\$ resolve $p $a"; A resolve "$a" --person "$p" 2>&1; echo "rc=$?"; } >> "$out"
+      done
+    done
+    { A people --json; A keys --json; A ledger --json; A granted echo; A granted --for writer echo --json; A holders echo; A holders login --json
+      A mcp-config house; A mcp-config writer; A agent-access house --json; A jobs house --json; A budgets house --json; A bots-cap --json
+    } 2>&1 | sed -E -e 's/[0-9]{13}/<ms>/g' -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}/<t>/g' >> "$out"
+  }
+  use_home "$T/sw2"
+  rm -f "$(dirname "$AUTHJ")/auth.log"
+  post_state "$T/post.core"
+  [[ $(grep -c . "$T/post.core") -gt 40 ]] && ok "rollback: the core's answers after its writes are recorded" || bad "rollback: too few answers" "$(head -5 "$T/post.core")"
+  rb=$(KITH_KERNEL="$KERNEL" "$BIN" rollback authority 2>&1); rc=$?
+  if [[ $rc == 0 ]] && ! grep -q '"kith_tombstone"' "$AUTHJ"; then ok "rollback: auth.json is a file again"; else bad "rollback" "rc=$rc $rb"; fi
+  rm -f "$(dirname "$AUTHJ")/auth.log"
+  post_state "$T/post.file"
+  if cmp -s "$T/post.core" "$T/post.file"; then ok "rollback: the file answers what the core answered"; else
+    bad "rollback: the file differs from the core's last answers" "$(diff "$T/post.core" "$T/post.file" | head -30)"; fi
+  if python3 - "$AUTHJ" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1]))
+assert 'echo/new' in a['profiles'] and 'echo/second' in a['profiles'], sorted(a['profiles'])
+assert a['env']['house']['echo'], a['env']
+assert a.get('once', {}) == {}, a.get('once')
+assert a['members']['house']['amy'].get('helper_once'), a['members']['house']['amy']
+PY
+  then ok "rollback: what the core wrote (profiles, env) is in the file"; else bad "rollback: what is in the file"; fi
+  # and forward again, as the runbook says: import again (the rolled-back file names the owner of a profile the core held with none,
+  # `later/main`, so the core's rows differ from the file's and a plain step refuses), then step; the core answers what it did before
+  out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+  [[ $rc != 0 && $out == *'differ from auth.json'* ]] && ok "rollback: a plain step over a core that differs from the file refuses and says to import again" || bad "rollback: step before the re-import" "rc=$rc $out"
+  "$BIN" kernel core-migrate --authority --force >"$T/reimport" 2>&1 || bad "rollback: the re-import" "$(cat "$T/reimport")"
+  KITH_KERNEL="$KERNEL" "$BIN" migrate step authority >"$T/restep" 2>&1 && grep -q '"kith_tombstone"' "$AUTHJ" && ok "rollback: stepping again works" || bad "rollback: stepping again" "$(cat "$T/restep")"
+  rm -f "$(dirname "$AUTHJ")/auth.log"
+  post_state "$T/post.again"
+  cmp -s "$T/post.core" "$T/post.again" && ok "rollback: ... and the core answers the same again" || bad "rollback: step again differs" "$(diff "$T/post.core" "$T/post.again" | head -20)"
 fi
+
+# --- 4b. what the step refuses at run time (nothing written) -----------------------------------------------------------------------
+# One-time secrets in the file live only in auth.json and the Keychain, so the step waits for them: the file is untouched, and
+# the step goes through once they are gone.
+mkdir -p "$T/ro" && cp -R "$G/home" "$T/ro/home" && cp -R "$G/serve" "$T/ro/serve"
+use_home "$T/ro"
+python3 -c "
+import json, sys
+a = json.load(open(sys.argv[1]))
+a['once'] = {'o1': {'agent': 'house', 'created': 1, 'expires': 4102444800000}}
+json.dump(a, open(sys.argv[1], 'w'))" "$AUTHJ"
+sha_before=$(shasum "$AUTHJ" | cut -d' ' -f1)
+out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+if [[ $rc != 0 && $out == *'one-time secret'* && $out == *'wait until they are used or expire (at most an hour'* ]] \
+   && [[ $(shasum "$AUTHJ" | cut -d' ' -f1) == "$sha_before" ]] && ! grep -q kith_tombstone "$AUTHJ"; then
+  ok "step: one-time secrets in auth.json refuse it, nothing changed"
+else bad "step with a once" "rc=$rc $out"; fi
+python3 -c "
+import json, sys
+a = json.load(open(sys.argv[1]))
+a['once'] = {}
+json.dump(a, open(sys.argv[1], 'w'))" "$AUTHJ"
+out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+[[ $rc == 0 ]] && grep -q kith_tombstone "$AUTHJ" && ok "step: ... and goes through once they are used" || bad "step after the once is gone" "rc=$rc $out"
+# a core imported before the secret tables were kept is told to import again, and the file stays
+mkdir -p "$T/rs" && cp -R "$G/home" "$T/rs/home" && cp -R "$G/serve" "$T/rs/serve"
+use_home "$T/rs"
+"$BIN" kernel core-migrate --authority >/dev/null 2>&1
+sqlite3 "$T/rs/home/.kith/core/$DBF" "INSERT INTO secret_stale (reason) VALUES ('test')"
+out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+[[ $rc != 0 && $out == *'import again'* ]] && ! grep -q kith_tombstone "$AUTHJ" && ok "step: a stale core is told to import again, the file stays" || bad "step on a stale core" "rc=$rc $out"
 
 # `who` with handles_stale: a database imported before people.handles existed matches nobody, so who and whois refuse (exit 3)
 # while the flag is set, and the verbs that do not read handles still answer.

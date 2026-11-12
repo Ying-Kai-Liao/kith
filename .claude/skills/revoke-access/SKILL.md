@@ -329,3 +329,26 @@ taken again by someone else would inherit it), and the removal (`forget`) takes 
 `GrantWrite` (`GrantOn`, base `switched-grant`) with the oracle `grbad` and the invariant `NoGrantForGone`; `broken-grant-no-person`
 (the guard dropped) and `broken-forget-keeps-grant` (the removal leaves them) must fail. The other secret writers touch nothing a
 revoke reads (profiles, grants of agents, env); `people.secretRevoke` only narrows, so it is a `removal_only` write.
+
+## The router on the tombstone (2026-11-12, M2-23 lift)
+
+With auth.json a tombstone kith-auth has no file: `resolve`, `may`, `door_state`/`door` and `exec` ask the core (`people.resolve`,
+`people.may`, ...), and the C/S-b writes (the always, the helper, the grant) read the core's fact in their own locked step. The model
+says it with `RouterDoor` (needs `Switched`): `MayP` is then `~crev[m].v /\ rows[m] # {}`, the core's copy, which `CrevAfter` keeps equal
+to `revoked[m]` in the same step. It adds no action; the claim is that every start of a turn, a door or a helper reads that one fact.
+`RouterStale` is the break: the router answers from the file it replaced (frozen at the switch: the rows it had, never revoked).
+The `switched-router*` pass rows are the switched rows under a new name: under `Switched`, `crev` follows `revoked` in the same step, so
+`MayP` is the same predicate. They prove the properties hold; the sensitivity proof is the breaks. "Every router path reads that one fact
+in the step it acts" is an assumption TLC does not test; the router-check's byte-for-byte parity does. `RouterStale` reads live `rows`,
+not rows frozen at the switch, which is a weaker break than described, and still fails.
+**The door row models L1's route, not the code at this head:** `door` is not in kith-auth's ROUTES and exits 3 on the tombstone (a
+guest door is refused, the recheck sweep kills a running one). When L1 routes it, L1 must re-check `switched-router-door` against the
+code: `kith_door`'s start is "allowed and not held, one step under the kith-auth lock" (`kith_door.py:15`), while a routed
+`door_state` reads under the core's lock, so the model's one-step start holds only if the core's door check and the claim are one
+transaction.
+Rows (checks.tsv, "the router"): `switched-router` (TypeOK, CoreInStep, R2, R4, SyncAgrees, BotBelowOwner, R1, R5, R5c, R6, R6c, R6cDown,
+R6cWake pass), `switched-router-door` (DoorD2, DoorD2c, DoorD1, DoorsCutWithRevoke pass), `switched-router-kill` (NoLiveProc passes),
+and the breaks `broken-router-stale` (R2, R1, R6 fail) and `broken-router-stale-door` (DoorD2 fails). Two smoke rows
+(`switched-router R1`, `broken-router-stale R1`). The code side is `kernel/tests/kith-auth-router-check` on homes stepped for real
+(`kith migrate step authority`, no hand-written tombstone any more) and its section 4: a rollback after the core's own writes gives a
+file that answers what the core answered. SYNC is not moved: the lift (runtime refusals in `cutover/authority.rs`) adds no revoke step.

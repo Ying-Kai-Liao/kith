@@ -544,9 +544,100 @@ def test_access_never_exceeds_the_grant(ops):
         state_properties()
 
 
+# --- the same answers on a home stepped for real (M2-23 lift) -----------------------------------------------------------------
+# After `kith migrate step authority` kith-auth has no file: resolve, may, people, budgets ... come from the core. Whatever a
+# generated sequence built, a copy of the home stepped for real must answer every one of them as the file does (stdout and
+# exit code, byte for byte). The writers that still exit 3 on a tombstone are not run there; the sequence is built on the file
+# and the copy is stepped from it. Needs the built kith (KITH_BIN); skipped without it.
+STEP_BIN = os.environ.get('KITH_BIN') or os.environ.get('KITH_DIFFTEST_BIN')
+STEPPED = {'examples': 0, 'refused': 0, 'answers': 0}
+
+
+def home_copy(name):
+    """A home in the layout `kith` finds on a Mac (auth.json under .kith/secrets), holding this example's file, agents and
+    services. Returns (env, auth path)."""
+    d = T / 'stepped' / name
+    shutil.rmtree(d, ignore_errors=True)
+    kh = d / 'home' / '.kith'
+    (kh / 'secrets').mkdir(parents=True)
+    shutil.copy(ka.AUTH, kh / 'secrets' / 'auth.json')
+    shutil.copytree(T / 'kith' / 'agents', kh / 'agents')
+    if ka.mac_services().is_dir():
+        shutil.copytree(ka.mac_services(), kh / 'services')
+    (d / 'serve').mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('KITH_', 'HQ_'))}
+    env.update(HOME=str(d / 'home'), KITH_HOME=str(kh), KITH_STATE=str(kh), KITH_MACHINE=str(kh), KITH_AGENTS=str(kh / 'agents'),
+               KITH_SERVE_DIR=str(d / 'serve'), KITH_SERVE_PORT='1', KITH_WAKE_NO_KICK='1', KITH_BIN=STEP_BIN,
+               KITH_SECURITY_BIN='/usr/bin/false', PYTHONDONTWRITEBYTECODE='1')
+    return env, kh / 'secrets' / 'auth.json'
+
+
+def same(out):
+    """An answer as data when it is JSON: the core keeps a table's rows in its own order (an agent's members by person), so the
+    keys of an object (`budgets`) can come in another order than the file's; the lists (`people --json`) keep theirs."""
+    try:
+        return json.loads(out)
+    except ValueError:
+        return out
+
+
+def answers(env):
+    import subprocess
+    out = []
+    cmds = [['people', '--json'], ['bots-cap', '--json'], ['budgets', AGENTS[0], '--json'], ['keys', '--json']]
+    for who in ALL:
+        for agent in AGENTS:
+            cmds += [['may', who, agent], ['resolve', agent, '--person', who]]
+    for cmd in cmds:
+        r = subprocess.run([sys.executable, str(KERNEL / 'bin' / 'kith-auth'), *cmd], env=env, capture_output=True, text=True, timeout=120)
+        out.append((cmd, r.returncode, r.stdout))
+    return out
+
+
+@settings(max_examples=int(os.environ.get('PROPS_STEPPED_EXAMPLES', 8)), deadline=None, database=None,
+          suppress_health_check=list(HealthCheck))
+@given(SEQUENCES)
+def test_a_stepped_home_answers_as_the_file(ops):
+    import subprocess
+    reset()
+    for op in ops:
+        # `set` writes Keychain items, which this run has none of; the other secret writers (grants, env, connect) go in
+        if op[0] != 'sset':
+            apply(op)
+    file_env, _ = home_copy('file')
+    core_env, core_auth = home_copy('core')
+    before = core_auth.read_bytes()
+    step = subprocess.run([STEP_BIN, 'migrate', 'step', 'authority'], env={**core_env, 'KITH_KERNEL': str(KERNEL)},
+                          capture_output=True, text=True, timeout=300)
+    STEPPED['examples'] += 1
+    if step.returncode != 0:
+        # nothing the generator builds is one the import may refuse: a refusal here is a finding, not a skip
+        STEPPED['refused'] += 1
+        assert core_auth.read_bytes() == before, f'a refused step touched auth.json: {step.stderr}'
+        raise AssertionError(f'the step refused a generated home: {(step.stdout + step.stderr).strip()}\nops {ops}')
+    assert b'kith_tombstone' in core_auth.read_bytes(), f'the step said ok but left a file: {step.stdout}'
+    want, got = answers(file_env), answers(core_env)
+    STEPPED['answers'] += len(want)
+    for (cmd, rc, out), (_, rc2, out2) in zip(want, got):
+        assert (rc, same(out)) == (rc2, same(out2)), f'{cmd}: the file says rc={rc} {out!r}, the stepped home rc={rc2} {out2!r}\nops {ops}'
+    # and back: the rollback gives a file that answers the same
+    rb = subprocess.run([STEP_BIN, 'rollback', 'authority'], env={**core_env, 'KITH_KERNEL': str(KERNEL)},
+                        capture_output=True, text=True, timeout=300)
+    assert rb.returncode == 0 and b'kith_tombstone' not in core_auth.read_bytes(), f'rollback: {rb.stderr}'
+    back = answers(core_env)
+    for (cmd, rc, out), (_, rc2, out2) in zip(want, back):
+        assert (rc, same(out)) == (rc2, same(out2)), f'{cmd}: after the rollback rc={rc2} {out2!r}, the file said rc={rc} {out!r}\nops {ops}'
+
+
 if __name__ == '__main__':
     try:
         test_access_never_exceeds_the_grant()
         print('ok   kith-auth access properties')
+        if STEP_BIN and os.access(STEP_BIN, os.X_OK):
+            test_a_stepped_home_answers_as_the_file()
+            assert STEPPED['examples'] > 0 and STEPPED['answers'] > 0, f'the stepped run compared nothing: {STEPPED}'
+            print(f'ok   kith-auth answers on a stepped home equal the file ({STEPPED["examples"]} homes, {STEPPED["refused"]} refused by the import, {STEPPED["answers"]} answers)')
+        else:
+            print('skip kith-auth answers on a stepped home (needs the built kith: KITH_BIN)')
     finally:
         shutil.rmtree(T, ignore_errors=True)

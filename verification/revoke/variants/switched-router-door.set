@@ -1,0 +1,6 @@
+\* MODELS L1's FUTURE ROUTE, not the code at this head (`door` exits 3 on the tombstone): kith-auth's door_state reads the core. L1 must re-check this row (kith_door's start is one step under the kith-auth lock; a routed door_state reads under the core's lock)
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE

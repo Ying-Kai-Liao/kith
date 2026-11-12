@@ -64,6 +64,27 @@ impl Core {
         core
     }
 
+    /// The rig's own auth.json, stepped for real (`kith migrate step authority`: import, same answer, marker, tombstone),
+    /// then a daemon on the core it made, switched on. Nothing is put in by hand: the core holds what the file held.
+    pub(super) fn start_stepped(r: &Rig) -> Self {
+        let tmp = Tmp::new();
+        let home = r.dir.join("home");
+        let mut folders = folders(&tmp.path().join("machine"));
+        // the file kith-auth wrote is the rig's (`KITH_AUTH`), and the agents are the rig's
+        folders.secrets.clone_from(&r.dir);
+        folders.agents = home.join("agents");
+        let kernel = home.join("kernel");
+        let said = crate::core_front::step_authority_for_test(&folders, &kernel).expect("the step");
+        assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
+        let env = json!({"KITH_AGENTS": home.join("agents").to_string_lossy()});
+        let data = Arc::new(CoreData::new(folders, home, kernel, env.as_object().unwrap().clone()));
+        let daemon = crate::core_front::serve_for_test(&data.folders);
+        *crate::api::authority::TEST_AUTH_FILE.lock().unwrap() = Some(r.dir.join("auth.json"));
+        let core = Self { tmp, daemon: Some(daemon), data };
+        core.on();
+        core
+    }
+
     pub(super) fn ask(&self, method: &str, mut params: Value) -> Option<Value> {
         params["home"] = self.data.home.to_str().unwrap().into();
         params["kernel"] = self.data.kernel.to_str().unwrap().into();

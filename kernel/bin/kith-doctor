@@ -212,6 +212,9 @@ def services():
     section('services')
     r = run(str(KITH / 'bin' / 'kith-auth'), 'ls')
     if r.returncode:
+        if 'moved to the Kith core' in (r.stderr + r.stdout):
+            note('authority is switched to the core: `kith-auth ls` has no core form yet, so the grants are not listed here')
+            return
         bad(f'kith-auth ls failed: {(r.stderr or r.stdout).strip()[:200]}')
         return
     agent, n = '', 0
@@ -228,6 +231,43 @@ def services():
         ok(f'{n} grant(s) checked')
 
 
+def core_profiles():
+    """On the tombstone: a profile that names no owner, on a service that is personal now. The core stores a new profile's
+    owner when it is written, so no owner means the service was not personal then. kith-auth reads such a profile as the
+    owner's (it asks the service now), but the host's `secrets.serviceKeys` reads it as shared with everyone who may use the
+    agent: the two disagree until the owner is named."""
+    body = {'viaSwitch': True, 'kernel': str(KITH), 'home': str(HOME),
+            'env': {k: os.environ[k] for k in ('KITH_STATE', 'HQ_STATE', 'KITH_HOME', 'HQ_HOME', 'KITH_AGENTS', 'HQ_AGENTS') if os.environ.get(k)}}
+    binary = kith_bin()
+    try:
+        r = subprocess.run([binary, 'kernel', 'core-call', 'people.secretsView', '--params-stdin'], input=json.dumps(body),
+                           capture_output=True, text=True, timeout=10) if binary else None
+        view = json.loads(r.stdout)['auth'] if r is not None and r.returncode == 0 else None
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        view = None
+    if not isinstance(view, dict):
+        note('the core did not answer people.secretsView, so the profiles\' owners were not checked')
+        return
+    owners = [p for p, v in (view.get('people') or {}).items() if v.get('owner')]
+    for name, prof in sorted((view.get('profiles') or {}).items()):
+        if prof.get('person') or '/' not in name:
+            continue
+        # the kernel's services first, then this Mac's (the host's connectors), as kith-auth's service_file finds them
+        spec = {}
+        for folder in (KITH / 'services', P['KITH_MACHINE'] / 'services'):
+            svc = folder / f'{name.split("/", 1)[0]}.json'
+            if svc.is_file():
+                try:
+                    spec = json.loads(svc.read_text())
+                except ValueError:
+                    spec = {}
+                break
+        if spec.get('personal', spec.get('kind') in ('login', 'browser')):
+            warn(f'profiles: {name} names no owner in the core, and {name.split("/", 1)[0]} is a personal service now: kith-auth reads it as '
+                 'the owner\'s, the host reads it as shared with everyone who may use its agents. Name the owner: kith rollback authority, '
+                 f'kith auth owner {name} {owners[0] if owners else "<you>"}, kith kernel core-migrate --authority --force, kith migrate step authority')
+
+
 def people():
     """The people tables in auth.json: rows and grants that name someone or something that isn't there, logins
     shared with everyone, free shells, and the Discord settings from before people."""
@@ -236,6 +276,7 @@ def people():
         auth = kith_tombstone.load_json(Path(os.environ.get('KITH_AUTH') or P['KITH_SECRETS'] / 'auth.json'))
     except kith_tombstone.Tombstoned:
         note('authority is switched to the core (auth.json is a tombstone); `kith kernel cutover rollback authority` undoes it')
+        core_profiles()
         return
     except FileNotFoundError:
         note('no auth.json yet')

@@ -248,6 +248,47 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - Independent packages run in parallel, one outcome per worker brief.
 - `rust-rebuild` goes to `main` later through one normal PR with full CI.
 
+## Runbook: stepping a Mac's authority to the core (G6)
+
+For the operator (Kai), once per Mac. `kith migrate step authority` moves who may use what out of `auth.json` into the core.
+The step is open (the M2-18 gates are closed); it refuses only for what it finds on the Mac, and every refusal leaves the file
+as it was. `KITH_CORE_AUTHORITY` stays unset: turning the host's switch on by default is a separate decision (M2-24).
+
+**Do not step a Mac that is in use until L1, q234 and the switched-Mac end-to-end test have landed.** Nothing steps by itself, and
+`rust-rebuild` ships to no one, but with the constant gone this line is the only guard. On a stepped Mac today these stop, all
+failing closed (none widens anyone's access):
+- app invites and `/link` (q234);
+- guest doors: `door` is not routed and exits 3, so a new door is refused and the recheck sweep kills a running one;
+- the job tick (the edge card's Yes on a job, the share sheet);
+- room secrets: `once put/copy` and `exec --secret` exit 3 (the core has no `once` table);
+- kith-auth's people-admin writes (`member`, `person`, `bot`, `invite`, `preset`, `handle`, `link`) and `ls`.
+
+1. **Back up.** Copy `~/.kith/secrets/auth.json` and the core (`~/.kith/core/`) somewhere safe. (The step also keeps
+   `auth.json.pre-cutover-<time>` beside the file and a `VACUUM INTO` snapshot of the core, but those are the step's, not yours.)
+2. **Quiet one-time secrets.** `once` in `auth.json` holds one-time secrets that live only in the file and the Keychain. The
+   step refuses while there are any ("wait until they are used or expire (at most an hour), then step"). Nothing to do but wait; an expired entry is cleared only by the host's sweep, so `kith serve` must be running for the hour to be the limit.
+3. **Import again, and compare.** A core imported before handles (m0015), profiles, grants and env (m0021, m0023) or a helper's
+   `since` (m0016) were kept is *stale*: it says "none" where the file says something, and the router would answer from it.
+   The step refuses it with "import again". So always re-import first, with the same-answer check:
+   `kith kernel core-migrate --authority --force`, then `kith migrate check authority`. It must say 0 differences. A difference
+   is a finding, not something to step past: read the lines (they name the person, the profile or the agent, never a value).
+4. **Dry run.** `kith migrate step authority --dry-run` prints the preflight: `once` entries in auth.json (item 7), open removals, credential records in serve.db that
+   have not moved into the vault (unlock the vault in the app first), live claims or asks held by an id that is not a person.
+   Each non-zero item stops the step and names its ids; fix them, run the dry run again.
+5. **Step.** `kith migrate step authority`. It takes `auth.json.lock`, imports, compares again, writes the marker and the record,
+   and only then turns `auth.json` into the tombstone, holding the lock to the end. If it stops half way ("auth.json changed
+   during the step", a held lock) nothing was tombstoned: run it again. A crash between the record and the tombstone is
+   finished by running the same command (it keeps the core's newer rows when the file is the one the step imported).
+6. **Check.** `kith migrate status` says authority is switched. `kith-auth may`, `resolve`, `people --json` and `keys --json` now
+   answer from the core (the same words as before); `kith doctor` says authority is switched and lists any profile that has no owner
+   in the core on a service that is personal now. The writers (`access`, `helper`, `job --decline`, `set`, `grant`, `revoke`,
+   `env`, `connect`, `disconnect`) need the core's daemon (`kith serve` runs it); with none they exit 3 and change nothing.
+7. **Back out.** `kith rollback authority` takes the lock, writes the Keychain items back, and gives you an `auth.json` that holds
+   what the core holds now (grants, profiles, env and a helper's `since` included), laid over the file the step kept. Run
+   `kith kernel core-migrate --authority --force` and then `kith migrate step authority` again when you want to go forward (step 3
+   again: the rolled-back file can name an owner for a profile that the core held with none, so a plain step refuses with
+   "differ from auth.json" until the core is imported again).
+
 ## Log
 
 - 2026-11-03: plan written; decisions recorded. B0 done in PR #582. Issue #578 opened for a model per backup entry.
@@ -451,3 +492,5 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
   - `once put|take` and `exec --secret ID`: the `once` table is S-c; the step refuses while it is non-empty. Callers: the owner's one-time secret to a room member (`cards/room_secret.rs`) and the agent run that takes it (`kith-auth-secret-check`).
   - `mcp-config` with more than one argument, `keys` without `--json`, `account-state` without `--json`, `door` or `mcp-names` with the wrong number of arguments: no caller (the launcher passes the agent only; the host and secret cards pass `--json`; the rest are usage errors on the file too).
   Checks: `kernel/tests/kith-auth-router-check` gained `door` (every person x held and not, the stale, no-job and renamed-piece shapes), `mcp-names`, `ls`, `connectors`, the tick (file vs daemon, embedded exits 3), the app-only line for the seven verbs, a revoke and an undo seen from `door`, and `disconnect` on a grant that is still held (one `people.secretRevoke` with `dropHostProfiles`; the last holder of a host profile removes it on both sides). Core: `authority::tests::card::a_job_is_ticked_...`.
+
+- 2026-11-12: M2-23 L2 (the step lift, `KITH_CORE_AUTHORITY` still OFF): `kith migrate step authority` is no longer refused by a constant. `STEP_REFUSAL` and the module's `lifted` flag are gone; the step refuses only for what a run finds: `auth.json`'s `once` holds one-time secrets (checked under `auth.json.lock` in `source_lock`, which the step holds through the tombstone, and `before_tombstone`'s sha check refuses a `once` written in between, so none is lost: "wait until they are used or expire (at most an hour), then step"); a core imported before profiles/grants/env (`secret_stale`), a helper's `since` or handles were kept (refused before the import: "import again", `--force` is the import again); a preflight that is not zero; a file that changed during the step. The old text's gates, each closed: 1 and 2 (kith-auth and the host read the tombstone and answer from the core) #960/#964/#969/#970 and #875; 4 and 5 (`addBot`/`removeBot`/`removePerson` clear the id's grants, profiles' `with` and rows in the same transaction with `forget`, `removePerson --unused` and `retired` check handles, grants and profiles) #864 (the test `forget_also_clears_grants_and_profiles` runs), #861, #865; 6 and 7 (writers for `agent_access`, profiles, grants and env) #846 and #970; 8 (the revoke bridge) #790 and #880; 9 (the "already switched" branch) #921 and #959 (the step keeps the sha of the imported file as `auth_sha`; a repair offers `--force` only while the core is unmoved); 10 (`people --json`) #861. New: the router-check steps its copies for real and adds the way back (rollback after the core's own writes, step again), the refusals above through the CLI, and `kith doctor` on a stepped home; `kith-auth-props` compares the answers of a stepped copy with the file's and with the rolled-back file (host-build, `KITH_BIN`); `botguests_props` runs 14-20 on a host stepped for real (`a_bot_never_has_more_than_its_owner_holds_now_on_a_stepped_host`); the revoke model gained `RouterDoor` for all of kith-auth's reads and the break `RouterStale` (rows `switched-router*`, `broken-router-stale*`); `kith doctor` flags a profile with no owner in the core on a service that is personal now. The runbook (G6) is "Runbook: stepping a Mac's authority" above. NOT in this package: `door` and the job tick (L1), the people-admin writes (`member`, `person`, `bot`, `invite`, `preset`, `handle`, `link`) which still exit 3 on the tombstone, and the default of `KITH_CORE_AUTHORITY` (M2-24, Kai's decision).
