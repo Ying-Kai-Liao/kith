@@ -47,7 +47,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 use zeroize::{Zeroize as _, Zeroizing};
 
-use super::authority_preflight::{Preflight, run as run_preflight};
+use super::authority_preflight::{Item as PfItem, Preflight, run as run_preflight};
 use super::secrets_back::{self, OsStore};
 use super::{Env, Module, Opts, SourceLock, SwitchedFile, marker, tombstone};
 use crate::AuthorityOptions;
@@ -324,20 +324,28 @@ fn refuse_unmoved_vault(ctx: &Ctx, core: &Connection) -> Result<()> {
 /// `kith-auth` keeps one-time secrets (`once`) only in auth.json, and the core has no table for them, so a tombstone would
 /// strand each one with its Keychain item. Looked at under `auth.json.lock`, which the step holds through the tombstone
 /// (`before_tombstone` checks the file's sha, so a `once` written after this read refuses the step instead of being lost).
-fn refuse_open_once(auth: &Path) -> Result<()> {
+fn open_once_ids(auth: &Path) -> Vec<String> {
     // A file that cannot be read or parsed is the import's refusal to make, not this one's.
     let Ok(bytes) = std::fs::read(auth) else {
-        return Ok(());
+        return Vec::new();
     };
-    let n = serde_json::from_slice::<Value>(&bytes)
+    serde_json::from_slice::<Value>(&bytes)
         .ok()
-        .and_then(|v| v.get("once").and_then(Value::as_object).map(Map::len))
-        .unwrap_or(0);
+        .and_then(|v| {
+            v.get("once")
+                .and_then(Value::as_object)
+                .map(|o| o.keys().cloned().collect())
+        })
+        .unwrap_or_default()
+}
+
+fn refuse_open_once(auth: &Path) -> Result<()> {
+    let n = open_once_ids(auth).len();
     if n == 0 {
         return Ok(());
     }
     Err(Error::Refused(format!(
-        "authority: auth.json holds {n} one-time secret(s) (`once`) that only kith-auth can use; wait until they are used or expire (at most an hour), then step. Nothing was changed"
+        "authority: auth.json holds {n} one-time secret(s) (`once`) that only kith-auth can use; wait until they are used or expire (at most an hour; an expired one is cleared by the host's sweep, so kith serve must be running), then step. Nothing was changed"
     )))
 }
 
@@ -363,7 +371,7 @@ fn refuse_stale_core(db: &Path, force: bool) -> Result<()> {
         return Ok(());
     };
     Err(Error::Refused(format!(
-        "authority: core.db was imported before {what} were kept; import again (kith kernel core-migrate --authority --force), then step. Nothing was changed"
+        "authority: core.db was imported before {what} were kept; import again (kith kernel core-migrate --authority --force), then step. auth.json was not touched"
     )))
 }
 
@@ -905,7 +913,16 @@ impl Module for AuthorityModule {
             .and_then(|r| r.as_ref().err())
             .map(ToString::to_string);
         // A real step has no import to ask yet, and its own import refuses by itself.
-        run_preflight(self, env, refusal, db.as_ref(), import.is_some()).map(Some)
+        let mut pre = run_preflight(self, env, refusal, db.as_ref(), import.is_some())?;
+        // The real step refuses these under its lock; the dry run never takes it, so it is counted here too.
+        pre.items.push(PfItem {
+            n: 7,
+            what: "one-time secrets (`once`) in auth.json, which the core cannot hold",
+            ids: open_once_ids(&ctx(env)?.auth),
+            stops: true,
+            skipped: None,
+        });
+        Ok(Some(pre))
     }
 
     fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {

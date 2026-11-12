@@ -725,7 +725,7 @@ a = json.load(open(sys.argv[1]))
 assert 'echo/new' in a['profiles'] and 'echo/second' in a['profiles'], sorted(a['profiles'])
 assert a['env']['house']['echo'], a['env']
 assert a.get('once', {}) == {}, a.get('once')
-assert any(isinstance(m, dict) and m.get('helper_once') for m in a['members']['house'].values()) or True
+assert a['members']['house']['amy'].get('helper_once'), a['members']['house']['amy']
 PY
   then ok "rollback: what the core wrote (profiles, env) is in the file"; else bad "rollback: what is in the file"; fi
   # and forward again, as the runbook says: import again (the rolled-back file names the owner of a profile the core held with none,
@@ -751,7 +751,7 @@ a['once'] = {'o1': {'agent': 'house', 'created': 1, 'expires': 4102444800000}}
 json.dump(a, open(sys.argv[1], 'w'))" "$AUTHJ"
 sha_before=$(shasum "$AUTHJ" | cut -d' ' -f1)
 out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
-if [[ $rc != 0 && $out == *'one-time secret'* && $out == *'wait until they are used or expire (at most an hour), then step'* ]] \
+if [[ $rc != 0 && $out == *'one-time secret'* && $out == *'wait until they are used or expire (at most an hour'* ]] \
    && [[ $(shasum "$AUTHJ" | cut -d' ' -f1) == "$sha_before" ]] && ! grep -q kith_tombstone "$AUTHJ"; then
   ok "step: one-time secrets in auth.json refuse it, nothing changed"
 else bad "step with a once" "rc=$rc $out"; fi

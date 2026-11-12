@@ -2016,7 +2016,7 @@ fn a_step_with_one_time_secrets_in_auth_json_is_refused_and_changes_nothing() {
         let e = refusal(step(&reg, &r.env, "authority", opts()));
         assert!(
             e.contains("1 one-time secret(s)")
-                && e.contains("wait until they are used or expire (at most an hour), then step"),
+                && e.contains("wait until they are used or expire (at most an hour"),
             "{e}"
         );
     }
@@ -2030,6 +2030,19 @@ fn a_step_with_one_time_secrets_in_auth_json_is_refused_and_changes_nothing() {
     r.edit(|v| v["once"] = json!({}));
     step(&reg, &r.env, "authority", opts()).expect("step");
     assert!(tombstone::is_tombstone(&r.auth()));
+}
+
+#[test]
+fn a_dry_run_reports_one_time_secrets_and_is_not_ready() {
+    let (r, reg) = rig();
+    put_once(&r);
+    let dry = Opts {
+        dry_run: true,
+        ..opts()
+    };
+    let e = refusal(step(&reg, &r.env, "authority", dry));
+    assert!(e.contains("preflight 7.") && e.contains("o1"), "{e}");
+    assert!(e.contains("not ready"), "{e}");
 }
 
 /// Wraps a module and has a `kith-auth once put` land in auth.json after the once check (inside `same_answer`), as a writer

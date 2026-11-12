@@ -254,16 +254,25 @@ For the operator (Kai), once per Mac. `kith migrate step authority` moves who ma
 The step is open (the M2-18 gates are closed); it refuses only for what it finds on the Mac, and every refusal leaves the file
 as it was. `KITH_CORE_AUTHORITY` stays unset: turning the host's switch on by default is a separate decision (M2-24).
 
+**Do not step a Mac that is in use until L1, q234 and the switched-Mac end-to-end test have landed.** Nothing steps by itself, and
+`rust-rebuild` ships to no one, but with the constant gone this line is the only guard. On a stepped Mac today these stop, all
+failing closed (none widens anyone's access):
+- app invites and `/link` (q234);
+- guest doors: `door` is not routed and exits 3, so a new door is refused and the recheck sweep kills a running one;
+- the job tick (the edge card's Yes on a job, the share sheet);
+- room secrets: `once put/copy` and `exec --secret` exit 3 (the core has no `once` table);
+- kith-auth's people-admin writes (`member`, `person`, `bot`, `invite`, `preset`, `handle`, `link`) and `ls`.
+
 1. **Back up.** Copy `~/.kith/secrets/auth.json` and the core (`~/.kith/core/`) somewhere safe. (The step also keeps
    `auth.json.pre-cutover-<time>` beside the file and a `VACUUM INTO` snapshot of the core, but those are the step's, not yours.)
 2. **Quiet one-time secrets.** `once` in `auth.json` holds one-time secrets that live only in the file and the Keychain. The
-   step refuses while there are any ("wait until they are used or expire (at most an hour), then step"). Nothing to do but wait.
+   step refuses while there are any ("wait until they are used or expire (at most an hour), then step"). Nothing to do but wait; an expired entry is cleared only by the host's sweep, so `kith serve` must be running for the hour to be the limit.
 3. **Import again, and compare.** A core imported before handles (m0015), profiles, grants and env (m0021, m0023) or a helper's
    `since` (m0016) were kept is *stale*: it says "none" where the file says something, and the router would answer from it.
    The step refuses it with "import again". So always re-import first, with the same-answer check:
    `kith kernel core-migrate --authority --force`, then `kith migrate check authority`. It must say 0 differences. A difference
    is a finding, not something to step past: read the lines (they name the person, the profile or the agent, never a value).
-4. **Dry run.** `kith migrate step authority --dry-run` prints the preflight: open removals, credential records in serve.db that
+4. **Dry run.** `kith migrate step authority --dry-run` prints the preflight: `once` entries in auth.json (item 7), open removals, credential records in serve.db that
    have not moved into the vault (unlock the vault in the app first), live claims or asks held by an id that is not a person.
    Each non-zero item stops the step and names its ids; fix them, run the dry run again.
 5. **Step.** `kith migrate step authority`. It takes `auth.json.lock`, imports, compares again, writes the marker and the record,

@@ -600,7 +600,8 @@ def test_a_stepped_home_answers_as_the_file(ops):
     import subprocess
     reset()
     for op in ops:
-        if op[0] not in SECRET_KINDS and op[0] != 'hand-profile':
+        # `set` writes Keychain items, which this run has none of; the other secret writers (grants, env, connect) go in
+        if op[0] != 'sset':
             apply(op)
     file_env, _ = home_copy('file')
     core_env, core_auth = home_copy('core')
@@ -609,11 +610,10 @@ def test_a_stepped_home_answers_as_the_file(ops):
                           capture_output=True, text=True, timeout=300)
     STEPPED['examples'] += 1
     if step.returncode != 0:
-        # a refusal is allowed (the file holds something the import will not take: it is named, and the file stays)
+        # nothing the generator builds is one the import may refuse: a refusal here is a finding, not a skip
         STEPPED['refused'] += 1
-        assert (step.stdout + step.stderr).strip(), 'the step failed with no words'
         assert core_auth.read_bytes() == before, f'a refused step touched auth.json: {step.stderr}'
-        return
+        raise AssertionError(f'the step refused a generated home: {(step.stdout + step.stderr).strip()}\nops {ops}')
     assert b'kith_tombstone' in core_auth.read_bytes(), f'the step said ok but left a file: {step.stdout}'
     want, got = answers(file_env), answers(core_env)
     STEPPED['answers'] += len(want)

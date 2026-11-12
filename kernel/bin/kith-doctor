@@ -252,12 +252,15 @@ def core_profiles():
     for name, prof in sorted((view.get('profiles') or {}).items()):
         if prof.get('person') or '/' not in name:
             continue
-        # this Mac's own services (the host's connectors) first, then the kernel's, as kith-auth's service_file finds them
+        # the kernel's services first, then this Mac's (the host's connectors), as kith-auth's service_file finds them
         spec = {}
-        for folder in (P['KITH_MACHINE'] / 'services', KITH / 'services'):
+        for folder in (KITH / 'services', P['KITH_MACHINE'] / 'services'):
             svc = folder / f'{name.split("/", 1)[0]}.json'
             if svc.is_file():
-                spec = json.loads(svc.read_text())
+                try:
+                    spec = json.loads(svc.read_text())
+                except ValueError:
+                    spec = {}
                 break
         if spec.get('personal', spec.get('kind') in ('login', 'browser')):
             warn(f'profiles: {name} names no owner in the core, and {name.split("/", 1)[0]} is a personal service now: kith-auth reads it as '
