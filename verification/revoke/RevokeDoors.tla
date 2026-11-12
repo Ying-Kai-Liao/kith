@@ -569,6 +569,7 @@ DoorSweep(m) ==
 \* check. It needs the flock, which a start holds between its check and its claim, so it cannot run in that gap (CutSweepNoLock: it can).
 CutOffSweep(m) ==
     /\ RouterDoor
+    /\ m \in DoorMacs   \* a row with no guest door in it keeps its state space (cutDone would only split states)
     /\ ~NoDoorSweep
     /\ revoked[m]
     /\ ~cutDone[m]
