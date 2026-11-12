@@ -588,6 +588,9 @@ def answers(env):
     for who in ALL:
         for agent in AGENTS:
             cmds += [['may', who, agent], ['resolve', agent, '--person', who]]
+            # the guest door's check (the revoke path: a revoked person, or the bot of one, reads `revoked`); the package declares no valid
+            # door here, so a person who may run the agent reads `no-job`. The tick is a write that needs the daemon, which these runs do not start
+            cmds += [['door', agent, who, 'render@0123456789ab', '--json']]
     for cmd in cmds:
         r = subprocess.run([sys.executable, str(KERNEL / 'bin' / 'kith-auth'), *cmd], env=env, capture_output=True, text=True, timeout=120)
         out.append((cmd, r.returncode, r.stdout))

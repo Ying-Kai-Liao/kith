@@ -254,14 +254,24 @@ For the operator (Kai), once per Mac. `kith migrate step authority` moves who ma
 The step is open (the M2-18 gates are closed); it refuses only for what it finds on the Mac, and every refusal leaves the file
 as it was. `KITH_CORE_AUTHORITY` stays unset: turning the host's switch on by default is a separate decision (M2-24).
 
-**Do not step a Mac that is in use until L1, q234 and the switched-Mac end-to-end test have landed.** Nothing steps by itself, and
-`rust-rebuild` ships to no one, but with the constant gone this line is the only guard. On a stepped Mac today these stop, all
-failing closed (none widens anyone's access):
-- app invites and `/link` (q234);
-- guest doors: `door` is not routed and exits 3, so a new door is refused and the recheck sweep kills a running one;
-- the job tick (the edge card's Yes on a job, the share sheet);
+**Do not step a Mac that is in use until q234 and the switched-Mac end-to-end test have landed, and you have accepted the door bound below.**
+Nothing steps by itself, and `rust-rebuild` ships to no one, but with the constant gone this line is the only guard. L1 is in: `door`,
+the job tick, `ls`, `connectors`, `mcp-names` and `helper-mcp` answer from the core. On a stepped Mac these still stop, all failing
+closed (none widens anyone's access):
+- app invites and `/link` (q234): the Settings "Link Telegram" button and the chat `/link CODE` run `invite` and `link`, which are app-only;
 - room secrets: `once put/copy` and `exec --secret` exit 3 (the core has no `once` table);
-- kith-auth's people-admin writes (`member`, `person`, `bot`, `invite`, `preset`, `handle`, `link`) and `ls`.
+- kith-auth's people-admin writes (`member`, `person`, `bot`, `invite`, `preset`, `handle`, `link`: manage people in the app), and the profile writers `owner`, `share`, `browser`.
+
+**The door bound (Kai accepts it before stepping).** On the file, a guest door's start and a revoke shared kith-auth's lock, so no door could start
+after a revoke reached the Mac. On a stepped Mac the start reads the core under the core's own lock while the revoke commits in the core without
+that lock, so a revoke can land between the start's check and its claim. The bound is: **a door that slips in dies at the revoke's own sweep
+(seconds after the commit), with the host's 60 s loop as the backstop.** The model says so: `switched-router-door` expects `DoorD2` to fail and
+`DoorCutAtSweep` to pass (the sweep needs the lock the start holds between check and claim). Notes for the operator:
+- **Revoke from the app.** The app's revoke runs `cut_off`, which sweeps the doors. A terminal `kith people suspend` writes the core and never calls
+  `cut_off`: a door that slipped in lives until the 60 s loop.
+- **A slow core kills doors.** The 60 s recheck calls `kith-auth door`, which gives up after 4 s; a core read slower than that reads `error`, and every
+  running door is ended (only `held` is spared). It fails closed and costs a render, not access.
+- Restoring D2 exactly is the doors table in the core (M2-14's `start`, M3) or the host taking `auth.json.lock` around the switched revoke.
 
 1. **Back up.** Copy `~/.kith/secrets/auth.json` and the core (`~/.kith/core/`) somewhere safe. (The step also keeps
    `auth.json.pre-cutover-<time>` beside the file and a `VACUUM INTO` snapshot of the core, but those are the step's, not yours.)

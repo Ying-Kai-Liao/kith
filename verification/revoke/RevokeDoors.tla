@@ -65,6 +65,8 @@ CONSTANTS
     \* ---- broken guest doors (FALSE in the design) ----
     DoorNoHold,         \* the door start reads may() only, not whether the Mac is in sync (GuestDoor.tla "nohold")
     DoorSplit,          \* the door checks, then claims and starts in a later step (GuestDoor.tla "split")
+    CutSweepNoLock,     \* BROKEN (RouterDoor): the revoke's own sweep (cut_off) runs without kith-auth's lock, so it can run between a start's
+                        \*   check and its claim, sees nothing, and the door then starts after the sweep
     NoDoorSweep,        \* nothing kills a running door when its person is revoked
     BotDoor,            \* TRUE = B's guest door and P's tick of its job are in the model (FALSE in base.consts)
     BotDoorNoCut,       \* B's door check reads B's own tick only, not cut to what P holds (kith-auth owner_cut)
@@ -157,7 +159,7 @@ Live    == {"running", "helping"}
 Proc    == Live \cup {"ending", "stuck", "reported", "rending", "rstuck"}
 \* P's guest door on a Mac: idle; checked (DoorSplit only: access read, no claim yet); running (claimed, so the
 \* sweep sees it); killed by the sweep; done (it ended by itself).
-GDoor   == {"idle", "checked", "running", "killed", "done"}
+GDoor   == {"idle", "checked", "cutchecked", "running", "killed", "done"}   \* cutchecked: the sweep ran while the start held the lock between its check and claim (CutSweepNoLock only)
 
 Rows0  == [m \in Macs |-> IF m = "m1" THEN {"hand", "star"} ELSE {"hand", "host"}]
 BotRow == [m \in Macs |-> TRUE]
@@ -525,9 +527,13 @@ Stop(m, w) ==
 \* A live turn of P asks for the door (the owner's job card, if any, is answered before this). kith_door.run takes
 \* kith-auth's lock, reads `kith-auth door` (may(), not held, the job ticked), writes the claim and starts the box:
 \* one step. Any door P's turn came through: the run is already going, the door is a tool call inside it.
+\* On the tombstone (RouterDoor) the check reads the core under the core's own lock, not kith-auth's flock, which the revoke does not take:
+\* the start is a check, then a start, and a revoke can land between them. What stops the door that slips in is the revoke's own named sweep
+\* (CutOffSweep: cut_off ends in doors::sweep, which takes the flock the start holds from the check to the claim).
+DoorTwoStep == DoorSplit \/ RouterDoor
 DoorGate(m) == MayP(m) /\ (DoorNoHold \/ InSync(m))
 DoorCheck(m) ==
-    /\ DoorSplit
+    /\ DoorTwoStep
     /\ m \in DoorMacs
     /\ gdoor[m] = "idle"
     /\ turn[m]["P"] \in Live
@@ -535,8 +541,8 @@ DoorCheck(m) ==
     /\ gdoor' = [gdoor EXCEPT ![m] = "checked"]
     /\ UNCHANGED <<auth, turn, door, ext>>
 DoorStart(m) ==
-    /\ IF DoorSplit
-       THEN gdoor[m] = "checked"
+    /\ IF DoorTwoStep
+       THEN gdoor[m] \in {"checked", "cutchecked"}
        ELSE /\ m \in DoorMacs
             /\ gdoor[m] = "idle"
             /\ turn[m]["P"] \in Live
@@ -555,6 +561,16 @@ DoorSweep(m) ==
     /\ gdoor[m] = "running"
     /\ ~MayP(m)
     /\ gdoor' = [gdoor EXCEPT ![m] = "killed"]
+    /\ UNCHANGED <<auth, turn, door, ext>>
+
+\* The named sweep of a revoke on the tombstone (cut_off -> doors::sweep): once the revoke reached the Mac, a running door of P is killed with no
+\* check. It needs the flock, which a start holds between its check and its claim, so it cannot run in that gap (CutSweepNoLock: it can).
+CutOffSweep(m) ==
+    /\ RouterDoor
+    /\ ~NoDoorSweep
+    /\ revoked[m]
+    /\ \/ gdoor[m] = "running" /\ gdoor' = [gdoor EXCEPT ![m] = "killed"]
+       \/ CutSweepNoLock /\ gdoor[m] = "checked" /\ gdoor' = [gdoor EXCEPT ![m] = "cutchecked"]
     /\ UNCHANGED <<auth, turn, door, ext>>
 
 (* ---- a bot's guest door (kith-auth door_state for a bot: owner_cut) ---- *)
@@ -861,6 +877,7 @@ Next ==
           \/ DoorStart(m)
           \/ DoorEnd(m)
           \/ DoorSweep(m)
+          \/ CutOffSweep(m)
           \/ BotDoorStart(m)
           \/ BotDoorEnd(m)
           \/ BotDoorSweep(m)
@@ -895,7 +912,7 @@ Next ==
 
 \* The sweep loop runs every 60 s: weak fairness (only DoorD1, a liveness property, depends on it).
 Spec == Init /\ [][Next]_vars
-        /\ (\A m \in Macs : WF_vars(DoorSweep(m)))
+        /\ (\A m \in Macs : WF_vars(DoorSweep(m)) /\ WF_vars(CutOffSweep(m)))
         /\ (\A m \in Macs : WF_vars(AskSweep(m)) /\ WF_vars(WakeWithdraw(m)) /\ WF_vars(ClaimEnding(m)) /\ WF_vars(KillSent(m)) /\ WF_vars(KillReSend(m)))
         /\ WF_vars(SetNet("m2", "online")) /\ WF_vars(\E a, b \in Macs : HExchange(a, b))
 
@@ -967,6 +984,9 @@ DoorD2 == [][\A m \in Macs : DoorStartOf(m) => ~revoked[m]]_vars
 DoorD2c == [][\A m \in Macs : DoorStartOf(m) => ~cloudRevoked]_vars
 \* DoorD1 (GuestDoor.tla D1): a door running for a revoked P is stopped (or the revoke is undone).
 DoorD1 == \A m \in Macs : (gdoor[m] = "running" /\ revoked[m]) ~> (gdoor[m] # "running" \/ ~revoked[m])
+\* DoorCutAtSweep (RouterDoor): no door of P starts after the revoke's own sweep ran: the sweep waits for the lock a start holds from its
+\* check to its claim. Fails in broken-router-sweep-no-lock.
+DoorCutAtSweep == [][\A m \in Macs : gdoor[m] = "cutchecked" => gdoor'[m] # "running"]_vars
 \* BotDoorCut (I6 for doors): a guest door of B starts only while its owner P holds it.
 \* CoreDoorHook (M2-14), at the level of the door TABLE: no moment where P is revoked on a Mac and a row of a door of P or B
 \* is still open there, with no fairness needed. It says nothing about the box (see DoorsSwept). Fails without the hook

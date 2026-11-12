@@ -480,10 +480,10 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   # `kith doctor` on the stepped home: iso turned the service of `later/main` personal after the import stored it with no owner, so the
   # core reads it as shared, where the file read it as the owner's: doctor says so. The file home (iso did the same there) says nothing.
   python3 "$KERNEL/bin/kith-doctor" > "$T/doctor.sw2" 2>&1
-  if grep -q 'profiles: later/main has no owner in the core' "$T/doctor.sw2"; then ok "doctor: a profile with no owner on a service that is personal now is flagged on the stepped home"; else
+  if grep -q 'profiles: later/main names no owner in the core' "$T/doctor.sw2"; then ok "doctor: a profile with no owner on a service that is personal now is flagged on the stepped home"; else
     bad "doctor: later/main not flagged" "$(grep -i 'profile\|switched\|core' "$T/doctor.sw2" | head -5)"; fi
   use_home "$T/gs"; python3 "$KERNEL/bin/kith-doctor" > "$T/doctor.gs" 2>&1
-  ! grep -q 'has no owner in the core' "$T/doctor.gs" && ok "doctor: the file home has no such warning" || bad "doctor: the file home was flagged"
+  ! grep -q 'names no owner in the core' "$T/doctor.gs" && ok "doctor: the file home has no such warning" || bad "doctor: the file home was flagged"
   use_home "$T/sw2"
   # the core says where a value lives, never the value: no secret, no invite code, no chat handle in what it answers
   printf '{"viaSwitch": true, "kernel": "%s", "home": "%s"}' "$KERNEL" "$HOME" | "$BIN" kernel core-call people.secretsView --params-stdin > "$T/view.out" 2>/dev/null
@@ -927,6 +927,13 @@ refuses() {
   [[ $rc == 3 && -z $out && -s $T/e ]] && ok "$name: exit 3, no answer" || bad "$name" "rc=$rc out=$out err=$(cat "$T/e")"
 }
 calls() { wc -l < "$1/calls" | tr -d ' '; }
+# H AGENT ask|deny TOOL: what the PreToolUse hook of a kith:<agent> helper decides ("pass" for no output); exactly one JSON object
+helper_hook() {
+  local out
+  out=$(printf '{"tool_name": "%s", "tool_input": {}}' "$3" | A helper-mcp "$1" "$2" 2>/dev/null) || { echo "exit-$?"; return; }
+  [[ -z $out ]] && { echo pass; return; }
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])' <<< "$out" 2>/dev/null || echo "not-one-object"
+}
 
 # no route: the verbs and shapes the core is not asked about keep today's text, and no call goes out
 mkwrap "$T/w1" pass
@@ -955,6 +962,14 @@ for v in "door house samuel" "door house samuel x@y --json extra" "mcp-names" "m
 done
 out=$(A ls --json extra 2>/dev/null); rc=$?   # --json puts the refusal on stdout, as it does on the file
 [[ $rc == 2 && $out == '{"ok": false, "error": "ls [--json]"}' ]] && ok "usage: ls --json extra: exit 2, the JSON error" || bad "usage: ls --json extra" "rc=$rc $out"
+# helper-mcp on the tombstone (the PreToolUse hook; a silent pass is the failure to watch for): a granted tool passes, an ungranted one is
+# asked in the owner's session and denied in a guest's
+[[ $(helper_hook house ask mcp__echo__say) == pass ]] && ok "helper-mcp, switched: a granted tool passes" || bad "helper-mcp, switched: a granted tool" "$(helper_hook house ask mcp__echo__say)"
+[[ $(helper_hook helper ask mcp__echo__say) == ask ]] && ok "helper-mcp, switched: an ungranted tool is asked (owner)" || bad "helper-mcp, switched: ungranted, owner" "$(helper_hook helper ask mcp__echo__say)"
+[[ $(KITH_PERSON=samuel helper_hook helper deny mcp__echo__say) == deny ]] && ok "helper-mcp, switched: an ungranted tool is denied (guest)" || bad "helper-mcp, switched: ungranted, guest"
+[[ $(helper_hook house ask Bash) == pass ]] && ok "helper-mcp, switched: a tool that is no MCP tool passes" || bad "helper-mcp, switched: Bash"
+[[ $(grep -c . "$T/w1/calls") -gt 0 ]] && ok "helper-mcp, switched: it asked the core" || bad "helper-mcp, switched: no call went to the core"
+: > "$T/w1/calls"
 [[ $(calls "$T/w1") == 0 ]] && ok "no route: the core was never asked" || bad "no route: a call went out" "$(cat "$T/w1/calls")"
 
 # a tombstone of another module is not authority's: no call, today's text
@@ -1028,6 +1043,13 @@ for mode in sleep garbage array nocore exit3 exit4 exit5; do
   refuses "core-call $mode: door" A door house eve "$DOOR" --json
   refuses "core-call $mode: mcp-names" A mcp-names house
   refuses "core-call $mode: ls" A ls
+  out=$(A ls --json 2>/dev/null); rc=$?   # a refusal of ls --json is JSON on stdout, as granted --json is
+  [[ $rc == 3 && $out == '{"ok": false, "error": '* ]] && ok "core-call $mode: ls --json refused: JSON error on stdout, exit 3" || bad "core-call $mode: ls --json" "rc=$rc $out"
+  # the helper hook never passes a tool it could not check: the decision, and exactly one JSON object, granted or not
+  [[ $(helper_hook house ask mcp__echo__say) == ask && $(helper_hook helper ask mcp__echo__say) == ask \
+     && $(KITH_PERSON=samuel helper_hook house deny mcp__echo__say) == deny ]] \
+    && ok "core-call $mode: helper-mcp gives the decision (ask for the owner, deny for a guest), never a pass" \
+    || bad "core-call $mode: helper-mcp" "$(helper_hook house ask mcp__echo__say) $(helper_hook helper ask mcp__echo__say) $(KITH_PERSON=samuel helper_hook house deny mcp__echo__say)"
   refuses "core-call $mode: connectors" A connectors --json
   refuses "core-call $mode: job tick" A job house amy edit
   refuses "core-call $mode: take-once" A resolve helper --person amy --via house --take-once

@@ -1,4 +1,4 @@
-\* MODELS L1's FUTURE ROUTE, not the code at this head (`door` exits 3 on the tombstone): kith-auth's door_state reads the core. L1 must re-check this row (kith_door's start is one step under the kith-auth lock; a routed door_state reads under the core's lock)
+\* L1's route: kith-auth's door_state reads the core under the core's lock, while kith_door's start holds only kith-auth's flock, which a core revoke does not take. So the start is a check, then a start (RouterDoor makes it two steps), the revoke can land between, and the guarantee is the revoke's own named sweep (CutOffSweep) plus the 60 s loop (DoorSweep). DoorD2 fails here by design.
 CoreGate = TRUE
 Switched = TRUE
 RouterDoor = TRUE

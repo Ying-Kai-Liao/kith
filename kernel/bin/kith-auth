@@ -3503,7 +3503,7 @@ def main(argv):
     if cmd in APP_ONLY:
         _APP_ONLY = cmd
     if cmd in ROUTES:
-        _ROUTE = (cmd, [a for a in rest if a != '--json'] if cmd == 'granted' else rest, cmd == 'granted' and '--json' in rest)
+        _ROUTE = (cmd, [a for a in rest if a != '--json'] if cmd == 'granted' else rest, cmd in ('granted', 'ls') and '--json' in rest)   # a refusal says it as JSON on stdout, as json_run does
         try:
             return dispatch(cmd, rest)
         except Routed as e:

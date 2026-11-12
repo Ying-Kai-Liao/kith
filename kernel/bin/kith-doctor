@@ -212,8 +212,8 @@ def services():
     section('services')
     r = run(str(KITH / 'bin' / 'kith-auth'), 'ls')
     if r.returncode:
-        if 'moved to the Kith core' in (r.stderr + r.stdout):
-            note('authority is switched to the core: `kith-auth ls` has no core form yet, so the grants are not listed here')
+        if 'moved to the Kith core' in (r.stderr + r.stdout) or 'moved to the core' in (r.stderr + r.stdout):
+            note('authority is switched to the core and it did not answer `kith-auth ls`, so the grants are not listed here')
             return
         bad(f'kith-auth ls failed: {(r.stderr or r.stdout).strip()[:200]}')
         return

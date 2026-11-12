@@ -11,6 +11,7 @@ HelperNoSync = FALSE
 GuestDoor = FALSE
 DoorNoHold = FALSE
 DoorSplit = FALSE
+CutSweepNoLock = FALSE
 NoDoorSweep = FALSE
 BotDoor = FALSE
 BotDoorNoCut = FALSE
