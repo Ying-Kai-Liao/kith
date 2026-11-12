@@ -241,9 +241,9 @@ switched-router-door	PROPERTY	DoorD2	fail
 switched-router-door	PROPERTY	DoorD2c	fail
 switched-router-door	PROPERTY	DoorD1	pass
 switched-router-door	INVARIANT	DoorsCutWithRevoke	fail
-switched-router-door	PROPERTY	DoorCutAtSweep	pass
+switched-router-door	INVARIANT	DoorCutAtSweep	pass
 # the revoke's own sweep without kith-auth's lock can run between a start's check and its claim: the door then starts after it
-broken-router-sweep-no-lock	PROPERTY	DoorCutAtSweep	fail
+broken-router-sweep-no-lock	INVARIANT	DoorCutAtSweep	fail
 switched-router-kill	INVARIANT	TypeOK	pass
 switched-router-kill	PROPERTY	NoLiveProc	pass
 # a router that answers from the file it replaced (frozen at the switch, never revoked) lets a revoked person in

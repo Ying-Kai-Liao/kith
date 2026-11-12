@@ -962,15 +962,17 @@ for v in "door house samuel" "door house samuel x@y --json extra" "mcp-names" "m
 done
 out=$(A ls --json extra 2>/dev/null); rc=$?   # --json puts the refusal on stdout, as it does on the file
 [[ $rc == 2 && $out == '{"ok": false, "error": "ls [--json]"}' ]] && ok "usage: ls --json extra: exit 2, the JSON error" || bad "usage: ls --json extra" "rc=$rc $out"
+# nothing above asked the core: counted here, before the helper rows below, which do ask it on the same wrapper
+pre=$(calls "$T/w1")
+[[ $pre == 0 ]] && ok "no route: the core was never asked" || bad "no route: a call went out" "$(cat "$T/w1/calls")"
 # helper-mcp on the tombstone (the PreToolUse hook; a silent pass is the failure to watch for): a granted tool passes, an ungranted one is
 # asked in the owner's session and denied in a guest's
 [[ $(helper_hook house ask mcp__echo__say) == pass ]] && ok "helper-mcp, switched: a granted tool passes" || bad "helper-mcp, switched: a granted tool" "$(helper_hook house ask mcp__echo__say)"
 [[ $(helper_hook helper ask mcp__echo__say) == ask ]] && ok "helper-mcp, switched: an ungranted tool is asked (owner)" || bad "helper-mcp, switched: ungranted, owner" "$(helper_hook helper ask mcp__echo__say)"
 [[ $(KITH_PERSON=samuel helper_hook helper deny mcp__echo__say) == deny ]] && ok "helper-mcp, switched: an ungranted tool is denied (guest)" || bad "helper-mcp, switched: ungranted, guest"
 [[ $(helper_hook house ask Bash) == pass ]] && ok "helper-mcp, switched: a tool that is no MCP tool passes" || bad "helper-mcp, switched: Bash"
-[[ $(grep -c . "$T/w1/calls") -gt 0 ]] && ok "helper-mcp, switched: it asked the core" || bad "helper-mcp, switched: no call went to the core"
-: > "$T/w1/calls"
-[[ $(calls "$T/w1") == 0 ]] && ok "no route: the core was never asked" || bad "no route: a call went out" "$(cat "$T/w1/calls")"
+[[ $(calls "$T/w1") -gt $pre ]] && ok "helper-mcp, switched: it asked the core" || bad "helper-mcp, switched: no call went to the core"
+: > "$T/w1/calls"   # the helper rows' calls are counted above; the checks below count their own
 
 # a tombstone of another module is not authority's: no call, today's text
 mkdir -p "$T/sw5" && cp -R "$T/sw4/home" "$T/sw5/home" && cp -R "$G/serve" "$T/sw5/serve"
