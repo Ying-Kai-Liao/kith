@@ -31,7 +31,6 @@ import kith_paths  # noqa: E402
 
 KINDS = ('terminal', 'ask', 'schedule', 'helper')
 COMPACT_TIMEOUT = 900
-BUSY = 75   # kith-stub's exit when another run holds the conversation's lock
 
 
 def sessions_mod():
@@ -123,12 +122,12 @@ def failed(sid, why):
     return f'failed: {why}'
 
 
-def parked(argv, cwd, env, group=False):
+def parked(argv, cwd, env, group=False, keep=None):
     """Fork the process that will be claude, parked before its exec: it execs argv (in cwd, with env, stdio on /dev/null)
     when b'1' is written to `go`, and exits without running anything when `go` closes unwritten (also when this process
     dies). Its pid is claude's pid (or the kith-stub's that runs claude), so the writer claim can name it before it starts
     (claim-then-exec, as a one-shot does in kernel/bin/kith). `group`: it leads a process group of its own, which reap() kills as
-    a whole. Returns (pid, go, err): an exec that fails writes why to `err`; one that succeeds closes it."""
+    a whole. `keep`: an fd that survives the exec (kith-stub's status pipe). Returns (pid, go, err): an exec that fails writes why to `err`; one that succeeds closes it."""
     go_r, go_w = os.pipe()
     err_r, err_w = os.pipe()   # not inheritable (PEP 446): the exec closes them
     pid = os.fork()
@@ -138,6 +137,8 @@ def parked(argv, cwd, env, group=False):
             os.close(err_r)
             if group:
                 os.setpgid(0, 0)
+            if keep is not None:
+                os.set_inheritable(keep, True)
             if os.read(go_r, 1) == b'1':
                 os.chdir(cwd)
                 null = os.open(os.devnull, os.O_RDWR)
@@ -168,6 +169,13 @@ def reap(pid, timeout=None, group=False):
         if time.monotonic() >= end:
             os.killpg(pid, signal.SIGKILL) if group else os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
+            if group:   # the claim may be given back only once claude has left the process table (a write stuck in the kernel)
+                for _ in range(100):
+                    try:
+                        os.killpg(pid, 0)
+                    except OSError:
+                        break
+                    time.sleep(0.1)
             return None
         time.sleep(0.2)
 
@@ -192,6 +200,14 @@ def lock_stub(sid):
     return [stub, '--lock-dir', os.path.join(machine, 'core', 'locks'), '--key', sid, '--'], None
 
 
+def stub_word(fd):
+    """What kith-stub wrote on its status pipe before it ran claude: "locked", "busy", or '' (it hit a lock error)."""
+    try:
+        return os.read(fd, 64).decode(errors='replace').strip()
+    except OSError:
+        return ''
+
+
 def compact(ks, e, since, at):
     """The claim names claude's own pid, not this sweep's (I11): a sweep that dies while claude writes leaves the claim held
     by the live writer, so nobody else gets in until claude has exited."""
@@ -202,7 +218,15 @@ def compact(ks, e, since, at):
     # The conversation's writer lock (a --direct run or a host turn on it is busy, not a second writer). The stub, not claude, is
     # the process the claim names: claude descends from it, and the claim ends with the stub, which waits for claude.
     stub, problem = lock_stub(sid)
-    pid, go, err = parked([*stub, claude, '-p', '--resume', sid, '/compact'], e.get('cwd') or '/', env, group=bool(stub))
+    # The stub says on a status pipe whether it holds the lock ("locked" / "busy"; nothing and EOF is a lock error): claude can
+    # itself exit 75, 126 or 127, so the exit code alone cannot tell.
+    status_r = status_w = None
+    if stub:
+        status_r, status_w = os.pipe()
+        stub = [*stub[:-1], '--status-fd', str(status_w), '--']
+    pid, go, err = parked([*stub, claude, '-p', '--resume', sid, '/compact'], e.get('cwd') or '/', env, group=bool(stub), keep=status_w)
+    if stub:
+        os.close(status_w)
     reaped = False
     try:
         if ks.take_claim(sid, pid, 'oneshot', lifecycle_owner=True):
@@ -228,13 +252,21 @@ def compact(ks, e, since, at):
         reaped = True
         if rc is None:
             return failed(sid, 'timed out')
-        if stub and rc == BUSY:
-            return 'busy'   # no decision: the pending 'compact' stands, and the next sweep tries again
+        if stub:
+            word = stub_word(status_r)
+            if word == 'busy':
+                return 'busy'   # no decision: the pending 'compact' stands, and the next sweep tries again
+            if not word and rc != 0:
+                return failed(sid, f'the conversation lock could not be taken (kith-stub exit {rc})')
+            if word == 'locked' and rc in (126, 127):
+                return failed(sid, f'claude did not start (exit {rc})')
         if rc == 0:
             lc.write_decision(sid, {**(lc.read_decision(sid) or {}), 'compacted': True, 'compactedAt': time.time()})
             return 'compacted'
         return failed(sid, f'exit {rc}')
     finally:
+        if status_r is not None:
+            os.close(status_r)
         os.close(go)   # a child still parked exits without running claude
         os.close(err)
         if not reaped:

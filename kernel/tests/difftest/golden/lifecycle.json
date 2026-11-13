@@ -47,6 +47,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-ok.jsonl",
@@ -104,6 +110,12 @@
    "at",
    "compactedAt",
    "failedAt"
+  ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
   ],
   "setup": [
    {
@@ -172,6 +184,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-fail.jsonl",
@@ -233,6 +251,12 @@
    "at",
    "compactedAt",
    "failedAt"
+  ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
   ],
   "setup": [
    {
@@ -300,6 +324,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-gone.jsonl",
@@ -358,6 +388,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-held.jsonl",
@@ -415,6 +451,12 @@
    "at",
    "compactedAt",
    "failedAt"
+  ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
   ],
   "setup": [
    {
@@ -478,6 +520,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-skresumed.jsonl",
@@ -535,6 +583,12 @@
    "at",
    "compactedAt",
    "failedAt"
+  ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
   ],
   "setup": [
    {
@@ -594,6 +648,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-skself.jsonl",
@@ -652,6 +712,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-small.jsonl",
@@ -709,6 +775,12 @@
    "at",
    "compactedAt",
    "failedAt"
+  ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
   ],
   "setup": [
    {
@@ -773,6 +845,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-twice.jsonl",
@@ -835,6 +913,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-st.jsonl",
@@ -854,7 +938,7 @@
    },
    {
     "write": "home/bin/kith-stub",
-    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nlock=$2; key=$4; shift 5\n[ -f \"$lock/$key.busy\" ] && { echo \"kith-stub: busy\" >&2; exit 75; }\nexec \"$@\"\n",
+    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nwhile [ \"$1\" != -- ]; do\n  case $1 in --lock-dir) lock=$2; shift ;; --key) key=$2; shift ;; --status-fd) fd=$2; shift ;; esac\n  shift\ndone\nshift\nif [ -f \"$lock/$key.busy\" ]; then\n  [ -n \"$fd\" ] && eval \"echo busy >&$fd\"\n  exit 75\nfi\n[ -n \"$fd\" ] && { eval \"echo locked >&$fd\"; eval \"exec $fd>&-\"; }\nexec \"$@\"\n",
     "mode": "755"
    }
   ]
@@ -907,6 +991,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-busy.jsonl",
@@ -926,7 +1016,7 @@
    },
    {
     "write": "home/bin/kith-stub",
-    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nlock=$2; key=$4; shift 5\n[ -f \"$lock/$key.busy\" ] && { echo \"kith-stub: busy\" >&2; exit 75; }\nexec \"$@\"\n",
+    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nwhile [ \"$1\" != -- ]; do\n  case $1 in --lock-dir) lock=$2; shift ;; --key) key=$2; shift ;; --status-fd) fd=$2; shift ;; esac\n  shift\ndone\nshift\nif [ -f \"$lock/$key.busy\" ]; then\n  [ -n \"$fd\" ] && eval \"echo busy >&$fd\"\n  exit 75\nfi\n[ -n \"$fd\" ] && { eval \"echo locked >&$fd\"; eval \"exec $fd>&-\"; }\nexec \"$@\"\n",
     "mode": "755"
    },
    {
@@ -981,6 +1071,12 @@
    "at",
    "compactedAt",
    "failedAt"
+  ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
   ],
   "setup": [
    {
@@ -1040,6 +1136,12 @@
    "compactedAt",
    "failedAt"
   ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
   "setup": [
    {
     "write": "home/.claude/projects/p/lc-LC-Bad.jsonl",
@@ -1059,7 +1161,7 @@
    },
    {
     "write": "home/bin/kith-stub",
-    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nlock=$2; key=$4; shift 5\n[ -f \"$lock/$key.busy\" ] && { echo \"kith-stub: busy\" >&2; exit 75; }\nexec \"$@\"\n",
+    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nwhile [ \"$1\" != -- ]; do\n  case $1 in --lock-dir) lock=$2; shift ;; --key) key=$2; shift ;; --status-fd) fd=$2; shift ;; esac\n  shift\ndone\nshift\nif [ -f \"$lock/$key.busy\" ]; then\n  [ -n \"$fd\" ] && eval \"echo busy >&$fd\"\n  exit 75\nfi\n[ -n \"$fd\" ] && { eval \"echo locked >&$fd\"; eval \"exec $fd>&-\"; }\nexec \"$@\"\n",
     "mode": "755"
    }
   ]

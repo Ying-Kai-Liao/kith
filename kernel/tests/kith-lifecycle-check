@@ -49,6 +49,7 @@ sid=$3
 printf '%s\n' "$*" >> "$KITH_STATE/stub-calls"
 [ -f "$KITH_STATE/live/terminal/$sid.claim" ] && echo held >> "$KITH_STATE/stub-claims"
 [ "${STUB_MODE:-ok}" = fail ] && exit 1
+[ "${STUB_MODE:-ok}" = e75 ] && exit 75
 if [ "${STUB_MODE:-ok}" = slow ]; then   # claude still writing: its own pid, then wait to be let go
   echo $$ > "$KITH_STATE/stub-pid"
   while [ ! -f "$KITH_STATE/stub-go" ]; do sleep 0.1; done
@@ -236,7 +237,7 @@ else
   fx l-busy 55 150000 "$Q"
   "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- sleep 60 &
   holder_pid=$!
-  for _ in $(seq 50); do "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- true >/dev/null 2>&1; [[ $? == 75 ]] && break; sleep 0.1; done
+  for _ in $(seq 150); do "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- true >/dev/null 2>&1; [[ $? == 75 ]] && break; sleep 0.1; done
   n=$(calls)
   out=$(python3 "$LC" sweep --session l-busy)
   is "busy: the sweep reports it and runs no claude" "$out/$(( $(calls) - n ))" "l-busy compact busy/0"
@@ -245,6 +246,14 @@ else
   kill $holder_pid 2>/dev/null; wait $holder_pid 2>/dev/null
   for _ in $(seq 50); do "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- true >/dev/null 2>&1 && break; sleep 0.1; done
   is "the next sweep, with the lock free, compacts" "$(python3 "$LC" sweep --session l-busy)/$(dec l-busy)" "l-busy compact compacted/compact compacted"
+
+  # busy is what the stub says on its status pipe, not an exit code: a claude that exits 75 itself has failed, and a lock that
+  # cannot be taken (the lock folder is not usable) is a failure with its reason, not a skip
+  fx l-e75 55 150000 "$Q"
+  is "a claude that itself exits 75 is a failure, not busy" "$(STUB_MODE=e75 python3 "$LC" sweep --session l-e75)" "l-e75 compact failed: exit 75"
+  fx l-lockerr 55 150000 "$Q"
+  : > "$T/afile"
+  is "a lock error is reported with its reason" "$(KITH_MACHINE=$T/afile python3 "$LC" sweep --session l-lockerr | sed 's/ (kith-stub exit [0-9]*)//')" "l-lockerr compact failed: the conversation lock could not be taken"
 
   # the lock is held for the compaction's whole life, and the claim names the stub (claude descends from it)
   fx l-life 55 150000 "$Q"
