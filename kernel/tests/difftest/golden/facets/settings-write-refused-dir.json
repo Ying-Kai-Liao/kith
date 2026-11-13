@@ -1,0 +1,8 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json.lock": "",
+  "state:home/.kith/settings.json/": "<empty dir>\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: <HOME>/.kith/settings.json is unreadable ([Errno 21] Is a directory: '<HOME>/.kith/settings.json')\n",
+  "step0.stdout": ""
+}

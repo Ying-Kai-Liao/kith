@@ -25,6 +25,11 @@
 //! service's key (`cards::secret`): it makes a card in the owner's chat and answers at once `{"ok": true, "carded":
 //! true, "message"}` or `{"ok": false, "error"}`. An owner token only (`TokenScope::OwnerAsk`); a guest's is "not authorized".
 //!
+//! `consumeOnce` (`{"token", "method": "consumeOnce", "tool", "input"}`) is the owner run's `PreToolUse` hook using up the
+//! yes of an auto-mode card ("Allow once"): the host noted it when `requestPermission` with `autoMode` ended in allow, under
+//! the run and the call's key, and answers `{"ok": true, "allowed": bool}`, true once. An owner token only, and only its own
+//! run's yeses; nothing in the run's folder can stand in for it.
+//!
 //! Two more read-only methods give a guest the kernel tools its sandbox keeps it from running itself: `memorySearch`
 //! (`kith-memory search`, as the token's person and agent) and `projectId` (`project-id`: the project the run was
 //! launched in, from the token, and `--info` of that one). Guest tokens only, same answer shape as `recall`.
@@ -130,6 +135,10 @@ struct Entry {
 /// The live tokens, by the SHA-256 of the token (the map never holds a token itself).
 pub struct TokenTable {
     entries: Mutex<HashMap<[u8; 32], Entry>>,
+    /// The "Allow once" yeses of auto-mode cards (`kith-permit denied`) waiting for the retry: `(run id, call key)` and
+    /// the end of each. Held here, not in a file of the run's folder, which the run can write itself. A restart loses them:
+    /// the retry is then refused, as if the card had been answered no.
+    onces: Mutex<HashMap<(String, String), Instant>>,
     /// `(peer, ancestor)`: whether `peer` is `ancestor` or one of its descendants. Replaceable for tests.
     ancestry: fn(u32, u32) -> bool,
 }
@@ -150,12 +159,30 @@ fn digest(token: &str) -> [u8; 32] {
 
 impl TokenTable {
     pub fn new() -> Self {
-        Self { entries: Mutex::new(HashMap::new()), ancestry: descends }
+        Self { entries: Mutex::new(HashMap::new()), onces: Mutex::new(HashMap::new()), ancestry: descends }
+    }
+
+    /// Records the owner's yes to a blocked call of run `run_id`, for the retry of exactly that call (`key` is
+    /// `kith_kernel::permit::host_once_key`). A yes to a call the classifier gave no verdict on is only good for the next
+    /// few minutes: Claude Code never retries those. Yeses past their end are dropped on the way.
+    pub fn keep_once(&self, run_id: &str, key: String, short: bool) {
+        let now = Instant::now();
+        let keep = if short { kith_kernel::permit::SHORT_ONCE_S } else { kith_kernel::permit::ONCE_KEEP_S };
+        let mut onces = self.onces.locked();
+        onces.retain(|_, end| *end > now);
+        onces.insert((run_id.to_owned(), key), now + Duration::from_secs_f64(keep));
+    }
+
+    /// Uses up the yes for this call of run `run_id`: true once, then false (the map's remove is the one step, under the
+    /// lock, so two calls at once get one yes between them).
+    pub fn take_once(&self, run_id: &str, key: &str) -> bool {
+        let end = self.onces.locked().remove(&(run_id.to_owned(), key.to_owned()));
+        end.is_some_and(|end| end > Instant::now())
     }
 
     #[cfg(test)]
     fn with_ancestry(ancestry: fn(u32, u32) -> bool) -> Self {
-        Self { entries: Mutex::new(HashMap::new()), ancestry }
+        Self { entries: Mutex::new(HashMap::new()), onces: Mutex::new(HashMap::new()), ancestry }
     }
 
     /// A fresh token for `identity`: 256 random bits as hex.
@@ -178,7 +205,15 @@ impl TokenTable {
     }
 
     fn revoke(&self, key: &[u8; 32]) {
-        self.entries.locked().remove(key);
+        let gone = self.entries.locked().remove(key);
+        if let Some(e) = gone {
+            self.drop_onces(&e.identity.run_id);
+        }
+    }
+
+    /// A run that lost its token keeps no yes: nothing could ask for it, and it would only sit until it expires.
+    fn drop_onces(&self, run_id: &str) {
+        self.onces.locked().retain(|(run, _), _| run != run_id);
     }
 
     /// A token for an owner run the kernel starts itself (over the API): bound to the process that will start the
@@ -194,7 +229,12 @@ impl TokenTable {
 
     /// Ends a token handed out by [`Self::insert_ask`]; false when it was not there.
     pub fn revoke_token(&self, token: &str) -> bool {
-        self.entries.locked().remove(&digest(token)).is_some()
+        let gone = self.entries.locked().remove(&digest(token));
+        let was_there = gone.is_some();
+        if let Some(e) = gone {
+            self.drop_onces(&e.identity.run_id);
+        }
+        was_there
     }
 
     /// Drops API-issued tokens past their end or whose process is gone (`alive`); returns the run ids that lost one,
@@ -215,7 +255,12 @@ impl TokenTable {
             .map(|(k, run, _, _)| (k, run))
             .collect();
         let mut entries = self.entries.locked();
-        dead.into_iter().filter_map(|(k, run)| entries.remove(&k).map(|_| run)).collect()
+        let reaped: Vec<String> = dead.into_iter().filter_map(|(k, run)| entries.remove(&k).map(|_| run)).collect();
+        drop(entries);
+        for run in &reaped {
+            self.drop_onces(run);
+        }
+        reaped
     }
 
     #[cfg(test)]
@@ -252,6 +297,9 @@ pub struct RunGrant {
     token: String,
     run_id: String,
     scope: TokenScope,
+    /// Set when the core minted the token (`KITH_RUN_TOKENS_VIA_CORE`): the host's table holds nothing for it, binding
+    /// and ending go to the core, and the run is told the core's socket.
+    core: Option<Box<crate::core_front::CoreRun>>,
 }
 
 impl RunGrant {
@@ -259,12 +307,31 @@ impl RunGrant {
     pub fn issue(table: &Arc<TokenTable>, identity: RunIdentity) -> Result<Self> {
         let (run_id, scope) = (identity.run_id.clone(), identity.scope);
         let (token, key) = table.insert(identity)?;
-        Ok(Self { table: table.clone(), key, token, run_id, scope })
+        Ok(Self { table: table.clone(), key, token, run_id, scope, core: None })
+    }
+
+    /// A grant for a token the core minted. The host's table is not involved.
+    pub fn from_core(run: Box<crate::core_front::CoreRun>) -> Self {
+        Self {
+            table: table().clone(),
+            key: [0; 32],
+            token: run.token.clone(),
+            run_id: run.run_id.clone(),
+            scope: TokenScope::Guest,
+            core: Some(run),
+        }
     }
 
     /// Binds the token to the process the run was started as. Until then no request resolves.
     pub fn bind_pid(&self, pid: u32) {
-        self.table.bind(&self.key, pid);
+        match &self.core {
+            Some(run) => {
+                if !run.bind(pid) {
+                    tracing::warn!(run = %self.run_id, "the core did not bind this run's token");
+                }
+            }
+            None => self.table.bind(&self.key, pid),
+        }
     }
 
     /// The run's id: what its requests are known by (a once grant reserved for its launch, the cards it parks).
@@ -274,6 +341,12 @@ impl RunGrant {
 
     /// The environment the run gets. The only place the token leaves this module.
     pub fn env(&self, socket: &Path) -> [(String, String); 2] {
+        if let Some(run) = &self.core {
+            return [
+                (TOKEN_ENV.into(), self.token.clone()),
+                (SOCKET_ENV.into(), run.socket.to_string_lossy().into_owned()),
+            ];
+        }
         let (token, sock) = match self.scope {
             TokenScope::Guest => (TOKEN_ENV, SOCKET_ENV),
             TokenScope::OwnerAsk => (ASK_TOKEN_ENV, ASK_SOCKET_ENV),
@@ -284,7 +357,10 @@ impl RunGrant {
 
 impl Drop for RunGrant {
     fn drop(&mut self) {
-        self.table.revoke(&self.key);
+        match &self.core {
+            Some(run) => run.end(),
+            None => self.table.revoke(&self.key),
+        }
         // The process is gone: what it was waiting on parks (C6).
         if let Some(hub) = hub() {
             crate::cards::run_exited(&hub, &self.run_id);
@@ -323,6 +399,20 @@ pub fn grant_for(
     session: &str,
     project: Option<&str>,
 ) -> Option<(RunGrant, [(String, String); 2])> {
+    if crate::core_front::run_tokens_via_core() {
+        let conversation = session_of(person, session);
+        let who = crate::core_front::RunWho { person, agent, conversation: &conversation, room, project };
+        // With the switch on the core is the authority: if it refuses (a revoked person) or does not answer there is no
+        // token (fail closed), and the host's table is not asked instead. The host mints only with the switch off.
+        return match crate::core_front::mint_run(&who) {
+            crate::core_front::Minted::Run(run) => {
+                let grant = RunGrant::from_core(run);
+                let env = grant.env(Path::new(""));
+                Some((grant, env))
+            }
+            crate::core_front::Minted::Refused | crate::core_front::Minted::Unavailable => None,
+        };
+    }
     let socket = SOCKET.get()?;
     let identity = RunIdentity {
         person: person.to_owned(),
@@ -497,6 +587,9 @@ pub enum AccessCall {
     /// An owner run asks for the card history (`kith cards history`): answered only for an agent whose package says
     /// `cards: read`, `cards::history`.
     History(usize),
+    /// The `PreToolUse` hook asks to use up the yes of an auto-mode card for this call (`consumeOnce`): the key of the call,
+    /// `None` for an input that gets no yes.
+    ConsumeOnce(Option<String>),
 }
 
 /// What a run asks to do: a tool name and its input, as Claude Code's permission prompt tool is given them.
@@ -616,6 +709,26 @@ pub fn authorize(table: &TokenTable, line: &[u8], peer: PeerInfo) -> Result<Auth
             }
             let call = AccessCall::Secret(json!({"service": service, "purpose": purpose}));
             Ok(Authorized { identity, run: Run::None, args: Vec::new(), ask: None, access: Some(call) })
+        }
+        "consumeOnce" => {
+            // The owner's run only, and only the yes its own token asked for (the table is keyed by the run).
+            if identity.scope != TokenScope::OwnerAsk {
+                return Err(Response::refused("not authorized"));
+            }
+            let (Some(tool), input) = (req["tool"].as_str(), &req["input"]) else {
+                return Err(Response::refused("a tool is needed"));
+            };
+            if tool.len() > MAX_ARG_LEN || !input.is_object() {
+                return Err(Response::refused("bad request"));
+            }
+            let key = kith_kernel::permit::host_once_key(tool, input);
+            Ok(Authorized {
+                identity,
+                run: Run::None,
+                args: Vec::new(),
+                ask: None,
+                access: Some(AccessCall::ConsumeOnce(key)),
+            })
         }
         "cardsHistory" => {
             // The owner's run only; whether its agent may read the history is the host's check (`cards::history`).
@@ -752,6 +865,13 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
                     }
                     None => crate::cards::request_permission(&hub, &identity, &ask.tool, &ask.input).await,
                 };
+                if d.allow
+                    && let Some(reason) = &ask.auto_denied
+                    && let Some(key) = kith_kernel::permit::host_once_key(&ask.tool, &ask.input)
+                {
+                    let short = kith_kernel::permit::NO_VERDICT.iter().any(|p| reason.starts_with(p));
+                    table.keep_once(&identity.run_id, key, short);
+                }
                 Response::Decision { allow: d.allow, message: d.message, waiting: d.waiting }
             }
             None => Response::Decision {
@@ -760,7 +880,15 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
                 waiting: false,
             },
         },
+        // Looks in the token table only: no hub, no card.
+        Ok(Authorized { identity, access: Some(AccessCall::ConsumeOnce(key)), .. }) => {
+            let allowed = key.is_some_and(|key| table.take_once(&identity.run_id, &key));
+            Response::Line(json!({"ok": true, "allowed": allowed}))
+        }
         Ok(Authorized { identity, access: Some(call), .. }) => match (hub(), call) {
+            // Not reached: the arm above takes every ConsumeOnce that authorized. Kept so the match stays total
+            // and a future change to that arm cannot turn this into a card or a hub call.
+            (_, AccessCall::ConsumeOnce(_)) => Response::refused("not authorized"),
             (Some(hub), AccessCall::Request(req)) => {
                 Response::Line(crate::cards::access::request(&hub, &identity, &req).await)
             }
@@ -1221,6 +1349,122 @@ mod tests {
         assert_eq!(machine_from_paths_json(br#"{"KITH_MACHINE": "relative"}"#), None);
         assert_eq!(machine_from_paths_json(b"nope"), None);
         assert!(socket_path().ends_with("run/host.sock"));
+    }
+
+    fn consume_line(token: &str, command: &str) -> Vec<u8> {
+        json!({"token": token, "method": "consumeOnce", "tool": "Bash", "input": {"command": command}})
+            .to_string()
+            .into_bytes()
+    }
+
+    fn allowed(r: &Response) -> Option<bool> {
+        match r {
+            Response::Line(v) if v["ok"] == true => v["allowed"].as_bool(),
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_card_yes_is_used_up_once_and_belongs_to_the_run_that_asked() {
+        let t = open_table();
+        let (a, b) = (ask_identity("echo", "s1", None), ask_identity("echo", "s1", None));
+        let (ta, tb) = (
+            t.insert_ask(a.clone(), 5, Duration::from_secs(60)).unwrap(),
+            t.insert_ask(b, 5, Duration::from_secs(60)).unwrap(),
+        );
+        let key = |c: &str| kith_kernel::permit::host_once_key("Bash", &json!({"command": c})).unwrap();
+        // no yes yet: a hint file or a guess gets nothing
+        assert_eq!(allowed(&handle_request(&t, &consume_line(&ta, "rm x"), peer(5)).await), Some(false));
+        t.keep_once(&a.run_id, key("rm x"), false);
+        // another run's token, another call: no
+        assert_eq!(allowed(&handle_request(&t, &consume_line(&tb, "rm x"), peer(5)).await), Some(false));
+        assert_eq!(allowed(&handle_request(&t, &consume_line(&ta, "rm y"), peer(5)).await), Some(false));
+        // the Bash description is the model's wording, not part of the call
+        let reworded = json!({"token": ta, "method": "consumeOnce", "tool": "Bash",
+                              "input": {"command": "rm x", "description": "again"}});
+        assert_eq!(allowed(&handle_request(&t, reworded.to_string().as_bytes(), peer(5)).await), Some(true));
+        assert_eq!(allowed(&handle_request(&t, &consume_line(&ta, "rm x"), peer(5)).await), Some(false));
+    }
+
+    #[tokio::test]
+    async fn consume_once_is_the_owner_runs_and_only_from_its_own_process() {
+        let t = open_table();
+        let g = RunGrant::issue(&t, id("guest")).unwrap();
+        let line = consume_line(&g.token, "ls");
+        g.bind_pid(5);
+        assert_eq!(handle_request(&t, &line, peer(5)).await, Response::refused("not authorized"));
+        let owner = ask_identity("echo", "s1", None);
+        let token = t.insert_ask(owner.clone(), 5, Duration::from_secs(60)).unwrap();
+        t.keep_once(
+            &owner.run_id,
+            kith_kernel::permit::host_once_key("Bash", &json!({"command": "ls"})).unwrap(),
+            false,
+        );
+        // a neighbour process holding the token gets nothing, and does not use the yes up
+        assert!(authorize(&t, &consume_line(&token, "ls"), peer(6)).is_err());
+        assert_eq!(allowed(&handle_request(&t, &consume_line(&token, "ls"), peer(5)).await), Some(true));
+        // a call that is no object is refused
+        let bad = json!({"token": token, "method": "consumeOnce", "tool": "Bash", "input": "ls"});
+        assert_eq!(handle_request(&t, bad.to_string().as_bytes(), peer(5)).await, Response::refused("bad request"));
+    }
+
+    #[test]
+    fn two_callers_for_one_yes_get_one_between_them() {
+        let t = open_table();
+        for round in 0..50 {
+            t.keep_once("run", format!("k{round}"), false);
+            let wins: usize = (0..8)
+                .map(|_| {
+                    let t = t.clone();
+                    std::thread::spawn(move || t.take_once("run", &format!("k{round}")))
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|h| usize::from(h.join().unwrap()))
+                .sum();
+            assert_eq!(wins, 1);
+        }
+    }
+
+    fn a_second_ago() -> Instant {
+        Instant::now().checked_sub(Duration::from_secs(1)).expect("the clock is older than a second")
+    }
+
+    #[test]
+    fn a_run_that_loses_its_token_keeps_no_yes() {
+        let t = open_table();
+        let (a, b) = (ask_identity("echo", "s1", None), ask_identity("echo", "s1", None));
+        let (ta, tb) = (
+            t.insert_ask(a.clone(), 5, Duration::from_secs(60)).unwrap(),
+            t.insert_ask(b.clone(), 5, Duration::from_secs(60)).unwrap(),
+        );
+        t.keep_once(&a.run_id, "k".into(), false);
+        t.keep_once(&b.run_id, "k".into(), false);
+        assert!(t.revoke_token(&ta));
+        assert!(!t.onces.locked().keys().any(|(run, _)| *run == a.run_id));
+        assert!(t.onces.locked().keys().any(|(run, _)| *run == b.run_id));
+        // a token past its end is reaped, and takes the run's yes with it
+        t.entries.locked().values_mut().for_each(|e| e.expires = Some(a_second_ago()));
+        assert_eq!(t.reap(|_| true), vec![b.run_id.clone()]);
+        assert!(t.onces.locked().is_empty());
+        let _ = tb;
+    }
+
+    #[test]
+    fn a_yes_lasts_a_day_and_a_no_verdict_one_a_few_minutes() {
+        let t = open_table();
+        t.keep_once("run", "long".into(), false);
+        t.keep_once("run", "short".into(), true);
+        let ends = t.onces.locked().clone();
+        let left = |k: &str| ends[&("run".to_owned(), k.to_owned())] - Instant::now();
+        assert!(left("long") > Duration::from_secs(23 * 3600) && left("long") <= Duration::from_secs(24 * 3600));
+        assert!(left("short") > Duration::from_secs(590) && left("short") <= Duration::from_secs(600));
+        // an end that has passed is no yes, and is dropped by the next one
+        t.onces.locked().insert(("run".into(), "old".into()), a_second_ago());
+        assert!(!t.take_once("run", "old"));
+        t.onces.locked().insert(("run".into(), "old".into()), a_second_ago());
+        t.keep_once("run", "new".into(), false);
+        assert!(!t.onces.locked().contains_key(&("run".to_owned(), "old".to_owned())));
     }
 
     #[test]

@@ -1,0 +1,1468 @@
+[
+ {
+  "name": "sessions-resolve-raw-session-id",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ],
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-oneshot",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1",
+    "oneshot"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-free-then-busy-for-another",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ],
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-busy-held-by-live-writer",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-busy-held-by-oneshot-and-app",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/p/bbbbbbbb-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"oneshot\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/bbbbbbbb-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\", \"person\": \"p1\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "2"
+   ],
+   [
+    "resolve",
+    "coder",
+    "bbbbbbbb-1111-4111-8111-111111111111",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-stale-claim-is-taken",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-taken-over-in-the-app",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.takeover.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\"}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-unknown-session",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "no-such-session",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-session-folder-gone",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}/gone\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-session-of-another-agent",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.json",
+    "text": "{\"v\": 1, \"sessionId\": \"11111111-1111-4111-8111-111111111111\", \"agent\": \"writer\", \"cwd\": \"{HOME}\", \"pid\": null}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-registry-cwd-when-transcript-has-none",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"type\": \"user\"}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.json",
+    "text": "{\"v\": 1, \"sessionId\": \"11111111-1111-4111-8111-111111111111\", \"agent\": \"coder\", \"cwd\": \"{HOME}\", \"pid\": null}"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-quotes-the-folder",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "mkdir": "home/it's here"
+   },
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}/it's here\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "resolve",
+    "coder",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-resolve-usage",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "resolve"
+   ],
+   [
+    "resolve",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "unswitched": "usage text of the Python script",
+  "stderr": false
+ },
+ {
+  "name": "sessions-claim-free-and-again",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ],
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ],
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "1",
+    "p1",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-person-and-agent-recorded",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "1",
+    "p1",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-busy",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-busy-kinds",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/a.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"oneshot\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/b.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/c.claim",
+    "text": "{\"pid\": 1}"
+   }
+  ],
+  "run": [
+   [
+    "claim",
+    "a",
+    "2"
+   ],
+   [
+    "claim",
+    "b",
+    "2"
+   ],
+   [
+    "claim",
+    "c",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-waits-then-gives-up",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0.3",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-stale-is-free",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/other.claim",
+    "text": "{\"pid\": 1, \"procStart\": \"Mon Jan  1 00:00:00 1990\", \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ],
+   [
+    "claim",
+    "other",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-prunes-stale-neighbours",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/old1.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/.kith/live/terminal/old2.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "claim",
+    "new",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-while-app-takes-over",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.takeover.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\"}"
+   }
+  ],
+  "run": [
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-without-state",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": null,
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-claim-usage",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "claim",
+    "11111111-1111-4111-8111-111111111111"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "unswitched": "usage text of the Python script",
+  "stderr": false
+ },
+ {
+  "name": "sessions-terminal-claims-for-an-interactive-run",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "terminal",
+    "11111111-1111-4111-8111-111111111111",
+    "1"
+   ],
+   [
+    "terminal",
+    "11111111-1111-4111-8111-111111111111",
+    "2"
+   ],
+   [
+    "terminal",
+    "x",
+    "1",
+    "p1",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-terminal-refused-at-once-when-held",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "5",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"oneshot\"}"
+   }
+  ],
+  "run": [
+   [
+    "terminal",
+    "11111111-1111-4111-8111-111111111111",
+    "2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-proc-claim-names-a-non-owner-run",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/proc-2147483000.claim",
+    "text": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\", \"person\": \"p9\"}"
+   }
+  ],
+  "run": [
+   [
+    "proc",
+    "1",
+    "p1",
+    "coder"
+   ],
+   [
+    "proc",
+    "1",
+    "p2",
+    "writer"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-sweep-nobody",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "sweep",
+    "p1",
+    "p2"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ]
+ },
+ {
+  "name": "sessions-release-gives-back-the-launchers-claim",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "sh",
+    "-c",
+    "python3 \"$0/bin/kith-sessions\" terminal \"$1\" $$ && python3 \"$0/bin/kith-sessions\" release \"$1\"; echo \"exit $?\"; ls \"$HOME/.kith/live/terminal\" | sort",
+    "{KERNEL}",
+    "11111111-1111-4111-8111-111111111111"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "x"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "unswitched": "release SID (the caller's parent) has no Rust verb: kernel threads has release PID"
+ },
+ {
+  "name": "sessions-release-not-ours-touches-nothing",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "release",
+    "11111111-1111-4111-8111-111111111111"
+   ],
+   [
+    "release",
+    "nobody"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "unswitched": "release SID has no Rust verb"
+ },
+ {
+  "name": "sessions-latest-and-pick-need-the-ledger",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}"
+   ],
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "unswitched": "pick / latest have no Rust verb",
+  "stdin": "\n"
+ },
+ {
+  "name": "sessions-latest-newest-session-in-the-folder",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_MACHINE": "{KITH_HOME}/machine"
+  },
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/11111111-1111-4111-8111-111111111111.jsonl",
+    "text": "{\"cwd\": \"{HOME}\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/p/22222222-2222-4222-8222-222222222222.jsonl",
+    "text": "{\"cwd\": \"{HOME}/else\", \"type\": \"user\", \"message\": {\"content\": \"hi\"}}\n"
+   },
+   {
+    "sqlite": "kith/machine/cost.db",
+    "sql": "create table runs(session, started, via, project, agent, person); insert into runs values('11111111-1111-4111-8111-111111111111','2026-01-01T00:00:00','ask',null,'coder',null),('22222222-2222-4222-8222-222222222222','2026-01-02T00:00:00','ask',null,'coder',null)"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}"
+   ],
+   [
+    "latest",
+    "coder",
+    "{HOME}/else"
+   ],
+   [
+    "latest",
+    "writer",
+    "{HOME}"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "unswitched": "pick / latest have no Rust verb"
+ },
+ {
+  "name": "sessions-no-verb-prints-the-usage",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [],
+   [
+    "bogus"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "unswitched": "usage text of the Python script",
+  "stderr": false
+ }
+]

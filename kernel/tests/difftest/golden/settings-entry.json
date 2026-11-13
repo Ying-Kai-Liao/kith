@@ -1,0 +1,415 @@
+[
+ {
+  "name": "settings-entry-permission",
+  "command": "settings-entry",
+  "needs": "rust",
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": ".kith"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "set",
+    "permission",
+    "plan"
+   ],
+   [
+    "echo",
+    "set",
+    "permission",
+    "plan",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "permission",
+    "bypassPermissions",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "permission",
+    "",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "permission",
+    "nope",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "permission",
+    "nope"
+   ]
+  ],
+  "normalize": [],
+  "ignore": []
+ },
+ {
+  "name": "settings-entry-call-model",
+  "command": "settings-entry",
+  "needs": "rust",
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": ".kith"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "set",
+    "call-model",
+    "opus"
+   ],
+   [
+    "echo",
+    "set",
+    "call-model",
+    "own",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "call-model",
+    "default",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "call-model",
+    "gpt-5",
+    "--json"
+   ]
+  ],
+  "normalize": [],
+  "ignore": []
+ },
+ {
+  "name": "settings-entry-limit",
+  "command": "settings-entry",
+  "needs": "rust",
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": ".kith"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "set",
+    "limit",
+    "12.5"
+   ],
+   [
+    "echo",
+    "set",
+    "limit",
+    "12.5",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "limit",
+    "none",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "limit",
+    "-3",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "limit",
+    "abc"
+   ]
+  ],
+  "normalize": [],
+  "ignore": []
+ },
+ {
+  "name": "settings-entry-at-limit",
+  "command": "settings-entry",
+  "needs": "rust",
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": ".kith"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "set",
+    "at-limit",
+    "hold"
+   ],
+   [
+    "echo",
+    "set",
+    "at-limit",
+    "tell",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "at-limit",
+    "never",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "at-limit",
+    "",
+    "--json"
+   ]
+  ],
+  "normalize": [],
+  "ignore": []
+ },
+ {
+  "name": "settings-entry-unknown-agent",
+  "command": "settings-entry",
+  "needs": "rust",
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": ".kith"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+   }
+  ],
+  "run": [
+   [
+    "ghost",
+    "set",
+    "permission",
+    "plan"
+   ],
+   [
+    "ghost",
+    "set",
+    "permission",
+    "plan",
+    "--json"
+   ]
+  ],
+  "normalize": [],
+  "ignore": []
+ },
+ {
+  "name": "settings-entry-usage",
+  "command": "settings-entry",
+  "needs": "rust",
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": ".kith"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "set"
+   ],
+   [
+    "echo",
+    "set",
+    "bogus",
+    "x",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "limit"
+   ]
+  ],
+  "normalize": [],
+  "ignore": []
+ },
+ {
+  "name": "settings-entry-existing-file",
+  "command": "settings-entry",
+  "needs": "rust",
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": ".kith"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+   },
+   {
+    "write": ".kith/settings.json",
+    "text": "{\n \"permission_mode\": \"acceptEdits\",\n \"plugins\": [\n  \"a@b\"\n ],\n \"agents\": {\n  \"echo\": {\n   \"permission_mode\": \"auto\",\n   \"limit\": 3\n  },\n  \"other\": {\n   \"call_model\": \"opus\"\n  }\n }\n}"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "set",
+    "permission",
+    "plan",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "limit",
+    "7",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "call-model",
+    "haiku",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "at-limit",
+    "tell",
+    "--json"
+   ]
+  ],
+  "normalize": [],
+  "ignore": []
+ },
+ {
+  "name": "settings-entry-malformed-file",
+  "command": "settings-entry",
+  "needs": "rust",
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_AUTH": "{HOME}/auth.json",
+   "TZ": "UTC",
+   "KITH_ASK_ID": null,
+   "KITH_AGENT": null,
+   "CLAUDE_CODE_SESSION_ID": null
+  },
+  "setup": [
+   {
+    "mkdir": ".kith"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+   },
+   {
+    "write": ".kith/settings.json",
+    "text": "{nope"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "set",
+    "permission",
+    "plan",
+    "--json"
+   ],
+   [
+    "echo",
+    "set",
+    "limit",
+    "7"
+   ]
+  ],
+  "normalize": [],
+  "ignore": []
+ }
+]

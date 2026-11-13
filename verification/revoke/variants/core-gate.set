@@ -1,0 +1,2 @@
+\* the code with KITH_CORE_AUTHORITY=1: the host's app and bot guard asks the core's copy of the revoked fact while the gate is open (M2-16/18a); kith-auth mirrors to the core after auth.json
+CoreGate = TRUE

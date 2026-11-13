@@ -95,12 +95,12 @@ pub(super) async fn auth_bin() -> Result<std::path::PathBuf> {
 }
 
 async fn person_exists(bin: &Path, id: &str) -> bool {
-    account::run(bin, &["people", id]).await.is_ok()
+    super::authority::run_auth(bin, &["people", id]).await.is_ok()
 }
 
 /// A removed person's id (or someone's old one): a new person never takes it, so never their memory, files or logins.
 async fn retired(bin: &Path, id: &str) -> bool {
-    account::run(bin, &["retired", id]).await.is_ok()
+    super::authority::run_auth(bin, &["retired", id]).await.is_ok()
 }
 
 async fn grant(bin: &Path, person: &str, agent: &str, role: &str, fresh: bool) -> Result<()> {
@@ -111,7 +111,21 @@ async fn grant(bin: &Path, person: &str, agent: &str, role: &str, fresh: bool) -
     if fresh {
         args.push(&budget);
     }
-    account::run(bin, &args).await.map(drop)
+    super::authority::run_auth(bin, &args).await.map(drop)
+}
+
+/// [`grant`] through the core: `people.grant`, with the settings `kith-auth member` gets.
+async fn core_grant(person: &str, agent: &str, role: &str, fresh: bool) -> Result<()> {
+    let mut params = json!({"person": person, "agent": agent, "preset": role});
+    if fresh {
+        params["budget"] = BUDGET.into();
+    }
+    super::authority::owner_call("people.grant", params, false).await.map(drop)
+}
+
+/// `member agent person --rm` through the core.
+async fn core_revoke(person: &str, agent: &str) -> Result<()> {
+    super::authority::owner_call("people.revoke", json!({"person": person, "agent": agent}), false).await.map(drop)
 }
 
 /// What a failed `createInvite` puts back.
@@ -128,12 +142,12 @@ impl Undo {
             hub.store.delete_invite(i).ok();
         }
         for (person, agent) in &self.agents {
-            account::run(bin, &["member", agent, person, "--rm"]).await.ok();
+            super::authority::run_auth(bin, &["member", agent, person, "--rm"]).await.ok();
         }
         // No link went out, so the id isn't retired (--unused, which kith-auth refuses if they have anything). Refused,
         // they stay in both: a retry with the same name finds them again.
         if let Some(p) = &self.person
-            && account::run(bin, &["person", p, "--rm", "--unused"]).await.is_ok()
+            && super::authority::run_auth(bin, &["person", p, "--rm", "--unused"]).await.is_ok()
         {
             hub.store.delete_person(p).ok();
         }
@@ -178,7 +192,8 @@ async fn make_invite(
             if !person_exists(bin, id).await {
                 bail!("There is no person `{id}` in kith-auth.");
             }
-            if account::who(bin, "-").await.owner_id.as_deref() == Some(id) {
+            // The same lookup `createInvite` made (the core's owner row when switched), not a kith-auth call of its own.
+            if account::person_of(bin, &Principal::Owner).await? == id {
                 bail!("That is you: the owner doesn't need an invite.");
             }
             hub.store.put_person(id, id)?;
@@ -197,7 +212,7 @@ async fn make_invite(
             }
             if !person_exists(bin, &id).await {
                 let arg = format!("name={name}");
-                account::run(bin, &["person", &id, &arg]).await?;
+                super::authority::run_auth(bin, &["person", &id, &arg]).await?;
                 undo.person = Some(id.clone());
             }
             hub.store.put_person(&id, name)?;
@@ -282,30 +297,42 @@ async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {
     Ok(json!({"revoked": revoked, "cloud": in_cloud}))
 }
 
+/// The owner's people list. Who a person is, their name, whether they are revoked and which agents they hold come
+/// from kith-auth (`kith-auth people --json`, read through the CLI, so a person or member added there shows too); the
+/// store only adds what kith-auth does not know: devices, membership, invites, projects, auto-bots. Read from
+/// kith-auth directly rather than through `kith people ls`: it needs nothing that adds, and costs a second process.
+/// A person only the store knows (kith-auth lost or renamed them) is left out: no access is shown that kith-auth
+/// doesn't give. kith-auth unreadable is an error, never an empty list that reads as "nobody".
 async fn people(hub: &Arc<Hub>) -> Result<Value> {
     let now = now_ms();
-    // Who is revoked (kith-auth's word, so a revoke from another Mac shows too); nobody when kith-auth can't say.
-    let revoked: Vec<String> = match account::bin().await {
-        Some(bin) => crate::remote::members::auth_people(&bin)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|p| p.revoked_at.is_some())
-            .map(|p| p.id)
-            .collect(),
-        None => vec![],
+    let bin = account::bin().await.ok_or_else(|| anyhow!("can't list people: kith-auth wasn't found"))?;
+    // Read and mirror under the lock `setPersonAccess` takes, so an older list never overwrites a newer copy.
+    let auth = {
+        let _w = AUTH_WRITES.lock().await;
+        let auth = crate::remote::members::auth_people_now(&bin).await.map_err(|e| {
+            // A core that is down is not kith-auth being unreadable; say which it was.
+            if e.downcast_ref::<super::authority::CoreDown>().is_some() {
+                e.context("can't list people")
+            } else {
+                e.context("can't list people: kith-auth wasn't readable")
+            }
+        })?;
+        crate::remote::members::mirror_agents(&hub.store, &auth);
+        auth
     };
     let connected = hub.connected.locked().clone();
     let memberships = hub.store.memberships()?;
     let invites = hub.store.invites()?;
-    let rows: Vec<Value> = hub
-        .store
-        .people()?
-        .into_iter()
-        .map(|p: PersonRow| {
+    let stored: BTreeMap<String, PersonRow> =
+        hub.store.people()?.into_iter().map(|p| (p.person_id.clone(), p)).collect();
+    let rows: Vec<Value> = auth
+        .iter()
+        .filter(|a| !a.owner && a.bot_of.is_empty())
+        .map(|a| {
+            let host = stored.get(&a.id);
             let devices: Vec<Value> = hub
                 .store
-                .devices_of(&p.person_id)
+                .devices_of(&a.id)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|d| {
@@ -313,14 +340,22 @@ async fn people(hub: &Arc<Hub>) -> Result<Value> {
                     "connected": connected.contains_key(&d.key)})
                 })
                 .collect();
-            let joined = memberships.iter().find(|m| m.person_id == p.person_id);
-            let waiting = invites.iter().filter(|i| i.person_id == p.person_id && i.open(now)).count();
+            let joined = memberships.iter().find(|m| m.person_id == a.id);
+            let waiting = invites.iter().filter(|i| i.person_id == a.id && i.open(now)).count();
+            // `agents` is what they hold by their own row (what setPersonAccess edits); the `*` row is listed apart.
+            let roles = |via: &str| -> BTreeMap<&str, &str> {
+                a.agents.iter().filter(|r| r.via == via).map(|r| (r.agent.as_str(), r.role.as_str())).collect()
+            };
+            let name = if a.name.is_empty() { host.map_or(a.id.as_str(), |p| p.name.as_str()) } else { &a.name };
             json!({
-                "personId": p.person_id, "name": p.name, "agents": p.agents, "projects": p.projects,
+                "personId": a.id, "name": name,
+                "agents": roles("own"), "everyoneAgents": roles("everyone"),
+                "projects": host.map(|p| p.projects.clone()).unwrap_or_default(),
                 "joined": joined.is_some(), "userId": joined.map(|m| m.user_id.clone()),
                 "membershipId": joined.map(|m| m.membership_id.clone()),
-                "openInvites": waiting, "devices": devices, "createdAt": p.created_at, "autoBots": p.auto_bots,
-                "revoked": revoked.contains(&p.person_id),
+                "openInvites": waiting, "devices": devices, "createdAt": host.map(|p| p.created_at),
+                "autoBots": host.is_some_and(|p| p.auto_bots),
+                "revoked": a.revoked_at.is_some(),
             })
         })
         .collect();
@@ -331,36 +366,98 @@ fn invited_person(hub: &Hub, id: &str) -> Result<PersonRow> {
     hub.store.person(id).ok_or_else(|| anyhow!("`{id}` isn't someone you invited"))
 }
 
+/// `invited_person`, and on a switched host also a person the core holds but the host never invited: one the owner
+/// added from the terminal (`kith-auth person` + `member`) and `kith migrate --authority` imported. The People list
+/// shows them, so the owner must be able to change their access. Only when switched: on a host that is not, the owner
+/// can still run `kith-auth member` from the terminal, but on a switched one kith-auth exits 3 on the tombstone (G1),
+/// so this is the only way in. The row made is `createInvite`'s (`put_person`, a repeat
+/// keeps what is there, so two calls at once make one); it holds no access of its own. The owner, a bot and a revoked
+/// person are refused as before.
+pub(super) async fn invited_or_core_person(hub: &Hub, bin: &Path, id: &str) -> Result<PersonRow> {
+    if let Some(p) = hub.store.person(id) {
+        return Ok(p);
+    }
+    if super::authority::switched_now()
+        && let Some(a) = crate::remote::members::auth_person(bin, id).await?
+        && !a.owner
+        && a.bot_of.is_empty()
+        && a.revoked_at.is_none()
+    {
+        let name = if a.name.is_empty() { id } else { a.name.as_str() };
+        hub.store.put_person(id, name)?;
+        if let Some(p) = hub.store.person(id) {
+            return Ok(p);
+        }
+    }
+    invited_person(hub, id)
+}
+
 async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     let id = str_arg(b, "personId")?;
-    let person = invited_person(hub, id)?;
     let bin = auth_bin().await?;
+    let person = invited_or_core_person(hub, &bin, id).await?;
     let changed_agents = !b["agents"].is_null();
     let mut warnings: Vec<String> = Vec::new();
     {
         let _w = AUTH_WRITES.lock().await;
         if changed_agents {
             let want = roles_of(&b["agents"])?;
+            // What kith-auth says they hold by their own row, whoever made it (the owner may have added one with the
+            // CLI): a read that fails stops here, before anything is changed. Until the switch the file is the
+            // truth and the core a copy of it; on a switched host this read goes to the core.
+            let held: Vec<String> = crate::remote::members::auth_person(&bin, id)
+                .await
+                .context("couldn't read what kith-auth says they hold")?
+                .ok_or_else(|| anyhow!("`{id}` isn't a person in kith-auth"))?
+                .agents
+                .into_iter()
+                .filter(|r| r.via == "own")
+                .map(|r| r.agent)
+                .collect();
             let mut made = person.made.clone();
+            // With KITH_CORE_AUTHORITY=1 the core is told after kith-auth, the order of kith-auth's own `mirror_to_core`
+            // (M2-18a): the file is the truth until the switch, so a change that reached only the core would close the
+            // gate and send the guard back to a file that never got it (a revoke undone). A mirror that fails is
+            // logged: the file has the change, and the gate only closes until `core-migrate` imports it.
+            // A switched host wrote the core already (`run_auth`): no second copy to make.
+            let on_core = super::authority::mirrors_to_core() && !super::authority::switched_now();
             for (agent, role) in &want {
                 let had = roles::may_use(id, agent).await;
                 grant(&bin, id, agent, role, !had).await.with_context(|| format!("giving {id} {agent}"))?;
+                if on_core && let Err(e) = core_grant(id, agent, role, !had).await {
+                    tracing::warn!(error = format!("{e:#}"), person = id, agent, "couldn't mirror a grant to the core");
+                }
                 if !had && !made.contains(agent) {
                     made.push(agent.clone());
                 }
             }
-            // Only a membership this host made is taken away again; one the owner gave by hand is left, and just no longer listed.
-            // kith-auth refusing (say the agent's folder is gone) must not stop the rest: it is reported, and the
-            // membership stays in `made` so a later change tries again.
-            for agent in person.agents.keys().filter(|a| !want.contains_key(*a)) {
-                if made.contains(agent) {
-                    match account::run(&bin, &["member", agent, id, "--rm"]).await {
-                        Ok(_) => made.retain(|m| m != agent),
-                        Err(e) => warnings.push(format!("couldn't take {agent} away from {id}: {e:#}")),
+            // An unticked own row goes, whoever made it; the `*` row is never touched from here. kith-auth refusing
+            // (say the agent's folder is gone) must not stop the rest: it is reported, and the row stays in `made`
+            // so a later change tries again.
+            for agent in held.iter().filter(|a| !want.contains_key(*a)) {
+                match super::authority::run_auth(&bin, &["member", agent, id, "--rm"]).await {
+                    Ok(_) => {
+                        made.retain(|m| m != agent);
+                        if on_core && let Err(e) = core_revoke(id, agent).await {
+                            tracing::warn!(
+                                error = format!("{e:#}"),
+                                person = id,
+                                agent,
+                                "couldn't mirror a revoke to the core"
+                            );
+                        }
                     }
+                    Err(e) => warnings.push(format!("couldn't take {agent} away from {id}: {e:#}")),
                 }
             }
-            hub.store.set_person_agents(id, &want)?;
+            // The copy follows kith-auth, not what was asked: a row that wouldn't go still shows.
+            match crate::remote::members::auth_people(&bin).await {
+                Ok(auth) => crate::remote::members::mirror_agents(&hub.store, &auth),
+                Err(e) => {
+                    warnings.push(format!("couldn't read kith-auth after the change: {e:#}"));
+                    hub.store.set_person_agents(id, &BTreeMap::new())?;
+                }
+            }
             hub.store.set_person_made(id, &made)?;
         }
         if !b["projects"].is_null() {
@@ -398,7 +495,13 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
         .await?
         .ok_or_else(|| anyhow!("`{id}` isn't a person on this computer"))?;
     if who.owner {
-        bail!("You can't revoke yourself.");
+        if revoke {
+            bail!("You can't revoke yourself.");
+        }
+        // Undo on the owner clears old data (an owner who was also revoked). It stays on this Mac: the cloud never holds
+        // the owner (apply_revoked skips them), so there is nothing to post and no other computer to tell.
+        let (core_updated, _) = local_revoke(hub, &bin, id, false).await?;
+        return Ok(json!({"revoked": false, "everywhere": false, "coreUpdated": core_updated}));
     }
     if !who.bot_of.is_empty() {
         bail!("`{id}` is a bot of {}'s; revoke {} and it goes quiet with them.", who.bot_of, who.bot_of);
@@ -414,28 +517,55 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    local_revoke(hub, &bin, id, revoke).await?;
+    let (core_updated, pending) = local_revoke(hub, &bin, id, revoke).await?;
     if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
         crate::remote::handle_revokes::changed(hub, &who, revoke);
     }
-    Ok(json!({"revoked": revoke, "everywhere": everywhere}))
+    // false: auth.json has it but the core's copy missed it (or may have); the owner runs it again once the core is up.
+    let mut out = json!({"revoked": revoke, "everywhere": everywhere, "coreUpdated": core_updated});
+    // The core took the revoke but could not finish stopping their runs: said to the owner, not only logged.
+    if let Some(pending) = pending {
+        out["revokePending"] = pending.into();
+    }
+    Ok(out)
 }
 
 /// This computer's half of a revoke or its undo, for the owner's own call, a change from the cloud and one from a paired
 /// computer: kith-auth's revoked state, then what the host holds. A revoke cuts the person off at once (R5) and keeps
 /// their devices, memberships and open invites for undo (R1, R2); an undo gives them back. Either repeats harmlessly.
-pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<()> {
-    {
+/// True when the core's copy of the person took the change too; false when kith-auth warned that it didn't (logged here).
+/// The second is what a switched core said it could not finish of the revoke order (`revokePending`), for the owner.
+pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<(bool, Option<String>)> {
+    let (core_updated, pending) = {
         let _w = AUTH_WRITES.lock().await;
-        account::run(bin, &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"]).await?;
-    }
+        let said = super::authority::run_auth_noted(
+            bin,
+            &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"],
+        )
+        .await;
+        let said = match said {
+            Ok((_, said)) => said,
+            Err(e) => {
+                // Switched or not (a switch may have landed a moment ago and kith-auth exits 3 on the tombstone): a
+                // revoke that was not taken must still stop what runs (the host's half is fail-closed), and the owner
+                // is told to run it again.
+                if revoke {
+                    cut_off(hub, id).await;
+                }
+                return Err(e);
+            }
+        };
+        account::note_stderr(id, &said);
+        let pending = said.lines().find(|l| l.contains("part of the revoke is pending")).map(str::to_owned);
+        (!account::core_missed(&said), pending)
+    };
     if revoke {
         cut_off(hub, id).await;
     } else {
         restored(hub, id);
     }
-    Ok(())
+    Ok((core_updated, pending))
 }
 
 /// Undo: what the revoke kept is back as it was.
@@ -476,7 +606,7 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
     super::botguests::sweep_claims(hub, ids, false).await;
     // Once nothing of theirs runs: the Claude Code temp folder their runs wrote in (<machine>/run/t/<id>).
     if let Some(bin) = account::bin().await
-        && let Err(e) = account::run(&bin, &["person", person, "--clear-temp"]).await
+        && let Err(e) = super::authority::run_auth(&bin, &["person", person, "--clear-temp"]).await
     {
         tracing::warn!(error = format!("{e:#}"), person, "couldn't remove a revoked person's temp folder");
     }
@@ -555,7 +685,8 @@ async fn access_ledger(b: &Value) -> Result<Vec<Value>> {
 
 async fn ledger(args: &[&str]) -> Result<Vec<Value>> {
     let bin = account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found on this computer"))?;
-    let out = account::run(&bin, args).await.map_err(|e| anyhow!("couldn't read the grants ledger: {e:#}"))?;
+    let out =
+        super::authority::run_auth(&bin, args).await.map_err(|e| anyhow!("couldn't read the grants ledger: {e:#}"))?;
     serde_json::from_str(&out).context("kith-auth's ledger wasn't JSON")
 }
 
@@ -576,7 +707,9 @@ async fn remove_grant(kind: &str, key: &str) -> Result<Value> {
     let bin = account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found on this computer"))?;
     {
         let _w = AUTH_WRITES.lock().await;
-        account::run(&bin, &["ledger", "--rm", key]).await.map_err(|e| anyhow!("couldn't remove it: {e:#}"))?;
+        super::authority::run_auth(&bin, &["ledger", "--rm", key])
+            .await
+            .map_err(|e| anyhow!("couldn't remove it: {e:#}"))?;
     }
     if ledger(&["ledger", "--json"]).await?.iter().any(|e| e["key"] == key) {
         bail!("kith-auth still lists it; it wasn't removed");
@@ -627,8 +760,7 @@ async fn start_chat(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result<Value>
         bail!("Your chat with an agent is the one on the home screen.");
     };
     let agent = str_arg(b, "agent")?;
-    let granted = hub.store.person(&person).is_some_and(|p| p.agents.contains_key(agent));
-    if !granted || !roles::may_use(&person, agent).await {
+    if !roles::may_use(&person, agent).await {
         return Err(NotAllowed(format!("You don't have access to {agent}.")).into());
     }
     Ok(roles::shape_bot(json!({"bot": chat_with(hub, &person, agent).await?})))

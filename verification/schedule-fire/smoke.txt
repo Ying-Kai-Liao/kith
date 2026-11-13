@@ -1,0 +1,8 @@
+# VARIANT PROPERTY of the checks.tsv rows run.sh --smoke checks; CI runs them when nothing the model covers changed.
+# Chosen by the architect (2026-11-05). Not the rev rows or claim-no-may (3.95M states each).
+fixed AtMostOncePerSlot
+live DueGetsRow
+no-unique AtMostOncePerSlot
+stale-may NoFireForRevokedPerson
+no-missed-live DueGetsRow
+fixed NeverFired

@@ -60,6 +60,34 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 Err(e) => json!({"info": null, "error": e, "fetchedAt": got.fetched_at}),
             }
         }
+        // The agent's own model, effort or harness (`kith <agent> set model|effort|harness`, with `--model` for a
+        // harness change): written to agent.md by the CLI, the app never writes it. `default` forgets the value.
+        // Owner only (not on the member or bot lists); hq's info read back, as with the permission mode.
+        "kithSetSetting" => {
+            let name = kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?;
+            let Some(setting @ ("model" | "effort" | "harness")) = b["setting"].as_str() else {
+                bail!("setting must be model, effort or harness");
+            };
+            let word = |v: &Value, what: &str| -> Result<String> {
+                match v.as_str().map(str::trim).filter(|w| !w.is_empty()) {
+                    Some(w) if !w.starts_with('-') && !w.contains(char::is_whitespace) => Ok(w.to_owned()),
+                    _ => bail!("{what} must be a name or default"),
+                }
+            };
+            let value = word(&b["value"], setting)?;
+            let model =
+                if setting == "harness" && !b["model"].is_null() { Some(word(&b["model"], "model")?) } else { None };
+            let extra: Vec<&str> = model.iter().flat_map(|m| ["--model", m.as_str()]).collect();
+            let got = hq::set_setting(&name, setting, &value, &extra).await?;
+            match got.info {
+                Ok(info) => json!({"info": info, "fetchedAt": got.fetched_at}),
+                Err(e) => json!({"info": null, "error": e, "fetchedAt": got.fetched_at}),
+            }
+        }
+        // The engines table as the CLI prints it (`kith engines --json`), passed through: the app's quick-chat picker
+        // and the engine sheet read installed / acp from it. Owner only (not on the member or bot lists). A kith
+        // that can't run, or an old one, answers with its own error text.
+        "kithEngines" => hq::json_cmd(&["engines", "--json"]).await?,
         // The Schedule card's buttons for a kith job: kith-sched does it, as the job's person (`hq::schedule`). Owner
         // only, like every method a member's contract doesn't list. hq's info read back, so the card shows the job now.
         "kithSchedule" => {
@@ -111,7 +139,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
     }))
 }
 
-enum Agent {
+pub(super) enum Agent {
     /// A bot that is not a kith agent (or a group).
     None,
     /// A kith bot whose agent kith no longer lists.
@@ -119,7 +147,7 @@ enum Agent {
     Kith(String),
 }
 
-fn bot_agent(hub: &Hub, id: &str) -> Result<Agent> {
+pub(super) fn bot_agent(hub: &Hub, id: &str) -> Result<Agent> {
     let row = hub.store.bot(id)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("no such bot"))?;
     let cfg = row.config;
     let Some(name) = cfg.hq_agent.clone().filter(|_| !cfg.is_group()) else {
@@ -129,7 +157,7 @@ fn bot_agent(hub: &Hub, id: &str) -> Result<Agent> {
     Ok(if gone { Agent::Gone(name) } else { Agent::Kith(name) })
 }
 
-fn kith_only(agent: Agent) -> Result<String> {
+pub(super) fn kith_only(agent: Agent) -> Result<String> {
     match agent {
         Agent::Kith(name) => Ok(name),
         Agent::None => bail!("this bot isn't a kith agent"),

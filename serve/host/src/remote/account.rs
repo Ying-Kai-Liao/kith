@@ -66,8 +66,8 @@ async fn apply(store: &Store, bin: &Path, owner: Option<&str>) -> Result<()> {
         // Unclaimed (or the account was deleted): the handle goes with it.
         let _w = crate::api::people::AUTH_WRITES.lock().await;
         if let Some(old) = store.kv_get(APPLIED) {
-            if let Some(person) = who(bin, &old).await.person {
-                run(bin, &["handle", &person, PLATFORM, "--rm"]).await?;
+            if let Some(person) = who(bin, &old).await?.person {
+                crate::api::authority::run_auth(bin, &["handle", &person, PLATFORM, "--rm"]).await?;
                 tracing::info!(person, "the Mac left its account; removed the person's kith handle");
             }
             store.kv_delete(APPLIED)?;
@@ -75,7 +75,7 @@ async fn apply(store: &Store, bin: &Path, owner: Option<&str>) -> Result<()> {
         return Ok(());
     };
     let _w = crate::api::people::AUTH_WRITES.lock().await;
-    let found = who(bin, uid).await;
+    let found = who(bin, uid).await?;
     match (&found.person, &found.owner_id) {
         (Some(_), _) if found.owner => {}
         (Some(person), _) => {
@@ -92,7 +92,7 @@ async fn apply(store: &Store, bin: &Path, owner: Option<&str>) -> Result<()> {
         }
         (None, Some(person)) => {
             // Replaces a handle bound to an earlier account of this Mac.
-            run(bin, &["handle", person, PLATFORM, uid]).await?;
+            crate::api::authority::run_auth(bin, &["handle", person, PLATFORM, uid]).await?;
             tracing::info!(person, "bound the claiming account to the owner person");
         }
         (None, None) => {
@@ -114,23 +114,73 @@ pub fn applied(store: &Store) -> Option<String> {
 
 /// The owner person's `kith` handle in kith-auth: the Kith account id the owner is known by on this Mac.
 pub async fn owner_handle(bin: &Path) -> Option<String> {
-    let out = hq::output(bin, &["people", "--json"]).await?;
-    let people: Vec<Value> = serde_json::from_slice(&out.stdout).ok()?;
+    // `run_auth`: a switched host asks the core (kith-auth exits 3 on the tombstone)
+    let out = crate::api::authority::run_auth(bin, &["people", "--json"]).await.ok()?;
+    let people: Vec<Value> = serde_json::from_str(&out).ok()?;
     let owner = people.iter().find(|p| p["owner"] == true)?;
     owner["kith"].as_str().filter(|uid| !uid.is_empty()).map(str::to_owned)
 }
 
-pub(crate) async fn who(bin: &Path, uid: &str) -> Who {
+pub(crate) async fn who(bin: &Path, uid: &str) -> Result<Who> {
+    if crate::api::authority::switched_now() {
+        return who_in_core(bin, uid).await;
+    }
     let out = hq::output(bin, &["who", PLATFORM, uid]).await;
-    out.and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).map_or_else(Who::default, |v| Who::parse(&v))
+    Ok(out.and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).map_or_else(Who::default, |v| Who::parse(&v)))
+}
+
+/// `kith-auth who kith <uid>` for a switched host, from the core's people (the tombstone answers nothing). A core that
+/// can't be asked is an error, not nobody: `apply` then fails and runs again, rather than skipping the unbind and
+/// forgetting it ever had to happen.
+async fn who_in_core(bin: &Path, uid: &str) -> Result<Who> {
+    let rows = crate::api::authority::run_auth(bin, &["people", "--json"]).await?;
+    let people = serde_json::from_str::<Vec<Value>>(&rows)?;
+    let text = |p: &Value, k: &str| p[k].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
+    let mine = people.iter().find(|p| p["handles"][PLATFORM] == uid || p[PLATFORM] == uid);
+    let owner = people.iter().find(|p| p["owner"] == true);
+    Ok(Who {
+        person: mine.and_then(|p| text(p, "id")),
+        owner: mine.is_some_and(|p| p["owner"] == true),
+        was: mine
+            .and_then(|p| p["was"].as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default(),
+        owner_id: owner.and_then(|p| text(p, "id")),
+        owner_linked: owner.is_some_and(|p| text(p, PLATFORM).is_some()),
+        revoked: mine.is_some_and(|p| p["revoked"] == true),
+        held: false,
+    })
 }
 
 pub(crate) async fn run(bin: &Path, args: &[&str]) -> Result<String> {
+    let (stdout, stderr) = run_noted(bin, args).await?;
+    if !stderr.is_empty() {
+        tracing::warn!(call = args.join(" "), stderr, "kith-auth succeeded but said something");
+    }
+    Ok(stdout)
+}
+
+/// `run`, keeping what kith-auth said on stderr when it succeeded: a revoke that reached auth.json but not the core says
+/// so there and still exits 0, so a caller that can tell the owner reads it here.
+pub(crate) async fn run_noted(bin: &Path, args: &[&str]) -> Result<(String, String)> {
     let out = hq::output(bin, args).await.ok_or_else(|| anyhow!("kith-auth didn't run"))?;
     if !out.status.success() {
         bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok((String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).trim().to_owned()))
+}
+
+/// Logs what a successful kith-auth call said on stderr, with the person it was for. Never lost: serve used to drop it.
+pub(crate) fn note_stderr(person: &str, stderr: &str) {
+    if !stderr.is_empty() {
+        tracing::warn!(person, stderr, "kith-auth succeeded but said something");
+    }
+}
+
+/// Whether kith-auth's stderr from a revoke, an undo or a removal is its "in auth.json; ... not updated" warning: the core's
+/// copy of people missed the change (it may have applied it, when the answer was lost).
+pub(crate) fn core_missed(stderr: &str) -> bool {
+    stderr.lines().any(|l| l.contains(" in auth.json; "))
 }
 
 /// Which kith-auth person a call is for: the owner person for Local and owner devices, the invited person for a
@@ -151,8 +201,20 @@ pub async fn person_of(bin: &Path, who: &Principal) -> Result<String> {
 }
 
 async fn who_owner(bin: &Path) -> Result<String> {
+    // A switched host has no auth.json to ask: `kith-auth who` exits 3 on the tombstone. The owner is the core's owner row.
+    if crate::api::authority::switched() {
+        let rows = crate::api::authority::run_auth(bin, &["people", "--json"]).await?;
+        let people: Vec<Value> = serde_json::from_str(&rows)?;
+        return people
+            .iter()
+            .find(|p| p["owner"] == true)
+            .and_then(|p| p["id"].as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow!("the core has no owner person yet"));
+    }
     who(bin, "-")
-        .await
+        .await?
         .owner_id
         .ok_or_else(|| anyhow!("kith-auth has no owner person yet (kith-auth person <you> owner)"))
 }
@@ -200,6 +262,14 @@ pub(crate) static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::co
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
+
+    #[test]
+    fn the_core_warning_is_told_from_other_stderr() {
+        assert!(core_missed("revoked in auth.json; core store not updated (run it again once kith serve is running)"));
+        assert!(core_missed("kith-auth: kith-ask did not finish: x\nunrevoked in auth.json; may not be updated"));
+        assert!(!core_missed(""));
+        assert!(!core_missed("kith-auth: kith-sessions did not finish: boom"));
+    }
 
     /// A throwaway auth.json driven by the repo's own kith-auth.
     struct Rig {

@@ -1,0 +1,12 @@
+{
+  "fakes": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith-wake: no session to wake: run it in a kith agent's session, or pass --session and --agent\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "kith-wake: no session to wake: run it in a kith agent's session, or pass --session and --agent\n",
+  "step1.stdout": "",
+  "step2.exit": "1\n",
+  "step2.stderr": "kith-wake: no session to wake: run it in a kith agent's session, or pass --session and --agent\n",
+  "step2.stdout": ""
+}

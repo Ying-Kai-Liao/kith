@@ -34,6 +34,7 @@ SessionStart): it is resumed only under that account.
                                                  the account a plain run starts on for bin/kith: main_id=ID plus launch-env's
                                                  assignments (empty for the default login); --state: pick()'s first candidate
                                                  (--prefer ID first when it is one), else the static main. Exit 4 + one line when it can't run
+  kith_accounts.py session-run SID [--sh]         the harness, model and effort a session started with ({} when the ledger doesn't know it)
   kith_accounts.py run-chain AGENT AGENT.MD KITH -- ARGS...   a non-interactive one-shot over pick()'s candidates (see run_chain)
   kith_accounts.py session-account SID           the account id a session was made under ('' when the ledger doesn't know it)
   --record notes last_started in the state file (the launch is real)
@@ -43,6 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import kith_settings  # noqa: E402
+import kith_tombstone  # noqa: E402
 from kith_paths import paths  # noqa: E402
 
 KERNEL = Path(__file__).resolve().parent.parent
@@ -50,11 +52,30 @@ ID_RE = re.compile(r'^([a-z][a-z0-9-]*)(?::([A-Za-z0-9][A-Za-z0-9._-]*))?$')
 STATUS_TIMEOUT = 20
 
 
+MODEL_RE = re.compile(r'^[\w.:\[\]/-]+$')
+CLAUDE_MODEL_RE = re.compile(r'^(opus|sonnet|haiku|fable|claude-)|^(best|opusplan)$')
+
+
+def is_claude_model(model):
+    """A Claude model name or alias; it means nothing to another harness (codex -m sonnet fails)."""
+    return bool(CLAUDE_MODEL_RE.match(model or ''))
+
+
+def split(entry):
+    """(id without the model, model or None): a backup entry is <harness>[:<name>][@<model>]."""
+    base, at, model = (entry or '').partition('@')
+    return base, (model if at else None)
+
+
 def parse(entry):
-    """(harness, name or None); ValueError says what is wrong with the id."""
+    """(harness, name or None); ValueError says what is wrong with the id. A trailing @model is checked and left out."""
+    entry, model = split(entry)
+    if model is not None and not MODEL_RE.match(model):
+        raise ValueError(f"'{entry}@{model}': @ needs a model name (claude@sonnet, claude:work@opus)")
     m = ID_RE.match(entry or '')
     if not m:
-        raise ValueError(f"'{entry}' is not an account id: use <harness> or <harness>:<name> (claude, claude:work, claude-api:main, codex)")
+        raise ValueError(f"'{entry}' is not an account id: use <harness> or <harness>:<name>, with @<model> for a model of its own "
+                         "(claude, claude:work, claude@sonnet, claude-api:main, codex)")
     harness, name = m.groups()
     if harness == 'claude-api' and not name:
         raise ValueError("claude-api needs a profile: claude-api:<profile>")
@@ -77,8 +98,18 @@ def family(harness):
     return FAMILY.get(harness, (harness,))
 
 
+def check_entry_model(entry):
+    """Raise ValueError when the entry's model can't belong to its harness: a Claude model on another one."""
+    h, _ = parse(entry)
+    model = split(entry)[1]
+    if model and is_claude_model(model) and h not in family('claude'):
+        raise ValueError(f"{model} is a Claude model and {h} is not Claude: use {h}@<a {h} model>, or claude@{model}")
+
+
 def check_main(entry, harness):
     """Raise ValueError unless entry can be the pinned account of an agent on harness."""
+    if split(entry)[1] is not None:
+        raise ValueError(f"{entry}: a pinned account takes no @model (the agent's own model applies); @model is for backups")
     h, _ = parse(entry)
     if h not in family(harness):
         raise ValueError(f"{entry} can't be the account of a {harness} agent: use "
@@ -197,7 +228,7 @@ def entry_json(entry, agent, primary=False):
     # `auth status` can't see them. A named or API-key main account is checked like any entry.
     ready, why = (True, None) if primary and not name else check(entry, agent)
     out = {'id': entry, 'harness': 'claude' if harness == 'claude-api' else harness, 'account': name,
-           'kind': 'primary' if primary else kind(harness, name), 'ready': ready}
+           'model': split(entry)[1], 'kind': 'primary' if primary else kind(harness, name), 'ready': ready}
     if not ready:
         out['why'] = why
     return out
@@ -213,7 +244,7 @@ def chain(agent, agent_md):
         try:
             items.append(entry_json(i, agent, primary=n == 0))
         except ValueError as e:   # a hand-edited bad id: listed as not ready rather than failing the whole chain
-            items.append({'id': i, 'harness': None, 'account': None, 'kind': 'unknown', 'ready': False, 'why': str(e)})
+            items.append({'id': i, 'harness': None, 'account': None, 'model': None, 'kind': 'unknown', 'ready': False, 'why': str(e)})
     return {'version': 1, 'agent': agent, 'chain': items}
 
 
@@ -327,12 +358,15 @@ def prepare_claude_dir(directory, main_dir=None, main_json=None):
             want = {k: main_cfg[k] for k in MIRRORED_FLAGS if k in main_cfg}
             cfg = _read_json(cfg_path) if cfg_path.exists() else {}
             if cfg is not None and any(cfg.get(k) != v for k, v in want.items()):
-                # Read again just before the swap: Claude Code may have written in between.
-                cfg = _read_json(cfg_path) if cfg_path.exists() else {}
-                if cfg is not None:
-                    cfg.update(want)
-                    _write_atomic(cfg_path, json.dumps(cfg, indent=2).encode())
-                    changed.append('.claude.json')
+                # Two launches on one account mirror one at a time (.claude.json.lock, flock; the Rust side takes the same),
+                # and the file is read again under it, just before the swap: Claude Code may have written in between.
+                with open(directory / '.claude.json.lock', 'a') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    cfg = _read_json(cfg_path) if cfg_path.exists() else {}
+                    if cfg is not None:
+                        cfg.update(want)
+                        _write_atomic(cfg_path, json.dumps(cfg, indent=2).encode())
+                        changed.append('.claude.json')
     except OSError as e:
         print(f'kith: could not sync {directory} with the main Claude login: {e}', file=sys.stderr)
     return changed
@@ -345,6 +379,15 @@ def launch_env(agent, entry, light=False, record=False):
     harness, name = parse(entry)
     if harness not in ('claude', 'claude-api', 'codex'):
         raise ValueError(f'{entry}: {harness} is not supported in launch-json yet')
+    model = split(entry)[1]
+    if model is None and not light:
+        # --backup claude for a chain entry claude@sonnet: the id without its model finds it, unless the chain lists the
+        # plain id too (the exact entry wins).
+        # The set's first entry is the main account (it takes no model), so only the rest are backups.
+        ids = (kith_settings.accounts(agent)[0] or [])[1:]
+        if entry not in ids:
+            found = [split(i)[1] for i in ids if split(i)[0] == entry and split(i)[1]]
+            model = found[0] if found else None
     light = light or (harness in ('claude', 'codex') and not name)
     ready, why = present(entry, agent) if light else check(entry, agent)
     if not ready:
@@ -362,7 +405,7 @@ def launch_env(agent, entry, light=False, record=False):
     if record:
         record_started(entry)
     return (f'backup_harness={q(run_harness_name)} backup_account={q(name or "")} backup_cfg_var={q(cfg_var)} '
-            f'backup_cfg_dir={q(cfg_dir)} backup_api_helper={q(helper)}')
+            f'backup_cfg_dir={q(cfg_dir)} backup_api_helper={q(helper)} backup_model={q(model or "")}')
 
 
 def ledger_id(provider, account, account_id):
@@ -392,6 +435,26 @@ def session_account(sid):
     except sqlite3.Error:
         return None
     return ledger_id(*row) if row else None
+
+
+def session_run(sid):
+    """{agent, harness, model, effort} a session was started with, from the cost ledger (the run's tag: KITH_PROVIDER,
+    KITH_MODEL, KITH_EFFORT); None when the ledger doesn't know it. Harness is claude for a row from before provider."""
+    import sqlite3
+    db = machine() / 'cost.db'
+    if not sid or not db.is_file():
+        return None
+    try:
+        c = sqlite3.connect(db.as_uri() + '?mode=ro', uri=True)
+        try:
+            cols = [r[1] for r in c.execute('pragma table_info(runs)')]
+            pick = 'provider' if 'provider' in cols else 'null'
+            row = c.execute(f'select agent, {pick}, model, effort from runs where session = ?', (sid,)).fetchone()
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return None
+    return {'agent': row[0], 'harness': row[1] or 'claude', 'model': row[2] or None, 'effort': row[3] or None} if row else None
 
 
 # --- the state file: what each account is doing right now ---------------------------------------------------------------
@@ -429,7 +492,10 @@ def _state_lock():
 
 
 def _read_state():
-    """(accounts dict, corrupt): the file's accounts; {} and corrupt=True when it exists but isn't ours."""
+    """(accounts dict, corrupt): the file's accounts; {} and corrupt=True when it exists but isn't ours.
+    Raises kith_tombstone.Tombstoned when the file moved to the Kith core (`kith migrate step accounts`): the data is in
+    the core now, so reading {} here, or writing over the note, would fork it. `kith rollback accounts` brings it back."""
+    kith_tombstone.check(state_file())
     try:
         text = state_file().read_text()
     except FileNotFoundError:
@@ -448,6 +514,7 @@ def _read_state():
 
 def _write_state(accts):
     f = state_file()
+    kith_tombstone.check(f)   # the last stop before an atomic rename would replace the note
     _write_atomic(f, (json.dumps({'version': 1, 'accounts': accts}, indent=2) + '\n').encode())
 
 
@@ -483,19 +550,56 @@ def _import_kernel_marks():
                              since=int(v.get('since') or v['out_until']))
             _write_state(accts)
             os.replace(old, old.with_name(old.name + '.imported'))
+    except kith_tombstone.Tombstoned:
+        raise
     except (OSError, ValueError, TypeError):
         pass   # read-only disk or a race that lost: the next call tries again
 
 
+class CoreUnavailable(kith_tombstone.Tombstoned):
+    """The state is in the core (`kith migrate step accounts`) and the core did not answer. A Tombstoned, so every caller
+    that stops on the tombstone stops on this too: no mark is guessed, nothing is read from the note."""
+
+    def __init__(self, why):
+        OSError.__init__(self, f'{state_file()} moved to the Kith core (module accounts), and the core gave no answer or refused: {why} '
+                               '(kith rollback accounts brings the file back)')
+        self.path, self.module = str(state_file()), 'accounts'
+
+
+def _core(*args, stdin=None):
+    """Once the state file is a tombstone the state is the core's table, and the Rust program is its only door:
+    `kith kernel account-state VERB ...` (the daemon when one runs, else an embedded core). Returns its stdout."""
+    try:
+        from kith_paths import KERNEL, kith_bin
+        bin_ = kith_bin(budget=10)
+        if not bin_:
+            raise CoreUnavailable('no kith program is installed')
+        r = subprocess.run([bin_, 'kernel', 'account-state', '--kernel', str(KERNEL), *args], input=stdin,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        if isinstance(e, CoreUnavailable):
+            raise
+        raise CoreUnavailable(str(e)) from None
+    if r.returncode:
+        raise CoreUnavailable((r.stderr or r.stdout).strip() or f'exit {r.returncode}')
+    return r.stdout
+
+
 def read_state():
-    """The state file's accounts ({} when there is none or it is corrupt), the old kernel marks imported first."""
-    _import_kernel_marks()
-    return _read_state()[0]
+    """The state file's accounts ({} when there is none or it is corrupt), the old kernel marks imported first. After the
+    cutover the file is a tombstone and the accounts come from the core."""
+    try:
+        _import_kernel_marks()
+        return _read_state()[0]
+    except kith_tombstone.Tombstoned:
+        accts = json.loads(_core('state'))
+        return {k: v for k, v in accts.items() if isinstance(k, str) and isinstance(v, dict)}
 
 
-def update_state(change):
+def update_state(change, via=None):
     """change(accounts) under the lock, then written back atomically. Returns nothing; a disk that can't be written to
-    loses the mark (the run goes on), it never fails the run."""
+    loses the mark (the run goes on), it never fails the run. `via` = (core verb args, stdin) is the same change made in the
+    core, for when the file is a tombstone; without it a tombstone stops the writer."""
     try:
         with _state_lock():
             accts, corrupt = _read_state()
@@ -506,6 +610,10 @@ def update_state(change):
                     pass
             change(accts)
             _write_state(accts)
+    except kith_tombstone.Tombstoned:
+        if via is None:
+            raise   # not a disk problem: the module moved, and a lost mark here would be silent
+        _core(*via[0], stdin=via[1])
     except OSError:
         pass
 
@@ -545,7 +653,7 @@ def mark_out(entry, until=None, reason='rate_limit', now=None, extend_only=True)
             return
         e['since'] = e.get('since', now) if isinstance(cur, (int, float)) and cur > now else now
         e['out_until'], e['reason'] = until, reason
-    update_state(change)
+    update_state(change, via=((['out', entry, '--until', str(until), '--reason', reason] + (['--extend'] if extend_only else [])), None))
 
 
 def clear_out(entry, now=None):
@@ -558,12 +666,15 @@ def clear_out(entry, now=None):
             e.pop(k, None)
         e['cleared_at'] = now
         e['cleared_host_until'] = int(float(host['out_until'])) if host else 0
-    update_state(change)
+    update_state(change, via=(['clear', entry], None))
 
 
 def record_started(entry, now=None):
     now = int(now or time.time())
-    update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('last_started', now))
+    try:
+        update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('last_started', now), via=(['started', entry], None))
+    except CoreUnavailable as e:   # a start time only feeds the spread policy: the run goes on (the Rust launch does the same)
+        print(f'kith: a start of {entry} was not noted: {e}', file=sys.stderr)
 
 
 def validate_usage(reading, now=None):
@@ -598,7 +709,8 @@ def validate_usage(reading, now=None):
 
 def record_usage(entry, reading, now=None):
     usage = validate_usage(reading, now)
-    update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('usage', usage))
+    update_state(lambda accts: accts.setdefault(entry, {}).__setitem__('usage', usage),
+                 via=(['usage', entry, '--json', '-'], json.dumps(usage)))
     return usage
 
 
@@ -654,7 +766,7 @@ POLICIES = {'fill': fill_policy, 'spread': spread_policy}
 
 
 def in_family(entry, harness):
-    return entry.split(':')[0] in family(harness)
+    return split(entry)[0].split(':')[0] in family(harness)   # claude@sonnet is a Claude account (the model is not part of it)
 
 
 def layout(agent, harness):
@@ -989,12 +1101,22 @@ if __name__ == '__main__':
             print(launch_env(a[1], a[2], record=record))
         elif len(a) == 3 and a[0] == 'main-env':
             print(main_env(a[1], a[2], use_state=use_state, record=record, prefer=prefer))
+        elif len(a) in (2, 3) and a[0] == 'session-run':
+            r = session_run(a[1]) or {}
+            if len(a) == 3 and a[2] == '--sh':   # for bin/kith: the harness and model a resumed thread keeps
+                print(f"s_harness={shlex.quote(r.get('harness') or '')} s_model={shlex.quote(r.get('model') or '')} "
+                      f"s_effort={shlex.quote(r.get('effort') or '')}")
+            else:
+                print(json.dumps(r))
         elif len(a) == 3 and a[0] == 'main-id':
             print(main_id(a[1], a[2]))
         elif len(a) == 2 and a[0] == 'session-account':
             print(session_account(a[1]) or '')
         else:
             sys.exit(__doc__.strip())
+    except kith_tombstone.Tombstoned as e:   # accounts state moved to the core (kith migrate step accounts)
+        print(f'kith: {e}', file=sys.stderr)
+        sys.exit(4)
     except ValueError as e:
         print(f'kith: {e}', file=sys.stderr)
         sys.exit(4)

@@ -1,14 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { draftOf, isGroup, type Bot } from '@shared/models'
+import { isGroup, type Bot } from '@shared/models'
 import { BotAvatar, GroupAvatar } from '../../components/Avatar'
 import { Hairline, IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { SheetPage } from '../../components/Overlay'
 import { parseLabels } from '@shared/room-labels'
+import { parseQuickEngines, QUICK_ENGINES, quickEngine, type QuickEngineOption } from '@shared/quick-chat'
 import { HStack, Spacer } from '../../components/Stack'
 import { Text } from '../../components/Text'
 import { useStore } from '../../store/context'
-import { createDefaultBot, errorText } from './drafts'
+import { errorText } from './drafts'
+import { NewAgentSheet } from './NewAgentSheet'
 import { AutoTextArea, BotChip } from './parts'
 import { StartingFolderChip, type StartingPick } from './PlaceFolderPicker'
 import './bots.css'
@@ -19,13 +21,19 @@ import './bots.css'
  * Picked bots become chips in the To: field; one opens its chat, several start a
  * group chat with them (or open the one they already share). Whatever you typed is sent.
  * `group` is "New group chat": the same page, but it only gathers bots and needs two.
+ * `quick` is "Quick chat": Kith's built-in scratch bot is already picked, and the engine and model can be chosen for this chat.
  */
-export function NewChatView({ group, onClose }: { group: boolean; onClose: () => void }) {
+export function NewChatView({ group, quick = false, onClose }: { group: boolean; quick?: boolean; onClose: () => void }) {
   const store = useStore()
   const [query, setQuery] = useState('')
   const [draft, setDraft] = useState('')
-  const [recipients, setRecipients] = useState<string[]>([])
-  const [creating, setCreating] = useState(false)
+  const [recipients, setRecipients] = useState<string[]>(() => (quick && store.quickChatBot ? [store.quickChatBot.id] : []))
+  // A quick chat's own engine and model; both empty is scratch's own.
+  const [engine, setEngine] = useState('')
+  const [model, setModel] = useState('')
+  // The picker's engines come from `kith engines --json`; if that fails the two known ones stay, with the reason shown.
+  const [engines, setEngines] = useState<QuickEngineOption[]>(QUICK_ENGINES)
+  const [enginesError, setEnginesError] = useState<string | null>(null)
   // A new group chat's purpose labels, typed as "launch, q4 plan".
   const [labels, setLabels] = useState('')
   // The folder for the first message; the bot's own default shows until one is picked.
@@ -35,7 +43,7 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
 
   // Bots not picked yet; a group can only be opened on its own, so groups go once someone's picked.
   const q = query.trim().toLowerCase()
-  const matches = store.roster.filter((b) => !recipients.includes(b.id) && !(isGroup(b) && (group || recipients.length > 0)) && (!q || b.name.toLowerCase().includes(q)))
+  const matches = store.roster.filter((b) => !recipients.includes(b.id) && !b.builtin && !(isGroup(b) && (group || recipients.length > 0)) && (!q || b.name.toLowerCase().includes(q)))
   const picked = recipients.map((id) => store.bots.get(id)).filter((b): b is Bot => !!b)
 
   const toPrompt = group ? (recipients.length < 2 ? 'Add agents to the group' : 'Add another agent') : recipients.length ? 'Add another agent' : 'Search or make an agent'
@@ -45,11 +53,29 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
       : 'Message the group'
     : picked.length === 0
       ? 'Message an agent'
+      : picked.length === 1 && picked[0]!.builtin
+        ? 'Start a quick chat'
       : `Message ${picked.map((b) => b.name).join(', ')}`
 
   useEffect(() => {
     toField.current?.focus()
   }, [])
+
+  useEffect(() => {
+    let live = true
+    store
+      .ready()
+      .then((client) => client.kithEngines())
+      .then((raw) => {
+        if (live) setEngines(parseQuickEngines(raw))
+      })
+      .catch((e: unknown) => {
+        if (live) setEnginesError(`Couldn't list engines: ${errorText(e)}`)
+      })
+    return () => {
+      live = false
+    }
+  }, [store])
 
   // The field stays in view as chips are added.
   useLayoutEffect(() => {
@@ -61,7 +87,9 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
   const open = (id: string, folder: StartingPick | null = null) => {
     const text = draft.trim()
     store.setSelection(id)
-    if (text) store.send(text, id, null, [], undefined, [], false, folder?.start ?? null)
+    // A quick chat is a new thread each time, with the engine and model picked here.
+    if (text && store.bots.get(id)?.builtin) store.send(text, id, null, [], undefined, [], true, folder?.start ?? null, null, null, quickEngine(engine, model))
+    else if (text) store.send(text, id, null, [], undefined, [], false, folder?.start ?? null)
     // With nothing to send, the pick goes straight to the chat's place.
     else if (folder) store.setPlaceFolder(id, folder.start).catch((e: unknown) => store.setError(errorText(e)))
     onClose()
@@ -93,27 +121,15 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
       .catch((e: unknown) => store.setError(errorText(e)))
   }
 
-  const create = () => {
-    if (creating) return
-    setCreating(true)
-    const name = query.trim()
-    const alone = recipients.length === 0 && !group
-    void (async () => {
-      try {
-        let bot = await createDefaultBot(store)
-        if (name) bot = await store.save({ ...draftOf(bot), name })
-        if (alone) {
-          open(bot.id)
-        } else {
-          // `createDefaultBot` selected it; stay here and add it to the others.
-          store.setSelection(null)
-          choose(bot)
-        }
-      } catch (e) {
-        store.setError(errorText(e))
-      }
-      setCreating(false)
-    })()
+  // "New agent" asks for a name and a line first, then makes a kith agent; the sheet reports what kith refuses.
+  const [making, setMaking] = useState(false)
+  const create = () => setMaking(true)
+  const made = (bot: Bot) => {
+    setMaking(false)
+    if (recipients.length === 0 && !group) return open(bot.id)
+    // Stay here and add it to the others.
+    store.setSelection(null)
+    choose(bot)
   }
 
   // Return in To: picks the top match, or with the field empty, starts the chat.
@@ -127,10 +143,12 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
   }
 
   // ⌘1 creates, ⌘2…⌘9 pick the matches; Escape closes.
-  const keys = useRef({ create, choose, matches, onClose })
-  keys.current = { create, choose, matches, onClose }
+  const keys = useRef({ create, choose, matches, onClose, making })
+  keys.current = { create, choose, matches, onClose, making }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The new-agent sheet has the keys while it is open.
+      if (keys.current.making) return
       if (e.key === 'Escape') {
         e.preventDefault()
         keys.current.onClose()
@@ -184,7 +202,7 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
       <div className="compose-list">
         <PickRow shortcut={1} onClick={create} icon={
           <span className="compose-create-icon">
-            <Icon key={creating ? 'hourglass' : 'plus'} name={creating ? 'hourglass' : 'plus'} size={13} weight="medium" className="fade-in" />
+            <Icon name="plus" size={13} weight="medium" />
           </span>
         }>
           {query ? `New agent “${query}”` : 'New agent'}
@@ -203,6 +221,15 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
         <div className="place-chip-row compose-folder">
           <StartingFolderChip key={picked[0]!.id} inherited={picked[0]!.folder} value={startFolder} onChange={setStartFolder} />
         </div>
+      ) : null}
+      {!group && picked.length === 1 && picked[0]!.builtin ? (
+        <HStack gap={8} className="compose-engine">
+          <select className="field-box" value={engine} aria-label="Engine" onChange={(e) => setEngine(e.target.value)}>
+            {engines.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+          {enginesError ? <Text size="footnote" tone="secondary">{enginesError}</Text> : null}
+          <input className="field-box" value={model} placeholder="Model (optional)" aria-label="Model" spellCheck={false} onChange={(e) => setModel(e.target.value)} />
+        </HStack>
       ) : null}
       {group ? (
         <input className="field-box compose-labels" value={labels} placeholder="Labels (optional): launch, q4 plan" aria-label="Labels" onChange={(e) => setLabels(e.target.value)} />
@@ -223,6 +250,7 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
           }}
         />
       </div>
+      <NewAgentSheet open={making} initialName={query} onClose={() => setMaking(false)} onMade={made} />
     </SheetPage>
   )
 }

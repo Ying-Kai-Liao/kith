@@ -37,6 +37,22 @@ files since the writer claims re-read: the wakes and `kernel/bin/kith-wake`, com
 through `kernel/bin/kith` still claims its session before claude starts, and a host turn takes the claim or is refused). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
 confirmed that the model describes the code at the new commit (steps below), and change both places.
 
+**Re-run for F7 (rust-rebuild, after #680):** `run.sh` at the F7 commit: 52 rows, every row as expected. Read: the F7 change to
+`serve/host/src/terminal/claim.rs` (an unknown claim `kind` is `Kind::Other`: a live holder judged by pid + start only, and
+`take_as` never removes it, as `kith-sessions` and the crate already do, so the "three actors" line below is true) and its
+test; the Rust twin (`core/kernel/src/threads*`) is now in `drift.sh`'s file list. **SYNC is not moved:** `drift.sh` still lists
+about 1500 changed lines in the covered files since `6fc1ae0d` (the twin itself, the off-turn sends, `kernel/bin/kith`,
+the wakes) that this re-run did not read against the model, so the pin stays until someone does.
+
+**`--held` (M1-7) and the model.** The model does not have a core-daemon claimer: `terminal.open`'s take (`starting`, then `retarget` to
+the stub's pid) is the same exclusive-link `take_claim` as `TermClaim`, so a second writer is refused by the same file, but the hand-over
+steps themselves (release by the launcher shell, open's take) are not model actions and TLC was not re-run for them. What the
+code and `kernel/tests/kith-held-check` rely on: every taker goes through one claim file and flock, so there is no window with two
+writers. The one gap is between the launcher's give-back and open's take: a third writer taking the claim there makes open answer busy
+(never a second engine; `kith-held-check` 7c), but the `--resume` the user asked for is then lost to that writer. The fix is an
+atomic hand-over inside `terminal.open` (take over the launcher's claim by pid + start time instead of release-then-take); listed as
+later work. `SYNC` is not moved.
+
 ## What is promised, and the harm if not
 
 | Property (in Threads.tla) | Plain sentence | Harm |
@@ -65,6 +81,7 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | `resolve()` with the claim held: `resolveThread` again, `hostBusy` die, `live_pid(e)` die; `die` gives the claim back (`release_claims`) | `TermResolve` (`ResumeChecksHostBusy`, `ResumeChecksOpen`) |
 | `kernel/bin/kith` `csid` (the session the run continues, a `--session-id`, or a new uuid for a fresh run or a fork), then `kith-sessions claim` (one-shot) or `kith-sessions terminal` (interactive) when resolve did not claim it; neither asks the host nor reads the registry | `TermLaunch` (`FreshClaims`) |
 | `exec claude` / `exec kith-sessions run -- claude` (run gives the claims back after claude exits; a one-shot's claim goes stale with its pid, `prune_stale`) | `TermUp`, `TermExit` (the launch gap: `LaunchIsInstant` removes it) |
+| `kernel/bin/kith` `--held` (M1-7: `kith_held_launch` in `lib/kith-core.sh`, `kith-sessions release SID`, `core/runtime/src/terminal.rs` `open_held`): for a `--resume` the shell's claim is given back only when `terminal.list` says a holder is up and the claim's pid is the caller's parent with the same start time; `terminal.open` then takes the claim for the daemon's pid (`kind: starting`; also refused while a live `.takeover.claim` exists), and `retarget`s it to the stub's pid once spawned; busy answers 75 and starts nothing. When open answers direct or is refused, the claim is taken again by `kith-sessions terminal` and the run goes on with `kith-sessions run`. No daemon or no holder: the claim is never given back | `TermClaim` and `TermUp` by another actor (the core as claimer), and the gap below; **not modelled** |
 | `kith-sessions` `record()` (SessionStart hook, `write_atomic`, one file per session id, pid replaced by a later terminal; `resumedFrom` = `KITH_RESUMED_FROM`) | `TermHook` (incl. a new session id claude moved to: `ClaudeForks`) |
 | claude's `~/.claude/sessions/<pid>.json` status idle vs other; user prompt and end | `TermPrompt`, `TermDone`, `TermExit` (a crash may leave a ghost: pid reused) |
 | `terminal/sync.rs` `writer()`: `taking`; for the lane's session and the scanned copy's: `claim::holder` (not the host's own `App` claim; `Kind::Bot` -> `Writer::Bot`), then a live `registry::read_one`; last the copy's liveness | `Writer`, `WriterOf`, `RegLive` |
@@ -93,6 +110,18 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 One step in the code is one action here. A check followed later by the act it guards is two actions
 (`AppGate` then `Enqueue` then `HostStart` then `HostClaim`; `TermClaim` then `TermResolve` then `TermUp`;
 `TakeRecheck` then `TakeSignal`), because another writer can act between them.
+
+## The Rust twin (A4-2, not switched)
+
+`core/kernel/src/threads*` (`kith kernel threads ...`) ports the kernel half of the table above step for step: the
+same order in `resolve` (claim, then ask the host, then the checks), `take_in` = `take_claim` (temp file, lock file,
+`link`, up to three judgements of a stale claim under the lock, the lock given up before `prune_stale`), `claim_start`,
+`proc_claim`, `sweep_persons`, `record`. It writes the existing files with no version field, so Python, the host's
+`claim.rs` and the crate are three actors on one folder, and the model's one-step `take` holds for each as long as all
+use the lock. That is run, not modelled: `kernel/tests/kith-threads-race` races the Python `kith-sessions` and the Rust
+verb for one thread (fresh, stale, reused pid, damaged, live) and fails on a second winner; CI runs it after the
+difftest. Nothing calls the crate for claims yet (the router and the host switch together, later); the differences
+from `kith-sessions` and `claim.rs` are in `docs/plans/one-bot-model.md` (A4-2).
 
 ## Bounds and assumptions
 

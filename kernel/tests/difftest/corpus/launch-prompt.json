@@ -1,0 +1,1649 @@
+[
+ {
+  "name": "launch-prompt-owner-memory",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory zebra\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/MEMORY.md",
+    "text": "grp1 room note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/sessions/s1.md",
+    "text": "session log\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/README.md",
+    "text": "alpha index note\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-no-memory",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-memory-cap",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\nmemory_cap: 60\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/README.md",
+    "text": "alpha index note, long enough to go over the small cap of sixty chars\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/old.md",
+    "text": "alpha older note that is also fairly long and should be dropped first\n"
+   },
+   {
+    "write": "kith/state/projects.json",
+    "text": "{\"projects\": {\"alpha\": {\"remotes\": [], \"paths\": []}}}"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state"
+  },
+  "run_old": [
+   [
+    "echo",
+    "-p",
+    "alpha",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--project",
+    "alpha"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "-p",
+    "alpha",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-guest-person",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}}}}"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "OWNER ABOUT SECRET\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "About sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "ANN ABOUT SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "OWNER MEMORY SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ANN MEMORY SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/sessions/s.md",
+    "text": "sam session detail\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/notes-widen.md",
+    "text": "---\naudience: shared\n---\nWIDEN ATTEMPT SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/narrow.md",
+    "text": "---\naudience: owner\n---\nNARROWED SECRET\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "sam"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--person",
+    "sam"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-owner-named",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}}}}"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "OWNER ABOUT SECRET\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "About sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "ANN ABOUT SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "OWNER MEMORY SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ANN MEMORY SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/sessions/s.md",
+    "text": "sam session detail\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/notes-widen.md",
+    "text": "---\naudience: shared\n---\nWIDEN ATTEMPT SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/narrow.md",
+    "text": "---\naudience: owner\n---\nNARROWED SECRET\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "kai"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--person",
+    "kai"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-bot-guest",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "OWNER ABOUT SECRET\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "About sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "ANN ABOUT SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "OWNER MEMORY SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ANN MEMORY SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/sessions/s.md",
+    "text": "sam session detail\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/notes-widen.md",
+    "text": "---\naudience: shared\n---\nWIDEN ATTEMPT SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/narrow.md",
+    "text": "---\naudience: owner\n---\nNARROWED SECRET\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/bot-ab12cd34/MEMORY.md",
+    "text": "bot own notes\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "bot-ab12cd34"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--person",
+    "bot-ab12cd34"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-room-owner",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}}}}"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "OWNER MEMORY\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "SAM MEMORY\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "About sam.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/a.md",
+    "text": "room note both present\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/b.md",
+    "text": "room note owner only\n"
+   },
+   {
+    "write": "kith/state/room-ledger/echo/grp1.json",
+    "text": "{\"rooms/grp1/a.md\": [\"sam\"]}"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_ROOM": "grp1",
+   "KITH_ROOM_MEMBERS": "sam"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-room-person",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}}}}"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "OWNER MEMORY\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "SAM MEMORY\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "About sam.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/a.md",
+    "text": "room note both present\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/b.md",
+    "text": "room note owner only\n"
+   },
+   {
+    "write": "kith/state/room-ledger/echo/grp1.json",
+    "text": "{\"rooms/grp1/a.md\": [\"sam\"]}"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_ROOM": "grp1",
+   "KITH_ROOM_MEMBERS": "sam",
+   "KITH_PERSON": "sam"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--person",
+    "sam"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-room-unknown-members",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}}}}"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "OWNER MEMORY\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "SAM MEMORY\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "About sam.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/a.md",
+    "text": "room note both present\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/b.md",
+    "text": "room note owner only\n"
+   },
+   {
+    "write": "kith/state/room-ledger/echo/grp1.json",
+    "text": "{\"rooms/grp1/a.md\": [\"sam\"]}"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_ROOM": "grp1",
+   "KITH_PERSON": "sam"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--person",
+    "sam"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-room-channel-via",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "OWNER MEMORY\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "SAM MEMORY\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "About sam.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/a.md",
+    "text": "room note both present\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/b.md",
+    "text": "room note owner only\n"
+   },
+   {
+    "write": "kith/state/room-ledger/echo/grp1.json",
+    "text": "{\"rooms/grp1/a.md\": [\"sam\"]}"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_VIA": "telegram"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-room-bot-guest",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "OWNER MEMORY\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft tip\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "SAM MEMORY\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "About sam.\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/a.md",
+    "text": "room note both present\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/rooms/grp1/b.md",
+    "text": "room note owner only\n"
+   },
+   {
+    "write": "kith/state/room-ledger/echo/grp1.json",
+    "text": "{\"rooms/grp1/a.md\": [\"sam\"]}"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_ROOM": "grp1",
+   "KITH_ROOM_MEMBERS": "sam",
+   "KITH_PERSON": "bot-ab12cd34"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--person",
+    "bot-ab12cd34"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-project-owner",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}}}}"
+   },
+   {
+    "write": "kith/state/projects.json",
+    "text": "{\"projects\": {\"alpha\": {\"parent\": \"acme\", \"remotes\": [], \"paths\": []}, \"acme\": {\"remotes\": [], \"paths\": []}, \"beta\": {\"parent\": \"alpha\", \"remotes\": [], \"paths\": []}, \"gamma\": {\"parent\": \"alpha\", \"remotes\": [], \"paths\": []}}}"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/README.md",
+    "text": "alpha index note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/extra.md",
+    "text": "alpha extra note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/detail.md",
+    "text": "---\nkind: project-detail\n---\nalpha detail log\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/beta/README.md",
+    "text": "beta only note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha.md",
+    "text": "alpha flat note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/sessions/alpha.md",
+    "text": "alpha owner session\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/sessions/alpha.md",
+    "text": "alpha sam session\n"
+   },
+   {
+    "write": "kith/state/projects/alpha/codebase.md",
+    "text": "alpha codebase map\n"
+   },
+   {
+    "write": "kith/state/projects/alpha/decisions.md",
+    "text": "2026-10-01 \u00b7 echo \u00b7 open: echo question 1 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 2 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 3 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 4 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 5 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 6 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 7 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 8 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 9 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 10 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 11 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 12 \u00b7 ctx\n2026-10-01 \u00b7 other \u00b7 open: other agent question \u00b7 ctx\n2026-10-02 \u00b7 other \u00b7 decision 1 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 2 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 3 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 4 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 5 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 6 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 7 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 8 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 9 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 10 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 11 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 12 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 13 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 14 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 15 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 16 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 17 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 18 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 19 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 20 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 21 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 22 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 23 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 24 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 25 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 26 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 27 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 28 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 29 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 30 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 31 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 32 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 33 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 34 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 35 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 36 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 37 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 38 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 39 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 40 \u00b7 why\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state"
+  },
+  "run_old": [
+   [
+    "echo",
+    "-p",
+    "alpha",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--project",
+    "alpha"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "-p",
+    "alpha",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-project-guest",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\", \"lang\": \"en\", \"tz\": \"UTC\"}, \"sam\": {\"name\": \"Sam \\\"S\\\" <x>\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}}, \"members\": {\"echo\": {\"sam\": {}, \"ann\": {}}}}"
+   },
+   {
+    "write": "kith/state/projects.json",
+    "text": "{\"projects\": {\"alpha\": {\"parent\": \"acme\", \"remotes\": [], \"paths\": []}, \"acme\": {\"remotes\": [], \"paths\": []}, \"beta\": {\"parent\": \"alpha\", \"remotes\": [], \"paths\": []}, \"gamma\": {\"parent\": \"alpha\", \"remotes\": [], \"paths\": []}}}"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/README.md",
+    "text": "alpha index note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/extra.md",
+    "text": "alpha extra note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha/detail.md",
+    "text": "---\nkind: project-detail\n---\nalpha detail log\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/beta/README.md",
+    "text": "beta only note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/projects/alpha.md",
+    "text": "alpha flat note\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/sessions/alpha.md",
+    "text": "alpha owner session\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/sessions/alpha.md",
+    "text": "alpha sam session\n"
+   },
+   {
+    "write": "kith/state/projects/alpha/codebase.md",
+    "text": "alpha codebase map\n"
+   },
+   {
+    "write": "kith/state/projects/alpha/decisions.md",
+    "text": "2026-10-01 \u00b7 echo \u00b7 open: echo question 1 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 2 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 3 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 4 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 5 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 6 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 7 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 8 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 9 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 10 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 11 \u00b7 ctx\n2026-10-01 \u00b7 echo \u00b7 open: echo question 12 \u00b7 ctx\n2026-10-01 \u00b7 other \u00b7 open: other agent question \u00b7 ctx\n2026-10-02 \u00b7 other \u00b7 decision 1 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 2 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 3 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 4 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 5 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 6 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 7 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 8 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 9 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 10 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 11 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 12 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 13 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 14 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 15 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 16 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 17 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 18 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 19 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 20 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 21 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 22 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 23 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 24 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 25 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 26 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 27 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 28 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 29 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 30 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 31 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 32 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 33 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 34 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 35 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 36 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 37 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 38 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 39 \u00b7 why\n2026-10-02 \u00b7 other \u00b7 decision 40 \u00b7 why\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "sam"
+  },
+  "run_old": [
+   [
+    "echo",
+    "-p",
+    "alpha",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--project",
+    "alpha",
+    "--person",
+    "sam"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "-p",
+    "alpha",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-prompt-project-bare",
+  "command": "launch-prompt",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\nHome is {{HOME_DIR}}.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/projects.json",
+    "text": "{\"projects\": {\"alpha\": {\"remotes\": [], \"paths\": []}}}"
+   },
+   {
+    "write": "kith/state/projects/alpha/codebase.md",
+    "text": "x\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state"
+  },
+  "run_old": [
+   [
+    "echo",
+    "-p",
+    "alpha",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "prompt",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--pkg",
+    "{KITH_HOME}/state/store/echo@0123456789",
+    "--json",
+    "--project",
+    "alpha"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "-p",
+    "alpha",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "system_prompt",
+   "new": "prompt"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ }
+]

@@ -237,6 +237,9 @@ impl Core {
         set(&mut env, "VIA", ad.platform());
         // The run's own tools come from the kernel this entry belongs to, not one the host's environment names.
         set(&mut env, "BIN", &self.paths.hq_bin.to_string_lossy());
+        // The conversation lock's launcher: this run's environment is built from nothing, and the kernel refuses a run it
+        // cannot lock.
+        env.extend(crate::kernel::stub_env().map(|(k, v)| (k.into(), v.into())));
         let (private, chat) = self.with(|i| {
             let th = i.st.threads.get(key);
             (

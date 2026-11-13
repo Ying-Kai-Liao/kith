@@ -139,7 +139,7 @@ EOF
   printf '{"hq":{"source":{"source":"directory","path":"%s"}}}\n' "$REPO" > "$HOME/.claude/plugins/known_marketplaces.json"
   echo '{"name":"hq"}' > "$HOME/.claude/plugins/cache/hq/hq/1/plugin.json"
 }
-mig() { "$KITH" migrate "$@" > "$T/out" 2> "$T/err"; local rc=$?; cat "$T/err" >> "$T/out"; return $rc; }
+mig() { "$KITH" migrate run "$@" > "$T/out" 2> "$T/err"; local rc=$?; cat "$T/err" >> "$T/out"; return $rc; }
 sees() { grep -q -- "$1" "$T/out"; }
 plist_has() { python3 -I -c 'import plistlib,sys; print(sys.argv[2] in str(plistlib.load(open(sys.argv[1],"rb"))))' "$1" "$2" | grep -q True; }
 LA=$HOME/Library/LaunchAgents
@@ -218,7 +218,7 @@ check "--undo twice says there is nothing to undo" "[ $rc != 0 ] && sees 'nothin
 # ---- 2. a migration that stops half way: continue it, or undo it -----------------------------------------------------
 sleep 1   # the backup folder is named by the second
 STUB_LAUNCHCTL_FAIL=1 mig; rc=$?
-check "a failing step stops the migration and says how to go on" "[ $rc != 0 ] && sees 'stopped:' && sees 'kith migrate --undo'"
+check "a failing step stops the migration and says how to go on" "[ $rc != 0 ] && sees 'stopped:' && sees 'kith migrate run --undo'"
 out=$("$KITH" doctor 2>&1)
 check "doctor reports the half-migrated state" "echo \"\$out\" | grep -q 'partly migrated'"
 mig; rc=$?

@@ -99,6 +99,7 @@ pub(super) fn router_methods() -> BTreeSet<String> {
         include_str!("folders.rs"),
         include_str!("backups.rs"),
         include_str!("kith_info.rs"),
+        include_str!("kith_new.rs"),
         include_str!("marketplace.rs"),
         include_str!("remote.rs"),
         include_str!("people.rs"),
@@ -106,6 +107,8 @@ pub(super) fn router_methods() -> BTreeSet<String> {
         include_str!("peers.rs"),
         include_str!("threads.rs"),
         include_str!("delegations.rs"),
+        include_str!("kith_tools.rs"),
+        include_str!("scratch.rs"),
     ];
     let mut out = BTreeSet::new();
     for src in sources {
@@ -156,8 +159,18 @@ async fn every_router_method_is_denied_to_members_unless_listed() {
     let sam = r.device("sam-phone", Some("sam"));
     let known = router_methods();
     assert!(known.len() > 100, "the walk found {} methods: did the router's layout change?", known.len());
-    for m in ["createBot", "updateBot", "deleteBot", "listDirs", "registerProject", "memoryCall", "routines", "skills"]
-    {
+    for m in [
+        "createBot",
+        "updateBot",
+        "deleteBot",
+        "newKithAgent",
+        "kernelStatus",
+        "listDirs",
+        "registerProject",
+        "memoryCall",
+        "routines",
+        "skills",
+    ] {
         assert!(known.contains(m), "{m} is a router method");
     }
     for listed in roles::MEMBER_METHODS {
@@ -330,8 +343,49 @@ async fn create_invite_makes_the_person_the_grants_and_the_cloud_record() {
     assert_eq!(bob["personId"], "bob-2");
     let people = call(&r, &Caller::Local, "people", json!({})).await.unwrap();
     let ids: Vec<&str> = people["people"].as_array().unwrap().iter().map(|p| p["personId"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["sam-lee", "bob-2"]);
-    assert_eq!(people["people"][0]["agents"], json!({"house": "member", "money": "guest"}));
+    // `bob` was made in kith-auth by hand and shows too: kith-auth is who a person is.
+    assert_eq!(ids, ["bob", "bob-2", "sam-lee"]);
+    assert_eq!(people["people"][2]["agents"], json!({"house": "member", "money": "guest"}));
+}
+
+/// `people` reads kith-auth: a person and a member row made there show with the agent and role; the host's own
+/// facts join in by id; revoked shows; the owner never; a store-only person is left out; kith-auth unreadable is an
+/// error, not an empty list.
+#[tokio::test]
+async fn people_come_from_kith_auth() {
+    let r = Rig::new().await;
+    r.auth(&["person", "ann", "name=Ann Lee"]);
+    r.auth(&["member", "house", "ann", "preset=member"]);
+    let list = || async {
+        let v = call(&r, &Caller::Local, "people", json!({})).await.unwrap();
+        v["people"].as_array().unwrap().clone()
+    };
+    let ann = list().await.into_iter().find(|p| p["personId"] == "ann").expect("made only in kith-auth, it shows");
+    assert_eq!(ann["name"], "Ann Lee");
+    assert_eq!(ann["agents"], json!({"house": "member"}));
+    assert_eq!((&ann["joined"], &ann["devices"], &ann["revoked"]), (&json!(false), &json!([]), &json!(false)));
+    assert!(list().await.iter().all(|p| p["personId"] != "kai"), "the owner is not a row");
+
+    // The host's mirror says something else: kith-auth wins. A person only the store knows isn't listed.
+    r.hub.store.put_person("ann", "Ann Lee").unwrap();
+    r.hub
+        .store
+        .set_person_agents("ann", &std::collections::BTreeMap::from([("money".to_owned(), "member".to_owned())]))
+        .unwrap();
+    r.hub.store.put_person("ghost", "Ghost").unwrap();
+    let rows = list().await;
+    assert_eq!(rows.iter().find(|p| p["personId"] == "ann").unwrap()["agents"], json!({"house": "member"}));
+    assert!(rows.iter().all(|p| p["personId"] != "ghost"));
+
+    r.auth(&["person", "ann", "--revoke", "--local"]);
+    let ann = list().await.into_iter().find(|p| p["personId"] == "ann").unwrap();
+    assert_eq!(ann["revoked"], true);
+    assert_eq!(ann["agents"], json!({"house": "member"}), "rows as they stand, for the undo");
+
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.dir.join("no-such-kith-auth"));
+    let broken = call(&r, &Caller::Local, "people", json!({})).await;
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.bin.clone());
+    assert!(broken.is_err(), "unreadable kith-auth is an error, not nobody");
 }
 
 #[tokio::test]
@@ -692,7 +746,7 @@ fn recap(audience: &str) -> kith_mem::summary::Summary {
 fn root_with_summary(r: &Rig, bot: &str, audience: &str) -> crate::store::Entry {
     use crate::store::{EntryKind, Lane};
     let mut data = json!({"text": "hi", "thread": {"count": 1}});
-    crate::chat::memory::summary::set_row_summary(&mut data, &recap(audience));
+    crate::hqmem::summary::set_row_summary(&mut data, &recap(audience));
     r.hub.store.insert_entry(&Lane::main(bot), EntryKind::User, 1, &data).unwrap()
 }
 
@@ -868,4 +922,111 @@ async fn forgetting_a_thread_takes_the_summary_off_its_row() {
         let row = seen["entries"].as_array().unwrap().iter().find(|e| e["id"] == older.id.as_str()).unwrap();
         assert!(row["data"]["thread"].get("summary").is_none());
     }
+}
+
+#[tokio::test]
+async fn a_bots_row_summary_follows_the_same_audience_rule_as_its_thread_rows() {
+    let r = Rig::new().await;
+    let row = |bot: &str| r.hub.bot_json(&r.hub.store.bot(bot).unwrap().unwrap())["lastSummary"].clone();
+    let owner_house = r.owner_bot("house");
+    assert!(row(&owner_house).is_null(), "no summary yet");
+    root_with_summary(&r, &owner_house, "owner");
+    assert_eq!(row(&owner_house), json!("Planned the move."), "the owner sees every audience");
+
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    let theirs = chat_of(&r, &sam).await;
+    // Each root is newer than the last, so the row follows the one just added.
+    for (audience, shown) in [("owner", false), ("person:eve", false), ("room:g1", false), ("person:sam", true)] {
+        root_with_summary(&r, &theirs, audience);
+        assert_eq!(!row(&theirs).is_null(), shown, "{audience}");
+    }
+}
+
+/// A membership changed with `kith-auth member` (not through the app) is what the host's access reads follow: the
+/// own-chat events of a member, `startChat`, and what `setPersonAccess` takes away.
+#[tokio::test]
+async fn memberships_changed_in_kith_auth_are_followed() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    r.owner_bot("money");
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    let started = call(&r, &sam, "startChat", json!({"agent": "house"})).await.unwrap();
+    let chat = started["bot"]["id"].as_str().unwrap().to_owned();
+    let hears = || roles::event_for(&r.hub.store, Some("sam"), json!({"type": "bot", "bot": {"id": chat}})).is_some();
+    assert!(hears());
+
+    // Removed with the CLI: startChat stops at once, their events at the next look at kith-auth.
+    r.auth(&["member", "house", "sam", "--rm"]);
+    assert!(call(&r, &sam, "startChat", json!({"agent": "house"})).await.unwrap_err().is::<NotAllowed>());
+    members::refresh_mirror(&r.hub).await;
+    assert!(!hears());
+
+    // Added with the CLI: seen after the look, and the chat starts even though the copy never heard of it.
+    r.auth(&["member", "house", "sam", "preset=member"]);
+    r.auth(&["member", "money", "sam", "preset=guest"]);
+    call(&r, &sam, "startChat", json!({"agent": "money"})).await.unwrap();
+    assert!(!hears(), "not before the look");
+    members::refresh_mirror(&r.hub).await;
+    assert!(hears());
+    assert_eq!(r.hub.store.person("sam").unwrap().agents.keys().collect::<Vec<_>>(), ["house", "money"]);
+
+    // The copy lying about a grant never lets startChat through.
+    let lie = std::collections::BTreeMap::from([("money".to_owned(), "member".to_owned())]);
+    r.hub.store.set_person_agents("sam", &lie).unwrap();
+    r.auth(&["member", "money", "sam", "--rm"]);
+    assert!(call(&r, &sam, "startChat", json!({"agent": "money"})).await.unwrap_err().is::<NotAllowed>());
+
+    // Unticking a row the CLI added removes it from kith-auth; the `*` row is left alone.
+    r.auth(&["member", "money", "sam", "preset=guest"]);
+    r.auth(&["member", "money", "*", "preset=guest"]);
+    call(&r, &Caller::Local, "setPersonAccess", json!({"personId": "sam", "agents": {"house": "member"}}))
+        .await
+        .unwrap();
+    let row = members::auth_person(&r.bin, "sam").await.unwrap().unwrap();
+    let own: Vec<&str> = row.agents.iter().filter(|a| a.via == "own").map(|a| a.agent.as_str()).collect();
+    assert_eq!(own, ["house"]);
+    assert!(row.agents.iter().any(|a| a.via == "everyone" && a.agent == "money"));
+    // The copy follows kith-auth's reach, the `*` row included (an untick never touched it).
+    assert_eq!(r.hub.store.person("sam").unwrap().agents.keys().collect::<Vec<_>>(), ["house", "money"]);
+
+    // kith-auth that can't be read stops the change before anything is done.
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.dir.join("no-such-kith-auth"));
+    let broken =
+        call(&r, &Caller::Local, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "guest"}})).await;
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.bin.clone());
+    assert!(broken.is_err());
+}
+
+/// An agent given to everyone (the `*` row) is one `startChat` lets a member into, so their own chat's events must
+/// arrive too (F8): the copy `event_for` reads follows the `*` row. Taking the row away stops them.
+#[tokio::test]
+async fn a_row_for_everyone_lets_the_members_chat_events_through() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    r.owner_bot("money");
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    r.auth(&["member", "money", "*", "preset=guest"]);
+    let started = call(&r, &sam, "startChat", json!({"agent": "money"})).await.unwrap();
+    let chat = started["bot"]["id"].as_str().unwrap().to_owned();
+    let hears = || roles::event_for(&r.hub.store, Some("sam"), json!({"type": "bot", "bot": {"id": chat}})).is_some();
+    assert!(!hears(), "not before the look");
+    members::refresh_mirror(&r.hub).await;
+    assert!(hears());
+    r.auth(&["member", "money", "*", "--rm"]);
+    members::refresh_mirror(&r.hub).await;
+    assert!(!hears());
+}
+
+/// The 10 s mirror reads kith-auth and writes the copy under the lock `setPersonAccess` holds (F8): while an owner's
+/// change holds it, the mirror waits, so its older read can't land over the change.
+#[tokio::test]
+async fn the_mirror_waits_for_the_lock_of_an_access_change() {
+    let r = Rig::new().await;
+    let held = crate::api::people::AUTH_WRITES.lock().await;
+    let hub = r.hub.clone();
+    let mut mirror = tokio::spawn(async move { members::refresh_mirror(&hub).await });
+    let early = tokio::time::timeout(Duration::from_millis(300), &mut mirror).await;
+    assert!(early.is_err(), "the mirror must wait while a change holds the lock");
+    drop(held);
+    tokio::time::timeout(Duration::from_secs(10), mirror).await.unwrap().unwrap();
 }

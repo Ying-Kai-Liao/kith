@@ -1,0 +1,5 @@
+TickGuard = TRUE
+MaxTurns = 2
+MaxEdits = 0
+MaxRevs = 0
+RecordSkips = FALSE

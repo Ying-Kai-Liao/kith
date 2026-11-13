@@ -1,0 +1,14 @@
+{
+  "fakes": "host-http POST /api/issueAskToken auth=Bearer fake-serve-token type=application/json body={\"agent\": \"alpha\", \"askedBy\": \"\", \"pid\": 4242, \"replyTo\": \"broken\", \"session\": \"sess-1\"}\n",
+  "state:home/.kith/live/ask/ask-7.reg": "{\"agent\": \"beta-2\", \"at\": 1}",
+  "state:home/.kith/live/ask/bad-agent.reg": "{\"agent\": \"Bad Name\"}",
+  "state:home/.kith/live/ask/broken.reg": "{oops",
+  "state:home/.kith/live/ask/long.reg": "{\"agent\": \"<HEX>\"}",
+  "state:home/.kith/live/ask/not-dict.reg": "[1]",
+  "state:home/.kith/live/ask/num-agent.reg": "{\"agent\": 5}",
+  "state:home/.kith/live/ask/ok64.reg": "{\"agent\": \"<HEX>\"}",
+  "state:home/serve/token": "fake-serve-token\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "export KITH_ASK_TOKEN=ask-tok-1\nexport KITH_ASK_SOCKET=/tmp/ask-1.sock\n"
+}

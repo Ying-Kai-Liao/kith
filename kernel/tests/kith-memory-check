@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kith-memory-check — the memory write checks end to end: the PreToolUse/PostToolUse hook in an agent's generated settings
 # (`kith <agent> --launch-json`), the hook run the way Claude Code runs it (its JSON on stdin), and `kith memory
-# check|log|diff|undo|forget`, in a throwaway HOME and KITH_HOME (the real ~/.kith is never read or written).
+# check|log|diff|undo|rm|forget`, in a throwaway HOME and KITH_HOME (the real ~/.kith is never read or written).
 #
 #   kernel/tests/kith-memory-check     needs the kith program: KITH_BIN, or serve/host's `cargo build --bin kith`;
 #                                      a few seconds; prints each check, exits 1 when one fails
@@ -25,7 +25,7 @@ check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails
 is() { [ "$(EXPR=$1 OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(os.environ["EXPR"]))')" = "$2" ]; }
 
 OUT=$("$KITH" echo --launch-json 2>/dev/null)
-check "settings carry the memory hooks on Write|Edit|MultiEdit" "is \"[(e, h['matcher'], 'memory hook ' + w in h['hooks'][0]['command'], '|| true' in h['hooks'][0]['command']) for e, w in (('PreToolUse', 'pre'), ('PostToolUse', 'post')) for h in d['settings']['hooks'][e]]\" \"[('PreToolUse', 'Write|Edit|MultiEdit', True, True), ('PostToolUse', 'Write|Edit|MultiEdit', True, True)]\""
+check "settings carry the memory hooks on Write|Edit|MultiEdit" "is \"[(e, h['matcher'], 'memory hook ' + w in h['hooks'][0]['command'], '|| true' in h['hooks'][0]['command']) for e, w in (('PreToolUse', 'pre'), ('PostToolUse', 'post')) for h in d['settings']['hooks'][e] if 'memory hook' in h['hooks'][0]['command']]\" \"[('PreToolUse', 'Write|Edit|MultiEdit', True, True), ('PostToolUse', 'Write|Edit|MultiEdit', True, True)]\""
 check "the cost hook is still there" "is \"'kith-cost' in d['settings']['hooks']['SessionStart'][0]['hooks'][0]['command']\" True"
 PRE=$(EXPR="d['settings']['hooks']['PreToolUse'][0]['hooks'][0]['command']" OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(os.environ["EXPR"]))')
 POST=$(EXPR="d['settings']['hooks']['PostToolUse'][0]['hooks'][0]['command']" OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(os.environ["EXPR"]))')
@@ -71,6 +71,36 @@ OUT=$("$KITH" memory tidy echo --json 2>"$T/err"); cat "$T/err" >&2
 check "tidy: lists no tidy-ups for a fresh agent" "is \"d['tidyUps']\" '[]'"
 "$KITH" memory tidy undo echo 99 >/dev/null 2>&1; rc=$?
 check "tidy undo: an unknown id is refused" "[ $rc != 0 ]"
+
+# rm: the deletion is a version, undo brings the file back, and the guards hold.
+printf -- '- note about zebras\n' > "$A/memory/zoo.md"
+printf -- '- spaced\n' > "$A/memory/my notes é.md"
+OUT=$("$KITH" memory rm "$A/memory/zoo.md" --json)
+check "rm --json: deleted, label, cause" "is \"(d['deleted'], d['file'], d['cause'])\" \"(True, 'echo/zoo.md', 'deleted')\""
+check "rm: the file is gone" "[ ! -e $A/memory/zoo.md ]"
+OUT=$("$KITH" memory log "$A/memory/zoo.md" --json)
+check "rm: log shows the deletion on top of the baseline" "is \"([v['cause'] for v in d['versions']], d['versions'][0]['deleted'])\" \"(['deleted', 'baseline (first seen)'], True)\""
+"$KITH" memory undo "$A/memory/zoo.md" >/dev/null
+check "rm: undo brings the file back" "grep -q zebras $A/memory/zoo.md"
+"$KITH" memory rm "$A/memory/zoo.md" >/dev/null && "$KITH" memory rm "$A/memory/zoo.md" >/dev/null 2>"$T/err"; rc=$?
+check "rm twice: exit 1, no such file" "[ $rc = 1 ] && grep -q 'no such file' $T/err"
+printf -- '- index\n' > "$MEM"
+"$KITH" memory rm "$MEM" >/dev/null 2>"$T/err"; rc=$?
+check "rm: MEMORY.md is refused and stays" "[ $rc = 1 ] && [ -f $MEM ] && grep -q 'index' $T/err"
+KITH_RUN_TOKEN=x KITH_RUN_SOCKET=/nope "$KITH" memory rm "$A/memory/my notes é.md" >/dev/null 2>"$T/err"; rc=$?
+check "rm: a run-token caller is refused and the file stays" "[ $rc = 1 ] && [ -f '$A/memory/my notes é.md' ] && grep -q 'owner' $T/err"
+"$KITH" memory rm "$A/memory/../../../outside.md" >/dev/null 2>"$T/err"; rc=$?
+check "rm: a path outside the memory folders is refused" "[ $rc != 0 ]"
+mkdir -p "$T/elsewhere"; printf 'keep\n' > "$T/elsewhere/x.md"; ln -s "$T/elsewhere" "$A/memory/link"
+"$KITH" memory rm "$A/memory/link/x.md" >/dev/null 2>"$T/err"; rc=$?
+check "rm: a symlinked folder escape is refused and the target stays" "[ $rc = 1 ] && [ -f $T/elsewhere/x.md ]"
+OUT=$("$KITH" memory rm "$A/memory/my notes é.md" --json)
+check "rm: names with spaces and unicode work" "is \"d['deleted']\" True"
+OUT=$("$KITH" memory forget "Likes zebras" --json)
+check "forget --json: forgotten, text" "is \"(d['forgotten'], d['text'])\" \"(True, 'Likes zebras')\""
+OUT=$("$KITH" memory forget "Likes zebras" --json)
+check "forget twice is the same" "is \"d['forgotten']\" True"
+check "forget: text output unchanged" "[ \"\$(\"$KITH\" memory forget 'Likes zebras')\" = 'Forgotten: no agent or tidy will write that to memory again.' ]"
 
 echo
 if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

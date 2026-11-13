@@ -1,0 +1,6 @@
+{
+  "fakes": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith-wake: a guest's session can't set waiters yet: the check would run as the owner, outside their sandbox\n",
+  "step0.stdout": ""
+}

@@ -6,7 +6,7 @@ use crate::LockExt as _;
 use crate::store::BotConfig;
 use anyhow::{Context, Result, anyhow, bail};
 use kith_wire::kernel::{self, command};
-pub use kith_wire::kernel::{Agent as HqAgent, Harness, PermissionMode, Project};
+pub use kith_wire::kernel::{Agent as HqAgent, Harness, PermissionMode, Project, RolePrompt};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
@@ -75,14 +75,78 @@ pub fn missing() -> String {
 
 /// What the host does with an agent of `kith ls --json` (the kernel contract's `Agent`).
 pub trait AgentExt {
-    /// Whether the host can run it: `kith <agent> --launch-json` covers Claude agents only. A kernel from before it
-    /// listed a harness ran every agent on Claude; one this version doesn't know is never started.
+    /// Whether the host can run it: Claude, and every engine of the core's table with an ACP mode (`kith <agent>
+    /// --launch-json` carries the rest). A kernel from before it listed a harness ran every agent on Claude; one this
+    /// version doesn't know is never started.
     fn runnable(&self) -> bool;
+
+    /// Whether it ships with the kernel (scratch). A kernel from before it listed the flag has none.
+    fn is_builtin(&self) -> bool;
 }
 
 impl AgentExt for HqAgent {
     fn runnable(&self) -> bool {
-        self.harness.unwrap_or(Harness::Claude) == Harness::Claude
+        let harness = self.harness.unwrap_or(Harness::Claude);
+        harness == Harness::Claude
+            || kith_kernel::engines::find(harness.as_str()).is_some_and(kith_kernel::engines::Engine::has_acp)
+    }
+
+    fn is_builtin(&self) -> bool {
+        self.builtin == Some(true)
+    }
+}
+
+/// The engine and model one quick chat (a thread of the built-in scratch agent) was started with. The host keeps it
+/// beside the thread and gives it to `kith scratch --launch-json` as `-H` / `-m` on every launch for that thread, so a
+/// later turn, a restart or a reload never falls back to scratch's own.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub struct ThreadEngine {
+    pub harness: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// Whether a quick chat can run on `harness`: any engine of the core's table with an ACP mode.
+fn thread_engine(harness: &str) -> bool {
+    kith_kernel::engines::find(harness).is_some_and(kith_kernel::engines::Engine::has_acp)
+}
+
+impl ThreadEngine {
+    /// What a client asked for, checked: a known engine and a model that can only be a model name (it becomes an
+    /// argument of `kith`, so nothing that could read as a flag). None when nothing was asked: scratch's own.
+    pub fn ask(harness: Option<&str>, model: Option<&str>) -> Result<Option<Self>> {
+        fn clean(v: Option<&str>) -> Option<&str> {
+            v.map(str::trim).filter(|v| !v.is_empty())
+        }
+        let (harness, model) = (clean(harness), clean(model));
+        if harness.is_none() && model.is_none() {
+            return Ok(None);
+        }
+        let harness = harness.unwrap_or("claude");
+        if !thread_engine(harness) {
+            bail!("a quick chat can't run on {harness} (`kith engines` lists the ones it can)");
+        }
+        if let Some(model) = model
+            && (model.len() > 64
+                || !model.starts_with(|c: char| c.is_ascii_alphanumeric())
+                || !model.chars().all(|c| c.is_ascii_alphanumeric() || "._:[]-".contains(c)))
+        {
+            bail!("'{model}' isn't a model name");
+        }
+        Ok(Some(Self { harness: harness.to_owned(), model: model.map(str::to_owned) }))
+    }
+
+    fn key(bot: &str, root: &str) -> String {
+        format!("thread-engine:{bot}:{root}")
+    }
+
+    /// The engine the thread `root` of `bot` was started with; None for scratch's own.
+    pub fn of_thread(store: &crate::store::Store, bot: &str, root: &str) -> Option<Self> {
+        serde_json::from_str(&store.kv_get(&Self::key(bot, root))?).ok()
+    }
+
+    pub fn save(&self, store: &crate::store::Store, bot: &str, root: &str) -> Result<()> {
+        store.kv_set(&Self::key(bot, root), &serde_json::to_string(self)?)
     }
 }
 
@@ -122,8 +186,12 @@ impl Launch {
     /// has it; this does not rely on that), and the mode is the membership's, never a free shell. The kernel already
     /// resolves the mode from the membership; this is the host's own check that nothing above it says otherwise.
     fn confine_to(&mut self, person: &str) -> Result<()> {
-        if self.is_codex() {
-            bail!("{} runs on Codex; runs for anyone but the owner need Claude Code", self.agent);
+        // Only an engine the table says can hold a guest's rules (hooks, a permission mode, per-run servers) serves
+        // them; the kernel refuses the rest at launch, and this is the host's own check on its answer.
+        if let Some(other) = self.other_engine()
+            && !kith_kernel::engines::find(other).is_some_and(kith_kernel::engines::Engine::serves_guests)
+        {
+            bail!("{} runs on {other}; runs for anyone but the owner need Claude Code", self.agent);
         }
         if let Some(seen) = self.env.get("KITH_PERSON").filter(|p| p.as_str() != person) {
             bail!("the kernel launched this run for {seen}, not {person}");
@@ -154,10 +222,15 @@ impl Launch {
         Ok(())
     }
 
-    /// Whether this launch runs Codex (a backup entry), whose sessions take ACP's own parameters instead of Claude's
-    /// `_meta`.
+    /// Whether this launch runs Codex, whose sessions take ACP's own parameters instead of Claude's `_meta`.
     pub fn is_codex(&self) -> bool {
         self.harness == Some(Harness::Codex)
+    }
+
+    /// The engine this launch runs when it is not Claude: `codex`, or the table id the kernel printed for any other
+    /// ACP engine. Their sessions take ACP's own parameters instead of Claude's `_meta`. None: a Claude run.
+    pub fn other_engine(&self) -> Option<&str> {
+        if self.is_codex() { Some("codex") } else { self.engine.as_deref() }
     }
 
     /// Whether a session made under `made` may be loaded by this run: only under the account that made it. A session
@@ -257,6 +330,8 @@ async fn run_bound(
     command
         .args(args)
         .envs(crate::kernel::both("VIA", "serve"))
+        // The kernel's own commands that start a run (a wake, an ask) lock it under the stub the host found.
+        .envs(crate::kernel::stub_env())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -298,7 +373,10 @@ async fn run_bound(
         .await
         .map_err(|_| anyhow!("`{shown}` took longer than {}s", budget.as_secs()))??;
     if !status.success() {
-        let why = stderr.trim();
+        // A `--json` command reports its refusal as {"ok": false, "error"} on stdout and leaves stderr empty.
+        let said =
+            serde_json::from_str::<Value>(stdout.trim()).ok().and_then(|v| v["error"].as_str().map(str::to_owned));
+        let why = if stderr.trim().is_empty() { said.as_deref().unwrap_or("") } else { stderr.trim() };
         if person.is_some() && status.code() == Some(3) {
             // The kernel's text ends with the owner's command to raise a budget; the person gets the sentence only.
             let why = why.strip_prefix("kith: ").unwrap_or(why);
@@ -443,6 +521,19 @@ impl InfoRun {
     }
 }
 
+/// How long the connector, skill and market commands may take (a skill add or an install fetches from GitHub).
+const TOOLS_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// A `kith … --json` command that grants, lists or installs (connect, skill add, market, install…): its JSON answer,
+/// passed through as the CLI printed it. `args` must already end in `--json`; the caller builds them from checked parts.
+pub async fn json_cmd(args: &[&str]) -> Result<Value> {
+    let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
+        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+    };
+    let out = run(&bin, args, None, TOOLS_TIMEOUT).await?;
+    serde_json::from_str(out.trim()).with_context(|| format!("`kith {}` didn't print JSON", args.join(" ")))
+}
+
 /// `kith <agent> set permission <mode>`: this Mac's permission mode for the agent, used by its next run from any
 /// entry point (kith's own error text on failure, e.g. a mode it doesn't know). Returns the info read back from hq.
 pub async fn set_permission(agent: &str, mode: &str) -> Result<InfoRun> {
@@ -461,6 +552,91 @@ pub async fn set_call_model(agent: &str, model: &str) -> Result<InfoRun> {
     };
     run(&bin, &[agent, "set", "call-model", model], None, LIST_TIMEOUT).await?;
     Ok(refill(agent, true).await)
+}
+
+/// `kith <agent> set model|effort|harness <value> [--model M] --json`: the agent's own setting in its agent.md, used by
+/// its next run from any entry point. `value` may be `default` (forget it); `extra` is `["--model", M]` for a harness
+/// change. Kith's own refusal text comes back as the error (a Claude model on a non-Claude harness, say). Returns the
+/// info read back from hq, so the app sees the new value.
+pub async fn set_setting(agent: &str, setting: &str, value: &str, extra: &[&str]) -> Result<InfoRun> {
+    let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
+        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+    };
+    let args = set_setting_args(agent, setting, value, extra);
+    let out = run(&bin, &args, None, LIST_TIMEOUT).await.map_err(|e| setting_error(setting, &e))?;
+    // An older kith prints plain text for a `set` it knows and fails on one it doesn't; neither is JSON.
+    match serde_json::from_str::<Value>(out.trim()) {
+        Ok(said) if said.is_object() => Ok(refill(agent, true).await),
+        _ => Err(old_kith(setting)),
+    }
+}
+
+/// The argv of `set_setting`: exactly the line a person types, `kith <agent> set <setting> <value> [--model M] --json`.
+fn set_setting_args<'a>(agent: &'a str, setting: &'a str, value: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args = vec![agent, "set", setting, value];
+    args.extend_from_slice(extra);
+    args.push("--json");
+    args
+}
+
+fn old_kith(setting: &str) -> anyhow::Error {
+    anyhow!("this Mac's kith can't set the {setting} this way; update kith (`kith update self`) and try again")
+}
+
+/// Kith's own sentence from a failed `set`: `run` wraps it as "`kith … --json` failed (exit status: 2): <text>".
+fn setting_error(setting: &str, e: &anyhow::Error) -> anyhow::Error {
+    let text = format!("{e:#}");
+    let Some(rest) = text.strip_prefix('`').and_then(|t| t.split_once("): ")).map(|(_, r)| r.trim()) else {
+        return anyhow!("{text}");
+    };
+    // An older kith has no `set model` / `set effort`: it prints its usage.
+    if rest.is_empty() || rest.to_lowercase().starts_with("usage") {
+        return old_kith(setting);
+    }
+    anyhow!("{}", rest.strip_prefix("kith: ").unwrap_or(rest))
+}
+
+/// How long `kith new` may take: it makes a folder and a git repo, no more.
+const NEW_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long the kernel probe waits: a broken Python or uv usually fails at once, a hung one should not hold the app.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+const UPDATE_KITH: &str =
+    "this Mac's kith can't make an agent this way; update kith (`kith update self`) and try again";
+
+/// `kith new <name> <description> --json`: makes the agent's folder (a role, a memory) and says where. Kith's own
+/// refusal (a name taken, a bad name) comes back as the error, without the command line around it. An older kith has
+/// no `--json` here and prints nothing useful: that is "update kith", not a made agent.
+pub async fn new_agent(bin: &Path, name: &str, description: &str) -> Result<kernel::NewAgent> {
+    let out = run(bin, &command::new(name, description, None), None, NEW_TIMEOUT).await.map_err(|e| kernel_said(&e))?;
+    serde_json::from_str::<kernel::NewAgent>(out.trim()).map_err(|_| anyhow!(UPDATE_KITH))
+}
+
+/// Kith's own sentence from a failed command: `run` wraps it as "`kith … --json` failed (exit status: 1): <text>".
+fn kernel_said(e: &anyhow::Error) -> anyhow::Error {
+    let text = format!("{e:#}");
+    let rest = text.strip_prefix('`').and_then(|t| t.split_once("): ")).map_or(text.as_str(), |(_, r)| r.trim());
+    // An older kith has no `new --json`: it prints its usage.
+    if rest.to_lowercase().starts_with("usage") {
+        return anyhow!(UPDATE_KITH);
+    }
+    let rest = ["kith-new: ", "kith: "].iter().find_map(|p| rest.strip_prefix(p)).unwrap_or(rest);
+    anyhow!("{rest}")
+}
+
+/// Whether the kernel at `bin` can list its agents: the roster sync's own call, with a short wait. The error is the
+/// last line of kith's complaint that says something (a Python or uv error ends with it), for the person to read.
+pub async fn probe(bin: &Path) -> std::result::Result<(), String> {
+    let out = run(bin, &command::ls(), None, PROBE_TIMEOUT).await.map_err(|e| {
+        let text = format!("{e:#}");
+        let rest = text.strip_prefix('`').and_then(|t| t.split_once("): ")).map_or(text.as_str(), |(_, r)| r);
+        let line = rest.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("kith failed");
+        line.chars().take(300).collect::<String>()
+    })?;
+    match serde_json::from_str::<Value>(out.trim()) {
+        Ok(v) if v.is_array() => Ok(()),
+        _ => Err("`kith ls --json` didn't print a list of agents".to_owned()),
+    }
 }
 
 /// `kith schedule <op> <agent> <id>` (pause, resume, run or rm) as the person the job runs for, so kith-sched stays
@@ -589,6 +765,8 @@ pub async fn project_add(id: &str, path: &str) -> Result<()> {
 /// deny rules, model, budget, memory folder) and fails closed: a refusal comes back as [`Refused`], never as a run of
 /// the owner's. `None` is the owner's run.
 ///
+/// `engine`: the engine and model a quick chat's thread was started with; None for every other launch.
+///
 /// `access`: that person's grant for this launch alone ([`crate::runauth::grant_for`] for the conversation the session
 /// will serve). With it the kernel asks the host for what the conversation was given beyond its box (a yes on an escape
 /// card, an "always") and puts it in the settings. An app chat's session gets them in its `session/new` or
@@ -605,8 +783,14 @@ pub async fn launch(
     room: &str,
     members: &Members,
     access: Option<&(crate::runauth::RunGrant, [(String, String); 2])>,
+    engine: Option<&ThreadEngine>,
 ) -> Result<Launch> {
-    let args = command::launch(agent, backup, project);
+    let mut args = command::launch(agent, backup, project);
+    // A quick chat's own engine and model (`kith scratch -H codex -m ...`): for that thread's launches only.
+    if let Some(engine) = engine {
+        args.extend(["-H", engine.harness.as_str()]);
+        args.extend(engine.model.iter().flat_map(|m| ["-m", m.as_str()]));
+    }
     // The room the run is for: the kernel loads memory for it and `kith recall` from the run applies its rules.
     let mut env = room_env(room, members);
     let access = access.filter(|_| person.is_some());
@@ -637,16 +821,14 @@ pub async fn launch(
     if let Some(person) = person {
         launch.confine_to(person)?;
     }
-    // A backup entry may run on another harness the host knows (Codex); the agent's own login is Claude.
-    // A harness this version doesn't know is never started.
-    let runs =
-        if backup.is_some() { [Harness::Claude, Harness::Codex].as_slice() } else { [Harness::Claude].as_slice() };
+    // Claude, Codex and every engine the kernel printed a table row for (`engine`) start. A harness this version
+    // doesn't know is never started.
     if let Some(harness) = launch.harness
-        && !runs.contains(&harness)
+        && harness != Harness::Claude
+        && launch.other_engine().is_none()
     {
         let on = if harness == Harness::Unknown { "a harness this host doesn't know" } else { harness.as_str() };
-        let runs: Vec<&str> = runs.iter().map(|h| h.as_str()).collect();
-        bail!("{agent} runs on {on}; the host starts {} agents only", runs.join(" and "));
+        bail!("{agent} runs on {on}; the host starts agents on Claude, Codex and the engines `kith engines` lists");
     }
     Ok(launch)
 }
@@ -939,6 +1121,17 @@ pub(crate) fn printed_launch(over: Value) -> Launch {
 mod tests {
     use super::*;
 
+    /// The same CLI line gives the same result: the app's model, effort and harness picks run the line a person types.
+    #[test]
+    fn a_setting_runs_the_line_a_person_types() {
+        assert_eq!(set_setting_args("house", "model", "opus", &[]), ["house", "set", "model", "opus", "--json"]);
+        assert_eq!(set_setting_args("house", "effort", "high", &[]), ["house", "set", "effort", "high", "--json"]);
+        assert_eq!(
+            set_setting_args("house", "harness", "codex", &["--model", "gpt-5"]),
+            ["house", "set", "harness", "codex", "--model", "gpt-5", "--json"]
+        );
+    }
+
     fn bot(model: Option<&str>) -> BotConfig {
         serde_json::from_value(json!({
             "id": "a", "name": "house", "backend": "claude", "cwd": "/agents/house", "hqAgent": "house",
@@ -1032,7 +1225,9 @@ mod tests {
         assert_eq!((o["model"].as_str(), o["effort"].as_str()), (Some("haiku"), Some("low")));
         assert_eq!(o["settings"]["permissions"]["defaultMode"], "auto");
         assert!(o["settings"]["hooks"].is_object(), "hq's hook survives");
-        for server in ["chat", "memory", "team", "routines", "connectors"] {
+        // Installed connectors reach a kith agent as granted services in the kernel's mcp-config (the `files` entry
+        // above is such a service), never from the host's own connector list; "connectors" is the sign-in helper.
+        for server in ["chat", "memory", "team", "routines", "connectors", "composio"] {
             assert!(!meta.to_string().contains(&format!("\"{server}\"")), "{server}");
         }
     }
@@ -1128,6 +1323,34 @@ mod tests {
     }
 
     #[test]
+    fn a_launch_for_another_acp_engine_is_acps_own_session_and_never_a_guests() {
+        let gemini = printed_launch(json!({
+            "harness": "gemini", "engine": "gemini", "acp": null, "registry": "gemini", "role_prompt": "none",
+        }));
+        assert_eq!(gemini.other_engine(), Some("gemini"));
+        assert_eq!(gemini.role_prompt, Some(RolePrompt::None));
+        assert_eq!(printed_launch(json!({"harness": "codex"})).other_engine(), Some("codex"));
+        assert_eq!(printed_launch(json!({"harness": "claude"})).other_engine(), None);
+        let mut guest = gemini.clone();
+        assert!(guest.confine_to("sam").unwrap_err().to_string().contains("need Claude Code"));
+        // The table decides who may run for guests, not a list here.
+        assert!(!kith_kernel::engines::find("gemini").unwrap().serves_guests());
+        assert!(kith_kernel::engines::find("claude").unwrap().serves_guests());
+    }
+
+    #[test]
+    fn an_agent_is_runnable_on_claude_and_every_acp_engine_of_the_table() {
+        let on = |harness: Option<Harness>| HqAgent { harness, ..Default::default() };
+        for h in [None, Some(Harness::Claude), Some(Harness::Codex), Some(Harness::Gemini), Some(Harness::Agy)] {
+            assert!(on(h).runnable(), "{h:?}");
+        }
+        // No ACP mode, or a word this version doesn't know.
+        for h in [Harness::Hermes, Harness::Dsh, Harness::Unknown] {
+            assert!(!on(Some(h)).runnable(), "{h:?}");
+        }
+    }
+
+    #[test]
     fn a_run_is_for_the_group_chat_else_the_1_1_of_its_person() {
         assert_eq!(room_of("echo", None, None), "1:1:echo:owner");
         assert_eq!(room_of("echo", Some("sam"), None), "1:1:echo:sam");
@@ -1169,6 +1392,17 @@ mod tests {
             "no words, no recall"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_failed_set_says_kiths_sentence_and_an_old_kith_says_to_update() {
+        let failed = |why: &str| anyhow!("`kith echo set model opus --json` failed (exit status: 2): {why}");
+        let said = setting_error("model", &failed("a Claude model needs a Claude harness")).to_string();
+        assert_eq!(said, "a Claude model needs a Claude harness");
+        let usage = setting_error("model", &failed("usage: kith <agent> set permission MODE")).to_string();
+        assert!(usage.contains("update kith"), "{usage}");
+        let other = setting_error("model", &anyhow!("kith took longer than 30s")).to_string();
+        assert_eq!(other, "kith took longer than 30s");
     }
 
     #[test]

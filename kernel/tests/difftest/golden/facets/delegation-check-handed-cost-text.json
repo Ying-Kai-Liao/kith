@@ -1,0 +1,7 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "step0.exit": "4\n",
+  "step0.stderr": "kith ask: delegation: the chain handed to this ask is not numbers\n",
+  "step0.stdout": ""
+}

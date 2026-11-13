@@ -1,5 +1,6 @@
 import type { LinkCode } from '@shared/host-contract.gen'
 import type { HostClient } from '../client/host-client'
+import type { QuickEngine } from '@shared/quick-chat'
 import {
   asEntry,
   isWorking,
@@ -18,9 +19,10 @@ import {
 import { normalizeFolder, type PlaceFolder, type PlaceSelection, type StartingFolder } from '@shared/place-folders'
 import { partialUpdate } from '@shared/optimistic'
 import { expireCalls, type IncomingCall } from '@shared/incoming-call'
-import { failureOf, OWN_TURN, type HeldPhase } from '@shared/held-run'
+import { CANT_STOP, failureOf, OWN_TURN, STILL_ENDING, type HeldPhase } from '@shared/held-run'
 import { DEFAULT_TURNS } from '@shared/conversation'
 import { parsePeek, parsePeeks, type Peek } from '@shared/handoff-peek'
+import type { KernelStatus } from '@shared/new-agent'
 import { FileDownloads } from './file-downloads'
 import { BotSync, sleep } from './bot-sync'
 
@@ -52,18 +54,20 @@ export class BotStore extends BotSync {
   private outgoingPlaces = new Map<string, StartingFolder>()
   /** The turns picked for a group message that has not reached the host yet, so Resend keeps them. */
   private outgoingBudgets = new Map<string, number>()
+  private outgoingEngines = new Map<string, QuickEngine>()
 
   /** Where each thread works, as the host last said (`thread`, `setPlaceFolder`); keyed `bot:root`. */
   private threadFolders = new Map<string, PlaceFolder | null>()
   threadFolder(botId: string, root: string) { return this.threadFolders.get(`${botId}:${root}`) ?? null }
 
   /** `newTask`: in a bot's chat, start a task rather than go on with the current one. */
-  send(text: string, botId: string, thread: string | null = null, files: OutgoingFile[] = [], nonce: string = crypto.randomUUID(), pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null) {
+  send(text: string, botId: string, thread: string | null = null, files: OutgoingFile[] = [], nonce: string = crypto.randomUUID(), pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null, engine: QuickEngine | null = null) {
     const trimmed = text.trim()
     if ((!trimmed && !files.length) || this.retired) return
     const data: Entry['data'] = { text: trimmed, status: 'sending', clientNonce: nonce }
     if (place) this.outgoingPlaces.set(nonce, place)
     if (budget !== null) this.outgoingBudgets.set(nonce, budget)
+    if (engine) this.outgoingEngines.set(nonce, engine)
     if (files.length) {
       data.attachments = files.map((f) => ({ id: f.id, name: f.name, size: f.data.length }))
       this.outgoingFiles.set(nonce, files)
@@ -88,11 +92,12 @@ export class BotStore extends BotSync {
               ids.push(id)
             }
           }
-          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via, budget)
+          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via, budget, this.outgoingEngines.get(nonce) ?? null)
         }, true)
         this.outgoingFiles.delete(nonce)
         this.outgoingPlaces.delete(nonce)
         this.outgoingBudgets.delete(nonce)
+        this.outgoingEngines.delete(nonce)
         this.upsert(e)
         this.changed()
       } catch (error) {
@@ -109,7 +114,8 @@ export class BotStore extends BotSync {
     this.entries.set(entry.botId, this.allEntries(entry.botId).filter((e) => e.id !== entry.id))
     const place = (entry.data.clientNonce && this.outgoingPlaces.get(entry.data.clientNonce)) || null
     const budget = (entry.data.clientNonce ? this.outgoingBudgets.get(entry.data.clientNonce) : undefined) ?? null
-    this.send(text, entry.botId, entry.threadId ?? null, files, entry.data.clientNonce ?? crypto.randomUUID(), [], false, place, null, budget)
+    const engine = (entry.data.clientNonce ? this.outgoingEngines.get(entry.data.clientNonce) : undefined) ?? null
+    this.send(text, entry.botId, entry.threadId ?? null, files, entry.data.clientNonce ?? crypto.randomUUID(), [], !!engine, place, null, budget, engine)
   }
 
   discard(entry: Entry) {
@@ -117,6 +123,7 @@ export class BotStore extends BotSync {
       this.outgoingFiles.delete(entry.data.clientNonce)
       this.outgoingPlaces.delete(entry.data.clientNonce)
       this.outgoingBudgets.delete(entry.data.clientNonce)
+      this.outgoingEngines.delete(entry.data.clientNonce)
     }
     this.entries.set(entry.botId, this.allEntries(entry.botId).filter((e) => e.id !== entry.id))
     this.changed()
@@ -410,6 +417,8 @@ export class BotStore extends BotSync {
       try {
         const res = await this.withLink((c) => c.stopHolder(held.session), true)
         if (res.ownTurn) phase = OWN_TURN
+        else if (res.stillEnding) phase = STILL_ENDING
+        else if (res.cantStop) phase = CANT_STOP
         else if (res.stopped) this.stoppedRuns.set(entry.id, { kind: held.kind, at: new Date() })
       } catch (error) {
         phase = failureOf(error, this.hostName)
@@ -430,6 +439,65 @@ export class BotStore extends BotSync {
       this.changed()
       return false
     }
+  }
+
+  /**
+   * Keeps a quick chat as a real agent named `name`. The host makes it with kith and syncs the roster, so its bot is
+   * here when this returns; a refusal (name taken, bad name) throws the host's own words.
+   */
+  async keepAsAgent(root: Entry, name: string) {
+    const res = await this.withLink((c) => c.keepScratchThread(root.botId, root.id, name.trim()))
+    this.onRosterChanged?.()
+    return res
+  }
+
+  /** Whether the kernel can run, as the host last said; null before the first answer or on a host that can't say. */
+  kernel: KernelStatus | null = null
+  private kernelChecking: Promise<KernelStatus | null> | null = null
+
+  /** Asks the host whether the kernel can run (`refresh`: now, not its short-lived copy). Never throws: an old host just leaves it unknown. */
+  checkKernel(refresh = false): Promise<KernelStatus | null> {
+    if (this.kernelChecking && !refresh) return this.kernelChecking
+    const run = (async () => {
+      try {
+        const status = await (await this.ready()).kernelStatus(refresh)
+        this.kernel = status
+      } catch {
+        this.kernel = null
+      }
+      this.kernelChecking = null
+      this.changed()
+      return this.kernel
+    })()
+    this.kernelChecking = run
+    return run
+  }
+
+  /**
+   * Makes a kith agent and returns its bot: the host's answer, or the roster's once it has it (the host syncs the roster
+   * itself, so this waits a few seconds at most). Null when none came (its engine isn't one the host runs). A refusal
+   * throws the host's own words.
+   */
+  async newKithAgent(params: Record<string, string>): Promise<{ agent: string; bot: Bot | null }> {
+    const res = await this.withLink((c) => c.newKithAgent(params))
+    let bot = res.bot ?? (res.botId ? this.bots.get(res.botId) ?? null : null)
+    if (bot && !this.bots.has(bot.id)) this.bots.set(bot.id, bot)
+    if (!bot) bot = await this.waitForAgentBot(res.agent)
+    this.onRosterChanged?.()
+    this.changed()
+    return { agent: res.agent, bot }
+  }
+
+  /** The roster's bot for kith agent `agent`, asking the host to look now and waiting a few seconds for its event. */
+  async waitForAgentBot(agent: string): Promise<Bot | null> {
+    const find = () => [...this.bots.values()].find((b) => b.hqAgent === agent && b.kind !== 'group') ?? null
+    await this.withLink((c) => c.call('syncHqBots', {}, 60_000)).catch(() => {})
+    for (let i = 0; i < 10; i++) {
+      const bot = find()
+      if (bot) return bot
+      await sleep(500)
+    }
+    return find()
   }
 
   /** Folds the room from this message on into a topic card (owner only); a refusal throws the host's own text. */

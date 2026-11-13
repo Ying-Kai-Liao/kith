@@ -191,5 +191,26 @@ has 'kith-permit lists report_bug' "$tools" '"report_bug"'
 grep -q 'mcp__kithpermit__report_bug' "$KERNEL/bin/kith" && ok 'bin/kith allows report_bug for non-owner runs' || bad 'bin/kith allows report_bug for non-owner runs'
 out=$("$KERNEL/bin/kith" bug --help 2>&1); has 'kith bug dispatches to kith-bug' "$out" 'kith bug "<title>"'
 
+# --- redaction after the authority cutover: auth.json is a tombstone, the people come from the pre-cutover copy ---------------
+REDACT=$(cat <<'PY'
+import sys; sys.path.insert(0, sys.argv[1] + '/lib')
+import kith_redact
+print(kith_redact.redactor()('Annabel Quince and anna and Zebrafish and Bobby Tables'))
+PY
+)
+red() { python3 -c "$REDACT" "$KERNEL"; }
+printf '%s\n' '{"kith_tombstone":1,"module":"authority","message":"moved","rollback":"kith rollback authority"}' > "$KITH_AUTH"
+out=$(red)
+[[ $out != *Zebrafish* ]] && ok 'tombstone, no copy: still runs, private word hidden' || bad 'tombstone, no copy: private word kept' "$out"
+printf '{"people":{"old":{"name":"Bobby Tables"}}}' > "$KITH_AUTH.pre-cutover-100"
+printf '{"people":{"anna":{"name":"Annabel Quince"}}}' > "$KITH_AUTH.pre-cutover-200"
+touch -t 202001010000 "$KITH_AUTH.pre-cutover-100"
+out=$(red)
+[[ $out != *Annabel* && $out != *anna* && $out == *Bobby* ]] && ok 'tombstone: names come from the newest pre-cutover copy' || bad 'tombstone: names come from the newest pre-cutover copy' "$out"
+printf 'not json' > "$KITH_AUTH.pre-cutover-300"; touch -t 202201010000 "$KITH_AUTH.pre-cutover-200"; touch -t 202301010000 "$KITH_AUTH.pre-cutover-300"
+out=$(red)
+[[ $out != *Annabel* ]] && ok 'tombstone: an unreadable newest copy falls back to the next' || bad 'tombstone: an unreadable newest copy falls back to the next' "$out"
+rm -f "$KITH_AUTH".pre-cutover-*
+
 [[ $fail == 0 ]] && echo 'all kith-bug checks passed' || echo 'kith-bug check FAILED'
 exit $fail

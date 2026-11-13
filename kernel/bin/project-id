@@ -26,7 +26,7 @@ research holding several repos), and may have a home: a folder of the user's own
 points at a home; it never lays one out. A path alias also matches the folders inside it, the longest alias winning.
 A repo is registered by its remote and by where it is checked out, so its parent knows where to find it on this Mac.
 """
-import json, os, re, subprocess, sys
+import fcntl, json, os, re, subprocess, sys
 
 HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 # The registry is state: <home>/state (lib/kith_paths.py).
@@ -132,6 +132,14 @@ def match(projects, d):
 
 
 def main(argv):
+    # The verbs that write hold projects.json.lock from reading the registry to writing it back, so two registers at
+    # once both land. The Rust project-id takes the same flock, so the two exclude each other. The lock is released when
+    # the process exits (the file closes). A state folder that cannot be locked falls through: the save fails there.
+    if argv[:1] == ["--register"] or (argv[:1] == ["--root"] and len(argv) > 1):
+        try:
+            fcntl.flock(os.open(REG + ".lock", os.O_RDWR | os.O_CREAT, 0o644), fcntl.LOCK_EX)
+        except OSError:
+            pass
     reg = load()
     projects = reg.setdefault("projects", {})
 

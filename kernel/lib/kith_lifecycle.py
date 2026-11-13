@@ -21,6 +21,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import kith_procstart
+
 FLOOR_TOKENS = 100_000            # a transcript below this is not worth a /compact (rule 5; the wrapper sets Claude's own floor to it)
 DEFAULT_CACHE_LIFE = 3600         # seconds: a subscription's 1 h cache. An API key's is 5 min: no timer then.
 SHORT_CACHE = 300
@@ -81,13 +83,8 @@ def safe(sid):
 
 
 def proc_start(pid):
-    """`ps` lstart in the C locale, squeezed: the text the claims carry."""
-    try:
-        out = subprocess.run(['ps', '-o', 'lstart=', '-p', str(pid)], capture_output=True, text=True, timeout=3,
-                             env={**os.environ, 'LC_ALL': 'C'}).stdout
-    except Exception:  # noqa: BLE001
-        return None
-    return ' '.join(out.split()) or None
+    """The start stamp of pid (kith_procstart: the string core/procstart writes); None when it can't be read."""
+    return kith_procstart.start_stamp(pid)
 
 
 # --- intent (rules 8, 14) ------------------------------------------------------------------------------------------------
@@ -111,14 +108,18 @@ def clear_intent(sid):
         (d / f'{sid}.json').unlink(missing_ok=True)
 
 
-def how_it_ended(sid, had_process=True, pid=None, start=None):
+def how_it_ended(sid, had_process=True, pid=None, start=None, launcher=None, launcher_start=None):
     """Why a session with no process stopped: the intent's reason ('idle', 'quit', 'revoked', ...), or 'crash' when a process
     ran and ended with none (SessionEnd always says "other", so only the intent tells). The intent must be for the process
-    that ended (its pid, and its start time when both sides know it): an older one is not this process' reason. A session we
+    that ended (its pid, and its start time when both sides know it): an older one is not this process' reason. A run under
+    kith-stub is also known by the stub's pid and start (launcher): the host writes the intent for the claim's pid. A session we
     never saw run (old data, from before intents) is None: nothing is claimed about it."""
     i = read_intent(sid)
+    if i and launcher and i.get('pid') == launcher \
+            and not (launcher_start and i.get('procStart') and not kith_procstart.same_process(i['procStart'], launcher_start)):
+        return i.get('why')
     if i and (pid is None or i.get('pid') is None or i['pid'] == pid) \
-            and not (start and i.get('procStart') and ' '.join(start.split()) != i['procStart']):
+            and not (start and i.get('procStart') and not kith_procstart.same_process(i['procStart'], start)):
         return i.get('why')
     return 'crash' if had_process else None
 

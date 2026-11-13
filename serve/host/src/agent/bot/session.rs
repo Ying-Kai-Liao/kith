@@ -184,9 +184,10 @@ impl Actor {
         if self.is_hq() {
             return self.ensure_hq_session(slot).await;
         }
-        if !self.cfg.connectors.is_empty()
-            || self.hub.store.kv_read(&format!("agent-env:{}", self.cfg.backend))?.is_some()
-        {
+        if self.cfg.connectors.is_empty() {
+            // The key may sit in the envelope alone (saved after M2-7), so ask the vault, not serve.db.
+            crate::market::vault::unlock_if_sealed(&self.hub, crate::agent::auth::env_slot(&self.cfg.backend)).await?;
+        } else {
             crate::market::vault::unlock(self.hub.clone()).await?;
         }
         // Where this place works: its own pick, the bot's default project, or the bot's folder.

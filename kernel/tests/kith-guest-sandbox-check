@@ -24,8 +24,8 @@ printf -- '---\nname: other\ndescription: another agent\n---\nYou other.\n' > "$
 printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$T/bin/claude"; chmod +x "$T/bin/claude"
 # A guest run refuses to start without a kith program that answers `memory hook` (fail closed, no unchecked memory writes);
 # CI has no host build, so a stub stands in for it (macOS dev machines pass without one only because a real kith is installed).
-printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
-export KITH_BIN=$T/bin/kith-stub
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-fake-host"; chmod +x "$T/bin/kith-fake-host"
+export KITH_BIN=$T/bin/kith-fake-host
 export PATH=$T/bin:$PATH
 
 KITH=$KERNEL/bin/kith
@@ -116,7 +116,7 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: nothing of <machine>/run is readable or writable but its socket" "$(q "$S" "not any('/run/t' in a or a.rstrip('/').endswith('/run') for a in aw + fs['allowRead'])")" True
   expect "$who: shell commands in the sandbox run without asking (a PreToolUse Bash hook allows)" "$(q "$S" "any(h.get('matcher') == 'Bash' and 'allow' in h['hooks'][0]['command'] for h in s['hooks']['PreToolUse'])")" True
   for root in "$T/linked state" "$T/real state"; do
-    for f in index serve secrets browsers bridge room-ledger; do
+    for f in index serve secrets browsers bridge room-ledger core; do
       expect "$who: denyRead $root/$f" "$(q "$S" "'$root/$f' in dr")" True
     done
     expect "$who: the memory approval key is unreadable ($root)" "$(q "$S" "any('$root/secrets/memory-approvals.key'.startswith(d.rstrip('/') + '/') for d in dr if d != '/') and any(r.startswith('Read(') and r.endswith('secrets/**)') for r in s['permissions']['deny'])")" True
@@ -130,8 +130,10 @@ for who in guest bot-3f9a1c2e; do
   # Not permissions.blockReadsOutsideWorkingDirectories: with it Claude Code asks (a safetyCheck that no hook allow outranks)
   # for a Bash command it cannot trace, such as `cd sub && export X=1; ls`, and every ask was a card to the owner. The file
   # tools are fenced by a PreToolUse hook instead (lib/kith_readfence.py): roots = the working directory and the add-dirs.
-  expect "$who: no blockReadsOutsideWorkingDirectories (its Bash ask outranks the hook allow); a read fence hook on the file tools instead" "$(q "$S" 's["permissions"].get("blockReadsOutsideWorkingDirectories"), any(h.get("matcher") == "Read|Grep|Glob|LS|NotebookRead" and "kith_readfence.py" in h["hooks"][0]["command"] and h["hooks"][0].get("onFailure") == "block" and h["hooks"][0]["timeout"] >= 30 for h in s["hooks"]["PreToolUse"])')" "(None, True)"
-  FENCE=$(q "$S" '[h["hooks"][0]["command"] for h in s["hooks"]["PreToolUse"] if "kith_readfence.py" in h["hooks"][0]["command"]][0]')
+  expect "$who: no blockReadsOutsideWorkingDirectories (its Bash ask outranks the hook allow); a read fence hook on the file tools instead" "$(q "$S" 's["permissions"].get("blockReadsOutsideWorkingDirectories"), any(h.get("matcher") == "Read|Grep|Glob|LS|NotebookRead" and ("kith_readfence.py" in h["hooks"][0]["command"] or " kernel readfence --root " in h["hooks"][0]["command"]) and h["hooks"][0].get("onFailure") == "block" and h["hooks"][0]["timeout"] >= 30 for h in s["hooks"]["PreToolUse"])')" "(None, True)"
+  FENCE=$(q "$S" '[h["hooks"][0]["command"] for h in s["hooks"]["PreToolUse"] if "kith_readfence.py" in h["hooks"][0]["command"] or " kernel readfence --root " in h["hooks"][0]["command"]][0]')
+  # The same hook with nothing to run: a missing script, or a verb the kith binary does not have.
+  BROKEN=${FENCE//kith_readfence.py/no-such-readfence.py}; BROKEN=${BROKEN// kernel readfence / kernel no-such-readfence }
   WD=$KITH_HOME/agents/echo/files/people/$who
   fence() { printf '{"tool_name":"%s","tool_input":{"%s":"%s"},"cwd":"%s"}' "$1" "$2" "$3" "$WD" | (cd "$T" && sh -c "$FENCE") | python3 -c '
 import json,sys
@@ -141,7 +143,10 @@ print(json.loads(t)["hookSpecificOutput"]["permissionDecision"] if t else "allow
   expect "$who: read fence: Read inside the working directory (absolute, relative) is not refused" "$(fence Read file_path "$WD/sub/f.txt") $(fence Read file_path sub/f.txt)" "allow allow"
   expect "$who: read fence: Read/Grep/Glob outside it, and a link out of it, are refused" "$(fence Read file_path "$HOME/.ssh/id_rsa") $(fence Grep path "$HOME") $(fence Glob path /etc) $(fence Read file_path ../../../../../../etc/hosts) $(fence Read file_path outlink/x)" "deny deny deny deny deny"
   expect "$who: read fence: a Grep with no path searches the working directory" "$(printf '{"tool_name":"Grep","tool_input":{"pattern":"x"},"cwd":"%s"}' "$WD" | (cd "$T" && sh -c "$FENCE") | wc -c | tr -d ' ')" 0
-  expect "$who: read fence: a hook that cannot run (no python) denies" "$(printf '{}' | (cd "$T" && PATH=/nonexistent /bin/sh -c "$FENCE") | grep -c 'permissionDecision')" 1
+  expect "$who: read fence: a hook that cannot run (script missing) denies" "$(printf '{}' | (cd "$T" && /bin/sh -c "$BROKEN") | grep -c 'permissionDecision')" 1
+  # python3 by absolute path: a PATH with no python (a guest's shell can change it) does not stop the fence, which still checks
+  expect "$who: read fence: python3 is an absolute path, so an emptied PATH does not break it" "$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s"},"cwd":"%s"}' "$HOME/.ssh/id_rsa" "$WD" | (cd "$T" && PATH=/nonexistent /bin/sh -c "$FENCE") | grep -c 'deny')" 1
+  expect "$who: read fence: the hook's python3 is an absolute path" "$(printf '%s' "$FENCE" | grep -c '^out=$(/')" 1
   expect "$who: the denies stay on top of the allowlist (index not allowed)" "$(q "$S" "not any(a == '$T/real state/index' or a == '$T/real state' for a in fs['allowRead'])")" True
   expect "$who: global config of the owner is not read" "$(q "$S" 's["env"]["GIT_CONFIG_GLOBAL"]')" /dev/null
   expect "$who: the link to the state folder is itself readable" "$(q "$S" "'$T/linked state' in fs['allowRead']")" True

@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# kith-sched-json-check — kith schedule ls|add|rm|pause|resume|run|log --json: one JSON object on stdout, the error
+# object and the text mode's exit code on a failure, the files' format unchanged. Runs from a copy of the kernel with a
+# stub bin/kith, so no real agent runs. Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-sched-json-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-json.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_AUTH=$T/auth.json KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_SCHED_PERMISSION_MODE KITH_RUN_OUTBOX HQ_RUN_OUTBOX
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_SERVE_DIR" "$T/k/bin" "$KITH_HOME/agents/house/role" "$KITH_HOME/agents/empty/role"
+for a in house empty; do printf -- '---\nname: %s\ndescription: test\n---\nbody\n' $a > "$KITH_HOME/agents/$a/role/agent.md"; done
+ln -s "$KERNEL/lib" "$T/k/lib"
+for b in kith-sched kith-auth; do cp "$KERNEL/bin/$b" "$T/k/bin/$b"; done
+printf '#!/bin/sh\necho ran > "$KITH_STATE/ran"\n' > "$T/k/bin/kith"; chmod +x "$T/k/bin/kith"
+J=$KITH_HOME/agents/house/jobs.json
+S() { python3 "$T/k/bin/kith-sched" "$@"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; head -c 600 "$T/out" "$T/err" 2>/dev/null | sed 's/^/     /'; fail=1; fi; }
+# q PY: evaluate the python expression PY with the last stdout ($T/out) parsed as `d`
+q() { python3 -c "import json,sys; d=json.load(open('$T/out')); print(($1))"; }
+run() { S "$@" > "$T/out" 2> "$T/err"; rc=$?; }
+onlyjson() { python3 -c "import json; json.loads(open('$T/out').read())" && [ ! -s "$T/err" ]; }
+
+run ls --json
+check "ls on no jobs: {jobs: []}, exit 0" "[ $rc = 0 ] && [ \"\$(q \"d['jobs']\")\" = '[]' ] && onlyjson"
+run ls empty --json
+check "ls of an agent with no jobs.json" "[ $rc = 0 ] && [ \"\$(q \"len(d['jobs'])\")\" = 0 ]"
+run ls nobody --json
+check "ls of an unknown agent: error object, exit 1" "[ $rc = 1 ] && [ \"\$(q \"d['ok']\")\" = False ] && grep -q 'no agent' $T/out && onlyjson"
+
+run add house "0 8 * * *" "say hi" --id hi --json
+check "add: ok, job with next" "[ $rc = 0 ] && [ \"\$(q \"d['ok'], d['job']['id'], d['replaced'], d['job']['next'] is not None\")\" = \"(True, 'hi', False, True)\" ]"
+check "add wrote jobs.json in the old format" "[ \"\$(python3 -c \"import json; print(json.load(open('$J')))\")\" = \"[{'id': 'hi', 'cron': '0 8 * * *', 'task': 'say hi'}]\" ]"
+run add house "0 9 * * *" "say hi again" --id hi -m haiku --json
+check "add of an existing id replaces it" "[ \"\$(q \"d['replaced'], d['job']['model']\")\" = \"(True, 'haiku')\" ]"
+run add house "99 8 * * *" "bad" --json
+check "add with a bad cron: error, exit 1, nothing written" "[ $rc = 1 ] && [ \"\$(q \"d['ok']\")\" = False ] && [ \"\$(python3 -c \"print(len(__import__('json').load(open('$J'))))\")\" = 1 ]"
+run add ghost "0 8 * * *" "x" --json
+check "add for an unknown agent: error" "[ $rc = 1 ] && [ \"\$(q \"d['ok']\")\" = False ]"
+run add house "0 8 * * *" --json
+check "add usage error: error object" "[ $rc = 1 ] && grep -q usage $T/out"
+
+printf '[{"id":"old","task":"no cron here"},{"id":"r","cron":"@daily","task":"go"},{"id":"p","cron":"@daily","task":"t","paused":true,"person":"sam"}]\n' > "$J"
+run ls house --json
+check "old jobs.json (missing fields) and paused/person list fine" "[ $rc = 0 ] && [ \"\$(q \"len(d['jobs']), d['jobs'][0]['cron'], d['jobs'][2]['paused'], d['jobs'][2]['next'], d['jobs'][2]['person']\")\" = \"(3, None, True, None, 'sam')\" ] && onlyjson"
+check "a bad cron shows as an error field, last is null" "[ \"\$(q \"'error' in d['jobs'][0], d['jobs'][0]['last']\")\" = '(True, None)' ]"
+
+run pause house p --json
+check "pause of a paused job: changed false" "[ $rc = 0 ] && [ \"\$(q \"d['ok'], d['changed']\")\" = '(True, False)' ]"
+run resume house p --json
+check "resume: changed true" "[ \"\$(q \"d['changed']\")\" = True ]"
+run resume house p --json
+check "resume of a running job: changed false" "[ \"\$(q \"d['changed']\")\" = False ]"
+run pause house p --json
+check "pause: changed true, file has paused" "[ \"\$(q \"d['changed']\")\" = True ] && grep -q '\"paused\": true' $J"
+run rm house old --json
+check "rm: changed true" "[ $rc = 0 ] && [ \"\$(q \"d['ok'], d['id'], d['changed']\")\" = \"(True, 'old', True)\" ]"
+run rm house old --json
+check "rm twice: error, exit 1 (as text mode)" "[ $rc = 1 ] && [ \"\$(q \"d['ok']\")\" = False ] && grep -q 'no job' $T/out"
+S rm house old >/dev/null 2>&1; check "text mode rm twice also exits 1" "[ $? = 1 ]"
+run pause house nope --json
+check "pause of an unknown job: error" "[ $rc = 1 ] && [ \"\$(q \"d['ok']\")\" = False ]"
+
+run run house r --json
+check "run: ok with pid and log" "[ $rc = 0 ] && [ \"\$(q \"d['ok'], isinstance(d['pid'], int), d['log'].endswith('.log')\")\" = '(True, True, True)' ] && onlyjson"
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$KITH_STATE/ran" ] && break; sleep 0.3; done
+check "the stub kith ran" "[ -s $KITH_STATE/ran ]"
+run run house nope --json
+check "run of an unknown job: error, exit 1" "[ $rc = 1 ] && [ \"\$(q \"d['ok']\")\" = False ]"
+
+run log --json
+check "log: runs list with the run" "[ $rc = 0 ] && [ \"\$(q \"len(d['runs']), d['runs'][0]['agent'], d['runs'][0]['id'], d['runs'][0]['why']\")\" = \"(1, 'house', 'r', 'run by hand')\" ] && onlyjson"
+run log house/r 5 --json
+check "log house/p n: agent, id, runs" "[ \"\$(q \"d['agent'], d['id'], len(d['runs'])\")\" = \"('house', 'r', 1)\" ]"
+run log house r --json
+check "log AGENT ID form" "[ \"\$(q \"len(d['runs'])\")\" = 1 ]"
+run log empty --json
+check "log of an agent with no runs: empty list" "[ \"\$(q \"d['runs']\")\" = '[]' ]"
+run log house/p zero --json
+check "log with a bad n: error" "[ $rc = 1 ] && [ \"\$(q \"d['ok']\")\" = False ]"
+run ls house --json
+check "ls shows last for the job that ran" "[ \"\$(q \"d['jobs'][0]['last']['why']\")\" = 'run by hand' ]"
+
+S ls house > "$T/out" 2>&1
+check "text ls unchanged (no JSON)" "grep -q 'next' $T/out && ! grep -q '^{' $T/out"
+exit $fail

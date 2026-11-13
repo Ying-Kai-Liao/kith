@@ -15,6 +15,7 @@
 //! transcript says is never logged.
 
 pub mod claim;
+pub mod core_claims;
 pub mod intent;
 mod jsonl;
 mod registry;
@@ -40,7 +41,7 @@ pub struct Env {
 impl Default for Env {
     fn default() -> Self {
         let home = dirs::home_dir().unwrap_or_default();
-        Self { state: crate::kernel::machine_dir(&home), sessions: registry::default_sessions_dir() }
+        Self { state: crate::kernel::state_dir(&home), sessions: registry::default_sessions_dir() }
     }
 }
 

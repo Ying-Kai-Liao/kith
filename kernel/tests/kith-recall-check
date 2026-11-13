@@ -312,5 +312,42 @@ check "KITH_PERSON=sam: exec --secret is refused as not available" "! env KITH_A
 check "KITH_PERSON=sam: once list, put, take and drop are refused" "for c in 'list --json' \"take $OS --bot b\" \"drop $OS\"; do ! env KITH_PERSON=sam \"$KERNEL/bin/kith-auth\" once \$c >$T/o 2>$T/e || exit 1; grep -q 'not available to this run' $T/e || exit 1; done"
 check "the owner's own run reaches the secret check, and finds none" "! env KITH_AGENT=echo \"$KERNEL/bin/kith-auth\" exec --secret $OS -- true >$T/o 2>$T/e && grep -q 'no such secret' $T/e"
 
+# `kith forget --thread ID --json` / `kith summarise --thread ID --json` (owner): JSON out, text unchanged without --json.
+# The store is a throwaway serve.db (KITH_SERVE_DB); the host is a stub answering summariseThread on a loopback port.
+python3 - "$T/serve.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("CREATE TABLE thread_summaries (thread_id TEXT PRIMARY KEY, text TEXT)")
+db.execute("INSERT INTO thread_summaries VALUES ('t1', 'a recap')")
+db.commit()
+PY
+export KITH_SERVE_DB=$T/serve.db KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+mkdir -p "$T/serve"; echo tok > "$T/serve/token"
+check "forget --json: JSON, the summary row is gone" "[ \"\$(python3 \"$R\" forget --thread t1 --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"forgotten\"], d[\"thread\"])')\" = 'True t1' ] && [ \"\$(python3 -c \"import sqlite3; print(sqlite3.connect('$T/serve.db').execute('select count(*) from thread_summaries').fetchone()[0])\")\" = 0 ]"
+check "forget twice: still forgotten" "python3 \"$R\" forget --thread t1 --json | grep -q '\"forgotten\": true'"
+check "forget without --json: text as before" "python3 \"$R\" forget --thread t1 | grep -q '^forgotten: t1 (its entries are kept'"
+check "summarise --json, host down: refused with the reason, no JSON" "! python3 \"$R\" summarise --thread t1 --json >$T/o 2>$T/e && grep -q 'host could not be reached' $T/e && [ ! -s $T/o ]"
+check "forget --json: a run-token caller is refused" "! env KITH_RUN_TOKEN=x KITH_RUN_SOCKET=/nope python3 \"$R\" forget --thread t1 --json >$T/o 2>$T/e"
+check "forget --json: a person's run is refused" "! env KITH_PERSON=sam python3 \"$R\" forget --thread t1 --json >$T/o 2>$T/e && grep -q 'only the owner' $T/e"
+check "forget --json: bad thread id is a usage error" "python3 \"$R\" forget --thread 'a b' --json 2>/dev/null; [ \$? = 2 ]"
+python3 - "$T/port" <<'PY' &
+import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        b = json.dumps({'written': True}).encode()
+        self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(('127.0.0.1', 0), H)
+open(sys.argv[1], 'w').write(str(s.server_address[1]))
+s.serve_forever()
+PY
+STUB=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$T/port" ] && break; sleep 0.3; done
+check "summarise --json, host answering: {written: true}" "[ \"\$(env KITH_SERVE_PORT=\$(cat $T/port) python3 \"$R\" summarise --thread t2 --json)\" = '{\"written\": true, \"thread\": \"t2\"}' ]"
+check "summarise without --json: text as before" "env KITH_SERVE_PORT=\$(cat $T/port) python3 \"$R\" summarise --thread t2 | grep -qx 'summary written'"
+kill $STUB 2>/dev/null; wait $STUB 2>/dev/null || true
+unset KITH_SERVE_DB KITH_SERVE_DIR KITH_SERVE_PORT
+
 echo
 if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

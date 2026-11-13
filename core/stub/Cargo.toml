@@ -1,0 +1,43 @@
+[package]
+name = "kith-stub"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "The conversation writer lock (runtime-design section 4): one OS lock per key, never deleted, never inherited"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like core/holder.
+workspace = "../../serve/host"
+
+# Links no other kith crate but kith-procstart (libc and windows-sys only, so the sidecar carries the same start stamp
+# the runtime compares), on purpose: the holder may spawn the stub, and a lock that cannot see policy cannot grow any.
+# Enforced by scripts/check-holder-deps.sh in CI. Keep this list short.
+[lib]
+name = "kith_stub"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kith-stub"
+path = "src/main.rs"
+
+[dependencies]
+kith-procstart = { path = "../procstart" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+# Tests only: the named-pipe server that plays the holder in tests/resident_windows.rs.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_IO", "Win32_System_Pipes"] }

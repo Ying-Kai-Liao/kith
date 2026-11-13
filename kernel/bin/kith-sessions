@@ -13,6 +13,8 @@
   kith-sessions terminal SID PID [PERSON [AGENT]]  for an interactive run that resolve did not claim (a fresh one, on the
                                            --session-id bin/kith chose; KITH_RESUME): the claim, kind terminal, for PID (the
                                            launcher's shell, which then execs `run`, which gives it back); refused at once when held
+  kith-sessions release SID                gives back SID's claim when its holder is the caller's parent (the launcher's shell, same start time),
+                                           else exits 1 and touches nothing (`kith AGENT --held` after a resume: terminal.open takes the claim itself)
   kith-sessions proc PID PERSON AGENT     every non-owner run: a session-less `proc-PID.claim` naming the person, so the revoke sweep
                                            finds the run (and the claude below it) after a host restart
   kith-sessions sweep PERSON...            revoke or removal with no host running: ends the live holders of every claim naming one of
@@ -151,6 +153,17 @@ def write_atomic(path, data):
     os.replace(tmp, path)
 
 
+def launcher_of(pid):
+    """When claude runs under kith-stub (the conversation lock), the stub is what a claim and the host's intents name, not
+    claude: its pid and start time, so an intent written for the stub still reads as this run's reason."""
+    try:
+        ppid = ps_row(pid)[0] if pid else 0
+        comm = ps_row(ppid)[1] if ppid > 1 else ''
+    except Exception:  # noqa: BLE001
+        return {}
+    return {'launcher': ppid, 'launcherStart': proc_start(ppid)} if os.path.basename(comm) == 'kith-stub' else {}
+
+
 def record():
     try:
         hook, env = json.load(sys.stdin), os.environ
@@ -170,7 +183,8 @@ def record():
             'v': 1, 'sessionId': sid, 'agent': env['KITH_AGENT'], 'cwd': cwd, 'transcriptPath': hook.get('transcript_path'),
             'pid': pid, 'project': env.get('KITH_PROJECT') or None, 'source': hook.get('source') or 'startup',
             'resumedFrom': resumed, 'startedAt': started, 'account': env.get('KITH_ACCOUNT_ID') or None,
-            'kind': kind, 'label': run_label(kind), 'procStart': proc_start(pid) if pid and kind != 'terminal' else None})
+            'kind': kind, 'label': run_label(kind), 'procStart': proc_start(pid) if pid and kind != 'terminal' else None,
+            **launcher_of(pid)})
     except Exception as e:  # noqa: BLE001 — listing must never block a session
         print(f'kith-sessions record: {e}', file=sys.stderr)
 
@@ -208,15 +222,20 @@ def host_call(method, body):
         return None
 
 
+def procstart():
+    """kernel/lib/kith_procstart.py: process start stamps, the same string core/procstart writes."""
+    lib = str(Path(__file__).resolve().parent.parent / 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_procstart
+    return kith_procstart
+
+
 def proc_start(pid):
-    """The start time of pid as `ps` prints it in the C locale (the host writes and reads the same text; the caller's locale
-    would print another one), whitespace squeezed; None when it can't be read."""
-    try:
-        out = subprocess.run(['ps', '-o', 'lstart=', '-p', str(pid)], capture_output=True, text=True, timeout=3,
-                             env={**os.environ, 'LC_ALL': 'C'}).stdout
-    except Exception:  # noqa: BLE001
-        return None
-    return ' '.join(out.split()) or None
+    """The start stamp of pid (`e<ms>` on macOS, `b<boot id>:<ticks>` on Linux; the host and the core write and read the same
+    one); None when it can't be read. Claims from before this carry `ps -o lstart=` text: compared the old way
+    (kith_procstart.claimer): a start that differs is a reused pid, one `ps` can't read is believed alive."""
+    return procstart().start_stamp(pid)
 
 
 def pid_alive(pid):
@@ -245,8 +264,14 @@ def read_claim(path):
 def claim_live(c):
     if not c or not pid_alive(c.get('pid')):
         return False
-    claimed, actual = c.get('procStart'), proc_start(c['pid'])
-    return not (claimed and actual) or ' '.join(claimed.split()) == actual
+    return procstart().claimer(c['pid'], c.get('procStart')) is not False   # held unless positively another process
+
+
+def claim_claimer(c):
+    """Whether the claim's holder is positively the process that took it: what a signal needs (the twin of the host's
+    Claim::is_claimer). claim_live says "held" for a start it can't compare (old lstart text that ps can't read, another stamp
+    form); that is no reason to signal whatever has the pid now."""
+    return bool(c) and pid_alive(c.get('pid')) and procstart().claimer(c['pid'], c.get('procStart')) is True
 
 
 def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_owner=False):
@@ -383,12 +408,12 @@ def sweep_persons(persons, grace=2.0):
     """The kernel's twin of the host's claim sweep (terminal/claim.rs sweep), for a revoke or removal made with no host
     running: the live holders of claims that name one of `persons`, and their descendants, get SIGTERM, and SIGKILL after
     `grace` seconds. A claim without a person is the owner's and is never touched; each holder is checked live first (pid and
-    start time), so a reused pid is left alone. Returns the pids it signalled."""
+    start time, positively: a claim from before stamps whose old text ps cannot match is not signalled), so a reused pid is left alone. Returns the pids it signalled."""
     d = reg_dir()
     holders = []
     for f in (d.glob('*.claim') if d and d.is_dir() else ()):
         c = read_claim(f)
-        if c and c.get('person') in persons and claim_live(c) and c.get('pid', 0) > 1:
+        if c and c.get('person') in persons and claim_claimer(c) and c.get('pid', 0) > 1:
             holders.append(c['pid'])
     if not holders:
         return []
@@ -442,6 +467,25 @@ def release_claims(pid):
                 f.unlink(missing_ok=True)
         finally:
             os.close(lock)
+
+
+def release_own(sid):
+    """Give back sid's claim, only if it is the caller's parent's (a launcher shell that took it in `resolve`) and that process is
+    the one that took it (same start time). True when it was given back."""
+    f = claim_path(sid)
+    if not f or not f.exists():
+        return False
+    ppid = os.getppid()
+    lock = os.open(f.with_name(f.name[:-len('.claim')] + '.claim.lock'), os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        c = read_claim(f)
+        if c and c.get('pid') == ppid and procstart().claimer(ppid, c.get('procStart')) is not False:
+            f.unlink(missing_ok=True)
+            return True
+        return False
+    finally:
+        os.close(lock)
 
 
 def live_pid(entry):
@@ -653,21 +697,38 @@ def entry_of(pid):
     return last
 
 
-def idle_stop(child, born):
+def engine_pid(child, cmd):
+    """The pid the registry names for the run: the child itself, or, when the child is kith-stub (the conversation lock's
+    launcher, which keeps claude as its own child), that child. None while the stub has not started claude yet."""
+    if os.path.basename(cmd[0]) != 'kith-stub':
+        return child
+    try:
+        table = subprocess.run(['ps', '-A', '-o', 'pid=,ppid='], capture_output=True, text=True, timeout=3).stdout.split('\n')
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for row in table:
+        got = row.split()
+        if len(got) == 2 and got[1] == str(child) and got[0].isdigit():
+            return int(got[0])
+    return None
+
+
+def idle_stop(child, born, eng=None):
     """Rule 3: the one place a human session sleeps. The idle clock is the latest of the last turn, the process start and
     the last keystroke (the terminal's access time); after `sleep_after` of it, with nothing outstanding (rule 7), the
     wrapper writes its intent and ends its own child. Nothing outside the terminal's own process tree ever signals a
     terminal session on a timer. True once the signal is sent."""
     try:
         lc, e = lifecycle(), None
-        e = entry_of(child)
+        eng = eng or child
+        e = entry_of(eng)
         if not e or not e.get('transcriptPath'):
             return False   # not a session we can judge (not listed, or it has not written yet): never slept
         key = os.fstat(0).st_atime if os.isatty(0) else None
         since = lc.idle_since(e['transcriptPath'], born, key)
-        if time.time() - since < lc.sleep_after() or lc.outstanding(e['transcriptPath'], child):
+        if time.time() - since < lc.sleep_after() or lc.outstanding(e['transcriptPath'], eng):
             return False
-        lc.write_intent(e['sessionId'], 'idle', child)
+        lc.write_intent(e['sessionId'], 'idle', eng)
         # Kai may have typed since the check above: looked at again just before the signal (S2).
         if os.isatty(0) and os.fstat(0).st_atime > (key or 0):
             lc.clear_intent(e['sessionId'])
@@ -699,45 +760,80 @@ def record_quit(child):
 def run(agent, cmd):
     """Run cmd as a child of ours so the take-over note can follow it. The child gets the default signals back; we ignore ^C
     (the child decides what it means), pass TERM/HUP on and return its exit code (128+n for a signal)."""
+    # Under kith-stub the stub says on a status pipe whether it holds the lock ("locked", "busy"; nothing and EOF means it hit
+    # a lock error, exit 70): the engine can itself exit 75, 126 or 127, so the exit code alone cannot tell.
+    status_r = None
+    if os.path.basename(cmd[0]) == 'kith-stub' and '--status-fd' not in cmd and '--' in cmd:
+        status_r, status_w = os.pipe()
+        cut = cmd.index('--')
+        cmd = cmd[:cut] + ['--status-fd', str(status_w)] + cmd[cut:]
     child = os.fork()
     if not child:
         for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             signal.signal(s, signal.SIG_DFL)
         try:
+            if status_r is not None:
+                os.close(status_r)
+                os.set_inheritable(status_w, True)
             os.execvp(cmd[0], cmd)
         except OSError as e:
             print(f'kith: cannot run {cmd[0]}: {e}', file=sys.stderr)
             os._exit(127)
+    if status_r is not None:
+        os.close(status_w)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     for s in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(s, lambda n, _f: os.kill(child, n))
-    st, born, stopped = 0, time.time(), False
+    st, born, stopped, eng = 0, time.time(), False, None
     next_check = born + idle_poll()
     while True:
         try:
             done, st = os.waitpid(child, os.WNOHANG)
             if done:
                 break
-            time.sleep(0.25)
+            # Until the engine is found a short tick: an engine that exits within one long tick would leave no pid to name
+            # in the quit intent (a clean /exit then reads as a crash).
+            time.sleep(0.25 if eng else 0.05)
+            eng = eng or engine_pid(child, cmd)   # kept: the stub is gone by the time the notes below are written
             if not stopped and time.time() >= next_check:
                 next_check = time.time() + idle_poll()
-                stopped = idle_stop(child, born)
+                stopped = idle_stop(child, born, eng)
         except InterruptedError:
             continue
         except ChildProcessError:
             break
     try:
         if not stopped and os.WIFEXITED(st) and os.WEXITSTATUS(st) == 0:
-            record_quit(child)   # Kai's own /exit: not a crash (rule 8)
+            record_quit(eng or child)   # Kai's own /exit: not a crash (rule 8)
         release_claims(os.getpid())
         if stopped:
-            asleep(child)
-        if not taken_note(agent, child):
-            resume_note(agent, child)
+            asleep(eng or child)
+        if not taken_note(agent, eng or child):
+            resume_note(agent, eng or child)
         wake_owed()
     except Exception as e:  # noqa: BLE001
         print(f'kith-sessions: {e}', file=sys.stderr)
-    return os.waitstatus_to_exitcode(st)   # a signal death comes back as -n
+    code = os.waitstatus_to_exitcode(st)   # a signal death comes back as -n
+    if status_r is not None:
+        code = stub_verdict(status_r, code)
+    return code
+
+
+def stub_verdict(fd, code):
+    """What the stub said on its status pipe, against the exit code: "busy" is busy (75) whatever the engine would exit with,
+    "locked" then 126/127 means the engine never started, and no word at all (EOF) is a lock error, not an engine exit."""
+    try:
+        with os.fdopen(fd) as f:
+            word = f.read().strip()
+    except OSError:
+        return code
+    if word == 'busy':
+        return 75
+    if word == 'locked' and code in (126, 127):
+        print(f'kith: the engine did not start ({code}); it never ran', file=sys.stderr)
+    elif not word and code == 70:
+        print('kith: the conversation lock could not be taken (not busy); this run did not start', file=sys.stderr)
+    return code
 
 
 def wake_owed():
@@ -812,6 +908,9 @@ if __name__ == '__main__':
         claim_oneshot(a[1], int(a[2]), a[3] if len(a) > 3 else None, a[4] if len(a) > 4 else None)
     elif a[:1] == ['terminal'] and len(a) in (3, 4, 5):
         claim_terminal(a[1], int(a[2]), a[3] if len(a) > 3 else None, a[4] if len(a) > 4 else None)
+    elif a[:1] == ['release'] and len(a) == 2:
+        # --held gives back the claim a resume took for the launcher's shell: terminal.open takes the session's claim itself.
+        sys.exit(0 if release_own(a[1]) else 1)
     elif a[:1] == ['proc'] and len(a) == 4:
         proc_claim(int(a[1]), a[2], a[3])
     elif a[:1] == ['sweep'] and len(a) > 1:

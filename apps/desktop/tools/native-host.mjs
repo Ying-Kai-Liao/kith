@@ -1,5 +1,5 @@
 // Builds the host the app bundles: node tools/native-host.mjs. macOS: build/native/kith-serve,
-// build/native/kith-tts (arm64) and build/native/kith/ (bin/kith + share/kith/kernel, the release
+// build/native/kith-tts (arm64) and build/native/kith/ (bin/kith, bin/kith-stub + share/kith/kernel, the release
 // layout; universal). `fast` (the sandbox runs of tools/dev.mjs): the host's `dev-app` profile for this
 // Mac's architecture only, since that build never leaves the Mac that made it. KITH_HOST_NATIVE_ONLY=1
 // does the same for the release profile (CI's unsigned build: its runner has no x86_64 target). Windows:
@@ -53,6 +53,9 @@ if (process.platform === 'win32') {
   rmSync(kith, { recursive: true, force: true })
   mkdirSync(join(kith, 'bin'), { recursive: true })
   run('lipo', ['-create', '-output', join(kith, 'bin/kith'), ...targets.map((t) => built(t, 'kith'))])
+  // The conversation lock's launcher, beside kith where `kith <agent>` looks for it; without it every run goes unlocked.
+  for (const target of targets) build(target, '-p', 'kith-stub')
+  run('lipo', ['-create', '-output', join(kith, 'bin/kith-stub'), ...targets.map((t) => built(t, 'kith-stub'))])
   // The kernel's VERSION is the app's version: the app installs this copy as its CLI (Resources/kith-install.sh).
   // A release build names it in KITH_APP_VERSION (the tag; electron-builder gets the same through extraMetadata).
   const version = process.env.KITH_APP_VERSION || JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version

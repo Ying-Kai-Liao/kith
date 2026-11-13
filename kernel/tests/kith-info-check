@@ -106,7 +106,7 @@ printf -- '---\nname: bare\ndescription: nothing else\nharness: codex\n---\nHi.\
 OUT=$("$KITH" bare --info-json 2>/dev/null); rc=$?
 check "bare agent on another harness prints info" "[ $rc = 0 ] && is \"(d['harness'], d['model'], d['skills'], d['tools'], d['mcp_servers'], d['permission_mode'], d['role']['sections'])\" \"('codex', None, [], [], [], None, [])\""
 "$KITH" nope --info-json >/dev/null 2>"$T/err"; rc=$?
-check "unknown agent: exit 1 and a message" "[ $rc = 1 ] && grep -q \"no agent 'nope'\" $T/err"
+check "unknown agent: the dispatcher's exit 2 and its message (like every unknown word)" "[ $rc = 2 ] && grep -q 'no agent named \"nope\"' $T/err"
 
 # a run for someone other than the owner gets no agent details
 KITH_PERSON=mallory "$KITH" echo --info-json >/dev/null 2>"$T/err"; rc=$?
@@ -121,8 +121,8 @@ KEPT=$(KITH_STATE=$KITH_MACHINE python3 "$KERNEL/lib/kith_settings.py" permissio
 check "set permission: an unknown mode is refused and changes nothing" "[ $rc = 1 ] && grep -q 'not one of' $T/err && [ $KEPT = plan ]"
 "$KITH" nope set permission auto 2>"$T/err"; rc=$?
 check "set permission: unknown agent" "[ $rc = 1 ] && grep -q \"no agent 'nope'\" $T/err"
-"$KITH" echo set model opus 2>/dev/null; rc=$?
-check "set: only permission is settable" "[ $rc = 2 ]"
+"$KITH" echo set bogus opus 2>/dev/null; rc=$?
+check "set: an unknown setting is a usage error" "[ $rc = 2 ]"
 "$KITH" echo set permission '' 2>/dev/null; rc=$?
 OUT=$("$KITH" echo --info-json 2>/dev/null)
 check "set permission '': forgets the choice, kith's default applies again" "[ $rc = 0 ] && is \"d['permission_mode']\" auto"

@@ -8,7 +8,7 @@
       "home": "/tmp/kith/kith/agents/echo",
       "model": null,
       "effort": null,
-      "harness": "gemini",
+      "harness": "frobnicator",
       "color": "teal"
     }
   ]

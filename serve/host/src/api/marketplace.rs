@@ -43,7 +43,8 @@ fn enable_new(hub: &Hub, kind: Installed, before: &[String]) -> Result<()> {
         return Ok(());
     }
     for row in hub.store.bots()? {
-        if row.deleted || row.config.is_group() {
+        // A kith agent's connectors and skills are its own (`kith <agent> connect|skill add`), not host config.
+        if row.deleted || row.config.is_group() || row.config.is_hq() {
             continue;
         }
         let (key, mut on) = match kind {
@@ -255,6 +256,12 @@ mod tests {
             .expect("bot config");
             store.save_bot(&cfg).expect("save bot");
         }
+        // A kith agent's tools are the CLI's: a new install never lands in its host row.
+        let kith: BotConfig = serde_json::from_value(
+            json!({"id": "k", "name": "k", "backend": "claude", "cwd": dir, "hqAgent": "house", "notify": false}),
+        )
+        .expect("bot config");
+        store.save_bot(&kith).expect("save bot");
         let connector = |id: &str| -> market::Connector {
             serde_json::from_value(json!({"id": id, "name": id, "url": "https://example.com/mcp"})).expect("connector")
         };
@@ -277,6 +284,7 @@ mod tests {
         enable_new(&hub, Installed::Skills, &[]).expect("enable");
         let skills = |id: &str| hub.store.bot(id).expect("read").expect("bot").config.skills;
         assert_eq!((skills("a"), skills("b")), (vec!["pdf".to_owned()], vec!["pdf".to_owned()]), "new skills too");
+        assert!(on("k").is_empty() && skills("k").is_empty(), "a kith agent's row is left alone");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

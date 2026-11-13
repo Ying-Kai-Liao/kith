@@ -1,0 +1,6 @@
+{
+  "fakes": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith-wake: a serve session wakes through the host, which doesn't set waiters yet\n",
+  "step0.stdout": ""
+}

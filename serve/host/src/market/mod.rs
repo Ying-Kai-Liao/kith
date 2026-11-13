@@ -18,6 +18,7 @@
 
 pub mod composio;
 pub mod logins;
+pub mod mirror;
 pub mod oauth;
 pub mod passwords;
 pub mod requests;
@@ -196,6 +197,7 @@ pub fn update_connectors<T>(
     let mut all = connectors(store)?;
     let result = change(&mut all)?;
     save_connectors(store, &all)?;
+    mirror::refresh(&all);
     Ok(result)
 }
 
@@ -206,11 +208,18 @@ fn add_connector(store: &crate::store::Store, mut c: Connector) -> Result<Value>
         {
             return Ok(existing.public());
         }
-        c.id = unique_id(&c.name, &all.iter().map(|c| c.id.clone()).collect::<Vec<_>>());
+        c.id = connector_id(&c.name, all);
         let public = c.public();
         all.push(c);
         Ok(public)
     })
+}
+
+/// An id for a new connector: unlike any installed one and any service name it would shadow.
+fn connector_id(name: &str, all: &[Connector]) -> String {
+    let mut taken: Vec<String> = all.iter().map(|c| c.id.clone()).collect();
+    taken.extend(mirror::taken_names());
+    unique_id(name, &taken)
 }
 
 fn unique_id(base: &str, taken: &[String]) -> String {

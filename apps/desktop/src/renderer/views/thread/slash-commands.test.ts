@@ -27,6 +27,12 @@ test('built-in commands come first, then only the bot\'s own skills, by name or 
   assert.deepEqual(slashCommands(normalizeBot({ id: 'g', kind: 'group', fastModeSupport: 'offered' }), '', installed), [])
 })
 
+test('a kith agent has no /fast: the CLI has no Fast mode setting, so it is not offered or run', () => {
+  const bot = normalizeBot({ id: 'b', hqAgent: 'house', fastModeSupport: 'offered' })
+  assert.deepEqual(slashCommands(bot, '', []), [])
+  assert.equal(builtInCommand(bot, '/fast'), null)
+})
+
 test('sending just a built-in command runs it; anything else is a message', () => {
   const bot = normalizeBot({ id: 'b', fastModeSupport: 'offered' })
   assert.equal(builtInCommand(bot, '/fast ')?.action.kind, 'fast')

@@ -1,0 +1,12 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/sid-w.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/865dd038e13d519527755ee3520bb59d.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"host\",\n  \"next\": \"<MASKED>\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"a\",\n      \"run\": \"<ID12>\",\n      \"text\": \"hi\",\n      \"why\": \"\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"sid-w\",\n  \"tries\": 0,\n  \"turn\": {\n    \"at\": \"<TS>\",\n    \"pid\": 2147483000,\n    \"procStart\": null,\n    \"run\": \"<ID12>\",\n    \"sid\": \"sid-w\"\n  },\n  \"v\": 1\n}\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.json": "[\n  {\n    \"agent\": \"coder\",\n    \"door\": \"host\",\n    \"next\": \"<MASKED>\",\n    \"person\": null,\n    \"requests\": [\n      {\n        \"at\": \"<TS>\",\n        \"id\": \"a\",\n        \"run\": \"<ID12>\",\n        \"text\": \"hi\",\n        \"why\": \"\"\n      }\n    ],\n    \"room\": null,\n    \"session\": \"sid-w\",\n    \"tries\": 0,\n    \"turn\": {\n      \"at\": \"<TS>\",\n      \"pid\": 2147483000,\n      \"procStart\": null,\n      \"run\": \"<ID12>\",\n      \"sid\": \"sid-w\"\n    },\n    \"v\": 1\n  }\n]\n",
+  "step1.stderr": ""
+}

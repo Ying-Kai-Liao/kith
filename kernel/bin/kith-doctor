@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """kith-doctor — check this Mac's kith and say what to fix. Changes nothing.
 
-  kith doctor            every check: ✓ fine, ! worth a look, ✗ broken (exit 1 when anything is broken)
+  kith doctor [--json]   every check: ✓ fine, ! worth a look, ✗ broken (exit 1 when anything is broken)
 
 Links and folders, whether `kith migrate` has moved this Mac off the hq names (and what is left on them), the tools kith needs, one backup line (state, memories and each agent: on GitHub,
 behind, or on this Mac only), kith's default permission mode, each agent's checks, services and grants, the people
@@ -15,38 +15,51 @@ from pathlib import Path
 KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
     os.path.normpath(os.path.join(os.environ.get('PWD') or os.getcwd(), sys.argv[0])))))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'lib'))
-from kith_paths import paths  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import kith_bin, paths  # noqa: E402  the one place that knows where kith's folders are
 import kith_settings  # noqa: E402
 import kith_migrate  # noqa: E402
+import kith_tombstone  # noqa: E402
 
 P = paths()
 HOME = Path.home()
 BAD = []
+JSON = False      # --json: the same checks, collected into one object instead of printed
+CHECKS = []       # [{section, level, name, ok}] in the order the text mode prints them
+SECTION = ['']
 
 
-def run(*args, cwd=None):
-    return subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+def run(*args, cwd=None, timeout=None):
+    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+
+
+def emit(level, mark, text):
+    if JSON:
+        CHECKS.append({'section': SECTION[0], 'level': level, 'name': text, 'ok': level != 'bad'})
+    else:
+        print(f'  {mark} {text}')
 
 
 def ok(text):
-    print(f'  ✓ {text}')
+    emit('ok', '✓', text)
 
 
 def warn(text):
-    print(f'  ! {text}')
+    emit('warn', '!', text)
 
 
 def bad(text):
     BAD.append(text)
-    print(f'  ✗ {text}')
+    emit('bad', '✗', text)
 
 
 def note(text):
-    print(f'  · {text}')
+    emit('note', '·', text)
 
 
 def section(title):
-    print(title)
+    SECTION[0] = title
+    if not JSON:
+        print(title)
 
 
 def cli():
@@ -80,7 +93,7 @@ def folders():
         bad(f'no kith folder {home} (KITH_HOME, else ~/kith): run kith init')
     dot = P['KITH_MACHINE']
     if dot == HOME / '.hq':
-        warn('this Mac\'s kith is still ~/.hq: kith migrate moves it to ~/.kith (everything works until then)')
+        warn('this Mac\'s kith is still ~/.hq: kith migrate run moves it to ~/.kith (everything works until then)')
     elif dot.is_dir() and not dot.is_symlink():
         ok(f'this Mac\'s kith: {dot}')
     else:
@@ -142,7 +155,7 @@ def backup():
     if any((HOME / f'Library/LaunchAgents/dev.{n}.backup.plist').exists() for n in ('kith', 'hq')):
         note('every night at 03:00 (dev.kith.backup, or dev.hq.backup before migrate; log logs/backup.log)')
     elif mark in ('✓', '!'):
-        warn('backups run only when you ask: kith backup --nightly runs them every night')
+        warn('backups run only when you ask: kith backup run --nightly runs them every night')
 
 
 def repos_and_agents():
@@ -199,6 +212,9 @@ def services():
     section('services')
     r = run(str(KITH / 'bin' / 'kith-auth'), 'ls')
     if r.returncode:
+        if 'moved to the Kith core' in (r.stderr + r.stdout) or 'moved to the core' in (r.stderr + r.stdout):
+            note('authority is switched to the core and it did not answer `kith-auth ls`, so the grants are not listed here')
+            return
         bad(f'kith-auth ls failed: {(r.stderr or r.stdout).strip()[:200]}')
         return
     agent, n = '', 0
@@ -215,12 +231,53 @@ def services():
         ok(f'{n} grant(s) checked')
 
 
+def core_profiles():
+    """On the tombstone: a profile that names no owner, on a service that is personal now. The core stores a new profile's
+    owner when it is written, so no owner means the service was not personal then. kith-auth reads such a profile as the
+    owner's (it asks the service now), but the host's `secrets.serviceKeys` reads it as shared with everyone who may use the
+    agent: the two disagree until the owner is named."""
+    body = {'viaSwitch': True, 'kernel': str(KITH), 'home': str(HOME),
+            'env': {k: os.environ[k] for k in ('KITH_STATE', 'HQ_STATE', 'KITH_HOME', 'HQ_HOME', 'KITH_AGENTS', 'HQ_AGENTS') if os.environ.get(k)}}
+    binary = kith_bin()
+    try:
+        r = subprocess.run([binary, 'kernel', 'core-call', 'people.secretsView', '--params-stdin'], input=json.dumps(body),
+                           capture_output=True, text=True, timeout=10) if binary else None
+        view = json.loads(r.stdout)['auth'] if r is not None and r.returncode == 0 else None
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        view = None
+    if not isinstance(view, dict):
+        note('the core did not answer people.secretsView, so the profiles\' owners were not checked')
+        return
+    owners = [p for p, v in (view.get('people') or {}).items() if v.get('owner')]
+    for name, prof in sorted((view.get('profiles') or {}).items()):
+        if prof.get('person') or '/' not in name:
+            continue
+        # the kernel's services first, then this Mac's (the host's connectors), as kith-auth's service_file finds them
+        spec = {}
+        for folder in (KITH / 'services', P['KITH_MACHINE'] / 'services'):
+            svc = folder / f'{name.split("/", 1)[0]}.json'
+            if svc.is_file():
+                try:
+                    spec = json.loads(svc.read_text())
+                except ValueError:
+                    spec = {}
+                break
+        if spec.get('personal', spec.get('kind') in ('login', 'browser')):
+            warn(f'profiles: {name} names no owner in the core, and {name.split("/", 1)[0]} is a personal service now: kith-auth reads it as '
+                 'the owner\'s, the host reads it as shared with everyone who may use its agents. Name the owner: kith rollback authority, '
+                 f'kith auth owner {name} {owners[0] if owners else "<you>"}, kith kernel core-migrate --authority --force, kith migrate step authority')
+
+
 def people():
     """The people tables in auth.json: rows and grants that name someone or something that isn't there, logins
     shared with everyone, free shells, and the Discord settings from before people."""
     section('people')
     try:
-        auth = json.loads(Path(os.environ.get('KITH_AUTH') or P['KITH_SECRETS'] / 'auth.json').read_text())
+        auth = kith_tombstone.load_json(Path(os.environ.get('KITH_AUTH') or P['KITH_SECRETS'] / 'auth.json'))
+    except kith_tombstone.Tombstoned:
+        note('authority is switched to the core (auth.json is a tombstone); `kith kernel cutover rollback authority` undoes it')
+        core_profiles()
+        return
     except FileNotFoundError:
         note('no auth.json yet')
         return
@@ -236,6 +293,31 @@ def people():
     if len(owners) != 1:
         bad(f'{len(owners)} owners in people ({", ".join(owners) or "none"}): kith auth person <you> owner')
     issues = 0
+    # data from before kith-auth refused it: may() checks the owner first, so such an owner (and their bots) still get in
+    # as the owner, while cut_off (chat, run tokens) refuses them. Same walk as kith-auth cut_off.
+    for pid in owners:
+        seen, cur, cut = set(), pid, False
+        while cur and cur not in seen and not cut:
+            cut = bool(folks.get(cur, {}).get('revoked'))
+            seen.add(cur)
+            cur = folks.get(cur, {}).get('bot_of')
+        if not cut and not folks[pid].get('bot_of'):
+            continue
+        issues += 1
+        bots = sorted(b for b, v in folks.items() if v.get('bot_of') == pid)
+        bot_txt = f' and their bots ({", ".join(bots)})' if bots else ''
+        if folks[pid].get('bot_of'):
+            parent = folks[pid]['bot_of']
+            # chat refuses only when some id up the bot_of chain is revoked (cut_off); otherwise the split is latent
+            chat = 'chat refuses them' if cut else f'if {parent} is ever revoked, chat would refuse them'
+            bad(f'people: {pid} is the owner and also a bot of {parent} (old data; a bot can\'t be made the owner now): '
+                f'kith-auth lets them in as the owner, and {chat}. Fix: kith auth person {pid} --rm '
+                f'(removes {pid}{bot_txt}), then kith auth person <you> owner')
+            continue
+        bad(f'people: {pid} is the owner and also revoked (old data): kith-auth still lets them and their bots in as the '
+            f'owner, while chat refuses them. If {pid} is you, the Mac\'s owner, on each Mac where kith doctor shows this: kith auth person {pid} --unrevoke. '
+            f'If not, in this order: kith auth person {pid} --rm (removes {pid}{bot_txt} for good; the id is retired), '
+            f'then kith auth person <you> owner')
     for agent, rows in members.items():
         if agent not in known:
             issues += 1
@@ -309,7 +391,7 @@ def plugin():
     if not have:
         bad('the kith plugin is not installed: run install.sh')
     elif 'kith@kith' not in installed:
-        warn('the plugin is still installed as hq@hq (subagents hq:<agent>): kith migrate, or install.sh, moves it to kith@kith')
+        warn('the plugin is still installed as hq@hq (subagents hq:<agent>): kith migrate run, or install.sh, moves it to kith@kith')
     elif have != want:
         warn(f'plugin {have} installed, the kernel has {want}: claude plugin install kith@kith (then restart sessions)')
     else:
@@ -435,16 +517,76 @@ def serve():
     ok(f'relay: {relay} (config.json)') if relay else ok('relay: built-in default (kith serve relay <url> to change)')
 
 
+def core():
+    """The core's daemon front: the daemon (pid, generation), its owner socket, the holder, and when no core can run, the verb
+    that recovers it. `kith kernel core-status` reads the lock file and asks the socket; it creates nothing and reads no database."""
+    section('kith core')
+    binary = kith_bin()
+    if not binary:
+        note('no kith program on this Mac yet: the Python kernel answers everything')
+        return
+    # Where kernel/bin/kith looks: beside the program's real path (install.sh links only `kith`), then beside the path as given.
+    stubs = [os.environ.get('KITH_STUB_BIN')] if os.environ.get('KITH_STUB_BIN') else \
+        [str(Path(os.path.realpath(binary)).parent / 'kith-stub'), str(Path(binary).parent / 'kith-stub')]
+    if any(os.access(s, os.X_OK) for s in stubs):
+        ok('conversation lock: kith-stub found, so each run holds its session\'s lock')
+    else:
+        warn('conversation lock: no kith-stub beside kith, so runs start unlocked (kith update self; KITH_REQUIRE_STUB=1 refuses instead)')
+    try:
+        # Reaching a daemon that is busy can take a minute; doctor asks for a few seconds (TimeoutExpired is a SubprocessError).
+        r = run(binary, 'kernel', 'core-status', '--json', timeout=5)
+        status = json.loads(r.stdout)
+    except subprocess.TimeoutExpired:
+        warn('the core did not answer `kith kernel core-status` in 5 seconds (a daemon that is busy or stuck)')
+        return
+    except (OSError, ValueError, subprocess.SubprocessError):
+        note('this kith program does not report on the core yet (kith update)')
+        return
+    c, d, h = status.get('core') or {}, status.get('daemon') or {}, status.get('holder')
+    if d.get('running'):
+        ok(f'core daemon: pid {d.get("pid")}, generation {d.get("generation")}, schema {d.get("schema_version")}, {d.get("served")} call(s) served')
+        ok(f'owner socket: {d.get("socket")}')
+    elif c.get('state') == 'down':
+        bad(f'{c.get("note")} Recover with: {c.get("recovery")}')
+    else:
+        note(c.get('note') or 'no daemon is running')
+    if c.get('mismatch'):
+        warn(c['mismatch'])
+    if c.get('last_start_problem') and not d.get('running'):
+        warn(f'the daemon did not start: {c["last_start_problem"]}')
+    if isinstance(h, dict):
+        state = h.get('state')
+        if state == 'connected':
+            ok(f'holder: instance {h.get("instance")}, pid {h.get("pid")}, {h.get("processes")} process(es)'
+               + (' (tied to the daemon\'s job: it ends with it)' if h.get('tied_to_starter') else ''))
+            if h.get('ending'):
+                warn(f'holder: {h.get("ending")} process(es) the core is ending are not gone yet; it keeps sending the kill (see the core log)')
+        elif state == 'absent':
+            note('holder: no kith-holder program beside kith (nothing uses a holder before M1)')
+        elif state == 'blocked':
+            warn(f'holder: blocked: {h.get("error")} (the daemon retries slowly and signals nothing). '
+                 'If that process is not the holder\'s any more, drop it from the record: kith holder forget <pid>')
+        elif state in ('unreachable',):
+            warn(f'holder: {h.get("error")} (the daemon retries; nothing uses a holder before M1)')
+        else:
+            note(f'holder: {state}')
+
+
 def main(argv):
     if '-h' in argv or '--help' in argv:
         print(__doc__.strip())
         return
-    for check in (folders, kith_version, migration, tools, repos_and_agents, services, people, plugin, jobs, serve):
+    global JSON
+    JSON = '--json' in argv
+    for check in (folders, kith_version, migration, tools, repos_and_agents, services, people, plugin, jobs, serve, core):
         try:
             check()
         except Exception as e:   # one broken check never hides the others
             bad(f'{check.__name__}: the check itself failed ({e!r})')
-    print(f'\n{len(BAD)} problem(s)' if BAD else '\nall good')
+    if JSON:
+        print(json.dumps({'ok': not BAD, 'problems': len(BAD), 'checks': CHECKS}))
+    else:
+        print(f'\n{len(BAD)} problem(s)' if BAD else '\nall good')
     sys.exit(1 if BAD else 0)
 
 

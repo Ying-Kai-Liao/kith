@@ -1,0 +1,10 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "state:home/.kith/live/ask/other.reg": "{\"chain\": \"z\", \"hop\": 0, \"cross_hops\": 0, \"cost\": 100.0}",
+  "state:home/.kith/live/ask/p.reg": "{\"chain\": \"c\", \"hop\": 1, \"cross_hops\": 0, \"cost\": 2.0}",
+  "state:home/.kith/live/ask/q.reg": "{\"chain\": \"c\", \"hop\": 2, \"cross_hops\": 0, \"cost\": 7.0}",
+  "step0.exit": "4\n",
+  "step0.stderr": "kith ask: delegation cost cap: chain c has spent US$9.00 of its US$5 cap; ask the user before starting another ask\n",
+  "step0.stdout": ""
+}

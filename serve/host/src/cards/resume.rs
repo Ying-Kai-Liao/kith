@@ -885,6 +885,8 @@ pub fn spawn_for(card: &Card, session: &str, note: &str) -> Spawn {
 
 fn spawn_with(agent: &str, person: &str, reply_to: Option<&str>, session: &str, note: &str) -> Spawn {
     let mut env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| crate::channels::run::inherited(k)).collect();
+    // The run starts from this empty environment: the conversation lock's launcher is named here, or the kernel refuses it.
+    env.extend(crate::kernel::stub_env());
     let mut set = |name: &str, v: &str| env.extend(crate::kernel::both(name, v));
     // The owner's session is the kernel's own kind of run (a wake), so its turn can still set waiters.
     set("VIA", if person.is_empty() { "wake" } else { "host" });

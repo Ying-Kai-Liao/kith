@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# kith-core-deps-check — the core crates (core/kernel, package kith-kernel; core/acp, package kith-acp) must stay light:
+# the CLI and the host both link them, so none of the host's server stack may come in through them
+# (docs/plans/core-design.md section 2, rule 6). kith-kernel stays sync (no tokio); kith-acp is the one async crate.
+# Fails when `cargo tree -p CRATE` (normal and build dependencies) lists a banned crate.
+#
+#   kernel/tests/kith-core-deps-check          needs cargo and the pinned toolchain; reads the host workspace's Cargo.lock
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd -P)"
+BANNED='axum|tower|tower-http|tokio|reqwest|ratatui|crossterm|kith-wire'
+
+fail=0
+check() { # CRATE BANNED-REGEX WHAT
+  local tree bad
+  tree=$(cd "$REPO/serve/host" && cargo tree -p "$1" -e normal,build --prefix none --locked 2>&1) \
+    || { echo "cargo tree failed:"; echo "$tree"; exit 1; }
+  bad=$(printf '%s\n' "$tree" | awk '{print $1}' | grep -E -x "$2" | sort -u)
+  if [[ -n $bad ]]; then
+    echo "$1 depends on crates the core must not use:"
+    printf '  %s\n' $bad
+    echo "see docs/plans/core-design.md section 2 (dependency rules)"
+    fail=1
+  else
+    echo "ok   $1 dependencies: $(printf '%s\n' "$tree" | sort -u | wc -l | tr -d ' ') crate(s), none banned"
+  fi
+}
+
+check kith-kernel "$BANNED"
+# kith-core (the sealed core runtime) links the kernel, so it keeps the kernel's rules: sync, no server stack.
+# The secrets envelope drives the OS key store through its own command line tool: no keyring or TLS stack comes in with it.
+check kith-core "$BANNED|keyring|openssl|openssl-sys"
+# kith-api (the method table) is serde_json and nothing else, not even another crate of this repo.
+check kith-api "$BANNED|kith-core|kith-kernel|kith-acp|kith-holder|kith-serve|kith-mem|kith-guest"
+# kith-acp is the one async crate (tokio is its job), but no server stack, HTTP client, UI or host-only crate.
+check kith-acp 'axum|tower|tower-http|reqwest|ratatui|crossterm|kith-wire|kith-mem|kith-guest|kith-serve'
+# kith-attach (the raw-mode attach client) stands on the holder's wire and platform layer only; Windows CI builds it alone.
+check kith-attach "$BANNED|kith-core|kith-kernel|kith-acp|kith-serve|kith-mem|kith-guest"
+exit $fail

@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'bc3ef31542338898f9e8fcf31b6cd9580a454ab13313c47abbae43585f12d071'
+export const CONTRACT_SHA256 = '98263f4dab0b900f53daf4ee5f6a9af81e8a02c4b97eb674d57fa292e411f863'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -216,6 +216,7 @@ export interface Bot {
   autoName: boolean
   tasks?: boolean | null
   hqAgent?: string | null
+  builtin?: boolean | null
   project?: string | null
   person?: string | null
   createdAt: number
@@ -234,6 +235,7 @@ export interface Bot {
   fastModeIssue?: string | null
   unread: number
   lastMessage?: string | null
+  lastSummary?: string | null
   lastAt: number
   botGuest?: BotGuestRef | null
 }
@@ -411,9 +413,11 @@ export interface BotInviteCreated {
   share: string
 }
 
-/** revoked is false when it already was. */
+/** revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host, and when nothing was sent to the core (a repeat remove, no kith-auth) or kith-auth itself failed. authUpdated is false when kith-auth failed to remove the person (auth.json may still hold it); absent otherwise. */
 export interface Revoked {
   revoked: boolean
+  coreUpdated?: boolean | null
+  authUpdated?: boolean | null
 }
 
 /** A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host. */
@@ -633,6 +637,8 @@ export interface SendParams {
   folder?: string | null
   clear?: boolean | null
   budget?: number | null
+  engine?: string | null
+  engineModel?: string | null
 }
 
 /** What `thread` takes. */
@@ -1253,7 +1259,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     KithInfo: { fields: { info: 'KithCard?', fetchedAt: 'int', error: 'string?' }, mayOmit: ['error'] },
     WorkingLane: { fields: { chat: 'string', thread: 'string?' } },
     BotGuestRef: { fields: { botId: 'string', name: 'string', provider: 'BotProvider', ownerPerson: 'string?', ownerName: 'string?' } },
-    Bot: { fields: { id: 'string', kind: 'BotKind', members: '[string]', labels: '[string]?', name: 'string', description: 'string', avatarColor: 'string', avatarShape: 'string', avatarSource: 'string', backend: 'string', command: 'string?', cwd: 'string?', permission: 'Permission', model: 'string?', modelOptions: '{string}', fastMode: 'bool', pinned: 'bool', position: 'int', hidden: 'bool', notify: 'bool?', connectors: '[string]', skills: '[string]', computer: 'bool', sharedMemory: 'bool?', harnessMemory: 'bool?', rowShowsSummary: 'bool', autoName: 'bool', tasks: 'bool?', hqAgent: 'string?', project: 'string?', person: 'string?', createdAt: 'int', managedWorkspace: 'bool', folder: 'json?', memoryRev: 'int?', workingLanes: '[WorkingLane]', rev: 'int', deleted: 'bool', status: 'BotStatus', activity: 'string', startedAt: 'int?', workingChat: 'string?', workingThread: 'string?', fastModeSupport: 'string', fastModeIssue: 'string?', unread: 'int', lastMessage: 'string?', lastAt: 'int', botGuest: 'BotGuestRef?' }, mayOmit: ['labels', 'command', 'cwd', 'folder', 'sharedMemory', 'memoryRev', 'tasks', 'hqAgent', 'project', 'person', 'botGuest'] },
+    Bot: { fields: { id: 'string', kind: 'BotKind', members: '[string]', labels: '[string]?', name: 'string', description: 'string', avatarColor: 'string', avatarShape: 'string', avatarSource: 'string', backend: 'string', command: 'string?', cwd: 'string?', permission: 'Permission', model: 'string?', modelOptions: '{string}', fastMode: 'bool', pinned: 'bool', position: 'int', hidden: 'bool', notify: 'bool?', connectors: '[string]', skills: '[string]', computer: 'bool', sharedMemory: 'bool?', harnessMemory: 'bool?', rowShowsSummary: 'bool', autoName: 'bool', tasks: 'bool?', hqAgent: 'string?', builtin: 'bool?', project: 'string?', person: 'string?', createdAt: 'int', managedWorkspace: 'bool', folder: 'json?', memoryRev: 'int?', workingLanes: '[WorkingLane]', rev: 'int', deleted: 'bool', status: 'BotStatus', activity: 'string', startedAt: 'int?', workingChat: 'string?', workingThread: 'string?', fastModeSupport: 'string', fastModeIssue: 'string?', unread: 'int', lastMessage: 'string?', lastSummary: 'string?', lastAt: 'int', botGuest: 'BotGuestRef?' }, mayOmit: ['labels', 'command', 'cwd', 'folder', 'sharedMemory', 'memoryRev', 'tasks', 'hqAgent', 'builtin', 'project', 'person', 'botGuest'] },
     BotAnswer: { fields: { bot: 'Bot' } },
     Entry: { fields: { id: 'string', seq: 'int', botId: 'string', threadId: 'string?', rev: 'int', kind: 'EntryKind', turn: 'int', data: 'json', createdAt: 'int', updatedAt: 'int' } },
     Entries: { fields: { entries: '[Entry]', folder: 'json?', conversation: 'RoomConversation?' }, mayOmit: ['folder', 'conversation'] },
@@ -1278,7 +1284,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     CallAccepted: { fields: { botId: 'string' } },
     Proven: { fields: { proven: 'bool' } },
     BotInviteCreated: { fields: { botId: 'string', inviteId: 'string', expiresAt: 'int', link: 'string', kithLink: 'string', share: 'string' } },
-    Revoked: { fields: { revoked: 'bool' } },
+    Revoked: { fields: { revoked: 'bool', coreUpdated: 'bool?', authUpdated: 'bool?' }, mayOmit: ['coreUpdated', 'authUpdated'] },
     BotLimits: { fields: { ratePerHour: 'int', concurrent: 'int', turnTimeoutS: 'int?', wakeProfile: 'string?' }, mayOmit: ['turnTimeoutS', 'wakeProfile'] },
     BotGuest: { fields: { botId: 'string', name: 'string', provider: 'BotProvider', state: 'BotGuestState', ownerPerson: 'string?', ownerName: 'string?', agents: '[string]', limits: 'BotLimits', connected: 'bool', createdAt: 'int', joinedAt: 'int?', decidedAt: 'int?', decidedBy: 'string?', lastSeenAt: 'int?', revokedAt: 'int?', revokedWhy: 'string?', personId: 'string?', conversations: 'json?' }, mayOmit: ['personId', 'conversations'] },
     BotGuests: { fields: { bots: '[BotGuest]' } },
@@ -1303,7 +1309,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HelloParams: { fields: {} },
     KithInfoParams: { fields: { botId: 'string', refresh: 'bool?' } },
     StartChatParams: { fields: { agent: 'string' } },
-    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?', budget: 'int?' } },
+    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?', budget: 'int?', engine: 'string?', engineModel: 'string?' } },
     ThreadParams: { fields: { botId: 'string', rootId: 'string' } },
     HistoryParams: { fields: { botId: 'string', beforeSeq: 'int?', limit: 'int?' } },
     NewSessionParams: { fields: { botId: 'string' } },

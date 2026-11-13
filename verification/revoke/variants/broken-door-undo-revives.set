@@ -1,0 +1,4 @@
+\* the core's swept rows, but an undo brings a swept door back (what DoorNoResurrect rules out)
+GuestDoor = TRUE
+CoreDoorHook = TRUE
+DoorUndoRevives = TRUE

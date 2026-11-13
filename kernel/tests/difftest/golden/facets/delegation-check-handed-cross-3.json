@@ -1,0 +1,7 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "step0.exit": "4\n",
+  "step0.stderr": "kith ask: delegation hop limit: this chain has already crossed to another Mac 2 times (at most 2); ask the user before starting another chain\n",
+  "step0.stdout": ""
+}

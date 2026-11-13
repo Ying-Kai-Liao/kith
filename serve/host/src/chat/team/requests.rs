@@ -13,7 +13,8 @@ use tokio::sync::watch;
 
 use super::{BotRequest, MAX_PENDING_MESSAGES};
 
-const MAX_REQUEST_HOPS: u8 = 8;
+/// A bot's chain of requests is as deep as the kernel lets a chain of asks go on one Mac.
+const MAX_REQUEST_HOPS: u8 = kith_kernel::delegation::MAX_LOCAL_HOPS;
 pub(super) const MAX_PENDING_MESSAGES_PER_SENDER: usize = 16;
 
 pub(super) struct Request {

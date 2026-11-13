@@ -5,7 +5,7 @@
     "version": 1,
     "agent": "echo",
     "agent_version": "3c920a46f5",
-    "harness": "gemini",
+    "harness": "frobnicator",
     "cwd": "/tmp/kith/work/alpha",
     "env": {
       "KITH_AGENT": "echo",
@@ -51,7 +51,7 @@
       "You echo."
     ],
     "backup": null,
-    "provider": "gemini",
+    "provider": "frobnicator",
     "account": null,
     "sandbox": "strict"
   }

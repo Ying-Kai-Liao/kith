@@ -8,7 +8,8 @@
       "home": "/tmp/kith/kith/agents/echo",
       "model": "opus",
       "effort": "high",
-      "harness": "claude"
+      "harness": "claude",
+      "builtin": false
     },
     {
       "name": "relay",
@@ -16,7 +17,17 @@
       "home": "/tmp/kith/kith/agents/relay",
       "model": null,
       "effort": null,
-      "harness": "codex"
+      "harness": "codex",
+      "builtin": false
+    },
+    {
+      "name": "scratch",
+      "description": "Built-in agent for quick chats. Each chat is its own thread; nothing is kept between chats.",
+      "home": "/tmp/kith/kith/state/agents/scratch",
+      "model": null,
+      "effort": null,
+      "harness": "claude",
+      "builtin": true
     }
   ]
 }

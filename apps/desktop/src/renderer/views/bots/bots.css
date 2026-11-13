@@ -478,3 +478,10 @@ button.member-row:hover {
 .colour-reset:disabled { opacity: 0.4; }
 .colour-note { margin: -6px 0 0; font-size: 12px; color: var(--kith-muted); text-align: center; }
 .look-row { display: inline-flex; align-items: center; gap: 8px; }
+.compose-engine {
+  margin: 0 12px 8px;
+}
+.compose-engine input {
+  flex: 1;
+  min-width: 0;
+}

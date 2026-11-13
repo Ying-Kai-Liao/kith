@@ -1,0 +1,132 @@
+//! Runs the engine as a child on Unix and holds the caller (and so the lock) until it is gone.
+//!
+//! The engine stays in the stub's process group, on purpose. The holder starts a terminal run in a pty with
+//! setsid + TIOCSCTTY, so the stub leads the session and the terminal's foreground group; an engine in that same
+//! group has the terminal already (no tcsetpgrp, no SIGTTOU games) and a `killpg(stub, KILL)` or an "is the group
+//! empty" check by the holder sees the engine too. An engine in a group of its own would survive that kill with the
+//! lock already free: two writers.
+//!
+//! Signals: Ctrl-C / Ctrl-\ from the keyboard reach the whole foreground group, so the engine gets them itself; the
+//! stub catches SIGINT and SIGQUIT with a handler that does nothing (not SIG_IGN, which the engine would inherit
+//! through exec; a handler is reset to the default there) so it outlives the engine's reaction to them. SIGTERM and
+//! SIGHUP sent to the stub alone are forwarded. SIGTSTP / SIGCONT stay at their defaults: a group stop stops both and
+//! the stub never exits while the engine lives, because it only returns from `waitpid` on the engine's exit.
+
+use std::ffi::OsString;
+use std::io::ErrorKind;
+use std::process::Command;
+use std::sync::atomic::{AtomicI32, Ordering};
+
+use libc::c_int;
+
+static CHILD: AtomicI32 = AtomicI32::new(0);
+/// A TERM/HUP that arrives before the engine's pid is stored; forwarded right after the spawn.
+static PENDING: AtomicI32 = AtomicI32::new(0);
+
+extern "C" fn forward(sig: c_int) {
+    let pid = CHILD.load(Ordering::Relaxed);
+    if pid > 0 {
+        // SAFETY: kill is async-signal-safe.
+        unsafe { libc::kill(pid, sig) };
+    } else {
+        PENDING.store(sig, Ordering::Relaxed);
+    }
+}
+
+extern "C" fn nothing(_: c_int) {}
+
+fn install(sig: c_int, handler: extern "C" fn(c_int)) {
+    // SAFETY: a zeroed sigaction with only handler and empty mask set; no SA_RESTART so waitpid sees EINTR.
+    unsafe {
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = handler as usize;
+        libc::sigemptyset(&mut sa.sa_mask);
+        libc::sigaction(sig, &sa, std::ptr::null_mut());
+    }
+}
+
+/// The engine, started and exec'd (std's `spawn` returns once the child has exec'd or failed to).
+pub struct Spawned(libc::pid_t);
+
+/// Starts the engine and returns its handle, or the stub's exit code when it cannot start. A resident stub calls this
+/// before it serves its control channel, so a take cannot land between the engine's fork and exec: until the exec the
+/// child still holds a copy of the lock file's open description, and a flock belongs to that description.
+pub fn spawn(engine: &[OsString]) -> Result<Spawned, i32> {
+    install(libc::SIGINT, nothing);
+    install(libc::SIGQUIT, nothing);
+    install(libc::SIGTERM, forward);
+    install(libc::SIGHUP, forward);
+
+    let mut cmd = Command::new(&engine[0]);
+    cmd.args(&engine[1..]);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        let stub = std::process::id() as libc::pid_t;
+        // If the stub is killed, the engine goes with it: no unguarded writer (macOS has no equivalent; there the
+        // holder's group kill is the safety net).
+        // SAFETY: prctl is async-signal-safe.
+        unsafe {
+            cmd.pre_exec(move || {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong);
+                // The stub may have died before the prctl took effect; then there is nobody left to guard the lock.
+                if libc::getppid() != stub {
+                    libc::_exit(1);
+                }
+                Ok(())
+            });
+        }
+    }
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("kith-stub: cannot start {:?}: {e}", engine[0]);
+            return Err(if e.kind() == ErrorKind::NotFound {
+                127
+            } else {
+                126
+            });
+        }
+    };
+    let pid = child.id() as libc::pid_t;
+    CHILD.store(pid, Ordering::Relaxed);
+    let pending = PENDING.load(Ordering::Relaxed);
+    if pending != 0 {
+        // SAFETY: kill has no preconditions beyond valid arguments.
+        unsafe { libc::kill(pid, pending) };
+    }
+    Ok(Spawned(pid))
+}
+
+pub fn run(engine: &[OsString]) -> i32 {
+    match spawn(engine) {
+        Ok(child) => wait(child),
+        Err(code) => code,
+    }
+}
+
+/// Holds until the engine is gone; the stub's exit code.
+pub fn wait(child: Spawned) -> i32 {
+    let pid = child.0;
+    loop {
+        let mut status: c_int = 0;
+        // SAFETY: status is a valid out pointer; pid is our child.
+        let r = unsafe { libc::waitpid(pid, &mut status, 0) };
+        if r < 0 {
+            if std::io::Error::last_os_error().kind() == ErrorKind::Interrupted {
+                continue;
+            }
+            eprintln!(
+                "kith-stub: wait failed: {}",
+                std::io::Error::last_os_error()
+            );
+            return 1;
+        }
+        if libc::WIFEXITED(status) {
+            return libc::WEXITSTATUS(status);
+        }
+        if libc::WIFSIGNALED(status) {
+            return 128 + libc::WTERMSIG(status);
+        }
+    }
+}

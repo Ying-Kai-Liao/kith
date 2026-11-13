@@ -569,6 +569,24 @@ async fn the_clock_cannot_expire_a_card_while_its_key_is_being_written() {
     assert_eq!(f.sets(), 1);
 }
 
+#[tokio::test]
+async fn a_withdrawal_waits_for_a_key_being_written() {
+    let f = Fake::new().await;
+    f.state(NONE);
+    f.ask("github").await;
+    let (card, _) = f.open();
+    let entry = card.entry_id.clone().unwrap();
+    let slot = Slot::take(&card.id).expect("the slot");
+    assert!(claimed(&card.id));
+    super::super::withdraw_entry(&f.r.hub, &entry);
+    super::super::delivered(&f.r.hub.store, &entry, false);
+    assert!(f.card(&card).state.open(), "a held slot keeps the closers off the card");
+    drop(slot);
+    assert!(!claimed(&card.id));
+    super::super::withdraw_entry(&f.r.hub, &entry);
+    assert_eq!(f.card(&card).state, CardState::Withdrawn);
+}
+
 // ---- respondPermission on a secret card
 
 #[tokio::test]

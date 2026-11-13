@@ -5,7 +5,7 @@
   kith ask <agent> -p ID "task"         ... in project ID's folder on this Mac (project-id --where), from anywhere
   kith ask <agent> -C DIR "task"        ... in DIR
   kith ask <agent> -c "follow-up"       continue the last conversation with that agent from this directory
-  kith ask ls                           the conversations kept, newest first
+  kith ask ls [--json]                  the conversations kept, newest first
   kith ask <agent>@<machine> "task"     an agent on another machine of yours, over ssh; the owner's runs only (kith remote --help)
   kith ask --bg <agent> [options] "task"  the same run in the background: prints an id at once and returns
   kith ask --to ID "message"            a follow-up to the --bg run ID: queued for its session (kith-wake) and delivered
@@ -109,8 +109,13 @@ def keep(key, value):
         tmp.replace(KEPT)
 
 
-def ls():
+def ls(as_json=False):
     kept = sorted(load().items(), key=lambda kv: kv[1].get('at', ''), reverse=True)
+    if as_json:
+        print(json.dumps({'conversations': [
+            {'key': key, 'agent': v.get('agent'), 'dir': key.split('|', 1)[-1], 'at': v.get('at'), 'turns': v.get('turns', 0),
+             'cost': v.get('cost', 0), 'last': v.get('last', '')} for key, v in kept]}, ensure_ascii=False))
+        return
     if not kept:
         print('no conversations yet: kith ask <agent> "task"')
     home = str(Path.home())
@@ -284,6 +289,54 @@ def settle(mid, cost, state=None):
             reg.update(state='capped' if tipped else state, answered_at=time.time())
         if tipped or state:
             write_reg(mid, reg)
+
+
+def mark_ended(mid, reg):
+    """Under box_locked: the end `kith ask --end` leaves: settled `stopped` and marked ended, a parked card has nothing to
+    resume, and what the mailbox holds counts as read."""
+    box(mid, 'parked').unlink(missing_ok=True)
+    reg.update(state='stopped', ended_at=time.time(), done=True, answered_at=reg.get('answered_at') or time.time())
+    write_reg(mid, reg)
+    box(mid, 'read').write_text(str(len(lines_of(mid))))
+
+
+def with_helpers(seeds, recs):
+    """Under box_locked: seeds (ids) and every open ask below them, all the way down the chain (an ask is below another when
+    its reply_to.ask is that one: a helper asking a helper). Ids already ended, delivered or answered are left out."""
+    out, todo = [], list(seeds)
+    while todo:
+        mid = todo.pop()
+        if mid in out:
+            continue
+        out.append(mid)
+        todo += [m for m, r in recs.items()
+                 if (r.get('reply_to') or {}).get('ask') == mid and not (r.get('ended_at') or r.get('delivered') or r.get('woke_answer'))]
+    return out
+
+
+def stop_record(mid):
+    """The call waiting on mid is being ended (kith-permit's helper wait ran out and sent SIGTERM to this process group): the
+    record is settled `stopped` and marked ended, as `kith ask --end` leaves it, so no answer wakes anyone afterwards. The asks
+    below it (a helper's own ask_helper call runs in a group of its own, out of reach of that signal) end the same way, and their
+    runs are stopped after the lock is let go. A record already answered or delivered stays as it is."""
+    with box_locked():
+        reg = read_reg(mid)
+        if not reg or reg.get('ended_at') or reg.get('delivered') or reg.get('woke_answer') or reg['state'] != 'open':
+            return
+        recs = records()
+        todo = []
+        for m in with_helpers([mid], recs):
+            r = recs[m] if m != mid else reg
+            if r.get('ended_at') or r.get('delivered') or r.get('woke_answer'):
+                continue
+            mark_ended(m, r)
+            if m != mid:
+                todo.append((m, r))
+    stop_runs(todo)
+
+
+def term_exits(signum, frame):
+    sys.exit(128 + signum)
 
 
 def cap_told(chain):
@@ -501,19 +554,30 @@ def descendants(pid):
     return out
 
 
-def stop_run(mid, reg):
-    """Stops the run behind mid if it still goes: the agent and what it started (the children of the kith ask process that
-    waits for it), then that process. Its pid is checked first, so a reused pid is left alone."""
+def run_victims(reg):
+    """The processes behind an ask's record: the agent and what it started (the children of the kith ask process that waits
+    for it), then that process, deepest first. Its pid is checked first, so a reused pid is left alone."""
     pid = reg.get('pid')
     if not pid or int(pid) == os.getpid() or not started_before(pid, reg.get('pid_at') or reg.get('at') or 0):
-        return False
-    victims = descendants(pid)[::-1] + [int(pid)]
+        return []
+    return descendants(pid)[::-1] + [int(pid)]
+
+
+def stop_runs(items):
+    """Stops the runs behind (mid, reg) pairs: TERM to every process of every run first, then one shared grace, then KILL for
+    whoever is still there (SIGTERM can be ignored or take its time, as kith-sessions finds). The wait is the same for one run
+    or fifty, which keeps `kith ask --end` and a helper wait's own grace inside their limits. Returns the ids stopped."""
+    stopped, victims = [], []
+    for mid, reg in items:
+        got = run_victims(reg)
+        if got:
+            stopped.append(mid)
+            victims += got
     for victim in victims:
         try:
             os.kill(victim, signal.SIGTERM)
         except OSError:
             pass
-    # SIGTERM can be ignored or take its time: whoever is still there after a short grace is killed, as kith-sessions does.
     deadline = time.time() + 2
     while time.time() < deadline and any(alive(v) for v in victims):
         time.sleep(0.1)
@@ -523,7 +587,7 @@ def stop_run(mid, reg):
                 os.kill(victim, signal.SIGKILL)
             except OSError:
                 pass
-    return True
+    return stopped
 
 
 def alive(pid):
@@ -545,7 +609,7 @@ def end_asks(sessions=(), persons=()):
     answered to its caller is history and stays. A record from before reply_to has no session and belongs to no lane, unless
     its caller's person is named. Returns the ids ended."""
     sessions, persons = set(sessions), set(persons)
-    ended, owed = [], set(sessions)
+    ended, owed, to_stop = [], set(sessions), []
     wake = wake_queue()
     with box_locked():
         for mid, reg in sorted(records().items()):
@@ -556,11 +620,8 @@ def end_asks(sessions=(), persons=()):
             mine = mine or (reg.get('person') in persons or job.get('person') in persons if persons else False)
             if not mine:
                 continue
-            stop_run(mid, reg)
-            box(mid, 'parked').unlink(missing_ok=True)
-            reg.update(state='stopped', ended_at=time.time(), done=True, answered_at=reg.get('answered_at') or time.time())
-            write_reg(mid, reg)
-            box(mid, 'read').write_text(str(len(lines_of(mid))))
+            to_stop.append((mid, reg))
+            mark_ended(mid, reg)
             ended.append(mid)
             if reg['reply_to'].get('session'):
                 owed.add(reg['reply_to']['session'])
@@ -568,11 +629,28 @@ def end_asks(sessions=(), persons=()):
                 owed.add(open(BG / (mid + '.sid')).read().strip())
             except OSError:
                 pass
+        recs = records()   # the asks below an ended one (a helper's own helper) end with it
+        for mid in with_helpers(ended, recs):
+            reg = recs[mid]
+            if mid in ended or reg.get('ended_at') or reg.get('delivered') or reg.get('woke_answer'):
+                continue
+            to_stop.append((mid, reg))
+            mark_ended(mid, reg)
+            ended.append(mid)
+    # The runs are stopped with the lock let go and the records already ended: a kith-ask answering TERM settles its own record
+    # (stop_record), which needs this lock, and sees ended_at. Holding it through the grace would cost every ask 2 s.
     owed.discard('')
-    for session in sorted(owed):
-        wake.withdraw(session)
-    if persons:
-        wake.withdraw_person(sorted(persons))
+
+    def withdraw():
+        for session in sorted(owed):
+            wake.withdraw(session)
+        if persons:
+            wake.withdraw_person(sorted(persons))
+    # Withdrawn before the runs are stopped as well as after: a --bg run that finishes while this goes on kicks a wake
+    # drain, and a follow-up it was owed must not be delivered after the end (kith-wake does not look at ended_at).
+    withdraw()
+    stop_runs(to_stop)
+    withdraw()
     return ended
 
 
@@ -859,7 +937,7 @@ def main(argv):
     if bg:
         argv = [a for a in argv if a != '--bg']
     if argv[0] == 'ls':
-        ls(); return 0
+        ls('--json' in argv[1:]); return 0
     if argv[0] == '--wait':
         return wait(argv[1:])
     if argv[0] == '--to':
@@ -902,14 +980,18 @@ def main(argv):
         # The record is made here (the hop caps and the cost cap apply before anything leaves); kith-remote sends the chain
         # along and settles the record with the other Mac's cost.
         mid = os.environ.pop('KITH_ASK_BG', None) or new_id('ask')
-        if read_reg(mid) is None:
-            open_record(mid, argv[0], crossing=True)
-        else:
-            claim_pid(mid)
         code = 1
+        signal.signal(signal.SIGTERM, term_exits)   # before the record exists: a TERM between the two leaves nothing open
         try:
+            if read_reg(mid) is None:
+                open_record(mid, argv[0], crossing=True)
+            else:
+                claim_pid(mid)
             code = subprocess.run([str(KITH / 'bin/kith-remote'), 'ask', *argv],
                                   env=dict(os.environ, KITH_ASK_RECORD=mid)).returncode
+        except BaseException:   # SIGTERM from the helper wait, or an interrupt: nothing answers into this record later
+            stop_record(mid)
+            raise
         finally:   # kith-remote settles a call it made; an early refusal or a crash must not leave the record open
             if code != 0:
                 settle(mid, 0, 'stopped')
@@ -990,32 +1072,43 @@ def main(argv):
     if bg_id:
         note_job(bg_id, agent, key)
         env['KITH_LAUNCH_SID_FILE'] = str(BG / (bg_id + '.sid'))
-    if read_reg(mid) is None:   # a --bg call made it when it began
-        open_record(mid, agent, brief=task)
-    elif bg_id:
-        claim_pid(mid)
-    # A run kith-remote started for another Mac's ask got its chain in KITH_ASK_*: the record holds it now, and the run's
-    # own asks find it through KITH_ASK_ID.
-    for k in ('KITH_ASK_CHAIN', 'KITH_ASK_HOP', 'KITH_ASK_CROSS', 'KITH_ASK_FROM', 'KITH_ASK_COST'):
-        env.pop(k, None)
-    env['KITH_LAUNCH_ASK_ID'] = mid
-    env['KITH_BACKUP_CHAIN'] = 'on'   # no host picks the account: bin/kith walks the account candidates (kith account pick)
-    proc = subprocess.run([str(KITH / 'bin/kith'), agent, *kith_opts, '--', task], env=env, stdin=subprocess.DEVNULL,
-                          capture_output=True, text=True)
-    if bg_id:
-        kick_wakes(job_session(bg_id, wait=0))
-    parked = box(mid, 'parked').exists()
+    # A SIGTERM from the helper wait ends this call and its record (stop_record). The handler is in place before the record
+    # exists and the guard holds through the last write of it, so no TERM in between leaves the record open. Once the call is
+    # parked on a card the record is meant to stay open: the guard lets go then.
+    signal.signal(signal.SIGTERM, term_exits)
+    guard = True
     try:
-        res = json.loads(proc.stdout)
-    except ValueError:
-        settle(mid, 0, None if parked else 'stopped')
-        sys.stderr.write((proc.stderr or proc.stdout or 'kith ask: %s gave no answer\n' % agent)[-3000:])
-        return proc.returncode or 1
-    # Not parked: the answer goes straight back to this call, so nothing is left for a wake. Parked: the card's answer comes.
-    settle(mid, res.get('total_cost_usd'), None if parked else ('stopped' if res.get('is_error') else 'answered'))
-    if not parked:
-        with box_locked():
-            patch_reg(mid, done=True, delivered=True)
+        if read_reg(mid) is None:   # a --bg call made it when it began
+            open_record(mid, agent, brief=task)
+        elif bg_id:
+            claim_pid(mid)
+        # A run kith-remote started for another Mac's ask got its chain in KITH_ASK_*: the record holds it now, and the run's
+        # own asks find it through KITH_ASK_ID.
+        for k in ('KITH_ASK_CHAIN', 'KITH_ASK_HOP', 'KITH_ASK_CROSS', 'KITH_ASK_FROM', 'KITH_ASK_COST'):
+            env.pop(k, None)
+        env['KITH_LAUNCH_ASK_ID'] = mid
+        env['KITH_BACKUP_CHAIN'] = 'on'   # no host picks the account: bin/kith walks the account candidates (kith account pick)
+        proc = subprocess.run([str(KITH / 'bin/kith'), agent, *kith_opts, '--', task], env=env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True)
+        if bg_id:
+            kick_wakes(job_session(bg_id, wait=0))
+        parked = box(mid, 'parked').exists()
+        guard = not parked
+        try:
+            res = json.loads(proc.stdout)
+        except ValueError:
+            settle(mid, 0, None if parked else 'stopped')
+            sys.stderr.write((proc.stderr or proc.stdout or 'kith ask: %s gave no answer\n' % agent)[-3000:])
+            return proc.returncode or 1
+        # Not parked: the answer goes straight back to this call, so nothing is left for a wake. Parked: the card's answer comes.
+        settle(mid, res.get('total_cost_usd'), None if parked else ('stopped' if res.get('is_error') else 'answered'))
+        if not parked:
+            with box_locked():
+                patch_reg(mid, done=True, delivered=True)
+    except BaseException:
+        if guard:
+            stop_record(mid)
+        raise
 
     sid, text = res.get('session_id'), res.get('result') or ''
     turns = (prev or {}).get('turns', 0) + 1

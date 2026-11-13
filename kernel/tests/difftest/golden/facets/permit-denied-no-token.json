@@ -1,0 +1,20 @@
+{
+  "fakes": "",
+  "state:home/.kith/run/once/r1/told-3d4820932a2a052f98497ad290af8f3d1b084850cdc25709a40694b048423c54": "<EPOCH>\n",
+  "state:home/serve/token": "fake-serve-token\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"PermissionDenied\",\n    \"retry\": true\n  }\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "",
+  "step3.exit": "0\n",
+  "step3.json": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"PreToolUse\",\n    \"permissionDecision\": \"deny\",\n    \"permissionDecisionReason\": \"Auto mode blocked this, and no card could be shown: this run has no way to reach the Kith app. Don't retry it or try another way around; tell the owner what you needed and why.\"\n  }\n}\n",
+  "step3.stderr": "",
+  "step4.exit": "0\n",
+  "step4.stderr": "",
+  "step4.stdout": ""
+}

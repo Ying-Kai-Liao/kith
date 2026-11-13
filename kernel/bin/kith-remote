@@ -4,6 +4,7 @@
   kith remote add NAME SSH-TARGET     a machine you can ssh into (e.g. mini you@mac-mini); checks it and lists its agents
   kith remote ls                      the machines, whether they answer, and their agents
   kith remote rm NAME                 forget one
+  add, ls and rm take --json: one object ({"ok": true, ...} / {"machines": [...]}), or {"ok": false, "error"} with the usual exit code
   kith ask AGENT@NAME [options] "task"   ask an agent there (the options of kith ask, plus --no-code); -c continues
 
 For your own machines only: it is plain ssh (over Tailscale, a LAN, anything your ssh config reaches), so it adds no
@@ -46,6 +47,9 @@ ask = importlib.util.module_from_spec(importlib.util.spec_from_loader('kith_ask'
 _loader.exec_module(ask)  # conversations are kept with kith ask's
 SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ControlMaster=auto',
        '-o', 'ControlPath=~/.ssh/hq-%C', '-o', 'ControlPersist=120']
+
+
+JSON = False   # add / ls / rm --json: the handlers return the object to print instead of printing text
 
 
 def remotes():
@@ -109,11 +113,23 @@ def add(name, target):
     r = remotes()
     r[name] = {'ssh': target, 'kith': kith}
     save_remotes(r)
+    if JSON:
+        return {'ok': True, 'name': name, 'ssh': target, 'kith': kith,
+                'agents': [l.split()[0] for l in agents.splitlines() if l.strip()]}
     print('%s → %s (%s)\n%s' % (name, target, kith, agents))
 
 
 def ls():
     r = remotes()
+    if JSON:
+        out = []
+        for name, m in r.items():
+            p = rsh(m['ssh'], shlex.quote(m['kith']) + ' ls', check=False)
+            up = p.returncode == 0
+            out.append({'name': name, 'ssh': m['ssh'], 'kith': m['kith'], 'reachable': up,
+                        'agents': [l.split()[0] for l in p.stdout.strip().splitlines() if l.strip()] if up else [],
+                        'error': None if up else p.stderr.strip()[-120:]})
+        return {'machines': out}
     if not r:
         print('no machines yet: kith remote add <name> <ssh target>')
     for name, m in r.items():
@@ -344,6 +360,23 @@ def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip()); return 0
     cmd, rest = argv[0], argv[1:]
+    if cmd in ('add', 'ls', 'rm') and '--json' in rest:
+        global JSON
+        JSON = True
+        rest = [a for a in rest if a != '--json']
+        try:
+            if cmd == 'add' and len(rest) == 2: out = add(*rest)
+            elif cmd == 'ls' and not rest: out = ls()
+            elif cmd == 'rm' and len(rest) == 1:
+                r = remotes(); had = rest[0] in r; r.pop(rest[0], None); save_remotes(r)
+                out = {'ok': True, 'name': rest[0], 'removed': had}
+            else: sys.exit('kith remote: usage: kith remote add NAME SSH-TARGET | ls | rm NAME [--json]')
+        except SystemExit as e:
+            msg = e.code if isinstance(e.code, str) else 'failed'
+            print(json.dumps({'ok': False, 'error': msg.removeprefix('kith remote: ')}))
+            return e.code if isinstance(e.code, int) else 1
+        print(json.dumps(out))
+        return 0
     if cmd == 'add' and len(rest) == 2: return add(*rest)
     if cmd == 'ls': return ls()
     if cmd == 'rm' and len(rest) == 1:

@@ -1,0 +1,2035 @@
+[
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "* * * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692860000,
+      "utc": "2026-11-03T08:01:00+00:00",
+      "local": "2026-11-03T08:01:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "*/15 * * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793693700000,
+      "utc": "2026-11-03T08:15:00+00:00",
+      "local": "2026-11-03T08:15:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "5/15 * * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793693100000,
+      "utc": "2026-11-03T08:05:00+00:00",
+      "local": "2026-11-03T08:05:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0,30 9-17 * * 1-5",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00",
+      "local": "2026-11-03T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * 0",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1794128400000,
+      "utc": "2026-11-08T09:00:00+00:00",
+      "local": "2026-11-08T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * 7",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1794128400000,
+      "utc": "2026-11-08T09:00:00+00:00",
+      "local": "2026-11-08T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * 5-7",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793955600000,
+      "utc": "2026-11-06T09:00:00+00:00",
+      "local": "2026-11-06T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * 0-7",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00",
+      "local": "2026-11-03T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 13 * 5",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793955600000,
+      "utc": "2026-11-06T09:00:00+00:00",
+      "local": "2026-11-06T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 13 * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1794560400000,
+      "utc": "2026-11-13T09:00:00+00:00",
+      "local": "2026-11-13T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 29 2 *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1835395200000,
+      "utc": "2028-02-29T00:00:00+00:00",
+      "local": "2028-02-29T00:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 31 4 *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "CronScheduler time search limit exceeded."
+    },
+    "validate": "CronScheduler time search limit exceeded."
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "59 23 31 12 *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1798761540000,
+      "utc": "2026-12-31T23:59:00+00:00",
+      "local": "2026-12-31T23:59:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 1 1 *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1798761600000,
+      "utc": "2027-01-01T00:00:00+00:00",
+      "local": "2027-01-01T00:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * MON-FRI",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00",
+      "local": "2026-11-03T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * JAN *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1798794000000,
+      "utc": "2027-01-01T09:00:00+00:00",
+      "local": "2027-01-01T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 12 * * 6,7",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1794052800000,
+      "utc": "2026-11-07T12:00:00+00:00",
+      "local": "2026-11-07T12:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "*/0 * * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "Component error: Step cannot be zero."
+    },
+    "validate": "invalid cron expression: Component error: Step cannot be zero."
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "60 * * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "Component error: Number out of bounds."
+    },
+    "validate": "invalid cron expression: Component error: Number out of bounds."
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 * 13 *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "Component error: Number out of bounds."
+    },
+    "validate": "invalid cron expression: Component error: Number out of bounds."
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "5-1 * * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "Component error: Range out of bounds."
+    },
+    "validate": "invalid cron expression: Component error: Range out of bounds."
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "1-2-3 * * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "Component error: Invalid range syntax."
+    },
+    "validate": "invalid cron expression: Component error: Invalid range syntax."
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "x y z a b",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "Pattern contains illegal characters: CronPattern contains illegal character 'X' in part 'X'"
+    },
+    "validate": "invalid cron expression: Pattern contains illegal characters: CronPattern contains illegal character 'X' in part 'X'"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "* * * * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692801000,
+      "utc": "2026-11-03T08:00:01+00:00",
+      "local": "2026-11-03T08:00:01+00:00"
+    },
+    "validate": "use a five-field cron expression"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 L * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1795996800000,
+      "utc": "2026-11-30T00:00:00+00:00",
+      "local": "2026-11-30T00:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 * * 5#2",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1794528000000,
+      "utc": "2026-11-13T00:00:00+00:00",
+      "local": "2026-11-13T00:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "@hourly",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00",
+      "local": "2026-11-03T09:00:00+00:00"
+    },
+    "validate": "use a five-field cron expression"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "@daily",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793750400000,
+      "utc": "2026-11-04T00:00:00+00:00",
+      "local": "2026-11-04T00:00:00+00:00"
+    },
+    "validate": "use a five-field cron expression"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "@midnight",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "Invalid pattern: Pattern must have between 5 and 7 fields."
+    },
+    "validate": "use a five-field cron expression"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "@weekly",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1794096000000,
+      "utc": "2026-11-08T00:00:00+00:00",
+      "local": "2026-11-08T00:00:00+00:00"
+    },
+    "validate": "use a five-field cron expression"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "@monthly",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1796083200000,
+      "utc": "2026-12-01T00:00:00+00:00",
+      "local": "2026-12-01T00:00:00+00:00"
+    },
+    "validate": "use a five-field cron expression"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "@yearly",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1798761600000,
+      "utc": "2027-01-01T00:00:00+00:00",
+      "local": "2027-01-01T00:00:00+00:00"
+    },
+    "validate": "use a five-field cron expression"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "CronPattern cannot be an empty string."
+    },
+    "validate": "use a five-field cron expression"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 29 2 *",
+      "timeZone": "UTC"
+    },
+    "after": 1803859200000,
+    "afterUtc": "2027-03-01T00:00:00+00:00",
+    "answer": {
+      "next": 1835395200000,
+      "utc": "2028-02-29T00:00:00+00:00",
+      "local": "2028-02-29T00:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1798761570000,
+    "afterUtc": "2026-12-31T23:59:30+00:00",
+    "answer": {
+      "next": 1798761600000,
+      "utc": "2027-01-01T00:00:00+00:00",
+      "local": "2027-01-01T00:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 8 * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793694600000,
+    "afterUtc": "2026-11-03T08:30:00+00:00",
+    "answer": {
+      "next": 1793781000000,
+      "utc": "2026-11-04T08:30:00+00:00",
+      "local": "2026-11-04T08:30:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 8 * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793694599000,
+    "afterUtc": "2026-11-03T08:29:59+00:00",
+    "answer": {
+      "next": 1793694600000,
+      "utc": "2026-11-03T08:30:00+00:00",
+      "local": "2026-11-03T08:30:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 8 * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793694600001,
+    "afterUtc": "2026-11-03T08:30:00.001+00:00",
+    "answer": {
+      "next": 1793781000001,
+      "utc": "2026-11-04T08:30:00.001+00:00",
+      "local": "2026-11-04T08:30:00.001+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Asia/Taipei"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793754000000,
+      "utc": "2026-11-04T01:00:00+00:00",
+      "local": "2026-11-04T09:00:00+08:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Asia/Taipei"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790490000000,
+      "utc": "2026-09-27T06:20:00+00:00",
+      "local": "2026-09-27T14:20:00+08:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Asia/Kolkata"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793763000000,
+      "utc": "2026-11-04T03:30:00+00:00",
+      "local": "2026-11-04T09:00:00+05:30"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Asia/Kolkata"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790499000000,
+      "utc": "2026-09-27T08:50:00+00:00",
+      "local": "2026-09-27T14:20:00+05:30"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Asia/Kathmandu"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793762100000,
+      "utc": "2026-11-04T03:15:00+00:00",
+      "local": "2026-11-04T09:00:00+05:45"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Asia/Kathmandu"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790498100000,
+      "utc": "2026-09-27T08:35:00+00:00",
+      "local": "2026-09-27T14:20:00+05:45"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Europe/London"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00",
+      "local": "2026-11-03T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Europe/London"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790515200000,
+      "utc": "2026-09-27T13:20:00+00:00",
+      "local": "2026-09-27T14:20:00+01:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Europe/Berlin"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793779200000,
+      "utc": "2026-11-04T08:00:00+00:00",
+      "local": "2026-11-04T09:00:00+01:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Europe/Berlin"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790511600000,
+      "utc": "2026-09-27T12:20:00+00:00",
+      "local": "2026-09-27T14:20:00+02:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793714400000,
+      "utc": "2026-11-03T14:00:00+00:00",
+      "local": "2026-11-03T09:00:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "America/New_York"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790533200000,
+      "utc": "2026-09-27T18:20:00+00:00",
+      "local": "2026-09-27T14:20:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "America/Los_Angeles"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793725200000,
+      "utc": "2026-11-03T17:00:00+00:00",
+      "local": "2026-11-03T09:00:00-08:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "America/Los_Angeles"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790544000000,
+      "utc": "2026-09-27T21:20:00+00:00",
+      "local": "2026-09-27T14:20:00-07:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "America/Sao_Paulo"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793707200000,
+      "utc": "2026-11-03T12:00:00+00:00",
+      "local": "2026-11-03T09:00:00-03:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "America/Sao_Paulo"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790529600000,
+      "utc": "2026-09-27T17:20:00+00:00",
+      "local": "2026-09-27T14:20:00-03:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Australia/Sydney"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793743200000,
+      "utc": "2026-11-03T22:00:00+00:00",
+      "local": "2026-11-04T09:00:00+11:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Australia/Sydney"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790482800000,
+      "utc": "2026-09-27T04:20:00+00:00",
+      "local": "2026-09-27T14:20:00+10:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Australia/Lord_Howe"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793743200000,
+      "utc": "2026-11-03T22:00:00+00:00",
+      "local": "2026-11-04T09:00:00+11:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Australia/Lord_Howe"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790481000000,
+      "utc": "2026-09-27T03:50:00+00:00",
+      "local": "2026-09-27T14:20:00+10:30"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Pacific/Auckland"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793736000000,
+      "utc": "2026-11-03T20:00:00+00:00",
+      "local": "2026-11-04T09:00:00+13:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Pacific/Auckland"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790472000000,
+      "utc": "2026-09-27T01:20:00+00:00",
+      "local": "2026-09-27T14:20:00+13:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Pacific/Kiritimati"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793732400000,
+      "utc": "2026-11-03T19:00:00+00:00",
+      "local": "2026-11-04T09:00:00+14:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Pacific/Kiritimati"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790468400000,
+      "utc": "2026-09-27T00:20:00+00:00",
+      "local": "2026-09-27T14:20:00+14:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "UTC"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00",
+      "local": "2026-11-03T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "UTC"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790518800000,
+      "utc": "2026-09-27T14:20:00+00:00",
+      "local": "2026-09-27T14:20:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Etc/GMT+5"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793714400000,
+      "utc": "2026-11-03T14:00:00+00:00",
+      "local": "2026-11-03T09:00:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "20 14 * * 0",
+      "timeZone": "Etc/GMT+5"
+    },
+    "after": 1790424000000,
+    "afterUtc": "2026-09-26T12:00:00+00:00",
+    "answer": {
+      "next": 1790536800000,
+      "utc": "2026-09-27T19:20:00+00:00",
+      "local": "2026-09-27T14:20:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "Mars/Olympus"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "invalid time zone: failed to parse timezone"
+    },
+    "validate": "invalid IANA time zone: failed to parse timezone"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": ""
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "invalid time zone: failed to parse timezone"
+    },
+    "validate": "invalid IANA time zone: failed to parse timezone"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "utc"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "invalid time zone: failed to parse timezone"
+    },
+    "validate": "invalid IANA time zone: failed to parse timezone"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "EST"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793714400000,
+      "utc": "2026-11-03T14:00:00+00:00",
+      "local": "2026-11-03T09:00:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 2 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1772884800000,
+    "afterUtc": "2026-03-07T12:00:00+00:00",
+    "answer": {
+      "next": 1772953200000,
+      "utc": "2026-03-08T07:00:00+00:00",
+      "local": "2026-03-08T03:00:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 2 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1772971200000,
+    "afterUtc": "2026-03-08T12:00:00+00:00",
+    "answer": {
+      "next": 1773037800000,
+      "utc": "2026-03-09T06:30:00+00:00",
+      "local": "2026-03-09T02:30:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 2 8 3 *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1767225600000,
+    "afterUtc": "2026-01-01T00:00:00+00:00",
+    "answer": {
+      "next": 1772953200000,
+      "utc": "2026-03-08T07:00:00+00:00",
+      "local": "2026-03-08T03:00:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "59 1 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1772884800000,
+    "afterUtc": "2026-03-07T12:00:00+00:00",
+    "answer": {
+      "next": 1772953140000,
+      "utc": "2026-03-08T06:59:00+00:00",
+      "local": "2026-03-08T01:59:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 3 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1772884800000,
+    "afterUtc": "2026-03-07T12:00:00+00:00",
+    "answer": {
+      "next": 1772953200000,
+      "utc": "2026-03-08T07:00:00+00:00",
+      "local": "2026-03-08T03:00:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "*/30 * * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1772952300000,
+    "afterUtc": "2026-03-08T06:45:00+00:00",
+    "answer": {
+      "next": 1772953200000,
+      "utc": "2026-03-08T07:00:00+00:00",
+      "local": "2026-03-08T03:00:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 1 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793448000000,
+    "afterUtc": "2026-10-31T12:00:00+00:00",
+    "answer": {
+      "next": 1793511000000,
+      "utc": "2026-11-01T05:30:00+00:00",
+      "local": "2026-11-01T01:30:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 1 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793511900000,
+    "afterUtc": "2026-11-01T05:45:00+00:00",
+    "answer": {
+      "next": 1793601000000,
+      "utc": "2026-11-02T06:30:00+00:00",
+      "local": "2026-11-02T01:30:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 1 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793512800000,
+    "afterUtc": "2026-11-01T06:00:00+00:00",
+    "answer": {
+      "next": 1793514600000,
+      "utc": "2026-11-01T06:30:00+00:00",
+      "local": "2026-11-01T01:30:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 1 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793515500000,
+    "afterUtc": "2026-11-01T06:45:00+00:00",
+    "answer": {
+      "next": 1793601000000,
+      "utc": "2026-11-02T06:30:00+00:00",
+      "local": "2026-11-02T01:30:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 * * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793507400000,
+    "afterUtc": "2026-11-01T04:30:00+00:00",
+    "answer": {
+      "next": 1793509200000,
+      "utc": "2026-11-01T05:00:00+00:00",
+      "local": "2026-11-01T01:00:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 * * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793511000000,
+    "afterUtc": "2026-11-01T05:30:00+00:00",
+    "answer": {
+      "next": 1793516400000,
+      "utc": "2026-11-01T07:00:00+00:00",
+      "local": "2026-11-01T02:00:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 * * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793514600000,
+    "afterUtc": "2026-11-01T06:30:00+00:00",
+    "answer": {
+      "next": 1793516400000,
+      "utc": "2026-11-01T07:00:00+00:00",
+      "local": "2026-11-01T02:00:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 0 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793502000000,
+    "afterUtc": "2026-11-01T03:00:00+00:00",
+    "answer": {
+      "next": 1793505600000,
+      "utc": "2026-11-01T04:00:00+00:00",
+      "local": "2026-11-01T00:00:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793534400000,
+    "afterUtc": "2026-11-01T12:00:00+00:00",
+    "answer": {
+      "next": 1793541600000,
+      "utc": "2026-11-01T14:00:00+00:00",
+      "local": "2026-11-01T09:00:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 1 * * *",
+      "timeZone": "Europe/London"
+    },
+    "after": 1774699200000,
+    "afterUtc": "2026-03-28T12:00:00+00:00",
+    "answer": {
+      "next": 1774746000000,
+      "utc": "2026-03-29T01:00:00+00:00",
+      "local": "2026-03-29T02:00:00+01:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 1 * * *",
+      "timeZone": "Europe/London"
+    },
+    "after": 1792843200000,
+    "afterUtc": "2026-10-24T12:00:00+00:00",
+    "answer": {
+      "next": 1792888200000,
+      "utc": "2026-10-25T00:30:00+00:00",
+      "local": "2026-10-25T01:30:00+01:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 1 * * *",
+      "timeZone": "Europe/London"
+    },
+    "after": 1792889100000,
+    "afterUtc": "2026-10-25T00:45:00+00:00",
+    "answer": {
+      "next": 1792978200000,
+      "utc": "2026-10-26T01:30:00+00:00",
+      "local": "2026-10-26T01:30:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 2 * * *",
+      "timeZone": "Australia/Sydney"
+    },
+    "after": 1791028800000,
+    "afterUtc": "2026-10-03T12:00:00+00:00",
+    "answer": {
+      "next": 1791043200000,
+      "utc": "2026-10-03T16:00:00+00:00",
+      "local": "2026-10-04T03:00:00+11:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 2 * * *",
+      "timeZone": "Australia/Sydney"
+    },
+    "after": 1775304000000,
+    "afterUtc": "2026-04-04T12:00:00+00:00",
+    "answer": {
+      "next": 1775316600000,
+      "utc": "2026-04-04T15:30:00+00:00",
+      "local": "2026-04-05T02:30:00+11:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "45 1 * * *",
+      "timeZone": "Australia/Lord_Howe"
+    },
+    "after": 1791028800000,
+    "afterUtc": "2026-10-03T12:00:00+00:00",
+    "answer": {
+      "next": 1791040500000,
+      "utc": "2026-10-03T15:15:00+00:00",
+      "local": "2026-10-04T01:45:00+10:30"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * 0",
+      "timeZone": "America/New_York"
+    },
+    "after": 1772841600000,
+    "afterUtc": "2026-03-07T00:00:00+00:00",
+    "answer": {
+      "next": 1772974800000,
+      "utc": "2026-03-08T13:00:00+00:00",
+      "local": "2026-03-08T09:00:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 * * 0",
+      "timeZone": "America/New_York"
+    },
+    "after": 1772978400000,
+    "afterUtc": "2026-03-08T14:00:00+00:00",
+    "answer": {
+      "next": 1773579600000,
+      "utc": "2026-03-15T13:00:00+00:00",
+      "local": "2026-03-15T09:00:00-04:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "cron",
+      "expression": "0 9 31 * *",
+      "timeZone": "America/New_York"
+    },
+    "after": 1793491200000,
+    "afterUtc": "2026-11-01T00:00:00+00:00",
+    "answer": {
+      "next": 1798725600000,
+      "utc": "2026-12-31T14:00:00+00:00",
+      "local": "2026-12-31T09:00:00-05:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 1
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692801000,
+      "utc": "2026-11-03T08:00:01+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 59
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692859000,
+      "utc": "2026-11-03T08:00:59+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 60
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692860000,
+      "utc": "2026-11-03T08:01:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 3600
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 86400
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793779200000,
+      "utc": "2026-11-04T08:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 31536000
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1825228800000,
+      "utc": "2027-11-03T08:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 0
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692800000,
+      "utc": "2026-11-03T08:00:00+00:00"
+    },
+    "validate": "interval must be between 1 second and 365 days"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": -1
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692799000,
+      "utc": "2026-11-03T07:59:59+00:00"
+    },
+    "validate": "interval must be between 1 second and 365 days"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 31536001
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1825228801000,
+      "utc": "2027-11-03T08:00:01+00:00"
+    },
+    "validate": "interval must be between 1 second and 365 days"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 9223372036854775807
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "error": "interval overflow"
+    },
+    "validate": "interval must be between 1 second and 365 days"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "interval",
+      "seconds": 86400
+    },
+    "after": 1772884800000,
+    "afterUtc": "2026-03-07T12:00:00+00:00",
+    "answer": {
+      "next": 1772971200000,
+      "utc": "2026-03-08T12:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "once",
+      "at": 1793692801000
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692801000,
+      "utc": "2026-11-03T08:00:01+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "once",
+      "at": 1793692800000
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": null
+    },
+    "validate": "one-time trigger must be in the future"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "once",
+      "at": 1793692799000
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": null
+    },
+    "validate": "one-time trigger must be in the future"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "once",
+      "at": 1798761600000
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1798761600000,
+      "utc": "2027-01-01T00:00:00+00:00"
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "once",
+      "at": 0
+    },
+    "after": 0,
+    "afterUtc": "1970-01-01T00:00:00+00:00",
+    "answer": {
+      "next": null
+    },
+    "validate": "one-time trigger must be in the future"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "webhook"
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": null
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "event",
+      "source": "github",
+      "event": "*",
+      "filters": {
+        "repo": "a/b"
+      }
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": null
+    },
+    "validate": "ok"
+  },
+  {
+    "op": "next",
+    "trigger": {
+      "type": "event",
+      "source": "nope",
+      "event": "*",
+      "filters": {}
+    },
+    "after": 1793692800000,
+    "afterUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": null
+    },
+    "validate": "unsupported event source"
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 60
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793692800000,
+    "nowUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793692860000,
+      "utc": "2026-11-03T08:01:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 3600
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793692800000,
+    "nowUtc": "2026-11-03T08:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 60
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793692830000,
+    "nowUtc": "2026-11-03T08:00:30+00:00",
+    "answer": {
+      "next": 1793692860000,
+      "utc": "2026-11-03T08:01:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 3600
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793692830000,
+    "nowUtc": "2026-11-03T08:00:30+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 60
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793692860000,
+    "nowUtc": "2026-11-03T08:01:00+00:00",
+    "answer": {
+      "next": 1793692920000,
+      "utc": "2026-11-03T08:02:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 3600
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793692860000,
+    "nowUtc": "2026-11-03T08:01:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 60
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793696399000,
+    "nowUtc": "2026-11-03T08:59:59+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 3600
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793696399000,
+    "nowUtc": "2026-11-03T08:59:59+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 60
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793779200000,
+    "nowUtc": "2026-11-04T08:00:00+00:00",
+    "answer": {
+      "next": 1793779260000,
+      "utc": "2026-11-04T08:01:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 3600
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793779200000,
+    "nowUtc": "2026-11-04T08:00:00+00:00",
+    "answer": {
+      "next": 1793782800000,
+      "utc": "2026-11-04T09:00:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 60
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793689200000,
+    "nowUtc": "2026-11-03T07:00:00+00:00",
+    "answer": {
+      "next": 1793692860000,
+      "utc": "2026-11-03T08:01:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 3600
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793689200000,
+    "nowUtc": "2026-11-03T07:00:00+00:00",
+    "answer": {
+      "next": 1793696400000,
+      "utc": "2026-11-03T09:00:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "interval",
+      "seconds": 0
+    },
+    "due": 1793692800000,
+    "dueUtc": "2026-11-03T08:00:00+00:00",
+    "now": 1793693100000,
+    "nowUtc": "2026-11-03T08:05:00+00:00",
+    "answer": {
+      "error": "invalid interval"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 8 * * *",
+      "timeZone": "UTC"
+    },
+    "due": 1793694600000,
+    "dueUtc": "2026-11-03T08:30:00+00:00",
+    "now": 1793694600000,
+    "nowUtc": "2026-11-03T08:30:00+00:00",
+    "answer": {
+      "next": 1793781000000,
+      "utc": "2026-11-04T08:30:00+00:00",
+      "local": "2026-11-04T08:30:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 8 * * *",
+      "timeZone": "UTC"
+    },
+    "due": 1793694600000,
+    "dueUtc": "2026-11-03T08:30:00+00:00",
+    "now": 1793908800000,
+    "nowUtc": "2026-11-05T20:00:00+00:00",
+    "answer": {
+      "next": 1793953800000,
+      "utc": "2026-11-06T08:30:00+00:00",
+      "local": "2026-11-06T08:30:00+00:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "cron",
+      "expression": "*/15 * * * *",
+      "timeZone": "Asia/Taipei"
+    },
+    "due": 1793694600000,
+    "dueUtc": "2026-11-03T08:30:00+00:00",
+    "now": 1793694660000,
+    "nowUtc": "2026-11-03T08:31:00+00:00",
+    "answer": {
+      "next": 1793695500000,
+      "utc": "2026-11-03T08:45:00+00:00",
+      "local": "2026-11-03T16:45:00+08:00"
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "once",
+      "at": 1793694600000
+    },
+    "due": 1793694600000,
+    "dueUtc": "2026-11-03T08:30:00+00:00",
+    "now": 1793694601000,
+    "nowUtc": "2026-11-03T08:30:01+00:00",
+    "answer": {
+      "next": null
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "webhook"
+    },
+    "due": 1793694600000,
+    "dueUtc": "2026-11-03T08:30:00+00:00",
+    "now": 1793694601000,
+    "nowUtc": "2026-11-03T08:30:01+00:00",
+    "answer": {
+      "next": null
+    }
+  },
+  {
+    "op": "advance",
+    "trigger": {
+      "type": "cron",
+      "expression": "30 1 * * *",
+      "timeZone": "America/New_York"
+    },
+    "due": 1793511000000,
+    "dueUtc": "2026-11-01T05:30:00+00:00",
+    "now": 1793513400000,
+    "nowUtc": "2026-11-01T06:10:00+00:00",
+    "answer": {
+      "next": 1793514600000,
+      "utc": "2026-11-01T06:30:00+00:00",
+      "local": "2026-11-01T01:30:00-05:00"
+    }
+  }
+]

@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+# kith-scratch-check — the built-in `scratch` agent (kernel/agents/scratch): works on an install with no agents, is marked
+# built in in the listings, is never backed up or shared, runs on the engine and model each chat picks (and a resumed thread
+# keeps them), and `kith scratch keep <thread> <name>` makes a real agent of a thread. Fake claude/codex/gh on PATH, a
+# throwaway HOME and KITH_HOME: the real ~/.kith, GitHub and logins are never touched.
+#
+#   kernel/tests/kith-scratch-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-scratch-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_MODEL KITH_EFFORT KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME KITH_SERVE_HOME
+mkdir -p "$HOME/.claude/projects/x" "$HOME/.codex" "$KITH_HOME/state" "$T/bin"
+export KITH_STATE=$KITH_HOME/state KITH_SERVE_DB=$T/serve.db
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+
+# Fake claude (a run prints its arguments), codex, and gh (logged in as "tester"; every call is recorded).
+cat > "$T/bin/claude" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+  "--version "*) echo "2.1.309 (Claude Code)" ;;
+  "plugin list") echo '[]' ;;
+  *) echo "claude-run $*" ;;
+esac
+EOF
+printf '#!/bin/sh\necho "codex-run $*"\n' > "$T/bin/codex"
+cat > "$T/bin/gh" <<'EOF'
+#!/bin/sh
+echo "$*" >> "$GH_LOG"
+case "$1 $2" in
+  "api user") echo tester ;;
+  "config get") echo tester ;;
+esac
+exit 0
+EOF
+chmod +x "$T/bin/claude" "$T/bin/codex" "$T/bin/gh"
+export PATH=$T/bin:$PATH GH_LOG=$T/gh.log
+touch "$HOME/.claude/.fake-login" "$HOME/.codex/.fake-login" "$GH_LOG"
+
+KITH=$KERNEL/bin/kith
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+# jq-like: py EXPR reads the JSON in $OUT as d.
+py() { OUT=$OUT EXPR=$1 python3 -c 'import json,os,sys; d=json.loads(os.environ["OUT"]); r=eval(os.environ["EXPR"]); print(*r if isinstance(r, tuple) else [r])'; }
+is() { [ "$(py "$1")" = "$2" ]; }
+SUM=$KERNEL/agents/scratch/agent.md
+
+# --- no agents installed, no install step ----------------------------------------------------------------------------
+check "the built-in ships in the kernel" "[ -f '$SUM' ]"
+OUT=$("$KITH" scratch --launch-json 2>/dev/null)
+check "kith scratch --launch-json resolves on an install with no agents" "is 'd[\"agent\"], d[\"harness\"]' 'scratch claude'"
+OUT=$("$KITH" ls --json 2>/dev/null)
+check "kith ls --json lists scratch, marked built in" "is '[(a[\"name\"], a[\"builtin\"]) for a in d]' \"[('scratch', True)]\""
+check "kith ls says built in" "\"$KITH\" ls 2>/dev/null | grep -q 'scratch.*(built in)'"
+OUT=$("$KITH" scratch --launch-json 2>/dev/null)
+OUT=$("$KITH" scratch --launch-json 2>/dev/null)
+check "scratch is not pre-approved to write long-term memory" "is '\"agents/scratch/memory/**\" in json.dumps(d[\"settings\"])' False"
+"$KITH" scratch hi >/dev/null 2>&1
+check "a scratch run leaves no long-term memory behind" "[ -z \"\$(find '$KITH_STATE/agents/scratch/memory' -type f 2>/dev/null)\" ]"
+sum_before=$(cksum < "$SUM")
+
+# --- engine and model per chat, agent.md untouched ---------------------------------------------------------------------
+OUT=$("$KITH" scratch -H codex -m gpt-5 --launch-json 2>/dev/null)
+check "-H codex -m gpt-5: the chat runs on codex with that model" "is 'd[\"harness\"], d[\"model\"]' 'codex gpt-5'"
+OUT=$(KITH_HARNESS=codex "$KITH" scratch --launch-json 2>/dev/null)
+check "KITH_HARNESS=codex picks the engine too" "is 'd[\"harness\"]' 'codex'"
+OUT=$("$KITH" scratch -H codex -m opus --launch-json 2>/dev/null)
+check "a Claude model never reaches codex (B0 guard)" "is 'd[\"harness\"], d[\"model\"]' 'codex None'"
+OUT=$("$KITH" scratch -m haiku --launch-json 2>/dev/null)
+check "-m haiku on the default engine" "is 'd[\"harness\"], d[\"model\"]' 'claude haiku'"
+check "none of that edited agent.md" "[ \"\$(cksum < '$SUM')\" = \"$sum_before\" ]"
+"$KITH" set harness codex >/dev/null 2>&1; "$KITH" scratch set harness codex >/dev/null 2>"$T/err"; rc=$?
+check "kith scratch set harness is refused (per-chat choice, not a persistent one)" "[ $rc != 0 ] && grep -q 'built in' '$T/err' && [ \"\$(cksum < '$SUM')\" = \"$sum_before\" ]"
+
+# --- a thread keeps its engine and model --------------------------------------------------------------------------------
+tag() { printf '{"session_id":"%s"}' "$1" | KITH_AGENT=${5:-scratch} KITH_MODEL=$2 KITH_PROVIDER=$3 KITH_EFFORT=$4 KITH_AGENT_VERSION=v "$KERNEL/bin/kith-cost" tag; }
+tag t-claude haiku claude "" ; tag t-codex gpt-5 codex "" ; tag t-other sonnet claude "" other
+printf '{"cwd":"%s"}\n' "$T" > "$HOME/.claude/projects/x/t-claude.jsonl"
+OUT=$("$KITH" scratch thread t-claude --json 2>/dev/null)
+check "kith scratch thread: harness and model from the ledger" "is 'd[\"harness\"], d[\"model\"], d[\"summary\"]' 'claude haiku False'"
+OUT=$("$KITH" scratch thread t-codex --json 2>/dev/null)
+check "kith scratch thread: a codex thread" "is 'd[\"harness\"], d[\"model\"]' 'codex gpt-5'"
+"$KITH" scratch thread t-other >/dev/null 2>&1
+check "kith scratch thread: another agent's thread is refused" "[ $? != 0 ]"
+"$KITH" scratch thread nope >/dev/null 2>&1
+check "kith scratch thread: an unknown thread is refused" "[ $? != 0 ]"
+OUT=$("$KITH" scratch --resume t-claude hi 2>/dev/null)
+check "resume keeps the thread's model" "echo \"\$OUT\" | grep -q -- '--model haiku' && echo \"\$OUT\" | grep -q -- '--resume t-claude'"
+OUT=$("$KITH" scratch -m sonnet --resume t-claude hi 2>/dev/null)
+check "resume with -m overrides it" "echo \"\$OUT\" | grep -q -- '--model sonnet'"
+
+# --- never backed up, never shared ------------------------------------------------------------------------------------
+git -C "$KITH_STATE" init -q && git -C "$KITH_STATE" commit -qm init --allow-empty
+printf "store/\nlive/\n*.db\n" > "$KITH_STATE/.git/info/exclude"   # what the real state .gitignore keeps out; agents/ it does not
+mkdir -p "$KITH_STATE/agents/scratch/memory" && echo "a fact" > "$KITH_STATE/agents/scratch/memory/MEMORY.md"
+OUT=$("$KERNEL/bin/kith-state" backup --json 2>/dev/null)
+check "backup --json: scratch is not a piece" "is '[p[\"name\"] for p in d]' \"['state']\""
+"$KITH" backup --yes >"$T/out" 2>&1
+check "backup makes no repo for scratch and pushes nothing of it" "! grep -q agent-scratch '$GH_LOG' && grep -q 'repo create' '$GH_LOG'"
+check "the state repo does not hold scratch's folder" "! git -C '$KITH_STATE' ls-files | grep -q scratch"
+"$KITH" share scratch >"$T/out" 2>&1; rc=$?
+check "kith share scratch is refused, saying why" "[ $rc != 0 ] && grep -q 'built in and never shared' '$T/out' && grep -q 'keep <thread> <name>' '$T/out'"
+"$KITH" share scratch --public >"$T/out" 2>&1; rc=$?
+check "kith share scratch --public too" "[ $rc != 0 ] && grep -q 'built in and never shared' '$T/out'"
+
+# --- keep as an agent ---------------------------------------------------------------------------------------------------
+python3 - "$KITH_SERVE_DB" <<'EOF'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.execute('create table entries (id text, bot_id text, thread_id text)')
+c.execute('create table thread_summaries (thread_id text, text text, links text, covered_seq int, written_at int)')
+c.execute("insert into thread_summaries values ('t-claude', 'Planning a week of cheap dinners: budget, shopping list, leftovers. More lines: one.', '[]', 1, 1)")
+c.commit()
+EOF
+OUT=$("$KITH" scratch keep t-claude dinner-pal --json 2>"$T/err"); rc=$?
+D=$KITH_HOME/agents/dinner-pal/role
+check "keep --json says what it made" "[ $rc = 0 ] && is 'd[\"agent\"], d[\"harness\"], d[\"model\"], d[\"from_summary\"]' 'dinner-pal claude haiku True' && is 'd[\"dir\"] == \"$D\"' True"
+check "keep: the summary's first sentence is the description" "grep -q '^description: Planning a week of cheap dinners' '$D/agent.md'"
+check "keep: agent.md carries the summary as a first draft" "grep -q 'budget, shopping list, leftovers' '$D/agent.md'"
+check "keep: the thread's model is in agent.md" "grep -q '^model: haiku' '$D/agent.md'"
+check "keep: a normal agent (own repo, committed)" "[ -n \"\$(git -C '$D' log --oneline)\" ]"
+OUT=$("$KITH" dinner-pal --launch-json 2>/dev/null)
+check "keep: it is pre-approved for memory like any agent (the control for scratch's check)" "is '\"agents/dinner-pal/memory/**\" in json.dumps(d[\"settings\"])' True"
+OUT=$("$KITH" ls --json 2>/dev/null)
+check "keep: it lists as a normal agent, not built in" "is '{a[\"name\"]: a[\"builtin\"] for a in d}' \"{'dinner-pal': False, 'scratch': True}\""
+OUT=$("$KERNEL/bin/kith-state" backup --json 2>/dev/null)
+check "keep: the new agent is backed up like any other" "is 'sorted(p[\"name\"] for p in d)' \"['dinner-pal', 'state']\""
+"$KITH" scratch keep t-claude dinner-pal >/dev/null 2>"$T/err"; rc=$?
+check "keep twice with the same name refuses the second" "[ $rc != 0 ] && grep -q 'already an agent' '$T/err'"
+"$KITH" scratch keep t-claude scratch >/dev/null 2>"$T/err"; rc=$?
+check "keep onto the built-in's own name refuses" "[ $rc != 0 ] && grep -q 'already an agent' '$T/err'"
+"$KITH" scratch keep nope other-pal >/dev/null 2>&1; rc=$?
+check "keep of an unknown thread refuses and makes nothing" "[ $rc != 0 ] && [ ! -e '$KITH_HOME/agents/other-pal' ]"
+"$KITH" scratch keep t-claude 'Bad Name' >/dev/null 2>&1; rc=$?
+check "keep with a bad name refuses and makes nothing" "[ $rc != 0 ]"
+OUT=$("$KITH" scratch keep t-codex code-pal --json 2>/dev/null)
+check "keep of a codex thread: codex and its model, no summary needed" "is 'd[\"harness\"], d[\"model\"], d[\"from_summary\"]' 'codex gpt-5 False' && grep -q '^harness: codex' '$KITH_HOME/agents/code-pal/role/agent.md' && grep -q '^model: gpt-5' '$KITH_HOME/agents/code-pal/role/agent.md'"
+OUT=$("$KITH" scratch keep t-claude opus-pal -H codex -m opus --json 2>/dev/null)
+check "keep -H codex -m opus: the Claude model is dropped (B0)" "is 'd[\"harness\"], d[\"model\"]' 'codex None'"
+
+# --- an app thread: its id is the host's root entry id, the ledger knows only the harness session -----------------------
+# The summary is keyed by the app's thread id, the cost ledger by the session; --session names the second.
+tag s-app-1 sonnet claude ""
+python3 - "$KITH_SERVE_DB" <<'EOF'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.execute("insert into thread_summaries values ('root-7', 'Sorting out a trip budget. More: one.', '[]', 1, 1)")
+# The host's own record of whose chat a thread is in: root-7 is scratch's, root-9 another agent's (both have a summary).
+c.execute('create table bots (id text, deleted int, config text)')
+c.execute("insert into bots values ('b-scratch', 0, '{\"hqAgent\": \"scratch\"}'), ('b-other', 0, '{\"hqAgent\": \"other\"}')")
+c.execute("insert into entries values ('root-7', 'b-scratch', null), ('root-9', 'b-other', null)")
+c.execute("insert into thread_summaries values ('root-9', 'Another agent talks money. More: two.', '[]', 1, 1)")
+c.commit()
+EOF
+"$KITH" scratch thread root-9 >/dev/null 2>&1
+check "app thread: a summary alone does not make another agent's thread scratch's" "[ $? != 0 ]"
+OUT=$("$KITH" scratch thread root-7 --json 2>/dev/null)
+check "app thread: the summary alone knows it, but not its engine" "is 'd[\"harness\"], d[\"summary\"]' 'None True'"
+OUT=$("$KITH" scratch thread root-7 --session s-app-1 --json 2>/dev/null)
+check "app thread: --session finds the engine in the ledger" "is 'd[\"harness\"], d[\"model\"], d[\"summary\"]' 'claude sonnet True'"
+"$KITH" scratch thread root-8 --session s-app-1 >/dev/null 2>&1
+check "app thread: a session alone makes a thread known (a chat with no summary yet)" "[ $? = 0 ]"
+"$KITH" scratch thread root-8 --session nope-1 >/dev/null 2>&1
+check "app thread: neither id known is refused" "[ $? != 0 ]"
+"$KITH" scratch thread root-8 --session s-app-1 --session >/dev/null 2>&1
+check "app thread: --session needs a value" "[ $? = 2 ]"
+OUT=$("$KITH" scratch keep root-7 trip-pal --session s-app-1 --json 2>/dev/null)
+check "keep of an app thread: summary by thread id, engine by session" "is 'd[\"agent\"], d[\"harness\"], d[\"model\"], d[\"from_summary\"]' 'trip-pal claude sonnet True'"
+OUT=$("$KITH" scratch keep root-8 young-pal -H claude -m opus --session s-app-1 --json 2>/dev/null)
+check "keep of an app thread with no summary yet: the session and the host's engine are enough" "is 'd[\"agent\"], d[\"model\"], d[\"from_summary\"]' 'young-pal opus False'"
+
+# --- a user's own agent called scratch is an ordinary agent --------------------------------------------------------------
+mkdir -p "$KITH_HOME/agents/scratch/role"
+printf -- '---\nname: scratch\ndescription: mine\n---\nMine.\n' > "$KITH_HOME/agents/scratch/role/agent.md"
+git -C "$KITH_HOME/agents/scratch/role" init -q && git -C "$KITH_HOME/agents/scratch/role" add -A && git -C "$KITH_HOME/agents/scratch/role" commit -qm init
+OUT=$("$KITH" ls --json 2>/dev/null)
+check "the user's scratch wins and is not built in" "is '[a[\"builtin\"] for a in d if a[\"name\"] == \"scratch\"]' '[False]'"
+OUT=$("$KERNEL/bin/kith-state" backup --json 2>/dev/null)
+check "the user's scratch is backed up like any agent" "is '\"scratch\" in [p[\"name\"] for p in d]' True"
+"$KITH" share scratch >"$T/out" 2>&1
+check "share does not call the user's scratch built in" "! grep -q 'built in' '$T/out'"
+
+[ $fails = 0 ] && echo "all ok" || { echo "$fails failed"; exit 1; }

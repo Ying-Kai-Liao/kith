@@ -42,8 +42,10 @@ Auto mode (Claude Code's classifier stands in for the prompt) has no prompt, so 
 run in auto mode, bin/kith adds two hooks: `denied` (PermissionDenied) sends the host the same requestPermission line with
 "autoMode": {"reason": the classifier's} and waits the live window; the owner's card says Allow once, Always allow or Deny
 (serve/host/src/cards/autoallow.rs; Always allow is saved through `kith allow`, lib/kith_allowed.py). On a yes `denied` writes a
-one-shot for that exact call into the run's own folder and answers retry: true, and `once` (PreToolUse) lets the retried call
-through, once: a PreToolUse allow beats the classifier (tried with claude 2.1.316, also against a hard_deny rule). A denial
+hint for that exact call into the run's own folder and answers retry: true, and `once` (PreToolUse) lets the retried call
+through, once, when the host agrees: the host keeps the yes (runauth.rs, per run) and `once` asks `consumeOnce` over the same ask
+socket to use it up. The file alone allows nothing, since the run can write there itself. A host restart loses the yes, so the
+retry is refused. A PreToolUse allow beats the classifier (tried with claude 2.1.316, also against a hard_deny rule). A denial
 with no verdict ("Auto mode could not evaluate ...", "Classifier unavailable") gets no card, since retry is ignored for it.
 No token, no host, no answer: nothing is printed and the denial stands. Only the owner's ask token is used, never a guest's.
 
@@ -60,7 +62,7 @@ Which token: a guest run has KITH_RUN_TOKEN and KITH_RUN_SOCKET (the host gave t
 and KITH_ASK_SOCKET (the host gave them, or `issue` got them for a run kith started itself). Secrets and logins are
 never carded: the host denies them at once. What the agent is told: kernel/skills/kith-guests/SKILL.md.
 """
-import hashlib, json, os, re, shutil, socket, subprocess, sys, time
+import hashlib, json, os, re, shutil, signal, socket, subprocess, sys, time
 
 SERVER, TOOL = 'kithpermit', 'approve'
 # The host waits its live window (default 90 s, at most 600) before it answers; a little longer than that.
@@ -212,6 +214,7 @@ def report_bug(a, env=os.environ):
 
 HELPER = 'ask_helper'
 HELPER_WAIT_S = 900
+HELPER_GRACE_S = 3   # TERM to KILL, when the wait runs out
 
 
 def helper_def():
@@ -224,6 +227,35 @@ def helper_def():
                             'properties': {'agent': {'type': 'string', 'description': 'the helper agent, e.g. personal'},
                                            'task': {'type': 'string', 'description': 'what to ask it, self-contained'}},
                             'required': ['agent', 'task']}}
+
+
+def run_helper(argv, env):
+    """Runs kith-ask in a process group of its own and waits HELPER_WAIT_S for it. A wait that runs out ends the whole group
+    (kith-ask, the bin/kith run under it, the engine and whatever those started), not just the one process: TERM first, which
+    kith-ask answers by settling its ask record `stopped` (no answer wakes anyone later), then KILL for whoever is still
+    there after HELPER_GRACE_S. Raises subprocess.TimeoutExpired then."""
+    p = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=HELPER_WAIT_S)
+    except subprocess.TimeoutExpired:
+        # communicate() leaves the child unreaped, so p.pid (the group's id) is still ours
+        for sig, wait in ((signal.SIGTERM, HELPER_GRACE_S), (signal.SIGKILL, None)):
+            try:
+                os.killpg(p.pid, sig)
+            except OSError:
+                pass
+            try:
+                p.communicate(timeout=wait or HELPER_GRACE_S)   # after KILL a grandchild that kept the pipes open must not hold us
+                break
+            except subprocess.TimeoutExpired:
+                pass
+        try:   # the leader may have gone on TERM with a grandchild left; the group id outlives the leader while any member runs
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        raise
+    return subprocess.CompletedProcess(argv, p.returncode, out, err)
 
 
 def ask_helper(a, env=os.environ):
@@ -243,8 +275,7 @@ def ask_helper(a, env=os.environ):
     if refused:
         return refused
     try:
-        r = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-ask'), agent, '--', task],
-                           env=child, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=HELPER_WAIT_S)
+        r = run_helper([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-ask'), agent, '--', task], child)
     except subprocess.TimeoutExpired:
         return '%s did not answer in time; carry on without it.' % agent
     except OSError as e:
@@ -463,8 +494,22 @@ def denied(raw, once_dir, env=os.environ):
     return RETRY
 
 
-def once(raw, once_dir):
-    """The PreToolUse hook's output: allow (and use up the one-shot) when this exact call was approved; refuse it with the
+ONCE_WAIT_S = 4
+
+
+def host_allows(tool, tool_input, env):
+    """Whether the host still holds the yes for this call (the card's Allow once), and uses it up. The file `denied` left is
+    only a hint that there may be one: the yes lives in the host, so a file the run wrote itself allows nothing. No token,
+    no socket, no answer: no."""
+    if not (env.get('KITH_ASK_TOKEN') and env.get('KITH_ASK_SOCKET')):
+        return False
+    reply = call_host('consumeOnce', {'tool': tool, 'input': tool_input},
+                      {k: env[k] for k in ('KITH_ASK_TOKEN', 'KITH_ASK_SOCKET')}, timeout=ONCE_WAIT_S)
+    return bool(reply) and reply.get('ok') is True and reply.get('allowed') is True
+
+
+def once(raw, once_dir, env=os.environ):
+    """The PreToolUse hook's output: allow (and use up the host's yes) when this exact call was approved and `denied` left its hint; refuse it with the
     reason when `denied` left a note for its retry a moment ago; else ''."""
     d = hook_input(raw)
     if not d or d.get('hook_event_name') != 'PreToolUse':
@@ -476,6 +521,8 @@ def once(raw, once_dir):
             body = f.read().split()
         os.unlink(path)
         if body[1:] == ['short'] and time.time() - float(body[0]) > SHORT_ONCE_S:
+            return ''
+        if not host_allows(d['tool_name'], d['tool_input'], env):
             return ''
     except (OSError, ValueError):
         note = os.path.join(once_dir, 'note-' + key)
