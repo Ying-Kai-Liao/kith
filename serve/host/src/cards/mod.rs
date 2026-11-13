@@ -763,6 +763,21 @@ pub fn withdraw_person(hub: &Hub, person: &str, agent: Option<&str>) {
     }
 }
 
+/// `kith ask` runs ended (Stop, a revoke, a timeout, the end of a chain): the open cards they parked on are withdrawn, and a
+/// waiting call is told so. The ask is gone, so nobody is told of an answer (no `tell_asker`). A secret card being written
+/// is left to its own steps (see `delivered`).
+pub fn withdraw_asks(hub: &Hub, ended: &[&str]) {
+    for card in hub.store.cards_open_all() {
+        if !card.reply_to.as_deref().is_some_and(|ask| ended.contains(&ask)) || secret::claimed(&card.id) {
+            continue;
+        }
+        if hub.store.card_withdraw(&card.id).unwrap_or(false) {
+            deliver(&card.id, &Verdict::Deny("The request that asked for this was stopped.".into()));
+            close_entry(hub, &card, "cancelled");
+        }
+    }
+}
+
 /// Past their deadline, cards expire: silence is no (A1).
 pub fn sweep(hub: &Hub) {
     expire(hub, now_ms());

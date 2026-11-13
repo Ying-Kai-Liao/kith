@@ -89,14 +89,29 @@ pub fn decide_within(
 }
 
 /// The card outlived its live window and the run is ending its turn on it: the `kith ask` that started the run
-/// (`KITH_ASK_ID`) gets "waiting" and the card's later answer instead of this turn's words (kith-ask).
-fn park(env: &Env, kernel: &Path) {
+/// (`KITH_ASK_ID`) gets "waiting" and the card's later answer instead of this turn's words (kith-ask). The marker is written
+/// under the ask box's lock (kith-ask's `box_locked`), so it cannot land between the steps of an end, and not at all once the
+/// ask has been ended: nothing is left to resume.
+pub(super) fn park(env: &Env, kernel: &Path) {
+    use fs2::FileExt as _;
     let mid = env.get("KITH_ASK_ID").unwrap_or_default();
     if !is_ask_id(mid) {
         return;
     }
     let boxed = env.paths(kernel).machine.join("live/ask");
-    if std::fs::create_dir_all(&boxed).is_ok() {
-        let _ = std::fs::write(boxed.join(format!("{mid}.parked")), "");
+    let Ok(()) = std::fs::create_dir_all(&boxed) else {
+        return;
+    };
+    let Ok(lock) = std::fs::File::create(boxed.join(".lock")) else {
+        return;
+    };
+    if lock.lock_exclusive().is_err() {
+        return;
     }
+    if crate::delegation::read_reg(&boxed, mid)
+        .is_some_and(|r| crate::delegation::truthy(r.get("ended_at")))
+    {
+        return;
+    }
+    let _ = std::fs::write(boxed.join(format!("{mid}.parked")), "");
 }
