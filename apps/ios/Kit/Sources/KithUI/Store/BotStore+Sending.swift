@@ -40,15 +40,16 @@ extension BotStore {
 
     /// Transfer to the outbox now; an eventual acknowledgement must not erase a newer draft.
     @discardableResult
-    func sendComposerDraft(to botId: String, thread: String? = nil, files: [OutgoingFile] = [], newTask: Bool = false,
-                           start: FolderChoice? = nil, budget: Int? = nil) -> Bool {
+    /// `into`: the task the main chat's box points at (its root as the thread); the draft stays the main chat's.
+    func sendComposerDraft(to botId: String, thread: String? = nil, into: String? = nil, files: [OutgoingFile] = [],
+                           newTask: Bool = false, start: FolderChoice? = nil, budget: Int? = nil) -> Bool {
         let typed = composerDraft(for: botId, thread: thread)
         guard !retired, !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { return false }
         // A reply quotes its message; with nothing typed (files only) there is nothing to attach it to.
         let quote = thread == nil ? replyQuotes[botId].flatMap(ReplyQuote.line(of:)) : nil
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? typed : ReplyQuote.compose(quote: quote, text: typed)
         let pasted = composerPasted[composerKey(botId, thread)] ?? []
-        send(text, to: botId, thread: thread, nonce: UUID().uuidString, files: files, pasted: pasted, newTask: newTask,
+        send(text, to: botId, thread: thread ?? into, nonce: UUID().uuidString, files: files, pasted: pasted, newTask: newTask,
              start: start, budget: budget)
         replyQuotes[botId] = nil
         setComposerDraft("", for: botId, thread: thread)

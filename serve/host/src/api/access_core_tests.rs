@@ -64,6 +64,27 @@ impl Core {
         core
     }
 
+    /// The rig's own auth.json, stepped for real (`kith migrate step authority`: import, same answer, marker, tombstone),
+    /// then a daemon on the core it made, switched on. Nothing is put in by hand: the core holds what the file held.
+    pub(super) fn start_stepped(r: &Rig) -> Self {
+        let tmp = Tmp::new();
+        let home = r.dir.join("home");
+        let mut folders = folders(&tmp.path().join("machine"));
+        // the file kith-auth wrote is the rig's (`KITH_AUTH`), and the agents are the rig's
+        folders.secrets.clone_from(&r.dir);
+        folders.agents = home.join("agents");
+        let kernel = home.join("kernel");
+        let said = crate::core_front::step_authority_for_test(&folders, &kernel).expect("the step");
+        assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
+        let env = json!({"KITH_AGENTS": home.join("agents").to_string_lossy()});
+        let data = Arc::new(CoreData::new(folders, home, kernel, env.as_object().unwrap().clone()));
+        let daemon = crate::core_front::serve_for_test(&data.folders);
+        *crate::api::authority::TEST_AUTH_FILE.lock().unwrap() = Some(r.dir.join("auth.json"));
+        let core = Self { tmp, daemon: Some(daemon), data };
+        core.on();
+        core
+    }
+
     pub(super) fn ask(&self, method: &str, mut params: Value) -> Option<Value> {
         params["home"] = self.data.home.to_str().unwrap().into();
         params["kernel"] = self.data.kernel.to_str().unwrap().into();
@@ -426,10 +447,12 @@ async fn a_tombstone_file_is_what_switches_the_host_and_taking_it_away_switches_
     std::fs::remove_file(&auth).unwrap();
     std::fs::write(&auth, r#"{"people": {}}"#).unwrap();
     assert!(!super::authority::switched());
-    // An auth.json that exists but can't be read is not "not a tombstone": it fails closed.
+    // An auth.json that exists but can't be read is neither: no access, and never the core (M1, 2026-11-06).
     std::fs::remove_file(&auth).unwrap();
     std::fs::create_dir(&auth).unwrap();
-    assert!(super::authority::switched());
+    assert!(!super::authority::switched() && !super::authority::switched_now());
+    assert!(!super::authority::guard_on_core(), "an unreadable file is not handed to the core");
+    assert!(matches!(super::authority::Selected::now(), super::authority::Selected::Closed));
     std::fs::remove_dir(&auth).unwrap();
     assert!(!super::authority::switched(), "missing is the unswitched rules");
 }
@@ -798,4 +821,61 @@ async fn a_revoke_the_core_could_not_finish_is_told_to_the_owner() {
     // A kill entry with no pid, or for a pid that is not running, is left alone.
     let gone = json!({"kill": [kill_entry(999_999, "e1"), {"claimId": 2, "pid": null}]});
     assert_eq!(super::authority::finish_revoke(&gone, "sam").await, "");
+}
+
+/// C-b: once authority is on the core, auth.json is a tombstone whose change time never moves, so the cards watch the
+/// core's revision. A write made in the core (never through kith-auth) re-derives who answers each open card on the next
+/// poll, and a poll that sees nothing new does not.
+#[tokio::test]
+async fn a_core_side_write_changes_who_answers_a_card_within_one_poll() {
+    let r = Rig::new().await;
+    let mut core = Core::start(&r);
+    core.on();
+    core.switched();
+    core.ask("people.grant", json!({"person": "sam", "agent": "house", "preset": "member", "viaSwitch": true}))
+        .expect("grant");
+    let new = crate::store::NewCard {
+        session: "s-poll".into(),
+        source: "acp",
+        bot_id: None,
+        run_id: None,
+        person: "sam".into(),
+        agent: "house".into(),
+        answerable_by: Some("sam".into()),
+        in_grants: true,
+        tool: "WebFetch".into(),
+        input: "{}".into(),
+        resource: "k-poll".into(),
+        shown: String::new(),
+        deadline: i64::MAX,
+        reply_to: None,
+        asked_by: None,
+    };
+    let (crate::store::Opened::New(row) | crate::store::Opened::Joined(row) | crate::store::Opened::Granted(row)) =
+        r.hub.store.card_open(&new, 1).unwrap();
+    let answerable = || r.hub.store.card(&row.id).unwrap().answerable_by;
+    let mut seen = crate::cards::authority_stamp().await;
+    assert!(
+        matches!(seen, Some(crate::cards::AuthStamp::Core(_))),
+        "a tombstone is watched through the core: {seen:?}"
+    );
+    assert!(!crate::cards::poll_authority(&r.hub, &mut seen).await, "nothing changed: nothing re-derived");
+    // an always written in the core moves the revision
+    core.ask(
+        "people.access",
+        json!({"person": "sam", "agent": "house", "kind": "domain", "value": "docs.example.com", "viaSwitch": true}),
+    )
+    .expect("always");
+    assert!(crate::cards::poll_authority(&r.hub, &mut seen).await, "the next poll sees the write");
+    assert_eq!(answerable().as_deref(), Some("sam"), "a member still answers");
+    // sam is made a guest in the core: within one poll the card is the owner's alone
+    core.ask("people.grant", json!({"person": "sam", "agent": "house", "preset": "guest", "viaSwitch": true}))
+        .expect("demote");
+    assert!(crate::cards::poll_authority(&r.hub, &mut seen).await);
+    assert_eq!(answerable(), None, "the owner alone answers now");
+    assert!(!crate::cards::poll_authority(&r.hub, &mut seen).await);
+    // the core down: this tick learns nothing, and re-derives nothing
+    core.stop();
+    assert_eq!(crate::cards::authority_stamp().await, None);
+    assert!(!crate::cards::poll_authority(&r.hub, &mut seen).await);
 }

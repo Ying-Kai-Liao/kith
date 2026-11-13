@@ -25,7 +25,7 @@ check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails
 is() { [ "$(EXPR=$1 OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(os.environ["EXPR"]))')" = "$2" ]; }
 
 OUT=$("$KITH" echo --launch-json 2>/dev/null)
-check "settings carry the memory hooks on Write|Edit|MultiEdit" "is \"[(e, h['matcher'], 'memory hook ' + w in h['hooks'][0]['command'], '|| true' in h['hooks'][0]['command']) for e, w in (('PreToolUse', 'pre'), ('PostToolUse', 'post')) for h in d['settings']['hooks'][e]]\" \"[('PreToolUse', 'Write|Edit|MultiEdit', True, True), ('PostToolUse', 'Write|Edit|MultiEdit', True, True)]\""
+check "settings carry the memory hooks on Write|Edit|MultiEdit" "is \"[(e, h['matcher'], 'memory hook ' + w in h['hooks'][0]['command'], '|| true' in h['hooks'][0]['command']) for e, w in (('PreToolUse', 'pre'), ('PostToolUse', 'post')) for h in d['settings']['hooks'][e] if 'memory hook' in h['hooks'][0]['command']]\" \"[('PreToolUse', 'Write|Edit|MultiEdit', True, True), ('PostToolUse', 'Write|Edit|MultiEdit', True, True)]\""
 check "the cost hook is still there" "is \"'kith-cost' in d['settings']['hooks']['SessionStart'][0]['hooks'][0]['command']\" True"
 PRE=$(EXPR="d['settings']['hooks']['PreToolUse'][0]['hooks'][0]['command']" OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(os.environ["EXPR"]))')
 POST=$(EXPR="d['settings']['hooks']['PostToolUse'][0]['hooks'][0]['command']" OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(os.environ["EXPR"]))')

@@ -10,7 +10,7 @@ set -euo pipefail
 
 # The commit at which the model was last confirmed to describe the files below (origin/main, 2026-10-28; first at
 # ed2ceb63, after the secret cards and the limit cards were merged).
-SYNC=732dfef5fa4a31a190277b2ffb02895d3da3ff1a
+SYNC=f5b92e19daddcfdfc92162abfc38be2b63dd3e4d
 
 FILES=(
   serve/host/src/cards/secret.rs    # provide, respond, deny, grant, Slot, write_key, open_card, list_keys, revoke_key
@@ -23,6 +23,7 @@ FILES=(
   core/runtime/src/cards/mod.rs     # the core's card store: claim, release, saved, saved_in, withdraw, sweep, park_run, answer
   core/runtime/src/cards/secret.rs  # the core's secret path: begin, commit (write + save in one transaction), provide, cards.provide
   core/runtime/src/secrets/mod.rs   # the envelope the secret path writes through (put, get, list)
+  core/runtime/src/authority/secret_writes.rs  # S-b: the core half of `kith-auth set` on the tombstone (the names, never a value)
   core/api/src/table/cards.rs       # the cards.provide row (owner only, values by the client)
 )
 paths=()

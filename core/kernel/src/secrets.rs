@@ -28,7 +28,7 @@ pub mod pyjson;
 #[cfg(test)]
 mod tests;
 
-use jobs::Job;
+pub use jobs::{Job, PIECES, effective};
 
 /// A refusal `kith-auth` would `die` with: its message and exit code.
 #[derive(Debug, PartialEq, Eq)]
@@ -118,7 +118,7 @@ impl Ctx {
 
     /// Where an agent's package is (`agent_dirs()` in `kith-auth`): `<agent>/role` when that holds an `agent.md`, else the
     /// agent's own folder, in the user's agents then the kernel's; else where it would be.
-    fn package_dir(&self, agent: &str) -> PathBuf {
+    pub fn package_dir(&self, agent: &str) -> PathBuf {
         let plain = !agent.is_empty() && !agent.contains('/') && !agent.starts_with('.');
         if plain {
             for root in [self.agents.clone(), self.kernel.join("agents")] {
@@ -609,7 +609,7 @@ fn access_of(row: &Value) -> Map<String, Value> {
 }
 
 /// Whether `have` (an access dict) covers value: a path inside a held folder (write covers read), a domain it lists.
-fn held(have: &Value, kind: &str, value: &Value) -> bool {
+pub fn held(have: &Value, kind: &str, value: &Value) -> bool {
     if kind == "domains" {
         return arr(get(have, "domains")).contains(value);
     }
@@ -671,6 +671,16 @@ impl<'a> Rules<'a> {
         }))
     }
 
+    /// Whether the agent's package declares a job of this name (capabilities.yaml `jobs:`).
+    pub fn declares_job(&self, agent: &str, name: &str) -> bool {
+        self.jobs_of(agent).iter().any(|j| j.name == name)
+    }
+
+    /// The job of this name the agent's package declares, as it is now (the share sheet's tick keeps its pieces).
+    pub fn declared_job(&self, agent: &str, name: &str) -> Option<Job> {
+        self.jobs_of(agent).iter().find(|j| j.name == name).cloned()
+    }
+
     /// `acting`: the person this run works for; never the owner inside a guest's sandbox: then it is no one (`-`).
     pub fn acting(&self) -> String {
         let named = self
@@ -699,7 +709,7 @@ impl<'a> Rules<'a> {
         };
         for (name, tick) in ticks {
             let jobs = self.jobs_of(pkg);
-            let granted = jobs::effective(tick, jobs.iter().find(|j| j.name == *name));
+            let granted = effective(tick, jobs.iter().find(|j| j.name == *name));
             for (k, vs) in granted.into_iter().enumerate() {
                 for x in vs {
                     if !out[k].contains(&x) {
@@ -1140,6 +1150,69 @@ impl<'a> Rules<'a> {
             }
         }
         Ok(out)
+    }
+
+    /// `kith-auth who <platform> <user-id>` (M2-23): which person owns a chat handle, with the owner, whether the owner is
+    /// linked on that platform, and the revoke and held flags the channels gate on.
+    pub fn who(&self, platform: &str, uid: &str) -> R<Value> {
+        // A database imported before `people.handles` existed has none for anyone: a chat sender would match nobody (or the
+        // wrong person), so it says so and refuses until the import is run again.
+        if truthy(get(self.auth, "handles_stale")) {
+            return die(
+                "cannot match a chat handle to a person: this database was imported before people.handles existed; import again first",
+            );
+        }
+        let people = get(self.auth, "people");
+        let pid = people.as_object().and_then(|o| {
+            o.iter()
+                .find(|(_, v)| get(get(v, "handles"), platform).as_str() == Some(uid))
+                .map(|(p, _)| p.clone())
+        });
+        let me = owner(self.auth);
+        let flag = |f: &dyn Fn(&str) -> bool| pid.as_deref().is_some_and(f);
+        let mut out = Map::new();
+        out.insert(
+            "person".into(),
+            pid.clone().map_or(Value::Null, Value::String),
+        );
+        out.insert("owner".into(), flag(&|p| is_owner(self.auth, p)).into());
+        out.insert(
+            "was".into(),
+            pid.as_deref().map_or_else(
+                || Value::Array(Vec::new()),
+                |p| get_or(get(people, p), "was", Value::Array(Vec::new())),
+            ),
+        );
+        out.insert(
+            "owner_id".into(),
+            me.clone().map_or(Value::Null, Value::String),
+        );
+        out.insert(
+            "owner_linked".into(),
+            me.as_deref()
+                .is_some_and(|m| truthy(get(get(get(people, m), "handles"), platform)))
+                .into(),
+        );
+        out.insert("revoked".into(), flag(&|p| cut_off(self.auth, p)).into());
+        out.insert("held".into(), flag(&|p| self.bridge_held(p)).into());
+        Ok(Value::Object(out))
+    }
+
+    /// `kith-auth granted [--for AGENT] <service>`: the profiles an agent holds for a service, as written (one name or a
+    /// list).
+    pub fn granted(&self, agent: &str, service: &str) -> R<Vec<Value>> {
+        // `grants` is filled by the authority import; a database imported before it did has none, which says nothing.
+        if truthy(get(self.auth, "secrets_stale")) {
+            return die(
+                "cannot read the grants: this database was imported before they were kept; import again first",
+            );
+        }
+        let g = get(get(get(self.auth, "grants"), agent), service);
+        Ok(match g {
+            Value::Array(items) => items.clone(),
+            g if truthy(g) => vec![g.clone()],
+            _ => Vec::new(),
+        })
     }
 
     /// `cloud_sync` and `bridge_held`: kith serve's channels serve a person other than the owner only while this Mac is

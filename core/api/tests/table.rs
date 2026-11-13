@@ -453,6 +453,32 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people person clear-temp ann", "people.clearTemp"),
         ("people retired ann", "people.retired"),
         ("people budgets echo", "people.budgets"),
+        ("people secrets-view", "people.secretsView"),
+        (
+            "people access-always echo ann read /tmp/x --by ann",
+            "people.access",
+        ),
+        (
+            "people access-always echo ann domain a.example.com --rm",
+            "people.access",
+        ),
+        ("people helper echo ann scratch --once", "people.helper"),
+        ("people job echo ann tidy --decline abc", "people.job"),
+        ("people job echo ann tidy --tick", "people.job"),
+        (
+            "people secret-set github/work --grant echo",
+            "people.secretSet",
+        ),
+        (
+            "people secret-grant github --known-only",
+            "people.secretGrant",
+        ),
+        (
+            "people secret-revoke echo github --profile github/work",
+            "people.secretRevoke",
+        ),
+        ("people secret-env echo github", "people.secretEnv"),
+        ("people revision", "people.revision"),
         ("people ledger --person ann", "people.ledger"),
         (
             "people ledger-remove read:echo:ann:/tmp/x",

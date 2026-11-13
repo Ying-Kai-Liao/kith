@@ -148,6 +148,7 @@ fn copy_out(src: &Connection) -> Result<Connection> {
         "secret_profiles",
         "secret_vars",
         "secret_grants",
+        "secret_env",
         "secret_stale",
         "authority_settings",
     ] {
@@ -186,6 +187,7 @@ fn is_empty(snapshot: &Value) -> bool {
         "agent_access",
         "profiles",
         "grants",
+        "env",
     ]
     .iter()
     .all(|t| {
@@ -642,6 +644,94 @@ pub(crate) fn same_answer(ctx: &Ctx, layout: &Layout, conn: &Connection) -> Resu
     Ok(out)
 }
 
+/// The `helper_since` of every membership row of the file against the core's (m0016): when each helper was allowed.
+fn helper_since_diffs(want: &Value, have: &Value) -> Vec<String> {
+    let flat = |v: &Value| -> std::collections::BTreeMap<(String, String), Value> {
+        let mut out = std::collections::BTreeMap::new();
+        for (agent, rows) in v
+            .get("members")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
+            for (person, r) in rows.as_object().into_iter().flatten() {
+                if let Some(h) = r.get("helper_since") {
+                    out.insert((agent.clone(), person.clone()), h.clone());
+                }
+            }
+        }
+        out
+    };
+    let (w, h) = (flat(want), flat(have));
+    w.keys()
+        .chain(h.keys().filter(|k| !w.contains_key(*k)))
+        .filter(|k| w.get(*k) != h.get(*k))
+        .map(|(agent, person)| {
+            format!(
+                "members {agent}/{person}: helper_since (auth.json {}, core.db {})",
+                w.get(&(agent.clone(), person.clone()))
+                    .unwrap_or(&Value::Null),
+                h.get(&(agent.clone(), person.clone()))
+                    .unwrap_or(&Value::Null)
+            )
+        })
+        .collect()
+}
+
+/// The `env` of the file against the core's (m0023), by agent, service and variable name, and the order a service's
+/// variables come in (`mcp-config` prints them so). The values are settings, but the line says only that one differs.
+fn env_diffs(want: &Value, have: &Value) -> Vec<String> {
+    // (agent, service) -> its variables in order
+    let flat = |v: &Value| -> std::collections::BTreeMap<(String, String), Vec<(String, Value)>> {
+        let mut out = std::collections::BTreeMap::new();
+        for (agent, by_service) in v
+            .get("env")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
+            for (service, vars) in by_service.as_object().into_iter().flatten() {
+                let vars = vars
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(k, x)| (k.clone(), x.clone()))
+                    .collect();
+                out.insert((agent.clone(), service.clone()), vars);
+            }
+        }
+        out
+    };
+    let (w, h) = (flat(want), flat(have));
+    let mut out = Vec::new();
+    for key in w.keys().chain(h.keys().filter(|k| !w.contains_key(*k))) {
+        let name = format!("env {}/{}", key.0, key.1);
+        match (w.get(key), h.get(key)) {
+            (Some(a), Some(b)) if a == b => {}
+            (Some(_), None) => out.push(format!("{name}: in auth.json, not in core.db")),
+            (None, Some(_)) => out.push(format!("{name}: in core.db, not in auth.json")),
+            (Some(a), Some(b)) => {
+                let mut what: Vec<String> = a
+                    .iter()
+                    .filter(|(k, x)| b.iter().find(|(l, _)| l == k).is_none_or(|(_, y)| y != x))
+                    .map(|(k, _)| format!("variable {k}"))
+                    .collect();
+                what.extend(
+                    b.iter()
+                        .filter(|(k, _)| !a.iter().any(|(l, _)| l == k))
+                        .map(|(k, _)| format!("variable {k} (only in core.db)")),
+                );
+                if what.is_empty() {
+                    what.push("the order of the variables".into());
+                }
+                out.push(format!("{name}: differs in {}", what.join(", ")));
+            }
+            (None, None) => {}
+        }
+    }
+    out
+}
+
 /// The profiles and grants of the file against the core's (m0021): by name, so the line names the profile or the agent.
 /// A variable is named, its source (a reference, still not shown) only said to differ. The rules read neither table, so
 /// this is not part of `check::diffs`; it is what `retired`, `person --rm --unused` and a rollback rest on.
@@ -649,10 +739,18 @@ fn secret_diffs(want: &Value, have: &Value) -> Vec<String> {
     let mut out = Vec::new();
     if have.get("secrets_stale").is_some() {
         out.push(
-            "core.db was imported before profiles and grants were kept; import again (kith kernel core-migrate --authority --force)"
+            "core.db was imported before profiles, grants and env were kept; import again (kith kernel core-migrate --authority --force)"
                 .into(),
         );
     }
+    if have.get("helper_since_stale").is_some() {
+        out.push(
+            "core.db was imported before a helper's `since` was kept (memberships.helper_since); import again (kith kernel core-migrate --authority --force)"
+                .into(),
+        );
+    }
+    out.extend(helper_since_diffs(want, have));
+    out.extend(env_diffs(want, have));
     let table = |v: &Value, t: &str| {
         v.get(t)
             .and_then(Value::as_object)

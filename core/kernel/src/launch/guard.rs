@@ -130,6 +130,14 @@ pub fn secret_paths(roots: &[String], secrets_dir: &str, machine: &str) -> Vec<S
     dedup(out)
 }
 
+/// `secret_paths` for a grant of access: when the secrets folder is the machine folder itself, the whole folder counts,
+/// not just env and auth.json: no guest needs it.
+pub fn whole_secret_paths(roots: &[String], secrets_dir: &str, machine: &str) -> Vec<String> {
+    let mut out = secret_paths(roots, secrets_dir, machine);
+    out.extend(both(secrets_dir));
+    dedup(out)
+}
+
 /// `(trees, files)` the run may not write: below each of `folders`, below `home`, the PATH folders, and the extra
 /// `trees` (the kernel, the agent's package, ...). Both spellings of each.
 pub fn rule_w(home: &str, folders: &[String], trees: &[String]) -> (Vec<String>, Vec<String>) {

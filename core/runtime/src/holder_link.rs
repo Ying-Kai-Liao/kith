@@ -12,7 +12,7 @@
 //! frame is only ever a failed connection: generation authority stays in core.db, so a fake holder cannot make a
 //! core step down.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
@@ -428,15 +428,17 @@ fn connected(
     // told to the claim it ended, including one that happened while this core was down (the welcome lists it).
     let mut seen = Known::default();
     seen.note_all(&client.welcome.procs);
-    for h in client.welcome.procs.iter().filter(|h| h.exit.is_some()) {
-        if let Some(exit) = &h.exit {
-            report_exit(shared, h.claim, h.pid, exit);
+    // An exit the claim could not record reaches the relay as a live process: the relay would take its end and ack it.
+    let mut offered = client.welcome.procs.clone();
+    for h in &mut offered {
+        if let Some(exit) = &h.exit
+            && !report_exit(shared, h.claim, h.pid, exit)
+        {
+            seen.owed.insert(h.id);
+            h.exit = None;
         }
     }
-    shared
-        .terminals
-        .relay
-        .link_up(client.sender(), &client.welcome.procs);
+    shared.terminals.relay.link_up(client.sender(), &offered);
     shared.terminals.set_link(true);
     shared.set_holder(|h| {
         h.state = "connected";
@@ -495,6 +497,18 @@ fn connected(
         let held = client
             .list()
             .map_err(|e| format!("the holder stopped answering: {e}"))?;
+        for h in &held {
+            if let Some(exit) = h.exit.as_ref().filter(|_| seen.owed.contains(&h.id)) {
+                take_exit(
+                    shared,
+                    &mut client,
+                    &shared.terminals.relay,
+                    &mut seen,
+                    h.id,
+                    exit,
+                )?;
+            }
+        }
         if remote {
             let live = held.iter().filter(|h| h.exit.is_none()).count();
             shared.set_holder(|h| h.procs = live);
@@ -591,25 +605,14 @@ fn pump(
         wait = Duration::ZERO;
         match kind {
             proto::OUTPUT => relay.output(id, &payload),
-            proto::EXITED => {
-                // An exit the relay does not know (or cannot read) is acked all the same, so the holder forgets it.
-                let known = match serde_json::from_slice::<proto::Exit>(&payload) {
-                    Ok(exit) => {
-                        // The claim hears of it before the relay does: a claim never outlives the process it names.
-                        if let Some((claim, pid, _)) = seen.of(id) {
-                            report_exit(shared, claim, pid, &exit);
-                        }
-                        relay.exited(id, &exit)
-                    }
-                    Err(e) => {
-                        log::note(
-                            logs,
-                            &format!("holder: unreadable exit of process {id} ({e}); acked"),
-                        );
-                        false
-                    }
-                };
-                if !known {
+            proto::EXITED => match serde_json::from_slice::<proto::Exit>(&payload) {
+                Ok(exit) => take_exit(shared, client, relay, seen, id, &exit)?,
+                Err(e) => {
+                    // An exit nobody can read is acked all the same, so the holder forgets it.
+                    log::note(
+                        logs,
+                        &format!("holder: unreadable exit of process {id} ({e}); acked"),
+                    );
                     let held = proto::HeldId {
                         instance: instance.clone(),
                         id,
@@ -618,7 +621,7 @@ fn pump(
                         .ack(&held)
                         .map_err(|e| format!("the holder stopped answering: {e}"))?;
                 }
-            }
+            },
             proto::TAILED => {
                 if let Some(held) = relay.tailed(id, &payload) {
                     client
@@ -905,8 +908,10 @@ pub(crate) fn reconcile(
     Ok(())
 }
 
-/// Ends the process group of each recorded process whose pid still has the recorded start stamp, and waits for the
-/// groups to be empty. A pid that is gone, or has another start in the same form, is not ours: left alone. So is a
+/// Ends the process group of each recorded process whose pid still has the recorded start stamp, or whose pid is gone
+/// while its group still has a process and its record is a start from this boot, and waits for the groups to be empty. A
+/// pid that is gone with its group, gone with a record from an earlier boot or of unknown form, or has another start in
+/// the same form, is not ours: left alone. So is a
 /// live pid that is not a session leader: every holder spawn calls `setsid`, so the recorded process leads its session
 /// and anything else at that pid is a stranger, whatever the record says. A start that cannot be told otherwise (the
 /// pid's own cannot be read, or the record is empty, old `ps` text, or of another form) is neither: nothing is
@@ -922,9 +927,18 @@ fn end_groups(
     let mut stuck: Vec<String> = Vec::new();
     for p in procs {
         match procstart::probe(p.pid) {
-            procstart::Probe::Gone => {
-                notes.push(format!("holder: pid {} is gone; nothing to end", p.pid));
-            }
+            // The leader died but its group may not have: the engine it started runs on in it. Whether that group is
+            // still the recorded one is `procstart::orphan_group`'s one rule (this boot, group not ours, still held).
+            procstart::Probe::Gone => match procstart::orphan_group(p.pid, &p.started) {
+                Some(group) => {
+                    notes.push(format!(
+                        "holder: pid {} is gone but its process group still runs; ending the group",
+                        p.pid
+                    ));
+                    mine.push(group);
+                }
+                None => notes.push(format!("holder: pid {} is gone; nothing to end", p.pid)),
+            },
             procstart::Probe::Alive(Some(now)) if procstart::comparable(&p.started, &now) => {
                 if !procstart::same_process(&p.started, &now) {
                     notes.push(format!(
@@ -1148,6 +1162,8 @@ pub(crate) struct Known {
     procs: HashMap<u32, (u64, u32, String)>,
     /// Ends that did not finish in a spawn's late path; the supervisor puts them back in the queue.
     unfinished: Vec<proto::HeldId>,
+    /// Exits whose claim report did not commit: not acked, so the holder lists them again and each listing retries.
+    owed: HashSet<u32>,
 }
 
 impl Known {
@@ -1189,20 +1205,55 @@ pub(crate) fn exit_body(
     body.to_string()
 }
 
-/// A holder exit for the claim the process was spawned for. A claim id the core does not know (a terminal started
-/// before claims, a process of another core) is stored nowhere and changes nothing. A failure is logged, never raised: the
-/// exit stays in the holder until acked and the next listing offers it again.
-fn report_exit(shared: &Shared, claim: u64, pid: u32, exit: &proto::Exit) {
+/// A holder exit for the claim the process was spawned for. True once core.db has it: committed, or nothing to record (a
+/// claim id the core does not know, from a terminal started before claims or a process of another core, changes
+/// nothing). False when the write failed: it is logged, and the caller neither acks the exit nor tells the relay, so the
+/// holder keeps it and the next listing offers it again.
+fn report_exit(shared: &Shared, claim: u64, pid: u32, exit: &proto::Exit) -> bool {
     let Ok(claim) = i64::try_from(claim) else {
-        return;
+        return true;
     };
     let body = exit_body(Some(pid), Some(exit), false, None);
-    if let Err(e) = shared.with_core(|c| claims::report(c, claim, "exit", &body, now_ms())) {
-        log::note(
-            &shared.logs,
-            &format!("holder: could not report the exit of pid {pid} for claim {claim}: {e}"),
-        );
+    match shared.with_core(|c| claims::report(c, claim, "exit", &body, now_ms())) {
+        Ok(_) => true,
+        Err(e) => {
+            log::note(
+                &shared.logs,
+                &format!("holder: could not report the exit of pid {pid} for claim {claim}: {e}"),
+            );
+            false
+        }
     }
+}
+
+/// An exit the holder reported or listed: the claim hears of it first (a claim never outlives the process it names),
+/// then the relay sends EXIT to the viewers and takes the tail, which is acked when it comes. An exit the relay does not
+/// know is acked here. One the claim could not record is owed: no EXIT, no ack, retried at the next listing.
+fn take_exit(
+    shared: &Shared,
+    client: &mut Client,
+    relay: &Relay,
+    seen: &mut Known,
+    id: u32,
+    exit: &proto::Exit,
+) -> std::result::Result<(), String> {
+    if let Some((claim, pid, _)) = seen.of(id)
+        && !report_exit(shared, claim, pid, exit)
+    {
+        seen.owed.insert(id);
+        return Ok(());
+    }
+    seen.owed.remove(&id);
+    if !relay.exited(id, exit) {
+        let held = proto::HeldId {
+            instance: client.welcome.instance.clone(),
+            id,
+        };
+        client
+            .ack(&held)
+            .map_err(|e| format!("the holder stopped answering: {e}"))?;
+    }
+    Ok(())
 }
 
 /// How the process `pid` started, as the system says now (empty when it cannot be read: a later kill then treats it as

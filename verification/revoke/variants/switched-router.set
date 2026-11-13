@@ -1,0 +1,4 @@
+\* switched (#875) with kith-auth answering from the core on the tombstone: resolve/may/door/exec read the core's fact (M2-23 router)
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE

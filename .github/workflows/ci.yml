@@ -220,6 +220,7 @@ jobs:
               - 'kernel/bin/kith-auth'
               - 'core/runtime/src/cards/**'
               - 'core/runtime/src/secrets/**'
+              - 'core/runtime/src/authority/secret_writes.rs'
               - 'core/api/src/table/cards.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ model of the holder lease and the code it covers (the list in the holder-lease skill).
@@ -258,7 +259,9 @@ jobs:
             # nothing in the host depends on. Those two get their own small job (host-crates). The kernel's bin and lib
             # are not here: the host tests that run them are the host-kernel job (filter kernel_host above).
             host_core:
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/bin/kith,kernel/bin/kith-account}'
+              # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
+              # memory and summary), and the libs those programs load on every call.
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -319,6 +322,13 @@ jobs:
               Differential harness (same CLI line, same result) self-test and seed corpus|kernel/tests/kith-difftest-check --summary difftest-summary.json
               Agent set check (kith <agent> set model/effort, --json, a model per backup entry)|kernel/tests/kith-agent-set-check
               Footguns check|kernel/tests/kith-footguns-check
+              CI names check (every kernel/tests/kith-*-check is run here or exempt with a reason)|kernel/tests/kith-ci-names-check
+              CI names self-test (a check dropped from ci.yml fails it)|kernel/tests/kith-ci-names-check --selftest
+              Install drain check|kernel/tests/kith-install-drain-check
+              Agent dirs check|kernel/tests/kith-agent-dirs-check
+              Market check|kernel/tests/kith-market-check
+              Cutover check|kernel/tests/kith-cutover-check
+              Serve launch check|kernel/tests/kith-serve-launch-check
           - shard: 2
             checks: |
               Auth property check|kernel/tests/kith-auth-props
@@ -336,6 +346,15 @@ jobs:
               Accounts tombstone check (a tombstoned state.json refuses writes; kith-account exits 4)|kernel/tests/kith-accounts-tombstone-check
               Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
               Grants check (connectors and skills as grants on an agent)|kernel/tests/kith-grants-check
+              Limit check|kernel/tests/kith-limit-check
+              Agent allow check|kernel/tests/kith-agent-allow-check
+              Agent deny secrets check|kernel/tests/kith-agent-deny-secrets-check
+              Trusted allow check|kernel/tests/kith-trusted-allow-check
+              Must ask check|kernel/tests/kith-must-ask-check
+              Auth C2 check|kernel/tests/kith-auth-c2-check
+              Auth secret check|kernel/tests/kith-auth-secret-check
+              Keys check|kernel/tests/kith-keys-check
+              Connector check|kernel/tests/kith-connector-check
           - shard: 3
             bun: true
             checks: |
@@ -363,6 +382,12 @@ jobs:
               Scratch check (the built-in scratch agent: engine per chat, never backed up or shared, keep as an agent)|kernel/tests/kith-scratch-check
               Core boundary check (kith-core stays sealed)|kernel/tests/kith-core-boundary-check
               Core boundary self-test (each rule fails on a deliberate violation)|kernel/tests/kith-core-boundary-check --selftest
+              Owner launch check|kernel/tests/kith-owner-launch-check
+              Run kind check|kernel/tests/kith-run-kind-check
+              Group check|kernel/tests/kith-group-check
+              Send to check|kernel/tests/kith-send-to-check
+              Schedule prune check|kernel/tests/kith-sched-prune-check
+              Project id lock check|kernel/tests/kith-project-id-lock-check
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -447,7 +472,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # A full run (the model or its code changed) takes ~20 min before the M2-23 kill rows, more with their liveness checks;
+    # the always rows (C-a, switched-always*) add ~45 min (the kill row's liveness check alone ~25).
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -614,9 +641,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.host_core == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 80: the test archive plus the parity, router and stepped-props steps below took 36 of the old 45 minutes before the router rows grew; each step is named to show the slow one.
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
       - name: Install pinned toolchain
         working-directory: serve
         run: rustup show active-toolchain || rustup toolchain install
@@ -635,17 +664,22 @@ jobs:
         run: cargo nextest archive --workspace --exclude kith-guest --exclude kith-tts --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
       # The Rust core against the Python kernel, the same CLI line both ways (kernel/tests/difftest): the test binaries above
       # already built the host's dependencies, so this adds the one kith program. Its router finds it through KITH_BIN.
+      - name: Build the kith program
+        run: cargo build --manifest-path serve/host/Cargo.toml --bin kith
       - name: Core parity (difftest --rust)
         run: |
-          cargo build --manifest-path serve/host/Cargo.toml --bin kith
           kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
           # The same corpus again with the core database made first, so every Rust verb runs inside an embedded core.
           kernel/tests/difftest/kith-difftest --rust --core --bin "$PWD/serve/host/target/debug/kith"
           # And once more with a daemon running in each NEW sandbox, so the verbs the daemon answers go through its owner socket.
           kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
+      - name: Core parity, frozen access-verb cases (difftest --golden)
+        run: |
           # The frozen access-verb cases (recorded from Python, never re-recorded): the Rust program alone against the record.
           # --golden takes its cases from its DIR, so it does not combine with --core or --daemon.
           kernel/tests/difftest/kith-difftest --golden kernel/tests/difftest/golden --rust --bin "$PWD/serve/host/target/debug/kith"
+      - name: Launch, switch and revoke-stopgap checks
+        run: |
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
           # `kith <agent> --launch-json` per engine against the recorded fixtures; the claude one needs this Rust program for its memory hooks.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-engines-check
@@ -658,6 +692,19 @@ jobs:
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
           # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.
           KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-embedded-check
+          # The memory and summary verbs and the settings switch run the built kith.
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-memory-check
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-summary-check
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-settings-switch-check
+      # Its own step so a slow run shows which check it is (the router check and the stepped props took most of the old single step's time).
+      - name: Authority router check (kith-auth on the tombstone)
+        # The authority router (M2-23): on the tombstone kith-auth answers its read verbs from the core, the same as the file, and refuses the rest.
+        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-router-check
+      - name: Access properties, stepped home (kith-auth-props)
+        # The access properties again on a home stepped for real (kith migrate step authority): the same answers as the file, and back after a rollback.
+        run: PROPS_EXAMPLES=40 PROPS_STEPPED_EXAMPLES=10 KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-props
+      - name: Direct lock, stub and held checks
+        run: |
           # A direct run holds its conversation's lock under kith-stub (M1-3).
           cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
           KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check

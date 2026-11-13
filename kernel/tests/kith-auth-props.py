@@ -8,6 +8,7 @@ import io
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -20,6 +21,11 @@ os.environ.update(KITH_AUTH=str(T / 'auth.json'), HOME=str(T / 'home'), KITH_HOM
                   KITH_SERVE_DIR=str(T / 'serve'), KITH_SERVE_PORT='1')
 for k in ('KITH_STATE', 'HQ_STATE', 'KITH_PERSON', 'KITH_AGENT', 'HQ_HOME'):
     os.environ.pop(k, None)
+# this Mac's own folder, fixed: `env` expands $KITH_* from paths() into the environment, which would otherwise move it
+os.environ['KITH_STATE'] = str(T / 'machine')
+# no Keychain tool, on every OS so a run reads the same on a Mac and in CI (a developer's real Keychain must not leak in):
+# every item reads as absent
+os.environ['KITH_SECURITY_BIN'] = '/usr/bin/false'
 (T / 'home').mkdir()
 AGENTS = ['house', 'garden']
 for a in AGENTS:
@@ -36,6 +42,13 @@ loader = importlib.machinery.SourceFileLoader('kith_auth', str(KERNEL / 'bin' / 
 spec = importlib.util.spec_from_loader('kith_auth', loader)
 ka = importlib.util.module_from_spec(spec)
 loader.exec_module(ka)
+ka.keychain_put = lambda kc, var, value: True   # no real Keychain: what is checked is what the writers record
+# S-b, the secret writers: an API-key service, a login (personal: its profiles are the owner's unless named) and a host
+# connector with no secrets (its `<id>/host` profile is marked as the host's own), on this Mac's services folder
+ka.mac_services().mkdir(parents=True, exist_ok=True)
+for _name, _spec in {'sk': {'kind': 'cli', 'secrets': ['KEY']}, 'lg': {'kind': 'login', 'secrets': ['PASS']},
+                     'hc': {'kind': 'connector'}}.items():
+    (ka.mac_services() / f'{_name}.json').write_text(json.dumps(_spec))
 
 OWNER = 'kai'
 PEOPLE = ['sam', 'amy']
@@ -47,6 +60,7 @@ ALL = [OWNER] + PEOPLE + BOTS + ['ghost']
 BEYOND = [('read', '/work/a'), ('read', '/work/a/b'), ('write', '/work/a'), ('write', '/work/c'),
           ('domain', 'a.example'), ('domain', 'b.example')]
 KINDS = {'read': 'read', 'write': 'write', 'domain': 'domains'}
+HOSTS = ['kept.example', 'other.example']   # hosts the owner keeps for every guest of an agent (agent-access)
 FREE_SHELL = {'bypassPermissions', 'auto'}
 # env a membership may set, and names that would change how the run starts or which kith it talks to
 ENV_OK, ENV_BAD = ['FOO'], ['PATH', 'KITH_HOME', 'DYLD_INSERT_LIBRARIES']
@@ -60,6 +74,16 @@ def run(*argv):
         except SystemExit as e:
             return e.code in (None, 0)
     return True
+
+
+def run_stdin(values, *argv):
+    """run(), with a JSON object on stdin (set --stdin-json)."""
+    real = sys.stdin
+    sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps(values).encode()))
+    try:
+        return run(*argv)
+    finally:
+        sys.stdin = real
 
 
 def reset():
@@ -81,6 +105,21 @@ def allowed(agent, who):
 HAND = ['row', 'row-auto', 'grant', 'invite']
 SETTINGS = ['', '', 'preset=guest', 'preset=member', 'helpers=garden', 'deny=Bash', 'budget=7', 'mode=auto',
             'mode=bypassPermissions'] + [f'env.{k}=x' for k in ENV_OK + ENV_BAD]
+SECRET_SVCS = ['sk', 'lg', 'hc']
+SECRET_PROFILES = ['sk/a', 'sk/b', 'lg/main', 'lg/alt']
+# who a grant names: an agent, or an agent for one person's own account (a person who may not exist, too)
+GRANT_WHO = AGENTS + [f'{a}@{p}' for a in AGENTS for p in PEOPLE + ['ghost']]
+SECRET_OPS = [
+    st.tuples(st.just('sset'), st.sampled_from(SECRET_PROFILES), st.sampled_from([None] + AGENTS)),
+    st.tuples(st.just('sgrant'), st.sampled_from(GRANT_WHO), st.sampled_from(SECRET_SVCS), st.sampled_from(['a', 'b', 'main', 'alt', 'host'])),
+    st.tuples(st.just('srevoke'), st.sampled_from(AGENTS), st.sampled_from(SECRET_SVCS), st.sampled_from([None, 'a', 'main', 'host'])),
+    st.tuples(st.just('connect'), st.sampled_from(AGENTS), st.sampled_from(SECRET_SVCS), st.sampled_from([None, 'a', 'main', 'host'])),
+    st.tuples(st.just('disconnect'), st.sampled_from(AGENTS), st.sampled_from(SECRET_SVCS)),
+    st.tuples(st.just('senv'), st.sampled_from(AGENTS), st.sampled_from(SECRET_SVCS), st.sampled_from(['FOO=1', 'FOO=', 'BAR=2'])),
+    # hand edits of a profile: shared on purpose (`*`), someone's own, lent to amy, or nobody's in particular
+    st.tuples(st.just('hand-profile'), st.sampled_from(SECRET_PROFILES), st.sampled_from(['*', 'sam', 'lent', 'plain'])),
+]
+SECRET_KINDS = {'sset', 'sgrant', 'srevoke', 'connect', 'disconnect', 'senv'}
 OPS = st.one_of(
     st.tuples(st.just('person'), st.sampled_from(PEOPLE)),
     st.tuples(st.just('person-rm'), st.sampled_from(PEOPLE)),
@@ -98,6 +137,16 @@ OPS = st.one_of(
     st.tuples(st.just('job'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE])),
     st.tuples(st.just('job-rm'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS)),
     st.tuples(st.just('helper'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(['', '--once'])),
+    # C-a / C-b, the card writes the router sends to the core on the tombstone: an always with --by, the removals of a helper
+    # and a tick (on anyone, revoked people included), the No of a widening card, the hosts kept for every guest
+    st.tuples(st.just('access-by'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(BEYOND),
+              st.sampled_from(ALL)),
+    st.tuples(st.just('helper-rm'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE])),
+    st.tuples(st.just('job-decline'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(['h1', 'h2'])),
+    st.tuples(st.just('agent-access'), st.sampled_from(AGENTS), st.sampled_from(HOSTS)),
+    st.tuples(st.just('agent-access-rm'), st.sampled_from(AGENTS), st.sampled_from(HOSTS)),
+    # S-b, the secret writers the router sends to the core on the tombstone
+    *SECRET_OPS,
 )
 
 
@@ -120,6 +169,13 @@ JOBS = st.tuples(st.sampled_from(PEOPLE), st.booleans(), st.sampled_from(['job',
                  st.sampled_from(['', '--once']), st.sampled_from(['', '', 'revoke', 'member-rm'])).map(
     lambda t: {'': [], 'revoke': [('revoke', t[0])], 'member-rm': [('member-rm', 'house', t[0])]}[t[4]]
     + [(t[2], 'house', who) + ((t[3],) if t[2] == 'helper' else ()) for who in ([t[0]] if t[1] else []) + BOTS])
+# a profile that is shared on purpose, someone's own or lent, and then a writer that names it again: the owner, the `*` and the
+# people it is lent to must survive (random commands alone rarely hit the same profile twice)
+SECRET_PAIR = st.tuples(st.sampled_from(SECRET_PROFILES), st.sampled_from(['*', 'sam', 'lent', 'plain']),
+                        st.sampled_from(['sset', 'sgrant', 'connect', 'srevoke']), st.sampled_from(AGENTS)).map(
+    lambda t: [('hand-profile', t[0], t[1]),
+               {'sset': ('sset', t[0], t[3]), 'sgrant': ('sgrant', t[3], *t[0].split('/')),
+                'connect': ('connect', t[3], *t[0].split('/')), 'srevoke': ('srevoke', t[3], *t[0].split('/'))}[t[2]]])
 # A table first (people, their bots, rows with settings), then anything: random commands alone rarely build one.
 SEQUENCES = st.tuples(
     st.lists(st.tuples(st.just('hand'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(HAND)),
@@ -134,6 +190,7 @@ SEQUENCES = st.tuples(
     st.sampled_from([[], [('cap', '50')]]),
     st.lists(ACCESS, max_size=3).map(lambda xs: [op for x in xs for op in x]),
     st.lists(JOBS, max_size=2).map(lambda xs: [op for x in xs for op in x]),
+    st.lists(SECRET_PAIR, max_size=3).map(lambda xs: [op for x in xs for op in x]),
     st.lists(OPS, max_size=8),
 ).map(lambda parts: [op for part in parts for op in part])
 
@@ -165,8 +222,40 @@ def apply(op):
             a.setdefault('members', {}).setdefault(agent, {})[who] = {'mode': 'auto'} if what == 'row-auto' else {}
         ka.AUTH.write_text(json.dumps(a))
         return True
+    if kind == 'sset':
+        _, profile, grant_agent = op
+        var = 'KEY' if profile.startswith('sk/') else 'PASS'
+        return run_stdin({var: f'v-{profile}'}, 'set', profile, '--stdin-json', *(['--grant', grant_agent] if grant_agent else []))
+    if kind == 'sgrant':
+        return run('grant', op[1], op[2], f'{op[2]}/{op[3]}')
+    if kind == 'srevoke':
+        return run('revoke', op[1], op[2], *(['--profile', f'{op[2]}/{op[3]}'] if op[3] else []))
+    if kind == 'connect':
+        return run('connect', op[1], op[2], *(['--profile', f'{op[2]}/{op[3]}'] if op[3] else []))
+    if kind == 'disconnect':
+        return run('disconnect', op[1], op[2])
+    if kind == 'senv':
+        return run('env', op[1], op[2], op[3])
+    if kind == 'hand-profile':
+        _, profile, what = op
+        a = json.loads(ka.AUTH.read_text())
+        prof = a.setdefault('profiles', {}).setdefault(profile, {})
+        if what == 'lent':
+            prof['with'] = ['amy']
+        elif what in ('*', 'sam'):
+            prof['person'] = what
+        ka.AUTH.write_text(json.dumps(a))
+        return True
     if kind in ('access', 'access-rm'):
         return run('access', op[1], op[2], op[3][0], op[3][1], *(['--rm'] if kind == 'access-rm' else []))
+    if kind == 'access-by':
+        return run('access', op[1], op[2], op[3][0], op[3][1], '--by', op[4])
+    if kind == 'helper-rm':
+        return run('helper', op[1], op[2], 'garden', '--rm')
+    if kind == 'job-decline':
+        return run('job', op[1], op[2], 'work', '--decline', op[3])
+    if kind in ('agent-access', 'agent-access-rm'):
+        return run('agent-access', op[1], 'domain', op[2], *(['--rm'] if kind == 'agent-access-rm' else []))
     if kind in ('job', 'job-rm'):
         return run('job', op[1], op[2], 'work', *(['--rm'] if kind == 'job-rm' else []))
     if kind == 'helper':
@@ -197,6 +286,10 @@ def state_properties():
             assert r['allowed'] is False, f'{who} may use the built-in scratch: {r}'
     for agent in AGENTS:
         rows = a['members'].get(agent, {})
+        kept = (a.get('agent_access', {}).get(agent) or {}).get('domains') or []
+        # (C-b) a host kept for every guest of an agent is never the owner's to be boxed by
+        assert not set(ka.resolve(a, agent, OWNER).get('access', {}).get('domains', [])) & set(kept), \
+            f'the owner is given the kept hosts {kept} of {agent}'
         for who in ALL:
             r = ka.resolve(a, agent, who)
             if who == OWNER:
@@ -253,6 +346,20 @@ def state_properties():
             else:
                 # (c) the owner's bots together are capped by owner_bots_budget, when set.
                 assert r['budget'] == (a.get('owner_bots_budget') or ''), f'owner bot {who}: budget {r["budget"]!r}'
+    # (S-b) a profile no one is named for is the owner's on a personal service (a login) and shared otherwise; and a guest is
+    # never handed the owner's login unless it was lent to them (a bot of a guest has the guest's say, not the owner's)
+    for name, prof in a['profiles'].items():
+        if not prof.get('person'):
+            want = OWNER if name.startswith('lg/') else None
+            assert ka.owner_of(a, name) == want, f'{name}: owner {ka.owner_of(a, name)!r}, expected {want!r}'
+    for agent in AGENTS:
+        for who in PEOPLE + BOTS:
+            profile, _why, _ = ka.granted(a, agent, 'lg', who)
+            if profile and who in a['people']:
+                belongs = ka.owner_of(a, profile)
+                lent = a['profiles'].get(profile, {}).get('with', [])
+                assert belongs in (None, ka.canonical(a, who)) or ka.canonical(a, who) in lent, \
+                    f'{who} is handed {profile}, which is {belongs}\'s and not lent to them'
     for b in bot_ids(a):
         # a bot belongs to a person who still exists.
         assert ka.canonical(a, a['people'][b]['bot_of']) in a['people'], f'bot {b} outlived its owner'
@@ -279,6 +386,34 @@ def test_access_never_exceeds_the_grant(ops):
             p = before['people'].get(op[1])
             assert (op[1] in a['retired']) == (p is not None and not p.get('bot_of')) or op[1] in before['retired'], \
                 f'{op[1]}: retired {op[1] in a["retired"]}'
+        if op[0] in SECRET_KINDS:
+            # (S-b) the secret writers change profiles, grants and env and nothing else; a profile that is there keeps its owner,
+            # its `*` and the people it is lent to; only a host connector's mark is ever dropped, and only by a disconnect;
+            # a refusal writes nothing.
+            for table in ('people', 'members', 'presets', 'invites', 'retired', 'agent_access'):
+                assert a[table] == before[table], f'{op}: changed {table}'
+            for name, prof in before['profiles'].items():
+                if name in a['profiles']:
+                    for k in ('person', 'with'):
+                        assert a['profiles'][name].get(k) == prof.get(k), f'{op}: {name} lost its {k}'
+                else:
+                    assert op[0] == 'disconnect' and prof == ka.HOST_STORE, f'{op}: dropped the profile {name}: {prof}'
+            if op[0] == 'senv':
+                assert a['grants'] == before['grants'] and a['profiles'] == before['profiles'], f'{op}: env touched more'
+            else:
+                assert a['env'] == before['env'], f'{op}: touched env'
+            if not ok:
+                assert a == before, f'{op}: refused but wrote'
+            if op[0] == 'sset' and ok:
+                _, profile, grant_agent = op
+                var = 'KEY' if profile.startswith('sk/') else 'PASS'
+                assert a['profiles'][profile][var] == f'keychain:kith/{profile}#{var}', f'{op}: no reference'
+                assert all(v == f'keychain:kith/{profile}#{var}' for k, v in a['profiles'][profile].items()
+                           if k == var), f'{op}: the reference is not the Keychain item'
+                if grant_agent:
+                    assert profile in ka.grant_list(a['grants'].get(grant_agent, {}).get(profile.split('/')[0])), f'{op}: not granted'
+            if op[0] == 'disconnect' and ok:
+                assert op[2] not in a['grants'].get(op[1], {}), f'{op}: still connected'
         if op[0] in ('person', 'bot') and op[1] not in before['people'] and op[1] in before['retired']:
             assert not ok and op[1] not in a['people'], f'{op}: a retired id was given to someone new'
         if op[0] == 'member-rm' and ok and op[2] != EVERYONE:
@@ -345,6 +480,59 @@ def test_access_never_exceeds_the_grant(ops):
                 assert others == olds, f'{op}: changed another row'
             else:
                 assert a == before, f'{op}: refused but wrote'
+        if op[0] == 'access-by':
+            # (C-a, M3) --by names the person or the bot's owner, and only while a member of the agent now; the owner (or no
+            # --by) is always fine. A refusal here is any of the access refusals above, or this one, and writes nothing.
+            _, agent, who, (kind, value), by = op
+            p = before['people'].get(who)
+            parent = ka.parent_of(before, who) if p else None
+            approver = ka.canonical(before, by)
+            owner_said = ka.is_owner(before, approver)
+            member_now = (by in before['people'] and ka.resolve(before, agent, approver)['allowed'] is True
+                          and ka.resolve(before, agent, approver).get('preset') == 'member')
+            by_ok = owner_said or (approver in (who, parent) and member_now)
+            if ok:
+                assert by_ok, f'{op}: accepted, but {by} may not approve for {who}'
+                got = a['members'][agent][who]['access_by'].get(f'{kind}:{value}')
+                assert got in (None, approver), f'{op}: the entry says {got!r} approved it'
+                if not owner_said:
+                    assert got in (approver, None), f'{op}: approver lost'
+            elif by_ok:
+                pass   # refused for another reason (checked by the plain access op's property)
+            else:
+                assert a == before, f'{op}: refused but wrote'
+        if op[0] == 'helper-rm':
+            # (C-b) taking a helper away takes it as written, from anyone, a revoked person or a stranger included: it
+            # never refuses, and the helper is not on the row afterwards.
+            assert ok, f'{op}: a removal was refused'
+            row = a['members'].get(op[1], {}).get(ka.canonical(a, op[2]))
+            assert not isinstance(row, dict) or 'garden' not in (row.get('helpers') or []), f'{op}: still listed'
+        if op[0] == 'job-decline':
+            # (C-b) the No of a widening card writes only on a person's own row, only for a job that is ticked, and only
+            # the declined hash; a refusal writes nothing.
+            _, agent, who, h = op
+            row = before['members'].get(agent, {}).get(who)
+            ticked = isinstance(row, dict) and isinstance((row.get('jobs') or {}).get('work'), dict)
+            p = before['people'].get(who)
+            want = (ticked and p is not None and not p.get('owner') and ka.may(before, who, agent)[0]
+                    and 'work' in ka.jobs_of(agent))
+            assert ok == bool(want), f'{op}: accepted {ok}, expected {bool(want)}'
+            if ok:
+                assert h in a['members'][agent][who]['jobs']['work']['declined'], f'{op}: not recorded'
+                a2 = json.loads(json.dumps(a))
+                del a2['members'][agent][who]['jobs']['work']['declined']
+                b2 = json.loads(json.dumps(before))
+                b2['members'][agent][who]['jobs']['work'].pop('declined', None)
+                assert a2 == b2, f'{op}: changed more than the declined hashes'
+            else:
+                assert a == before, f'{op}: refused but wrote'
+        if op[0] in ('agent-access', 'agent-access-rm'):
+            # (C-b) a host kept for every guest is the agent's, never on a person's row; a removal always goes through.
+            _, agent, host = op
+            assert ok, f'{op}: refused'
+            kept = (a.get('agent_access', {}).get(agent) or {}).get('domains') or []
+            assert (host in kept) == (op[0] == 'agent-access'), f'{op}: kept {kept}'
+            assert a['members'] == before['members'], f'{op}: touched a person\'s row'
         if op[0] == 'access-rm' and ok:
             _, agent, who, (kind, value) = op
             row = a['members'].get(agent, {}).get(who, {})
@@ -356,9 +544,103 @@ def test_access_never_exceeds_the_grant(ops):
         state_properties()
 
 
+# --- the same answers on a home stepped for real (M2-23 lift) -----------------------------------------------------------------
+# After `kith migrate step authority` kith-auth has no file: resolve, may, people, budgets ... come from the core. Whatever a
+# generated sequence built, a copy of the home stepped for real must answer every one of them as the file does (stdout and
+# exit code, byte for byte). The writers that still exit 3 on a tombstone are not run there; the sequence is built on the file
+# and the copy is stepped from it. Needs the built kith (KITH_BIN); skipped without it.
+STEP_BIN = os.environ.get('KITH_BIN') or os.environ.get('KITH_DIFFTEST_BIN')
+STEPPED = {'examples': 0, 'refused': 0, 'answers': 0}
+
+
+def home_copy(name):
+    """A home in the layout `kith` finds on a Mac (auth.json under .kith/secrets), holding this example's file, agents and
+    services. Returns (env, auth path)."""
+    d = T / 'stepped' / name
+    shutil.rmtree(d, ignore_errors=True)
+    kh = d / 'home' / '.kith'
+    (kh / 'secrets').mkdir(parents=True)
+    shutil.copy(ka.AUTH, kh / 'secrets' / 'auth.json')
+    shutil.copytree(T / 'kith' / 'agents', kh / 'agents')
+    if ka.mac_services().is_dir():
+        shutil.copytree(ka.mac_services(), kh / 'services')
+    (d / 'serve').mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('KITH_', 'HQ_'))}
+    env.update(HOME=str(d / 'home'), KITH_HOME=str(kh), KITH_STATE=str(kh), KITH_MACHINE=str(kh), KITH_AGENTS=str(kh / 'agents'),
+               KITH_SERVE_DIR=str(d / 'serve'), KITH_SERVE_PORT='1', KITH_WAKE_NO_KICK='1', KITH_BIN=STEP_BIN,
+               KITH_SECURITY_BIN='/usr/bin/false', PYTHONDONTWRITEBYTECODE='1')
+    return env, kh / 'secrets' / 'auth.json'
+
+
+def same(out):
+    """An answer as data when it is JSON: the core keeps a table's rows in its own order (an agent's members by person), so the
+    keys of an object (`budgets`) can come in another order than the file's; the lists (`people --json`) keep theirs."""
+    try:
+        return json.loads(out)
+    except ValueError:
+        return out
+
+
+def answers(env):
+    import subprocess
+    out = []
+    cmds = [['people', '--json'], ['bots-cap', '--json'], ['budgets', AGENTS[0], '--json'], ['keys', '--json']]
+    for who in ALL:
+        for agent in AGENTS:
+            cmds += [['may', who, agent], ['resolve', agent, '--person', who]]
+            # the guest door's check (the revoke path: a revoked person, or the bot of one, reads `revoked`); the package declares no valid
+            # door here, so a person who may run the agent reads `no-job`. The tick is a write that needs the daemon, which these runs do not start
+            cmds += [['door', agent, who, 'render@0123456789ab', '--json']]
+    for cmd in cmds:
+        r = subprocess.run([sys.executable, str(KERNEL / 'bin' / 'kith-auth'), *cmd], env=env, capture_output=True, text=True, timeout=120)
+        out.append((cmd, r.returncode, r.stdout))
+    return out
+
+
+@settings(max_examples=int(os.environ.get('PROPS_STEPPED_EXAMPLES', 8)), deadline=None, database=None,
+          suppress_health_check=list(HealthCheck))
+@given(SEQUENCES)
+def test_a_stepped_home_answers_as_the_file(ops):
+    import subprocess
+    reset()
+    for op in ops:
+        # `set` writes Keychain items, which this run has none of; the other secret writers (grants, env, connect) go in
+        if op[0] != 'sset':
+            apply(op)
+    file_env, _ = home_copy('file')
+    core_env, core_auth = home_copy('core')
+    before = core_auth.read_bytes()
+    step = subprocess.run([STEP_BIN, 'migrate', 'step', 'authority'], env={**core_env, 'KITH_KERNEL': str(KERNEL)},
+                          capture_output=True, text=True, timeout=300)
+    STEPPED['examples'] += 1
+    if step.returncode != 0:
+        # nothing the generator builds is one the import may refuse: a refusal here is a finding, not a skip
+        STEPPED['refused'] += 1
+        assert core_auth.read_bytes() == before, f'a refused step touched auth.json: {step.stderr}'
+        raise AssertionError(f'the step refused a generated home: {(step.stdout + step.stderr).strip()}\nops {ops}')
+    assert b'kith_tombstone' in core_auth.read_bytes(), f'the step said ok but left a file: {step.stdout}'
+    want, got = answers(file_env), answers(core_env)
+    STEPPED['answers'] += len(want)
+    for (cmd, rc, out), (_, rc2, out2) in zip(want, got):
+        assert (rc, same(out)) == (rc2, same(out2)), f'{cmd}: the file says rc={rc} {out!r}, the stepped home rc={rc2} {out2!r}\nops {ops}'
+    # and back: the rollback gives a file that answers the same
+    rb = subprocess.run([STEP_BIN, 'rollback', 'authority'], env={**core_env, 'KITH_KERNEL': str(KERNEL)},
+                        capture_output=True, text=True, timeout=300)
+    assert rb.returncode == 0 and b'kith_tombstone' not in core_auth.read_bytes(), f'rollback: {rb.stderr}'
+    back = answers(core_env)
+    for (cmd, rc, out), (_, rc2, out2) in zip(want, back):
+        assert (rc, same(out)) == (rc2, same(out2)), f'{cmd}: after the rollback rc={rc2} {out2!r}, the file said rc={rc} {out!r}\nops {ops}'
+
+
 if __name__ == '__main__':
     try:
         test_access_never_exceeds_the_grant()
         print('ok   kith-auth access properties')
+        if STEP_BIN and os.access(STEP_BIN, os.X_OK):
+            test_a_stepped_home_answers_as_the_file()
+            assert STEPPED['examples'] > 0 and STEPPED['answers'] > 0, f'the stepped run compared nothing: {STEPPED}'
+            print(f'ok   kith-auth answers on a stepped home equal the file ({STEPPED["examples"]} homes, {STEPPED["refused"]} refused by the import, {STEPPED["answers"]} answers)')
+        else:
+            print('skip kith-auth answers on a stepped home (needs the built kith: KITH_BIN)')
     finally:
         shutil.rmtree(T, ignore_errors=True)

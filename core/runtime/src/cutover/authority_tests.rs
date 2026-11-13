@@ -106,11 +106,6 @@ fn original() -> Value {
 }
 
 fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
-    rig_full(limit, false)
-}
-
-/// `refuse`: the module as the real one is, with the step refused until M2-18 lifts it.
-fn rig_full(limit: Option<usize>, refuse: bool) -> (Rig, Vec<Box<dyn Module>>) {
     let (t, m) = machine();
     let root = t.path().to_path_buf();
     std::fs::create_dir_all(&m).unwrap();
@@ -149,7 +144,6 @@ fn rig_full(limit: Option<usize>, refuse: bool) -> (Rig, Vec<Box<dyn Module>>) {
         limit,
     )
     .waiting(std::time::Duration::from_millis(300));
-    let module = if refuse { module.refusing() } else { module };
     let rig = Rig {
         env: Env::new(&m).with_ctx(ctx),
         dir: t,
@@ -409,6 +403,102 @@ fn a_step_switches_and_a_rollback_gives_the_same_auth_json_back() {
         Some("tok"),
         "the secret went back before the file"
     );
+}
+
+#[test]
+fn env_is_imported_compared_and_written_back_from_the_core() {
+    let (r, reg) = rig();
+    r.edit(|v| {
+        v["env"] = json!({"house": {"svc": {"B": "2", "A": 1}, "other": {"X": "y"}}, "gone-agent": {"svc": {"Z": "z"}}});
+    });
+    let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+    reg[0].import(&r.env, Some(&mut core), opts()).unwrap();
+    drop(core);
+    assert_eq!(
+        r.count("secret_env"),
+        4,
+        "an agent that no longer exists too"
+    );
+    let d = r.diffs(reg[0].as_ref());
+    assert!(d.is_empty(), "same answer after the import: {d:?}");
+    // a different value, a missing variable and one only the core has are all differences, named but never shown
+    r.db()
+        .execute_batch(
+            "UPDATE secret_env SET value = '\"3\"' WHERE agent = 'house' AND service = 'svc' AND var = 'B'; \
+             DELETE FROM secret_env WHERE agent = 'house' AND service = 'other'; \
+             INSERT INTO secret_env VALUES ('house', 'svc', 'C', '\"c\"', 2);",
+        )
+        .unwrap();
+    let d = r.diffs(reg[0].as_ref());
+    assert!(said(&d, "env house/svc: differs in variable B"), "{d:?}");
+    assert!(said(&d, "variable C (only in core.db)"), "{d:?}");
+    assert!(
+        said(&d, "env house/other: in auth.json, not in core.db"),
+        "{d:?}"
+    );
+    assert!(
+        !d.iter().any(|l| l.contains("\"3\"")),
+        "no value is shown: {d:?}"
+    );
+    // the same variables in another order is a difference too (`mcp-config` prints them in the file's order)
+    r.db()
+        .execute_batch(
+            "DELETE FROM secret_env WHERE var = 'C'; \
+             UPDATE secret_env SET value = '\"2\"' WHERE var = 'B'; \
+             INSERT INTO secret_env VALUES ('house', 'other', 'X', '\"y\"', 0); \
+             UPDATE secret_env SET seq = 1 WHERE var = 'B'; UPDATE secret_env SET seq = 0 WHERE var = 'A';",
+        )
+        .unwrap();
+    let d = r.diffs(reg[0].as_ref());
+    assert!(
+        said(&d, "env house/svc: differs in the order of the variables"),
+        "{d:?}"
+    );
+}
+
+#[test]
+fn a_rollback_writes_the_cores_env_in_its_order_and_not_the_old_copys() {
+    let (r, reg) = rig();
+    r.edit(|v| {
+        v["env"] = json!({"house": {"svc": {"A": "plain"}}, "gone-agent": {"svc": {"Z": "z"}}});
+    });
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert_eq!(r.count("secret_env"), 2);
+    r.db()
+        .execute_batch(
+            "DELETE FROM secret_env WHERE agent = 'gone-agent'; \
+             UPDATE secret_env SET seq = 1 WHERE var = 'A'; \
+             INSERT INTO secret_env VALUES ('house', 'svc', 'B', '\"2\"', 0), ('house', 'svc', 'N', '1', 2), ('house', 'other', 'X', '\"y\"', 0);",
+        )
+        .unwrap();
+    rollback(&reg, &r.env, "authority", opts()).unwrap();
+    let after: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert_eq!(
+        after["env"],
+        json!({"house": {"svc": {"B": "2", "A": "plain", "N": 1}, "other": {"X": "y"}}})
+    );
+    let order: Vec<&String> = after["env"]["house"]["svc"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
+    assert_eq!(order, ["B", "A", "N"], "the core's order");
+}
+
+#[test]
+fn a_file_whose_env_is_not_an_object_per_service_is_refused() {
+    let (r, reg) = rig();
+    r.edit(|v| v["env"] = json!({"house": {"svc": "plain"}}));
+    let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+    let e = reg[0]
+        .import(&r.env, Some(&mut core), opts())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("env.house.svc") && e.contains("not an object"),
+        "{e}"
+    );
+    assert_eq!(r.count("people"), 0, "nothing was imported");
 }
 
 #[test]
@@ -698,32 +788,8 @@ fn a_rollback_writes_auth_json_private_and_keeps_a_newer_keychain_value() {
 // --- M2-18 step guard: the refusal, the lock with its sha check, the vault rows ---------------------------------------
 
 #[test]
-fn a_real_step_is_refused_with_the_open_gates_and_auth_json_is_untouched() {
-    let (r, reg) = rig_full(None, true);
-    let before = std::fs::read(r.auth()).unwrap();
-    for _ in 0..2 {
-        let e = step(&reg, &r.env, "authority", opts())
-            .unwrap_err()
-            .to_string();
-        assert!(
-            e.contains("M2-18 gates are open")
-                && e.contains("revoke bridge")
-                && e.contains("'already switched' branch")
-                && e.contains("people --json"),
-            "{e}"
-        );
-    }
-    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
-    assert!(!tombstone::is_tombstone(&r.auth()));
-    assert!(
-        phase(&r.env, "authority").is_none(),
-        "no record was written"
-    );
-}
-
-#[test]
-fn a_dry_run_and_check_still_work_while_the_step_is_refused() {
-    let (r, reg) = rig_full(None, true);
+fn a_dry_run_and_check_leave_the_file_alone() {
+    let (r, reg) = rig();
     let dry = Opts {
         dry_run: true,
         ..opts()
@@ -874,13 +940,10 @@ fn the_lock_is_held_throughout_the_step_and_the_rollback() {
 }
 
 #[test]
-fn a_lifted_step_that_recorded_no_sha_does_not_tombstone() {
+fn a_step_that_recorded_no_sha_does_not_tombstone() {
     let (r, reg) = rig();
     let e = reg[0].before_tombstone(&r.env).unwrap_err().to_string();
     assert!(e.contains("did not record auth.json's sha"), "{e}");
-    // The unlifted module is never in a real step, so it has nothing to check.
-    let (r, reg) = rig_full(None, true);
-    reg[0].before_tombstone(&r.env).expect("not lifted");
 }
 
 #[test]
@@ -1747,4 +1810,318 @@ fn a_kith_auth_write_after_a_kept_copy_keeps_the_record_switched_and_says_rollba
     assert!(msg.contains("kith rollback authority"), "{msg}");
     assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
     assert!(!tombstone::is_tombstone(&r.auth()));
+}
+
+fn revoke_in_core(r: &Rig, id: &str) {
+    r.db()
+        .execute("UPDATE people SET revoked = 1 WHERE id = ?1", [id])
+        .unwrap();
+}
+
+/// A marker from before the sha was kept.
+fn drop_auth_sha(r: &Rig) {
+    let seed: String = r
+        .db()
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'cutover:authority:seed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut v: Value = serde_json::from_str(&seed).unwrap();
+    v.as_object_mut().unwrap().remove("auth_sha");
+    r.db()
+        .execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'cutover:authority:seed'",
+            [v.to_string()],
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_repair_over_a_never_touched_file_finishes_the_tombstone_and_keeps_the_core_revoke() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The core moved on (a revoke) while auth.json stayed the file the step imported: the core is the newer side.
+    revoke_in_core(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(revoked_in_core(&r, "sam"), "the core's revoke stays");
+    // Running it again is the finished switch.
+    let out = step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(said(&out, "already switched"), "{out:?}");
+    assert!(revoked_in_core(&r, "sam"));
+}
+
+#[test]
+fn a_changed_file_over_an_unmoved_core_is_told_to_force_and_force_imports_it() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("kith migrate step authority --force"), "{msg}");
+    let force = Opts {
+        force: true,
+        ..opts()
+    };
+    step(&reg, &r.env, "authority", force).unwrap();
+    assert!(revoked_in_core(&r, "sam"), "the file's revoke was imported");
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+}
+
+#[test]
+fn a_changed_file_and_a_moved_core_refuse_without_force_advice_and_leave_the_record() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    revoke_in_core(&r, "mia");
+    std::fs::remove_dir(blocker).unwrap();
+    let bytes = std::fs::read(r.auth()).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("both sides changed"), "{msg}");
+    assert!(msg.contains("kith migrate check authority"), "{msg}");
+    assert!(!msg.contains("--force"), "{msg}");
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    assert_eq!(std::fs::read(r.auth()).unwrap(), bytes);
+    assert!(revoked_in_core(&r, "mia"));
+}
+
+#[test]
+fn an_older_marker_with_no_sha_is_told_to_force_only_while_the_core_is_unmoved() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    revoked_in_file(&r, "sam");
+    drop_auth_sha(&r);
+    std::fs::remove_dir(blocker).unwrap();
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("kith migrate step authority --force"), "{msg}");
+    // Once the core has moved too, nothing says which side is newer.
+    revoke_in_core(&r, "mia");
+    let msg = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(msg.contains("compare by hand"), "{msg}");
+    assert!(!msg.contains("--force"), "{msg}");
+}
+
+fn force() -> Opts {
+    Opts {
+        force: true,
+        ..opts()
+    }
+}
+
+#[test]
+fn force_on_a_stepping_record_is_refused_once_the_core_has_moved() {
+    for old_marker in [false, true] {
+        let (r, reg) = rig();
+        let blocker = crash_before_tombstone(&r, &reg);
+        revoked_in_file(&r, "sam");
+        if old_marker {
+            drop_auth_sha(&r);
+        }
+        std::fs::remove_dir(blocker).unwrap();
+        // The first repair sees an unmoved core: it advises --force and leaves the record Stepping.
+        let msg = refusal(step(&reg, &r.env, "authority", opts()));
+        assert!(msg.contains("--force"), "{msg}");
+        assert_eq!(phase(&r.env, "authority"), Some(Phase::Stepping));
+        // Then the core takes a revoke of its own.
+        revoke_in_core(&r, "mia");
+        let bytes = std::fs::read(r.auth()).unwrap();
+        let msg = refusal(step(&reg, &r.env, "authority", force()));
+        assert!(!msg.contains("--force"), "{msg}");
+        assert!(revoked_in_core(&r, "mia"), "the core's revoke is kept");
+        assert!(!revoked_in_core(&r, "sam"), "the file was not imported");
+        assert_eq!(std::fs::read(r.auth()).unwrap(), bytes);
+        assert!(!tombstone::is_tombstone(&r.auth()));
+    }
+}
+
+#[test]
+fn a_stepping_record_with_the_same_marker_and_file_finishes_the_tombstone_without_importing() {
+    let (r, reg) = rig();
+    let blocker = crash_before_tombstone(&r, &reg);
+    // The crash came after the marker and before the switched record.
+    let s = state::read(&r.env.layout, "authority").unwrap().unwrap();
+    state::write(
+        &r.env.layout,
+        "authority",
+        &Switch {
+            phase: Phase::Stepping,
+            ..s
+        },
+    )
+    .unwrap();
+    revoke_in_core(&r, "sam");
+    std::fs::remove_dir(blocker).unwrap();
+    step(&reg, &r.env, "authority", opts()).unwrap();
+    assert!(tombstone::is_tombstone(&r.auth()));
+    assert_eq!(phase(&r.env, "authority"), Some(Phase::Switched));
+    assert!(
+        revoked_in_core(&r, "sam"),
+        "no import over the core's revoke"
+    );
+}
+
+#[test]
+fn a_rollback_writes_the_cores_helper_since_back_unless_the_database_is_from_before_it() {
+    let base = json!({
+        "people": {"kai": {"owner": true}, "sam": {}},
+        "members": {"house": {"sam": {"helpers": ["garden"], "helper_since": {"garden": 1}}}},
+    });
+    let mut snap = json!({
+        "people": {"kai": {"owner": true}, "sam": {}},
+        "members": {"house": {"sam": {"helpers": ["garden"], "helper_since": {"garden": 2}}}},
+        "presets": {}, "invites": {}, "retired": {}, "agent_access": {},
+    });
+    // the core's value wins
+    let out = authority::merge_back(Some(base.clone()), &snap);
+    assert_eq!(
+        out["members"]["house"]["sam"]["helper_since"],
+        json!({"garden": 2})
+    );
+    // a helper removed in the core does not come back from the old copy
+    snap["members"]["house"]["sam"]["helpers"] = json!([]);
+    snap["members"]["house"]["sam"]
+        .as_object_mut()
+        .unwrap()
+        .remove("helper_since");
+    let out = authority::merge_back(Some(base.clone()), &snap);
+    assert!(out["members"]["house"]["sam"].get("helper_since").is_none());
+    // a database imported before the column existed has NULLs that say nothing: the old copy's stays
+    snap["helper_since_stale"] = json!(true);
+    let out = authority::merge_back(Some(base), &snap);
+    assert_eq!(
+        out["members"]["house"]["sam"]["helper_since"],
+        json!({"garden": 1})
+    );
+}
+
+fn put_once(r: &Rig) {
+    r.edit(|v| {
+        v["once"] =
+            json!({"o1": {"agent": "house", "created": 1, "expires": 4_102_444_800_000_i64}});
+    });
+}
+
+#[test]
+fn a_step_with_one_time_secrets_in_auth_json_is_refused_and_changes_nothing() {
+    let (r, reg) = rig();
+    put_once(&r);
+    let before = std::fs::read(r.auth()).unwrap();
+    for _ in 0..2 {
+        let e = refusal(step(&reg, &r.env, "authority", opts()));
+        assert!(
+            e.contains("1 one-time secret(s)")
+                && e.contains("wait until they are used or expire (at most an hour"),
+            "{e}"
+        );
+    }
+    assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+    assert!(!tombstone::is_tombstone(&r.auth()));
+    assert!(
+        phase(&r.env, "authority").is_none(),
+        "no record was written"
+    );
+    // used or expired: the file has none, and the step goes through
+    r.edit(|v| v["once"] = json!({}));
+    step(&reg, &r.env, "authority", opts()).expect("step");
+    assert!(tombstone::is_tombstone(&r.auth()));
+}
+
+#[test]
+fn a_dry_run_reports_one_time_secrets_and_is_not_ready() {
+    let (r, reg) = rig();
+    put_once(&r);
+    let dry = Opts {
+        dry_run: true,
+        ..opts()
+    };
+    let e = refusal(step(&reg, &r.env, "authority", dry));
+    assert!(e.contains("preflight 7.") && e.contains("o1"), "{e}");
+    assert!(e.contains("not ready"), "{e}");
+}
+
+/// Wraps a module and has a `kith-auth once put` land in auth.json after the once check (inside `same_answer`), as a writer
+/// that got in between would.
+struct OnceInBetween(Box<dyn Module>, PathBuf);
+
+impl Module for OnceInBetween {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
+        self.0.tombstones(env)
+    }
+    fn import(&self, env: &Env, core: Option<&mut Core>, o: Opts) -> Result<Vec<String>> {
+        self.0.import(env, core, o)
+    }
+    fn same_answer(&self, env: &Env, db: &Connection) -> Result<Vec<String>> {
+        let out = self.0.same_answer(env, db);
+        let mut v: Value = serde_json::from_slice(&std::fs::read(&self.1).unwrap()).unwrap();
+        v["once"] =
+            json!({"late": {"agent": "house", "created": 1, "expires": 4_102_444_800_000_i64}});
+        std::fs::write(&self.1, v.to_string()).unwrap();
+        out
+    }
+    fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
+        self.0.export_back(env, core)
+    }
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        self.0.source_lock(env)
+    }
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        self.0.before_tombstone(env)
+    }
+    fn digest(&self, env: &Env, db: &Connection) -> Result<String> {
+        self.0.digest(env, db)
+    }
+}
+
+#[test]
+fn a_one_time_secret_written_after_the_check_is_not_lost_to_the_tombstone() {
+    let (r, mut reg) = rig();
+    let inner = reg.remove(0);
+    let reg: Vec<Box<dyn Module>> = vec![Box::new(OnceInBetween(inner, r.auth()))];
+    let e = refusal(step(&reg, &r.env, "authority", opts()));
+    assert!(e.contains("auth.json changed during the step"), "{e}");
+    assert!(
+        !tombstone::is_tombstone(&r.auth()),
+        "auth.json is still the file"
+    );
+    let v: Value = serde_json::from_slice(&std::fs::read(r.auth()).unwrap()).unwrap();
+    assert!(v["once"]["late"].is_object(), "the late once is kept");
+}
+
+#[test]
+fn a_core_imported_before_secrets_or_helper_since_were_kept_is_told_to_import_again() {
+    for (sql, word) in [
+        (
+            "INSERT INTO secret_stale VALUES ('before secret_grants')",
+            "profiles, grants and env",
+        ),
+        (
+            "INSERT INTO authority_settings (key, value) VALUES ('helper_since_stale', '1')",
+            "a helper's `since`",
+        ),
+        (
+            "INSERT INTO authority_settings (key, value) VALUES ('handles_stale', '1')",
+            "people's handles",
+        ),
+    ] {
+        let (r, reg) = rig();
+        {
+            let mut core = crate::start_with(&r.env.layout, MIGRATIONS).unwrap();
+            reg[0].import(&r.env, Some(&mut core), opts()).unwrap();
+        }
+        r.db().execute_batch(sql).unwrap();
+        let before = std::fs::read(r.auth()).unwrap();
+        let e = refusal(step(&reg, &r.env, "authority", opts()));
+        assert!(e.contains("import again") && e.contains(word), "{e}");
+        assert_eq!(std::fs::read(r.auth()).unwrap(), before);
+        assert!(!tombstone::is_tombstone(&r.auth()));
+    }
 }

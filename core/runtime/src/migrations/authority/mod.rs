@@ -9,6 +9,7 @@ mod m0012_access_requests;
 mod m0013_agent_access;
 mod m0014_open_removals;
 mod m0015_person_handles;
+mod m0016_helper_since;
 
 pub(super) const STEPS: &[Migration] = &[
     m0010_authority_read::MIGRATION,
@@ -17,4 +18,5 @@ pub(super) const STEPS: &[Migration] = &[
     m0013_agent_access::MIGRATION,
     m0014_open_removals::MIGRATION,
     m0015_person_handles::MIGRATION,
+    m0016_helper_since::MIGRATION,
 ];

@@ -265,15 +265,50 @@ def lock_auth():
     return _LOCK
 
 
+class Routed(Exception):
+    """load_auth met the authority tombstone for a verb the core can answer (main set _ROUTE): main sends it there."""
+
+
+_ROUTE = None   # (verb, args, as_json) of a verb in ROUTES, set by main; read by load_auth
+_APP_ONLY = None   # the verb, when it is one of APP_ONLY and was asked of this home's own auth.json; set by main, read by load_auth
+# The people-admin writes. Once auth.json is the authority tombstone the Kith app (the host's people methods) is how people
+# are added, changed and removed: the host sends these to the core, and kith-auth on the tombstone says so and exits 3.
+APP_ONLY = ('member', 'person', 'bot', 'invite', 'preset', 'handle', 'link')
+_AS_JSON = False   # a secret writer was asked for --json (connect, disconnect): route_fail says it as JSON
+_VIEW = None    # the core's tables in auth.json's shape (people.secretsView), set by route_secret_read; read by load_auth
+
+
+ROUTED_WRITES = ('access', 'helper', 'job')   # the card writes the core answers on the tombstone (C-a, C-b)
+
+
 def load_auth(write=False):
     """auth.json as a dict. write=True: the caller will save_auth, so take the lock first."""
+    if write and _ROUTE and _ROUTE[0] in ROUTED_WRITES:
+        # A card write on the tombstone goes to the core, which is the one lock there: look before taking auth.json's own.
+        try:
+            kith_tombstone.read_text(AUTH)
+        except kith_tombstone.Tombstoned as e:
+            if e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
+                raise Routed(str(e))
+        except (OSError, ValueError):
+            pass   # the plain path below says what is wrong with the file
     if write:
         lock_auth()
     try:
-        data = json.loads(kith_tombstone.read_text(AUTH))
+        if _VIEW is not None and not write:   # a secret-read verb on the tombstone: the core's tables, not the note
+            data = _VIEW
+        else:
+            data = json.loads(kith_tombstone.read_text(AUTH))
     except FileNotFoundError:
         data = {}
     except kith_tombstone.Tombstoned as e:   # authority moved to the core: never answer from the note (fail closed)
+        # A read of this home's own auth.json for a verb in ROUTES goes to the core instead (M2-23); run_routed exits 3
+        # with this text when the shape of the verb has no route.
+        if _ROUTE and not write and e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
+            raise Routed(str(e))
+        if _APP_ONLY and e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
+            die(f'{_APP_ONLY} is app-only now that authority moved to the core: on a switched Mac, manage people in the Kith '
+                f'app. ({e})', 3)
         die(str(e), 3)
     except ValueError as e:
         die(f'{AUTH}: invalid JSON ({e})')
@@ -846,7 +881,7 @@ def cmd_helper_mcp(agent, decision):
         f = files.get(server)
         if not f or json.loads(f.read_text()).get('kind') != 'mcp':
             return
-        if granted(load_auth(), agent, f.stem)[0]:
+        if granted(read_auth(), agent, f.stem)[0]:   # on the tombstone: the core's tables, or the check fails and the tool gets `decision`
             return
         why = f'{agent} has no grant for {f.stem} in this run (kith-auth grant {agent} {f.stem} <profile>)'
     except (Exception, SystemExit):
@@ -928,7 +963,9 @@ def connector_row(auth, agent, svc, declared=False):
 
 
 def connect_args(args):
+    global _AS_JSON
     as_json = '--json' in args
+    _AS_JSON = as_json
     opts, rest = take_opts([a for a in args if a != '--json'], {'--profile'})
     return as_json, opts, rest
 
@@ -952,7 +989,7 @@ def cmd_connect(args):
     spec = json.loads(f.read_text())
     if spec.get('kind') in ('login', 'browser'):
         jfail(f"{svc} is not a connector (kind {spec.get('kind')}); kith-auth grant {agent} {svc} <profile>", as_json)
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     have = grant_list(auth['grants'].get(agent, {}).get(svc))
     profile = opts.get('--profile')
     if profile is None and not have:
@@ -975,7 +1012,9 @@ def cmd_connect(args):
             auth['grants'].setdefault(agent, {})[svc] = profile
             changed = True
         if changed or profile not in auth['profiles']:
-            save_auth(auth)
+            # a grant that changed since it looked is refused by the core, not overwritten
+            commit(auth, in_core, 'people.secretGrant',
+                   {'agents': [agent], 'service': svc, 'profiles': [profile], 'ifHave': {agent: have}})
     row = connector_row(auth, agent, svc, svc in needs(agent))
     if as_json:
         print(json.dumps({'ok': True, 'agent': agent, 'connector': svc, 'changed': changed, 'profile': row['profile'],
@@ -994,7 +1033,7 @@ def cmd_disconnect(args):
         jfail('disconnect <agent> <connector> [--json]', as_json, 2)
     agent, svc = rest
     known_agent(agent, as_json)
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     grants = auth['grants'].get(agent)
     held = grant_list(grants.get(svc)) if isinstance(grants, dict) else []
     if held:
@@ -1004,7 +1043,7 @@ def cmd_disconnect(args):
         for p in held:   # a host profile nobody else holds goes with its last grant; keyed profiles are the owner's to keep
             if auth['profiles'].get(p) == HOST_STORE and not agents_granted(auth, p):
                 auth['profiles'].pop(p)
-        save_auth(auth)
+        commit(auth, in_core, 'people.secretRevoke', {'agent': agent, 'service': svc, 'dropHostProfiles': True})
     msg = f'{agent} may no longer use {svc}' if held else f'{agent} had no {svc} connected; nothing to do'
     if as_json:
         print(json.dumps({'ok': True, 'agent': agent, 'connector': svc, 'changed': bool(held), 'message': msg}))
@@ -1147,6 +1186,10 @@ def cmd_set(profile, var):
     svc, _ = split_profile(profile)
     if not VAR_RE.match(var) or var not in service(svc).get('secrets', []):
         die(f'{svc} declares no secret by that name')
+    core = core_store()
+    if core:
+        probe_core()   # before the prompt and the Keychain: no daemon, or not switched, is exit 3 with nothing stored
+        once_owner_only(core_tables())   # a guest's MCP server runs outside the box: the file's permissions stood in
     value = getpass.getpass(f'{profile} {var}: ')
     if not value:
         die('nothing entered; unchanged')
@@ -1155,9 +1198,12 @@ def cmd_set(profile, var):
     kc = f'kith/{profile}'
     if not keychain_put(kc, var, value):
         die('the Keychain did not take the key; nothing stored')
-    auth = load_auth(write=True)
-    auth['profiles'].setdefault(profile, {})[var] = f'keychain:{kc}#{var}'
-    save_auth(auth)
+    if core:
+        set_in_core(profile, [var], None)
+    else:
+        auth = load_auth(write=True)
+        auth['profiles'].setdefault(profile, {})[var] = f'keychain:{kc}#{var}'
+        save_auth(auth)
     print(f'stored in Keychain as {kc} / {var}; {profile} now reads it from there')
 
 
@@ -1186,21 +1232,28 @@ def cmd_set_stdin(profile, grant_agent):
         if bad_value(value):
             die(f'refused: each key is text, non-empty, no NUL, at most {MAX_VALUE} bytes; nothing stored', 2)
     kc = f'kith/{profile}'
+    core = core_store()
+    if core:
+        probe_core()   # before any Keychain item is written: no daemon, or not switched, is exit 3 with nothing stored
+        once_owner_only(core_tables())   # a guest's MCP server runs outside the box: the file's permissions stood in
     for var, value in values.items():
         if not keychain_put(kc, var, value):
             die('the Keychain did not take the key; auth.json unchanged')
     names = list(values)
     values = None
-    auth = load_auth(write=True)
-    refs = auth['profiles'].setdefault(profile, {})
-    for var in names:
-        refs[var] = f'keychain:{kc}#{var}'
-    if grant_agent is not None:
-        have = grant_list(auth['grants'].setdefault(grant_agent, {}).get(svc))
-        if profile not in have:
-            have.append(profile)
-        auth['grants'][grant_agent][svc] = have if len(have) > 1 else have[0]   # one profile stays the plain string
-    save_auth(auth)
+    if core:
+        set_in_core(profile, names, grant_agent)
+    else:
+        auth = load_auth(write=True)
+        refs = auth['profiles'].setdefault(profile, {})
+        for var in names:
+            refs[var] = f'keychain:{kc}#{var}'
+        if grant_agent is not None:
+            have = grant_list(auth['grants'].setdefault(grant_agent, {}).get(svc))
+            if profile not in have:
+                have.append(profile)
+            auth['grants'][grant_agent][svc] = have if len(have) > 1 else have[0]   # one profile stays the plain string
+        save_auth(auth)
     print(json.dumps({'profile': profile, 'service': svc, 'vars': names, 'granted': grant_agent}))
 
 
@@ -1465,11 +1518,11 @@ def cmd_keys(args):
 
 def cmd_revoke(args, as_json=False):
     if as_json and len(args) in (2, 4):   # a retired agent's row can still be revoked; one that never existed can't
-        if args[0] not in agents() and args[0] not in load_auth()['grants']:
+        if args[0] not in agents() and args[0] not in read_auth()['grants']:
             die(f"no agent '{args[0]}' (kith ls)")
     if len(args) == 4 and args[2] == '--profile':
         agent, svc, profile = args[0], args[1], args[3]
-        auth = load_auth(write=True)
+        auth, in_core = load_for_write()
         before = json.dumps(auth, sort_keys=True)
         grants = auth['grants'].get(agent, {})
         left = [p for p in grant_list(grants.get(svc)) if p != profile]
@@ -1480,7 +1533,7 @@ def cmd_revoke(args, as_json=False):
         if not grants:
             auth['grants'].pop(agent, None)
         changed = json.dumps(auth, sort_keys=True) != before
-        save_auth(auth)
+        commit(auth, in_core, 'people.secretRevoke', {'agent': agent, 'service': svc, 'profile': profile})
         if as_json:
             print(json.dumps({'ok': True, 'agent': agent, 'service': svc, 'profile': profile, 'changed': changed}))
             return
@@ -1488,10 +1541,10 @@ def cmd_revoke(args, as_json=False):
         return
     if len(args) != 2:
         die('revoke <agent> <service> [--profile P]', 2)
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     held = args[1] in auth['grants'].get(args[0], {})
     auth['grants'].get(args[0], {}).pop(args[1], None)
-    save_auth(auth)
+    commit(auth, in_core, 'people.secretRevoke', {'agent': args[0], 'service': args[1]})
     if as_json:
         print(json.dumps({'ok': True, 'agent': args[0], 'service': args[1], 'profile': None, 'changed': held}))
         return
@@ -1714,21 +1767,21 @@ def cmd_agent_access(args):
     agent, _, host = args[:3]
     import kith_guard
     if len(args) == 4:
-        auth = load_auth(write=True)
+        auth, in_core = load_for_write()
         if drop_agent_domain(auth, agent, host):
-            save_auth(auth)
+            commit(auth, in_core, 'people.agentAccess', {'agent': agent, 'domain': host, 'remove': True})
         print(f'{host} is no longer kept for everyone {agent} is shared with')
         return
     if not kith_guard.valid_domain(host):
         die(f"'{host}' is not a plain host name (no wildcard, address or port)", 2)
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     kept = auth['agent_access'].setdefault(agent, {})
     have = kept.setdefault('domains', [])
     if host not in have:
         have.append(host)
         kept.setdefault('since', {})[host] = int(time.time() * 1000)
         kept.setdefault('by', {})[host] = None
-    save_auth(auth)
+    commit(auth, in_core, 'people.agentAccess', {'agent': agent, 'domain': host})
     print(f'every guest of {agent} may reach {host} beyond the box')
 
 
@@ -2987,7 +3040,7 @@ def do_grant(who, svc, profile, known_only=False):
         for a in names:
             if base(a) not in agents() and a not in ('bridge', 'serve'):
                 die(f"no agent '{a}' (kith ls)")
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     before = json.dumps(auth, sort_keys=True)
     for a in names:
         if '@' in a:
@@ -3000,8 +3053,424 @@ def do_grant(who, svc, profile, known_only=False):
     for agent in names:
         auth['grants'].setdefault(agent, {})[svc] = profiles if len(profiles) > 1 else profiles[0]
     changed = json.dumps(auth, sort_keys=True) != before
-    save_auth(auth)
+    commit(auth, in_core, 'people.secretGrant',
+           {'agents': names, 'service': svc, 'profiles': profiles, 'knownOnly': known_only})
     return names, profiles, changed, uses
+
+
+# --- authority in the core (M2-23): the reads kith-auth answers from the core once auth.json is a tombstone ---------------
+
+def route_fail(why):
+    """The core can't be asked, or didn't answer: exit 3, as the tombstone's own refusal. Never a guess. In --json mode the
+    refusal is the {"ok": false, "error"} on stdout that json_run gives."""
+    msg = f'authority moved to the core, and it gave no answer: {why}'
+    if (_ROUTE and _ROUTE[2]) or _AS_JSON:
+        print(json.dumps({'ok': False, 'error': msg}))
+    else:
+        print(f'kith-auth: {msg}', file=sys.stderr)
+    sys.exit(3)
+
+
+def _core_call(method, params, person=False):
+    """One call of the core, as the mirror makes it (`kith kernel core-call`: the daemon first, an embedded core when none
+    answers), always marked viaSwitch: the core refuses it unless authority is switched. (answer dict, None, 0), or
+    (None, why, code) for no program, a timeout, a refusal, a lost answer, no core, an answer that is no object. The code
+    is core-call's own: 3 no daemon answers (nothing ran), 4 the core refused (nothing ran), 5 the call went out and the
+    answer was lost (it may have run), 1 anything else. Never sent again: a take-once may have been used up by a call
+    whose answer was lost."""
+    if guest_sandbox():
+        return None, 'a guest run does not reach the core', 3
+    try:
+        from kith_paths import kith_bin
+        bin_ = kith_bin(budget=MIRROR_PROBE_SECS)
+    except Exception:
+        bin_ = ''
+    if not bin_:
+        return None, 'no kith program to ask', 3
+    # the serve dir holds cloud-sync.json: `held`; the secret writers also say whose run they are (the core refuses a guest's)
+    names = MIRROR_ENV + ('KITH_SERVE_DIR',) + (('KITH_PERSON',) if person else ())
+    body = {**params, 'viaSwitch': True, 'kernel': str(KITH), 'home': str(Path.home()),
+            'env': {k: os.environ[k] for k in names if os.environ.get(k)}}
+    try:
+        r = subprocess.run([bin_, 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(body),
+                           capture_output=True, text=True, timeout=CORE_CALL_SECS)
+    except subprocess.TimeoutExpired:
+        return None, 'the core did not answer in time', 5
+    except OSError as e:
+        return None, str(e), 3
+    if r.returncode != 0:
+        return None, (r.stderr or r.stdout).strip().removeprefix('kith-auth: ') or f'core-call exited {r.returncode}', r.returncode
+    try:
+        ans = json.loads(r.stdout)
+    except ValueError:
+        ans = None
+    if not isinstance(ans, dict):
+        return None, 'the answer is not a JSON object', 5
+    if ans.get('noCore'):
+        return None, 'there is no core database', 3   # impossible on a switched home: never read as empty or allowed
+    return ans, None, 0
+
+
+def core_ask(method, params, person=False):
+    """_core_call, with anything but an answer as route_fail (exit 3)."""
+    ans, why, _ = _core_call(method, params, person)
+    if ans is None:
+        route_fail(why)
+    return ans
+
+
+def _field(ans, key, kind):
+    """ans[key] when it is of the kind (a bool is no number); anything else fails closed."""
+    v = ans.get(key)
+    kinds = kind if isinstance(kind, tuple) else (kind,)
+    if not isinstance(v, kinds) or (isinstance(v, bool) and bool not in kinds):
+        route_fail(f'the answer has no usable {key}')
+    return v
+
+
+def _say(text=None, code=0):
+    """(stdout line or None, stderr, exit code) of a routed verb."""
+    return text, '', code
+
+
+# --- the secret writers on the tombstone (S-b) ----------------------------------------------------------------------------
+# set, grant, revoke, env, connect, disconnect and `agent-access ... domain` change profiles, grants and env. On the
+# tombstone each reads the core's tables (people.secretsView), changes that copy exactly as it would auth.json's, and sends
+# the change to the core in ONE call that checks and writes in a locked step. The core never sees a value: `set` writes the
+# Keychain item first (and reads it back) and tells the core the variable NAMES, so a crash leaves an orphan item and never
+# a grant without one. No daemon, or authority back on auth.json: exit 3 before anything is written.
+
+def core_store():
+    """Whether this home's authority is the core's: auth.json is the tombstone. A tombstone anywhere else fails closed."""
+    try:
+        kith_tombstone.read_text(AUTH)
+    except kith_tombstone.Tombstoned as e:
+        if e.module == 'authority' and AUTH == paths()['KITH_SECRETS'] / 'auth.json':
+            return True
+        die(str(e), 3)
+    except (OSError, ValueError):
+        pass   # the plain path says what is wrong with the file
+    return False
+
+
+def probe_core():
+    """Before a Keychain item is written: a daemon that is switched answers, or this is exit 3 with nothing stored."""
+    core_ask('people.revision', {})
+
+
+def core_tables():
+    """The core's tables in auth.json's shape (people.secretsView: where each value lives, never the value)."""
+    auth = dict(_field(core_ask('people.secretsView', {}), 'auth', dict))
+    for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites', 'retired', 'once', 'agent_access'):
+        auth.setdefault(table, {})
+    return auth
+
+
+def load_for_write():
+    """(auth, in_core) for a verb that changes secrets: auth.json under its lock, or on the tombstone the core's tables.
+    The verb changes the copy as it always did and then calls commit()."""
+    if core_store():
+        return core_tables(), True
+    return load_auth(write=True), False
+
+
+def read_auth():
+    return core_tables() if core_store() else load_auth()
+
+
+def core_write(method, params):
+    """One secret write of the core. A refusal of its rules is printed as kith-auth prints its own (the same line, the same
+    exit code); a core that gives no answer is exit 3."""
+    ans = core_ask(method, {**params, 'dies': True}, person=True)
+    if ans.get('died') is not None:
+        die(_field(ans, 'why', str), _field(ans, 'died', int))
+    if ans.get('ok') is not True and not isinstance(ans.get('lines'), list):   # (agentAccess answers its line)
+        route_fail('the answer has no usable ok')
+
+
+def commit(auth, in_core, method, params):
+    """Where save_auth(auth) was: the file, or one call of the core."""
+    if in_core:
+        core_write(method, params)
+    else:
+        save_auth(auth)
+
+
+def set_in_core(profile, names, grant_agent):
+    """The core half of `set`, after the Keychain took the values. The references are recorded in one transaction. A core
+    that refuses or gives no answer leaves an orphan item (or a rotated value), never a grant without one; an answer that
+    was lost is checked once against the core's tables, and `set` is the same call again, so the owner may retry."""
+    params = {'profile': profile, 'vars': names, 'dies': True}
+    if grant_agent is not None:
+        params['grant'] = grant_agent
+    ans, why, code = _core_call('people.secretSet', params, person=True)
+    if ans is not None:
+        if ans.get('died') is not None:
+            die(f"{_field(ans, 'why', str)} (the key is in the Keychain; nothing was recorded in the core: set it again)",
+                _field(ans, 'died', int))
+        if ans.get('ok') is not True:
+            route_fail('the answer has no usable ok')
+        return
+    if code == 5 and core_has(profile, names, grant_agent):
+        return   # the core took it and the answer was lost
+    if code == 5:
+        die('the key is in the Keychain, but the core did not say whether it took it; set it again', 5)
+    die(f'the key is in the Keychain, but the core did not take it ({why}); nothing was recorded or granted: set it again',
+        code if code in (3, 4) else 3)
+
+
+def core_has(profile, names, grant_agent):
+    """Whether the core holds what `set` would have recorded (after a lost answer). Any doubt is no."""
+    ans, _, _ = _core_call('people.secretsView', {})
+    auth = ans.get('auth') if isinstance(ans, dict) else None
+    if not isinstance(auth, dict):
+        return False
+    refs = (auth.get('profiles') or {}).get(profile)
+    if not isinstance(refs, dict) or any(refs.get(v) != f'keychain:kith/{profile}#{v}' for v in names):
+        return False
+    if grant_agent is None:
+        return True
+    svc = profile.partition('/')[0]
+    return profile in grant_list(((auth.get('grants') or {}).get(grant_agent) or {}).get(svc))
+
+
+WHO_KEYS = (('person', (str, type(None))), ('owner', bool), ('was', list), ('owner_id', (str, type(None))),
+            ('owner_linked', bool), ('revoked', bool), ('held', bool))
+
+
+def route_who(args, as_json):
+    if len(args) != 2:
+        return None
+
+    def render(ans):
+        for k, kind in WHO_KEYS:
+            _field(ans, k, kind)
+        return _say(json.dumps({k: ans[k] for k, _ in WHO_KEYS}))
+    return 'people.who', {'platform': args[0], 'id': args[1]}, render
+
+
+def route_whois(args, as_json):
+    if len(args) != 2:
+        return None
+
+    def render(ans):
+        who = _field(ans, 'person', (str, type(None)))
+        return _say(who) if who else _say(code=1)
+    return 'people.who', {'platform': args[0], 'id': args[1]}, render
+
+
+def route_may_resolve(cmd):
+    def route(args, as_json):
+        once = '--take-once' in args if cmd == 'resolve' else '--once' in args
+        args = [a for a in args if a not in ('--take-once', '--once')]
+        opts, args = take_opts(args, {'--via', '--person'})
+        via = opts.get('--via') or None
+        if cmd == 'may' and len(args) == 2:
+            def render(ans):
+                if ans.get('died') is not None:   # the rules have no answer: kith-auth dies with the line, no "no"
+                    return None, f"kith-auth: {_field(ans, 'why', str)}\n", _field(ans, 'died', int)
+                allowed, why = _field(ans, 'allowed', bool), _field(ans, 'why', str)
+                return _say(why, 0 if allowed else 1)
+            params = {'person': args[0], 'agent': args[1], 'once': once, 'dies': True}
+            if via:
+                params['via'] = via
+            return 'people.may', params, render
+        if cmd == 'resolve' and len(args) == 1:
+            def render(ans):
+                if ans.get('died') is not None:   # the rules have no answer (a deleted preset): the line and code kith-auth dies with
+                    return None, f"kith-auth: {_field(ans, 'why', str)}\n", _field(ans, 'died', int)
+                _field(ans, 'allowed', bool)
+                _field(ans, 'held', bool)
+                _field(ans, 'person', str)
+                return _say(json.dumps(ans))
+            params = {'agent': args[0], 'dies': True}
+            person = opts.get('--person') or os.environ.get('KITH_PERSON')
+            if person:   # else the core's own default, the owner (acting() for a run with no KITH_PERSON)
+                params['person'] = person
+            if via:
+                params['via'] = via
+                if once:   # decided and used up in one transaction of the core; sent with a caller only, never again
+                    params['takeOnce'] = True
+            return 'people.resolve', params, render
+        die(f'{cmd}: see kith-auth --help', 2)
+    return route
+
+
+def route_granted(args, as_json):
+    agent, args = take_for(args)
+    if len(args) != 1:
+        return None
+
+    def render(ans):
+        grants = _field(ans, 'grants', list)
+        if as_json:
+            return _say(json.dumps({'service': args[0], 'grants': grants}))
+        return _say('\n'.join(str(g) for g in grants))
+    return 'people.granted', {'agent': agent, 'service': args[0]}, render
+
+
+def route_bots_cap(args, as_json):
+    if args != ['--json']:
+        return None   # bare `bots-cap` takes auth.json's lock, `bots-cap N` writes
+
+    def render(ans):
+        cap = ans.get('cap')
+        if isinstance(cap, bool) or not (cap is None or isinstance(cap, (int, float))):
+            route_fail('the answer has no usable cap')
+        return _say(json.dumps({'cap': float(cap) if cap else None, 'bots': _field(ans, 'bots', list)}))
+    return 'people.botsCap', {'json': True}, render
+
+
+def route_people(args, as_json):
+    if '--json' not in args or '--matrix' in args:
+        return None   # the text list and the matrix stay on the file
+    return 'people.listPeople', {}, lambda ans: _say(json.dumps(_field(ans, 'rows', list)))
+
+
+def route_retired(args, as_json):
+    if len(args) != 1:
+        return None
+
+    def render(ans):
+        lines = _field(ans, 'lines', list)
+        if not _field(ans, 'retired', bool):
+            return _say(code=1)
+        if len(lines) != 1 or not isinstance(lines[0], str):
+            route_fail('the answer has no usable line')
+        return _say(lines[0])
+    return 'people.retired', {'id': args[0]}, render
+
+
+def route_budgets(args, as_json):
+    if args[1:] != ['--json']:
+        return None
+    return 'people.budgets', {'agent': args[0]}, lambda ans: _say(json.dumps(_field(ans, 'budgets', dict)))
+
+
+def route_ledger(args, as_json):
+    if len(args) == 2 and args[0] == '--rm':
+        return None
+    opts, rest = take_opts(args, {'--person', '--agent'})
+    if rest != ['--json'] or any(not v or v.startswith('-') for v in opts.values()):
+        return None   # the text form, or a usage error the verb gives itself
+    return 'people.ledger', {k[2:]: v for k, v in opts.items()}, lambda ans: _say(json.dumps(_field(ans, 'rows', list)))
+
+
+def route_secret_read(cmd, wants):
+    """The secret-read verbs (S-a) decide from profiles, grants, env and who the run is for. On the tombstone the core gives
+    those tables in auth.json's shape (`people.secretsView`: where a value lives, never the value), and the verb runs its own
+    code over them, so its output is the file's byte for byte. The caller still reads the value from the Keychain itself.
+    `wants(args)`: whether this shape of the verb reads the tables (else it keeps the tombstone's refusal)."""
+    def route(args, as_json):
+        if not wants(args):
+            return None
+
+        def render(ans):
+            global _VIEW
+            _VIEW = _field(ans, 'auth', dict)
+            dispatch(cmd, args)   # exits itself, or execs (`exec`)
+            return None, '', 0
+        return 'people.secretsView', {}, render
+    return route
+
+
+def _write_render(ans):
+    """What a card write printed: its line, or the refusal the verb died with (`dies`: the core tells it as an answer)."""
+    if ans.get('died') is not None:
+        return None, f"kith-auth: {_field(ans, 'why', str)}\n", _field(ans, 'died', int)
+    lines = _field(ans, 'lines', list)
+    if not lines or any(not isinstance(x, str) for x in lines):
+        route_fail('the answer has no usable line')
+    return _say('\n'.join(lines))
+
+
+def route_access(args, as_json):
+    """`access <agent> <id> read|write|domain <path|host> [--by <id>] [--rm]` (the always of an escape card): one core call
+    that checks and writes in a single locked step, the same refusals as `cmd_access`. Its usage and static checks have run."""
+    opts, rest = take_opts(args, {'--by'})
+    if len(rest) not in (4, 5) or rest[2] not in ACCESS_KINDS or (len(rest) == 5 and (rest[4] != '--rm' or opts)):
+        return None
+    params = {'agent': rest[0], 'person': rest[1], 'kind': rest[2], 'value': rest[3], 'dies': True}
+    if len(rest) == 5:
+        params['remove'] = True
+    elif opts.get('--by'):
+        params['by'] = opts['--by']
+    return 'people.access', params, _write_render
+
+
+def route_helper(args, as_json):
+    """`helper <agent> <id> <helper> [--once | --rm]` (the always of a helper card)."""
+    rest = [a for a in args if a not in ('--rm', '--once')]
+    flags = [a for a in args if a in ('--rm', '--once')]
+    if len(rest) != 3 or len(flags) > 1:
+        return None
+    params = {'agent': rest[0], 'person': rest[1], 'helper': rest[2], 'dies': True}
+    if flags:
+        params['remove' if flags[0] == '--rm' else 'once'] = True
+    return 'people.helper', params, _write_render
+
+
+def route_job(args, as_json):
+    """`job <agent> <id> <job> [--shown JSON | --decline HASH | --rm]`: the No of a widening card, or a tick (the share sheet's,
+    and the Yes of a card that offers the job). The core reads the package's job as it is now and cuts the tick to it, in
+    the same locked step that checks the person."""
+    opts, rest = take_opts(args, {'--shown', '--decline'})
+    if len(rest) not in (3, 4):
+        return None
+    params = {'agent': rest[0], 'person': rest[1], 'job': rest[2], 'dies': True}
+    if rest[3:] == ['--rm'] and not opts:
+        params['remove'] = True
+    elif len(rest) == 3 and list(opts) == ['--decline']:
+        params['decline'] = opts['--decline']
+    elif len(rest) == 3 and list(opts) in ([], ['--shown']):
+        params['tick'] = True
+        if opts:
+            params['shown'] = opts['--shown']   # the core parses it where the file did: after the person is checked
+    else:
+        return None
+    return 'people.job', params, _write_render
+
+
+def _exec_reads(args):
+    return take_for(args)[1][:1] != ['--secret']   # a one-time secret is the `once` table, which the core does not hold yet
+
+
+ROUTES = {'who': route_who, 'whois': route_whois, 'may': route_may_resolve('may'), 'resolve': route_may_resolve('resolve'),
+          'granted': route_granted, 'bots-cap': route_bots_cap, 'people': route_people, 'retired': route_retired,
+          'budgets': route_budgets, 'ledger': route_ledger,
+          'mcp-config': route_secret_read('mcp-config', lambda args: len(args) == 1),
+          'get': route_secret_read('get', lambda args: True),
+          'exec': route_secret_read('exec', _exec_reads),
+          'holders': route_secret_read('holders', lambda args: True),
+          'keys': route_secret_read('keys', lambda args: args == ['--json']),
+          'account-state': route_secret_read('account-state', lambda args: len(args) == 3 and args[2] == '--json'),
+          # the edge card's listing and the jobs lists the launch reads: kith-auth's own code over the core's tables
+          'agent-access': route_secret_read('agent-access', lambda args: len(args) == 1 or args[1:] == ['--json']),
+          'jobs': route_secret_read('jobs', lambda args: True),
+          # the servers mcp-config would start (kith-info lists them), the owner's listings, and a guest's door (kith_door's
+          # start and sweep): all kith-auth's own code over the core's tables, so the answer is the file's byte for byte
+          'mcp-names': route_secret_read('mcp-names', lambda args: len(args) == 1),
+          'ls': route_secret_read('ls', lambda args: args in ([], ['--json'])),
+          'connectors': route_secret_read('connectors', lambda args: True),
+          'door': route_secret_read('door', lambda args: len(args) in (3, 4)),
+          # the card writes: one call of the core, which checks and writes in a single locked step
+          'access': route_access, 'helper': route_helper, 'job': route_job}
+
+
+def run_routed(tombstone):
+    """The verb in _ROUTE on a tombstone of authority: asked of the core, or exit 3 with the tombstone's text when this
+    shape of the verb has no route (the writers, the text lists, anything that needs auth.json's other tables)."""
+    cmd, args, as_json = _ROUTE
+    plan = ROUTES[cmd](args, as_json)
+    if plan is None:
+        die(tombstone, 3)
+    method, params, render = plan
+    out, err, code = render(core_ask(method, params))
+    if err:
+        sys.stderr.write(err)
+    if out is not None:
+        print(out)
+    sys.exit(code)
 
 
 def main_json(cmd, rest):
@@ -3026,10 +3495,24 @@ def main_json(cmd, rest):
 
 
 def main(argv):
+    global _ROUTE, _APP_ONLY
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
         return
     cmd, rest = argv[0], argv[1:]
+    if cmd in APP_ONLY:
+        _APP_ONLY = cmd
+    if cmd in ROUTES:
+        _ROUTE = (cmd, [a for a in rest if a != '--json'] if cmd == 'granted' else rest, cmd in ('granted', 'ls') and '--json' in rest)   # a refusal says it as JSON on stdout, as json_run does
+        try:
+            return dispatch(cmd, rest)
+        except Routed as e:
+            return run_routed(str(e))
+    return dispatch(cmd, rest)
+
+
+def dispatch(cmd, rest):
+    argv = [cmd, *rest]
     if cmd in ('ls', 'grant', 'revoke', 'granted') and '--json' in rest:
         rest = [a for a in rest if a != '--json']
         json_run(lambda: main_json(cmd, rest))
@@ -3057,12 +3540,14 @@ def main(argv):
     elif cmd == 'env' and len(rest) >= 2:
         agent, svc, pairs = rest[0], rest[1], rest[2:]
         service(svc, agent)
-        auth = load_auth(write=True)
+        auth, in_core = load_for_write()
         mine = auth['env'].setdefault(agent, {}).setdefault(svc, {})
+        sent = []
         for pair in pairs:
             var, eq, value = pair.partition('=')
             if not eq or not var:
                 die(f'expected VAR=value, got {pair!r}', 2)
+            sent.append([var, value])
             if value:
                 mine[var] = value
             else:
@@ -3072,7 +3557,7 @@ def main(argv):
         if not auth['env'][agent]:
             auth['env'].pop(agent)
         if pairs:
-            save_auth(auth)
+            commit(auth, in_core, 'people.secretEnv', {'agent': agent, 'service': svc, 'pairs': sent})
         for var, value in settings(auth, agent, svc).items():
             print(f'{var}={value}')
     elif cmd == 'browser' and len(rest) in (1, 2):

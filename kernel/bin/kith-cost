@@ -532,28 +532,13 @@ def agent_json(c, name, period):
 
 
 def read_budgets(agent):
-    """Each person's monthly budget on the agent, from kith-auth; from the core once auth.json is its tombstone (kith-auth
-    exits 3 there). Raises when neither can be read: an unreadable limit is never "no limit"."""
+    """Each person's monthly budget on the agent, from kith-auth (which asks the core itself once auth.json is its
+    tombstone). Raises when it can't be read: an unreadable limit is never "no limit"."""
     here = os.path.dirname(os.path.realpath(__file__))
-    auth = os.path.join(here, 'kith-auth')
-    r = subprocess.run([auth, 'budgets', agent, '--json'], capture_output=True, text=True, timeout=20)
-    if r.returncode == 0:
-        return json.loads(r.stdout)
-    if r.returncode != 3:
-        raise subprocess.CalledProcessError(r.returncode, auth)
-    from kith_paths import kith_bin
-    bin_ = kith_bin(budget=4)
-    if not bin_:
-        raise OSError('no kith program to ask the core')
-    params = {'agent': agent, 'kernel': os.path.dirname(here), 'home': str(Path.home()),
-              'env': {k: os.environ[k] for k in ('KITH_STATE', 'HQ_STATE', 'KITH_HOME', 'HQ_HOME', 'KITH_AGENTS', 'HQ_AGENTS')
-                      if os.environ.get(k)}}
-    c = subprocess.run([bin_, 'kernel', 'core-call', 'people.budgets', '--params-stdin'], input=json.dumps(params),
-                       capture_output=True, text=True, timeout=20, check=True)
-    budgets = json.loads(c.stdout)['budgets']
-    if not isinstance(budgets, dict):
-        raise ValueError('the core answered no budgets')
-    return budgets
+    r = subprocess.run([os.path.join(here, 'kith-auth'), 'budgets', agent, '--json'], capture_output=True, text=True, timeout=20)
+    if r.returncode != 0:
+        raise subprocess.CalledProcessError(r.returncode, 'kith-auth budgets')
+    return json.loads(r.stdout)
 
 
 def members(c, agent):

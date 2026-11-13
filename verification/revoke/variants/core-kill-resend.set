@@ -1,0 +1,5 @@
+Asks = TRUE
+CoreSweep = TRUE
+KillSplit = TRUE
+HostCrash = TRUE
+ReSendKills = TRUE

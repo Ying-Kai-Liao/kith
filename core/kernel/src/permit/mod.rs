@@ -19,6 +19,7 @@
 
 mod access;
 mod apply;
+pub use apply::never_granted;
 mod bug;
 mod decide;
 mod door;

@@ -77,8 +77,8 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                 );
                 conn.execute(
                     "INSERT INTO memberships (agent, person, preset, mode, trusted, deny, model, env, helpers, budget, \
-                     access, jobs, helper_once, access_by, access_since) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                     access, jobs, helper_once, access_by, access_since, helper_since) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                     params![
                         agent,
                         person,
@@ -95,6 +95,7 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                         j(r, "helper_once"),
                         j(r, "access_by"),
                         j(r, "access_since"),
+                        j(r, "helper_since"),
                     ],
                 )
                 .expect("insert membership");

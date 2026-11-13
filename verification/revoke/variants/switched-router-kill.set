@@ -1,0 +1,7 @@
+\* the router with the core's claim sweep and the kill after the commit: no process of a revoked person outlives the revoke
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+CoreSweep = TRUE
+KillSplit = TRUE
+Asks = TRUE
