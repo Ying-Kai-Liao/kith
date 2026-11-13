@@ -491,9 +491,21 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
 /// to the cloud. Owner history (memory, threads, costs) is never touched (R3).
 async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> {
     let bin = auth_bin().await?;
-    let who = crate::remote::members::auth_person(&bin, id)
-        .await?
-        .ok_or_else(|| anyhow!("`{id}` isn't a person on this computer"))?;
+    let who = match crate::remote::members::auth_person(&bin, id).await {
+        Ok(who) => who.ok_or_else(|| anyhow!("`{id}` isn't a person on this computer"))?,
+        // The record of who is who is out of reach (a switched Mac whose core is not running). A revoke still stops what
+        // runs and takes their devices, from this host's own record: an invited person, never the owner or a bot. The
+        // owner is told it is not done everywhere, and nothing of it reaches the cloud or the core until they try again.
+        Err(e) if revoke && hub.store.person(id).is_some() && hub.store.bot_guest_of_person(id).is_none() => {
+            tracing::warn!(error = format!("{e:#}"), person = id, "a revoke without the core: cut off here only");
+            cut_off(hub, id).await;
+            bail!(
+                "{id} was cut off on this computer: their turns were stopped and their devices set aside. The Kith core \
+                 isn't running, so the revoke is not complete yet; start it and revoke again to finish."
+            );
+        }
+        Err(e) => return Err(e),
+    };
     if who.owner {
         if revoke {
             bail!("You can't revoke yourself.");
@@ -563,7 +575,10 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
     if revoke {
         cut_off(hub, id).await;
     } else {
-        restored(hub, id);
+        // an undo gives back what the host set aside under every id it may hold them under
+        for held in crate::remote::core_revokes::held_under(id).await {
+            restored(hub, &held);
+        }
     }
     Ok((core_updated, pending))
 }

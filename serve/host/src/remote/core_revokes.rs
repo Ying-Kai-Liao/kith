@@ -54,6 +54,27 @@ impl Due {
     }
 }
 
+/// Every id the host may hold the person of one `listPeople` row under: the current id and each former one (`was`). The host
+/// never moves its rows when the core renames a person, so a cut, an undo and the "no card" fence all look under all of
+/// them (a former id is never handed out again).
+pub(crate) fn host_ids(row: &Value) -> Vec<String> {
+    let own = row["id"].as_str().into_iter();
+    let was = row["was"].as_array().into_iter().flatten().filter_map(Value::as_str);
+    own.chain(was).map(str::to_owned).collect()
+}
+
+/// [`host_ids`] of `person` as the core lists them now; just `person` when the host is not switched or the core can't say.
+pub(crate) async fn held_under(person: &str) -> Vec<String> {
+    if switched_now()
+        && let Ok(said) = owner_call("people.listPeople", json!({"viaSwitch": true, "withWas": true}), true).await
+        && let Some(row) =
+            said["rows"].as_array().into_iter().flatten().find(|r| host_ids(r).iter().any(|i| i == person))
+    {
+        return host_ids(row);
+    }
+    vec![person.to_owned()]
+}
+
 /// Whom the core's rows say to cut: every non-owner person shown revoked, and every non-owner the host still holds live
 /// that the core no longer lists (a removal). Empty when the rows are not a usable answer (no owner among them: a core
 /// that is empty or not what it was must not cut anyone).
@@ -64,8 +85,7 @@ fn to_cut(rows: &Value, held: &[String], done: &BTreeSet<Cut>) -> (Vec<Cut>, BTr
     }
     // A person renamed in the core is still known to the host under the old id (it never moves its rows): a former id
     // (`was`) is listed too, or the rename would read as a removal.
-    let mut listed: BTreeSet<&str> = rows.iter().filter_map(|p| p["id"].as_str()).collect();
-    listed.extend(rows.iter().filter_map(|p| p["was"].as_array()).flatten().filter_map(Value::as_str));
+    let listed: BTreeSet<String> = rows.iter().flat_map(host_ids).collect();
     let revoked: BTreeSet<Cut> = rows
         .iter()
         .filter(|p| p["owner"] != true && p["revoked"] == true)
@@ -73,9 +93,7 @@ fn to_cut(rows: &Value, held: &[String], done: &BTreeSet<Cut>) -> (Vec<Cut>, BTr
             // The host keeps a renamed person's rows under the old id, so a revoke is cut under the current id and every
             // former one (a former id is never handed out again).
             let at = p["revoked_at"].to_string();
-            let own = p["id"].as_str().into_iter();
-            let was = p["was"].as_array().into_iter().flatten().filter_map(Value::as_str);
-            own.chain(was).map(|id| (id.to_owned(), at.clone())).collect::<Vec<_>>()
+            host_ids(p).into_iter().map(|id| (id, at.clone())).collect::<Vec<_>>()
         })
         .collect();
     let mut cut: Vec<Cut> = Vec::new();
@@ -87,7 +105,7 @@ fn to_cut(rows: &Value, held: &[String], done: &BTreeSet<Cut>) -> (Vec<Cut>, BTr
     }
     let owners: BTreeSet<&str> = rows.iter().filter(|p| p["owner"] == true).filter_map(|p| p["id"].as_str()).collect();
     for id in held {
-        if !listed.contains(id.as_str()) && !owners.contains(id.as_str()) && !cut.iter().any(|c| &c.0 == id) {
+        if !listed.contains(id) && !owners.contains(id.as_str()) && !cut.iter().any(|c| &c.0 == id) {
             cut.push((id.clone(), String::new()));
         }
     }

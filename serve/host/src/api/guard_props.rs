@@ -181,18 +181,18 @@ impl Rig {
 
     /// The same question under each answer: (kith-auth stand-in, core).
     fn both<T>(&self, f: impl Fn() -> T) -> (T, T) {
-        *authority::TEST_CORE.lock().unwrap() = None;
+        authority::set_test_core(None);
         let host = f();
-        *authority::TEST_CORE.lock().unwrap() = Some(self.core.clone());
+        authority::set_test_core(Some(self.core.clone()));
         let core = f();
-        *authority::TEST_CORE.lock().unwrap() = None;
+        authority::set_test_core(None);
         (host, core)
     }
 }
 
 impl Drop for Rig {
     fn drop(&mut self) {
-        *authority::TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        authority::set_test_core(None);
         *TEST_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         TEST_ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         if let Some(d) = self.daemon.take() {
@@ -205,6 +205,13 @@ fn runner(default: u32) -> TestRunner {
     let mut config = Config { failure_persistence: None, max_shrink_iters: 16, ..Config::default() };
     config.cases = std::env::var("PROPTEST_CASES").ok().and_then(|c| c.parse().ok()).unwrap_or(default);
     TestRunner::new(config)
+}
+
+/// How many access rows (read, write, domains) a resolve bundle carries; None when it has no `access` object at all.
+fn access_rows(v: &Value) -> Option<usize> {
+    v["access"]
+        .is_object()
+        .then(|| ["read", "write", "domains"].iter().map(|k| v["access"][k].as_array().map_or(0, Vec::len)).sum())
 }
 
 /// Generated worlds: every person, agent and the bot gets the same `may_use`, preset and guard verdict under both
@@ -232,7 +239,7 @@ fn the_guard_asks_the_core_and_gets_the_same_answers_as_kith_auth() {
                             (
                                 roles::may_use(name, a).await,
                                 roles::may_use_checked(name, a).await,
-                                roles::resolve(name, a).await.map(|v| v["preset"].clone()),
+                                roles::resolve(name, a).await.map(|v| (v["preset"].clone(), access_rows(&v))),
                             )
                         })
                     });
@@ -255,13 +262,18 @@ fn the_guard_asks_the_core_and_gets_the_same_answers_as_kith_auth() {
                         prop_assert_eq!(h.1 == Some(true), c.1 == Some(true), "{}/{} {:?}", name, a, w);
                         // The preset only matters to a member: "member" under both, or neither.
                         prop_assert_eq!(
-                            h.2.as_ref().is_some_and(|p| p == "member"),
-                            c.2.as_ref().is_some_and(|p| p == "member"),
+                            h.2.as_ref().is_some_and(|p| p.0 == "member"),
+                            c.2.as_ref().is_some_and(|p| p.0 == "member"),
                             "{}/{} {:?}",
                             name,
                             a,
                             w
                         );
+                    }
+                    // The bundle a guest's launch reads (`consumeAccess`) comes from the core with its `access` object: these
+                    // worlds keep no access rows, so it is there and empty (the e2e checks real rows).
+                    if c.0 {
+                        prop_assert_eq!(c.2.as_ref().and_then(|p| p.1), Some(0), "access {}/{} {:?}", name, a, w);
                     }
                     if c.0 {
                         granted.set(granted.get() + 1);
@@ -340,10 +352,10 @@ fn a_core_that_does_not_answer_refuses_and_a_revoke_is_seen_at_once() {
         rig.core.kernel.clone(),
         rig.core.env.clone(),
     ));
-    *authority::TEST_CORE.lock().unwrap() = Some(none);
+    authority::set_test_core(Some(none));
     assert!(rig.rt.block_on(roles::guard(&rig.hub, "sam", true, "send", &body)).is_err());
     assert_eq!(rig.rt.block_on(roles::may_use_checked("sam", "house")), None);
-    *authority::TEST_CORE.lock().unwrap() = None;
+    authority::set_test_core(None);
 
     // A daemon that knows nobody (the core's database empty before the import): members are refused.
     let blank = Tmp::new();
@@ -354,10 +366,10 @@ fn a_core_that_does_not_answer_refuses_and_a_revoke_is_seen_at_once() {
         rig.core.env.clone(),
     ));
     let daemon = crate::core_front::serve_for_test(&empty.folders);
-    *authority::TEST_CORE.lock().unwrap() = Some(empty);
+    authority::set_test_core(Some(empty));
     assert!(rig.rt.block_on(roles::guard(&rig.hub, "sam", true, "send", &body)).is_err());
     assert!(!rig.rt.block_on(roles::may_use("sam", "house")));
-    *authority::TEST_CORE.lock().unwrap() = None;
+    authority::set_test_core(None);
     daemon.stop();
 }
 
@@ -368,7 +380,7 @@ fn a_flood_against_a_hung_core_is_refused_within_the_wait_and_starts_no_threads(
     let rig = Rig::new();
     let w = World { held: [[2, 0], [0, 0]], star: [false, false], bot: [false, false], suspended: [false, false] };
     rig.load(&w);
-    *authority::TEST_CORE.lock().unwrap() = Some(rig.core.clone());
+    authority::set_test_core(Some(rig.core.clone()));
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let held: Vec<_> =
         (0..authority::MAX_ASKS).map(|_| rt.block_on(authority::asks().acquire_owned()).unwrap()).collect();
@@ -393,5 +405,5 @@ fn a_flood_against_a_hung_core_is_refused_within_the_wait_and_starts_no_threads(
         rt.block_on(authority::core_verdict("sam", "house")).is_some_and(|v| v.allowed),
         "the permits did not come back"
     );
-    *authority::TEST_CORE.lock().unwrap() = None;
+    authority::set_test_core(None);
 }
