@@ -252,7 +252,7 @@ pub(super) fn store(conn: &Connection, before: &Value, after: &Value) -> Result<
     }
 
     // lane B's tables: only what the core's writes change (`forget` drops grants and `with` entries). A profile's
-    // variables and browser stay as they are; a grant list keeps its order in `seq`.
+    // variables stay as they are; a grant list keeps its order in `seq`.
     let (old, new) = (table(before, "grants"), table(after, "grants"));
     for agent in old
         .keys()
@@ -290,12 +290,17 @@ pub(super) fn store(conn: &Connection, before: &Value, after: &Value) -> Result<
     }
     for (name, p) in new {
         let was = old.get(name);
-        let same = |o: &Value| o.get("person") == p.get("person") && o.get("with") == p.get("with");
+        let same = |o: &Value| {
+            o.get("person") == p.get("person")
+                && o.get("with") == p.get("with")
+                && o.get("browser") == p.get("browser")
+        };
         if !was.is_some_and(same) {
             conn.execute(
-                "INSERT INTO secret_profiles (profile, person, lent) VALUES (?1, ?2, ?3) \
-                 ON CONFLICT(profile) DO UPDATE SET person = excluded.person, lent = excluded.lent",
-                params![name, text(p, "person")?, json(p, "with")],
+                "INSERT INTO secret_profiles (profile, person, lent, browser) VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(profile) DO UPDATE SET person = excluded.person, lent = excluded.lent, \
+                 browser = excluded.browser",
+                params![name, text(p, "person")?, json(p, "with"), text(p, "browser")?],
             )?;
         }
         // the variables: each is the Keychain reference (or `env:`/`env-file:` one) of its value, never the value

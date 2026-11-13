@@ -831,11 +831,15 @@ pub fn start(hub: &Arc<Hub>) {
         // kith-auth writes its file from outside the host (a revoke, a new grant): who answers follows within seconds.
         // Once authority is on the core the file is a tombstone that never changes, so the core's revision is watched.
         let mut seen = authority_stamp().await;
+        // A revoke made in the core alone (a terminal `core-call people.suspend`) reaches this host here too: on a change
+        // of the revision, at start, and at least every 60 s (`remote::core_revokes`, narrowing only).
+        let mut core_revokes = crate::remote::core_revokes::Due::default();
         let mut tick = tokio::time::interval(AUTH_POLL);
         loop {
             tick.tick().await;
             let Some(hub) = weak.upgrade() else { return };
-            poll_authority(&hub, &mut seen).await;
+            let changed = poll_authority(&hub, &mut seen).await;
+            core_revokes.tick(&hub, changed).await;
         }
     });
 }

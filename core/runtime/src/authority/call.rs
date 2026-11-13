@@ -65,6 +65,10 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.secretGrant"
             | "people.secretRevoke"
             | "people.secretEnv"
+            | "people.secretOwner"
+            | "people.secretShare"
+            | "people.secretBrowser"
+            | "people.link"
             | "people.revision"
     )
 }
@@ -82,6 +86,9 @@ fn routed_write(method: &str) -> bool {
             | "people.secretGrant"
             | "people.secretRevoke"
             | "people.secretEnv"
+            | "people.secretOwner"
+            | "people.secretShare"
+            | "people.secretBrowser"
     )
 }
 
@@ -251,7 +258,11 @@ fn removal_only(method: &str, params: &Value) -> bool {
     ) || (switch(params, "remove")
         && matches!(
             method,
-            "people.access" | "people.helper" | "people.job" | "people.agentAccess"
+            "people.access"
+                | "people.helper"
+                | "people.job"
+                | "people.agentAccess"
+                | "people.secretShare"
         ))
 }
 
@@ -461,9 +472,10 @@ pub(crate) fn call_in(
             |a| json!({ "rows": write::list(a, c, word(params, "agent"), word(params, "person")) }),
         ),
         // `kith-auth people --json`: every person, bots and revoked ones too, with their agent rows and handles.
-        "people.listPeople" => {
-            store::read(core, |a| json!({ "rows": people_json::people_json(a, c) }))
-        }
+        "people.listPeople" => store::read(
+            core,
+            |a| json!({ "rows": people_json::people_json(a, c, switch(params, "withWas")) }),
+        ),
         // The answer of `may` itself (M2-15): the host's event filter asks it per person and agent. A refusal of the
         // rules is a "no" with its words, as for `kith-auth may`.
         "people.may" => {
@@ -966,6 +978,40 @@ pub(super) fn write_in(
                 need(params, "service")?,
                 &pairs,
             )
+        }
+        "people.secretOwner" => secret_writes::secret_owner(
+            a,
+            c,
+            life,
+            need(params, "profile")?,
+            need(params, "person")?,
+        ),
+        "people.secretShare" => {
+            let ids = names(params, "ids")?;
+            secret_writes::secret_share(
+                a,
+                c,
+                need(params, "profile")?,
+                &ids,
+                switch(params, "remove"),
+            )
+        }
+        "people.secretBrowser" => secret_writes::secret_browser(
+            a,
+            c,
+            life,
+            need(params, "profile")?,
+            word(params, "browser"),
+        ),
+        "people.link" => {
+            let said = write::link(
+                a,
+                c,
+                need(params, "platform")?,
+                need(params, "uid")?,
+                need(params, "code")?,
+            )?;
+            Ok(json!({ "person": said.first(), "lines": said }))
         }
         "people.removeGrant" => Ok(lines(write::remove_grant(a, c, need(params, "key")?)?)),
         "people.handle" => {

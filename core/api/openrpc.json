@@ -4739,6 +4739,14 @@
       "summary": "Every person the owner knows, as of the last import, as `kith-auth people --json` lists them: the owner first, then everyone by id with each person's bots after them. Each has the id, name, owner flag, the person a bot belongs to (`bot_of`) and the person at the top (`root`), whether their access is removed (`revoked`, `revoked_at`), the cloud link (`kith`), the other accounts (`handles`) and the agents they have a row for (`agents`: agent, role, via). People imported before handles were kept have none until imported again.",
       "params": [
         {
+          "name": "withWas",
+          "summary": "Also each person's former ids (`was`), which `kith-auth people --json` does not list.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -4794,6 +4802,12 @@
         ],
         "requires": [],
         "args": {
+          "withWas": {
+            "kind": "switch",
+            "spellings": [
+              "--with-was"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -8251,6 +8265,479 @@
             "spellings": [
               "--dies"
             ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretOwner",
+      "summary": "`kith-auth owner`: whose a profile is. `-` shares it with everyone who may use the agents granted it (stored `*`), `default` stores what the service's own rule gives (the owner's id for a personal service, none for a shared one), a person's id needs that person now. A profile that does not exist is refused, and so is a caller who is not the owner. Writes no Keychain item. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "profile",
+          "summary": "The profile.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "A person's id, `-` or `default`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-owner"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "profile": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretShare",
+      "summary": "`kith-auth share`: lends a profile to people (or, with `--rm`, takes it back). Every id must be a person now. The list keeps its order and drops repeats; an empty one is none. It is a removal only with `--rm`, so a damaged cutover record still lets that through. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "profile",
+          "summary": "The profile.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "ids",
+          "summary": "The people.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Take it back.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-share"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "profile": {
+            "kind": "positional"
+          },
+          "ids": {
+            "kind": "caller"
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretBrowser",
+      "summary": "`kith-auth browser`: a browser profile (`browser/<name>`, made when missing with the owner's id as its owner) and, when named, the browser it was made in. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "profile",
+          "summary": "The profile, `browser/<name>` or `<name>`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "browser",
+          "summary": "The browser.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-browser"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "profile": {
+            "kind": "positional"
+          },
+          "browser": {
+            "kind": "flag",
+            "spellings": [
+              "--browser"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.link",
+      "summary": "Spend a `/link` code: bind the code's person to the caller's account on a chat platform, in one step. A code that is unknown, ran out, or whose person was removed or cut off since, is refused with the same words and stays; so is an account that is another person's. Answers the person. Only through the daemon, for the host (`viaSwitch`).",
+      "params": [
+        {
+          "name": "platform",
+          "summary": "`telegram`, `discord`, `slack` or `kith`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "uid",
+          "summary": "Their id on the platform.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "code",
+          "summary": "The code.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "link"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "platform": {
+            "kind": "positional"
+          },
+          "uid": {
+            "kind": "positional"
+          },
+          "code": {
+            "kind": "positional"
           },
           "kernel": {
             "kind": "flag",

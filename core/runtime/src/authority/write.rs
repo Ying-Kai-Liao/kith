@@ -788,6 +788,33 @@ pub(crate) fn code_of(code: &str) -> String {
     code.trim().to_uppercase()
 }
 
+/// `kith-auth link <platform> <user-id> <code>`: spends a code to bind its person's chat account, in one transaction.
+/// Every refusal returns before anything is written, so the code stays. A code that ran out, one whose person is gone
+/// or cut off since it was made, all read as an unknown code (the revoke comment "link refuses a revoked person's code"
+/// relies on it). A renamed person binds the new id.
+pub(crate) fn link(auth: &mut Value, c: &Ctx, plat: &str, uid: &str, code: &str) -> R<Vec<String>> {
+    const UNKNOWN: &str =
+        "that code is unknown or expired; ask for a new one (kith-auth invite <id>)";
+    tables(auth);
+    let code = code_of(code);
+    let Some(inv) = table(auth, "invites").get(&code).cloned() else {
+        return die(UNKNOWN);
+    };
+    if inv.get("expires").and_then(Value::as_f64).unwrap_or(0.0) < c.now_ms / 1000.0 {
+        return die(UNKNOWN);
+    }
+    let who = secrets::canonical(
+        auth,
+        inv.get("person").and_then(Value::as_str).unwrap_or(""),
+    );
+    if !people(auth).contains_key(&who) || secrets::cut_off(auth, &who) {
+        return die(UNKNOWN);
+    }
+    handle(auth, &who, plat, Some(uid))?;
+    table(auth, "invites").remove(&code);
+    Ok(vec![who])
+}
+
 /// Takes an open code back. `kith-auth` only spends one (`link`); the owner taking one back gets the same refusal for a
 /// code that is unknown or ran out.
 pub(crate) fn invite_remove(auth: &mut Value, c: &Ctx, code: &str) -> R<Vec<String>> {

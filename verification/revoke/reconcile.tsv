@@ -1,0 +1,5 @@
+# cfg (in reconcile/)	expected	why
+# The host's reconcile of a revoke made in the core alone (Reconcile.tla; remote/core_revokes.rs). Whole-config rows: TypeOK, NoLostUndo, FailCutHolds, Narrows.
+design	pass	read and set-aside in ONE step under AUTH_WRITES, narrowing only
+broken-split-read	fail	NoLostUndo: the read taken outside the lock, an app undo lands before the set-aside
+broken-restore-too	fail	FailCutHolds: a tick that also gives back undoes a fail-closed cut whose core write failed
