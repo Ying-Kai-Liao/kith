@@ -480,3 +480,22 @@ fn bad_room_params_are_errors_not_quiet_choices() {
         "revoked"
     );
 }
+
+#[test]
+fn the_row_refuses_a_room_principal_or_room_conversation_without_the_room_turn() {
+    let (_t, mut core, _m) = world();
+    let a = row(
+        &mut core,
+        "hostclaim.enqueue",
+        &json!({"conversation": "x1", "agent": "echo", "engine": "claude", "source": "room",
+                "person": "room-r1", "prompt": "hi", "revokeSeen": 0, "key": "k"}),
+    );
+    assert_eq!(a["refused"], "other", "{a}");
+    let b = row(
+        &mut core,
+        "hostclaim.enqueue",
+        &json!({"conversation": "x2", "agent": "echo", "engine": "claude", "source": "app",
+                "person": "ann", "prompt": "hi", "revokeSeen": 0, "room": "r1", "joinEpoch": 1}),
+    );
+    assert_eq!(b["refused"], "other", "{b}");
+}

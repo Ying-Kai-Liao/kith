@@ -685,3 +685,48 @@ fn adopt_makes_an_ending_claim_of_the_old_host_a_kill_again() {
         .expect("reason");
     assert_eq!(reason, "host_changed");
 }
+
+#[test]
+fn a_plain_looking_request_cannot_slip_a_room_principal_or_a_room_conversation_past_the_rules() {
+    let (_t, mut c) = open();
+    // A room principal with no level: owner level with no basis.
+    let mut owner_level = room_basis(&[], "ann", Chain::None);
+    owner_level.level = Level::Owner;
+    owner_level.room = None;
+    owner_level.join_epoch = None;
+    owner_level.key = Some("k".into());
+    let e = refused(basis::enqueue(
+        &mut c,
+        &new_turn("c1", "room-r1"),
+        &owner_level,
+        10,
+    ));
+    assert!(e.contains("only a room turn does"), "{e}");
+    // A person's owner-level turn must not create a room conversation.
+    let mut mk = room_basis(&[], "ann", Chain::None);
+    mk.level = Level::Owner;
+    let e = refused(basis::enqueue(&mut c, &new_turn("c2", "ann"), &mk, 11));
+    assert!(e.contains("may not create"), "{e}");
+    assert_eq!(count(&c, "SELECT count(*) FROM conversations"), 0);
+    assert_eq!(count(&c, "SELECT count(*) FROM turns"), 0);
+    // The owner's path stays.
+    basis::enqueue(&mut c, &new_turn("c3", OWNER), &mk, 12).expect("owner creates");
+}
+
+#[test]
+fn an_idle_process_is_spared_while_another_basis_runs_on_its_conversation() {
+    let (_t, mut c) = open();
+    let t1 = room_turn(&mut c, "room-c1", &["ann"], Chain::Root(2));
+    let id = claim_turn(&mut c, "room-c1", t1, "room-r1");
+    redeem(&mut c, id, 100, "e100", "kith-serve-host/1-a", 12).expect("redeem");
+    stop(&mut c, id, "done", false, 13).expect("end");
+    end_gone(&mut c, &Procs::default(), 14).expect("gone");
+    warm::register(&mut c, &proc_of(200, "e200", "room-r1", Some("room-c1"))).expect("idle");
+    // Now a turn of bob's runs on the same conversation.
+    let t2 = room_turn(&mut c, "room-c1", &["bob"], Chain::Root(2));
+    let id2 = claim_turn(&mut c, "room-c1", t2, "room-r1");
+    redeem(&mut c, id2, 300, "e300", "kith-serve-host/1-a", 15).expect("redeem");
+    let r = revoke_person(&mut c, "ann", 20).expect("revoke");
+    let pids: Vec<_> = r.kill.iter().filter_map(|k| k.pid).collect();
+    assert!(!pids.contains(&200) && !pids.contains(&300), "{pids:?}");
+}

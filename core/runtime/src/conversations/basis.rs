@@ -158,8 +158,11 @@ pub(crate) fn enqueue_in(
     }
     let (budget_root, budget_left) = chain_of(tx, b)?;
     check_target(tx, t, b, now)?;
-    if b.level == Level::Room && !t.person.starts_with("room-") {
-        return Err(refused("a room turn runs as the principal room-<id>"));
+    // A room principal and a room turn go together: each implies the other.
+    if t.person.starts_with("room-") != (b.level == Level::Room) {
+        return Err(refused(
+            "a room turn runs as the principal room-<id>, and only a room turn does",
+        ));
     }
     let fixed = Fixed {
         level: Some(b.level.as_str()),
@@ -309,6 +312,13 @@ fn check_target(tx: &Transaction<'_>, t: &NewTurn<'_>, b: &Basis, now: i64) -> R
         let (Some(room), Some(join)) = (&b.room, b.join_epoch) else {
             return Ok(());
         };
+        // Only a room turn or the owner brings a room conversation into being.
+        if b.level != Level::Room && t.person != OWNER {
+            return Err(refused(&format!(
+                "{} may not create a room conversation at owner level",
+                t.person
+            )));
+        }
         create_room_conversation(tx, t.conversation, t.agent, t.engine, room, join, now)?;
         return Ok(());
     };
