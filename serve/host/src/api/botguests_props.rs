@@ -130,15 +130,24 @@ fn op() -> impl Strategy<Value = Op> {
 const RATES: [i64; 7] = [0, 1, 2, 60, 61, 600, 601];
 const CONCS: [i64; 6] = [0, 1, 2, 3, 8, 9];
 
+/// How a case's host holds authority: the file (kith-auth), or a core.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Host {
+    File,
+    Copied,
+    Stepped,
+}
+
 #[allow(clippy::needless_range_loop)]
 impl State {
     async fn new(pool: Vec<String>) -> Self {
-        Self::build(pool, false).await
+        Self::build(pool, Host::File).await
     }
 
-    /// `switched`: once the people are made, a core daemon takes them over (the same people, grants and the owner), and
-    /// auth.json becomes a tombstone, so every later write and read of the host goes to the core.
-    async fn build(pool: Vec<String>, switched: bool) -> Self {
+    /// `host`: once the people are made, a core daemon takes them over and auth.json becomes a tombstone, so every later
+    /// write and read of the host goes to the core. `Copied`: the same people, grants and the owner, put in one by one.
+    /// `Stepped`: `kith migrate step authority`, for real, over the file kith-auth just wrote.
+    async fn build(pool: Vec<String>, host: Host) -> Self {
         let r = Rig::new().await;
         r.owner_bot("house");
         r.owner_bot("money");
@@ -160,19 +169,26 @@ impl State {
             .collect();
         members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
         let callers = [Caller::Local, r.device("sam-phone", Some("sam")), r.device("ann-phone", Some("ann"))];
-        let (core, auth_log) = if switched {
-            let core = Core::start(&r);
-            core.ask("people.addPerson", json!({"id": "ann"})).expect("ann");
-            for p in ["sam", "ann"] {
-                for a in AGENTS {
-                    core.ask("people.grant", json!({"person": p, "agent": a, "preset": "member"})).expect("grant");
+        let (core, auth_log) = if host == Host::File {
+            (None, None)
+        } else {
+            let core = if host == Host::Stepped {
+                Core::start_stepped(&r)
+            } else {
+                let core = Core::start(&r);
+                core.ask("people.addPerson", json!({"id": "ann"})).expect("ann");
+                for p in ["sam", "ann"] {
+                    for a in AGENTS {
+                        core.ask("people.grant", json!({"person": p, "agent": a, "preset": "member"})).expect("grant");
+                    }
                 }
-            }
-            core.on();
-            // The tombstone goes where kith-auth reads (`KITH_AUTH` of the rig), so a call left on kith-auth fails
-            // closed as in production; and the real kith-auth is swapped for a stand-in that logs and fails.
-            core.switched_over(&r.dir.join("auth.json"));
-            core.phase("switched");
+                core.on();
+                // The tombstone goes where kith-auth reads (`KITH_AUTH` of the rig), so a call left on kith-auth fails
+                // closed as in production; and the real kith-auth is swapped for a stand-in that logs and fails.
+                core.switched_over(&r.dir.join("auth.json"));
+                core.phase("switched");
+                core
+            };
             let log = r.dir.join("kith-auth-calls");
             let bin = r.dir.join("kith-auth-logging");
             std::fs::write(&bin, format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", log.display())).unwrap();
@@ -183,8 +199,6 @@ impl State {
             *crate::remote::account::TEST_BIN.lock().unwrap() = Some(bin);
             assert!(crate::api::authority::switched(), "the rig is not switched");
             (Some(core), Some(log))
-        } else {
-            (None, None)
         };
         Self {
             core,
@@ -910,23 +924,31 @@ fn sim() -> (tokio::runtime::Runtime, Vec<String>) {
 /// people around it.
 #[test]
 fn a_bot_never_has_more_than_its_owner_holds_now() {
-    sequences(false);
+    sequences(Host::File);
 }
 
 /// The same sequences and the same model with the host switched (P6): auth.json is a tombstone and a core holds the
 /// people, grants and bots, so a revoke, a removal and a shrink go through the core, and every read comes from it.
 #[test]
 fn a_bot_never_has_more_than_its_owner_holds_now_on_a_switched_host() {
-    sequences(true);
+    sequences(Host::Copied);
 }
 
-fn sequences(switched: bool) {
+/// (M2-23 lift) The same sequences and the same model on a host that was stepped for real: the people, grants and bots
+/// are the file's, imported by `kith migrate step authority`, not put in by hand. The answers must be the model's, as
+/// on the file and on the hand-made core.
+#[test]
+fn a_bot_never_has_more_than_its_owner_holds_now_on_a_stepped_host() {
+    sequences(Host::Stepped);
+}
+
+fn sequences(host: Host) {
     let (rt, pool) = sim();
     assert!(pool.len() > 100, "router walk found {} methods", pool.len());
     runner(10)
         .run(&proptest::collection::vec(op(), 1..9), |ops| {
             // Dropped before the next case builds its own: the rig holds the process-wide environment.
-            let mut state = rt.block_on(State::build(pool.clone(), switched));
+            let mut state = rt.block_on(State::build(pool.clone(), host));
             let outcome = rt.block_on(async {
                 // Kai's own bot first, so a case never passes by refusing everything.
                 state.create(0, 3).await?;
@@ -960,7 +982,7 @@ fn sequences(switched: bool) {
 #[test]
 fn a_switched_host_never_runs_kith_auth() {
     let (rt, pool) = sim();
-    let mut state = rt.block_on(State::build(pool, true));
+    let mut state = rt.block_on(State::build(pool, Host::Copied));
     rt.block_on(async {
         assert!(crate::api::authority::switched(), "the host is switched");
         // The owner's and a member's createBotInvite (the owner's person is looked up in the core).
@@ -994,7 +1016,7 @@ fn a_switched_host_never_runs_kith_auth() {
 #[test]
 fn a_switched_host_refuses_an_invite_for_the_owner() {
     let (rt, pool) = sim();
-    let state = rt.block_on(State::build(pool, true));
+    let state = rt.block_on(State::build(pool, Host::Copied));
     rt.block_on(async {
         assert!(crate::api::authority::switched());
         let body = json!({"personId": "kai", "agents": {"house": "member"}});
@@ -1017,7 +1039,7 @@ fn down_or_refused(e: &anyhow::Error) -> bool {
 #[test]
 fn a_switched_host_with_the_core_down_refuses_every_bot_call() {
     let (rt, pool) = sim();
-    let mut state = rt.block_on(State::build(pool.clone(), true));
+    let mut state = rt.block_on(State::build(pool.clone(), Host::Copied));
     let tomb =
         || std::fs::read_to_string(crate::api::authority::TEST_AUTH_FILE.lock().unwrap().clone().unwrap()).unwrap();
     let before = tomb();
@@ -1070,7 +1092,7 @@ fn a_switched_host_with_the_core_down_refuses_every_bot_call() {
 #[test]
 fn a_switched_host_with_the_core_down_refuses_the_spending_limit_and_the_ledger() {
     let (rt, pool) = sim();
-    let mut state = rt.block_on(State::build(pool, true));
+    let mut state = rt.block_on(State::build(pool, Host::Copied));
     let tomb =
         || std::fs::read_to_string(crate::api::authority::TEST_AUTH_FILE.lock().unwrap().clone().unwrap()).unwrap();
     let before = tomb();

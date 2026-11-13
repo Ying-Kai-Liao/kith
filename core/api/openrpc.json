@@ -7525,7 +7525,7 @@
     },
     {
       "name": "people.job",
-      "summary": "The No of a widening card for a ticked job (`--decline HASH`: that package update is not asked again), or with --rm the tick goes, as it is written, with no check. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "summary": "The tick of a job (`--tick`, the share sheet's or the Yes of a card that offers it: the pieces the owner saw, `--shown JSON`, else the job as the package declares it now, cut to what the package declares now), the No of a widening card for a ticked job (`--decline HASH`: that package update is not asked again), or with --rm the tick goes, as it is written, with no check. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
       "params": [
         {
           "name": "agent",
@@ -7565,6 +7565,22 @@
           "required": false,
           "schema": {
             "type": "boolean"
+          }
+        },
+        {
+          "name": "tick",
+          "summary": "Tick the job for the person.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "shown",
+          "summary": "With --tick: the pieces the owner saw, as JSON `{\"domains\": [..], \"helpers\": [..], \"doors\": [..]}`.",
+          "required": false,
+          "schema": {
+            "type": "string"
           }
         },
         {
@@ -7650,6 +7666,18 @@
             "kind": "switch",
             "spellings": [
               "--rm"
+            ]
+          },
+          "tick": {
+            "kind": "switch",
+            "spellings": [
+              "--tick"
+            ]
+          },
+          "shown": {
+            "kind": "flag",
+            "spellings": [
+              "--shown"
             ]
           },
           "dies": {

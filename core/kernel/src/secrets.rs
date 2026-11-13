@@ -28,7 +28,7 @@ pub mod pyjson;
 #[cfg(test)]
 mod tests;
 
-use jobs::Job;
+pub use jobs::{Job, PIECES, effective};
 
 /// A refusal `kith-auth` would `die` with: its message and exit code.
 #[derive(Debug, PartialEq, Eq)]
@@ -676,6 +676,11 @@ impl<'a> Rules<'a> {
         self.jobs_of(agent).iter().any(|j| j.name == name)
     }
 
+    /// The job of this name the agent's package declares, as it is now (the share sheet's tick keeps its pieces).
+    pub fn declared_job(&self, agent: &str, name: &str) -> Option<Job> {
+        self.jobs_of(agent).iter().find(|j| j.name == name).cloned()
+    }
+
     /// `acting`: the person this run works for; never the owner inside a guest's sandbox: then it is no one (`-`).
     pub fn acting(&self) -> String {
         let named = self
@@ -704,7 +709,7 @@ impl<'a> Rules<'a> {
         };
         for (name, tick) in ticks {
             let jobs = self.jobs_of(pkg);
-            let granted = jobs::effective(tick, jobs.iter().find(|j| j.name == *name));
+            let granted = effective(tick, jobs.iter().find(|j| j.name == *name));
             for (k, vs) in granted.into_iter().enumerate() {
                 for x in vs {
                     if !out[k].contains(&x) {

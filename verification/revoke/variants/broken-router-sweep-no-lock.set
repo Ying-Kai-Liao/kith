@@ -1,0 +1,7 @@
+\* the revoke's own sweep ignores kith-auth's lock: it can run between a start's check and its claim (the door then starts after it)
+CutSweepNoLock = TRUE
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE

@@ -13,8 +13,11 @@ deny-default sandbox-exec profile of the door's own, on one folder of the person
     re-listen/accept only on them. The supervisor keeps its own copy of each socket open until every door process is
     gone, so a port is never freed while the box could take it by an implicit bind.
   - start (D2, model GuestDoor.tla): under the kith-auth lock, the step that reads allowed and not held (`kith-auth door`)
-    writes the claim and starts the box. A revoke takes the same lock, so a door either started before it (and its claim
-    is there for the sweep) or sees it and doesn't start.
+    writes the claim and starts the box. On the file a revoke takes the same lock, so a door either started before it (and its
+    claim is there for the sweep) or sees it and doesn't start. On a switched Mac (authority in the core) the check reads the core
+    under the core's own lock, which a revoke holds instead of this one: a revoke can land between the check and the claim. The
+    guarantee is then the revoke's own sweep (cut_off -> sweep, which waits for this lock and so finds the claim), seconds after
+    the commit, with the 60 s sweep loop as the backstop.
   - stop (D1): `sweep` kills every door of the listed people, every door whose supervisor is gone (a host or kith-permit
     killed with -9), and every door its person may no longer run. A door process is one in this door's sandbox (it may
     read <claim>.in and not <claim>.out: sandbox_check), or one whose environment holds KITH_DOOR=<claim>, or a

@@ -7,7 +7,7 @@
 //! rule W place is never granted, a bot never holds more than its owner, and `--by` names only the person or the bot's
 //! owner, who must be a member now. A removal takes the entry as written, with no checks (like `remove_grant`).
 
-use kith_kernel::secrets::{self, Ctx, Rules};
+use kith_kernel::secrets::{self, Ctx, PIECES, Rules, effective};
 use serde_json::{Map, Value, json};
 
 use super::revoke::Life;
@@ -338,6 +338,62 @@ pub(crate) fn job_remove(auth: &mut Value, agent: &str, pid: &str, name: &str) -
         ticks.shift_remove(name);
     }
     vec![format!("{pid} no longer has the job {name} for {agent}")]
+}
+
+/// `cmd_job` with no flag, or `--shown`: a tick at share, or the Yes of a card that offers the job. The tick keeps the job
+/// as the owner saw it (`shown`, the JSON the share sheet or card listed, else the job as the package declares it now), cut to
+/// what the package declares now. A tick again replaces the first, a decline of it included.
+pub(crate) fn job_tick(
+    auth: &mut Value,
+    c: &Ctx,
+    agent: &str,
+    pid: &str,
+    name: &str,
+    shown: Option<&str>,
+) -> R<Vec<String>> {
+    const SHOWN: &str = "--shown is JSON: {\"domains\": [..], \"helpers\": [..], \"doors\": [..]}";
+    if !is_agent_name(agent) {
+        return usage("job <agent> <id> <job> [--shown JSON | --decline HASH | --rm]");
+    }
+    let Some(job) = Rules::new(c, auth).declared_job(agent, name) else {
+        return usage(format!(
+            "{agent} declares no job '{name}' (capabilities.yaml jobs:)"
+        ));
+    };
+    write::tables(auth);
+    let pid = own_row(c, auth, agent, pid)?;
+    let shown = match shown {
+        Some(text) => match serde_json::from_str::<Value>(text) {
+            Ok(v) if v.is_object() => v,
+            _ => return usage(SHOWN),
+        },
+        None => json!(
+            PIECES
+                .iter()
+                .map(|k| ((*k).to_owned(), json!(job.piece(k))))
+                .collect::<Map<String, Value>>()
+        ),
+    };
+    let kept = effective(&json!({ "snapshot": shown }), Some(&job));
+    let snapshot: Map<String, Value> = PIECES
+        .iter()
+        .zip(kept)
+        .map(|(k, v)| ((*k).to_owned(), Value::Array(v)))
+        .collect();
+    let at = stamp(c);
+    let Some(row) = row_mut(auth, agent, &pid) else {
+        return die(format!("{pid} has no membership of their own for {agent}"));
+    };
+    if !row.get("jobs").is_some_and(Value::is_object) {
+        row.insert("jobs".to_owned(), json!({}));
+    }
+    if let Some(ticks) = row.get_mut("jobs").and_then(Value::as_object_mut) {
+        ticks.insert(
+            name.to_owned(),
+            json!({ "snapshot": snapshot, "since": at }),
+        );
+    }
+    Ok(vec![format!("{pid} has the job {name} for {agent}")])
 }
 
 /// `cmd_job --decline`: the No of a widening card, so that package update isn't asked again (the pieces it added still ask

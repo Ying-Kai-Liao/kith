@@ -352,13 +352,11 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
     Ok(answer(res, held))
 }
 
-/// What the secret-read verbs of `kith-auth` read, from the tables as auth.json's value. Refused on a database imported
-/// before profiles, grants and env were kept: its empty tables say nothing, and answering "no grant" or "no env" from
-/// them would start a service without what the file gave it.
-/// The keys of the view, and no others: what `mcp-config`, `get`, `exec`, `holders`, `keys` and `account-state` read
-/// (`may` and its rules over people, memberships and presets; the profiles, grants and env), and the hosts kept for every
-/// guest of an agent (`agent_access`: what `agent-access` and the guest's rules over `agent_domains` read; C-b). Anything the core holds
-/// later (`once`, the retired ids, kept hosts, the bots' cap) joins only when someone decides a verb needs it.
+/// The keys of the view, and no others: what `mcp-config`, `mcp-names`, `get`, `exec`, `holders`, `keys`, `account-state`,
+/// `ls` and `connectors` read (`may` and its rules over people, memberships and presets; the profiles, grants and env), the
+/// hosts kept for every guest of an agent (`agent_access`: what `agent-access` and the guest's rules over `agent_domains`
+/// read; C-b), and what `jobs` and `door` read of a membership's ticked jobs (they are in the memberships). Anything the core
+/// holds later (`once`, the retired ids, kept hosts, the bots' cap) joins only when someone decides a verb needs it.
 pub(super) const VIEW_KEYS: &[&str] = &[
     "people",
     "members",
@@ -369,6 +367,9 @@ pub(super) const VIEW_KEYS: &[&str] = &[
     "agent_access",
 ];
 
+/// What the secret-read verbs of `kith-auth` read, from the tables as auth.json's value. Refused on a database imported
+/// before profiles, grants and env were kept: its empty tables say nothing, and answering "no grant" or "no env" from
+/// them would start a service without what the file gave it.
 pub(super) fn secrets_view(a: &Value, switched: bool) -> std::result::Result<Value, Die> {
     if a.get("secrets_stale").is_some() {
         // On a switched home auth.json is the tombstone, so there is no file to import again.
@@ -894,6 +895,16 @@ pub(super) fn write_in(
             );
             if switch(params, "remove") {
                 return Ok(lines(card::job_remove(a, agent, person, name)));
+            }
+            if switch(params, "tick") {
+                return Ok(lines(card::job_tick(
+                    a,
+                    c,
+                    agent,
+                    person,
+                    name,
+                    word(params, "shown"),
+                )?));
             }
             Ok(lines(card::job_decline(
                 a,

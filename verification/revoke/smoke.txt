@@ -5,3 +5,5 @@ core-order OrderKept
 broken-star R2
 broken-bridge-no-sync R6c
 code NeverBridgeServed
+switched-router R1
+broken-router-stale R1
