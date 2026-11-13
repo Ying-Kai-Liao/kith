@@ -74,7 +74,7 @@ red until the verb exists. The Python replay always runs every case.
 
 ### Lifecycle (M3-14 P4)
 
-`golden/lifecycle.json` (also in `corpus/`) freezes `kernel/bin/kith-lifecycle sweep|status` and its `compact()` before `compact()`
+`golden/lifecycle.json` (golden only, like `wake.json`) freezes `kernel/bin/kith-lifecycle sweep|status` and its `compact()` before `compact()`
 runs claude under `kith-stub` (the conversation's writer lock). All cases are `unswitched` (no Rust side). `lifecycle-old.py` runs
 the verbs unchanged and adds `compact SID WHAT`, which calls `compact()` for a session whose decision is on record, because its
 refusals (`held`, `skipped`) are what a change between the decision and the claim makes of it, which a sweep cannot reach from
