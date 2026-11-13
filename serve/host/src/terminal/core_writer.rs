@@ -2,10 +2,10 @@
 //! per-turn writer lock, which a resident `kith-stub` holds for the host. Machinery only: nothing calls it until the wiring
 //! package (P7), and nothing turns it on.
 //!
-//! **The mode** ([`Mode`]) is picked once at host start. `Files` is today's path and the default. `Shadow` is
-//! `KITH_HOST_CORE_CLAIMS=1` (`core_claims`). `Writer` only when the core's `claims` module reads switched (its switch file
-//! plus the marker, through `cutover.mayServe`); no env var turns it on. A Writer host whose core does not answer waits
-//! ([`Begin::CoreDown`]); it never runs a turn unclaimed.
+//! **The mode** ([`Mode`]) is read from the gate at every begin and at the caller's tick, not once at host start. `Files` is
+//! today's path and the default. `Shadow` is `KITH_HOST_CORE_CLAIMS=1` (`core_claims`). `Writer` only when
+//! `cutover.mayServe {module: "claims"}` answers `ok: true`; no env var turns it on. An unclear gate (a warning, a refusal,
+//! no core) with the switch file there is `Held`: the turn waits ([`Begin::NotWriter`]) and no `hostclaim.*` call is made.
 //!
 //! **One turn** ([`CoreWriter::begin`]), each step one call:
 //! 1. `hostclaim.enqueue` (refused as revoked: dropped), 2. `hostclaim.turn` (`claim_next`, the only way to claim a turn; the
@@ -29,9 +29,11 @@
 //!
 //! Blocking: every call is a core row or a stub line, so an async caller runs them on a blocking thread.
 //!
-//! Open: a `hostclaim.enqueue` whose reply was lost leaves a queued turn nobody knows the id of (no row lists turns); the next
-//! begin enqueues again and the first one waits for its deadline. A `Down` is told apart from a refusal, so nothing else is
-//! guessed.
+//! A `hostclaim.enqueue` whose reply was lost is safe to repeat: every enqueue carries [`Turn::key`] (made once at accept), so
+//! the retry lands on the same turn row. A `Down` is told apart from a refusal, so nothing else is guessed.
+//!
+//! The caller runs at most one begin per conversation at a time, and retries a lost end report ([`Finished::ReportLost`]) with
+//! [`CoreWriter::retry_end`] on its slow tick.
 
 // Nothing calls this until the wiring package (P7).
 #![allow(dead_code, reason = "machinery with no caller yet")]
@@ -66,30 +68,38 @@ pub enum Mode {
     Shadow,
     /// The core claim and the stub's lock are the writer.
     Writer,
+    /// The gate cannot be read (stepping, rolling back, a marker that does not match, a refused question, a core that is
+    /// down) and the switch file exists, so the core might be the writer: nothing runs and no `hostclaim.*` call is made until
+    /// the gate answers clearly. The same rule as `routines/switch.rs` `decide` (`Gate::Held`).
+    Held,
 }
 
 impl Mode {
     /// The mode for what the core's gate said. `said` is the answer to `cutover.mayServe {module: "claims"}`; `switch_file` is
     /// whether the module's switch file exists (the one thing readable when the core is down); `shadow_flag` is
-    /// `KITH_HOST_CORE_CLAIMS=1`. Writer needs the gate's yes, or no answer at all with the switch file there (a switched Mac
-    /// whose core is down waits, it does not fall back to files). A clear no, or no switch file, is never Writer.
+    /// `KITH_HOST_CORE_CLAIMS=1`. Writer only on `ok: true`. A clear no (`ok: false`, no warning) is never Writer. Anything
+    /// unclear (a warning, a refusal, no answer, a shape not known) with the switch file there is `Held`: a switched Mac whose
+    /// core is down or mid-step waits, it neither falls back to files nor claims. With no switch file the module was never
+    /// switched and an unclear gate is just a Mac without a core: not Writer.
     pub fn decide(said: &Answer, switch_file: bool, shadow_flag: bool) -> Self {
-        let writer = match said {
+        let (writer, held) = match said {
             Answer::Done(v) => match (v.get("ok").and_then(Value::as_bool), v.get("warning").and_then(Value::as_str)) {
-                (Some(true), _) => true,
-                (Some(false), None) => false,
-                _ => switch_file,
+                (Some(true), _) => (true, false),
+                (Some(false), None) => (false, false),
+                _ => (false, switch_file),
             },
-            Answer::Refused(_) | Answer::Down { .. } => switch_file,
+            Answer::Refused(_) | Answer::Down { .. } => (false, switch_file),
         };
-        match (writer, shadow_flag) {
-            (true, _) => Self::Writer,
-            (false, true) => Self::Shadow,
-            (false, false) => Self::Files,
+        match (writer, held, shadow_flag) {
+            (true, _, _) => Self::Writer,
+            (false, true, _) => Self::Held,
+            (false, false, true) => Self::Shadow,
+            (false, false, false) => Self::Files,
         }
     }
 
-    /// The mode of this host start: asks the core's gate once.
+    /// The mode right now: asks the core's gate. [`CoreWriter::begin`] asks it at every begin, and the caller's slow tick
+    /// asks it again ([`CoreWriter::mode`]); it is not decided once at host start.
     pub fn select(folders: &Paths) -> Self {
         let said = row_answer(folders, "cutover.mayServe", &json!({"module": MODULE}));
         Self::decide(&said, crate::core_front::switch_file_exists(folders, MODULE), super::core_claims::flag_on())
@@ -136,9 +146,17 @@ pub struct Turn<'a> {
     /// `hostclaim.epoch` of the person, read at accept (before the host's may check).
     pub revoke_seen: i64,
     pub deadline: Option<i64>,
+    /// Made once at accept ([`new_turn_key`]), carried on the queued item and sent with every enqueue: an enqueue whose reply
+    /// was lost and is retried lands on the same turn row and spends the budget once (`turns.enq_key`).
+    pub key: &'a str,
     /// The room fields of the enqueue (`basis`, `epochs`, `room`, `gen`, `level`, `joinEpoch`, `author`, `budget`...), a JSON
     /// object merged in as it is.
     pub room: Option<&'a Value>,
+}
+
+/// A fresh turn key, for [`Turn::key`]: made when the item is accepted, never again for the same item.
+pub fn new_turn_key() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 /// A turn that holds its claim and the lock: the caller syncs the transcript and prompts.
@@ -194,6 +212,12 @@ pub enum Dropped {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Begin {
     Running(Running),
+    /// The gate does not say Writer (read at this begin, before any `hostclaim.*` call). `Held`: wait and begin again on the
+    /// tick, nothing was asked of the core. `Files` or `Shadow`: the module was switched back; run the other path.
+    NotWriter {
+        turn: Option<i64>,
+        mode: Mode,
+    },
     /// Another turn's claim holds the conversation: stay queued, begin again (same turn id) on the next tick.
     Queued {
         turn: i64,
@@ -249,8 +273,8 @@ pub enum End {
 pub enum Finished {
     /// The lock is released and the end reported.
     Reported,
-    /// The lock is released but the core did not take the report (`why`): the claim stays `running` and the next begin of the
-    /// conversation ends it.
+    /// The lock is released but the core did not take the report (`why`): the claim stays `running` (a writer) until the
+    /// caller's slow tick sends it again with [`CoreWriter::retry_end`].
     ReportLost(String),
     /// A room turn's claim is stopped and its process group killed; `gone` says whether the process is confirmed gone and its
     /// `warm_procs` row forgotten.
@@ -335,35 +359,38 @@ impl CoreWriter {
         self.data("hostclaim.report", &json!({"claimId": claim, "kind": kind, "body": body.to_string()})).map(drop)
     }
 
+    /// The mode right now (the gate read again). The caller's slow tick asks it too, so a module that is half-stepped or rolled
+    /// back is noticed while turns wait.
+    pub fn mode(&self) -> Mode {
+        Mode::select(&self.folders)
+    }
+
     /// Begins `t` on the warm process `stub`: steps 2 to 6 of design 1.3. Call it again with the same turn id after
-    /// [`Begin::Queued`], [`Begin::Retry`], [`Begin::CoreDown`] or an unpark.
+    /// [`Begin::Queued`], [`Begin::Retry`], [`Begin::CoreDown`], [`Begin::NotWriter`] or an unpark. The caller runs at most one
+    /// begin per conversation at a time.
+    ///
+    /// The gate is read first, at every begin: only `ok: true` is Writer, and in `Held` the core is asked nothing else.
     pub fn begin(&self, t: &Turn<'_>, stub: &mut dyn WarmStub) -> Begin {
+        let mode = self.mode();
+        if mode != Mode::Writer {
+            return Begin::NotWriter { turn: t.id, mode };
+        }
         let mut turn = t.id;
         let mut claim = None;
-        // What the core shows for the conversation: a claim of ours that a repeated begin resumes (the reply was lost, or
-        // the redeem did not finish), or one an earlier turn never ended.
+        // A claim of this very turn that a repeated begin resumes (the reply was lost, or the redeem did not finish). Any
+        // other live claim is a writer like any other: the core answers `held` and the turn stays queued. Begin never ends a
+        // claim it was not asked to: a lost end report is retried with [`CoreWriter::retry_end`], an abandoned begin with
+        // [`CoreWriter::abandon`], an old host's claim is ended by [`CoreWriter::adopt`].
         match self.live(t.conversation) {
             Err(why) => return Begin::CoreDown { turn, why },
             Ok(Some(c)) if c["holderInstance"] == self.instance.as_str() && c["kind"] == "turn" => {
-                let id = c["claimId"].as_i64();
-                // Another process of this host that runs a turn on the conversation is a writer like any other: held.
+                // The same stub, or a claim not redeemed yet (no pid).
                 let same = c["pid"].is_null() || c["pid"].as_u64() == Some(u64::from(stub.pid()));
-                match (id, c["state"].as_str()) {
-                    (Some(id), Some("claimed" | "running")) if t.id.is_some() && same => claim = Some(id),
-                    (Some(id), Some("claimed")) if same => {
-                        let _ = self.call(
-                            "hostclaim.stop",
-                            &json!({"claimId": id, "reason": "a turn never started",
-                                                                    "requeue": false}),
-                        );
-                    }
-                    (Some(id), Some("running")) if same => {
-                        // A claim of this process whose end the core never heard, begun again as a new turn: its lock is
-                        // given back (a repeated release is `not-held`) and it ends as `finish` would have.
-                        let _ = stub.release(t.conversation, id);
-                        let _ = self.report(id, "done", stub.pid(), &json!({}));
-                    }
-                    _ => {}
+                let theirs = t.id.is_some() && c["turn"].as_i64() == t.id;
+                if let (true, true, Some(id), Some("claimed" | "running")) =
+                    (theirs, same, c["claimId"].as_i64(), c["state"].as_str())
+                {
+                    claim = Some(id);
                 }
             }
             Ok(_) => {}
@@ -389,7 +416,7 @@ impl CoreWriter {
         let person = owner_or(t.person);
         if turn.is_none() {
             let mut ask = json!({"conversation": t.conversation, "agent": t.agent, "engine": t.engine, "source": t.source,
-                                 "person": person, "prompt": "", "revokeSeen": t.revoke_seen});
+                                 "person": person, "prompt": "", "revokeSeen": t.revoke_seen, "key": t.key});
             if let Some(d) = t.deadline {
                 ask["deadline"] = json!(d);
             }
@@ -515,6 +542,9 @@ impl CoreWriter {
         let pid = stub.pid();
         let Some(started) = proc_start(pid) else {
             return if give_lock_back(stub, t.conversation, claim) {
+                // Put back, so `Failed` means ended: a claim left `claimed` would hold the conversation with nobody running.
+                let _ =
+                    self.call("hostclaim.stop", &json!({"claimId": claim, "reason": "no start time", "requeue": true}));
                 Begin::Failed { turn: Some(turn), why: "the stub's start time can't be read".into() }
             } else {
                 self.lock_stuck(stub, claim, "no start time")
@@ -601,10 +631,7 @@ impl CoreWriter {
                 }
                 Finished::RoomEnded { gone }
             }
-            End::Killed => match self.report(run.claim, "exit", run.pid, &json!({})) {
-                Ok(()) => Finished::Reported,
-                Err(why) => Finished::ReportLost(why),
-            },
+            End::Killed => self.retry_end(run, end),
             End::Done | End::OutOfUsage => {
                 if !give_lock_back(stub, conversation, run.claim) {
                     let Begin::LockStuck { why } = self.lock_stuck(stub, run.claim, "release failed") else {
@@ -612,16 +639,24 @@ impl CoreWriter {
                     };
                     return Finished::LockStuck(why);
                 }
-                let sent = if end == End::Done {
-                    self.report(run.claim, "done", run.pid, &json!({}))
-                } else {
-                    self.report(run.claim, "exit", run.pid, &json!({"out_of_usage": true}))
-                };
-                match sent {
-                    Ok(()) => Finished::Reported,
-                    Err(why) => Finished::ReportLost(why),
-                }
+                self.retry_end(run, end)
             }
+        }
+    }
+
+    /// Sends the end report of `run` again, after [`Finished::ReportLost`]: the lock is already released, so only the report
+    /// goes (a report on a claim the core has ended is stored and changes nothing). The caller retries on its slow tick until
+    /// it gets [`Finished::Reported`]; a begin of the conversation never ends the claim for it. A room end has no report.
+    pub fn retry_end(&self, run: &Running, end: End) -> Finished {
+        let sent = match end {
+            End::Done => self.report(run.claim, "done", run.pid, &json!({})),
+            End::OutOfUsage => self.report(run.claim, "exit", run.pid, &json!({"out_of_usage": true})),
+            End::Killed => self.report(run.claim, "exit", run.pid, &json!({})),
+            End::Room => return Finished::RoomEnded { gone: !pid_runs(run.pid) },
+        };
+        match sent {
+            Ok(()) => Finished::Reported,
+            Err(why) => Finished::ReportLost(why),
         }
     }
 

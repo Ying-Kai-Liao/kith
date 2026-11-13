@@ -44,6 +44,13 @@ struct World {
     redeem_refused: bool,
     /// What `cutover.mayServe` answers for the claims module.
     switched: Option<bool>,
+    /// The gate answers `ok: false` with a warning (stepping, rolling back, a marker mismatch), or refuses the call.
+    gate_warning: bool,
+    gate_refused: bool,
+    /// (conversation, key, turn): an enqueue with a key already seen answers the same turn.
+    keys: Vec<(String, String, i64)>,
+    /// The enqueue is applied but its reply is lost, this many times.
+    enqueue_lost: u32,
 }
 
 fn data(v: Value) -> Answer {
@@ -71,17 +78,32 @@ impl World {
         let conv = p["conversation"].as_str().unwrap_or_default().to_owned();
         let id = p["claimId"].as_i64().unwrap_or_default();
         match method {
-            "cutover.mayServe" => data(match self.switched {
-                Some(ok) => json!({"ok": ok}),
-                None => json!({"ok": false}),
-            }),
+            "cutover.mayServe" => {
+                if self.gate_refused {
+                    return Answer::Refused("the gate is not answering".into());
+                }
+                if self.gate_warning {
+                    return data(json!({"ok": false, "warning": "the module is stepping"}));
+                }
+                data(json!({"ok": self.switched.unwrap_or(false)}))
+            }
             "hostclaim.epoch" => data(json!({"epoch": 0})),
             "hostclaim.enqueue" => {
                 if self.revoke_enqueue {
                     return refused("revoked");
                 }
-                let n = i64::try_from(self.turns.len()).unwrap() + 1;
-                self.turns.push((n, "queued".into(), None));
+                let key = p["key"].as_str().expect("every enqueue carries a key").to_owned();
+                let seen = self.keys.iter().find(|k| k.0 == conv && k.1 == key).map(|k| k.2);
+                let n = seen.unwrap_or_else(|| {
+                    let n = i64::try_from(self.turns.len()).unwrap() + 1;
+                    self.turns.push((n, "queued".into(), None));
+                    self.keys.push((conv.clone(), key, n));
+                    n
+                });
+                if self.enqueue_lost > 0 {
+                    self.enqueue_lost -= 1;
+                    return Answer::Down { why: "the reply was lost".into(), lost: true };
+                }
                 data(json!({"turn": n}))
             }
             "hostclaim.turn" => {
@@ -195,7 +217,7 @@ impl World {
                     self.live(&conv).map(|i| &self.claims[i])
                 };
                 data(json!({"claim": c.map(|c| json!({"claimId": c.id, "conversation": c.conv, "state": c.state,
-                    "kind": c.kind, "person": "owner", "pid": c.pid, "started": c.started, "holderInstance": c.instance}))}))
+                    "kind": c.kind, "person": "owner", "pid": c.pid, "started": c.started, "holderInstance": c.instance, "turn": c.turn}))}))
             }
             "hostclaim.cancel" => {
                 let t = p["turn"].as_i64().unwrap();
@@ -302,7 +324,11 @@ impl Rig {
             cache: dir.join("cache"),
             store: dir.join("store"),
         };
-        let world = Arc::new(Mutex::new(World { account: "main".into(), ..World::default() }));
+        // A switched Mac: the gate says yes, and the switch file is there for when the core does not answer.
+        let world = Arc::new(Mutex::new(World { account: "main".into(), switched: Some(true), ..World::default() }));
+        let switch = folders.machine.join("core").join("cutover");
+        std::fs::create_dir_all(&switch).unwrap();
+        std::fs::write(switch.join("claims.switch"), "").unwrap();
         let w = world.clone();
         let fake: Fake = Arc::new(move |m, p| w.lock().unwrap().answer(m, p));
         register(&state, fake);
@@ -340,6 +366,8 @@ impl Rig {
     #[allow(clippy::unused_self, reason = "reads as the rig's")]
     fn turn<'a>(&self, conv: &'a str, id: Option<i64>) -> Turn<'a> {
         Turn {
+            // A turn accepted now: its own key (a test that retries one turn reuses the struct).
+            key: Box::leak(new_turn_key().into_boxed_str()),
             id,
             conversation: conv,
             agent: "builder",
@@ -355,22 +383,32 @@ impl Rig {
 
     /// A one-shot stub (as `kith --direct` runs) holding `key`, until the returned handle is dropped.
     fn direct(&self, key: &str) -> Direct {
-        let mut child = Command::new(stub_bin())
-            .args(["--lock-dir"])
-            .arg(self.locks())
-            .args(["--key", key, "--", "cat"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let stdin = child.stdin.take();
-        let held = (0..200).any(|_| {
-            std::thread::sleep(Duration::from_millis(25));
-            !self.lock_free(key)
-        });
-        assert!(held, "the one-shot stub never took the lock");
-        Direct { child, stdin }
+        // The probe (`lock_free`) takes the lock for a moment itself, and a one-shot that starts inside that moment finds it busy
+        // and exits (75): on a loaded Mac that is the usual case. So a one-shot that has exited is started again.
+        for _ in 0..20 {
+            let mut child = Command::new(stub_bin())
+                .args(["--lock-dir"])
+                .arg(self.locks())
+                .args(["--key", key, "--", "cat"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let stdin = child.stdin.take();
+            for _ in 0..40 {
+                std::thread::sleep(Duration::from_millis(25));
+                if child.try_wait().unwrap().is_some() {
+                    break;
+                }
+                if !self.lock_free(key) {
+                    return Direct { child, stdin };
+                }
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        panic!("the one-shot stub never took the lock");
     }
 
     /// Whether the lock of `key` can be taken now (a one-shot stub answers 75 when it is held).
@@ -441,6 +479,8 @@ struct Real {
     /// Every release answers an error (a wedged stub).
     release_fails: bool,
     killed: std::cell::Cell<bool>,
+    /// The pid the host reads (a process that is not there: its start time can't be read).
+    fake_pid: Option<u32>,
 }
 
 impl Real {
@@ -456,6 +496,7 @@ impl Real {
             restarts: Vec::new(),
             release_fails: false,
             killed: std::cell::Cell::new(false),
+            fake_pid: None,
         }
     }
 
@@ -482,7 +523,7 @@ impl Real {
 
 impl WarmStub for Real {
     fn pid(&self) -> u32 {
-        self.acp.pid().unwrap()
+        self.fake_pid.unwrap_or_else(|| self.acp.pid().unwrap())
     }
     fn account(&self) -> Option<String> {
         self.account.clone()
@@ -531,14 +572,21 @@ fn writer_mode_is_off_unless_the_core_says_the_module_is_switched() {
     assert_eq!(Mode::decide(&no, false, true), Mode::Shadow, "the shadow flag alone is the old mode");
     assert_eq!(Mode::decide(&no, true, true), Mode::Shadow, "a clear no is never Writer, even with a switch file");
     // "switched, core down" and "not switched, core up" are two different rigs (the TEST_CORE lesson).
-    assert_eq!(Mode::decide(&down, true, false), Mode::Writer, "switched and no core: Writer, so the turn waits");
+    assert_eq!(Mode::decide(&down, true, false), Mode::Held, "switched and no core: held, so the turn waits");
     assert_eq!(
         Mode::decide(&down, false, false),
         Mode::Files,
         "never switched and no core: files, as on a Mac without one"
     );
-    assert_eq!(Mode::decide(&warned, true, false), Mode::Writer);
+    // An unclear answer is never Writer (the rule of `routines/switch.rs`): only `ok: true` is.
+    assert_eq!(Mode::decide(&warned, true, false), Mode::Held);
+    assert_eq!(Mode::decide(&warned, true, true), Mode::Held, "held beats the shadow flag");
     assert_eq!(Mode::decide(&warned, false, false), Mode::Files);
+    let refused = Answer::Refused("no".into());
+    assert_eq!(Mode::decide(&refused, true, false), Mode::Held);
+    assert_eq!(Mode::decide(&refused, false, false), Mode::Files);
+    let odd = Answer::Done(json!({"fine": true}));
+    assert_eq!(Mode::decide(&odd, true, false), Mode::Held);
     // No env var turns it on in a shipped build: the flag is Shadow only.
     assert_eq!(Mode::default(), Mode::Files);
 }
@@ -566,7 +614,7 @@ async fn claimed_takes_the_lock_redeems_on_the_stubs_pid_and_a_normal_end_releas
     assert_eq!(run.account.as_deref(), Some("main"));
     assert_eq!(
         r.log(),
-        ["hostclaim.show", "hostclaim.enqueue", "hostclaim.turn", "hostclaim.redeem"],
+        ["cutover.mayServe", "hostclaim.show", "hostclaim.enqueue", "hostclaim.turn", "hostclaim.redeem"],
         "the lock is taken between the claim and the redeem"
     );
     assert_eq!(r.turn_state(1).0, "running");
@@ -651,7 +699,7 @@ async fn a_revoked_enqueue_drops_the_item_with_nothing_queued() {
     let b = r.writer.begin(&r.turn("s1", None), &mut stub);
     assert!(matches!(b, Begin::Dropped { turn: None, why: Dropped::Revoked, .. }), "{b:?}");
     assert_eq!(r.w().turns.len(), 0);
-    assert_eq!(r.log(), ["hostclaim.show", "hostclaim.enqueue"]);
+    assert_eq!(r.log(), ["cutover.mayServe", "hostclaim.show", "hostclaim.enqueue"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -776,8 +824,25 @@ async fn a_core_that_does_not_answer_means_the_turn_waits_and_never_takes_the_lo
     let r = Rig::new();
     let mut stub = r.stub("main");
     r.w().down = true;
+    // The Mac is switched (its switch file is there) and the core does not answer: held, nothing asked.
+    assert_eq!(r.writer.begin(&r.turn("s1", None), &mut stub), Begin::NotWriter { turn: None, mode: Mode::Held });
+    assert!(r.lock_free("s1"));
+    // The gate answers but the next call does not.
+    r.w().down = false;
+    let w = r.world.clone();
+    let wrapped: Fake = Arc::new(move |m, p| {
+        let mut w = w.lock().unwrap();
+        if m == "hostclaim.show" && p["conversation"].is_string() {
+            w.log.push(m.to_owned());
+            return Answer::Down { why: "gone".into(), lost: false };
+        }
+        w.answer(m, p)
+    });
+    register(&r.folders.state, wrapped);
     assert!(matches!(r.writer.begin(&r.turn("s1", None), &mut stub), Begin::CoreDown { turn: None, .. }));
     assert!(r.lock_free("s1"));
+    let w = r.world.clone();
+    register(&r.folders.state, Arc::new(move |m, p| w.lock().unwrap().answer(m, p)));
     // Down in the middle: the claim was made, the redeem got no answer. The lock is kept; the retry finishes the redeem.
     r.w().down = false;
     let w = r.world.clone();
@@ -893,14 +958,137 @@ async fn adopt_ends_the_claims_of_an_older_host_and_leaves_this_ones() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_claim_of_ours_that_was_never_ended_is_ended_before_the_next_turn_claims() {
+async fn a_begin_ends_no_claim_it_was_not_asked_to_and_another_live_claim_of_ours_is_held() {
     let r = Rig::new();
     let mut stub = r.stub("main");
-    running(r.writer.begin(&r.turn("s1", None), &mut stub));
-    // The turn's end never reached the core (it was down); the host's next turn on the conversation ends it first, and the
-    // lock that turn still held is given back, or the new claim would find it busy.
+    let first = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    // A second begin on the conversation without the first having finished (P7 never does this; the rule holds anyway): the
+    // running claim is a writer like any other, so the new turn stays queued and nothing of the first is touched.
+    let b = r.writer.begin(&r.turn("s1", None), &mut stub);
+    assert_eq!(b, Begin::Queued { turn: 2 });
+    assert_eq!(r.claim_state(1), "running");
+    assert_eq!(r.turn_state(1).0, "running");
+    assert!(!r.lock_free("s1"), "its lock is still held");
+    assert!(r.w().reports.is_empty(), "no end was reported for it");
+    // Naming the first turn resumes it (the same claim); naming another turn does not.
+    let again = running(r.writer.begin(&r.turn("s1", Some(first.turn)), &mut stub));
+    assert_eq!((again.claim, again.again), (first.claim, true));
+    let b = r.writer.begin(&r.turn("s1", Some(2)), &mut stub);
+    assert_eq!(b, Begin::Queued { turn: 2 }, "a claim of turn 1 is not resumed by turn 2");
+    assert_eq!(r.w().claims.len(), 1);
+    // A claim that was never redeemed is no different.
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    r.w().redeem_lost = 0;
+    r.w().claims.push(C {
+        id: 1,
+        conv: "s1".into(),
+        state: "claimed".into(),
+        kind: "turn".into(),
+        pid: None,
+        started: None,
+        instance: Some(r.writer.instance().to_owned()),
+        turn: Some(7),
+    });
+    let b = r.writer.begin(&r.turn("s1", Some(9)), &mut stub);
+    assert!(matches!(b, Begin::Queued { turn: 9 }), "{b:?}");
+    assert_eq!(r.claim_state(1), "claimed", "left alone");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lost_end_report_is_sent_again_by_the_caller_and_a_begin_does_not_end_it() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
     let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
-    assert_eq!(run.claim, 2);
-    assert_eq!(r.claim_state(1), "ended");
-    assert_eq!(r.turn_state(1).0, "done");
+    // The core goes away at the end of the turn: the lock is released, the report is lost.
+    r.w().down = true;
+    let lost = r.writer.finish(&run, "s1", &mut stub, End::Done);
+    assert!(matches!(lost, Finished::ReportLost(_)), "{lost:?}");
+    assert!(r.lock_free("s1"), "released first");
+    r.w().down = false;
+    assert_eq!(r.claim_state(1), "running");
+    // The next turn's begin leaves it alone: the conversation stays held for it.
+    let b = r.writer.begin(&r.turn("s1", None), &mut stub);
+    assert_eq!(b, Begin::Queued { turn: 2 });
+    assert_eq!(r.claim_state(1), "running");
+    // The slow tick sends the report again: the claim ends, the turn is done, a repeat changes nothing.
+    assert_eq!(r.writer.retry_end(&run, End::Done), Finished::Reported);
+    assert_eq!((r.claim_state(1).as_str(), r.turn_state(1).0.as_str()), ("ended", "done"));
+    assert_eq!(r.writer.retry_end(&run, End::Done), Finished::Reported);
+    let next = running(r.writer.begin(&r.turn("s1", Some(2)), &mut stub));
+    assert_eq!(next.turn, 2);
+    // Still down: the retry says so.
+    r.w().down = true;
+    assert!(matches!(r.writer.retry_end(&next, End::OutOfUsage), Finished::ReportLost(_)));
+}
+
+// --- the gate is read at every begin -----------------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unclear_gate_holds_the_turn_with_no_hostclaim_call_and_it_runs_once_the_gate_says_yes() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let held = Begin::NotWriter { turn: None, mode: Mode::Held };
+    // Stepping or rolling back (a warning), with the switch file there.
+    r.w().gate_warning = true;
+    assert_eq!(r.writer.begin(&r.turn("s1", None), &mut stub), held);
+    // The gate question itself refused.
+    r.w().gate_warning = false;
+    r.w().gate_refused = true;
+    assert_eq!(r.writer.begin(&r.turn("s1", None), &mut stub), held);
+    // No core at all.
+    r.w().gate_refused = false;
+    r.w().down = true;
+    assert_eq!(r.writer.begin(&r.turn("s1", None), &mut stub), held);
+    assert_eq!(r.writer.mode(), Mode::Held);
+    assert!(r.log().iter().all(|m| m == "cutover.mayServe"), "nothing but the gate was asked: {:?}", r.log());
+    assert!(r.lock_free("s1"));
+    // A clear no is not Writer either: the module was switched back.
+    r.w().down = false;
+    r.w().switched = Some(false);
+    let t = r.turn("s1", None);
+    assert_eq!(r.writer.begin(&t, &mut stub), Begin::NotWriter { turn: None, mode: Mode::Files });
+    // The gate is read again at each begin, not once: it says yes now and the same turn runs.
+    r.w().switched = Some(true);
+    assert_eq!(r.writer.mode(), Mode::Writer);
+    running(r.writer.begin(&t, &mut stub));
+}
+
+// --- the stub's start time, the enqueue key -----------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_time_that_cannot_be_read_ends_the_claim_and_puts_the_turn_back() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    // A pid that is not there: the take works on the real stub, the start time of the pid the host reads does not.
+    stub.fake_pid = Some(4_000_000);
+    let b = r.writer.begin(&r.turn("s1", None), &mut stub);
+    assert!(matches!(b, Begin::Failed { turn: Some(1), .. }), "{b:?}");
+    assert!(r.lock_free("s1"), "the lock went back");
+    assert_eq!(r.claim_state(1), "ended", "Failed means ended");
+    assert_eq!(r.turn_state(1).0, "queued", "the turn is put back, not cancelled");
+    // The next begin of the same turn claims again.
+    stub.fake_pid = None;
+    let run = running(r.writer.begin(&r.turn("s1", Some(1)), &mut stub));
+    assert_eq!((run.turn, run.claim), (1, 2));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_enqueue_whose_reply_was_lost_is_retried_with_its_key_onto_the_same_turn() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    r.w().enqueue_lost = 1;
+    let t = r.turn("s1", None);
+    // A plain owner turn (empty basis): the row is made, the reply is lost, the caller sees the core down.
+    let b = r.writer.begin(&t, &mut stub);
+    assert!(matches!(b, Begin::CoreDown { turn: None, .. }), "{b:?}");
+    assert_eq!(r.w().turns.len(), 1);
+    // The same item begins again with the same key: the same row, not a second one.
+    let run = running(r.writer.begin(&t, &mut stub));
+    assert_eq!(run.turn, 1);
+    assert_eq!(r.w().turns.len(), 1, "one row: the budget is spent once");
+    assert_eq!(r.log().iter().filter(|m| *m == "hostclaim.enqueue").count(), 2);
+    // Every enqueue carries the key.
+    assert_eq!(r.w().keys.len(), 1);
+    assert_ne!(new_turn_key(), new_turn_key());
 }
