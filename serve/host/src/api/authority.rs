@@ -169,6 +169,36 @@ impl CoreData {
         }
     }
 
+    /// `kith-auth resolve --person` from the core's `people.resolve`: the whole bundle (`allowed`, `preset`, `access`...),
+    /// which is what a guest's launch reads (`consumeAccess`). Marked like [`Self::heard`]; `dies` so a deleted preset
+    /// is no answer, never a "no" the rules did not give.
+    pub fn resolved(&self, person: &str, agent: &str) -> Resolved {
+        if person.is_empty() {
+            return Resolved::Unknown;
+        }
+        let (Some(home), Some(kernel)) = (self.home.to_str(), self.kernel.to_str()) else { return Resolved::Unknown };
+        let mut params = json!({
+            "person": person, "agent": agent, "dies": true, "home": home, "kernel": kernel, "env": self.env,
+        });
+        #[cfg(test)]
+        let follows = TEST_CORE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|c| c.folders.machine == self.folders.machine);
+        #[cfg(not(test))]
+        let follows = true;
+        if follows && switched() {
+            params["viaSwitch"] = true.into();
+        }
+        match crate::core_front::call_owner(&self.folders, "people.resolve", &params, true) {
+            crate::core_front::Answer::Done(a) if a.get("died").is_some_and(|d| !d.is_null()) => Resolved::Unknown,
+            crate::core_front::Answer::Done(a) if a["allowed"].is_boolean() => Resolved::Bundle(a),
+            crate::core_front::Answer::Refused(said) if is_not_switched(&said) => Resolved::NotSwitched,
+            _ => Resolved::Unknown,
+        }
+    }
+
     fn ask(&self, person: &str, agent: &str) -> bool {
         // The owner is never a guest of this seam: the core can not grant more than the mirror does.
         self.verdict(person, agent).is_some_and(|v| v.allowed && !v.owner)
@@ -225,10 +255,23 @@ fn process_core() -> Arc<CoreData> {
     CORE.get_or_init(|| Arc::new(CoreData::from_process())).clone()
 }
 
-/// A test's core (a daemon on a folder of its own) in place of the process's, and the guard's switch on while it is
-/// set. Tests that set it hold `account::ONE_AT_A_TIME`.
+/// A test's core (a daemon on a folder of its own) in place of the process's. It says which core, not whether the
+/// host is switched on: that is [`TEST_OPT_IN`] (`KITH_CORE_AUTHORITY`), so a test can run the runbook's own
+/// configuration (a stepped Mac with the switch off). Tests that set it hold `account::ONE_AT_A_TIME`.
 #[cfg(test)]
 pub static TEST_CORE: Mutex<Option<Arc<CoreData>>> = Mutex::new(None);
+
+/// A test's `KITH_CORE_AUTHORITY=1`: the guard and the mirror follow the core while it is set. Off unless a test sets
+/// it (`set_test_core` does, with a core).
+#[cfg(test)]
+pub static TEST_OPT_IN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A test hands the host a core with the opt-in on (what `TEST_CORE` alone meant before the split), or takes both away.
+#[cfg(test)]
+pub fn set_test_core(core: Option<Arc<CoreData>>) {
+    TEST_OPT_IN.store(core.is_some(), std::sync::atomic::Ordering::SeqCst);
+    *TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = core;
+}
 
 /// What the core says of `person` and `agent` for the request guard (`KITH_CORE_AUTHORITY=1`). None: it could not be
 /// asked in time (a caller reads that as "no", or "try again" where it can). Off the async threads, [`MAX_ASKS`] at a
@@ -241,7 +284,8 @@ pub async fn core_verdict(person: &str, agent: &str) -> Option<Verdict> {
     }
 }
 
-/// [`core_verdict`] with the core's "not switched" told apart, for the guard that can then read the file.
+/// [`core_verdict`] with the core's "not switched" told apart (the host's own reads use [`core_resolved`] now).
+#[cfg(test)]
 pub async fn core_heard(person: &str, agent: &str) -> Heard {
     if person.is_empty() {
         return Heard::Unknown;
@@ -274,6 +318,35 @@ impl Authority for CoreData {
         }
         answer
     }
+}
+
+/// [`core_heard`] for the whole `resolve` bundle.
+pub async fn core_resolved(person: &str, agent: &str) -> Resolved {
+    if person.is_empty() {
+        return Resolved::Unknown;
+    }
+    let core = process_core();
+    let (person, agent) = (person.to_owned(), agent.to_owned());
+    let sem = asks();
+    let run = async move {
+        let permit = sem.acquire_owned().await.ok()?;
+        tokio::task::spawn_blocking(move || {
+            let _held = permit;
+            core.resolved(&person, &agent)
+        })
+        .await
+        .ok()
+    };
+    tokio::time::timeout(ASK_WAIT, run).await.ok().flatten().unwrap_or(Resolved::Unknown)
+}
+
+/// What the core said to a `people.resolve`.
+pub enum Resolved {
+    Bundle(Value),
+    /// The core refused the marked read: authority is back on auth.json.
+    NotSwitched,
+    /// It could not be asked in time, or its answer is no answer.
+    Unknown,
 }
 
 /// The answer chosen for one stream (or one call): built once, from the opt-in.
@@ -416,9 +489,6 @@ pub fn switched_now() -> bool {
 fn auth_file_now() -> AuthFile {
     #[cfg(test)]
     {
-        if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none() {
-            return AuthFile::Plain;
-        }
         let file = TEST_AUTH_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         file.map_or(AuthFile::Plain, |f| auth_file_at(&f))
     }
@@ -458,8 +528,8 @@ impl SwitchCache {
 #[cfg(test)]
 pub static TEST_STALE_SWITCHED: Mutex<Option<bool>> = Mutex::new(None);
 
-/// A test points the host at an auth.json of its own (a real tombstone file, or none) while it holds `TEST_CORE`; read
-/// only then, like `TEST_GATE_SHUT`.
+/// A test points the host at an auth.json of its own (a real tombstone file, or none); read whenever it is set, with
+/// or without the opt-in.
 #[cfg(test)]
 pub static TEST_AUTH_FILE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -650,11 +720,11 @@ pub fn start_gate() {
     }
 }
 
-/// [`core_selected`] for the request guard: also on while a test has given it a core (`TEST_CORE`), so a test does not
+/// [`core_selected`] for the request guard: also on while a test has given it a core (`TEST_OPT_IN`), so a test does not
 /// have to set a variable the other tests of the process would see.
 pub fn guard_on_core() -> bool {
     #[cfg(test)]
-    if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
+    if TEST_OPT_IN.load(std::sync::atomic::Ordering::SeqCst) {
         return match auth_file() {
             AuthFile::Tombstone => true,
             AuthFile::Unreadable => false,
@@ -665,7 +735,7 @@ pub fn guard_on_core() -> bool {
 }
 
 /// A test shuts the gate while its core stays up and opted in (what a write by kith-auth does for up to `GATE_EVERY`).
-/// Only read while `TEST_CORE` is set, and every test that sets `TEST_CORE` holds the rig's `ONE_AT_A_TIME` first, so
+/// Only read while `TEST_OPT_IN` is set, and every test that sets it holds the rig's `ONE_AT_A_TIME` first, so
 /// no other test sees it.
 #[cfg(test)]
 pub static TEST_GATE_SHUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -673,10 +743,10 @@ pub static TEST_GATE_SHUT: std::sync::atomic::AtomicBool = std::sync::atomic::At
 /// Whether a write to kith-auth is mirrored to the core: the opt-in (`KITH_CORE_AUTHORITY=1`), not the gate. The first
 /// write moves the fingerprint and closes the gate for up to `GATE_EVERY`, so a second change in that window would
 /// skip the mirror and leave the gate closed until `core-migrate --force`. A mirror into a core that differs only
-/// brings it closer to the file. Also on while a test has given the guard a core (`TEST_CORE`).
+/// brings it closer to the file. Also on while a test has the opt-in (`TEST_OPT_IN`).
 pub fn mirrors_to_core() -> bool {
     #[cfg(test)]
-    if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
+    if TEST_OPT_IN.load(std::sync::atomic::Ordering::SeqCst) {
         return true;
     }
     opted_in() || switched()
@@ -776,6 +846,13 @@ fn core_form(args: &[&str]) -> Option<(CoreMethod, Value)> {
         ["handle", person, platform, uid] => {
             (CoreMethod::Handle, json!({"person": person, "platform": platform, "uid": uid}))
         }
+        // A `/link` code and its use (the app's "Link Telegram", chat's `/link CODE`). `minutes` goes as a number: the core
+        // reads it as one, and a string would silently become the 15-minute default.
+        ["invite", person] => (CoreMethod::Invite, json!({"person": person})),
+        ["invite", person, minutes] => {
+            (CoreMethod::Invite, json!({"person": person, "minutes": minutes.parse::<i64>().ok()?}))
+        }
+        ["link", platform, uid, code] => (CoreMethod::Link, json!({"platform": platform, "uid": uid, "code": code})),
         ["bot", id, "--rm"] => (CoreMethod::RemoveBot, json!({"id": id})),
         ["bot", id, "--of", owner, ..] => {
             let mut p = settings(4, &["name", "provider"])?;
@@ -816,6 +893,8 @@ enum CoreMethod {
     Ledger,
     RemoveGrant,
     Handle,
+    Invite,
+    Link,
 }
 
 impl CoreMethod {
@@ -837,6 +916,8 @@ impl CoreMethod {
             Self::Ledger => "people.ledger",
             Self::RemoveGrant => "people.removeGrant",
             Self::Handle => "people.handle",
+            Self::Invite => "people.invite",
+            Self::Link => "people.link",
         }
     }
 
@@ -861,7 +942,9 @@ impl CoreMethod {
             | Self::AddPerson
             | Self::BotsCap
             | Self::RemoveGrant
-            | Self::Handle => true,
+            | Self::Handle
+            | Self::Invite
+            | Self::Link => true,
             Self::ClearTemp => false,
         }
     }
@@ -1012,6 +1095,8 @@ mod gate_tests {
             (&["ledger", "--rm", "k"], CoreMethod::RemoveGrant, true),
             (&["handle", "sam", "telegram", "--rm"], CoreMethod::Handle, true),
             (&["handle", "sam", "telegram", "42"], CoreMethod::Handle, true),
+            (&["invite", "sam", "15"], CoreMethod::Invite, true),
+            (&["link", "telegram", "42", "ABC234"], CoreMethod::Link, true),
         ];
         for (args, want, marked) in shapes {
             let (got, _) = core_form(args).unwrap();

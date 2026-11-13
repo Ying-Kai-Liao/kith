@@ -754,6 +754,94 @@ fn an_invite_is_made_listed_and_taken_back() {
     );
 }
 
+const UNKNOWN_CODE: &str =
+    "that code is unknown or expired; ask for a new one (kith-auth invite <id>)";
+
+fn link_params(uid: &str, code: &str) -> Value {
+    json!({"platform": "telegram", "uid": uid, "code": code})
+}
+
+#[test]
+fn a_link_binds_the_codes_person_once_and_spends_the_code() {
+    let mut rig = Rig::new(&base());
+    let code = rig
+        .call("people.invite", &json!({"person": "sam"}))
+        .unwrap()["code"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // read as `link` reads it: trimmed, any case
+    let said = rig
+        .call(
+            "people.link",
+            &link_params("42", &format!(" {} ", code.to_lowercase())),
+        )
+        .unwrap();
+    assert_eq!(said, json!({"person": "sam", "lines": ["sam"]}));
+    let t = rig.tables();
+    assert_eq!(t["people"]["sam"]["handles"]["telegram"], "42");
+    assert!(
+        t["invites"].as_object().unwrap().is_empty(),
+        "the code is spent"
+    );
+    assert_eq!(
+        rig.call("people.link", &link_params("42", &code))
+            .unwrap_err(),
+        UNKNOWN_CODE
+    );
+}
+
+#[test]
+fn a_link_refused_writes_nothing_and_keeps_the_code() {
+    let mut a = base();
+    a["people"]["amy"] = json!({"revoked": {"at": 5}});
+    a["people"]["bot-q"] = json!({"bot_of": "amy"});
+    let soon = NOW / 1000.0 + 900.0;
+    a["invites"] = json!({
+        "RRRRRR": {"person": "amy", "expires": soon},
+        "BBBBBB": {"person": "bot-q", "expires": soon},
+        "GGGGGG": {"person": "gone", "expires": soon},
+        "EEEEEE": {"person": "sam", "expires": NOW / 1000.0 - 1.0},
+        "SSSSSS": {"person": "sam", "expires": soon},
+    });
+    let mut rig = Rig::new(&a);
+    rig.call(
+        "people.handle",
+        &json!({"person": "kai", "platform": "telegram", "uid": "7"}),
+    )
+    .unwrap();
+    let before = rig.tables();
+    // a cut-off person (and their bot), a removed one, an expired code and an unknown one all read the same
+    for code in ["RRRRRR", "BBBBBB", "GGGGGG", "EEEEEE", "NNNNNN"] {
+        assert_eq!(
+            rig.call("people.link", &link_params("42", code))
+                .unwrap_err(),
+            UNKNOWN_CODE,
+            "{code}"
+        );
+    }
+    // an account that is another person's
+    assert_eq!(
+        rig.call("people.link", &link_params("7", "SSSSSS"))
+            .unwrap_err(),
+        "telegram 7 is already kai"
+    );
+    // a user id that is no id
+    assert!(
+        rig.call("people.link", &link_params("@sam", "SSSSSS"))
+            .unwrap_err()
+            .contains("user ids are numbers")
+    );
+    assert_eq!(
+        rig.tables(),
+        before,
+        "a refusal writes nothing, the code stays"
+    );
+    // and the code still works once the uid is right
+    rig.call("people.link", &link_params("42", "SSSSSS"))
+        .unwrap();
+}
+
 #[test]
 fn an_invite_is_refused_for_who_kith_auth_refuses() {
     let mut a = base();

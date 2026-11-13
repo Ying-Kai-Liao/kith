@@ -237,6 +237,14 @@ async fn ask_for(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, input: &Value, a
     if input.to_string().len() > MAX_INPUT {
         return deny("That request is too large to show for approval.");
     }
+    // A person whose access is set aside (revoked) gets no card: a run left alive after the revoke must not ask the owner.
+    // (under every id the host may hold them under: a renamed person's rows stay under the old one)
+    if !who.person.is_empty() && {
+        let held = crate::remote::core_revokes::held_under(&who.person).await;
+        hub.store.suspended_people().is_ok_and(|s| held.iter().any(|id| s.contains(id)))
+    } {
+        return deny("This person's access has been revoked, so no approval was asked for.");
+    }
     let (resource, shown) = match resource::classify(tool, input, &resource::roots()) {
         resource::Classified::Card { key, shown } => (key, shown),
         resource::Classified::Never => {
@@ -763,6 +771,21 @@ pub fn withdraw_person(hub: &Hub, person: &str, agent: Option<&str>) {
     }
 }
 
+/// `kith ask` runs ended (Stop, a revoke, a timeout, the end of a chain): the open cards they parked on are withdrawn, and a
+/// waiting call is told so. The ask is gone, so nobody is told of an answer (no `tell_asker`). A secret card being written
+/// is left to its own steps (see `delivered`).
+pub fn withdraw_asks(hub: &Hub, ended: &[&str]) {
+    for card in hub.store.cards_open_all() {
+        if !card.reply_to.as_deref().is_some_and(|ask| ended.contains(&ask)) || secret::claimed(&card.id) {
+            continue;
+        }
+        if hub.store.card_withdraw(&card.id).unwrap_or(false) {
+            deliver(&card.id, &Verdict::Deny("The request that asked for this was stopped.".into()));
+            close_entry(hub, &card, "cancelled");
+        }
+    }
+}
+
 /// Past their deadline, cards expire: silence is no (A1).
 pub fn sweep(hub: &Hub) {
     expire(hub, now_ms());
@@ -827,11 +850,15 @@ pub fn start(hub: &Arc<Hub>) {
         // kith-auth writes its file from outside the host (a revoke, a new grant): who answers follows within seconds.
         // Once authority is on the core the file is a tombstone that never changes, so the core's revision is watched.
         let mut seen = authority_stamp().await;
+        // A revoke made in the core alone (a terminal `core-call people.suspend`) reaches this host here too: on a change
+        // of the revision, at start, and at least every 60 s (`remote::core_revokes`, narrowing only).
+        let mut core_revokes = crate::remote::core_revokes::Due::default();
         let mut tick = tokio::time::interval(AUTH_POLL);
         loop {
             tick.tick().await;
             let Some(hub) = weak.upgrade() else { return };
-            poll_authority(&hub, &mut seen).await;
+            let changed = poll_authority(&hub, &mut seen).await;
+            core_revokes.tick(&hub, changed).await;
         }
     });
 }

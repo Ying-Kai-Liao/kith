@@ -219,13 +219,32 @@ async fn who_owner(bin: &Path) -> Result<String> {
         .ok_or_else(|| anyhow!("kith-auth has no owner person yet (kith-auth person <you> owner)"))
 }
 
+/// What a person is told when a `/link` call fails. The core's own refusal is said as it is (no `kith-auth:` in front);
+/// anything else (the core down, lost or out of step, kith-auth missing) is one plain line that names no path, socket or
+/// method. A host still on auth.json says what kith-auth said, as it always did.
+pub(crate) fn linking_error(e: &anyhow::Error) -> anyhow::Error {
+    use crate::api::authority::{CoreDown, CoreRefused};
+    if let Some(r) = e.downcast_ref::<CoreRefused>() {
+        return anyhow!("{}", r.0.trim_start_matches("kith-auth: "));
+    }
+    if e.downcast_ref::<CoreDown>().is_some() || crate::api::authority::switched_now() {
+        return anyhow!("Linking isn't available on this computer right now.");
+    }
+    anyhow!("{e}")
+}
+
 /// `linkCode`: a one-time code the caller's person sends as `/link <code>` to the Kith bot on Telegram, Discord or Slack.
 pub async fn link_code(hub: &Hub, caller: &Caller) -> Result<Value> {
     let bin = bin().await.ok_or_else(|| anyhow!("Linking isn't available on this computer (kith-auth not found)."))?;
-    let person = caller_person(hub, &bin, caller).await?;
+    // (a core that is down is said the plain way here too: asking who the caller is goes to the core first)
+    let person = caller_person(hub, &bin, caller).await.map_err(|e| {
+        if e.downcast_ref::<crate::api::authority::CoreDown>().is_some() { linking_error(&e) } else { e }
+    })?;
     let out = {
         let _w = crate::api::people::AUTH_WRITES.lock().await;
-        run(&bin, &["invite", &person, &LINK_MINUTES.to_string()]).await?
+        crate::api::authority::run_auth(&bin, &["invite", &person, &LINK_MINUTES.to_string()])
+            .await
+            .map_err(|e| linking_error(&e))?
     };
     let code = out.lines().next().unwrap_or("").trim().to_owned();
     if code.is_empty() {

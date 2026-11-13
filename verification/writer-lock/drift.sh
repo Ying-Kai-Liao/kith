@@ -8,12 +8,10 @@
 # set SYNC below to the commit you checked (and in .claude/skills/writer-lock/SKILL.md).
 set -euo pipefail
 
-# Where the models were PINNED, not confirmed: Holder.tla was derived from rust-rebuild 73a03656 (M0d #663/#669 and
-# holder_link.rs, M0c); WriterLock4.tla models the design, not code. Files that changed in the covered paths since
-# are listed below as drift on purpose: nobody has re-read them against the models yet. Move SYNC only after that
-# re-read (skill, "When you change covered code"). The claim code proper (the stub's lock held across the engine's
-# life, claim ids on the wire, the core's claim transaction) is M3; add its files to FILES as they land.
-SYNC=73a03656ad207a7abc854136eda0ab848a2ab591
+# Confirmed at 1720d27e (M3-12, 2026-11-14): every covered change since the old pin (73a03656) was read against the
+# models (verification/writer-lock/results4.md, "Added by M3-12"). Move SYNC only after the next re-read (skill, "When you
+# change covered code").
+SYNC=1720d27eef3ac4f1208b94fa7c61f268a9e824b4
 
 FILES=(
   core/stub                           # the start stub: the writer lock (fd CLOEXEC, kept to the engine's exit), redeem, the engine as its child
@@ -26,6 +24,13 @@ FILES=(
   core/runtime/src/wake/queue.rs      # (M3-10b1, Claims4.tla) give_back / release: a wake given back after a stop
   core/runtime/src/wake/turns.rs      # (M3-10c, Claims4.tla) the wake's turn: start_in parks terminal_live, a run's end closes its turn
   core/runtime/src/import/claims.rs  # (M3-10b3) the claim files into core.db: only live claimers, never a second live row on a conversation
+  core/runtime/src/kill_resend.rs     # (M3-12, Claims4 SendKill) the daemon's own tick re-sends the kill of `ending` claims; victims and the dead leader's group
+  core/runtime/src/hostclaim.rs       # (M3-12, M3-10f) the host's claim rows: one claims-API call each, refusals as data
+  core/runtime/src/hostclaim_tests.rs # (M3-12) the same, real-core tests: a claim left ending, a hello under the host's instance name
+  core/runtime/src/holder_link_tests.rs # (M3-12) the holder link's tests (the link itself is holder_link.rs)
+  core/kernel/src/procstart.rs        # (M3-12, K2) orphan_group, same_process, comparable, claim_victims: what "the process is gone" means
+  core/procstart                      # (M3-12) the stamp crate behind it (Linux b<boot_id>:<ticks>, unknown cross-form)
+  serve/host/src/terminal             # (M3-12, M3-10f) core_claims.rs (the host's turn claims: HOST_INSTANCE, the claim file as the writer with the core row as its shadow), claim.rs, sync.rs, registry.rs
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

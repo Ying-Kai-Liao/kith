@@ -478,6 +478,10 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
             "people.secretRevoke",
         ),
         ("people secret-env echo github", "people.secretEnv"),
+        ("people secret-owner github/work sam", "people.secretOwner"),
+        ("people secret-share github/work", "people.secretShare"),
+        ("people secret-browser work", "people.secretBrowser"),
+        ("people link telegram 42 ABC234", "people.link"),
         ("people revision", "people.revision"),
         ("people ledger --person ann", "people.ledger"),
         (
