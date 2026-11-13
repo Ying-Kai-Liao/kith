@@ -67,7 +67,9 @@ mod unix {
             stream.set_read_timeout(Some(ANSWER_WITHIN))?;
             stream.set_write_timeout(Some(ANSWER_WITHIN))?;
             let reader = BufReader::new(stream.try_clone()?);
-            Ok(Self { io: Mutex::new(Some((stream, reader))) })
+            Ok(Self {
+                io: Mutex::new(Some((stream, reader))),
+            })
         }
 
         /// `take <key> <claim>`. `Err` is a channel that gave no answer (the stub is gone or wedged); the lock may or may not
@@ -94,18 +96,29 @@ mod unix {
         /// One line out, one line back: (the answer's first word, the reason that follows an `error`). An answer for another
         /// claim, or one that is not a line, is a broken channel.
         fn ask(&self, verb: &str, key: &str, claim: i64) -> std::io::Result<(String, String)> {
-            let broken = |why: &str| std::io::Error::new(std::io::ErrorKind::BrokenPipe, why.to_owned());
+            let broken =
+                |why: &str| std::io::Error::new(std::io::ErrorKind::BrokenPipe, why.to_owned());
             if claim < 0 || key.is_empty() || key.contains([' ', '\n', '\r']) {
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a key and claim id"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "not a key and claim id",
+                ));
             }
-            let mut guard = self.io.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let (stream, reader) = guard.as_mut().ok_or_else(|| broken("the control channel is closed"))?;
+            let mut guard = self
+                .io
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let (stream, reader) = guard
+                .as_mut()
+                .ok_or_else(|| broken("the control channel is closed"))?;
             let mut got = String::new();
             let sent = writeln!(stream, "{verb} {key} {claim}")
                 .and_then(|()| stream.flush())
                 .and_then(|()| reader.read_line(&mut got));
             let answer = match sent {
-                Ok(n) if n > 0 && got.ends_with('\n') => got.trim_end_matches(['\n', '\r']).to_owned(),
+                Ok(n) if n > 0 && got.ends_with('\n') => {
+                    got.trim_end_matches(['\n', '\r']).to_owned()
+                }
                 Ok(_) => String::new(),
                 Err(e) => {
                     *guard = None;
@@ -113,7 +126,11 @@ mod unix {
                 }
             };
             let mut words = answer.splitn(3, ' ');
-            let (said, for_claim, why) = (words.next().unwrap_or(""), words.next(), words.next().unwrap_or(""));
+            let (said, for_claim, why) = (
+                words.next().unwrap_or(""),
+                words.next(),
+                words.next().unwrap_or(""),
+            );
             // `error - <reason>` (a line the stub could not read) names no claim; every other answer names ours.
             if said.is_empty() || (for_claim != Some(&claim.to_string()) && said != "error") {
                 *guard = None;
@@ -124,7 +141,10 @@ mod unix {
 
         /// Whether the channel is still usable (it breaks on the first call that gets no answer).
         pub fn is_open(&self) -> bool {
-            self.io.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()
+            self.io
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
         }
     }
 
@@ -171,11 +191,20 @@ mod unix {
                 Ok(())
             });
         }
-        let started = Acp::start(process, &format!("kith-stub --resident {command}"), cwd, env);
+        let started = Acp::start(
+            process,
+            &format!("kith-stub --resident {command}"),
+            cwd,
+            env,
+        );
         // The host keeps no copy of the stub's end, spawned or not: a dead host must read as end-of-file there.
         drop(theirs);
         let (acp, rx) = started?;
-        Ok((acp, rx, Ctl::new(ours).context("opening the control channel")?))
+        Ok((
+            acp,
+            rx,
+            Ctl::new(ours).context("opening the control channel")?,
+        ))
     }
 }
 
