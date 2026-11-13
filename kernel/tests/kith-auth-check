@@ -27,6 +27,10 @@ check "a Clerk id is refused on telegram" "! A handle kai telegram user_2AbC123"
 check "a username is refused on kith" "! A handle kai kith kai"
 check "another person can't take a bound kith id" "! A handle bob kith user_2AbC123"
 check "handle --rm clears it" "A handle kai kith --rm && ! A whois kith user_2AbC123"
+check "room- ids are reserved: a person can't be added with one" "! A person room-kai"
+check "room- ids are reserved: a bot can't be added with one" "! A bot room-b1 --of bob"
+check "room- ids are reserved: a person can't be renamed to one" "! A person bob id=room-bob"
+check "a room- word inside an id is fine" "A person roomy && A person sam-room-x"
 
 # --- bot persons: kai is the owner, sam an invitee; each bot belongs to one of them
 A person sam >/dev/null 2>&1

@@ -122,8 +122,11 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             if let Some(o) = b.as_object_mut() {
                 o.remove("builtin");
             }
+            // An agent joining a room with people is checked live here, off the blocking thread, and the save holds
+            // to what was checked (chat/room_people.rs).
+            let verified = crate::chat::room_people::verify_adds(hub, &b).await?;
             let hub = hub.clone();
-            json!({"bot": tokio::task::spawn_blocking(move || hub.update_bot(&b)).await??})
+            json!({"bot": tokio::task::spawn_blocking(move || hub.update_bot_checked(&b, verified.as_ref())).await??})
         }
         // The roster as the user dragged it, top first.
         "reorderBots" => {

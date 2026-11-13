@@ -134,14 +134,24 @@ def asked_by(mid):
 
 def park(env=os.environ):
     """The card outlived its live window and the run is ending its turn on it: the kith ask that started the run (KITH_ASK_ID)
-    gets "waiting" and the card's later answer instead of this turn's words (kith-ask)."""
+    gets "waiting" and the card's later answer instead of this turn's words (kith-ask). The marker is written under the ask box's
+    lock (kith-ask's box_locked), so it cannot land between the steps of an end (end_asks, stop_runs), and not at all once
+    the ask has been ended: nothing is left to resume."""
     mid = env.get('KITH_ASK_ID') or ''
     if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}', mid):
         return
     try:
+        import fcntl
         box = ask_box()
         box.mkdir(parents=True, exist_ok=True)
-        (box / ('%s.parked' % mid)).write_text('')
+        with open(box / '.lock', 'w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                ended = json.loads((box / ('%s.reg' % mid)).read_text()).get('ended_at')
+            except (OSError, ValueError, AttributeError):
+                ended = None
+            if not ended:
+                (box / ('%s.parked' % mid)).write_text('')
     except OSError:
         pass
 

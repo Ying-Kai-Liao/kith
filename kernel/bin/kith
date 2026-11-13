@@ -354,6 +354,11 @@ if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/
 nested=0; [[ -n ${KITH_AGENT:-} ]] && nested=1   # started by another run (KITH_AGENT is exported further down)
 caller_env=${KITH_AGENT:-}   # the caller's name as it came in (exported over with this agent's a little below)
 caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trusted=0 p_mode="" p_model="" p_deny="" p_line="" p_env_names="" p_rooms=""
+# A room person (room-<id>, the meet of everyone in a room with people) has no row in auth.json: only the Rust launch
+# builds its grant (launch/room.rs), so this script never starts a run for one.
+if [[ ${KITH_PERSON:-} == room-* ]]; then
+  echo "kith: ${KITH_PERSON} is a room person; it only launches through the Rust launch, not this script" >&2; exit 3
+fi
 if [[ -n ${KITH_PERSON:-} ]]; then
   # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
   # kith-auth says held, a revoke made in the app or on another Mac may not be here yet, so ask again every 2 s for up

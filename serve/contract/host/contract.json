@@ -409,6 +409,18 @@
       "doc": "Every handle revoke or undo the sender knows; the answer is the receiver's own list, so both ends hold the latest of each.",
       "fields": { "handles": "[HandleRevoke]" }
     },
+    "RoomPerson": {
+      "doc": "One stay of a person in a group room: open while leftGen is null. A gen is the seq of the join or leave line in the room's main lane.",
+      "fields": { "person": "string", "joinedGen": "int", "leftGen": "int?" }
+    },
+    "RoomPeople": {
+      "doc": "The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host.",
+      "fields": { "enabled": "bool", "gen": "int", "people": "[RoomPerson]" }
+    },
+    "RoomPersonChange": {
+      "doc": "What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).",
+      "fields": { "gen": "int", "changed": "bool" }
+    },
     "BotProof": {
       "doc": "Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.",
       "fields": { "state": "BotGuestState", "botId": "string?", "owner": "string?", "agents": "[string]?" },
@@ -850,6 +862,24 @@
       "who": ["peer"],
       "params": { "handles": "[HandleRevoke]" },
       "result": "HandleRevokes"
+    },
+    "addRoomPerson": {
+      "doc": "Rooms with people: lets a person into a group room, one step with one new gen. Refused while the host setting is off, for the owner, for a room with no Kith agent or with an outside bot, and for a person not granted every agent in it (asked live).",
+      "who": ["owner"],
+      "params": { "room": "string", "person": "string" },
+      "result": "RoomPersonChange"
+    },
+    "removeRoomPerson": {
+      "doc": "Rooms with people: takes a person out of a group room, one step with one new gen. Someone who is not in the room changes nothing.",
+      "who": ["owner"],
+      "params": { "room": "string", "person": "string" },
+      "result": "RoomPersonChange"
+    },
+    "roomPeople": {
+      "doc": "Rooms with people: every stay in a group room and the room's gen.",
+      "who": ["owner"],
+      "params": { "room": "string" },
+      "result": "RoomPeople"
     }
   }
 }

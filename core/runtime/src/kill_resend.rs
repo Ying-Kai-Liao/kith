@@ -10,7 +10,7 @@
 //! - Which claims: `state = 'ending'` with a pid, whose `end_reason` is a kill's (not `done` / `exit` / `out_of_usage`: a
 //!   report that names no process also writes `ending`, a nameless exit that ran out of usage is rewritten to
 //!   `out_of_usage`, and that process is the claimer's own business), and whose holder instance is this
-//!   Mac's: the serve host's ([`HOST_INSTANCE`]), none (a claim made before the switch, a terminal's own), or the
+//!   Mac's: the serve host's ([`is_host_instance`]), none (a claim made before the switch, a terminal's own), or the
 //!   connected local holder's. A claim with no instance counts only for a kill the core decided (a revoke, a stop), never
 //!   for `holder_changed`: no holder started that process (H1), so a holder's hello is no reason to signal it. Claims of an older local holder instance are skipped and left to the next hello's
 //!   `reconcile`; a remote holder's pids are not this Mac's, so its instance is never an owner.
@@ -18,6 +18,8 @@
 //!   say is the recorded one. A missing, empty or incomparable stamp is logged once per claim and never signalled; a gone
 //!   or reused pid is left alone. Where the leader is gone but its group is still held and the stamp is from this boot,
 //!   the dead leader's group is signalled (the rule of #919's `end_groups`).
+//! - A `warm_procs` row with `kill_at` set (a revoke or a host change decided it must die) is signalled the same way, under
+//!   the negative of its pid as its claim id; the row goes when `hostclaim.settle` finds the process gone.
 //! - What is signalled: [`procstart::claim_victims`], the same set the host's `end_claimed` uses: descendants first, the
 //!   claimer, and its process group when it leads one.
 //! - How: SIGTERM on the first pass that finds it, remembered as (pid, stamp, when). SIGKILL on a later pass, once `grace`
@@ -29,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use kith_kernel::procstart::{self, Sig};
 
-use crate::conversations::claims::HOST_INSTANCE;
+use crate::conversations::claims::is_host_instance;
 use crate::daemon::Shared;
 use crate::log;
 
@@ -72,7 +74,9 @@ pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Ve
         let mut st = c.conn().prepare(
             "SELECT claim_id, pid, pid_started, holder_instance, end_reason FROM claims
              WHERE state = 'ending' AND pid IS NOT NULL
-               AND end_reason IS NOT NULL AND end_reason NOT IN ('done', 'exit', ?1)",
+               AND end_reason IS NOT NULL AND end_reason NOT IN ('done', 'exit', ?1)
+             UNION ALL
+             SELECT -pid, pid, started, instance, 'warm' FROM warm_procs WHERE kill_at IS NOT NULL",
         )?;
         let rows = st
             .query_map([crate::accounts::failover::OUT_OF_USAGE], |r| {
@@ -99,7 +103,7 @@ pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Ve
         claims.insert(claim);
         let mine = match holder_instance.as_deref() {
             None => reason != HOLDER_CHANGED,
-            Some(h) => h == HOST_INSTANCE || Some(h) == holder,
+            Some(h) => is_host_instance(h) || Some(h) == holder,
         };
         let Ok(pid) = u32::try_from(pid) else {
             continue;
