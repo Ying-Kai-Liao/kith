@@ -28,6 +28,49 @@ pub(super) const ENTRY_COLS: &str = "seq, id, bot_id, rev, kind, turn, data, cre
 /// A bot still winding down after its deletion can't leave lines behind (`?2` is the chat).
 const LIVE_CHAT: &str = "WHERE NOT EXISTS (SELECT 1 FROM bots WHERE id = ?2 AND deleted = 1)";
 
+/// Writes one entry on `c` (a connection or a transaction); an `id` already stored comes back as that entry.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn insert_entry_in(
+    c: &rusqlite::Connection,
+    id: &str,
+    lane: &Lane,
+    kind: EntryKind,
+    turn: i64,
+    data: &Value,
+    now: i64,
+    origin_gen: Option<i64>,
+) -> Result<(Entry, bool)> {
+    if let Some(e) =
+        c.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?1"), [id], row_entry).optional()?
+    {
+        return Ok((e, false));
+    }
+    let rev = next_rev(c)?;
+    let added = c.execute(
+        &format!(
+            "INSERT INTO entries(id, bot_id, thread_id, rev, kind, turn, data, created_at, updated_at, origin_gen)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9 {LIVE_CHAT}"
+        ),
+        params![id, lane.chat, lane.thread, rev, kind.as_str(), turn, data.to_string(), now, origin_gen],
+    )?;
+    ensure!(added == 1, "the chat was deleted");
+    Ok((
+        Entry {
+            id: id.to_owned(),
+            seq: c.last_insert_rowid(),
+            bot_id: lane.chat.clone(),
+            thread_id: lane.thread.clone(),
+            rev,
+            kind: kind.as_str().to_owned(),
+            turn,
+            data: data.clone(),
+            created_at: now,
+            updated_at: now,
+        },
+        true,
+    ))
+}
+
 impl Store {
     /// Production writes go through `Hub::add_entry` (which holds and retries); this is the tests' direct way in.
     #[cfg(test)]
@@ -52,35 +95,36 @@ impl Store {
         now: i64,
     ) -> Result<(Entry, bool)> {
         let c = self.db.locked();
-        if let Some(e) =
-            c.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?1"), [id], row_entry).optional()?
-        {
-            return Ok((e, false));
-        }
-        let rev = next_rev(&c)?;
-        let added = c.execute(
-            &format!(
-                "INSERT INTO entries(id, bot_id, thread_id, rev, kind, turn, data, created_at, updated_at)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8 {LIVE_CHAT}"
-            ),
-            params![id, lane.chat, lane.thread, rev, kind.as_str(), turn, data.to_string(), now],
-        )?;
-        ensure!(added == 1, "the chat was deleted");
-        Ok((
-            Entry {
-                id: id.to_owned(),
-                seq: c.last_insert_rowid(),
-                bot_id: lane.chat.clone(),
-                thread_id: lane.thread.clone(),
-                rev,
-                kind: kind.as_str().to_owned(),
-                turn,
-                data: data.clone(),
-                created_at: now,
-                updated_at: now,
-            },
-            true,
-        ))
+        insert_entry_in(&c, id, lane, kind, turn, data, now, None)
+    }
+
+    /// [`Self::insert_entry_at`] naming the room gen the entry comes from (`origin_gen`): a person's post takes the gen
+    /// at its append, a turn's output the gen its turn started in. Written with the row and never changed after, so
+    /// nothing re-stamps it; a row without one is from before any person was in a room.
+    #[cfg_attr(not(test), allow(dead_code))] // the member side's post path (rooms with people, PR B) is its caller
+    pub fn insert_entry_from_gen(
+        &self,
+        lane: &Lane,
+        kind: EntryKind,
+        turn: i64,
+        data: &Value,
+        now: i64,
+        origin_gen: i64,
+    ) -> Result<Entry> {
+        let c = self.db.locked();
+        let id = uuid::Uuid::new_v4().to_string();
+        insert_entry_in(&c, &id, lane, kind, turn, data, now, Some(origin_gen)).map(|(e, _)| e)
+    }
+
+    /// The room gen entry `id` came from; `None` for an entry from before any person was in a room (or no such entry).
+    #[cfg_attr(not(test), allow(dead_code))] // read by the member side's visibility filter (PR B)
+    pub fn origin_gen(&self, id: &str) -> Option<i64> {
+        let c = self.db.locked();
+        c.query_row("SELECT origin_gen FROM entries WHERE id = ?1", [id], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+            .flatten()
     }
 
     /// Deterministic IDs make routine transcript publication retryable after a crash.

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 18;
+const SCHEMA: i64 = 19;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -37,6 +37,8 @@ const SCHEMA: i64 = 18;
 /// 17: a device's `PushKit` (`VoIP`) ticket (`push_tickets.voip_ticket`), for call pushes.
 /// 18: "This session" grants (`session_grants`, designs/2026-11-02-grant-card): an action the owner allowed for the rest
 /// of one conversation of an owner run.
+/// 19: people in a group room (`room_people`, designs/2026-11-12-rooms-with-people) and the gen each entry came from
+/// (`entries.origin_gen`; NULL is from before any person, the owner's era).
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
         c.query_row("SELECT CAST(v AS INTEGER) FROM kv WHERE k = 'schema'", [], |r| r.get(0)).optional()?.unwrap_or(0);
@@ -78,7 +80,27 @@ fn migrate(c: &Connection) -> Result<()> {
     migrate_15(c)?;
     migrate_16(c)?;
     migrate_17(c)?;
-    migrate_18(c)
+    migrate_18(c)?;
+    migrate_19(c)
+}
+
+fn migrate_19(c: &Connection) -> Result<()> {
+    // Run again by a test that sets the version back, so a column already there is left alone.
+    let has: i64 =
+        c.query_row("SELECT COUNT(*) FROM pragma_table_info('entries') WHERE name = 'origin_gen'", [], |r| r.get(0))?;
+    c.execute_batch("BEGIN;")?;
+    if has == 0 {
+        c.execute_batch("ALTER TABLE entries ADD COLUMN origin_gen INTEGER;")?;
+    }
+    c.execute_batch(
+        "CREATE TABLE IF NOT EXISTS room_people(
+            room TEXT NOT NULL, person TEXT NOT NULL, joined_gen INTEGER NOT NULL, left_gen INTEGER,
+            PRIMARY KEY(room, joined_gen));
+         CREATE UNIQUE INDEX IF NOT EXISTS room_people_open ON room_people(room, person) WHERE left_gen IS NULL;
+         INSERT INTO kv(k, v) VALUES('schema', '19') ON CONFLICT(k) DO UPDATE SET v = '19';
+         COMMIT;",
+    )?;
+    Ok(())
 }
 
 fn migrate_18(c: &Connection) -> Result<()> {
@@ -432,7 +454,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("19"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -453,7 +475,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("19"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -476,7 +498,7 @@ mod tests {
                 .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("19"));
         assert!(s.peers_in().unwrap().is_empty() && s.peers_out().unwrap().is_empty());
     }
 
@@ -496,7 +518,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("19"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         assert!(s.push_tickets().is_empty(), "push tickets have a voip column");
         drop(s);

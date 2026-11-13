@@ -12,6 +12,7 @@ pub mod oneshot;
 pub mod outbox;
 pub mod profile;
 pub mod prompt;
+pub mod room_people;
 pub mod router;
 pub mod tasks;
 pub mod team;

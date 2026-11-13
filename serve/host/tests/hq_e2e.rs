@@ -999,6 +999,50 @@ async fn a_warm_owner_process_in_a_room_starts_again_when_the_rooms_members_chan
     assert_eq!(last_room_env(&s), (None, Some("1".to_owned())));
 }
 
+/// A stay of `person` in `room` as the host writes it, written straight into the host's database (the rig has no
+/// authority to grant `addRoomPerson` against): `left` closes it. The host reads the store on every turn.
+fn stay(s: &Setup, room: &str, person: &str, joined: i64, left: Option<i64>) {
+    let db = rusqlite::Connection::open(s.host.home.join("serve.db")).unwrap();
+    db.execute(
+        "INSERT INTO room_people(room, person, joined_gen, left_gen) VALUES(?1, ?2, ?3, ?4)",
+        rusqlite::params![room, person, joined, left],
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_or_while_anyone_is_in() {
+    let s = start().await;
+    let house = s.house().await["id"].as_str().unwrap().to_owned();
+    s.host.call("updateBot", json!({"id": house, "tasks": false})).await;
+    let group = s.host.call("createBot", json!({"name": "Room", "kind": "group", "members": [house]})).await;
+    let group = group["bot"]["id"].as_str().unwrap().to_owned();
+    let inits = || s.requests("initialize").len();
+
+    s.host.reply(&group, "first").await;
+    s.host.reply(&group, "second").await;
+    assert_eq!((s.launches().len(), inits()), (1, 1), "nobody in the room: the warm process answers");
+
+    // Someone joined and left between two turns: the members are the owner's bots alone again, but the room's gen
+    // moved, so the process that started before is not trusted with what happened in between.
+    stay(&s, &group, "sam", 1_000_000, Some(1_000_001));
+    s.host.reply(&group, "third").await;
+    assert_eq!(initialized(&s, 2).await, 2, "a join then a leave starts the process again");
+    assert_eq!(last_room_env(&s), (None, Some("1".to_owned())), "and the room reads as owner only again");
+
+    // The gen is the same now and nobody is in: warm again.
+    s.host.reply(&group, "fourth").await;
+    assert_eq!((s.launches().len(), inits()), (2, 2), "the new process is reused while nothing changes");
+
+    // Someone is in the room: a process for it is never reused, though the members are the same as last turn.
+    stay(&s, &group, "ann", 1_000_002, None);
+    s.host.reply(&group, "fifth").await;
+    assert_eq!(initialized(&s, 3).await, 3);
+    assert_eq!(last_room_env(&s), (Some("ann".to_owned()), None), "the room's person is in the room's members");
+    s.host.reply(&group, "sixth").await;
+    assert_eq!(initialized(&s, 4).await, 4, "with a person in the room no process is warm");
+}
+
 #[tokio::test]
 async fn a_bot_guests_warm_run_in_a_room_starts_again_when_the_rooms_members_change() {
     let mut s = start_for_a_person().await;

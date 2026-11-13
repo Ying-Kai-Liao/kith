@@ -496,6 +496,7 @@ fn router_methods() -> BTreeSet<String> {
         include_str!("bots.rs"),
         include_str!("calls.rs"),
         include_str!("cards.rs"),
+        include_str!("room_people.rs"),
         include_str!("host.rs"),
         include_str!("folders.rs"),
         include_str!("backups.rs"),
@@ -535,6 +536,20 @@ fn router_methods() -> BTreeSet<String> {
     out.extend(crate::chat::memory::HQ_METHODS.iter().map(|m| (*m).to_owned()));
     out.insert("readFile".into());
     out
+}
+
+#[tokio::test]
+async fn a_bot_guest_and_a_member_cannot_call_the_room_people_methods() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let active = active_bot(&r).await;
+    let sam = sam(&r).await;
+    for who in [&active.caller, &sam] {
+        for m in ["addRoomPerson", "removeRoomPerson", "roomPeople"] {
+            let e = call(&r, who, m, json!({"room": "r", "person": "sam"})).await.unwrap_err();
+            assert!(e.is::<NotAllowed>() || e.is::<super::devices::Forbidden>(), "{m}: {e:#}");
+        }
+    }
 }
 
 #[tokio::test]
