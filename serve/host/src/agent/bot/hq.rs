@@ -360,6 +360,7 @@ impl Actor {
         let conversation = format!("acp:{}:{}", self.lane.chat, self.lane.thread.as_deref().unwrap_or_default());
         let lane = self.lane.clone();
         let mut warm;
+        let mut members;
         let (mut launch, backup, mut reservation) = loop {
             let backup = match self.hub.backups.pick(&agent, &chain, &skip) {
                 Pick::Primary => None,
@@ -368,11 +369,16 @@ impl Actor {
             };
             self.serving.clone_from(&backup);
             let current = self.hq_session(slot);
+            // Read once per attempt: the same value decides whether the process is reused and what a new one launches with.
+            members = self.run_members();
             // An invited person's turn asks the kernel again even when a session is warm: their membership may have
             // been taken away, their budget used up or their mode changed since the last turn.
             warm = matches!((&current, &self.conn), (Some(sid), Some(conn)) if conn.loaded.contains_key(sid))
                 && self.conn_serving == self.serving
-                && self.conn_room == self.run_room();
+                && self.conn_room == self.run_room()
+                // A process keeps the room's members it was started with (owner only, or who is in): any change, in
+                // either direction, starts it again, or its recall and notes would treat the room as it was.
+                && self.conn_members == members;
             // A process on another account than the main one is started again below: its launch says so.
             if warm && person.is_none() && self.conn_on_main(&chain) {
                 self.turn_session = current;
@@ -424,7 +430,7 @@ impl Actor {
                 backup.as_deref(),
                 person.as_deref(),
                 &room,
-                &self.run_members(),
+                &members,
                 access.as_ref(),
             )
             .await
@@ -473,7 +479,9 @@ impl Actor {
             started_as.0.push(("permission_mode".into(), launch.permission_mode.map_or("", |m| m.as_str()).to_owned()));
         }
         if self.conn.is_some()
-            && (self.conn_started_as.as_ref() != Some(&started_as) || self.conn_serving != self.serving)
+            && (self.conn_started_as.as_ref() != Some(&started_as)
+                || self.conn_serving != self.serving
+                || self.conn_members != members)
             && let Some(c) = self.conn.take()
         {
             c.acp.kill().await;
@@ -526,6 +534,7 @@ impl Actor {
             self.conn_serving.clone_from(&self.serving);
             self.conn_account.clone_from(&launch.account_id);
             self.conn_room = self.run_room();
+            self.conn_members.clone_from(&members);
             let provider = if launch.is_codex() { "codex" } else { self.cfg.backend.as_str() };
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
             // Anyone but the owner asks the host who they are (`kith recall` over the run socket), with a token that
