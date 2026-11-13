@@ -89,11 +89,7 @@ fn rank(mode: &str) -> Option<u8> {
 }
 
 fn mode_name(rank: u8) -> &'static str {
-    if rank == 0 {
-        "default"
-    } else {
-        "acceptEdits"
-    }
+    if rank == 0 { "default" } else { "acceptEdits" }
 }
 
 /// A list of strings; anything else (missing, not a list, a non-string entry) is `None`.
