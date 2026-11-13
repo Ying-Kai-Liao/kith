@@ -83,6 +83,19 @@ async fn a_person_renamed_in_the_core_is_not_cut_off_here() {
 }
 
 #[tokio::test]
+async fn a_person_renamed_then_revoked_in_the_core_is_set_aside_under_the_old_id() {
+    let (r, core) = switched_with_sam().await;
+    core.ask("people.renamePerson", json!({"id": "sam", "to": "samuel"})).expect("rename");
+    core.ask("people.suspend", json!({"id": "samuel"})).expect("suspend");
+    let mut done = BTreeSet::new();
+    reconcile(&r.hub, &mut done).await;
+    assert!(set_aside(&r, "sam") && !held(&r, "sam"), "the rows under the old id are set aside");
+    let before = r.hub.store.suspended_people().unwrap();
+    reconcile(&r.hub, &mut done).await;
+    assert_eq!(r.hub.store.suspended_people().unwrap(), before, "a second look changes nothing");
+}
+
+#[tokio::test]
 async fn a_fail_closed_cut_survives_a_tick_because_the_tick_never_restores() {
     let (r, _core) = switched_with_sam().await;
     // an app revoke whose core write failed: cut here, the core still has them active

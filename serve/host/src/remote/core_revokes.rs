@@ -69,7 +69,14 @@ fn to_cut(rows: &Value, held: &[String], done: &BTreeSet<Cut>) -> (Vec<Cut>, BTr
     let revoked: BTreeSet<Cut> = rows
         .iter()
         .filter(|p| p["owner"] != true && p["revoked"] == true)
-        .filter_map(|p| Some((p["id"].as_str()?.to_owned(), p["revoked_at"].to_string())))
+        .flat_map(|p| {
+            // The host keeps a renamed person's rows under the old id, so a revoke is cut under the current id and every
+            // former one (a former id is never handed out again).
+            let at = p["revoked_at"].to_string();
+            let own = p["id"].as_str().into_iter();
+            let was = p["was"].as_array().into_iter().flatten().filter_map(Value::as_str);
+            own.chain(was).map(|id| (id.to_owned(), at.clone())).collect::<Vec<_>>()
+        })
         .collect();
     let mut cut: Vec<Cut> = Vec::new();
     for key in &revoked {
@@ -180,6 +187,19 @@ mod tests {
         ]);
         let (cut, _) = to_cut(&renamed, &["sam".to_owned(), "gone".to_owned()], &BTreeSet::new());
         assert_eq!(who(&cut), ["gone"], "sam is samuel's former id: left alone");
+    }
+
+    #[test]
+    fn a_renamed_then_revoked_person_is_cut_under_every_id_the_host_may_hold() {
+        let rows = json!([
+            {"id": "kai", "owner": true, "revoked": false},
+            {"id": "samuel", "owner": false, "revoked": true, "revoked_at": 7, "was": ["sam"]},
+        ]);
+        let (cut, _) = to_cut(&rows, &["sam".to_owned()], &BTreeSet::new());
+        assert_eq!(cut, [key("sam", "7"), key("samuel", "7")]);
+        // cut once, nothing live under either id: a second look leaves it
+        let done = BTreeSet::from([key("samuel", "7"), key("sam", "7")]);
+        assert_eq!(to_cut(&rows, &[], &done).0, Vec::<Cut>::new());
     }
 
     #[test]
