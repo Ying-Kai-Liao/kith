@@ -63,9 +63,45 @@ impl Store {
 
     /// `person` joins `room`: one transaction writes `notice` (the `personJoined` line, whose `seq` is the new gen) and
     /// the open stay. `None` and nothing written when they already have an open stay (a repeat is not a second join).
+    #[cfg_attr(not(test), allow(dead_code, reason = "the host joins through join_room_person_for"))]
     pub fn join_room_person(&self, room: &str, person: &str, notice: &Value) -> Result<Option<Entry>> {
+        self.join_room_person_for(room, person, notice, None)
+    }
+
+    /// [`Self::join_room_person`] for an invite's room part (`(invite, room)`): the part's done mark is written in the
+    /// same transaction as the join. A part already done (or not there) joins no one, so a person Kai removed is not
+    /// let back in by the invite; a person already in has the part marked and nothing else written.
+    pub fn join_room_person_for(
+        &self,
+        room: &str,
+        person: &str,
+        notice: &Value,
+        part: Option<&str>,
+    ) -> Result<Option<Entry>> {
         let mut c = self.db.locked();
         let tx = c.transaction()?;
+        if let Some(invite) = part {
+            let open: bool = tx
+                .query_row(
+                    "SELECT done_at IS NULL FROM invite_rooms WHERE invite_id = ?1 AND room = ?2",
+                    params![invite, room],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if !open {
+                return Ok(None);
+            }
+        }
+        let mark = |tx: &rusqlite::Transaction| -> Result<()> {
+            if let Some(invite) = part {
+                tx.execute(
+                    "UPDATE invite_rooms SET done_at = ?3 WHERE invite_id = ?1 AND room = ?2 AND done_at IS NULL",
+                    params![invite, room, now_ms()],
+                )?;
+            }
+            Ok(())
+        };
         let open: Option<i64> = tx
             .query_row(
                 "SELECT joined_gen FROM room_people WHERE room = ?1 AND person = ?2 AND left_gen IS NULL",
@@ -74,6 +110,8 @@ impl Store {
             )
             .optional()?;
         if open.is_some() {
+            mark(&tx)?;
+            tx.commit()?;
             return Ok(None);
         }
         let id = uuid::Uuid::new_v4().to_string();
@@ -82,6 +120,7 @@ impl Store {
             "INSERT INTO room_people(room, person, joined_gen, left_gen) VALUES(?1, ?2, ?3, NULL)",
             params![room, person, entry.seq],
         )?;
+        mark(&tx)?;
         tx.commit()?;
         Ok(Some(entry))
     }
@@ -196,7 +235,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("19"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("20"));
         assert!(s.join_room_person("r", "ben", &line("personJoined")).unwrap().is_some());
         let _ = std::fs::remove_dir_all(dir);
     }

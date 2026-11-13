@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '5f2be9a3e0e7ee07fced0bb57a6198f46c336e5fbff53e036a22860b2ab7bd64'
+export const CONTRACT_SHA256 = '8622ed909714feb630e1b98b3f369fc89a9f48db67a1bed84da76ddaef223111'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -513,6 +513,18 @@ export interface RoomPeople {
   people: RoomPerson[]
 }
 
+/** What making an invite answers: its id and links, when it lapses, and the person it is for. */
+export interface CreatedInvite {
+  inviteId: string
+  link: string
+  appLink: string
+  kithLink: string
+  webLink?: string | null
+  pageLink?: string | null
+  expiresAt: number
+  personId: string
+}
+
 /** What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen). */
 export interface RoomPersonChange {
   gen: number
@@ -932,6 +944,14 @@ export interface PeerRevokesParams {
   handles: HandleRevoke[]
 }
 
+/** What `createInvite` takes. */
+export interface CreateInviteParams {
+  agents: Record<string, string>
+  name?: string | null
+  personId?: string | null
+  rooms?: string[] | null
+}
+
 /** What `addRoomPerson` takes. */
 export interface AddRoomPersonParams {
   room: string
@@ -996,6 +1016,7 @@ export interface Types {
   HandleRevokes: HandleRevokes
   RoomPerson: RoomPerson
   RoomPeople: RoomPeople
+  CreatedInvite: CreatedInvite
   RoomPersonChange: RoomPersonChange
   BotProof: BotProof
   BotAsked: BotAsked
@@ -1057,6 +1078,7 @@ export interface Types {
   BotLeaveParams: BotLeaveParams
   PeerAgentsParams: PeerAgentsParams
   PeerRevokesParams: PeerRevokesParams
+  CreateInviteParams: CreateInviteParams
   AddRoomPersonParams: AddRoomPersonParams
   RemoveRoomPersonParams: RemoveRoomPersonParams
   RoomPeopleParams: RoomPeopleParams
@@ -1133,6 +1155,7 @@ export const METHODS = {
   botLeave: { who: ['bot'], params: 'BotLeaveParams', result: 'Empty' },
   peerAgents: { who: ['peer'], params: 'PeerAgentsParams', result: 'PeerAgents' },
   peerRevokes: { who: ['peer'], params: 'PeerRevokesParams', result: 'HandleRevokes' },
+  createInvite: { who: ['owner'], params: 'CreateInviteParams', result: 'CreatedInvite' },
   addRoomPerson: { who: ['owner'], params: 'AddRoomPersonParams', result: 'RoomPersonChange' },
   removeRoomPerson: { who: ['owner'], params: 'RemoveRoomPersonParams', result: 'RoomPersonChange' },
   roomPeople: { who: ['owner'], params: 'RoomPeopleParams', result: 'RoomPeople' },
@@ -1190,6 +1213,7 @@ export interface Params {
   botLeave: BotLeaveParams
   peerAgents: PeerAgentsParams
   peerRevokes: PeerRevokesParams
+  createInvite: CreateInviteParams
   addRoomPerson: AddRoomPersonParams
   removeRoomPerson: RemoveRoomPersonParams
   roomPeople: RoomPeopleParams
@@ -1246,13 +1270,14 @@ export interface Results {
   botLeave: Empty
   peerAgents: PeerAgents
   peerRevokes: HandleRevokes
+  createInvite: CreatedInvite
   addRoomPerson: RoomPersonChange
   removeRoomPerson: RoomPersonChange
   roomPeople: RoomPeople
 }
 
 /** What the owner alone (a method no one else may call; the owner may call every method) may call. */
-export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic', 'addRoomPerson', 'removeRoomPerson', 'roomPeople'] as const satisfies readonly MethodName[]
+export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic', 'createInvite', 'addRoomPerson', 'removeRoomPerson', 'roomPeople'] as const satisfies readonly MethodName[]
 
 /** What an invited person may call. */
 export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'scheduleMessages', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation'] as const satisfies readonly MethodName[]
@@ -1349,6 +1374,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HandleRevokes: { fields: { handles: '[HandleRevoke]' } },
     RoomPerson: { fields: { person: 'string', joinedGen: 'int', leftGen: 'int?' } },
     RoomPeople: { fields: { enabled: 'bool', gen: 'int', people: '[RoomPerson]' } },
+    CreatedInvite: { fields: { inviteId: 'string', link: 'string', appLink: 'string', kithLink: 'string', webLink: 'string?', pageLink: 'string?', expiresAt: 'int', personId: 'string' }, mayOmit: ['webLink', 'pageLink'] },
     RoomPersonChange: { fields: { gen: 'int', changed: 'bool' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
     BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?', room: 'string?' }, mayOmit: ['duplicate', 'room'] },
@@ -1410,6 +1436,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotLeaveParams: { fields: {} },
     PeerAgentsParams: { fields: {} },
     PeerRevokesParams: { fields: { handles: '[HandleRevoke]' } },
+    CreateInviteParams: { fields: { agents: '{string}', name: 'string?', personId: 'string?', rooms: '[string]?' } },
     AddRoomPersonParams: { fields: { room: 'string', person: 'string' } },
     RemoveRoomPersonParams: { fields: { room: 'string', person: 'string' } },
     RoomPeopleParams: { fields: { room: 'string' } },

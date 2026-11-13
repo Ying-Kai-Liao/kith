@@ -38,7 +38,7 @@ pub struct Change {
 /// The agents of the room's members, sorted and without repeats. A room takes people only when every member is a Kith
 /// agent bot and there is at least one: a bot guest reads by seq floor, not by gen, and a room with no agent leaves
 /// nothing for the live check to fail (a revoked person would read it). Errors say why, for Kai.
-fn room_agents(store: &Store, room: &str) -> Result<Vec<String>> {
+pub(crate) fn room_agents(store: &Store, room: &str) -> Result<Vec<String>> {
     let Some(group) = store.bot(room)?.filter(|r| !r.deleted && r.config.is_group()) else {
         bail!("That isn't a group room.");
     };
@@ -110,6 +110,12 @@ fn check_person(person: &str) -> Result<&str> {
 /// for a room that takes no people ([`room_agents`]), and for a person not granted every agent in it, asked live. A
 /// person already in the room changes nothing and bumps no gen.
 pub async fn add_person(hub: &Arc<Hub>, room: &str, person: &str) -> Result<Change> {
+    add_person_for(hub, room, person, None).await
+}
+
+/// [`add_person`] for the room part of invite `part`: the same checks and the same step, with the part's done mark
+/// written in that step's transaction, so a removal that follows can't be undone by a later prove.
+pub async fn add_person_for(hub: &Arc<Hub>, room: &str, person: &str, part: Option<&str>) -> Result<Change> {
     if !enabled(&hub.store) {
         bail!("People in rooms aren't turned on.");
     }
@@ -123,7 +129,7 @@ pub async fn add_person(hub: &Arc<Hub>, room: &str, person: &str) -> Result<Chan
                 bail!("{person} isn't granted {agent}; a room's people need every agent in it.");
             }
         }
-        if let Some(change) = commit(hub, room, person, true, Some(&agents))? {
+        if let Some(change) = commit(hub, room, person, true, Some(&agents), part)? {
             return Ok(change);
         }
     }
@@ -136,13 +142,20 @@ pub fn remove_person(hub: &Hub, room: &str, person: &str) -> Result<Change> {
     if hub.store.bot(room)?.is_none_or(|r| r.deleted || !r.config.is_group()) {
         bail!("That isn't a group room.");
     }
-    Ok(commit(hub, room, person.trim(), false, None)?
+    Ok(commit(hub, room, person.trim(), false, None, None)?
         .unwrap_or(Change { room_gen: hub.store.room_gen(room), changed: false }))
 }
 
 /// The write itself, under the membership lock. `None` only when `agents` (what a join was checked against) is no
 /// longer the room's agents.
-fn commit(hub: &Hub, room: &str, person: &str, join: bool, agents: Option<&[String]>) -> Result<Option<Change>> {
+fn commit(
+    hub: &Hub,
+    room: &str,
+    person: &str,
+    join: bool,
+    agents: Option<&[String]>,
+    part: Option<&str>,
+) -> Result<Option<Change>> {
     let _members = membership_lock();
     if let Some(checked) = agents
         && room_agents(&hub.store, room)? != checked
@@ -150,7 +163,10 @@ fn commit(hub: &Hub, room: &str, person: &str, join: bool, agents: Option<&[Stri
         return Ok(None);
     }
     let line = notice(&hub.store, person, join);
-    let written = hub.commit_room_person(room, person, join, &line)?;
+    let written = match part {
+        None => hub.commit_room_person(room, person, join, &line)?,
+        Some(_) => hub.commit_room_person_for(room, person, join, &line, part)?,
+    };
     Ok(Some(match written {
         Some(e) => Change { room_gen: e.seq, changed: true },
         None => Change { room_gen: hub.store.room_gen(room), changed: false },
