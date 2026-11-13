@@ -779,6 +779,7 @@ fn listed_claims(held: &[proto::Held]) -> Vec<i64> {
 }
 
 /// The serve host's instance name on its turn claims; no holder may say hello under it (see [`reconcile`]).
+#[cfg(test)]
 pub(crate) const HOST_INSTANCE: &str = claims::HOST_INSTANCE;
 
 /// Step 7: a hello that meets an instance other than the recorded one ends what the old one held, confirms it gone,
@@ -805,7 +806,7 @@ pub(crate) fn reconcile(
     high_water: i64,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), Lost> {
-    if instance == HOST_INSTANCE {
+    if claims::is_host_instance(instance) {
         return Err(Lost::Blocked(format!(
             "the holder's instance id {instance:?} is the serve host's own claim name; not recorded"
         )));

@@ -252,3 +252,71 @@ fn a_version_80_database_with_a_report_row_migrates_and_keeps_the_pid_the_report
         .expect("claim pid");
     assert_eq!(pid, 100);
 }
+
+#[test]
+fn a_version_81_database_with_live_claims_migrates_and_its_rows_stay_owner_level() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    let v81: Vec<_> = MIGRATIONS
+        .iter()
+        .copied()
+        .filter(|s| s.version <= 81)
+        .collect();
+    {
+        let c = start_with(&l, &v81).expect("v81 db");
+        assert_eq!(c.schema_version(), 81);
+        let db = c.conn();
+        conversation(db, "c1");
+        conversation(db, "c2");
+        db.execute(
+            "INSERT INTO claims (claim_id, conversation, generation, kind, state, pid, pid_started, person, turn, created_at)
+             VALUES (1, 'c1', 1, 'turn', 'running', 100, 'e100', 'sam', 1, 1)",
+            [],
+        )
+        .expect("claim");
+        db.execute(
+            "INSERT INTO turns (id, conversation, claim_id, person, source, state, queued_at) VALUES (1, 'c1', 1, 'sam', 'app', 'running', 1)",
+            [],
+        )
+        .expect("running turn");
+        db.execute(
+            "INSERT INTO turns (id, conversation, person, source, state, queued_at) VALUES (2, 'c2', 'sam', 'app', 'queued', 1)",
+            [],
+        )
+        .expect("queued turn");
+    }
+    let mut c = start_with(&l, MIGRATIONS).expect("migrates");
+    assert_eq!(c.migrated_from(), Some(81));
+    {
+        let db = c.conn();
+        let one = |sql: &str| -> i64 { db.query_row(sql, [], |r| r.get(0)).expect(sql) };
+        assert_eq!(
+            one(
+                "SELECT count(*) FROM turns WHERE level = 'owner' AND budget_left IS NULL AND room IS NULL AND author IS NULL"
+            ),
+            2
+        );
+        assert_eq!(one("SELECT count(*) FROM turn_people"), 0);
+        assert_eq!(
+            one("SELECT count(*) FROM conversations WHERE room IS NULL AND join_epoch IS NULL"),
+            2
+        );
+        assert_eq!(one("SELECT count(*) FROM warm_procs"), 0);
+        assert_eq!(
+            one("SELECT count(*) FROM claims WHERE state = 'running' AND pid = 100"),
+            1
+        );
+    }
+    // The live claim is still the writer, and a revoke reaches it by its person as before.
+    let r = crate::conversations::claims::revoke_person(&mut c, "sam", 5).expect("revoke");
+    assert_eq!(r.kill.len(), 1);
+    assert_eq!(r.kill[0].pid, Some(100));
+    assert_eq!(r.cancelled_turns, 1, "the queued turn");
+    let db = c.conn();
+    let state: String = db
+        .query_row("SELECT state FROM claims WHERE claim_id = 1", [], |r| {
+            r.get(0)
+        })
+        .expect("state");
+    assert_eq!(state, "ending");
+}
