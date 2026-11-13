@@ -723,6 +723,8 @@ jobs:
           # A direct run holds its conversation's lock under kith-stub (M1-3).
           cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
           KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check
+          # A compaction (kith-lifecycle) holds the conversation's lock the same way: busy, held for its whole life, killed with claude.
+          KITH_REAL_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-lifecycle-check
           # An installed kith finds its stub through the ~/.local/bin link; kith serve puts one beside the host.
           kernel/tests/kith-stub-install-check
           # kith --held and kith attach: the real daemon, holder, stub and attach client with a fake engine (M1-7).

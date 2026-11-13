@@ -72,6 +72,21 @@ files with one masked name are an error), and `unswitched` (text saying why the 
 with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
 red until the verb exists. The Python replay always runs every case.
 
+### Lifecycle (M3-14 P4)
+
+`golden/lifecycle.json` (golden only, like `wake.json`) freezes `kernel/bin/kith-lifecycle sweep|status` and its `compact()` before `compact()`
+runs claude under `kith-stub` (the conversation's writer lock). All cases are `unswitched` (no Rust side). `lifecycle-old.py` runs
+the verbs unchanged and adds `compact SID WHAT`, which calls `compact()` for a session whose decision is on record, because its
+refusals (`held`, `skipped`) are what a change between the decision and the claim makes of it, which a sweep cannot reach from
+outside: compacted (rc 0), claude failed (rc 1, once per idle period), claude missing, folder gone, held by another claim, and
+skipped (a resume cleared the decision, a new turn, Claude compacted it itself, under the floor). The claude is `KITH_CLAUDE`, a
+script that logs its call and whether the claim file was there. `KITH_STUB_BIN` names no program in the frozen cases, and a fake
+`kith-stub` (logs its argv, exits 75 when `<lock dir>/<key>.busy` exists, else execs what follows `--`) in the stub cases.
+Re-recorded when `compact()` moved under the stub (intended; the replay does not read intended.json): the six cases that reach claude
+(`sweep-compacted`, `rc0`, `claude-failed`, `claude-failed-direct`, `claude-missing`, `sweep-twice`) gain the one stderr warning of a
+run with no stub. Added then: `under-stub` (the argv), `busy` (75: outcome `busy`, no decision, again on the next sweep),
+`no-stub-required` (`KITH_REQUIRE_STUB=1`: `failed` with the reason, claude not run), `bad-session-id` (an id outside `a-z0-9._-`).
+
 ### project-id (M5-2)
 
 `golden/project-id.json` (also in `corpus/`) freezes `kernel/bin/project-id` before `kith kernel project-id` replaces it: 19 cases of the
