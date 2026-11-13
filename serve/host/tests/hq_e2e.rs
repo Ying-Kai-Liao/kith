@@ -846,3 +846,44 @@ async fn an_owner_message_over_the_limit_waits_under_a_card_and_runs_when_answer
     .await;
     assert_eq!(told.len(), 1, "the line shows once a month");
 }
+
+/// The latest `--launch-json` call's room env, as the stub logged it: (`KITH_ROOM_MEMBERS`, `KITH_ROOM_OWNER_ONLY`).
+fn last_room_env(s: &Setup) -> (Option<String>, Option<String>) {
+    let last = s.launches().pop().expect("a launch");
+    let text = |k: &str| last[k].as_str().map(str::to_owned);
+    (text("room_members"), text("room_owner_only"))
+}
+
+#[tokio::test]
+async fn a_warm_owner_process_in_a_room_starts_again_when_the_rooms_members_change() {
+    let s = start().await;
+    let house = s.house().await["id"].as_str().unwrap().to_owned();
+    s.host.call("updateBot", json!({"id": house, "tasks": false})).await;
+    let guest = s.host.bot("Guest", "default").await;
+    let group = s.host.call("createBot", json!({"name": "Room", "kind": "group", "members": [house]})).await;
+    let group = group["bot"]["id"].as_str().unwrap().to_owned();
+    let inits = || s.requests("initialize").len();
+
+    s.host.reply(&group, "first").await;
+    assert_eq!(s.launches().len(), 1);
+    assert_eq!(last_room_env(&s), (None, Some("1".to_owned())), "the owner's bots alone: owner only");
+    assert_eq!(inits(), 1);
+
+    // Nothing changed: the warm process answers, no new launch.
+    s.host.reply(&group, "second").await;
+    assert_eq!((s.launches().len(), inits()), (1, 1), "unchanged members reuse the warm process");
+
+    // A bot guest joins the room: its person is a member now, so the process starts again with that env.
+    let db = rusqlite::Connection::open(s.host.home.join("serve.db")).unwrap();
+    db.execute("UPDATE bots SET config = json_set(config, '$.person', 'sam') WHERE id = ?1", [&guest]).unwrap();
+    s.host.call("updateBot", json!({"id": group, "members": [house, guest]})).await;
+    s.host.reply(&group, "third").await;
+    assert_eq!((s.launches().len(), inits()), (2, 2), "a new member starts the process again");
+    assert_eq!(last_room_env(&s), (Some("sam".to_owned()), None), "the guest's person, and no longer owner only");
+
+    // And back to the owner's bots alone: a new process again, owner only.
+    s.host.call("updateBot", json!({"id": group, "members": [house]})).await;
+    s.host.reply(&group, "fourth").await;
+    assert_eq!((s.launches().len(), inits()), (3, 3));
+    assert_eq!(last_room_env(&s), (None, Some("1".to_owned())));
+}

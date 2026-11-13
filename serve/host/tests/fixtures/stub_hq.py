@@ -19,7 +19,9 @@ home = os.environ["STUB_HQ_HOME"]
 args = sys.argv[1:]
 with open(os.path.join(home, "calls.jsonl"), "a", encoding="utf-8") as log:
     log.write(json.dumps({"args": args, "via": os.environ.get("KITH_VIA") or os.environ.get("HQ_VIA"), "cwd": os.getcwd(),
-                          "person": os.environ.get("KITH_PERSON") or None}) + "\n")
+                          "person": os.environ.get("KITH_PERSON") or None,
+                          "room_members": os.environ.get("KITH_ROOM_MEMBERS"),
+                          "room_owner_only": os.environ.get("KITH_ROOM_OWNER_ONLY")}) + "\n")
 
 def call_model():
     """`set call-model` keeps the choice in `call_model`; like kith, default (or none) is sonnet and `own` is the agent's own."""
