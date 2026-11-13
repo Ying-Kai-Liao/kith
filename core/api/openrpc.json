@@ -13235,7 +13235,7 @@
     },
     {
       "name": "hostclaim.proc",
-      "summary": "A host engine process, idle or not, with the session it has loaded: registers it or moves its session, so a revoke reaches an idle one. Refused (`revoked`) when `revokeSeen` is stale. Answers `{registered}`.",
+      "summary": "A host engine process, idle or not, with the session it has loaded: registers it or moves its session, so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
       "params": [
         {
           "name": "pid",
@@ -13336,7 +13336,7 @@
     },
     {
       "name": "hostclaim.procGone",
-      "summary": "The process exited: forget it. Answers `{gone}`.",
+      "summary": "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. Answers `{gone}`.",
       "params": [
         {
           "name": "pid",

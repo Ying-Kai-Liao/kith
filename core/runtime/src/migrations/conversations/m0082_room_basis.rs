@@ -8,7 +8,9 @@
 //! - `turn_people`: the basis. `revoke_seen` is that person's revoke epoch when the turn was queued, so the enqueue and
 //!   the claim's fence each refuse a turn whose basis person was revoked since. Written once with the turn.
 //! - `turns.budget_root`, `budget_left`, `author`: the per-message turn budget. NULL `budget_left` is no budget (every
-//!   old row, an owner-level turn). `enq_key` makes an enqueue that is retried after a lost reply land on the same row,
+//!   old row, an owner-level turn). The budget is total turns of the message: `turn_budgets` holds one counter per chain
+//!   (keyed by the root turn), spent in the enqueue transaction of each follow-up; `budget_left` of a turn is what the
+//!   counter held when that turn was queued. `enq_key` makes an enqueue that is retried after a lost reply land on the same row,
 //!   so the budget is spent once.
 //! - `conversations.room`, `join_epoch`: a room-person conversation is the session of one (agent, room, join epoch); the
 //!   unique index is what refuses a second one.
@@ -40,6 +42,11 @@ pub(super) const MIGRATION: Migration = Migration {
             PRIMARY KEY (turn, person)
         ) WITHOUT ROWID;
         CREATE INDEX turn_people_person ON turn_people (person);
+
+        CREATE TABLE turn_budgets (
+            root INTEGER PRIMARY KEY REFERENCES turns (id),
+            left INTEGER NOT NULL CHECK (left >= 0)
+        );
 
         CREATE TRIGGER turns_basis_fixed BEFORE UPDATE OF room, start_gen, level, budget_root, budget_left, author, enq_key
             ON turns

@@ -43,6 +43,20 @@ fn kill(pid: i64, started: String) -> Kill {
 
 /// Registers a process, or moves the session it has loaded. A row already marked for a kill stays marked.
 pub(crate) fn register(core: &mut Core, w: &WarmProc<'_>) -> Result<()> {
+    if !is_host_instance(w.instance) {
+        return Err(Error::BadParams(format!(
+            "kith-core: {:?} is not a host instance",
+            w.instance
+        )));
+    }
+    // A guest's process is registered with the epoch read before the access check, or a revoke that committed between
+    // the two would have swept already and never marked the new row.
+    if !w.person.is_empty() && w.person != super::basis::OWNER && w.revoke_seen.is_none() {
+        return Err(Error::BadParams(format!(
+            "kith-core: a process of {} is registered with revokeSeen",
+            w.person
+        )));
+    }
     let tx = core.claim_tx()?;
     let moved = match w.revoke_seen {
         Some(seen) => claims::revoke_epoch_in(&tx, w.person)? != seen,
@@ -65,11 +79,13 @@ pub(crate) fn register(core: &mut Core, w: &WarmProc<'_>) -> Result<()> {
     Ok(())
 }
 
-/// The process is gone (the host saw it exit): forgets the row. True when there was one.
+/// The process is gone (the host saw it exit): forgets the row, unless a kill is owed for it. The engine in the stub's
+/// group can outlive the stub the host saw exit, so a marked row leaves only through [`settle`], which looks at the
+/// group. True when a row was forgotten.
 pub(crate) fn gone(core: &mut Core, pid: u32, started: &str) -> Result<bool> {
     let tx = core.claim_tx()?;
     let n = tx.execute(
-        "DELETE FROM warm_procs WHERE pid = ?1 AND started = ?2",
+        "DELETE FROM warm_procs WHERE pid = ?1 AND started = ?2 AND kill_at IS NULL",
         params![pid, started],
     )?;
     tx.commit()?;
@@ -77,17 +93,22 @@ pub(crate) fn gone(core: &mut Core, pid: u32, started: &str) -> Result<bool> {
 }
 
 /// R-c: the processes a revoke of `person` reaches, marked for a kill and answered. A process is the person's own
-/// (`person`), or has loaded a conversation whose live claim runs a turn with the person in its basis. Call it while
-/// that claim is still live. Repeating it answers the same kills.
+/// (`person`), or has loaded a conversation that has had a turn with the person in its basis and is not now running
+/// someone else's turn: idle after the turn's claim ended, or still running the person's. Call it before the revoke
+/// cancels their turns. Repeating it answers the same kills.
 pub(super) fn revoke_in(tx: &Transaction<'_>, person: &str, now: i64) -> Result<Vec<Kill>> {
     let hit: Vec<(i64, String)> = {
         let mut st = tx.prepare(
             "SELECT pid, started FROM warm_procs
              WHERE person = ?1
-                OR conversation IN (
-                    SELECT c.conversation FROM claims c
-                    WHERE c.state IN ('claimed', 'running', 'ending')
-                      AND c.turn IN (SELECT turn FROM turn_people WHERE person = ?1))",
+                OR (conversation IN (
+                        SELECT t.conversation FROM turns t
+                        WHERE t.id IN (SELECT turn FROM turn_people WHERE person = ?1))
+                    AND NOT EXISTS (
+                        SELECT 1 FROM claims c
+                        WHERE c.conversation = warm_procs.conversation
+                          AND c.state IN ('claimed', 'running', 'ending')
+                          AND (c.turn IS NULL OR c.turn NOT IN (SELECT turn FROM turn_people WHERE person = ?1))))",
         )?;
         st.query_map([person], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<std::result::Result<_, _>>()?
@@ -213,6 +234,14 @@ pub(crate) fn adopt(core: &mut Core, instance: &str, now: i64) -> Result<Adopted
         if n == 1 {
             claims::requeue_turn(&tx, id)?;
         }
+        // An `ending` row that ended as a `done`, `exit` or out-of-usage report is not a kill to the re-send; the host
+        // change makes it one, so a lost signal is sent again.
+        tx.execute(
+            "UPDATE claims SET end_reason = 'host_changed'
+             WHERE claim_id = ?1 AND state = 'ending'
+               AND (end_reason IS NULL OR end_reason IN ('done', 'exit', ?2))",
+            params![id, crate::accounts::failover::OUT_OF_USAGE],
+        )?;
         out.kill.push(claims::kill_of(id, pid, started));
     }
     let old: Vec<(i64, String, String)> = {

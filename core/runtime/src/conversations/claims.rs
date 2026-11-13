@@ -1238,6 +1238,9 @@ pub(super) fn enqueue_turn_with_in(
     now: i64,
 ) -> Result<i64> {
     check_turn(t)?;
+    if fixed.level.is_none() {
+        basis::check_plain(tx, t)?;
+    }
     // Inside the transaction that inserts the turn, so a revoke either commits first (refused here) or after (its sweep
     // cancels this turn): no turn is queued past a revoke its enqueuer did not see (Claims4's c4-epochleak).
     if epoch(tx, t.person)? != t.revoke_seen {

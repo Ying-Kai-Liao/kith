@@ -106,14 +106,25 @@ pub(crate) fn enqueue_in(
 ) -> Result<i64> {
     if let Some(key) = &b.key {
         // A retry after a lost reply: the turn is already there and its budget already spent.
-        let seen: Option<i64> = tx
+        type Seen = (i64, String, Option<String>, String, Option<String>);
+        let seen: Option<Seen> = tx
             .query_row(
-                "SELECT id FROM turns WHERE conversation = ?1 AND enq_key = ?2",
+                "SELECT id, person, author, level, room FROM turns WHERE conversation = ?1 AND enq_key = ?2",
                 params![t.conversation, key],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .optional()?;
-        if let Some(id) = seen {
+        if let Some((id, person, author, level, room)) = seen {
+            // The same request, not another one that reused the key.
+            if person != t.person
+                || author != b.author
+                || level != b.level.as_str()
+                || room != b.room
+            {
+                return Err(refused(&format!(
+                    "key {key:?} names turn {id}, which is another request"
+                )));
+            }
             return Ok(id);
         }
     }
@@ -132,7 +143,8 @@ pub(crate) fn enqueue_in(
         return Err(refused("a room turn has no basis: it speaks for nobody"));
     }
     for (p, _) in &b.people {
-        if p.is_empty() || p.starts_with("bot:") || p.starts_with("room-") {
+        // The owner is never in a basis: they are not a room person (their own turns are owner level).
+        if p.is_empty() || p == OWNER || p.starts_with("bot:") || p.starts_with("room-") {
             return Err(refused(&format!(
                 "{p:?} is not a person: a basis holds people, not bots or rooms"
             )));
@@ -146,6 +158,9 @@ pub(crate) fn enqueue_in(
     }
     let (budget_root, budget_left) = chain_of(tx, b)?;
     check_target(tx, t, b, now)?;
+    if b.level == Level::Room && !t.person.starts_with("room-") {
+        return Err(refused("a room turn runs as the principal room-<id>"));
+    }
     let fixed = Fixed {
         level: Some(b.level.as_str()),
         room: b.room.clone(),
@@ -156,6 +171,13 @@ pub(crate) fn enqueue_in(
         key: b.key.clone(),
     };
     let id = claims::enqueue_turn_with_in(tx, t, &fixed, now)?;
+    if let (Chain::Root(budget), None) = (b.chain, budget_root) {
+        // The one counter of the chain: every turn that follows spends from it, whichever branch it is on.
+        tx.execute(
+            "INSERT INTO turn_budgets (root, left) VALUES (?1, ?2)",
+            params![id, budget],
+        )?;
+    }
     let mut st = tx.prepare(
         "INSERT OR IGNORE INTO turn_people (turn, person, revoke_seen) VALUES (?1, ?2, ?3)",
     )?;
@@ -184,7 +206,8 @@ fn chain_of(tx: &Transaction<'_>, b: &Basis) -> Result<(Option<i64>, Option<i64>
         }
         Chain::Root(budget) => {
             let author = b.author.as_deref().unwrap_or_default();
-            if !b.people.iter().any(|(p, _)| p == author) {
+            // The owner's post opens a chain without being listed: they are never in the basis.
+            if author != OWNER && !b.people.iter().any(|(p, _)| p == author) {
                 return Err(refused(&format!(
                     "{author:?} is not a person of the basis: only a person's post opens a turn budget"
                 )));
@@ -202,31 +225,73 @@ fn chain_of(tx: &Transaction<'_>, b: &Basis) -> Result<(Option<i64>, Option<i64>
                     "kith-core: a follow-up turn names its author".into(),
                 ));
             }
-            let parent: Option<(Option<i64>, Option<i64>)> = tx
+            let parent: Option<(Option<i64>, Option<i64>, Option<String>)> = tx
                 .query_row(
-                    "SELECT budget_root, budget_left FROM turns WHERE id = ?1",
+                    "SELECT budget_root, budget_left, room FROM turns WHERE id = ?1",
                     [from],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()?;
-            let Some((root, left)) = parent else {
+            let Some((root, parent_left, parent_room)) = parent else {
                 return Err(refused(&format!(
                     "turn {from} does not exist: nothing to follow"
                 )));
             };
-            let Some(left) = left else {
+            if parent_left.is_none() {
                 return Err(refused(&format!(
                     "turn {from} has no turn budget to follow"
                 )));
-            };
-            if left <= 0 {
+            }
+            if parent_room != b.room {
                 return Err(refused(&format!(
-                    "the turn budget of the chain of turn {from} is spent"
+                    "turn {from} is in another room: a chain stays in one room"
                 )));
             }
-            Ok((Some(root.unwrap_or(from)), Some(left - 1)))
+            // The budget is total turns of the message: one counter per chain, spent here and never given back.
+            let root = root.unwrap_or(from);
+            let spent = tx.execute(
+                "UPDATE turn_budgets SET left = left - 1 WHERE root = ?1 AND left > 0",
+                [root],
+            )?;
+            if spent != 1 {
+                return Err(refused(&format!(
+                    "the turn budget of the chain of turn {root} is spent"
+                )));
+            }
+            let left: i64 = tx.query_row(
+                "SELECT left FROM turn_budgets WHERE root = ?1",
+                [root],
+                |r| r.get(0),
+            )?;
+            Ok((Some(root), Some(left)))
         }
     }
+}
+
+/// R-g and R-a for a turn that came in without room fields (schedule fires, a plain `hostclaim.enqueue`): a room
+/// principal is a room turn, which names its basis, and a room conversation takes the owner's turns only.
+pub(super) fn check_plain(tx: &Transaction<'_>, t: &NewTurn<'_>) -> Result<()> {
+    if t.person.starts_with("room-") {
+        return Err(refused(&format!(
+            "{} is a room principal: its turns are room turns with a basis",
+            t.person
+        )));
+    }
+    let room: Option<String> = tx
+        .query_row(
+            "SELECT room FROM conversations WHERE id = ?1",
+            [t.conversation],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    if room.is_some() && t.person != OWNER {
+        return Err(refused(&format!(
+            "conversation {} is a room conversation: only the owner's turns go to it outside a room turn",
+            t.conversation
+        )));
+    }
+    Ok(())
 }
 
 /// R-g: the conversation a turn goes to. A room conversation is the session of one (agent, room, join epoch). A room

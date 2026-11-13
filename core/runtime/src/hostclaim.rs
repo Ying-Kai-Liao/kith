@@ -105,7 +105,12 @@ fn basis_of(p: &Value) -> Result<Option<Basis>> {
     ) {
         (None, None) => Chain::None,
         (Some(n), None) => Chain::Root(n),
-        (_, Some(from)) => Chain::Follow(from),
+        (None, Some(from)) => Chain::Follow(from),
+        (Some(_), Some(_)) => {
+            return Err(bad(
+                "budget opens a chain and budgetFrom follows one: send one of them",
+            ));
+        }
     };
     Ok(Some(Basis {
         people,

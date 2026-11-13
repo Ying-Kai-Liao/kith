@@ -164,7 +164,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.proc",
-        "A host engine process, idle or not, with the session it has loaded: registers it or moves its session, so a revoke reaches an idle one. Refused (`revoked`) when `revokeSeen` is stale. Answers `{registered}`.",
+        "A host engine process, idle or not, with the session it has loaded: registers it or moves its session, so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
         &[
             need("pid", "int", "The process."),
             need("started", "string", "Its start stamp."),
@@ -185,7 +185,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.procGone",
-        "The process exited: forget it. Answers `{gone}`.",
+        "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. Answers `{gone}`.",
         &[
             need("pid", "int", "The process."),
             need("started", "string", "Its start stamp."),

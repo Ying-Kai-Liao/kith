@@ -16,6 +16,7 @@ use super::tests::{Procs, count, open, state, turn_state};
 use super::warm::{self, WarmProc};
 use crate::db::Core;
 use crate::error::Error;
+use crate::gate::Liveness;
 
 fn new_turn<'a>(conv: &'a str, person: &'a str) -> NewTurn<'a> {
     NewTurn {
@@ -83,7 +84,7 @@ fn proc_of<'a>(pid: u32, started: &'a str, person: &'a str, conv: Option<&'a str
         person,
         agent: "echo",
         conversation: conv,
-        revoke_seen: None,
+        revoke_seen: Some(0),
     }
 }
 
@@ -507,4 +508,180 @@ fn a_process_is_not_registered_past_its_persons_revoke() {
     warm::register(&mut c, &w).expect("current");
     assert!(warm::gone(&mut c, 300, "e300").expect("gone"));
     assert!(!warm::gone(&mut c, 300, "e300").expect("twice"));
+}
+
+/// A process that is gone, whose process group may still hold the engine.
+struct Orphan(std::cell::Cell<bool>);
+
+impl Liveness for Orphan {
+    fn start(&self, _pid: u32) -> Option<String> {
+        None
+    }
+    fn gone(&self, _pid: u32) -> bool {
+        true
+    }
+    fn orphan_group(&self, _pid: u32, _recorded: &str) -> bool {
+        self.0.get()
+    }
+}
+
+#[test]
+fn the_room_rules_hold_for_a_turn_that_names_no_room_field() {
+    let (_t, mut c) = open();
+    // A room principal at the plain path has no basis for a revoke to find.
+    let e = refused(enqueue_turn(&mut c, &new_turn("c1", "room-r1"), 10));
+    assert!(e.contains("room principal"), "{e}");
+    // A room conversation takes the owner's plain turn and nobody else's.
+    basis::ensure_room(&mut c, "rc", "echo", "claude", "r1", 1, 10).expect("room conversation");
+    let e = refused(enqueue_turn(&mut c, &new_turn("rc", "ann"), 11));
+    assert!(e.contains("room conversation"), "{e}");
+    enqueue_turn(&mut c, &new_turn("rc", OWNER), 12).expect("the owner's");
+    assert_eq!(count(&c, "SELECT count(*) FROM turns"), 1);
+}
+
+#[test]
+fn the_budget_is_total_turns_of_the_message_whichever_branch_spends_it() {
+    let (_t, mut c) = open();
+    let root = room_turn(&mut c, "room-c1", &["ann"], Chain::Root(2));
+    let follow = |c: &mut Core, from: i64| {
+        basis::enqueue(
+            c,
+            &new_turn("room-c1", "room-r1"),
+            &room_basis(&["ann"], "bot:7", Chain::Follow(from)),
+            11,
+        )
+    };
+    let a = follow(&mut c, root).expect("first");
+    // A follow-up of a follow-up draws on the same counter...
+    follow(&mut c, a).expect("second");
+    // ...so a sibling of the first has nothing left.
+    let e = refused(follow(&mut c, root));
+    assert!(e.contains("turn budget of the chain"), "{e}");
+    assert_eq!(count(&c, "SELECT left FROM turn_budgets"), 0);
+}
+
+#[test]
+fn the_owners_post_opens_a_chain_without_being_in_the_basis() {
+    let (_t, mut c) = open();
+    let b = room_basis(&["ann"], OWNER, Chain::Root(2));
+    basis::enqueue(&mut c, &new_turn("room-c1", "room-r1"), &b, 10).expect("owner's root");
+    let e = refused(basis::enqueue(
+        &mut c,
+        &new_turn("room-c2", "room-r1"),
+        &room_basis(&["ann", OWNER], "ann", Chain::Root(2)),
+        11,
+    ));
+    assert!(
+        e.contains("not a person"),
+        "the owner is never in the basis: {e}"
+    );
+}
+
+#[test]
+fn a_retried_key_must_be_the_same_request_and_a_chain_stays_in_its_room() {
+    let (_t, mut c) = open();
+    let root = room_turn(&mut c, "room-c1", &["ann"], Chain::Root(3));
+    let mut b = room_basis(&["ann"], "bot:7", Chain::Follow(root));
+    b.key = Some("k".into());
+    let id = basis::enqueue(&mut c, &new_turn("room-c1", "room-r1"), &b, 11).expect("follow-up");
+    b.author = Some("bot:8".into());
+    let e = refused(basis::enqueue(
+        &mut c,
+        &new_turn("room-c1", "room-r1"),
+        &b,
+        12,
+    ));
+    assert!(e.contains("another request"), "{e}");
+    b.author = Some("bot:7".into());
+    assert_eq!(
+        basis::enqueue(&mut c, &new_turn("room-c1", "room-r1"), &b, 13).expect("same"),
+        id
+    );
+    // A parent in another room is no parent.
+    let mut other = room_basis(&["ann"], "bot:7", Chain::Follow(root));
+    other.room = Some("r2".into());
+    let e = refused(basis::enqueue(
+        &mut c,
+        &new_turn("room-c3", "room-r2"),
+        &other,
+        14,
+    ));
+    assert!(e.contains("another room"), "{e}");
+}
+
+#[test]
+fn a_revoke_marks_the_idle_room_process_after_its_claim_ended_and_spares_other_turns() {
+    let (_t, mut c) = open();
+    let t1 = room_turn(&mut c, "room-c1", &["ann"], Chain::Root(2));
+    let id = claim_turn(&mut c, "room-c1", t1, "room-r1");
+    redeem(&mut c, id, 100, "e100", "kith-serve-host/1-a", 12).expect("redeem");
+    stop(&mut c, id, "done", false, 13).expect("end");
+    end_gone(&mut c, &Procs::default(), 14).expect("gone");
+    assert_eq!(state(&c, id), "ended");
+    warm::register(&mut c, &proc_of(200, "e200", "room-r1", Some("room-c1"))).expect("idle");
+    // Another room conversation runs a turn of bob's: ann's revoke leaves its process alone.
+    let mut bobs = room_basis(&["bob"], "bob", Chain::Root(2));
+    bobs.room = Some("r2".into());
+    let t2 =
+        basis::enqueue(&mut c, &new_turn("room-c2", "room-r2"), &bobs, 14).expect("bob's turn");
+    let id2 = claim_turn(&mut c, "room-c2", t2, "room-r2");
+    redeem(&mut c, id2, 300, "e300", "kith-serve-host/1-a", 15).expect("redeem");
+    warm::register(&mut c, &proc_of(400, "e400", "room-r1", Some("room-c2"))).expect("bob's");
+    let r = revoke_person(&mut c, "ann", 20).expect("revoke");
+    let pids: Vec<_> = r.kill.iter().filter_map(|k| k.pid).collect();
+    assert!(pids.contains(&200), "{pids:?}");
+    assert!(!pids.contains(&400) && !pids.contains(&300), "{pids:?}");
+}
+
+#[test]
+fn a_guests_process_registers_with_its_epoch_and_a_marked_row_leaves_only_through_settle() {
+    let (_t, mut c) = open();
+    let mut w = proc_of(300, "e300", "ann", None);
+    w.revoke_seen = None;
+    let e = warm::register(&mut c, &w).expect_err("no epoch");
+    assert!(matches!(e, Error::BadParams(_)), "{e}");
+    w.instance = "h1";
+    w.revoke_seen = Some(0);
+    let e = warm::register(&mut c, &w).expect_err("not a host");
+    assert!(e.to_string().contains("not a host instance"), "{e}");
+    w.instance = "kith-serve-host/1-a";
+    warm::register(&mut c, &w).expect("registered");
+    revoke_person(&mut c, "ann", 20).expect("revoke");
+    // The host saw the stub exit; the engine in its group may not have.
+    assert!(
+        !warm::gone(&mut c, 300, "e300").expect("gone"),
+        "kept: a kill is owed"
+    );
+    let orphan = Orphan(std::cell::Cell::new(true));
+    assert_eq!(
+        warm::settle(&mut c, &orphan).expect("settle"),
+        0,
+        "the group is alive"
+    );
+    orphan.0.set(false);
+    assert_eq!(warm::settle(&mut c, &orphan).expect("settle"), 1);
+    assert_eq!(count(&c, "SELECT count(*) FROM warm_procs"), 0);
+}
+
+#[test]
+fn adopt_makes_an_ending_claim_of_the_old_host_a_kill_again() {
+    let (_t, mut c) = open();
+    let id = host_claim(&mut c, "a", "kith-serve-host/1-a", Some(100));
+    // The old host's release reported `done` with no pid: the claim waits `ending` under a reason the re-send skips.
+    c.conn()
+        .execute(
+            "UPDATE claims SET state = 'ending', end_reason = 'done' WHERE claim_id = ?1",
+            [id],
+        )
+        .expect("ending");
+    warm::adopt(&mut c, "kith-serve-host/2-b", 20).expect("adopt");
+    let reason: String = c
+        .conn()
+        .query_row(
+            "SELECT end_reason FROM claims WHERE claim_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .expect("reason");
+    assert_eq!(reason, "host_changed");
 }

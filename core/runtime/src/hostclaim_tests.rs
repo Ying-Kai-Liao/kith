@@ -434,7 +434,7 @@ fn the_room_rows_carry_the_basis_the_budget_and_the_processes() {
     );
     assert_eq!(dup["refused"], "other", "{dup}");
     // Processes: register, move, revoke-reach, forget.
-    let w = json!({"pid": 900, "started": "e900", "instance": "kith-serve-host/1-a", "person": "bob", "agent": "echo"});
+    let w = json!({"pid": 900, "started": "e900", "instance": "kith-serve-host/1-a", "person": "bob", "agent": "echo", "revokeSeen": 0});
     assert_eq!(row(&mut core, "hostclaim.proc", &w)["registered"], true);
     assert_eq!(
         row(
@@ -458,4 +458,25 @@ fn the_room_rows_carry_the_basis_the_budget_and_the_processes() {
         &json!({"instance": "kith-serve-host/2-b"}),
     );
     assert_eq!(adopted["ended"], json!([]), "{adopted}");
+}
+
+#[test]
+fn bad_room_params_are_errors_not_quiet_choices() {
+    let (_t, mut core, _m) = world();
+    let both = json!({
+        "conversation": "rc1", "agent": "echo", "engine": "claude", "source": "room", "person": "room-r1",
+        "prompt": "hi", "revokeSeen": 0, "level": "room", "basis": ["ann"], "epochs": {"ann": 0},
+        "room": "r1", "joinEpoch": 1, "author": "ann", "budget": 1, "budgetFrom": 5,
+    });
+    assert!(call_at(&mut core, "hostclaim.enqueue", &both, MS).is_err());
+    // A guest's process without the epoch is an error; a stale one is data.
+    let w = json!({"pid": 9, "started": "e9", "instance": "kith-serve-host/1-a", "person": "ann"});
+    assert!(call_at(&mut core, "hostclaim.proc", &w, MS).is_err());
+    crate::conversations::claims::revoke_person(&mut core, "ann", MS).expect("revoke");
+    let mut stale = w.clone();
+    stale["revokeSeen"] = json!(0);
+    assert_eq!(
+        row(&mut core, "hostclaim.proc", &stale)["refused"],
+        "revoked"
+    );
 }
