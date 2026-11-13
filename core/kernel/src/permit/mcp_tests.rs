@@ -298,13 +298,20 @@ fn park_waits_for_the_ask_box_lock_and_skips_an_ended_ask() {
     let (e, r) = (env.clone(), root.clone());
     let t = std::thread::spawn(move || super::decide::park(&e, &r));
     std::thread::sleep(Duration::from_millis(400));
-    assert!(!boxed.join("ask-8.parked").exists(), "park wrote while the lock was held");
+    assert!(
+        !boxed.join("ask-8.parked").exists(),
+        "park wrote while the lock was held"
+    );
     drop(lock);
     t.join().unwrap();
     assert!(boxed.join("ask-8.parked").is_file());
     // an ended ask gets no marker: an end already removed it and nothing is left to resume
     std::fs::remove_file(boxed.join("ask-8.parked")).unwrap();
-    std::fs::write(boxed.join("ask-8.reg"), "{\"state\": \"stopped\", \"ended_at\": 5}").unwrap();
+    std::fs::write(
+        boxed.join("ask-8.reg"),
+        "{\"state\": \"stopped\", \"ended_at\": 5}",
+    )
+    .unwrap();
     super::decide::park(&env, &root);
     assert!(!boxed.join("ask-8.parked").exists());
 }

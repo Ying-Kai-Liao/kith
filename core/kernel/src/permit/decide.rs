@@ -99,12 +99,18 @@ pub(super) fn park(env: &Env, kernel: &Path) {
         return;
     }
     let boxed = env.paths(kernel).machine.join("live/ask");
-    let Ok(()) = std::fs::create_dir_all(&boxed) else { return };
-    let Ok(lock) = std::fs::File::create(boxed.join(".lock")) else { return };
+    let Ok(()) = std::fs::create_dir_all(&boxed) else {
+        return;
+    };
+    let Ok(lock) = std::fs::File::create(boxed.join(".lock")) else {
+        return;
+    };
     if lock.lock_exclusive().is_err() {
         return;
     }
-    if crate::delegation::read_reg(&boxed, mid).is_some_and(|r| crate::delegation::truthy(r.get("ended_at"))) {
+    if crate::delegation::read_reg(&boxed, mid)
+        .is_some_and(|r| crate::delegation::truthy(r.get("ended_at")))
+    {
         return;
     }
     let _ = std::fs::write(boxed.join(format!("{mid}.parked")), "");
