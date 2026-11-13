@@ -17,7 +17,6 @@ mod botguests_props;
 mod bots;
 mod calls;
 mod cards;
-mod room_people;
 #[cfg(test)]
 mod contract_tests;
 #[cfg(test)]
@@ -44,8 +43,6 @@ pub(crate) mod people;
 #[cfg(test)]
 mod people_tests;
 #[cfg(test)]
-mod room_people_tests;
-#[cfg(test)]
 mod proof_tests;
 mod remote;
 #[cfg(test)]
@@ -57,6 +54,9 @@ pub mod roles;
 mod roles_props;
 #[cfg(test)]
 mod roles_tests;
+mod room_people;
+#[cfg(test)]
+mod room_people_tests;
 #[cfg(test)]
 mod room_points_props;
 #[cfg(test)]

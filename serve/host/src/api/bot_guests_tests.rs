@@ -539,6 +539,20 @@ fn router_methods() -> BTreeSet<String> {
 }
 
 #[tokio::test]
+async fn a_bot_guest_and_a_member_cannot_call_the_room_people_methods() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let active = active_bot(&r).await;
+    let sam = sam(&r).await;
+    for who in [&active.caller, &sam] {
+        for m in ["addRoomPerson", "removeRoomPerson", "roomPeople"] {
+            let e = call(&r, who, m, json!({"room": "r", "person": "sam"})).await.unwrap_err();
+            assert!(e.is::<NotAllowed>() || e.is::<super::devices::Forbidden>(), "{m}: {e:#}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn every_router_method_is_denied_to_bots_unless_listed() {
     let r = Rig::new().await;
     r.owner_bot("house");

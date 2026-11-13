@@ -52,7 +52,7 @@ async fn adding_is_refused_while_the_setting_is_off_and_taking_out_is_not() {
     let room = room_of(&r, &["house"]);
     let e = add(&r, &room, "sam").await.unwrap_err();
     assert!(format!("{e:#}").contains("aren't turned on"), "{e:#}");
-    assert!(r.hub.store.room_stays(&room).is_empty());
+    assert_eq!(r.hub.store.room_stays(&room), vec![]);
     assert_eq!(remove(&r, &room, "sam").await.unwrap()["changed"], false, "nobody to take out, still fine");
     let listed = call(&r, "roomPeople", json!({"room": room})).await.unwrap();
     assert_eq!(listed, json!({"enabled": false, "gen": 0, "people": []}));
@@ -117,13 +117,19 @@ async fn a_room_takes_people_only_with_kith_agents_in_it() {
     let bot = r.owner_bot("house");
     assert!(add(&r, &bot, "sam").await.is_err());
     // A group of plain bots: no Kith agent, so nothing for a revoke to fail in `room_member_may`.
-    for id in ["a", "b"] {
-        let cfg = serde_json::from_value(json!({"id": id, "name": id, "backend": "claude", "cwd": "/tmp"})).unwrap();
-        r.hub.create_bot(cfg).unwrap();
-    }
+    let plain_ids: Vec<String> = ["a", "b"]
+        .iter()
+        .map(|id| {
+            let cfg =
+                serde_json::from_value(json!({"id": "", "name": id, "backend": "claude", "cwd": "/tmp"})).unwrap();
+            r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned()
+        })
+        .collect();
     let plain = r
         .hub
-        .create_bot(serde_json::from_value(json!({"id": "", "kind": "group", "name": "P", "members": ["a", "b"]})).unwrap())
+        .create_bot(
+            serde_json::from_value(json!({"id": "", "kind": "group", "name": "P", "members": plain_ids})).unwrap(),
+        )
         .unwrap()["id"]
         .as_str()
         .unwrap()
@@ -134,7 +140,10 @@ async fn a_room_takes_people_only_with_kith_agents_in_it() {
     let mixed = r
         .hub
         .create_bot(
-            serde_json::from_value(json!({"id": "", "kind": "group", "name": "M", "members": ["a", bot]})).unwrap(),
+            serde_json::from_value(
+                json!({"id": "", "kind": "group", "name": "M", "members": [plain_ids[0].clone(), bot]}),
+            )
+            .unwrap(),
         )
         .unwrap()["id"]
         .as_str()
@@ -156,7 +165,7 @@ async fn an_agent_joins_a_room_with_people_only_when_every_person_has_it() {
 
     let e = call(&r, "updateBot", json!({"id": room, "members": [house_bot, money]})).await.unwrap_err();
     assert!(format!("{e:#}").contains("isn't granted money"), "{e:#}");
-    assert_eq!(r.hub.store.bot(&room).unwrap().unwrap().config.members, [house_bot.clone()], "not saved");
+    assert_eq!(r.hub.store.bot(&room).unwrap().unwrap().config.members, std::slice::from_ref(&house_bot), "not saved");
 
     // The same edit through a path that checked nothing is refused too.
     let e = r.hub.update_bot(&json!({"id": room, "members": [house_bot, money]})).unwrap_err();
@@ -220,8 +229,8 @@ async fn a_deleted_room_takes_its_people_with_it() {
     sam_with(&r, json!({"house": "member"})).await;
     let room = room_of(&r, &["house"]);
     add(&r, &room, "sam").await.unwrap();
-    call(&r, "deleteBot", json!({"id": room})).await.unwrap();
-    assert!(r.hub.store.room_stays(&room).is_empty());
+    call(&r, "deleteBot", json!({"botId": room})).await.unwrap();
+    assert_eq!(r.hub.store.room_stays(&room), vec![]);
     assert_eq!(r.hub.store.room_gen(&room), 0);
 }
 
@@ -237,5 +246,5 @@ async fn an_invited_person_cannot_call_the_methods_not_even_for_themselves() {
         assert!(e.is::<super::devices::NotAllowed>(), "{method}: {e:#}");
     }
     assert!(dispatch(&r.hub, &phone, "roomPeople", json!({"room": room})).await.is_err());
-    assert!(r.hub.store.room_stays(&room).is_empty());
+    assert_eq!(r.hub.store.room_stays(&room), vec![]);
 }

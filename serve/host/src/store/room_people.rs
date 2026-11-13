@@ -28,8 +28,8 @@ impl Store {
     /// Every stay in `room`, oldest first.
     pub fn room_stays(&self, room: &str) -> Vec<Stay> {
         let c = self.db.locked();
-        let Ok(mut st) = c
-            .prepare("SELECT person, joined_gen, left_gen FROM room_people WHERE room = ?1 ORDER BY joined_gen")
+        let Ok(mut st) =
+            c.prepare("SELECT person, joined_gen, left_gen FROM room_people WHERE room = ?1 ORDER BY joined_gen")
         else {
             return vec![];
         };
@@ -109,7 +109,6 @@ impl Store {
         tx.commit()?;
         Ok(Some(entry))
     }
-
 }
 
 #[cfg(test)]
@@ -137,7 +136,7 @@ mod tests {
         let leave = s.leave_room_person("r", "ben", &line("personLeft")).unwrap().unwrap();
         assert!(leave.seq > join.seq);
         assert_eq!(s.room_gen("r"), leave.seq);
-        assert!(s.room_open_people("r").is_empty());
+        assert_eq!(s.room_open_people("r"), Vec::<String>::new());
         assert!(s.leave_room_person("r", "ben", &line("personLeft")).unwrap().is_none(), "nobody left to leave");
         let again = s.join_room_person("r", "ben", &line("personJoined")).unwrap().unwrap();
         assert_eq!(
@@ -154,7 +153,7 @@ mod tests {
     fn the_gen_is_the_seq_of_the_line_in_the_rooms_main_lane() {
         let s = store();
         let join = s.join_room_person("r", "ben", &line("personJoined")).unwrap().unwrap();
-        let seen = s.messages_after(&Lane::main("r"), 0, 10).unwrap();
+        let seen = s.entries_from("r", 0).unwrap();
         assert!(seen.iter().any(|e| e.seq == join.seq), "{seen:?}");
         assert_eq!(join.data["notice"], "personJoined");
     }
@@ -165,7 +164,7 @@ mod tests {
         s.join_room_person("r", "ben", &line("personJoined")).unwrap();
         s.join_room_person("other", "ben", &line("personJoined")).unwrap();
         s.drop_room("r").unwrap();
-        assert!(s.room_stays("r").is_empty());
+        assert_eq!(s.room_stays("r"), vec![]);
         assert_eq!(s.room_gen("r"), 0);
         assert_eq!(s.room_open_people("other"), vec!["ben".to_owned()]);
     }

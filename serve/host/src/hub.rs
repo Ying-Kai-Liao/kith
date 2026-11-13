@@ -269,8 +269,12 @@ impl Hub {
 
     /// [`Self::update_bot`] with the live check of the members it adds to a room with people (`verified`, made by the
     /// async handler: `chat::room_people::verify_adds`). Without it such an edit is refused.
-    pub fn update_bot_checked(&self, patch: &Value, verified: Option<&crate::chat::room_people::Verified>) -> Result<Value> {
-        let id =patch["id"].as_str().ok_or_else(|| anyhow!("id required"))?.to_owned();
+    pub fn update_bot_checked(
+        &self,
+        patch: &Value,
+        verified: Option<&crate::chat::room_people::Verified>,
+    ) -> Result<Value> {
+        let id = patch["id"].as_str().ok_or_else(|| anyhow!("id required"))?.to_owned();
         let row = self.store.bot(&id)?.filter(|b| !b.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
         let mut merged = serde_json::to_value(&row.config)?;
         for (k, v) in patch.as_object().into_iter().flatten() {

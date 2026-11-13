@@ -31,7 +31,7 @@ pub fn enabled(store: &Store) -> bool {
 /// What a join or a leave did: the room's gen after it, and whether it changed anything (a repeat does not).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Change {
-    pub gen: i64,
+    pub room_gen: i64,
     pub changed: bool,
 }
 
@@ -136,7 +136,8 @@ pub fn remove_person(hub: &Hub, room: &str, person: &str) -> Result<Change> {
     if hub.store.bot(room)?.is_none_or(|r| r.deleted || !r.config.is_group()) {
         bail!("That isn't a group room.");
     }
-    Ok(commit(hub, room, person.trim(), false, None)?.unwrap_or(Change { gen: hub.store.room_gen(room), changed: false }))
+    Ok(commit(hub, room, person.trim(), false, None)?
+        .unwrap_or(Change { room_gen: hub.store.room_gen(room), changed: false }))
 }
 
 /// The write itself, under the membership lock. `None` only when `agents` (what a join was checked against) is no
@@ -151,8 +152,8 @@ fn commit(hub: &Hub, room: &str, person: &str, join: bool, agents: Option<&[Stri
     let line = notice(&hub.store, person, join);
     let written = hub.commit_room_person(room, person, join, &line)?;
     Ok(Some(match written {
-        Some(e) => Change { gen: e.seq, changed: true },
-        None => Change { gen: hub.store.room_gen(room), changed: false },
+        Some(e) => Change { room_gen: e.seq, changed: true },
+        None => Change { room_gen: hub.store.room_gen(room), changed: false },
     }))
 }
 

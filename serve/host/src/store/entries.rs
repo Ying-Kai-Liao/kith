@@ -120,7 +120,11 @@ impl Store {
     #[cfg_attr(not(test), allow(dead_code))] // read by the member side's visibility filter (PR B)
     pub fn origin_gen(&self, id: &str) -> Option<i64> {
         let c = self.db.locked();
-        c.query_row("SELECT origin_gen FROM entries WHERE id = ?1", [id], |r| r.get(0)).optional().ok().flatten().flatten()
+        c.query_row("SELECT origin_gen FROM entries WHERE id = ?1", [id], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+            .flatten()
     }
 
     /// Deterministic IDs make routine transcript publication retryable after a crash.
