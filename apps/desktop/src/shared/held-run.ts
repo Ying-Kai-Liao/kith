@@ -7,6 +7,10 @@ import type { Entry, HeldRun } from './models.ts'
 export interface StopHolderResult {
   stopped: { kind: string; pid: number; since: string } | null
   ownTurn?: { kind: string; pid: number; since: string } | null
+  /** Signalled, but something of the run is still in the process table: its claim is kept. Stop again. */
+  stillEnding?: { kind: string; pid: number; since: string } | null
+  /** This computer can't stop a run (no process signals): nothing was done. */
+  cantStop?: { kind: string; pid: number; since: string } | null
 }
 
 export type HeldPhase = { kind: 'idle' } | { kind: 'stopping' } | { kind: 'failed'; reason: string; retry: boolean }
@@ -82,6 +86,8 @@ export function confirmMessage({ held, mac, agent, now = new Date() }: { held: H
 }
 
 export const OWN_TURN: HeldPhase = { kind: 'failed', reason: "That's Kith's own turn. It ends by itself.", retry: false }
+export const STILL_ENDING: HeldPhase = { kind: 'failed', reason: 'Still ending — press Stop again', retry: true }
+export const CANT_STOP: HeldPhase = { kind: 'failed', reason: "This computer can't stop that run", retry: false }
 
 /** How a failed `stopHolder` reads. A 403 means this account isn't the owner (the button should not have shown). */
 export function failureOf(error: unknown, mac: string): HeldPhase {

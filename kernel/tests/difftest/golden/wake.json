@@ -1,0 +1,5329 @@
+[
+ {
+  "name": "wake-enqueue-queued",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--",
+    "hello world"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ],
+   [
+    "status",
+    "nope"
+   ],
+   [
+    "status",
+    "nope",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-with-why-and-room",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--why",
+    "card",
+    "--room",
+    "r1",
+    "--",
+    "card answered"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-merge-two-requests-one-turn",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--",
+    "first"
+   ],
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "b",
+    "--agent",
+    "coder",
+    "--why",
+    "reply",
+    "--",
+    "second"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a"
+   ],
+   [
+    "status",
+    "b"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-merge-then-take-one-turn",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--door",
+    "host",
+    "--",
+    "first"
+   ],
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "b",
+    "--agent",
+    "coder",
+    "--door",
+    "host",
+    "--why",
+    "reply",
+    "--",
+    "second"
+   ],
+   [
+    "take",
+    "--holder",
+    "2147483000",
+    "--sid",
+    "claude-sid-1"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-duplicate-id",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--",
+    "first"
+   ],
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--",
+    "again"
+   ],
+   [
+    "enqueue",
+    "s2",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--",
+    "other session"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-duplicate-of-answered",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/answered.json",
+    "text": "{\"done-1\": {\"how\": \"answered\", \"t\": 4000000000, \"run\": \"aaaaaaaaaaaa\"}, \"gone-1\": {\"how\": \"withdrawn\", \"t\": 4000000000, \"run\": null}}"
+   }
+  ],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "done-1",
+    "--agent",
+    "coder",
+    "--",
+    "late copy"
+   ],
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "gone-1",
+    "--agent",
+    "coder",
+    "--",
+    "late copy"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "status",
+    "done-1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-answered-expired-is-new",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/answered.json",
+    "text": "{\"old-1\": {\"how\": \"answered\", \"t\": 1000.0, \"run\": null}}"
+   }
+  ],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "old-1",
+    "--agent",
+    "coder",
+    "--",
+    "again"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-person-needs-host-door",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--person",
+    "p1",
+    "--",
+    "x"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-person-host-door",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--person",
+    "p1",
+    "--door",
+    "host",
+    "--",
+    "x"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-wrong-person",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": \"p1\", \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "b",
+    "--agent",
+    "coder",
+    "--person",
+    "p2",
+    "--door",
+    "host",
+    "--",
+    "x"
+   ],
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "c",
+    "--agent",
+    "coder",
+    "--",
+    "x"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-wrong-agent",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "b",
+    "--agent",
+    "writer",
+    "--",
+    "x"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-host-door-takes-over-run-door",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "b",
+    "--agent",
+    "coder",
+    "--door",
+    "host",
+    "--",
+    "x"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-host-door-while-run-turn-running",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "b",
+    "--agent",
+    "coder",
+    "--door",
+    "host",
+    "--",
+    "x"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-usage",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1"
+   ],
+   [
+    "enqueue"
+   ],
+   [
+    "bogus"
+   ],
+   []
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-enqueue-non-ascii-text",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--",
+    "héllo wörld ☃"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-withdraw-all",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "withdraw",
+    "s1"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "status",
+    "a"
+   ],
+   [
+    "enqueue",
+    "s1",
+    "--id",
+    "a",
+    "--agent",
+    "coder",
+    "--",
+    "late copy"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-withdraw-one-id",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "withdraw",
+    "s1",
+    "--id",
+    "a"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ],
+   [
+    "status",
+    "b",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-withdraw-keeps-what-a-running-turn-carries",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "withdraw",
+    "s1"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ],
+   [
+    "status",
+    "b",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-withdraw-nothing",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "withdraw",
+    "nobody"
+   ],
+   [
+    "withdraw",
+    "nobody",
+    "--id",
+    "x"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-withdraw-drops-the-waiters-too",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"at:+1h\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"at\", \"at\": 4000000000.0}"
+   },
+   {
+    "write": "home/.kith/sessions/waits/vvvvvvvvvvvv.json",
+    "text": "{\"v\": 1, \"id\": \"vvvvvvvvvvvv\", \"on\": \"at:+1h\", \"session\": \"s2\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"at\", \"at\": 4000000000.0}"
+   }
+  ],
+  "run": [
+   [
+    "withdraw",
+    "s1"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "withdraw",
+    "s2",
+    "--id",
+    "w"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-withdraw-person",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": \"p1\", \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}, {\"id\": \"a2\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/ad328846aa18b32a335816374511cac1.json",
+    "text": "{\"v\": 1, \"session\": \"s2\", \"agent\": \"coder\", \"person\": \"p2\", \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/41242b9fae56fad4e6e77dfe33cb18d1.json",
+    "text": "{\"v\": 1, \"session\": \"s3\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"o\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/5b840157e7e86aef3b3fd0fc24f3add3.json",
+    "text": "{\"v\": 1, \"session\": \"s4\", \"agent\": \"coder\", \"person\": \"p3\", \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"c\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"at:+1h\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"at\", \"at\": 4000000000.0}"
+   }
+  ],
+  "run": [
+   [
+    "withdraw-person",
+    "p1",
+    "p2"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "status",
+    "a"
+   ],
+   [
+    "status",
+    "o"
+   ],
+   [
+    "withdraw-person",
+    "nobody"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-withdraw-person-usage",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "withdraw-person"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-nothing",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-single-request-note",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/d2f79c3600ebc29d67793b01456ce233.json",
+    "text": "{\"v\": 1, \"session\": \"acp:chat:t1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"card\", \"text\": \"the answer is yes\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-request-without-why-note",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": \"p1\", \"room\": \"r1\", \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"plain text\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-skips-run-door-and-running-and-not-yet",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/ad328846aa18b32a335816374511cac1.json",
+    "text": "{\"v\": 1, \"session\": \"s2\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"bbbbbbbbbbbb\"}], \"turn\": {\"run\": \"bbbbbbbbbbbb\", \"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/41242b9fae56fad4e6e77dfe33cb18d1.json",
+    "text": "{\"v\": 1, \"session\": \"s3\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"c\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 4000000000}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-by-session-and-sid",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/ad328846aa18b32a335816374511cac1.json",
+    "text": "{\"v\": 1, \"session\": \"s2\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000",
+    "--session",
+    "s2",
+    "--sid",
+    "abc"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-session-id-is-the-turns-sid",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/6327747653fd884e9d739598bea4d749.json",
+    "text": "{\"v\": 1, \"session\": \"1f0e0000-0000-4000-8000-000000000001\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-channel-thread-has-no-sid",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/56c2db445b419892147871a904d6c510.json",
+    "text": "{\"v\": 1, \"session\": \"owner/repo#7\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-recovers-dead-turn-seen-by-session",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/2593c2904a9ba27ddde625cc7bf5bb51.json",
+    "text": "{\"v\": 1, \"session\": \"sid-seen\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": \"sid-seen\"}, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.claude/projects/p/sid-seen.jsonl",
+    "text": "{\"type\": \"user\", \"message\": {\"content\": \"[kith wake aaaaaaaaaaaa] hi\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-recovers-dead-turn-unseen-owes-again",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/d3114adbdc98a2858a2081b35253d820.json",
+    "text": "{\"v\": 1, \"session\": \"sid-unseen\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": \"sid-unseen\"}, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.claude/projects/p/sid-unseen.jsonl",
+    "text": "{\"type\": \"user\", \"message\": {\"content\": \"[kith wake zzzzzzzzzzzz] other turn\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-recover-leaves-a-live-writers-session",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/865dd038e13d519527755ee3520bb59d.json",
+    "text": "{\"v\": 1, \"session\": \"sid-w\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": \"sid-w\"}, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/live/terminal/sid-w.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-recover-leaves-a-live-holder",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/6dbcfb311139bd6e5e99984d70a567ff.json",
+    "text": "{\"v\": 1, \"session\": \"sid-h\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": \"sid-h\"}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-recover-fifth-failure-ends-failed",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/cab8bb24de3daf5e375d88aabce55ac5.json",
+    "text": "{\"v\": 1, \"session\": \"sid-f\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": \"sid-f\"}, \"tries\": 4, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-take-usage",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "take"
+   ],
+   [
+    "take",
+    "--holder",
+    "x"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-done-answers-what-the-turn-carried",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "done",
+    "aaaaaaaaaaaa"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ],
+   [
+    "status",
+    "b",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-done-how-withdrawn",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "done",
+    "aaaaaaaaaaaa",
+    "--how",
+    "withdrawn"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-done-unknown-run",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "done",
+    "cccccccccccc"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-done-last-request-removes-the-item",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "done",
+    "aaaaaaaaaaaa"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-back-owes-again-after-a-failed-try",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "back",
+    "aaaaaaaaaaaa"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-back-held-is-not-a-failed-try",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "back",
+    "aaaaaaaaaaaa",
+    "--held"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-back-fifth-failed-try-ends-failed",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 4, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "back",
+    "aaaaaaaaaaaa"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ],
+   [
+    "status",
+    "b",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-back-held-never-fails",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 4, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "back",
+    "aaaaaaaaaaaa",
+    "--held"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-back-unknown-run",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "back",
+    "cccccccccccc"
+   ],
+   [
+    "back",
+    "cccccccccccc",
+    "--held"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-back-then-take-waits-out-the-pause",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}, {\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "back",
+    "aaaaaaaaaaaa",
+    "--held"
+   ],
+   [
+    "take",
+    "--holder",
+    "2147483000"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-done-back-usage",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "done"
+   ],
+   [
+    "back"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-status-states",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"q\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}, {\"id\": \"r\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"aaaaaaaaaaaa\"}], \"turn\": {\"run\": \"aaaaaaaaaaaa\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/answered.json",
+    "text": "{\"ok\": {\"how\": \"answered\", \"t\": 4000000000, \"run\": \"bbbbbbbbbbbb\"}, \"fl\": {\"how\": \"failed\", \"t\": 4000000000, \"run\": \"cccccccccccc\"}, \"wd\": {\"how\": \"withdrawn\", \"t\": 4000000000, \"run\": null}}"
+   }
+  ],
+  "run": [
+   [
+    "status",
+    "q",
+    "--json"
+   ],
+   [
+    "status",
+    "r",
+    "--json"
+   ],
+   [
+    "status",
+    "ok",
+    "--json"
+   ],
+   [
+    "status",
+    "fl",
+    "--json"
+   ],
+   [
+    "status",
+    "wd",
+    "--json"
+   ],
+   [
+    "status",
+    "ok"
+   ],
+   [
+    "status",
+    "r"
+   ],
+   [
+    "status",
+    "nope"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-ls-all-shapes",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/ad328846aa18b32a335816374511cac1.json",
+    "text": "{\"v\": 1, \"session\": \"s2\", \"agent\": \"coder\", \"person\": \"p1\", \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}, {\"id\": \"c\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/41242b9fae56fad4e6e77dfe33cb18d1.json",
+    "text": "{\"v\": 1, \"session\": \"s3\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"d\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"dddddddddddd\"}], \"turn\": {\"run\": \"dddddddddddd\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"pid:1\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"pid\", \"pid\": 1, \"procStart\": null}"
+   }
+  ],
+  "run": [
+   [
+    "ls"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-ls-damaged-files",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/damaged.json",
+    "text": "{nope"
+   },
+   {
+    "write": "home/.kith/sessions/queue/empty.json",
+    "text": "{}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/answered.json",
+    "text": "[]"
+   },
+   {
+    "write": "home/.kith/sessions/waits/bad.json",
+    "text": "x"
+   }
+  ],
+  "run": [
+   [
+    "ls"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "status",
+    "a"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-wait-at-time",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:2026-10-27T15:00",
+    "--session",
+    "s1",
+    "--agent",
+    "coder",
+    "remember",
+    "the",
+    "thing"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until",
+   "at"
+  ]
+ },
+ {
+  "name": "wake-wait-at-relative",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:+30m",
+    "--session",
+    "s1",
+    "--agent",
+    "coder",
+    "--why",
+    "tea"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until",
+   "at"
+  ]
+ },
+ {
+  "name": "wake-wait-at-twice-keeps-the-first",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:2026-10-27T15:00",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "at:2026-10-27T15:00",
+    "--session",
+    "s1",
+    "--agent",
+    "coder",
+    "other"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until",
+   "at"
+  ]
+ },
+ {
+  "name": "wake-wait-pid-alive",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "pid:1",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-wait-pid-gone",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "pid:2147483000",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "pid:abc",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-wait-ci",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "ci:Ying-Kai-Liao/kith#345",
+    "--session",
+    "s1",
+    "--agent",
+    "coder",
+    "--timeout",
+    "2h"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-wait-ci-bad-form",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "ci:nope",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "ci:a/b#x",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-wait-refuses",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:soon",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "at:+5x",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "task:1",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "mcp-task:1",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "file:/x",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "nothing",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "wait",
+    "--on",
+    "at:+1h",
+    "--timeout",
+    "3weeks",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until",
+   "at"
+  ]
+ },
+ {
+  "name": "wake-wait-no-session",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:+1h"
+   ],
+   [
+    "wait",
+    "--on",
+    "at:+1h",
+    "--session",
+    "s1"
+   ],
+   [
+    "wait",
+    "--on",
+    "at:+1h",
+    "--agent",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-wait-session-from-env",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "CLAUDE_CODE_SESSION_ID": "envsess",
+   "KITH_AGENT": "envagent"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:+1h"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until",
+   "at"
+  ]
+ },
+ {
+  "name": "wake-wait-guest-refused",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_PERSON": "p1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:+1h",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-wait-host-session-refused",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_VIA": "serve"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:+1h",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-wait-run-vias-allowed",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_VIA": "ask"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait",
+    "--on",
+    "at:+1h",
+    "--session",
+    "s1",
+    "--agent",
+    "coder"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until",
+   "at"
+  ]
+ },
+ {
+  "name": "wake-wait-usage",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "wait"
+   ],
+   [
+    "wait",
+    "--on"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-fires-an-elapsed-at-waiter",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"at:x\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"the note\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 1000.0, \"kind\": \"at\", \"at\": 1000.0}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls",
+    "--json"
+   ],
+   [
+    "drain"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-at-waiter-not-yet",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"at:x\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"at\", \"at\": 4000000000.0}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-fires-a-waiter-whose-pid-exited",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"pid:2147483000\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"the build\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"pid\", \"pid\": 2147483000, \"procStart\": null}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-keeps-a-waiter-whose-pid-runs",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"pid:1\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"pid\", \"pid\": 1, \"procStart\": null}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-waiter-timeout",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"pid:1\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 1000.0, \"kind\": \"pid\", \"pid\": 1, \"procStart\": null}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-waiter-for-someone-elses-session-is-dropped",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": \"p1\", \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"at:x\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 1000.0, \"kind\": \"at\", \"at\": 1000.0}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-two-waiters-one-turn",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"at:x\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 1000.0, \"kind\": \"at\", \"at\": 1000.0}"
+   },
+   {
+    "write": "home/.kith/sessions/waits/vvvvvvvvvvvv.json",
+    "text": "{\"v\": 1, \"id\": \"vvvvvvvvvvvv\", \"on\": \"pid:2147483000\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"pid\", \"pid\": 2147483000, \"procStart\": null}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-ci-needs-two-looks-then-fires",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/gh-fake",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/bin/gh-fake",
+    "text": "#!/bin/sh\ncase \"$2\" in\n view) echo '{\"headRefOid\":\"0123456789abcdef0123456789abcdef01234567\",\"state\":\"OPEN\"}';;\n checks) echo '[{\"name\":\"build\",\"bucket\":\"pass\"},{\"name\":\"lint\",\"bucket\":\"skipping\"},{\"name\":\"t\",\"bucket\":\"pass\"}]';;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"ci:o/r#5\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"ci\", \"repo\": \"o/r\", \"pr\": 5}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "drain"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-ci-failed-checks",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/gh-fake",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/bin/gh-fake",
+    "text": "#!/bin/sh\ncase \"$2\" in\n view) echo '{\"headRefOid\":\"0123456789abcdef0123456789abcdef01234567\",\"state\":\"OPEN\"}';;\n checks) echo '[{\"name\":\"build\",\"bucket\":\"fail\"},{\"name\":\"t\",\"bucket\":\"cancel\"},{\"name\":\"ok\",\"bucket\":\"pass\"}]';;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"ci:o/r#5\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"ci\", \"repo\": \"o/r\", \"pr\": 5}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "drain"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-ci-pending-keeps-waiting",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/gh-fake",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/bin/gh-fake",
+    "text": "#!/bin/sh\ncase \"$2\" in\n view) echo '{\"headRefOid\":\"0123456789abcdef0123456789abcdef01234567\",\"state\":\"OPEN\"}';;\n checks) echo '[{\"name\":\"build\",\"bucket\":\"pending\"}]';;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"ci:o/r#5\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"ci\", \"repo\": \"o/r\", \"pr\": 5}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "drain"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-ci-merged-fires-at-once",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/gh-fake",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/bin/gh-fake",
+    "text": "#!/bin/sh\ncase \"$2\" in\n view) echo '{\"headRefOid\":\"0123456789abcdef0123456789abcdef01234567\",\"state\":\"MERGED\"}';;\n checks) echo '[]';;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"ci:o/r#5\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"ci\", \"repo\": \"o/r\", \"pr\": 5}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-ci-two-waiters-one-wake",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/gh-fake",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/bin/gh-fake",
+    "text": "#!/bin/sh\ncase \"$2\" in\n view) echo '{\"headRefOid\":\"0123456789abcdef0123456789abcdef01234567\",\"state\":\"CLOSED\"}';;\n checks) echo '[]';;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"ci:o/r#5\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"ci\", \"repo\": \"o/r\", \"pr\": 5}"
+   },
+   {
+    "write": "home/.kith/sessions/waits/vvvvvvvvvvvv.json",
+    "text": "{\"v\": 1, \"id\": \"vvvvvvvvvvvv\", \"on\": \"ci:o/r#5\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"ci\", \"repo\": \"o/r\", \"pr\": 5}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "drain"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-ci-gh-down-logs-and-keeps-the-waiter",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/gh-fake",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [
+   {
+    "write": "home/bin/gh-fake",
+    "text": "#!/bin/sh\necho not json\nexit 1\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/waits/wwwwwwwwwwww.json",
+    "text": "{\"v\": 1, \"id\": \"wwwwwwwwwwww\", \"on\": \"ci:o/r#5\", \"session\": \"s1\", \"agent\": \"coder\", \"why\": \"\", \"note\": \"\", \"created\": 1.0, \"checked\": 0, \"seen\": null, \"until\": 4000000000.0, \"kind\": \"ci\", \"repo\": \"o/r\", \"pr\": 5}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s1.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-drain-nothing",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0"
+  },
+  "setup": [],
+  "run": [
+   [
+    "drain"
+   ],
+   [
+    "ls"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-deliver-ok-commits",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_WAKE_KITH": "{HOME}/bin/kith-fake"
+  },
+  "setup": [
+   {
+    "write": "home/bin/kith-fake",
+    "text": "#!/bin/sh\necho \"args: $*\"\necho \"via=$KITH_VIA wait=$KITH_CLAIM_WAIT person=${KITH_PERSON:-none}\"\nexit 0\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"one\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}, {\"id\": \"b\", \"why\": \"reply\", \"text\": \"two\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "deliver",
+    "s1"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-deliver-nonzero-with-marker-seen-commits",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_WAKE_KITH": "{HOME}/bin/kith-fake"
+  },
+  "setup": [
+   {
+    "write": "home/bin/kith-fake",
+    "text": "#!/bin/sh\necho oops >&2\nexit 3\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.claude/projects/p/s1.jsonl",
+    "text": ""
+   }
+  ],
+  "run": [
+   [
+    "deliver",
+    "s1"
+   ],
+   [
+    "status",
+    "a",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-deliver-held-is-not-a-failed-try",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_WAKE_KITH": "{HOME}/bin/kith-fake"
+  },
+  "setup": [
+   {
+    "write": "home/bin/kith-fake",
+    "text": "#!/bin/sh\necho \"kith: that session is open in another writer (pid 9, terminal); close it first\" >&2\nexit 1\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "deliver",
+    "s1"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-deliver-failed-try-backs-off",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_WAKE_KITH": "{HOME}/bin/kith-fake"
+  },
+  "setup": [
+   {
+    "write": "home/bin/kith-fake",
+    "text": "#!/bin/sh\necho boom >&2\nexit 2\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "deliver",
+    "s1"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-deliver-not-owed-or-held-does-nothing",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_WAKE_KITH": "{HOME}/bin/kith-fake"
+  },
+  "setup": [
+   {
+    "write": "home/bin/kith-fake",
+    "text": "#!/bin/sh\necho ran\nexit 0\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"host\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/ad328846aa18b32a335816374511cac1.json",
+    "text": "{\"v\": 1, \"session\": \"s2\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"b\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   },
+   {
+    "write": "home/.kith/live/terminal/s2.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/.kith/sessions/queue/41242b9fae56fad4e6e77dfe33cb18d1.json",
+    "text": "{\"v\": 1, \"session\": \"s3\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"c\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": \"cccccccccccc\"}], \"turn\": {\"run\": \"cccccccccccc\", \"pid\": 2147483000, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"sid\": null}, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "deliver",
+    "s1"
+   ],
+   [
+    "deliver",
+    "s2"
+   ],
+   [
+    "deliver",
+    "s3"
+   ],
+   [
+    "deliver",
+    "nobody"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ },
+ {
+  "name": "wake-deliver-scrubs-the-run-env",
+  "command": "wake",
+  "unswitched": "kith-wake has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-wake"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "wake"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_POLL": "0",
+   "KITH_WAKE_KITH": "{HOME}/bin/kith-fake",
+   "KITH_PERSON": "p9",
+   "KITH_ROOM": "r9",
+   "KITH_RESUME": "1",
+   "CLAUDECODE": "1"
+  },
+  "setup": [
+   {
+    "write": "home/bin/kith-fake",
+    "text": "#!/bin/sh\necho \"person=${KITH_PERSON:-none} room=${KITH_ROOM:-none} resume=${KITH_RESUME:-none} cc=${CLAUDECODE:-none}\"\nexit 0\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json",
+    "text": "{\"v\": 1, \"session\": \"s1\", \"agent\": \"coder\", \"person\": null, \"room\": null, \"door\": \"run\", \"requests\": [{\"id\": \"a\", \"why\": \"\", \"text\": \"hi\", \"at\": \"2026-01-01T00:00:00Z\", \"run\": null}], \"turn\": null, \"tries\": 0, \"next\": 0}"
+   }
+  ],
+  "run": [
+   [
+    "deliver",
+    "s1"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ],
+   [
+    "\\b[0-9a-f]{12}\\b",
+    "<ID12>"
+   ]
+  ],
+  "normalize_paths": true,
+  "mask_keys": [
+   "next",
+   "t",
+   "created",
+   "checked",
+   "until"
+  ]
+ }
+]

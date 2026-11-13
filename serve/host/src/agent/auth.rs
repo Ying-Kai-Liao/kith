@@ -77,7 +77,7 @@ fn probe_dir() -> PathBuf {
     crate::service::data_dir().join("probe")
 }
 
-fn env_slot(backend: &str) -> String {
+pub(crate) fn env_slot(backend: &str) -> String {
     format!("agent-env:{backend}")
 }
 

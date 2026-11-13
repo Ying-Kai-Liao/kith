@@ -1,0 +1,5 @@
+\* BROKEN: the router answers from the file it replaced (frozen at the switch), not from the core
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+RouterStale = TRUE

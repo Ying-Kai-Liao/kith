@@ -1,0 +1,14 @@
+{
+  "fakes": "claude auth status\ncodex login status\n",
+  "state:home/.kith/accounts/claude/.hidden/": "<empty dir>\n",
+  "state:home/.kith/accounts/claude/other/": "<empty dir>\n",
+  "state:home/.kith/accounts/claude/work/": "<empty dir>\n",
+  "state:home/.kith/accounts/codex/b/": "<empty dir>\n",
+  "state:home/.kith/accounts/codex/c/": "<empty dir>\n",
+  "state:home/.kith/settings.json": "{\n  \"backups\": [\n    \"claude\",\n    \"codex\",\n    \"claude:work\"\n  ]\n}\n",
+  "state:kith/agents/cdx/role/agent.md": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agent\": \"echo\",\n  \"chain\": [\n    {\n      \"account\": null,\n      \"harness\": \"claude\",\n      \"id\": \"claude\",\n      \"kind\": \"primary\",\n      \"model\": null,\n      \"ready\": true\n    },\n    {\n      \"account\": \"work\",\n      \"harness\": \"claude\",\n      \"id\": \"claude:work\",\n      \"kind\": \"subscription\",\n      \"model\": null,\n      \"ready\": false,\n      \"why\": \"not logged in\"\n    },\n    {\n      \"account\": null,\n      \"harness\": \"codex\",\n      \"id\": \"codex\",\n      \"kind\": \"subscription\",\n      \"model\": null,\n      \"ready\": false,\n      \"why\": \"not logged in\"\n    }\n  ],\n  \"version\": 1\n}\n",
+  "step0.stderr": ""
+}

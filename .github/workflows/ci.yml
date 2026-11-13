@@ -7,6 +7,28 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      # mode=check is the cheap by-hand Rust check for workers (the rust-check job at the bottom). mode=model runs
+      # only the schedule-fire TLA+ job (it needs no packages). Push, PR and a dispatch with no inputs are all
+      # mode=full: exactly the jobs below, as before.
+      mode:
+        description: "full = the whole pipeline (batch runs); check = only the rust-check job; model = only the schedule-fire model"
+        type: choice
+        options: [full, check, model]
+        default: full
+      packages:
+        description: "check mode: cargo package names (-p), space separated"
+        type: string
+        default: ""
+      os:
+        description: "check mode: which runners"
+        type: choice
+        options: [all, linux, windows, macos]
+        default: all
+      artifact:
+        description: "check mode: also build the kith binary and upload it as an artifact"
+        type: boolean
+        default: false
 
 # Label events don't start this workflow (ci-label.yml dispatches it for ci:full), so a label never
 # creates a run, and never a skipped `ci` check.
@@ -28,6 +50,8 @@ jobs:
   # Path filtering happens here, not in `on.paths`, so the `ci` job below always
   # reports and can be the one required check.
   changes:
+    # Check and model mode skip this job, and with it (needs) every job below that depends on it.
+    if: ${{ inputs.mode != 'check' && inputs.mode != 'model' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # dorny/paths-filter lists a pull request's files through the API.
@@ -47,25 +71,51 @@ jobs:
       cloud: ${{ steps.h.outputs.cloud }}
       licenses: ${{ steps.f.outputs.licenses }}
       threads: ${{ steps.f.outputs.threads }}
+      writer_lock: ${{ steps.f.outputs.writer_lock }}
       revoke: ${{ steps.f.outputs.revoke }}
       secrets: ${{ steps.f.outputs.secrets }}
+      lease: ${{ steps.f.outputs.lease }}
+      schedule_fire: ${{ steps.f.outputs.schedule_fire }}
       ios: ${{ steps.h.outputs.ios }}
       desktop: ${{ steps.h.outputs.desktop }}
       relay: ${{ steps.h.outputs.relay }}
       e2e: ${{ steps.h.outputs.e2e }}
       guest_linux: ${{ steps.h.outputs.guest_linux }}
       bot_e2e: ${{ steps.h.outputs.bot_e2e }}
+      windows: ${{ steps.h.outputs.windows }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # On push to main dorny compares with the previous commit, so main only runs what changed.
+      # A workflow_dispatch run has no base, so dorny compares with the default branch (main). The batch run of a
+      # rust-rebuild batch is such a run on a branch that left main long ago, which would make every filter true.
+      # When the branch grew out of rust-rebuild (its fork point from rust-rebuild is past its fork point from main),
+      # compare with rust-rebuild instead. Anything else (a PR, a push, a main batch) keeps dorny's own base.
+      - name: Filter base
+        id: base
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if git rev-parse --verify -q origin/rust-rebuild >/dev/null; then
+            rr=$(git merge-base origin/rust-rebuild HEAD || true)
+            mn=$(git merge-base origin/main HEAD || true)
+            if [ -n "$rr" ] && [ "$rr" != "$mn" ] && git merge-base --is-ancestor "$mn" "$rr"; then
+              echo "base=rust-rebuild" >> "$GITHUB_OUTPUT"
+            fi
+          fi
       # Kernel and licenses keep markdown: the notices file and kernel docs are checked content.
       - uses: dorny/paths-filter@v3
         id: f
         with:
+          base: ${{ steps.base.outputs.base }}
           filters: |
             kernel:
               - 'kernel/**'
               - 'serve/contract/kernel/**'
+              # The core boundary check reads kith-core's sources and every Cargo.toml.
+              - 'core/runtime/**'
+              - 'core/api/**'
+              - '**/Cargo.toml'
               - 'scripts/ci/**'
               - '.github/workflows/ci.yml'
             # The kernel files the host's own unit tests run for real (the list: scripts/ci/host-kernel-tests.txt). A
@@ -103,20 +153,59 @@ jobs:
               - 'serve/host/src/api/botguests.rs'
               - 'serve/host/src/agent/bot/**'
               - 'serve/host/src/hub/actors.rs'
+              - 'core/kernel/src/threads.rs'
+              - 'core/kernel/src/threads/**'
+              - 'kernel/tests/kith-threads-race'
               - '.github/workflows/ci.yml'
+            # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill),
+            # plus the thread-writers code (the writer lock is what makes one thread have one writer). Not ci.yml: a workflow edit runs
+            # the smoke rows, not the full model (same for revoke and schedule_fire below).
+            writer_lock:
+              - 'verification/writer-lock/**'
+              - 'verification/threads/run.sh'
+              - '.claude/skills/writer-lock/**'
+              - '.claude/skills/thread-writers/**'
+              - 'core/runtime/src/asks/mod.rs'
+              - 'core/runtime/src/wake/**'
+              - 'core/stub/**'
+              - 'core/holder/src/holder.rs'
+              - 'core/holder/src/proto.rs'
+              - 'core/runtime/src/holder_link.rs'
+              - 'core/runtime/src/terminal.rs'
+              - 'core/runtime/src/conversations/**'
+              - 'kernel/bin/kith-sessions'
+              - 'kernel/bin/kith-lifecycle'
+              - 'kernel/bin/kith-wake'
+              - 'kernel/bin/kith'
+              - 'serve/host/src/terminal/**'
+              - 'serve/host/src/cards/resume.rs'
+              - 'serve/host/src/api/threads.rs'
+              - 'serve/host/src/api/bots.rs'
+              - 'serve/host/src/api/botguests.rs'
+              - 'serve/host/src/agent/bot/**'
+              - 'serve/host/src/hub/actors.rs'
+              - 'core/kernel/src/threads.rs'
+              - 'core/kernel/src/threads/**'
+              - 'kernel/tests/kith-threads-race'
             # The TLA+ model of revoking a person and the code it covers (the list in the revoke-access skill).
             revoke:
               - 'verification/revoke/**'
               - 'verification/threads/run.sh'
               - '.claude/skills/revoke-access/**'
               - 'kernel/bin/kith-auth'
+              - 'kernel/bin/kith'
+              - 'kernel/bin/kith-permit'
+              - 'kernel/lib/kith_door.py'
+              - 'serve/host/src/doors.rs'
+              - 'core/runtime/src/authority/**'
+              - 'core/runtime/src/doors/**'
+              - 'core/runtime/src/migrations/doors/**'
               - 'serve/host/src/channels/**'
               - 'serve/host/src/api/people.rs'
               - 'serve/host/src/api/botguests.rs'
               - 'serve/host/src/remote/**'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
-              - '.github/workflows/ci.yml'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
             secrets:
               - 'verification/secrets/**'
@@ -129,25 +218,56 @@ jobs:
               - 'serve/host/src/api/bots.rs'
               - 'serve/host/src/api/roles.rs'
               - 'kernel/bin/kith-auth'
+              - 'core/runtime/src/cards/**'
+              - 'core/runtime/src/secrets/**'
+              - 'core/runtime/src/authority/secret_writes.rs'
+              - 'core/api/src/table/cards.rs'
               - '.github/workflows/ci.yml'
+            # The TLA+ model of the holder lease and the code it covers (the list in the holder-lease skill).
+            lease:
+              - 'verification/lease/**'
+              - 'verification/threads/run.sh'
+              - '.claude/skills/holder-lease/**'
+              - 'core/holder/src/holder.rs'
+              - 'core/holder/src/proto.rs'
+              - 'core/holder/src/client.rs'
+              - 'core/holder/src/clock.rs'
+              - 'core/runtime/src/holder_link.rs'
+              - '.github/workflows/ci.yml'
+            # The TLA+ model of the schedule fire protocol and the code it covers (the list in the schedule-fire skill).
+            schedule_fire:
+              - 'verification/schedule-fire/**'
+              - 'verification/lease/run.sh'
+              - '.claude/skills/schedule-fire/**'
+              - 'core/runtime/src/schedules/**'
+              - 'core/runtime/src/migrations/schedules/**'
+              - 'core/runtime/src/conversations/claims.rs'
+              - 'kernel/bin/kith-sched'
       # 'every': a file must match the whole list, so each filter is one brace pattern plus a markdown
       # exclusion. A docs-only change then runs no heavy job. The only markdown that ships is
       # apps/ios/WhatsNew.md (an iOS resource), so ios excludes just READMEs.
       - uses: dorny/paths-filter@v3
         id: h
         with:
+          base: ${{ steps.base.outputs.base }}
           predicate-quantifier: every
           filters: |
             host:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             # What the root crate builds from: the host and the memory and wire crates, not guest or tts, which
             # nothing in the host depends on. Those two get their own small job (host-crates). The kernel's bin and lib
             # are not here: the host tests that run them are the host-kernel job (filter kernel_host above).
             host_core:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
+              # memory and summary), and the libs those programs load on every call.
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
+              - '!**/*.md'
+            # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on.
+            windows:
+              - '{core/holder/**,core/stub/**,core/attach/**,core/runtime/**,core/api/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
               - '!**/*.md'
             cloud:
               - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
@@ -199,6 +319,16 @@ jobs:
               Unknown agent check|kernel/tests/kith-unknown-agent-check
               Self-update check|kernel/tests/kith-self-update-check
               Pkg EINTR check|kernel/tests/kith-pkg-eintr-check
+              Differential harness (same CLI line, same result) self-test and seed corpus|kernel/tests/kith-difftest-check --summary difftest-summary.json
+              Agent set check (kith <agent> set model/effort, --json, a model per backup entry)|kernel/tests/kith-agent-set-check
+              Footguns check|kernel/tests/kith-footguns-check
+              CI names check (every kernel/tests/kith-*-check is run here or exempt with a reason)|kernel/tests/kith-ci-names-check
+              CI names self-test (a check dropped from ci.yml fails it)|kernel/tests/kith-ci-names-check --selftest
+              Install drain check|kernel/tests/kith-install-drain-check
+              Agent dirs check|kernel/tests/kith-agent-dirs-check
+              Market check|kernel/tests/kith-market-check
+              Cutover check|kernel/tests/kith-cutover-check
+              Serve launch check|kernel/tests/kith-serve-launch-check
           - shard: 2
             checks: |
               Auth property check|kernel/tests/kith-auth-props
@@ -206,10 +336,25 @@ jobs:
               Auth check|kernel/tests/kith-auth-check
               Auth lock check|kernel/tests/kith-auth-lock-check
               Auth revoke check|kernel/tests/kith-auth-revoke-check
+              Auth core mirror check (kith-auth person/bot --rm/--revoke against a fake core)|kernel/tests/kith-auth-core-mirror-check
               Helper MCP grants check|kernel/tests/kith-helper-mcp-check
               Cost bots check|kernel/tests/kith-cost-bots-check
               Call check|kernel/tests/kith-call-check
               Chain check|kernel/tests/kith-chain-check
+              People check (kith people, kith invite, kith bot ls/invite/revoke/decide/auto-allow --json, against a stub host)|kernel/tests/kith-people-check
+              Account check (kith account add/remove/list --json, the login command returned and not run)|kernel/tests/kith-account-check
+              Accounts tombstone check (a tombstoned state.json refuses writes; kith-account exits 4)|kernel/tests/kith-accounts-tombstone-check
+              Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
+              Grants check (connectors and skills as grants on an agent)|kernel/tests/kith-grants-check
+              Limit check|kernel/tests/kith-limit-check
+              Agent allow check|kernel/tests/kith-agent-allow-check
+              Agent deny secrets check|kernel/tests/kith-agent-deny-secrets-check
+              Trusted allow check|kernel/tests/kith-trusted-allow-check
+              Must ask check|kernel/tests/kith-must-ask-check
+              Auth C2 check|kernel/tests/kith-auth-c2-check
+              Auth secret check|kernel/tests/kith-auth-secret-check
+              Keys check|kernel/tests/kith-keys-check
+              Connector check|kernel/tests/kith-connector-check
           - shard: 3
             bun: true
             checks: |
@@ -220,6 +365,7 @@ jobs:
               Load check|kernel/tests/kith-load-check
               Guest helper check|kernel/tests/kith-guest-helper-check
               Wake check|kernel/tests/kith-wake-check
+              Procstart check (Python process start stamps, the same string core/procstart writes)|kernel/tests/kith-procstart-check
               Guest jobs check|kernel/tests/kith-guest-jobs-check
               Schedule jobs file check|kernel/tests/kith-sched-jobs-check
               Send check|kernel/tests/kith-send-check
@@ -228,6 +374,20 @@ jobs:
               Trajectory check|kernel/tests/kith-trajectory-check
               Bug check|kernel/tests/kith-bug-check
               Guest door check|kernel/tests/kith-guest-door-check
+              Schedule json check (kith schedule ls/add/rm/pause/resume/run/log --json, the error object)|kernel/tests/kith-sched-json-check
+              Auth json check (kith auth ls/granted/grant/revoke --json, no secret value in any output)|kernel/tests/kith-auth-json-check
+              New check (kith new --json - the agent made, or the error object and no folder left)|kernel/tests/kith-new-check
+              Pkg json check (kith versions, history, pin, unpin, restore, install, share, deps, update, push, commit --json)|kernel/tests/kith-pkg-json-check
+              JSON misc check (--json on doctor, remote, ask ls, bug, backup add/remove, update self --check, wake status, lifecycle, chain, project)|kernel/tests/kith-json-misc-check
+              Scratch check (the built-in scratch agent: engine per chat, never backed up or shared, keep as an agent)|kernel/tests/kith-scratch-check
+              Core boundary check (kith-core stays sealed)|kernel/tests/kith-core-boundary-check
+              Core boundary self-test (each rule fails on a deliberate violation)|kernel/tests/kith-core-boundary-check --selftest
+              Owner launch check|kernel/tests/kith-owner-launch-check
+              Run kind check|kernel/tests/kith-run-kind-check
+              Group check|kernel/tests/kith-group-check
+              Send to check|kernel/tests/kith-send-to-check
+              Schedule prune check|kernel/tests/kith-sched-prune-check
+              Project id lock check|kernel/tests/kith-project-id-lock-check
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -253,6 +413,12 @@ jobs:
             fi
           done <<< "$CHECKS"
           [ "$failed" = 0 ] || { echo "$failed check(s) failed in this shard, see the ::error lines above"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.shard == 1
+        with:
+          name: difftest-summary
+          path: difftest-summary.json
+          if-no-files-found: ignore
 
   # Exits 0 when every row of verification/threads/checks.tsv matches its expected pass/fail, so green means no
   # change from the recorded baseline (some rows are known findings on purpose).
@@ -274,12 +440,17 @@ jobs:
       - name: TLA+ model check
         run: verification/threads/run.sh
 
-  # The same for revoking a person: verification/revoke/checks.tsv, every row as expected.
-  revoke-access:
+  # The same for the writer lock (WriterLock4.tla) and the holder's claim rules (Holder.tla): the fast rows of
+  # verification/writer-lock/checks.tsv. The two slow rows (15-30 min each) run only with `run.sh --all`.
+  # The full fast rows run only when a file the model covers changed (filter writer_lock); every other run
+  # (including a ci.yml edit) runs the smoke rows listed in verification/writer-lock/smoke.txt. Skipped in check
+  # and model mode, where `changes` is skipped.
+  writer-lock:
     needs: changes
-    if: needs.changes.outputs.revoke == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # full fast rows took 19-26 min, then hit 35 twice (2026-11-05)
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -291,7 +462,33 @@ jobs:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
-        run: verification/revoke/run.sh
+        env:
+          FULL: ${{ needs.changes.outputs.writer_lock }}
+        run: verification/writer-lock/run.sh $([ "$FULL" = true ] || echo --smoke)
+
+  # The same for revoking a person: verification/revoke/checks.tsv, every row as expected.
+  # Full rows when the filter matches, else the smoke rows (verification/revoke/smoke.txt).
+  revoke-access:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' }}
+    runs-on: ubuntu-latest
+    # A full run (the model or its code changed) takes ~20 min before the M2-23 kill rows, more with their liveness checks;
+    # the always rows (C-a, switched-always*) add ~45 min (the kill row's liveness check alone ~25).
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check
+        env:
+          FULL: ${{ needs.changes.outputs.revoke }}
+        run: verification/revoke/run.sh $([ "$FULL" = true ] || echo --smoke)
 
   # The same for a secret card (one writer per card, never after it closed): verification/secrets/checks.tsv.
   secret-cards:
@@ -311,6 +508,50 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/secrets/run.sh
+
+  # The same for the holder lease (ping-anchored deadline, sleep-aware clock): verification/lease/checks.tsv.
+  holder-lease:
+    needs: changes
+    if: needs.changes.outputs.lease == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check
+        run: verification/lease/run.sh
+
+  # The same for the schedule fire protocol (one transaction per fire, skip rule, deadline): verification/schedule-fire/checks.tsv.
+  # Check mode skips this job (it needs `changes`); mode=model runs just this one:
+  #   gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model
+  schedule-fire:
+    needs: changes
+    if: ${{ !cancelled() && (inputs.mode == 'model' || needs.changes.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check
+        env:
+          # mode=model is the by-hand full model run; otherwise full only when the filter matches, else smoke rows
+          # (verification/schedule-fire/smoke.txt).
+          FULL: ${{ (inputs.mode == 'model' || needs.changes.outputs.schedule_fire == 'true') && 'true' || '' }}
+        run: verification/schedule-fire/run.sh $([ "$FULL" = true ] || echo --smoke)
 
   # Format and clippy on the whole host workspace. The tests are in host-build, host-test and host-crates.
   host:
@@ -339,15 +580,72 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy
         run: cargo clippy --manifest-path host/Cargo.toml --workspace --all-targets -- -D warnings
+      # The holder owns processes and decides nothing: it must not link kith-core, kith-kernel or any other kith crate.
+      - name: The holder links no kith crate
+        run: sh ../scripts/check-holder-deps.sh
+      # The method table: its OpenRPC file is current, nothing released is broken, and every contract and corpus verb
+      # parses to its row (core/api/tests/table.rs). Regenerate with the command the failure message prints.
+      - name: Method table (kith-api)
+        run: cargo test --manifest-path host/Cargo.toml -p kith-api --locked
+
+  # Windows from day one (docs/plans/runtime-design.md section 8): the holder's ConPTY, named pipes, job objects and
+  # detaching only prove themselves here, including that the holder and its process survive the process that
+  # started it. Runs on workflow_dispatch too (the changes job reports it for any run that is not a pull request).
+  windows:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true' || needs.changes.outputs.host_core == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+        working-directory: serve
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: host-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Clippy
+        run: cargo clippy --manifest-path host/Cargo.toml -p kith-holder --all-targets --locked -- -D warnings
+      - name: Holder and platform layer tests
+        run: cargo test --manifest-path host/Cargo.toml -p kith-holder --locked -- --test-threads=1
+      # kith-kernel has Unix-only modules (threads) behind cfg; kith-core takes its lifetime lock with LockFileEx and
+      # checks owner-only access lists with icacls. Both only prove themselves here.
+      - name: Kernel and core runtime tests
+        run: |
+          cargo clippy --manifest-path host/Cargo.toml -p kith-core --all-targets --locked -- -D warnings
+          cargo test --manifest-path host/Cargo.toml -p kith-core --locked
+          cargo clippy --manifest-path host/Cargo.toml -p kith-api --all-targets --locked -- -D warnings
+          cargo test --manifest-path host/Cargo.toml -p kith-api --locked
+          cargo test --manifest-path host/Cargo.toml -p kith-kernel --locked --no-fail-fast
+      # kith-stub (core/stub) joins the same proof once it exists on the branch.
+      - name: Stub tests
+        run: |
+          if [ -d ../core/stub ]; then
+            cargo clippy --manifest-path host/Cargo.toml -p kith-stub --all-targets --locked -- -D warnings
+            cargo test --manifest-path host/Cargo.toml -p kith-stub --locked
+          fi
+      # The attach client's console code (raw mode, VT input, ctrl handler) only proves itself here; serve/host cannot build
+      # on Windows, which is why the client is a crate of its own.
+      - name: Attach client
+        run: |
+          cargo clippy --manifest-path host/Cargo.toml -p kith-attach --all-targets --locked -- -D warnings
+          cargo test --manifest-path host/Cargo.toml -p kith-attach --locked
 
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.
   host-build:
     needs: changes
     if: needs.changes.outputs.host_core == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 80: the test archive plus the parity, router and stepped-props steps below took 36 of the old 45 minutes before the router rows grew; each step is named to show the slow one.
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
       - name: Install pinned toolchain
         working-directory: serve
         run: rustup show active-toolchain || rustup toolchain install
@@ -364,6 +662,79 @@ jobs:
       - name: Build the test archive
         working-directory: serve/host
         run: cargo nextest archive --workspace --exclude kith-guest --exclude kith-tts --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
+      # The Rust core against the Python kernel, the same CLI line both ways (kernel/tests/difftest): the test binaries above
+      # already built the host's dependencies, so this adds the one kith program. Its router finds it through KITH_BIN.
+      - name: Build the kith program
+        run: cargo build --manifest-path serve/host/Cargo.toml --bin kith
+      - name: Core parity (difftest --rust)
+        run: |
+          kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
+          # The same corpus again with the core database made first, so every Rust verb runs inside an embedded core.
+          kernel/tests/difftest/kith-difftest --rust --core --bin "$PWD/serve/host/target/debug/kith"
+          # And once more with a daemon running in each NEW sandbox, so the verbs the daemon answers go through its owner socket.
+          kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
+      - name: Core parity, frozen access-verb cases (difftest --golden)
+        run: |
+          # The frozen access-verb cases (recorded from Python, never re-recorded): the Rust program alone against the record.
+          # --golden takes its cases from its DIR, so it does not combine with --core or --daemon.
+          kernel/tests/difftest/kith-difftest --golden kernel/tests/difftest/golden --rust --bin "$PWD/serve/host/target/debug/kith"
+      - name: Launch, switch and revoke-stopgap checks
+        run: |
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
+          # `kith <agent> --launch-json` per engine against the recorded fixtures; the claude one needs this Rust program for its memory hooks.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-engines-check
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
+          # The accounts step: the account verbs and the Python readers through the core, nothing reading the tombstone.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
+          # The pkg and project-id switches: the launch's two lookups are the core's, per verb, and a guest's project-id stays Python.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
+          # The cost switch: the ported kith-cost verbs are the core's, tag/record stay Python, and the launch's budget checks hold on both paths.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
+          # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-embedded-check
+          # The memory and summary verbs and the settings switch run the built kith.
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-memory-check
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-summary-check
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-settings-switch-check
+      # Its own step so a slow run shows which check it is (the router check and the stepped props took most of the old single step's time).
+      - name: Authority router check (kith-auth on the tombstone)
+        # The authority router (M2-23): on the tombstone kith-auth answers its read verbs from the core, the same as the file, and refuses the rest.
+        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-router-check
+      - name: Access properties, stepped home (kith-auth-props)
+        # The access properties again on a home stepped for real (kith migrate step authority): the same answers as the file, and back after a rollback.
+        run: PROPS_EXAMPLES=40 PROPS_STEPPED_EXAMPLES=10 KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-props
+      - name: Switched-Mac end to end (stepped scratch home, switch off)
+        # P2 of the migration blockers: a scratch home is stepped for real with KITH_CORE_AUTHORITY off (the runbook's own
+        # configuration) and invites, access, revoke and undo, cards, secrets and the rollback run against the real kith-auth,
+        # daemon and `kith rollback authority` (serve/host/src/api/stepped_e2e_tests.rs). The test is #[ignore]d (so no other job reports it as passed) and this step runs it
+        # with --run-ignored only: a missing kith binary is a failure, never a skip. Same flags as the archive build above, so the test binary is cached.
+        working-directory: serve/host
+        env:
+          KITH_BIN: ${{ github.workspace }}/serve/host/target/debug/kith
+        run: |
+          test -x "$KITH_BIN" || { echo "no kith binary at $KITH_BIN"; exit 1; }
+          cargo nextest run --profile ci --no-tests=fail --run-ignored only --workspace --exclude kith-guest --exclude kith-tts -E 'test(stepped_e2e_tests::a_stepped_mac)'
+      - name: Direct lock, stub and held checks
+        run: |
+          # A direct run holds its conversation's lock under kith-stub (M1-3).
+          cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
+          KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check
+          # An installed kith finds its stub through the ~/.local/bin link; kith serve puts one beside the host.
+          kernel/tests/kith-stub-install-check
+          # kith --held and kith attach: the real daemon, holder, stub and attach client with a fake engine (M1-7).
+          cargo build --manifest-path serve/host/Cargo.toml -p kith-holder
+          T="$PWD/serve/host/target/debug"
+          KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
+      - name: Run-once cost and kernel notes
+        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
+      # The guest door check's kill -9 case (the Rust server's door goes with it) needs a built kith; the kernel shard has none.
+      - name: Guest door check with the built kith (kill -9 of the server)
+        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-guest-door-check
+      # kith-sessions and the Rust threads module claiming one thread at once: never more than one writer.
+      - name: Thread writers, Python and Rust as two actors
+        run: kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
+      - name: Core dependency rules
+        run: kernel/tests/kith-core-deps-check
       - uses: actions/upload-artifact@v4
         with:
           name: host-tests
@@ -479,6 +850,37 @@ jobs:
           --workspace-remap .
           -E 'kind(test)' --partition count:${{ matrix.shard }}/3
 
+  # The secrets envelope against the real OS key stores (the unit tests use an in-memory one): a throwaway keychain on
+  # macOS, gnome-keyring in its own D-Bus session on Linux.
+  core-keystore:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    name: core-keystore (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    defaults:
+      run:
+        shell: bash
+        working-directory: serve/host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config gnome-keyring libsecret-tools dbus
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: core-keystore-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Real key store tests
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/real-keystore-tests.sh"
+
   # guest and tts do not feed the host, so a change to only them skips the build above. Also the doctests, which
   # nextest does not run.
   host-crates:
@@ -505,9 +907,9 @@ jobs:
         with:
           tool: cargo-nextest@0.9.100
       - name: Tests
-        run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem
+        run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel -p kith-core
       - name: Doctests
-        run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem
+        run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel -p kith-core
 
   cloud:
     needs: changes
@@ -795,8 +1197,8 @@ jobs:
   # skipped by the filter, fails on any failure or cancellation.
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
-    if: ${{ !cancelled() }}
-    needs: [changes, kernel, host, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -808,3 +1210,138 @@ jobs:
           case " $RESULTS " in
             *" failure "*|*" cancelled "*) exit 1 ;;
           esac
+
+  # Light Rust check, by hand only (never on push or pull_request): fmt, clippy -D warnings and tests of chosen
+  # packages on Linux, Windows and macOS, instead of building on your Mac. Every other job is skipped in this mode.
+  #
+  # How to use (GitHub only dispatches workflow files that exist on main, so this lives in ci.yml, and --ref makes
+  # the run use the branch's copy of the file, inputs included):
+  #   push your branch to origin
+  #   gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=check -f packages="kith-holder kith-core" -f os=all
+  #   gh run list --repo Ying-Kai-Liao/kith --workflow ci.yml --branch <branch> --limit 1   # the run id
+  #   gh run watch <run-id> --repo Ying-Kai-Liao/kith --exit-status
+  # Add -f artifact=true to also get the built `kith` binary (from each runner that was asked for):
+  #   gh run download <run-id> --repo Ying-Kai-Liao/kith -n kith-linux -D /tmp/kith-bin   # or -n kith-macos (no Windows binary)
+  #   chmod +x /tmp/kith-bin/kith && kernel/tests/difftest/kith-difftest --rust --bin /tmp/kith-bin/kith
+  # packages: names as in `cargo -p`. Every Rust crate here is in the serve/host workspace (core/* are out-of-tree
+  # members of it), so one manifest serves all. Empty fails fast. os: all | linux | windows | macos.
+  rust-check:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' }}
+    name: rust-check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # kith-serve's test suite plus the artifact build runs past 40 minutes on a cold cache.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os == 'linux' && '["ubuntu-latest"]' || inputs.os == 'windows' && '["windows-latest"]' || inputs.os == 'macos' && '["macos-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: serve/host
+    env:
+      PACKAGES: ${{ inputs.packages }}
+    steps:
+      - name: Require packages
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [ -z "$(echo "$PACKAGES" | tr -d '[:space:]')" ]; then
+            echo "::error::mode=check needs -f packages=\"<cargo package names>\" (for example kith-holder)"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: rust-check-${{ matrix.os }}
+      - name: Select packages
+        run: |
+          sel=""
+          for p in $PACKAGES; do
+            sel="$sel -p $p"
+          done
+          echo "SEL=$sel" >> "$GITHUB_ENV"
+      - name: fmt
+        run: cargo fmt --check $SEL
+      - name: clippy
+        run: cargo clippy $SEL --all-targets --locked -- -D warnings
+      - name: test
+        run: cargo test $SEL --locked --no-fail-fast
+      # The envelope's real key store (macOS Keychain, Linux Secret Service), on a throwaway store made in the job.
+      - name: Real key store (kith-core)
+        if: ${{ contains(inputs.packages, 'kith-core') && runner.os != 'Windows' }}
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get install -y --no-install-recommends gnome-keyring libsecret-tools dbus
+          fi
+          bash "$GITHUB_WORKSPACE/.github/scripts/real-keystore-tests.sh"
+      # The host program is Unix-only (the windows job builds just the holder and core crates), so no Windows binary.
+      - name: Build kith
+        if: inputs.artifact && runner.os != 'Windows'
+        run: |
+          cargo build --locked -p kith-serve --bin kith
+          cargo build --locked -p kith-holder --bin kith-holder
+          cargo build --locked -p kith-stub
+      # The same on macOS (the host-build job above runs it on Linux): the door's supervisor stops with a killed server.
+      - name: Guest door check with the built kith (kill -9 of the server)
+        if: inputs.artifact && runner.os != 'Windows'
+        run: KITH_BIN="$PWD/target/debug/kith" "$GITHUB_WORKSPACE/kernel/tests/kith-guest-door-check"
+      - name: Upload kith
+        if: inputs.artifact && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kith-${{ runner.os == 'Linux' && 'linux' || 'macos' }}
+          path: |
+            serve/host/target/debug/kith
+            serve/host/target/debug/kith-holder
+            serve/host/target/debug/kith-stub
+          if-no-files-found: error
+          retention-days: 3
+
+  # Check mode also runs the host-kernel list check (the script only, no build, seconds): a host test that reads the
+  # kernel and is missing from scripts/ci/host-kernel-tests.txt fails by hand, not first on a batch run.
+  rust-check-host-kernel:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' }}
+    name: host-kernel-check (check mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/ci/host-kernel-tests.sh check
+
+  # Check mode with kith-serve in packages also runs its unit tests (host-test's `-E 'not kind(test)'`), scoped to that
+  # crate, on the requested os. Never Windows: kith-serve is not built there.
+  rust-check-host-test:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' && inputs.os != 'windows' && contains(inputs.packages, 'kith-serve') }}
+    name: host-test (${{ matrix.os }}, check mode)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os == 'linux' && '["ubuntu-latest"]' || inputs.os == 'macos' && '["macos-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+    defaults:
+      run:
+        working-directory: serve/host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: rust-check-host-test-${{ matrix.os }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.100
+      - name: Run the kith-serve unit tests
+        run: cargo nextest run --profile ci -p kith-serve -E 'not kind(test)'

@@ -2,7 +2,12 @@
 //! apps and helpers (loopback + `Authorization: Bearer <token>`), and `GET /channel`, the
 //! direct end-to-end encrypted channel phones use (see `channel`).
 
+#[cfg(test)]
+mod access_core_tests;
 mod accounts;
+pub mod authority;
+#[cfg(test)]
+pub(crate) mod authority_props;
 mod backups;
 #[cfg(test)]
 mod bot_guests_tests;
@@ -14,6 +19,8 @@ mod calls;
 mod cards;
 #[cfg(test)]
 mod contract_tests;
+#[cfg(test)]
+mod core_revokes_tests;
 mod delegations;
 pub mod devices;
 #[cfg(test)]
@@ -21,9 +28,13 @@ mod error_tests;
 mod events;
 mod files;
 mod folders;
+#[cfg(test)]
+mod guard_props;
 mod host;
 mod http;
 mod kith_info;
+mod kith_new;
+pub(crate) mod kith_tools;
 mod marketplace;
 mod peers;
 #[cfg(test)]
@@ -47,6 +58,9 @@ mod roles_tests;
 mod room_points_props;
 #[cfg(test)]
 mod room_secrets_props;
+mod scratch;
+#[cfg(test)]
+mod stepped_e2e_tests;
 mod threads;
 
 pub use events::{events_stream, term_events};
@@ -234,6 +248,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };
+    let b = match kith_tools::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
     let b = match marketplace::call(hub, caller, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
@@ -247,6 +265,14 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match bots::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match kith_new::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match scratch::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

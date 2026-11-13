@@ -24,6 +24,11 @@ pub enum Refused {
     /// The routine is already running; the sender (or the cloud queue) tries again later.
     Busy,
     Invalid(String),
+    /// The schedules are the core's now and it did not answer (or the host cannot tell whose they are yet): the sender,
+    /// or the cloud queue, tries again later. Only while the core owns the schedules (`routines::switch`).
+    Held,
+    /// The job belongs to another Mac's host: this one has nothing to run (the core's `not-here`).
+    NotHere,
 }
 
 impl Refused {
@@ -33,11 +38,13 @@ impl Refused {
             Self::Paused => "paused",
             Self::Busy => "busy",
             Self::Invalid(_) => "invalid",
+            Self::Held => "held",
+            Self::NotHere => "not-here",
         }
     }
 
     pub fn retry(&self) -> bool {
-        matches!(self, Self::Busy)
+        matches!(self, Self::Busy | Self::Held)
     }
 }
 
@@ -48,6 +55,8 @@ impl std::fmt::Display for Refused {
             Self::Paused => f.write_str("routine is paused"),
             Self::Busy => f.write_str("routine already has an active run"),
             Self::Invalid(why) => f.write_str(why),
+            Self::Held => f.write_str("routines are moving to the Kith core; try again shortly"),
+            Self::NotHere => f.write_str("this routine runs on another Mac"),
         }
     }
 }

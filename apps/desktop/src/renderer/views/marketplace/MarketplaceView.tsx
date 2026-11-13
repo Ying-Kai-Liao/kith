@@ -10,7 +10,10 @@ import { ComputerBadge } from '../ComputerBadge'
 import { AgentSheet, AgentTile, NodeNotice } from './AgentSheet'
 import { ComposioSection } from './ComposioViews'
 import { CredentialsView } from './CredentialsView'
-import { CustomConnectorSheet, InstallConnectorSheet, NewSkillSheet } from './ConnectorSheets'
+import { CustomConnectorSheet, InstallConnectorSheet } from './ConnectorSheets'
+import { BotPreviewSheet, WhichBotsSheet } from './KithSheets'
+import { useKithTools } from './kith-tools'
+import { type MarketBot } from '@shared/kith-tools'
 import { SetupTerminalView } from './SetupTerminal'
 import { SkillSheet, type SkillRef } from './SkillSheet'
 import {
@@ -23,14 +26,16 @@ import { usePlugins } from './plugins'
 const connectorId = (c: MarketConnector) => c.name
 
 /**
- * The Marketplace (Grok Bot's layout): one page of agents, connectors and
- * skills for the bots on one computer (the store in context). Installing happens on that
- * computer; each bot turns connectors and skills on in its settings.
+ * The Marketplace (Grok Bot's layout): one page of shared bots, engines (the ACP registry), connectors and
+ * skills for the bots on one computer (the store in context). A connector or skill installs on that
+ * computer and then goes onto a kith agent through the CLI (`kith <agent> connect|skill add`); a shared bot
+ * installs with `kith install` after its preview.
  * With more than one computer, the header switches between them (the caller swaps the store).
  */
 export function MarketplaceView({ computers, computer, onComputer, appsFirst = false }: { appsFirst?: boolean; computers: { id: string; name: string }[]; computer: string; onComputer: (id: string) => void }) {
   const store = useStore()
   const plugins = usePlugins(store)
+  const kith = useKithTools(store)
   const dismiss = useDismiss()
   const [search, setSearch] = useState('')
   /** Bumped on each submitted search, so every section searches again. */
@@ -44,13 +49,18 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
   const [loadingSkills, setLoadingSkills] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [installing, setInstalling] = useState<MarketConnector | null>(null)
-  const [busySkill, setBusySkill] = useState<string | null>(null)
   const [addingConnector, setAddingConnector] = useState(false)
-  const [writingSkill, setWritingSkill] = useState(false)
   const [viewingSkill, setViewingSkill] = useState<SkillRef | null>(null)
   const [agent, setAgent] = useState<Backend | null>(null)
+  /** The connector or skill being put on (or taken off) bots. */
+  const [placing, setPlacing] = useState<{ kind: 'connector' | 'skill'; name: string; title: string } | null>(null)
+  const [sharedBots, setSharedBots] = useState<MarketBot[]>([])
+  const [loadingBots, setLoadingBots] = useState(true)
+  const [botsError, setBotsError] = useState<string | null>(null)
+  const [previewing, setPreviewing] = useState<MarketBot | null>(null)
+  const botRequest = useRef(0)
   const [addingNode, setAddingNode] = useState(false)
-  /** Agents shown before "Load more agents" (two rows of the grid). */
+  /** Agents shown before "Load more engines" (two rows of the grid). */
   const [agentLimit, setAgentLimit] = useState(10)
   const [showInstalled, setShowInstalled] = useState(false)
   const [showCredentials, setShowCredentials] = useState(false)
@@ -85,6 +95,23 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
     }
   }
 
+  const loadBots = async (q = query) => {
+    const id = ++botRequest.current
+    setLoadingBots(true)
+    try {
+      const rows = await (await store.ready()).kithMarket(q)
+      if (botRequest.current !== id) return
+      setSharedBots(rows)
+      setBotsError(null)
+    } catch (e) {
+      if (botRequest.current !== id) return
+      setSharedBots([])
+      setBotsError(errorText(e))
+    } finally {
+      if (botRequest.current === id) setLoadingBots(false)
+    }
+  }
+
   const loadMoreConnectors = async () => {
     if (loadingMore || loadingConnectors) return
     if (hasHiddenItems(connectors)) {
@@ -112,9 +139,13 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
     // Picks up CLIs installed or signed in outside Kith.
     void store.refreshBackends()
     void loadConnectors('')
+    void loadBots('')
+    void kith.refresh()
     void (async () => {
       try {
-        setSkills(await market.marketSkills(await store.ready()))
+        // The catalog is the CLI's (`kith skills available`); a skill goes onto a bot with `kith <bot> skill add`.
+        const catalog = await (await store.ready()).kithSkillsAvailable()
+        setSkills(catalog.map((c) => ({ source: c.name, name: c.name, description: c.description, installed: false })))
       } catch (e) {
         setError(errorText(e))
       }
@@ -127,17 +158,23 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
   const submit = (q: string) => {
     setSearchToken((t) => t + 1)
     void loadConnectors(q)
+    void loadBots(q)
   }
 
-  const installSkill = async (s: MarketSkill) => {
-    setBusySkill(s.source)
-    try {
-      await plugins.installSkill(s.source)
-    } catch (e) {
-      setError(errorText(e))
-    }
-    setBusySkill(null)
+  /** The host's id for an installed registry connector: the name `kith <bot> connect` takes. */
+  const installedId = (c: MarketConnector) => plugins.installedConnectors.find((i) => i.registryName === c.name)?.id
+  const openConnector = (c: MarketConnector) => {
+    const id = installedId(c)
+    if (id) setPlacing({ kind: 'connector', name: id, title: c.title })
   }
+
+  /** The names of the bots (not agents) that hold one thing, for a row's subtitle. */
+  const heldBy = (agents: readonly string[]) => {
+    const names = kith.botsOf(agents).map((b) => b.name)
+    return names.length ? `On ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3}` : ''}` : null
+  }
+  const withHolders = (held: string | null, text: string) => (held ? `${held} · ${text}` : text)
+  const skillOwners = kith.skillHolders()
 
   const header = (
     <div className="market-heading">
@@ -186,8 +223,8 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
       <Icon name="magnifyingglass" size={13} color="var(--secondary)" />
       <input
         value={search}
-        placeholder="Search agents, connectors and skills"
-        aria-label="Search agents, connectors and skills"
+        placeholder="Search bots, engines, connectors and skills"
+        aria-label="Search bots, engines, connectors and skills"
         spellCheck={false}
         onChange={(e) => {
           setSearch(e.target.value)
@@ -223,8 +260,30 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
           {header}
           {searchField}
           {appsFirst ? <ComposioSection query={query} searchToken={searchToken} /> : null}
+          <MarketSection title="Bots">
+            {loadingBots ? (
+              <SkeletonGrid />
+            ) : sharedBots.length === 0 ? (
+              <Text tone="secondary">{botsError ?? (query ? `No shared bots match “${query}”.` : 'No shared bots found.')}</Text>
+            ) : (
+              <ItemGrid>
+                {sharedBots.slice(0, 12).map((b) => (
+                  <MarketRow
+                    key={b.repo}
+                    title={b.name}
+                    subtitle={`${b.stars} ${b.stars === 1 ? 'star' : 'stars'} · ${b.description || b.repo}`}
+                    added={b.installed}
+                    icon={<TileIcon name="person.crop.circle" />}
+                    addLabel="Install"
+                    onAdd={() => setPreviewing(b)}
+                    onOpen={() => setPreviewing(b)}
+                  />
+                ))}
+              </ItemGrid>
+            )}
+          </MarketSection>
           {agents.length > 0 ? (
-            <MarketSection title={query ? `Agents matching “${query}”` : 'Agents'}>
+            <MarketSection title={query ? `Engines matching “${query}”` : 'Engines'}>
               {allAgents.some((b) => b.node === 'missing') ? <NodeNotice onAdd={() => setAddingNode(true)} /> : null}
               <div className="agent-grid">
                 {agents.slice(0, agentLimit).map((b) => <AgentCard key={b.id} backend={b} onClick={() => setAgent(b)} />)}
@@ -244,10 +303,11 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
                     <MarketRow
                       key={c.name}
                       title={c.title}
-                      subtitle={c.description ?? c.name}
+                      subtitle={withHolders(heldBy(kith.connectorHolders(installedId(c) ?? c.name)), c.description ?? c.name)}
                       added={c.installed}
                       icon={<ServiceLogo website={c.website} name={c.title} registryName={c.name} />}
                       onAdd={() => setInstalling(c)}
+                      onOpen={c.installed ? () => openConnector(c) : undefined}
                     />
                   ))}
                 </ItemGrid>
@@ -263,6 +323,7 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
           </MarketSection>
           {!appsFirst ? <ComposioSection query={query} searchToken={searchToken} /> : null}
           <MarketSection title="Skills">
+            {kith.skillReadError ? <Text size="footnote" tone="danger" role="alert">Some agents' skills could not be read: {kith.skillReadError}</Text> : null}
             {loadingSkills ? (
               <SkeletonGrid />
             ) : (
@@ -271,11 +332,10 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
                   <MarketRow
                     key={s.source}
                     title={s.name}
-                    subtitle={s.description}
-                    added={s.installed || plugins.installedSkills.some((i) => i.id === s.source.toLowerCase())}
-                    busy={busySkill === s.source}
+                    subtitle={withHolders(heldBy(skillOwners.get(s.source) ?? []), s.description)}
+                    added={(skillOwners.get(s.source) ?? []).length > 0}
                     icon={<SkillGlyph />}
-                    onAdd={() => void installSkill(s)}
+                    onAdd={() => setPlacing({ kind: 'skill', name: s.source, title: s.name })}
                     onOpen={() => setViewingSkill(s)}
                   />
                 ))}
@@ -292,19 +352,11 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
                 icon={<TileIcon name="point.3.connected.trianglepath.dotted" />}
                 onAdd={() => setAddingConnector(true)}
               />
-              <MarketRow
-                title="Your own skill"
-                subtitle="Write instructions a bot can follow"
-                added={false}
-                addLabel="New"
-                icon={<TileIcon name="square.and.pencil" />}
-                onAdd={() => setWritingSkill(true)}
-              />
             </ItemGrid>
           </MarketSection>
           {error ? <Text size="footnote" tone="danger">{error}</Text> : null}
           <Text size="footnote" tone="tertiary">
-            Connectors come from the official MCP Registry, apps through Composio, skills from Anthropic, agents from the ACP registry. Everything installs on {store.hostName}.
+            Connectors come from the official MCP Registry, apps through Composio, skills from Anthropic, bots from GitHub, engines from the ACP registry. Everything installs on {store.hostName}; connectors and skills then go onto the bots you pick.
           </Text>
         </div>
       </div>
@@ -319,16 +371,19 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
     <>
       <SlideStack base={page} top={showCredentials ? <CredentialsView onBack={() => setShowCredentials(false)} /> : showInstalled ? <InstalledView back={() => setShowInstalled(false)} /> : null} />
       <FormSheet open={installing !== null} onClose={() => setInstalling(null)}>
-        {installing ? <InstallConnectorSheet key={installing.name} item={installing} done={() => void loadConnectors(connectorQuery.current)} /> : null}
+        {installing ? <InstallConnectorSheet key={installing.name} item={installing} done={() => { void loadConnectors(connectorQuery.current); openConnector(installing) }} /> : null}
+      </FormSheet>
+      <FormSheet open={placing !== null} onClose={() => setPlacing(null)}>
+        {placing ? <WhichBotsSheet key={`${placing.kind}:${placing.name}`} kind={placing.kind} name={placing.name} title={placing.title} /> : null}
+      </FormSheet>
+      <FormSheet open={previewing !== null} onClose={() => setPreviewing(null)}>
+        {previewing ? <BotPreviewSheet key={previewing.repo} bot={previewing} done={() => void loadBots(query)} /> : null}
       </FormSheet>
       <FormSheet open={addingConnector} onClose={() => setAddingConnector(false)}>
         <CustomConnectorSheet />
       </FormSheet>
-      <FormSheet open={writingSkill} onClose={() => setWritingSkill(false)}>
-        <NewSkillSheet />
-      </FormSheet>
       <FormSheet open={viewingSkill !== null} onClose={() => setViewingSkill(null)}>
-        {viewingSkill ? <SkillSheet key={viewingSkill.name} skill={viewingSkill} /> : null}
+        {viewingSkill ? <SkillSheet key={viewingSkill.name} skill={viewingSkill} onAdd={() => { const s = viewingSkill; setViewingSkill(null); if (s.source) setPlacing({ kind: 'skill', name: s.source, title: s.name }) }} /> : null}
       </FormSheet>
       <FormSheet open={addingNode} onClose={() => setAddingNode(false)} width={560} height={560}>
         {addingNode ? <SetupTerminalView backend={null} step="node" back={() => setAddingNode(false)} /> : null}

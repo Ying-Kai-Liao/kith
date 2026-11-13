@@ -1,0 +1,6 @@
+{
+  "fakes": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: unknown thread \"no-such-session\" (the Kith host is not running, so only a Claude session id can be resumed)\n",
+  "step0.stdout": ""
+}

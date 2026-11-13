@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# kith-people-check — `kith people`, `kith invite` and `kith bot ls|invite|revoke-invite|revoke|decide|auto-allow`: CLI lines
+# in, stdout / exit code / the requests a stub host got out, so the same lines can check another implementation. The people
+# list comes from kith-auth (old data included); every invite goes through the host (nothing is written locally); the
+# host token and an invite's token hash never appear in output; the invite link appears only where the owner asked for it.
+# Throwaway HOME / KITH_HOME / KITH_AUTH and a stub host on a free port, never ~/.kith or the real host or cloud.
+#
+#   kernel/tests/kith-people-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-people.XXXXXX"); T=$(cd "$T" && pwd -P)
+SRV=
+trap '[[ -n $SRV ]] && kill $SRV 2>/dev/null; rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_SERVE_DIR=$T/serve KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT KITH_AGENTS HQ_HOME KITH_SERVE_PORT
+mkdir -p "$HOME" "$KITH_HOME/state" "$KITH_HOME/agents/house/role" "$KITH_HOME/agents/garden/role" "$KITH_SERVE_DIR"
+export KITH_STATE=$KITH_HOME/state
+for a in house garden; do printf -- '---\nname: %s\ndescription: test\n---\nbody\n' $a > "$KITH_HOME/agents/$a/role/agent.md"; done
+HOSTTOK="host$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+LINKTOK="linktok$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+HASH="hash$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+echo "$HOSTTOK" > "$KITH_SERVE_DIR/token"
+export HOSTTOK LINKTOK HASH
+
+# The stub host: POST /api/<m> with the bearer token; every request goes to rec.jsonl; answers shaped like the real
+# handlers (serve/host/src/api/people.rs, botguests.rs). The invites list carries a tokenHash on purpose: the CLI must drop it.
+cat > "$T/stub.py" <<'PY'
+import http.server, json, os, sys
+T, TOK, LINKTOK, HASH = sys.argv[1], os.environ['HOSTTOK'], os.environ['LINKTOK'], os.environ['HASH']
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.headers.get('Authorization') != 'Bearer ' + TOK:
+            self.send_response(401); self.send_header('Content-Length', '0'); self.end_headers(); return
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
+        m = self.path.rsplit('/', 1)[1]
+        open(T + '/rec.jsonl', 'a').write(json.dumps({'m': m, 'body': body}) + '\n')
+        st, out = 200, {}
+        if m == 'createInvite':
+            if body.get('name') == 'Refused':
+                st, out = 400, {'error': 'The Kith cloud is off on this computer, so an invite can\'t be sent.'}
+            else:
+                pid = body.get('personId') or body['name'].lower()
+                out = {'inviteId': 'inv_1', 'link': 'https://kithbot.app/join#c=c1&i=inv_1&t=' + LINKTOK,
+                       'appLink': 'kith://invite?t=' + LINKTOK, 'kithLink': 'kith://invite?t=' + LINKTOK, 'webLink': None,
+                       'pageLink': None, 'expiresAt': 4102444800000, 'personId': pid}
+        elif m == 'invites':
+            out = {'invites': [{'inviteId': 'inv_1', 'personId': 'sam', 'tokenHash': HASH, 'agents': {'house': 'member'},
+                                'createdAt': 1, 'expiresAt': 4102444800000, 'usedAt': None, 'revokedAt': None}]}
+        elif m == 'revokeInvite':
+            out = {'revoked': body['inviteId'] == 'inv_1', 'cloud': True}
+        elif m == 'bots':
+            out = {'bots': [{'botId': 'bg_grok', 'personId': 'bot-1', 'name': 'Grok', 'state': 'pending', 'ownerPerson': 'sam',
+                             'agents': ['house']}]}
+        elif m == 'createBotInvite':
+            out = {'botId': 'bg_new', 'inviteId': 'bi_1', 'expiresAt': 4102444800000,
+                   'link': 'https://kithbot.app/b/c1/bi_1#t=' + LINKTOK, 'kithLink': 'kith://bot?t=' + LINKTOK,
+                   'share': 'Install ... join https://kithbot.app/b/c1/bi_1#t=' + LINKTOK}
+        elif m == 'revokeBotInvite':
+            out = {'revoked': body['inviteId'] == 'bi_1'}
+        elif m == 'revokeBot':
+            out = {'revoked': body['botId'] == 'bg_grok'}
+        elif m == 'decideBot':
+            out = {'bot': {'botId': body['botId'], 'name': 'Grok', 'state': 'active' if body['decision'] == 'allow' else 'denied'}}
+        elif m == 'setAutoAllowBots':
+            if body['personId'] != 'sam':
+                st, out = 400, {'error': '`%s` isn\'t someone you invited' % body['personId']}
+            else:
+                out = {'person': {'id': 'sam'}}
+        b = json.dumps(out).encode()
+        self.send_response(st); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+open(T + '/port', 'w').write(str(s.server_port))
+s.serve_forever()
+PY
+python3 "$T/stub.py" "$T" & SRV=$!
+for _ in $(seq 50); do [[ -s $T/port ]] && break; sleep 0.1; done
+PORT=$(cat "$T/port")
+
+K=$KERNEL/bin/kith
+A() { "$KERNEL/bin/kith-auth" "$@"; }
+fails=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1 [rc=${rc:-} out=${OUT:0:200}]"; fails=$((fails + 1)); fi; }
+export OUT=
+jv() { python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(__import__("sys").argv[1]))' "$1"; }
+: > "$T/all.out"
+run() { OUT=$("$K" "$@" 2>"$T/err"); rc=$?; printf '%s\n' "$OUT" >> "$T/all.out"; cat "$T/err" >> "$T/all.out"; }
+rec() { : > "$T/rec.jsonl"; }
+sent() { python3 -c "import json,sys; r=[json.loads(l) for l in open('$T/rec.jsonl') if json.loads(l)['m']=='$1']; print($2)"; }
+nothing() { [ ! -s "$T/rec.jsonl" ]; }
+
+# ---- people: kith-auth's, old rows (made with kith-auth person, no host store) included ----
+A person kai name=Kai owner >/dev/null 2>&1
+run people --json
+check "people --json, nobody invited: ok, empty list" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['people'])\")\" = \"(True, [])\" ]"
+run people
+check "people (text), nobody: says so, exit 0" "[ $rc = 0 ] && [[ \$OUT == *'nobody invited'* ]]"
+A person sam name=Sam >/dev/null 2>&1
+A person ola name=Ola >/dev/null 2>&1
+A member house sam preset=member >/dev/null 2>&1
+A member garden sam >/dev/null 2>&1
+A member house ola >/dev/null 2>&1
+A bot bot-s --of sam name=Scout >/dev/null 2>&1
+A member house bot-s >/dev/null 2>&1
+run people ls --json
+check "ls --json: invitees only (no owner, no bot at top level), ordered by id" "[ \"\$(jv \"[p['id'] for p in d['people']]\")\" = \"['ola', 'sam']\" ]"
+check "each row: id, name, revoked, revoked_at, agents with role" "[ \"\$(jv \"d['people'][1]['agents']\")\" = \"[{'agent': 'garden', 'role': 'guest'}, {'agent': 'house', 'role': 'member'}]\" ] && [ \"\$(jv \"(d['people'][1]['name'], d['people'][1]['revoked'], d['people'][1]['revoked_at'])\")\" = \"('Sam', False, None)\" ]"
+check "a bot is nested under its person with its agents" "[ \"\$(jv \"d['people'][1]['bots']\")\" = \"[{'id': 'bot-s', 'name': 'Scout', 'revoked': False, 'agents': ['house']}]\" ]"
+run people show sam --json
+check "show --json: one person" "[ $rc = 0 ] && [ \"\$(jv \"d['person']['id']\")\" = sam ]"
+run people show kai --json
+check "show of the owner: not an invitee, ok false, exit 1" "[ $rc = 1 ] && [ \"\$(jv \"d['ok']\")\" = False ]"
+run people show bot-s --json
+check "show of a bot: not listed at top level, exit 1" "[ $rc = 1 ]"
+run people
+check "text list: one line per person, agents with roles" "[ $rc = 0 ] && [[ \$OUT == *'sam'*'house=member'* && \$OUT == *'bots: bot-s'* ]]"
+A person sam --revoke >/dev/null 2>&1
+run people ls --json
+check "revoked person: revoked true, revoked_at set, rows kept as they were" "[ \"\$(jv \"(d['people'][1]['revoked'], d['people'][1]['revoked_at'] is not None, len(d['people'][1]['agents']))\")\" = '(True, True, 2)' ] && [ \"\$(jv \"d['people'][1]['bots'][0]['revoked']\")\" = True ]"
+A person sam --unrevoke >/dev/null 2>&1
+run people bogus
+check "unknown people verb: usage, exit 2, nothing acted" "[ $rc = 2 ]"
+run people ls extra --json
+check "people ls with a stray word: usage, ok false, exit 2" "[ $rc = 2 ] && [ \"\$(jv \"d['ok']\")\" = False ]"
+check "kith-auth people --json: still a list, with the additive agents field" "[ \"\$(A people --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(isinstance(d,list), \"agents\" in d[0])')\" = 'True True' ]"
+
+# ---- host down: nothing done, clear error ----
+rec
+export KITH_SERVE_PORT=1
+run invite add Pat --agent house --json
+check "invite add, host unreachable: ok false, error, exit 1" "[ $rc = 1 ] && [ \"\$(jv \"d['ok']\")\" = False ] && [[ \$(jv \"d['error']\") == *'not reachable'* ]]"
+check "  and nothing was written locally" "[ \"\$(A people --json | python3 -c 'import json,sys; print(sum(1 for p in json.load(sys.stdin) if p[\"id\"]==\"pat\"))')\" = 0 ]"
+run invite add Pat --agent house
+check "invite add (text), host unreachable: error on stderr, exit 1, no stdout" "[ $rc = 1 ] && [ -z \"\$OUT\" ] && grep -q 'not reachable' $T/err"
+run bot ls --json
+check "bot ls, host unreachable: ok false, exit 1" "[ $rc = 1 ] && [ \"\$(jv \"d['ok']\")\" = False ]"
+export KITH_SERVE_PORT=$PORT
+
+# ---- invite ----
+rec
+run invite add Sam --agent house=member --agent garden --json
+check "invite add: ok, inviteId, personId, link, expiresAt, nothing else" "[ $rc = 0 ] && [ \"\$(jv \"sorted(d)\")\" = \"['expiresAt', 'inviteId', 'link', 'ok', 'personId']\" ] && [[ \$(jv \"d['link']\") == *'$LINKTOK'* ]]"
+check "  request: name + agents map (default role guest)" "[ \"\$(sent createInvite 'r[-1][\"body\"]')\" = \"{'name': 'Sam', 'agents': {'house': 'member', 'garden': 'guest'}}\" ]"
+rec
+run invite add Sam
+check "invite add with no agent: usage, exit 2, host not asked" "[ $rc = 2 ] && nothing"
+run invite add --agent house=admin
+check "invite add with a bad role: exit 2, host not asked" "[ $rc = 2 ] && nothing"
+run invite add --agent house
+check "invite add with no name and no --person: exit 2" "[ $rc = 2 ] && nothing"
+run invite add --person sam --agent house=member --json
+check "invite add --person: body carries personId, not name" "[ $rc = 0 ] && [ \"\$(sent createInvite 'r[-1][\"body\"]')\" = \"{'personId': 'sam', 'agents': {'house': 'member'}}\" ]"
+run invite add Sam --agent house
+check "invite add (text): the link is printed for the owner" "[ $rc = 0 ] && [[ \$OUT == *'$LINKTOK'* ]]"
+run invite add Refused --agent house --json
+check "host refusal passes its text through: ok false, exit 1" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'cloud is off'* ]]"
+run invite
+check "bare invite does not act: usage, exit 2" "[ $rc = 2 ]"
+rec
+run invite ls --json
+check "invite ls --json: the invites, no tokenHash" "[ $rc = 0 ] && [ \"\$(jv \"d['invites'][0]['inviteId']\")\" = inv_1 ] && [ \"\$(jv \"'tokenHash' in d['invites'][0]\")\" = False ]"
+run invite ls
+check "invite ls (text): id, person, state, agents" "[ $rc = 0 ] && [[ \$OUT == 'inv_1  sam  open  house=member' ]]"
+run invite revoke inv_1 --json
+check "invite revoke: changed true" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['changed'], d['inviteId'])\")\" = \"(True, True, 'inv_1')\" ]"
+run invite revoke inv_9 --json
+check "invite revoke of one already gone: ok, changed false" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['changed'])\")\" = '(True, False)' ]"
+run invite revoke
+check "invite revoke without an id: exit 2" "[ $rc = 2 ]"
+check "invite never writes kith-auth itself" "[ \"\$(A people --json | python3 -c 'import json,sys; print(sorted(p[\"id\"] for p in json.load(sys.stdin)))')\" = \"['bot-s', 'kai', 'ola', 'sam']\" ]"
+
+# ---- bots ----
+run bot ls --json
+check "bot ls --json: the host's bots" "[ $rc = 0 ] && [ \"\$(jv \"d['bots'][0]['botId']\")\" = bg_grok ]"
+run bot ls
+check "bot ls (text)" "[ $rc = 0 ] && [[ \$OUT == 'bg_grok  Grok  pending  of sam  house' ]]"
+rec
+run bot invite Rex --agent house --agent garden --json
+check "bot invite: ok, ids, link; body is name + agents" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['botId'], d['inviteId'])\")\" = \"(True, 'bg_new', 'bi_1')\" ] && [[ \$(jv \"d['link']\") == *'$LINKTOK'* ]] && [ \"\$(sent createBotInvite 'r[-1][\"body\"]')\" = \"{'name': 'Rex', 'agents': ['house', 'garden']}\" ]"
+run bot invite Rex --bot-id bg_new --json
+check "bot invite --bot-id: a fresh link for that bot" "[ \"\$(sent createBotInvite 'r[-1][\"body\"]')\" = \"{'name': 'Rex', 'agents': [], 'botId': 'bg_new'}\" ]"
+run bot revoke-invite bi_1 --json
+check "bot revoke-invite: changed true" "[ \"\$(jv \"(d['ok'], d['changed'])\")\" = '(True, True)' ]"
+run bot revoke bg_grok --json
+check "bot revoke by id: changed true, body botId" "[ \"\$(jv \"(d['changed'], d['botId'])\")\" = \"(True, 'bg_grok')\" ] && [ \"\$(sent revokeBot 'r[-1][\"body\"]')\" = \"{'botId': 'bg_grok'}\" ]"
+run bot revoke bg_gone --json
+check "bot revoke of one already gone: ok, changed false" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['changed'])\")\" = '(True, False)' ]"
+run bot revoke Grok --json
+check "bot revoke by name resolves through the host's list" "[ \"\$(sent revokeBot 'r[-1][\"body\"]')\" = \"{'botId': 'bg_grok'}\" ]"
+run bot decide Grok allow --always --json
+check "bot decide allow --always: body decision + alwaysForOwner" "[ \"\$(jv \"(d['ok'], d['state'])\")\" = \"(True, 'active')\" ] && [ \"\$(sent decideBot 'r[-1][\"body\"]')\" = \"{'botId': 'bg_grok', 'decision': 'allow', 'alwaysForOwner': True}\" ]"
+run bot decide bg_grok deny --json
+check "bot decide deny: state denied" "[ \"\$(jv \"d['state']\")\" = denied ]"
+run bot decide bg_grok maybe --json
+check "bot decide with another word: usage, exit 2" "[ $rc = 2 ] && [ \"\$(jv \"d['ok']\")\" = False ]"
+run bot decide bg_grok deny --always --json
+check "--always with deny is refused (exit 2)" "[ $rc = 2 ]"
+run bot auto-allow sam on --json
+check "bot auto-allow on: body personId + on" "[ $rc = 0 ] && [ \"\$(sent setAutoAllowBots 'r[-1][\"body\"]')\" = \"{'personId': 'sam', 'on': True}\" ] && [ \"\$(jv \"d['autoAllow']\")\" = True ]"
+run bot auto-allow nobody off --json
+check "bot auto-allow of someone not invited: host's text, ok false, exit 1" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *\"isn't someone you invited\"* ]]"
+run bot auto-allow sam sideways
+check "bot auto-allow with another word: exit 2" "[ $rc = 2 ]"
+run bot
+check "bare bot does not act: exit 2" "[ $rc = 2 ]"
+run bot set bg_grok --turn-timeout 60 --json
+check "kith bot set is still there (setBotLimits, host's answer as is)" "[ $rc = 0 ] && [ \"\$(sent setBotLimits 'r[-1][\"body\"]')\" = \"{'botId': 'bg_grok', 'turnTimeoutS': 60}\" ]"
+
+# ---- secrets: the host token and a token hash appear nowhere; the link token only where the owner asked for a link ----
+check "the host token is in no output" "! grep -q '$HOSTTOK' $T/all.out"
+check "no token hash in any output" "! grep -q '$HASH' $T/all.out"
+run invite ls --json; run bot ls --json; run people --json; run bot revoke bg_grok --json; run invite revoke inv_1 --json
+check "no command but invite add / bot invite prints the link token" "! printf '%s' \"\$(cat $T/all.out | tail -n 5)\" | grep -q '$LINKTOK'"
+check "the dispatcher lists people and invite as subcommands" "grep -q 'SUBCOMMANDS=.* people invite ' '$KERNEL/bin/kith'"
+
+[[ $fails == 0 ]] && echo "all passed" || { echo "$fails failed"; exit 1; }

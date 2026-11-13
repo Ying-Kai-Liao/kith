@@ -187,6 +187,7 @@
         "autoName": "bool",
         "tasks": "bool?",
         "hqAgent": "string?",
+        "builtin": "bool?",
         "project": "string?",
         "person": "string?",
         "createdAt": "int",
@@ -205,10 +206,11 @@
         "fastModeIssue": "string?",
         "unread": "int",
         "lastMessage": "string?",
+        "lastSummary": "string?",
         "lastAt": "int",
         "botGuest": "BotGuestRef?"
       },
-      "mayOmit": ["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "project", "person", "botGuest"]
+      "mayOmit": ["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "builtin", "project", "person", "botGuest"]
     },
     "BotAnswer": { "fields": { "bot": "Bot" } },
 
@@ -340,7 +342,11 @@
         "share": "string"
       }
     },
-    "Revoked": { "doc": "revoked is false when it already was.", "fields": { "revoked": "bool" } },
+    "Revoked": {
+      "doc": "revoked is false when it already was. coreUpdated is false when the core's copy of the removed bot missed it (the host's removal stands); absent from an older host, and when nothing was sent to the core (a repeat remove, no kith-auth) or kith-auth itself failed. authUpdated is false when kith-auth failed to remove the person (auth.json may still hold it); absent otherwise.",
+      "fields": { "revoked": "bool", "coreUpdated": "bool?", "authUpdated": "bool?" },
+      "mayOmit": ["coreUpdated", "authUpdated"]
+    },
     "BotLimits": {
       "doc": "A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host.",
       "fields": { "ratePerHour": "int", "concurrent": "int", "turnTimeoutS": "int?", "wakeProfile": "string?" },
@@ -524,7 +530,7 @@
       "result": "BotAnswer"
     },
     "send": {
-      "doc": "A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10.",
+      "doc": "A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10. engine (claude or codex) and engineModel are the owner's, for a new thread of the built-in scratch agent: that quick chat's own engine and model; ignored anywhere else.",
       "who": ["member"],
       "params": {
         "botId": "string",
@@ -538,7 +544,9 @@
         "project": "string?",
         "folder": "string?",
         "clear": "bool?",
-        "budget": "int?"
+        "budget": "int?",
+        "engine": "string?",
+        "engineModel": "string?"
       },
       "result": "EntryAnswer"
     },

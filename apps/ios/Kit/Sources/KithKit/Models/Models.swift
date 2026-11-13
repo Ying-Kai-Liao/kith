@@ -76,6 +76,10 @@ public struct Bot: Codable, Identifiable, Hashable, Sendable {
     public var workingLanes: [WorkingLane]? = nil
     public var unread: Int
     public var lastMessage: String?
+    /// The newest thread summary this viewer may see; the row shows it when `rowShowsSummary` is on. Nil from an older host.
+    public var lastSummary: String?
+    /// The owner's setting: the row shows `lastSummary` instead of the last message.
+    public var rowShowsSummary: Bool = false
     public var lastAt: Int64
     /// Set only on the chat a bot from outside (Grok…) has with an agent: the apps tag it and show it read-only.
     /// Nil on every other row and from an older host.
@@ -515,6 +519,7 @@ public struct BotDraft: Codable, Hashable, Sendable {
     public var connectors: [String]?
     public var skills: [String]?
     public var computer: Bool?
+    public var rowShowsSummary: Bool?
     /// The bot's default hq project. Always sent on an update: nil clears it.
     public var project: String?
     /// Only sent when the user changes it: unset, the host picks by the bot's folder.
@@ -555,7 +560,16 @@ public struct BotDraft: Codable, Hashable, Sendable {
         connectors = bot.connectors
         skills = bot.skills
         computer = bot.computer
+        rowShowsSummary = bot.rowShowsSummary
         project = bot.project
+    }
+}
+
+public extension Bot {
+    /// What an idle row says: the thread summary when the owner turned that on and the viewer may see one, else the last message.
+    var rowLine: String? {
+        if rowShowsSummary, let s = lastSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
+        return lastMessage
     }
 }
 
@@ -611,6 +625,8 @@ extension Bot {
         workingLanes = try c.decodeIfPresent([WorkingLane].self, forKey: .workingLanes)
         unread = try c.decodeIfPresent(Int.self, forKey: .unread) ?? 0
         lastMessage = try c.decodeIfPresent(String.self, forKey: .lastMessage)
+        lastSummary = try c.decodeIfPresent(String.self, forKey: .lastSummary)
+        rowShowsSummary = try c.decodeIfPresent(Bool.self, forKey: .rowShowsSummary) ?? false
         lastAt = try c.decodeIfPresent(Int64.self, forKey: .lastAt) ?? createdAt
         botGuest = try? c.decodeIfPresent(BotGuestInfo.self, forKey: .botGuest)
     }

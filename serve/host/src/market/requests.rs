@@ -295,11 +295,16 @@ pub async fn finish(hub: &Arc<Hub>, args: &Value) -> Result<Value> {
     super::verify::verify(&hub.store, connector_id, hub.port).await?;
     let bot = text(request, "botId")?;
     let row = hub.store.bot(bot)?.ok_or_else(|| anyhow!("Unknown bot"))?;
-    let mut enabled = row.config.connectors;
-    if !enabled.iter().any(|s| s == connector_id) {
-        enabled.push(connector_id.to_owned());
+    // A kith agent's connectors are `kith <agent> connect`'s, not host config; its error goes to the card.
+    if let Some(agent) = row.config.hq_agent.as_deref() {
+        crate::api::kith_tools::connect(agent, connector_id).await?;
+    } else {
+        let mut enabled = row.config.connectors;
+        if !enabled.iter().any(|s| s == connector_id) {
+            enabled.push(connector_id.to_owned());
+        }
+        hub.update_bot(&json!({"id":bot,"connectors":enabled}))?;
     }
-    hub.update_bot(&json!({"id":bot,"connectors":enabled}))?;
     hub.send_cmd(bot, Cmd::RefreshTools)?;
     let note = format!(
         "[Connection setup completed: {}. Credentials were submitted securely and are not in this conversation. Continue the task.]",
@@ -373,7 +378,7 @@ mod tests {
         assert_eq!(first["entry"]["data"]["connectionRequest"]["status"], "ready");
         assert!(!first.to_string().contains("test-private-key"));
         assert!(hub.store.bot("bot").unwrap().unwrap().config.connectors.contains(&"fixture".to_owned()));
-        assert!(!hub.store.kv_read("connectors").unwrap().unwrap().contains("test-private-key"));
+        assert!(hub.store.kv_read("connectors").unwrap().is_none_or(|v| !v.contains("test-private-key")));
         finish(&hub, &submitted).await.unwrap();
         let history = hub.store.history("bot", i64::MAX, 100).unwrap();
         assert_eq!(history.iter().filter(|e| e.id == format!("connection-ack-{id}")).count(), 1);
@@ -411,7 +416,7 @@ mod tests {
         assert_eq!(listed["items"][0]["site"], "github.com");
         assert_eq!(listed["items"][0]["username"], "kevin");
         assert!(!listed.to_string().contains("hunter2-private"));
-        assert!(!hub.store.kv_read("logins").unwrap().unwrap().contains("hunter2-private"));
+        assert!(hub.store.kv_read("logins").unwrap().is_none_or(|v| !v.contains("hunter2-private")));
         let history = hub.store.history("bot", i64::MAX, 100).unwrap();
         let history = serde_json::to_string(&history).unwrap();
         assert!(history.contains("type_login") && !history.contains("hunter2-private"));

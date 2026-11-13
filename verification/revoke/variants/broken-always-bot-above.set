@@ -1,0 +1,6 @@
+\* a bot's always is written without its owner's entry (the held() cap dropped)
+CoreGate = TRUE
+Switched = TRUE
+AlwaysOn = TRUE
+RouterDoor = TRUE
+AlwaysBotNoCut = TRUE

@@ -2,8 +2,8 @@
 //!
 //! kith-permit's `denied` hook sends the call, with the classifier's reason, as a `requestPermission` that carries
 //! `autoMode`; only the owner's run token may (runauth.rs). The card shows the agent, the action and the reason, and offers
-//! Allow once, Always allow and Deny. A yes lets the run retry that one call (kith-permit records a one-shot for its
-//! `PreToolUse` hook). Always allow also remembers it for the agent through `kith allow` (`lib/kith_allowed.py` decides what may
+//! Allow once, Always allow and Deny. A yes lets the run retry that one call (the host keeps the yes in `runauth`'s token table;
+//! kith-permit's `PreToolUse` hook uses it up with `consumeOnce`). Always allow also remembers it for the agent through `kith allow` (`lib/kith_allowed.py` decides what may
 //! be remembered and as what: the host only asks, then saves what the card showed). What the card offered is kept on its
 //! entry (`autoAllow`), so the answer saves that and nothing else, as `edge` does for a guest's edge asks.
 //!

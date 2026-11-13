@@ -2,11 +2,14 @@
 """kith-pkg — versioned agent packages. Every run is pinned to a snapshot; edits become a new version for the next run.
 
   kith-pkg resolve <agent>|--all [--json]   the pinned package dir to run (makes the snapshot if the agent changed)
+  (--json on versions, history, pin, unpin, restore, install --yes, share, deps, update, push, commit: one JSON object
+   on stdout, or {"ok": false, "error": ...} and a non-zero exit; the progress text is silenced)
   kith-pkg versions <agent>                 versions on disk, newest first (marks current, good, pinned)
   kith-pkg pin <agent> [VERSION]            run this version until unpinned (default: the previous good one)
   kith-pkg unpin <agent>                    back to following the latest edits
   kith-pkg check <agent>                    validate the working copy without snapshotting it
-  kith-pkg set-harness <agent> <harness> [--model M]
+  kith-pkg set-harness <agent> <harness> [--model M] [--json]
+  kith-pkg set-field <agent> model|effort <value|default> [--json]
                                           run the agent on another harness (claude, codex, ...): writes harness: in
                                           agent.md and drops its model (a model of the old harness) unless --model
                                           gives one; committed like any edit (what kith <agent> set harness runs)
@@ -24,6 +27,9 @@
 History (each agent is its own git repo; a version that passes checks is committed there automatically):
   kith-pkg install <github-link> [--as NAME] [--yes]  clone an agent (owner/repo, a github.com URL, .../tree/<ref>/<path>),
                                           show what it would do here and ask before keeping it (--yes: no question)
+  kith-pkg install <github-link> [--as NAME] --preview [--json]
+                                          only show what it would do here (permissions, services, programs, skills);
+                                          nothing is kept. With --yes --json: install, print {ok, name, path, version}
   kith-pkg install --saved                  install every agent <state>/agents.json lists that isn't here (a new Mac)
   kith-pkg save                             write <state>/agents.json: each installed agent and its GitHub link
   kith-pkg update <agent>|--all             pull the agent's upstream (fast-forward only; never touches local edits)
@@ -33,9 +39,11 @@ History (each agent is its own git repo; a version that passes checks is committ
   kith-pkg restore <agent> <commit>         make the package what it was at <commit>, as a new commit (undo with
                                           another restore); the next run uses it
   kith-pkg market [WORDS] [--new]          agents people shared publicly, most starred first (no GitHub login
-                                          needed): pick any by number to install; --new hides the ones you have
+                                          needed): pick any by number to install; --new hides the ones you have;
+                                          --json: the list as data (repo, name, description, stars, updated, url,
+                                          topics, installed, installed_as), no picker
   kith-pkg search [WORDS] [--mine]          agents on GitHub (repos tagged kith-agent, or the older hq-agent): yours, private ones included, and
-                                          public ones from anyone; --mine for yours only
+                                          public ones from anyone; --mine for yours only; --json: the list as data
   kith-pkg share <agent> [--public]         put the agent on GitHub as <you>/kith-agent-<name> (tagged kith-agent), private unless --public;
                                           --public refuses while the package or its history has personal details
   kith-pkg share <agent> --public --fresh [--repo NAME]
@@ -62,7 +70,10 @@ adapter fill {{KITH}} repo, {{AGENTS}} the agents folder, {{PACKAGE}} the agent'
 writes learned skills), {{AGENT}} name, {{AGENT_DIR}} the pinned package, {{HOME_DIR}} the live agent folder,
 {{HOME_REAL}} that folder with symlinks resolved (for permission rules), {{STATE}} the state folder, {{USER_HOME}} $HOME at run time, so a snapshot doesn't depend on the path it was made through. .home names the live agent folder.
 """
+import contextlib
 import hashlib
+import datetime
+import io
 import json
 import os
 import re
@@ -80,12 +91,15 @@ KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 from kith_paths import paths  # noqa: E402  the one place that knows where kith's folders are
 import kith_settings  # noqa: E402
+import kith_accounts  # noqa: E402
+import kith_tombstone  # noqa: E402
 # The state folder and the agents folder, <home>/state and <home>/agents (lib/kith_paths.py). Each agent's role/ is a git
 # checkout (or a symlink into one, for an agent that lives in a folder of a bigger repo).
 STATE_ROOT, AGENTS = paths()['KITH_STATE'], paths()['KITH_AGENTS']
 # Snapshots: ~/.kith/store (this Mac's, rebuildable: every good version is also in the agent's repo). On the agents'
 # disk each is an APFS clone; on another disk, unchanged files are hard links to the previous snapshot's.
 STORE = paths()['KITH_STORE']
+SERVICES = KITH / 'services'                                 # what a service is: kernel/services/<name>.json
 STATE = ('memory', 'data')                                   # live state, never snapshotted
 STATE_NESTED = set()                                         # learned skills are package: they version with it
 FORMAT = '2'                                                 # bump when snapshot contents change (e.g. .home)
@@ -96,11 +110,29 @@ KEEP = 2                                                     # newest versions k
 
 
 EINTR_TRIES, EINTR_SLEEP = 4, 0.25
+GITHUB = os.environ.get('KITH_GITHUB_GIT', 'https://github.com').rstrip('/')   # tests point it at a local folder
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 
 
+QUIET = False   # versions/history/pin/.../update --json: stdout is silenced, the one answer goes through emit()
+QUIET_CMDS = ('versions', 'history', 'pin', 'unpin', 'restore', 'share', 'deps', 'update', 'push', 'commit')
+JSON_ERRORS = False   # market/search/install --json: a failure is one {"ok":false,"error":..} object on stdout
+
+
+def emit(obj):
+    """The one JSON object a --json run answers with (stdout itself is silenced for it: see QUIET)."""
+    print(json.dumps(obj), file=sys.__stdout__)
+
+
+def iso(epoch):
+    return datetime.datetime.fromtimestamp(epoch).astimezone().isoformat(timespec='seconds')
+
+
 def die(msg, code=1):
-    print(f'kith-pkg: {msg}', file=sys.stderr)
+    if JSON_ERRORS:
+        print(json.dumps({'ok': False, 'error': msg}), file=sys.__stdout__)   # not the redirected progress stream
+    else:
+        print(f'kith-pkg: {msg}', file=sys.stderr)
     sys.exit(code)
 
 
@@ -274,22 +306,25 @@ def requires(home):
     return out
 
 
+def program_present(name):
+    if name.startswith(('/', '~')):
+        return Path(os.path.expanduser(name)).exists()
+    return bool(shutil.which(name))
+
+
 def missing(home):
-    def present(name):
-        if name.startswith(('/', '~')):
-            return Path(os.path.expanduser(name)).exists()
-        return bool(shutil.which(name))
-    return [r for r in requires(home) if not present(r[0])]
+    return [r for r in requires(home) if not program_present(r[0])]
 
 
 def install_missing(name, miss):
     """Run each missing program's install command, showing its output; True when all are there afterwards."""
+    out = subprocess.DEVNULL if QUIET else None   # --json: the answer is the only thing on stdout
     for prog, cmd, _ in miss:
         if cmd.startswith('brew ') and not shutil.which('brew'):
             print(f'  {prog}: needs Homebrew first (https://brew.sh), then: kith deps {name} --install')
             continue
         print(f'  $ {cmd}')
-        subprocess.run(cmd, shell=True)
+        subprocess.run(cmd, shell=True, stdout=out, stderr=out)
     left = missing(agent_home(name))
     for prog, cmd, _ in left:
         print(f'  ✗ {prog} still missing: {cmd}')
@@ -305,8 +340,17 @@ def show_missing(name, miss):
 
 def cmd_deps(names, install):
     short = False
+    report = []
     for name in names:
         miss = missing(agent_home(name))
+        if QUIET:
+            if install and miss:
+                install_missing(name, miss)
+                miss = missing(agent_home(name))
+            report.append({'agent': name, 'requires': len(requires(agent_home(name))),
+                           'missing': [{'program': p, 'install': c, 'why': w} for p, c, w in miss]})
+            short = short or bool(miss)
+            continue
         if not miss:
             if len(names) == 1:
                 print(f'{name}: has everything it runs' if requires(agent_home(name)) else f'{name}: requires nothing')
@@ -314,6 +358,12 @@ def cmd_deps(names, install):
         print(name)
         show_missing(name, miss)
         short = not install_missing(name, miss) if install else True
+    if QUIET:
+        if short and install:   # asked to install and something is still absent: that is a failure
+            emit({'ok': False, 'error': 'some programs are still missing', 'agents': report})
+            sys.exit(1)
+        emit({'ok': True, 'agents': report})   # without --install it only reports; what is missing is data
+        sys.exit(0)
     sys.exit(1 if short else 0)
 
 
@@ -379,9 +429,10 @@ def link_same(src, old, target):
         return False
 
 
-def pointers(agent):
+def pointers(agent, create=True):
     d = STORE / '.pointers'
-    d.mkdir(parents=True, exist_ok=True)
+    if create:   # a read (kith ls, kith doctor) leaves no folder behind
+        d.mkdir(parents=True, exist_ok=True)
     return d / f'{agent}.good', d / f'{agent}.pin'
 
 
@@ -437,7 +488,7 @@ def fetch(home, force=False):
             git = lambda *a: subprocess.run(['git', '-C', tmp, *a], env=env, capture_output=True, text=True,
                                             timeout=300)
             whole = any(p == '.' for _, p in items)     # a repo that is itself the skill
-            steps = [('init', '-q'), ('remote', 'add', 'origin', f'https://github.com/{repo}.git'),
+            steps = [('init', '-q'), ('remote', 'add', 'origin', f'{GITHUB}/{repo}.git'),
                      *([] if whole else [('sparse-checkout', 'set', '--no-cone', *[f'/{p}/' for _, p in items])]),
                      ('fetch', '-q', '--depth', '1', '--filter=blob:none', 'origin', ref),
                      ('checkout', '-q', 'FETCH_HEAD')]
@@ -547,13 +598,18 @@ def cmd_versions(agent):
     agent_home(agent)
     good, pin = pointers(agent)
     current = fingerprint(agent_home(agent))
+    rows = []
     for d in all_versions(agent):
         v = d.name.split('@', 1)[1]
         tags = [t for t, on in (('latest', v == current), ('good', v == read(good)), ('pinned', v == read(pin)),
                                 ('running', running(d))) if on]
         when = time.strftime('%Y-%m-%d %H:%M', time.localtime(made(d)))
         print(f'{v}  {when}  {" ".join(tags)}')
-    if not (STORE / f'{agent}@{current}').is_dir():
+        rows.append({'version': v, 'made': iso(made(d)), 'tags': tags})
+    unreleased = not (STORE / f'{agent}@{current}').is_dir()
+    if QUIET:
+        emit({'agent': agent, 'current': current, 'unreleased': unreleased, 'versions': rows})
+    if unreleased:
         print(f'{current}  (unreleased edits; the next run checks and snapshots them)')
 
 
@@ -570,8 +626,11 @@ def cmd_pin(agent, version):
     if not (STORE / f'{agent}@{version}').is_dir():
         die(f'no version {version} of {agent} here (kith-pkg versions {agent}); older ones are in its history: '
             f'kith-pkg history {agent}, then kith-pkg restore {agent} <commit>')
+    previous = read(pin) or None
     write_atomic(pin, version)
     print(f'{agent} pinned to {version}; new runs use it, running ones keep theirs')
+    if QUIET:
+        emit({'ok': True, 'agent': agent, 'version': version, 'previous': previous, 'changed': previous != version})
 
 
 def private_patterns():
@@ -622,7 +681,52 @@ def harness_names():
     return ('claude',)
 
 
-def cmd_set_harness(agent, harness, model=None):
+def set_result(agent, setting, value, previous, changed, as_json, text, **extra):
+    if as_json:
+        print(json.dumps({'agent': agent, 'setting': setting, 'value': value, 'previous': previous, 'changed': changed,
+                          **extra}))
+    else:
+        print(text)
+
+
+def cmd_set_field(agent, field, value, as_json=False):
+    """Write model: or effort: in agent.md's frontmatter ('default' or '' removes the line). No empty commit when it
+    already says that."""
+    value = '' if value == 'default' else value
+    if field == 'effort' and value and value not in EFFORTS:
+        die(f"effort {value!r} is not one of {', '.join(EFFORTS)} (default removes the line)", 2)
+    if field == 'model' and value and not re.fullmatch(r'[\w.:\[\]/-]+', value):
+        die(f'not a model name: {value!r}', 2)
+    home = agent_home(agent)
+    f = home / 'agent.md'
+    text = f.read_text()
+    m = re.match(r'^---\n(.*?)\n---\n?', text, re.S)
+    if not m:
+        die(f'{f}: no frontmatter')
+    fields = dict(re.findall(r'^([A-Za-z_-]+):\s*(.*)$', m.group(1), re.M))
+    harness = fields.get('harness') or 'claude'
+    harness = 'claude' if harness == 'claude-code' else harness
+    if field == 'model' and value and harness != 'claude' and kith_accounts.is_claude_model(value):
+        die(f"{value} is a Claude model and {agent} runs on {harness}; pick one of {harness}'s, or change the harness "
+            f'first: kith {agent} set harness claude --model {value}', 2)
+    old = fields.get(field, '')
+    keep = [x for x in m.group(1).split('\n') if not re.match(rf'^{field}:', x)]
+    if value:
+        at = len(keep)   # after the last of name/description/harness (and model, for effort), where agents keep it
+        for i, x in enumerate(keep):
+            if re.match(r'^(description|display_name|name|harness' + ('|model' if field == 'effort' else '') + '):', x):
+                at = i + 1
+        keep.insert(at, f'{field}: {value}')
+    new = '---\n' + '\n'.join(keep) + '\n---\n' + text[m.end():]
+    if new != text:
+        f.write_text(new)
+        commit(home, f'{agent}: {field} ' + (value or 'default'))
+    set_result(agent, field, value or None, old or None, new != text, as_json,
+               f'{agent}: {field} ' + (f'is {value}' if value else 'back to the default')
+               + (' (unchanged)' if new == text else '. The next run uses it.'))
+
+
+def cmd_set_harness(agent, harness, model=None, as_json=False):
     """Write harness: (and model:) in agent.md's frontmatter. A model always names a model of one harness, so changing
     the harness drops it unless a new one is given; the harness's own default answers then."""
     harness = 'claude' if harness == 'claude-code' else harness
@@ -631,7 +735,11 @@ def cmd_set_harness(agent, harness, model=None):
         die(f"unknown harness '{harness}'; one of: {', '.join(names)}", 2)
     if model is not None and not re.fullmatch(r'[\w.:\[\]/-]+', model):
         die(f"not a model name: {model!r}", 2)
+    if model and harness != 'claude' and kith_accounts.is_claude_model(model):
+        die(f"{model} is a Claude model and {harness} is not Claude: pick one of {harness}'s", 2)
     home = agent_home(agent)
+    if builtin(home):
+        die(f'{agent} is built in: its engine and model are picked per chat (kith {agent} -H HARNESS -m MODEL)')
     f = home / 'agent.md'
     text = f.read_text()
     m = re.match(r'^---\n(.*?)\n---\n?', text, re.S)
@@ -651,14 +759,17 @@ def cmd_set_harness(agent, harness, model=None):
     add = ([f'harness: {harness}'] if harness != 'claude' else []) + ([f'model: {new_model}'] if new_model else [])
     keep[at:at] = add
     new = '---\n' + '\n'.join(keep) + '\n---\n' + text[m.end():]
+    extra = {'model': new_model or None, 'previous_model': old_model or None}
     if new == text:
-        print(f'{agent}: already on {harness}' + (f' ({new_model})' if new_model else ''))
+        set_result(agent, 'harness', harness, old, False, as_json,
+                   f'{agent}: already on {harness}' + (f' ({new_model})' if new_model else ''), **extra)
         return
     f.write_text(new)
     commit(home, f'{agent}: run on {harness}' + (f' ({new_model})' if new_model else ''))
     dropped = f'; dropped model {old_model} (a {old} model)' if old_model and not new_model else ''
-    print(f'{agent}: runs on {harness}' + (f', model {new_model}' if new_model else f", that harness's default model")
-          + dropped + '. The next run uses it.')
+    set_result(agent, 'harness', harness, old, True, as_json,
+               f'{agent}: runs on {harness}' + (f', model {new_model}' if new_model else f", that harness's default model")
+               + dropped + '. The next run uses it.', **extra)
 
 
 def cmd_promote(agent, skill):
@@ -693,6 +804,12 @@ def git(home, *args, check=False, timeout=120):
     if check and r.returncode:
         die(f'git {args[0]} in {home}: {(r.stderr or r.stdout).strip()}')
     return r
+
+
+def builtin(home):
+    """True for an agent that ships with kith (kernel/agents/<name>, e.g. scratch): no repo of its own, never backed up
+    or shared. Keyed on where the agent resolves, so a user's own agent of the same name is an ordinary agent."""
+    return Path(home).parent == KITH / 'agents'
 
 
 def owned(home):
@@ -734,57 +851,169 @@ def parse_link(link):
     return f'https://github.com/{owner}/{repo}.git', ref or at or '', path, name
 
 
-def review(home):
-    """What an agent would do on this Mac, from its own files: shown before installing someone's agent."""
+def review_data(home):
+    """What an agent would do on this Mac, from its own files, as data: the install question's text (review) and
+    `install --preview --json` are both made from this, so they never drift."""
     fields, _ = frontmatter((home / 'agent.md').read_text())
-    lines = [f'  {fields.get("description", "(no description)")}']
-    if fields.get('model') or fields.get('effort'):
-        lines.append(f'  model {fields.get("model", "yours")}, effort {fields.get("effort", "yours")}')
+    warnings = []
     try:
         settings = json.loads((home / 'settings.json').read_text()) if (home / 'settings.json').exists() else {}
     except ValueError:
         settings = {}
+        warnings.append('settings.json is not valid JSON: ignored')
     perms = settings.get('permissions', {})
-    if perms.get('defaultMode'):
-        lines.append(f'  suggested permission mode: {perms["defaultMode"]}'
-                     + ('  ← runs every tool without asking' if perms['defaultMode'] == 'bypassPermissions' else ''))
-    allow = perms.get('allow', [])
-    if allow:
-        lines.append(f'  allowed without asking: {", ".join(allow[:8])}' + (' …' if len(allow) > 8 else ''))
-    hooks = [h.get('command', '') for event in settings.get('hooks', {}).values() for m in event
-             for h in m.get('hooks', [])]
-    if hooks:
-        lines.append(f'  hooks (commands that run on their own): {"; ".join(hooks[:4])}')
     try:
         mcp = json.loads((home / 'mcp.json').read_text()).get('mcpServers', {}) if (home / 'mcp.json').exists() else {}
     except ValueError:
         mcp = {}
-    if mcp:
-        lines.append('  MCP servers it starts: ' + ', '.join(f'{k} ({v.get("command", v.get("url", "?"))})'
-                                                         for k, v in mcp.items()))
-    tools = sorted(str(f.relative_to(home)) for f in (home / 'tools').rglob('*')
-                   if f.is_file() and '__pycache__' not in f.parts) if (home / 'tools').is_dir() else []
-    if tools:
-        lines.append(f'  its tools ({len(tools)}): {", ".join(tools[:6])}' + (' …' if len(tools) > 6 else ''))
-    skills = sorted(d.name for d in (home / 'skills').iterdir() if d.is_dir()) if (home / 'skills').is_dir() else []
-    if skills:
-        lines.append(f'  skills ({len(skills)}): {", ".join(skills[:10])}' + (' …' if len(skills) > 10 else ''))
+        warnings.append('mcp.json is not valid JSON: ignored')
     try:
         linked = external_skills(home)
-    except ValueError:
+    except ValueError as e:
         linked = {}
-    if linked:
-        lines.append('  skills fetched from other repos: ' + ', '.join(f'{k} ({v["repo"]})' for k, v in linked.items()))
-    progs = requires(home)
-    if progs:
-        lines.append(f'  programs it runs: {", ".join(p for p, _, _ in progs)}'
-                     + (f' (missing here: {", ".join(p for p, _, _ in missing(home))})' if missing(home) else ''))
+        warnings.append(str(e))
     svc = needs(home)
-    if svc:
-        own = [x for x in svc if (home / 'services' / f'{x}.json').is_file()]
-        lines.append(f'  asks for services: {", ".join(svc)}' + (f' (it defines {", ".join(own)})' if own else '')
+    gone = {r[0] for r in missing(home)}
+    return {
+        'description': fields.get('description'),
+        'model': fields.get('model'), 'effort': fields.get('effort'), 'harness': fields.get('harness'),
+        'permission_mode': perms.get('defaultMode'),
+        'allow': perms.get('allow', []),
+        'hooks': [h.get('command', '') for event in settings.get('hooks', {}).values() for m in event
+                  for h in m.get('hooks', [])],
+        'mcp': {k: v.get('command', v.get('url', '?')) for k, v in mcp.items()},
+        'tools': sorted(str(f.relative_to(home)) for f in (home / 'tools').rglob('*')
+                        if f.is_file() and '__pycache__' not in f.parts) if (home / 'tools').is_dir() else [],
+        'skills': sorted(d.name for d in (home / 'skills').iterdir() if d.is_dir()) if (home / 'skills').is_dir() else [],
+        'linked_skills': {k: v['repo'] for k, v in linked.items()},
+        'requires': [{'program': p, 'install': c, 'why': w, 'present': p not in gone} for p, c, w in requires(home)],
+        'needs': svc,
+        'own_services': [x for x in svc if (home / 'services' / f'{x}.json').is_file()],
+        'warnings': warnings,
+    }
+
+
+def review(home):
+    """The same, as the text shown before installing someone's agent."""
+    d = review_data(home)
+    lines = [f'  {d["description"] or "(no description)"}']
+    if d['model'] or d['effort']:
+        lines.append(f'  model {d["model"] or "yours"}, effort {d["effort"] or "yours"}')
+    if d['permission_mode']:
+        lines.append(f'  suggested permission mode: {d["permission_mode"]}'
+                     + ('  ← runs every tool without asking' if d['permission_mode'] == 'bypassPermissions' else ''))
+    allow = d['allow']
+    if allow:
+        lines.append(f'  allowed without asking: {", ".join(allow[:8])}' + (' …' if len(allow) > 8 else ''))
+    if d['hooks']:
+        lines.append(f'  hooks (commands that run on their own): {"; ".join(d["hooks"][:4])}')
+    if d['mcp']:
+        lines.append('  MCP servers it starts: ' + ', '.join(f'{k} ({v})' for k, v in d['mcp'].items()))
+    tools = d['tools']
+    if tools:
+        lines.append(f'  its tools ({len(tools)}): {", ".join(tools[:6])}' + (' …' if len(tools) > 6 else ''))
+    skills = d['skills']
+    if skills:
+        lines.append(f'  skills ({len(skills)}): {", ".join(skills[:10])}' + (' …' if len(skills) > 10 else ''))
+    if d['linked_skills']:
+        lines.append('  skills fetched from other repos: ' + ', '.join(f'{k} ({v})' for k, v in d['linked_skills'].items()))
+    progs = d['requires']
+    if progs:
+        gone = [p['program'] for p in progs if not p['present']]
+        lines.append(f'  programs it runs: {", ".join(p["program"] for p in progs)}'
+                     + (f' (missing here: {", ".join(gone)})' if gone else ''))
+    if d['needs']:
+        own = d['own_services']
+        lines.append(f'  asks for services: {", ".join(d["needs"])}' + (f' (it defines {", ".join(own)})' if own else '')
                      + ': nothing is shared until you grant it')
     return '\n'.join(lines)
+
+
+def auth_tables():
+    """(profiles, grants) from auth.json, read only; empty when there is none."""
+    f = Path(os.environ.get('KITH_AUTH') or paths()['KITH_SECRETS'] / 'auth.json')
+    try:
+        auth = kith_tombstone.load_json(f)
+    except kith_tombstone.Tombstoned:
+        raise   # authority moved to the core: not "no profiles, nothing granted"
+    except (OSError, ValueError):
+        auth = {}
+    return auth.get('profiles') or {}, auth.get('grants') or {}
+
+
+def service_status(svc, home, name):
+    """Per service an agent asks for: does this Mac know the service (kernel/services/, or the agent's own), is there a
+    profile (an account) to grant, and is it granted to this name already."""
+    profiles, grants = auth_tables()
+    out = []
+    for s in svc:
+        mine = sorted(p for p in profiles if p.startswith(f'{s}/'))
+        own = (home / 'services' / f'{s}.json').is_file()
+        out.append({'service': s, 'known': own or (SERVICES / f'{s}.json').is_file(), 'defined_by_agent': own,
+                    'profiles': mine, 'has_profile': bool(mine), 'granted': s in (grants.get(name) or {})})
+    return out
+
+
+def check_name(name):
+    if name == 'kith':   # the command's own name: `kith kith` can't be an agent
+        die("an agent can't be called 'kith' (it is the command's own name); pick another with --as NAME", 2)
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', name):
+        die(f'agent name {name!r}: use lowercase letters, digits and dashes (--as NAME)', 2)
+
+
+def free_name(name):
+    have = installed()
+    n = 2
+    while f'{name}-{n}' in have:
+        n += 1
+    return f'{name}-{n}'
+
+
+def clone_checkout(link, url, ref, dest):
+    """git clone url into dest (checking out ref); a clear die() when it can't (private without a login, no such repo)."""
+    r = git(dest.parent, 'clone', '-q', url, str(dest), timeout=600)
+    if r.returncode == 0 and ref:
+        r = git(dest, 'checkout', '-q', ref)
+    if r.returncode:
+        err = (r.stderr or r.stdout).strip()
+        if re.search(r'Authentication failed|could not read Username|terminal prompts disabled|not found|access', err, re.I):
+            die(f'cannot read {link}: the repo does not exist or is private (gh auth login, then try again)')
+        die(f'cannot clone {link}: {err.splitlines()[-1] if err else "git clone failed"}')
+
+
+def preview(link, name=None):
+    """install, minus keeping anything: clone into a temporary folder, say what it would do here, remove the folder."""
+    url, ref, path, default = parse_link(link)
+    name = name or default
+    check_name(name)
+    tmp = Path(tempfile.mkdtemp(prefix='kith-preview-'))
+    try:
+        clone_checkout(link, url, ref, tmp / 'repo')
+        home = tmp / 'repo' / path if path else tmp / 'repo'
+        if not (home / 'agent.md').is_file():
+            die(f'{link} is not a kith agent: no agent.md '
+                + (f'in {path}/' if path else 'at its root; for an agent in a folder, link .../tree/<ref>/<folder>'))
+        d = review_data(home)
+        taken = name in installed()
+        suggested = free_name(name) if taken else None
+        warnings = d['warnings']
+        if d['permission_mode'] == 'bypassPermissions':
+            warnings.append('suggests permission mode bypassPermissions: runs every tool without asking')
+        if taken:
+            warnings.append(f"there is already an agent '{name}': install with --as {suggested}")
+        return {'ok': True, 'repo': url.removeprefix('https://github.com/').removesuffix('.git'),
+                'ref': ref or None, 'path': path or None,
+                'commit': git(home, 'rev-parse', 'HEAD').stdout.strip() or None,
+                'name': name, 'name_taken': taken, 'suggested_name': suggested,
+                'description': d['description'] or '',
+                'harness': d['harness'], 'model': d['model'], 'effort': d['effort'],
+                'needs': service_status(d['needs'], home, name),
+                'requires': d['requires'],
+                'skills': {'own': d['skills'], 'linked': d['linked_skills']},
+                'permissions': {k: d[k] for k in ('permission_mode', 'allow', 'hooks', 'mcp', 'tools')},
+                'warnings': warnings, '_text': review(home)}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def choose_mode(name, home):
@@ -814,13 +1043,20 @@ def choose_mode(name, home):
 def cmd_install(link, name=None, ask=False):
     url, ref, path, default = parse_link(link)
     name = name or default
-    if name == 'kith':   # the command's own name: `kith kith` can't be an agent
-        die("an agent can't be called 'kith' (it is the command's own name); pick another with --as NAME", 2)
-    if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', name):
-        die(f'agent name {name!r}: use lowercase letters, digits and dashes (--as NAME)', 2)
+    check_name(name)
     if name in installed():
         die(f"there is already an agent '{name}' at {installed()[name]}")
     AGENTS.mkdir(parents=True, exist_ok=True)
+    fresh = not (AGENTS / name).exists()   # a failed install leaves no empty folder behind
+    try:
+        return install_checkout(link, url, ref, path, name, ask)
+    except SystemExit:
+        if fresh and (AGENTS / name).is_dir() and not any((AGENTS / name).iterdir()):
+            (AGENTS / name).rmdir()
+        raise
+
+
+def install_checkout(link, url, ref, path, name, ask):
     if path:   # an agent in a folder of a bigger repo: clone the repo once, link the folder in
         slug = re.sub(r'\W+', '-', url.split('github.com/')[-1].removesuffix('.git'))
         checkout = AGENTS / '.repos' / slug
@@ -834,10 +1070,8 @@ def cmd_install(link, name=None, ask=False):
         (AGENTS / name / 'role').symlink_to(checkout / path)
     else:
         (AGENTS / name).mkdir(exist_ok=True)
-        git(AGENTS / name, 'clone', '-q', url, 'role', check=True, timeout=600)
         home = AGENTS / name / 'role'
-        if ref:
-            git(home, 'checkout', '-q', ref, check=True)
+        clone_checkout(link, url, ref, home)
         if not (home / 'agent.md').is_file():
             shutil.rmtree(home)
             die(f'{link} has no agent.md at its root; for an agent in a folder, link .../tree/<ref>/<folder>')
@@ -852,7 +1086,7 @@ def cmd_install(link, name=None, ask=False):
             if not any(state.iterdir()):
                 state.rmdir()
             print(f'{name}: not installed')
-            return
+            return None
         choose_mode(name, home)
     for d in ('memory/projects', 'memory/sessions'):
         (state / d).mkdir(parents=True, exist_ok=True)
@@ -872,6 +1106,7 @@ def cmd_install(link, name=None, ask=False):
             install_missing(name, miss)
         else:
             print(f'  later: kith deps {name} --install')
+    return name, home
 
 
 def upstream(home):
@@ -880,31 +1115,43 @@ def upstream(home):
 
 
 def cmd_update(agent):
+    """Pulls the agent; returns {agent, changed, remote, head, ...} (--json answers with it)."""
     home = agent_home(agent)
     if not owned(home):
         die(f'{agent} is not in the agents folder ({AGENTS}); nothing to update from')
     remote = upstream(home)
     if not remote:
         print(f'{agent}: no remote, nothing to update')
-        return
+        return {'agent': agent, 'changed': False, 'remote': None, 'note': 'no remote, nothing to update',
+                'head': git(home, 'rev-parse', 'HEAD').stdout.strip() or None}
+    before = git(home, 'rev-parse', 'HEAD').stdout.strip()
     commit(home, f'{agent}: local edits before update')
     r = git(home, 'pull', '-q', '--ff-only', remote, git(home, 'branch', '--show-current').stdout.strip() or 'HEAD')
     if r.returncode:
         die(f'{agent}: could not fast-forward from {remote} (your edits and theirs differ: merge in {repo_root(home)}): '
             f'{r.stderr.strip()}')
     print(f'{agent}: {git(home, "log", "-1", "--format=%h %s").stdout.strip()}')
+    head = git(home, 'rev-parse', 'HEAD').stdout.strip()
+    return {'agent': agent, 'changed': head != before, 'remote': remote, 'head': head or None,
+            'subject': git(home, 'log', '-1', '--format=%s').stdout.strip()}
 
 
-def cmd_push(agent):
+def cmd_push(agent, info=None):
+    """info (a dict) gets {agent, committed, pushed, remote, note/error} for --json."""
+    info = {} if info is None else info
+    info['agent'] = agent
     home = agent_home(agent)
     if not owned(home):
+        info.update(pushed=False, remote=None, note='not in the agents folder')
         return
-    commit(home, f'{agent}: edits')
+    info['committed'] = commit(home, f'{agent}: edits')
     if 'origin' not in git(home, 'remote').stdout.split():
         print(f'{agent}: no remote (kith-pkg share {agent} puts it on GitHub)')
+        info.update(pushed=False, remote=None, note='no remote')
         return
     r = git(home, 'push', '-q', '-u', 'origin', 'HEAD')
     print(f'{agent}: ' + ('pushed' if r.returncode == 0 else f'push failed: {r.stderr.strip()}'))
+    info.update(pushed=r.returncode == 0, remote='origin', error=r.stderr.strip() or 'push failed' if r.returncode else None)
     return r.returncode == 0
 
 
@@ -913,6 +1160,9 @@ def cmd_history(agent, n=20):
     if not owned(home):
         die(f'{agent} has no history of its own (not a git repo in {AGENTS})')
     print(git(home, 'log', f'-{n}', '--date=format:%Y-%m-%d %H:%M', '--format=%h  %ad  %s', '--', '.').stdout.rstrip())
+    if QUIET:
+        log = git(home, 'log', f'-{n}', '--format=%H%x1f%aI%x1f%s', '--', '.').stdout.splitlines()
+        emit({'agent': agent, 'commits': [dict(zip(('sha', 'date', 'subject'), line.split('\x1f', 2))) for line in log]})
 
 
 def cmd_restore(agent, ref):
@@ -926,10 +1176,15 @@ def cmd_restore(agent, ref):
     git(home, 'restore', f'--source={full}', '--staged', '--worktree', '--', '.', check=True)
     if not commit(home, f'{agent}: restore to {full[:9]}'):
         print(f'{agent} is already at {full[:9]}')
+        if QUIET:
+            emit({'ok': True, 'agent': agent, 'ref': ref, 'restored_to': full, 'changed': False, 'problems': []})
         return
     bad = problems(home)
     print(f'{agent} restored to {full[:9]} as a new commit; new runs use it, running ones keep theirs'
           + (f'\n  checks fail, so the last good version keeps running: {"; ".join(bad)}' if bad else ''))
+    if QUIET:
+        emit({'ok': True, 'agent': agent, 'ref': ref, 'restored_to': full, 'changed': True,
+              'head': git(home, 'rev-parse', 'HEAD').stdout.strip(), 'problems': bad})
 
 
 def history_problems(home):
@@ -976,10 +1231,16 @@ def ensure_readme(home, agent, link):
                f'<profile>`): {", ".join(svc)}.\n' if svc else '')))
 
 
+def refuse_builtin(agent, home):
+    if builtin(home):
+        die(f'{agent} is built in and never shared; kith {agent} keep <thread> <name> makes it a real agent')
+
+
 def cmd_publish(agent, repo_name=None):
     """A public copy without the history: one commit per publish, holding the agent as it is now. The agent's own
     repo (origin) keeps every version and stays as private as it is."""
     home = agent_home(agent)
+    refuse_builtin(agent, home)
     if not owned(home) or repo_root(home).resolve() != home.resolve():
         die(f'{agent}: only an agent that is its own repo in the agents folder can be published')
     url = git(home, 'remote', 'get-url', 'public').stdout.strip()
@@ -1022,6 +1283,7 @@ def cmd_publish(agent, repo_name=None):
 
 def cmd_share(agent, public):
     home = agent_home(agent)
+    refuse_builtin(agent, home)
     if not owned(home):
         die(f'{agent} is not in the agents folder ({AGENTS})')
     root = repo_root(home)
@@ -1061,6 +1323,9 @@ def cmd_share(agent, public):
                         '--accept-visibility-change-consequences'], check=True, capture_output=True)
     print(f'{agent}: https://github.com/{repo} ({"public" if public else "private"}); '
           f'others install it with: kith install {repo}')
+    if QUIET:
+        emit({'ok': True, 'agent': agent, 'repo': repo, 'url': f'https://github.com/{repo}',
+              'visibility': 'public' if public else 'private', 'install': f'kith install {repo}'})
 
 
 def cmd_save():
@@ -1087,7 +1352,7 @@ def cmd_install_saved():
         if name in have:
             continue
         if not src.get('repo'):
-            print(f'{name}: never backed up, so it stays on the Mac it was made on (kith backup there brings it)', file=sys.stderr)
+            print(f'{name}: never backed up, so it stays on the Mac it was made on (kith backup run there brings it)', file=sys.stderr)
             continue
         repo = src['repo'] if os.path.isdir(src['repo']) else src['repo'].removesuffix('.git')   # a local repo stays a path
         link = repo + (f'/tree/HEAD/{src["path"]}' if src.get('path') else '')
@@ -1101,12 +1366,36 @@ TOPIC = 'kith-agent'
 OLD_TOPIC = 'hq-agent'   # agents shared before the rename: still found and installed
 
 
-def cmd_search(words, mine):
+def installed_remotes():
+    """{github 'owner/repo' (lowercase): agent name} for every installed agent with a history of its own."""
+    have = {}
+    for name, home in installed().items():
+        for remote in (git(home, 'remote').stdout.split() if owned(home) else []):
+            m = re.search(r'github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git)?$', git(home, 'remote', 'get-url', remote).stdout)
+            if m:
+                have[m.group(1).lower()] = name
+    return have
+
+
+def short_name(repo):
+    """The agent name a repo installs as: kith-agent-foo, hq-foo, ... -> foo."""
+    return re.sub(r'^(kith|hq)-(agent-)?', '', repo.split('/')[1])
+
+
+def agent_row(repo, description, stars, updated, url, topics, have, visibility='public'):
+    """One shared agent, as data (market and search --json print these; the pickers show them)."""
+    name = short_name(repo)
+    mine = have.get(repo.lower()) or (name if name in installed() else '')
+    return {'repo': repo, 'name': name, 'description': (description or '').strip(), 'stars': stars, 'updated': updated,
+            'url': url, 'topics': topics, 'visibility': visibility, 'installed': bool(mine), 'installed_as': mine or None}
+
+
+def cmd_search(words, mine, as_json=False):
     """Repos tagged kith-agent (or the older hq-agent): the agent catalogue. GitHub search includes the private repos you can see."""
-    found, seen = [], set()
+    found, seen = [], {}
     for topic in (TOPIC, OLD_TOPIC):
         args = ['gh', 'search', 'repos', *words, '--topic', topic, '--limit', '100', '--sort', 'updated',
-                '--json', 'fullName,description,visibility,updatedAt']
+                '--json', 'fullName,description,visibility,updatedAt,stargazersCount,url']
         if mine:
             me = subprocess.run(['gh', 'api', 'user', '-q', '.login'], capture_output=True, text=True).stdout.strip()
             args += ['--owner', me]
@@ -1114,39 +1403,47 @@ def cmd_search(words, mine):
         if r.returncode:
             die(f'gh search failed: {r.stderr.strip() or "is gh logged in? (gh auth login)"}')
         for x in json.loads(r.stdout):
-            if x['fullName'].lower() not in seen:
-                seen.add(x['fullName'].lower())
-                found.append(x)
-    have = {}
-    for name, home in installed().items():
-        url = git(home, 'remote', 'get-url', 'origin').stdout.strip() if owned(home) else ''
-        m = re.search(r'github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git)?$', url)
-        if m:
-            have[m.group(1).lower()] = name
+            key = x['fullName'].lower()
+            if key in seen:
+                seen[key]['topics'].append(topic)
+                continue
+            seen[key] = x
+            x['topics'] = [topic]
+            found.append(x)
+    have = installed_remotes()
+    rows = [agent_row(x['fullName'], x.get('description'), x.get('stargazersCount', 0), x.get('updatedAt'),
+                      x.get('url') or f'https://github.com/{x["fullName"]}', x['topics'], have, x['visibility'])
+            for x in found]
+    if as_json:
+        print(json.dumps(rows))
+        return
     if not found:
         print(f'no repos tagged {TOPIC}' + (f' matching {" ".join(words)}' if words else ''))
-    for x in found:
-        mark = f'installed as {have[x["fullName"].lower()]}' if x['fullName'].lower() in have else 'kith install ' + x['fullName']
+    for x in rows:
+        mark = f'installed as {x["installed_as"]}' if x['installed'] else 'kith install ' + x['repo']
         vis = '' if x['visibility'] == 'public' else f' ({x["visibility"]})'
-        print(f'{x["fullName"]}{vis}  {mark}\n    {(x["description"] or "").strip()[:110]}')
+        print(f'{x["repo"]}{vis}  {mark}\n    {x["description"][:110]}')
 
 
-def cmd_market(words, new_only):
-    """The public catalogue: repos tagged kith-agent (or hq-agent), read from GitHub's search without a login, to install by number."""
+def market_data(words, new_only=False):
+    """The public catalogue as rows (agent_row), most starred first: read from GitHub's search without a login.
+    KITH_GITHUB_API replaces the API's address (tests)."""
+    import urllib.error
     import urllib.parse
     import urllib.request
-    color = sys.stdout.isatty() and not os.environ.get('NO_COLOR')
-
-    def paint(code, text):
-        return f'\033[{code}m{text}\033[0m' if color else text
+    api = os.environ.get('KITH_GITHUB_API', 'https://api.github.com').rstrip('/')
     found, seen = [], set()
     for topic in (TOPIC, OLD_TOPIC):
         q = urllib.parse.quote(' '.join([*words, f'topic:{topic}']))
-        req = urllib.request.Request(f'https://api.github.com/search/repositories?q={q}&sort=stars&per_page=50',
+        req = urllib.request.Request(f'{api}/search/repositories?q={q}&sort=stars&per_page=50',
                                      headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'kith'})
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
                 items = json.load(r).get('items', [])
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 429):
+                die('GitHub rate limit reached for searches without a login; try again in a minute')
+            die(f'GitHub is not reachable ({e}); try again later')
         except (OSError, ValueError) as e:
             die(f'GitHub is not reachable ({e}); try again later')
         for x in items:
@@ -1154,34 +1451,39 @@ def cmd_market(words, new_only):
                 seen.add(x['full_name'].lower())
                 found.append(x)
     found.sort(key=lambda x: -x.get('stargazers_count', 0))
-    have = {}
-    for name, home in installed().items():
-        for remote in (git(home, 'remote').stdout.split() if owned(home) else []):
-            m = re.search(r'github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git)?$', git(home, 'remote', 'get-url', remote).stdout)
-            if m:
-                have[m.group(1).lower()] = name
+    have = installed_remotes()
+    rows = [agent_row(x['full_name'], x.get('description'), x.get('stargazers_count', 0),
+                      x.get('pushed_at') or x.get('updated_at'), x.get('html_url') or f'https://github.com/{x["full_name"]}',
+                      x.get('topics') or [], have) for x in found]
+    return [r for r in rows if not r['installed']] if new_only else rows
 
-    def short(repo):
-        return re.sub(r'^(kith|hq)-(agent-)?', '', repo.split('/')[1])
-    rows = [(x['full_name'], (x.get('description') or '').split('. ')[0].rstrip('.'), x.get('stargazers_count', 0),
-             have.get(x['full_name'].lower()) or (short(x['full_name']) if short(x['full_name']) in installed() else ''))
-            for x in found]
-    if new_only:
-        rows = [r for r in rows if not r[3]]
+
+def cmd_market(words, new_only, as_json=False):
+    """The public catalogue: repos tagged kith-agent (or hq-agent), read from GitHub's search without a login, to install by number."""
+    rows = market_data(words, new_only)
+    if as_json:
+        print(json.dumps(rows))
+        return
+    color = sys.stdout.isatty() and not os.environ.get('NO_COLOR')
+
+    def paint(code, text):
+        return f'\033[{code}m{text}\033[0m' if color else text
     if not rows:
         print(('     · no new agents' if new_only else f'     · no shared agents') + (f' matching {" ".join(words)}' if words else '')
               + ' yet')
         return
-    width = max(len(short(r[0])) for r in rows)
-    aw = min(60, max(len(r[1]) for r in rows))
+    abouts = [r['description'].split('. ')[0].rstrip('.') for r in rows]
+    width = max(len(r['name']) for r in rows)
+    aw = min(60, max(len(a) for a in abouts))
     pickable = []
-    for repo, about, stars, mine in rows:
-        if mine:
-            print(f'     {paint("32", "✓")}  {short(repo).ljust(width)}  {about[:aw].ljust(aw)}  {paint("2", "installed")}')
+    for r, about in zip(rows, abouts):
+        repo, stars = r['repo'], r['stars']
+        if r['installed']:
+            print(f'     {paint("32", "✓")}  {r["name"].ljust(width)}  {about[:aw].ljust(aw)}  {paint("2", "installed")}')
             continue
         pickable.append(repo)
         n = paint('38;5;79', str(len(pickable)).rjust(2))
-        print(f'    {n}  {short(repo).ljust(width)}  {about[:aw].ljust(aw)}  '
+        print(f'    {n}  {r["name"].ljust(width)}  {about[:aw].ljust(aw)}  '
               + paint('2', repo.split('/')[0] + (f'  ★{stars}' if stars else '')))
     if not pickable or not sys.stdin.isatty():
         if pickable:
@@ -1197,7 +1499,7 @@ def cmd_market(words, new_only):
 def cmd_list(as_json):
     out = {}
     for name, home in installed().items():
-        good = read(pointers(name)[0])
+        good = read(pointers(name, create=False)[0])
         o = {'dir': str(home), 'version': good}
         if owned(home):
             o['remote'] = git(home, 'remote', 'get-url', 'origin').stdout.strip()
@@ -1206,12 +1508,14 @@ def cmd_list(as_json):
             o['unpushed'] = int(ahead) if ahead.isdigit() else None
         else:
             o['legacy'] = True
+        if builtin(home):
+            o['builtin'] = True   # ships with kith: not backed up, not shared (kith-state, cmd_share)
         out[name] = o
     if as_json:
         print(json.dumps(out))
         return
     for name, o in out.items():
-        where = 'in the kith repo (legacy)' if o.get('legacy') else (o['remote'].removeprefix('https://github.com/')
+        where = 'built in' if o.get('builtin') else 'in the kith repo (legacy)' if o.get('legacy') else (o['remote'].removeprefix('https://github.com/')
                                                                    .removesuffix('.git') or 'local only')
         flags = [f for f, on in (('edits', o.get('dirty')), (f'{o.get("unpushed")} unpushed', o.get('unpushed')))
                  if on]
@@ -1222,9 +1526,28 @@ def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
         return
+    global JSON_ERRORS, QUIET
     cmd, rest = argv[0], argv[1:]
     as_json = '--json' in rest
     rest = [a for a in rest if a != '--json']
+    QUIET = as_json and cmd in QUIET_CMDS
+    if QUIET:
+        sys.stdout = io.StringIO()   # progress lines are not the answer; die() and emit() write to __stdout__
+    JSON_ERRORS = as_json and cmd in ('market', 'search', 'install') or QUIET
+    if JSON_ERRORS:   # one {"ok":false,"error":..} object and a non-zero exit, never a traceback
+        try:
+            return run(cmd, rest, as_json, argv)
+        except SystemExit:
+            raise
+        except kith_tombstone.Tombstoned as e:   # the rollback line, exit 3, like the plain path in __main__
+            die(str(e), 3)
+        except Exception as e:
+            die(f'{type(e).__name__}: {e}')
+    run(cmd, rest, as_json, argv)
+
+
+def run(cmd, rest, as_json, argv):
+    global JSON_ERRORS
     if cmd == 'resolve':
         names = sorted(installed()) if rest == ['--all'] else rest[:1]
         if not names:
@@ -1245,8 +1568,11 @@ def main(argv):
         cmd_pin(rest[0], rest[1] if len(rest) > 1 else '')
     elif cmd == 'unpin' and rest:
         agent_home(rest[0])
+        previous = read(pointers(rest[0])[1]) or None
         pointers(rest[0])[1].unlink(missing_ok=True)
         print(f'{rest[0]} follows the latest edits again')
+        if QUIET:
+            emit({'ok': True, 'agent': rest[0], 'previous': previous, 'changed': previous is not None})
     elif cmd == 'fetch' and rest:
         names = sorted(installed()) if rest[0] == '--all' else rest[:1]
         failed = False
@@ -1262,7 +1588,11 @@ def main(argv):
     elif cmd == 'deps' and rest:
         cmd_deps(sorted(installed()) if rest[0] == '--all' else rest[:1], '--install' in rest)
     elif cmd == 'set-harness' and len(rest) in (2, 4) and (len(rest) == 2 or rest[2] == '--model'):
-        cmd_set_harness(rest[0], rest[1], rest[3] if len(rest) == 4 else None)
+        JSON_ERRORS = as_json
+        cmd_set_harness(rest[0], rest[1], rest[3] if len(rest) == 4 else None, as_json)
+    elif cmd == 'set-field' and len(rest) == 3 and rest[1] in ('model', 'effort'):
+        JSON_ERRORS = as_json
+        cmd_set_field(rest[0], rest[1], rest[2], as_json)
     elif cmd == 'promote' and len(rest) == 2:
         cmd_promote(*rest)
     elif cmd == 'check' and rest[:1] == ['--share']:
@@ -1277,23 +1607,53 @@ def main(argv):
     elif cmd == 'save':
         cmd_save()
     elif cmd == 'install' and rest:
-        name = rest[rest.index('--as') + 1] if '--as' in rest else None
-        cmd_install(rest[0], name, ask='--yes' not in rest)
+        name = None
+        if '--as' in rest:
+            if rest.index('--as') + 1 >= len(rest):
+                die('install <github-link> [--as NAME]: --as needs a name', 2)
+            name = rest[rest.index('--as') + 1]
+        link = next((a for i, a in enumerate(rest) if not a.startswith('--') and (i == 0 or rest[i - 1] != '--as')), None)
+        if not link:
+            die('install <github-link> [--as NAME] [--preview|--yes] [--json]', 2)
+        if '--preview' in rest:
+            out = preview(link, name)
+            text = out.pop('_text')
+            print(json.dumps(out) if as_json else f'{out["name"]} ({link}):\n{text}')
+        elif as_json:
+            if '--yes' not in rest:
+                die('install --json needs --preview (what it would do) or --yes (do it)', 2)
+            with contextlib.redirect_stdout(sys.stderr):   # the progress lines are not the answer
+                done = cmd_install(link, name, ask=False)
+            home = done[1]
+            commit_ = git(home, 'rev-parse', 'HEAD').stdout.strip()
+            print(json.dumps({'ok': True, 'name': done[0], 'path': str(home), 'version': commit_[:12] or None}))
+        else:
+            cmd_install(link, name, ask='--yes' not in rest)
     elif cmd in ('update', 'commit', 'push') and rest:
         msg = rest[rest.index('-m') + 1] if '-m' in rest else ''
         names = sorted(installed()) if rest[0] == '--all' else rest[:1]
+        results = []
         for name in names:
             if cmd == 'update':
                 if owned(agent_home(name)) or rest[0] != '--all':
-                    cmd_update(name)
+                    results.append(cmd_update(name))
             elif cmd == 'push':
-                cmd_push(name)
-            elif commit(agent_home(name), msg or f'{name}: edits'):
-                print(f'{name}: committed')
+                info = {}
+                cmd_push(name, info)
+                if QUIET and info.get('error'):
+                    die(f'{name}: push failed: {info["error"]}')
+                results.append(info)
+            else:
+                done = commit(agent_home(name), msg or f'{name}: edits')
+                if done:
+                    print(f'{name}: committed')
+                results.append({'agent': name, 'changed': done})
+        if QUIET:
+            emit({'ok': True, 'agents': results})
     elif cmd == 'market':
-        cmd_market([w for w in rest if w != '--new'], '--new' in rest)
+        cmd_market([w for w in rest if w != '--new'], '--new' in rest, as_json)
     elif cmd == 'search':
-        cmd_search([w for w in rest if w != '--mine'], '--mine' in rest)
+        cmd_search([w for w in rest if w != '--mine'], '--mine' in rest, as_json)
     elif cmd == 'history' and rest:
         cmd_history(rest[0], int(rest[1]) if len(rest) > 1 else 20)
     elif cmd == 'restore' and len(rest) == 2:
@@ -1314,4 +1674,7 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except kith_tombstone.Tombstoned as e:   # authority moved to the core (kith kernel cutover step authority)
+        die(str(e), 3)   # the JSON error object under --json, else the stderr line

@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# kith-market-check — `kith market|search|install --json` and `kith install --preview`: the shared-agent catalogue as data and
+# what an install would do here, before anything is kept. Throwaway HOME and KITH_HOME; GitHub's search API is a stub on a free
+# port (KITH_GITHUB_API), `gh` is a fake on PATH, and the "repos" to install are local git repos (a link may be a path). No network.
+#
+# Meant as a corpus: each case is a command line (`kith ...`), the exit code it must give, the --json fields it must print (a
+# python expression over the output, d), and the state files left or not left (a preview leaves none). The same lines are meant
+# to run against the Rust core later and expect the same results.
+#
+#   kernel/tests/kith-market-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-market.XXXXXX"); T=$(cd "$T" && pwd -P)
+SRV=
+trap '[[ -n $SRV ]] && kill $SRV 2>/dev/null; rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json TMPDIR=$T/tmp GIT_CONFIG_GLOBAL=$T/gitconfig GIT_CONFIG_SYSTEM=/dev/null
+unset KITH_STATE HQ_STATE KITH_AGENTS KITH_ROOT NO_COLOR
+mkdir -p "$HOME" "$TMPDIR" "$T/bin" "$T/repos"
+git config --global user.email t@example.com; git config --global user.name t; git config --global init.defaultBranch main
+export PATH=$T/bin:$PATH
+KITH=$KERNEL/bin/kith
+AG=$KITH_HOME/agents
+
+# --- the repos to install: local git repos (the link is the path; the agent's name is the folder's) ------------------------
+mkrepo() { local d=$T/repos/$1; mkdir -p "$d"; cat > "$d/agent.md"; git -C "$d" init -q; git -C "$d" add -A; git -C "$d" commit -qm init; }
+mkrepo scout <<'EOF'
+---
+name: scout
+description: Finds things.
+model: sonnet
+harness: claude
+---
+You scout.
+EOF
+mkdir -p "$T/repos/pilot/skills/plan" "$T/repos/pilot/tools" "$T/repos/pilot/services"
+printf 'plan\n' > "$T/repos/pilot/skills/plan/SKILL.md"; printf '#!/bin/sh\n' > "$T/repos/pilot/tools/go.sh"
+printf '{"permissions":{"defaultMode":"bypassPermissions","allow":["Bash(ls:*)"]},"hooks":{"Stop":[{"hooks":[{"command":"echo done"}]}]}}\n' > "$T/repos/pilot/settings.json"
+printf '{"skills":{"ext":{"repo":"someone/skills","path":"ext","ref":"%s"}}}\n' "$(printf 'a%.0s' $(seq 40))" > "$T/repos/pilot/skills.json"
+printf '{"kind":"cli"}\n' > "$T/repos/pilot/services/mine.json"
+printf 'needs: [telegram, mine, nosuch]\nrequires:\n  kith-no-such-program: brew install kith-no-such-program  # for tests\n  sh: apt install sh\n' > "$T/repos/pilot/capabilities.yaml"
+mkrepo pilot <<'EOF'
+---
+name: pilot
+description: Flies.
+model: opus
+effort: high
+---
+You fly.
+EOF
+mkdir -p "$T/repos/notagent"; echo hi > "$T/repos/notagent/README.md"; git -C "$T/repos/notagent" init -q; git -C "$T/repos/notagent" add -A; git -C "$T/repos/notagent" commit -qm init
+printf '{"profiles":{"telegram/main":{"TOKEN":"x"}},"grants":{}}\n' > "$KITH_AUTH"
+
+# --- stubs: GitHub's search API (rate limited when the query holds "limited") and gh ----------------------------------------
+cat > "$T/stub.py" <<'PY'
+import http.server, json, sys, urllib.parse
+T = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('q', [''])[0]
+        if 'limited' in q:
+            self.send_response(403); self.send_header('Content-Length', '0'); self.end_headers(); return
+        mk = lambda n, d, s, topics: {'full_name': n, 'description': d, 'stargazers_count': s, 'pushed_at': '2026-10-01T00:00:00Z',
+                                      'html_url': 'https://github.com/' + n, 'topics': topics}
+        items = []
+        if 'topic:kith-agent' in q:
+            items = [mk('ann/kith-agent-scout', 'Finds things. Quickly.', 5, ['kith-agent']), mk('bob/kith-agent-pilot', 'Flies.', 9, ['kith-agent'])]
+        elif 'topic:hq-agent' in q:
+            items = [mk('cy/hq-old', 'An old one.', 1, ['hq-agent']), mk('bob/kith-agent-pilot', 'Flies.', 9, ['kith-agent', 'hq-agent'])]
+        if 'nomatch' in q:
+            items = []
+        if 'scout' in q:
+            items = [i for i in items if 'scout' in i['full_name']]
+        b = json.dumps({'items': items}).encode()
+        self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+open(T + '/port', 'w').write(str(s.server_port))
+s.serve_forever()
+PY
+python3 "$T/stub.py" "$T" & SRV=$!
+for _ in $(seq 50); do [[ -s $T/port ]] && break; sleep 0.1; done
+export KITH_GITHUB_API=http://127.0.0.1:$(cat "$T/port")
+cat > "$T/bin/gh" <<'EOF'
+#!/bin/sh
+# gh search repos ... --topic T: one mine repo per topic
+case "$1 $2" in
+  "search repos") case "$*" in
+    *) echo '[{"fullName":"me/kith-agent-scout","description":"Mine.","visibility":"private","updatedAt":"2026-10-02T00:00:00Z","stargazersCount":0,"url":"https://github.com/me/kith-agent-scout"}]' ;;
+    esac ;;
+  "api user") echo me ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$T/bin/gh"
+
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1 [RC=${RC:-} OUT=${OUT:-}]"; fail=1; fi; }
+# case NAME RC EXPR LINE...: `kith LINE...` exits RC; when EXPR is not "-", its stdout is JSON and EXPR (python, over d) is true
+case_() { local n=$1 rc=$2 expr=$3; shift 3; OUT=$("$KITH" "$@" 2>"$T/err"); RC=$?
+  local ok=1; [[ $RC == "$rc" ]] || ok=0
+  [[ $ok == 1 && $expr != - ]] && { EXPR=$expr OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); assert eval(os.environ["EXPR"])' 2>/dev/null || ok=0; }
+  [[ $OUT != *Traceback* && $(cat "$T/err") != *Traceback* ]] || ok=0
+  check "$n" "[[ $ok == 1 ]]"; }
+state() { find "$AG" "$TMPDIR" -mindepth 1 2>/dev/null | sort; }   # everything installing or previewing could leave behind
+
+# --- market --json -------------------------------------------------------------------------------------------------------
+case_ "market --json: most starred first, both topics, once each" 0 \
+  "[r['repo'] for r in d]==['bob/kith-agent-pilot','ann/kith-agent-scout','cy/hq-old']" market --json
+case_ "market --json: a row's fields" 0 \
+  "d[1]=={'repo':'ann/kith-agent-scout','name':'scout','description':'Finds things. Quickly.','stars':5,'updated':'2026-10-01T00:00:00Z','url':'https://github.com/ann/kith-agent-scout','topics':['kith-agent'],'visibility':'public','installed':False,'installed_as':None}" market --json
+case_ "market --json: the older hq-agent tag is listed, named without its prefix" 0 "d[2]['name']=='old'" market --json
+case_ "market scout --json: words narrow the search" 0 "[r['name'] for r in d]==['scout']" market scout --json
+case_ "market --json: nothing found is an empty list" 0 "d==[]" market nomatch --json
+case_ "market --json --new: same rows while nothing is installed" 0 "len(d)==3" market --new --json
+case_ "market --json: rate limited, a clear error" 1 "d['ok']==False and 'rate limit' in d['error']" market limited --json
+OUT=$("$KITH" market --json </dev/null | head -c 1); check "market --json prints JSON only (no picker text)" "[[ \$OUT == '[' ]]"
+
+# --- search --json (gh is the fake on PATH) ------------------------------------------------------------------------------
+case_ "search --json: one row per repo, both topics merged" 0 \
+  "len(d)==1 and d[0]['repo']=='me/kith-agent-scout' and d[0]['visibility']=='private' and d[0]['topics']==['kith-agent','hq-agent'] and d[0]['stars']==0" search --json
+case_ "search --mine --json" 0 "d[0]['name']=='scout'" search --mine --json
+
+# --- install --preview: what it would do, keeping nothing ------------------------------------------------------------------
+P=$T/repos/pilot
+before=$(state)
+case_ "preview: identity, harness/model, description" 0 \
+  "d['ok'] and d['name']=='pilot' and d['name_taken']==False and d['description']=='Flies.' and d['model']=='opus' and d['effort']=='high' and len(d['commit'])==40" install "$P" --preview --json
+case_ "preview: permissions" 0 \
+  "d['permissions']['permission_mode']=='bypassPermissions' and d['permissions']['allow']==['Bash(ls:*)'] and d['permissions']['hooks']==['echo done'] and d['permissions']['tools']==['tools/go.sh']" install "$P" --preview --json
+case_ "preview: skills, own and linked" 0 \
+  "d['skills']=={'own':['plan'],'linked':{'ext':'someone/skills'}}" install "$P" --preview --json
+case_ "preview: programs with presence and the install command" 0 \
+  "d['requires']==[{'program':'kith-no-such-program','install':'brew install kith-no-such-program','why':'for tests','present':False},{'program':'sh','install':'apt install sh','why':'','present':True}]" install "$P" --preview --json
+case_ "preview: services, known/profile/granted" 0 \
+  "[(n['service'],n['known'],n['has_profile'],n['granted'],n['defined_by_agent']) for n in d['needs']]==[('telegram',True,True,False,False),('mine',True,False,False,True),('nosuch',False,False,False,False)]" install "$P" --preview --json
+case_ "preview: the bypass warning" 0 "any('bypassPermissions' in w for w in d['warnings'])" install "$P" --preview --json
+case_ "preview: --as renames" 0 "d['name']=='copilot'" install "$P" --as copilot --preview --json
+case_ "preview: a harness field is reported" 0 "d['harness']=='claude'" install "$T/repos/scout" --preview --json
+case_ "preview: twice is the same answer" 0 "d['name']=='pilot'" install "$P" --preview --json
+check "preview leaves no agent folder, no state, no temp folder" "[[ \$(state) == \"\$before\" ]]"
+case_ "preview: not a kith agent is an error, not a crash" 1 "d['ok']==False and 'not a kith agent' in d['error']" install "$T/repos/notagent" --preview --json
+case_ "preview: not a link or a folder, a clear error" 2 "d['ok']==False and 'not a GitHub link' in d['error']" install "$T/nothing-here/x" --preview --json
+case_ "preview: a bad name" 2 "d['ok']==False and '--as NAME' in d['error']" install "$P" --as Bad_Name --preview --json
+check "failed previews leave nothing either" "[[ \$(state) == \"\$before\" ]]"
+
+# --- install --yes --json -------------------------------------------------------------------------------------------------------
+case_ "install --json alone asks for --preview or --yes" 2 "d['ok']==False" install "$T/repos/scout" --json
+check "…and installed nothing" "[[ ! -e $AG/scout ]]"
+case_ "install --yes --json: ok, name, path, version" 0 \
+  "d['ok'] and d['name']=='scout' and d['path'].endswith('/agents/scout/role') and len(d['version'])==12" install "$T/repos/scout" --yes --json
+check "…the agent is on disk with its state folders" "[[ -f $AG/scout/role/agent.md && -d $AG/scout/memory/sessions ]]"
+case_ "install --yes of an installed name refuses" 1 "d['ok']==False and 'already an agent' in d['error']" install "$T/repos/scout" --yes --json
+case_ "…with --as it installs a second copy" 0 "d['name']=='scout2' and d['ok']" install "$T/repos/scout" --as scout2 --yes --json
+case_ "preview of an installed name: name_taken and a suggestion" 0 \
+  "d['name_taken'] and d['suggested_name']=='scout-2' and any('--as scout-2' in w for w in d['warnings'])" install "$T/repos/scout" --preview --json
+case_ "install --yes of a non-agent: error, no leftovers" 1 "d['ok']==False" install "$T/repos/notagent" --yes --json
+check "…no empty folder left" "[[ ! -e $AG/notagent ]]"
+case_ "install without a link: usage, exit 2" 2 "d['ok']==False" install --yes --json
+case_ "market --json marks what is installed (by remote)" 0 "True" market --json
+git -C "$AG/scout/role" remote set-url origin https://github.com/ann/kith-agent-scout.git
+case_ "market --json: installed and as which local name" 0 \
+  "[(r['installed'],r['installed_as']) for r in d if r['name']=='scout']==[(True,'scout')]" market --json
+case_ "market --new --json hides it" 0 "[r['name'] for r in d]==['pilot','old']" market --new --json
+
+# --- the text paths still work -------------------------------------------------------------------------------------------------
+OUT=$("$KITH" install "$P" --as textpilot --preview 2>&1); RC=$?
+check "install --preview (text): the same review the y/N question shows" "[[ \$RC == 0 && \$OUT == *'textpilot ('*'  Flies.'*'suggested permission mode: bypassPermissions  ← runs every tool without asking'*'asks for services: telegram, mine, nosuch (it defines mine): nothing is shared until you grant it'* ]]"
+OUT=$("$KITH" install "$P" --as pilot 2>&1 </dev/null); RC=$?
+check "interactive install (no tty) prints the review, then installs" "[[ \$RC == 0 && \$OUT == *'pilot ('*'  Flies.'*'installed pilot from'* && -f $AG/pilot/role/agent.md ]]"
+OUT=$("$KITH" market </dev/null 2>&1); RC=$?
+check "market (text, no tty) lists rows and the install hint" "[[ \$RC == 0 && \$OUT == *'✓  scout'*'installed'* && \$OUT == *'kith install <owner>/<repo>'* ]]"
+OUT=$("$KITH" market limited 2>&1); RC=$?
+check "market (text): rate limited, one line, exit 1" "[[ \$RC == 1 && \$OUT == 'kith-pkg: GitHub rate limit'* ]]"
+
+exit $fail

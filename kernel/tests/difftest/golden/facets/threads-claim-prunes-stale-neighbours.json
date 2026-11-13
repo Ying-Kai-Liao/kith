@@ -1,0 +1,14 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/junk.claim.lock": "",
+  "state:home/.kith/live/terminal/proc-9.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/s-1.claim.lock": "",
+  "state:home/.kith/live/terminal/s-2.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/s-2.claim.lock": "",
+  "state:home/.kith/live/terminal/s-3.claim": "{\"pid\": 1, \"procStart\": \"<PSTART>\", \"at\": \"<TS>\", \"kind\": \"oneshot\"}",
+  "state:home/.kith/live/terminal/s-3.claim.lock": "",
+  "state:home/.kith/live/terminal/s-4.takeover.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": ""
+}

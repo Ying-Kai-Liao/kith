@@ -3,6 +3,7 @@
 # (which this asks where Java and the pinned tla2tools.jar are).
 #
 #   verification/revoke/run.sh                          every row of checks.tsv: variant x property, expected pass/fail
+#   verification/revoke/run.sh --smoke                       only the rows named in smoke.txt (CI when nothing the model covers changed)
 #   verification/revoke/run.sh --show VARIANT PROPERTY   TLC's full output (the counterexample) for one row
 #   verification/revoke/run.sh --list                   the rows
 #
@@ -38,11 +39,26 @@ verdict() {   # reads TLC output; prints pass | fail | error
   else echo error; fi
 }
 
+SMOKE=0; [[ ${1:-} == --smoke ]] && SMOKE=1
+
+# rows -> the checks.tsv rows to run: all of them, or with --smoke only those named in smoke.txt ("VARIANT PROPERTY" per line).
+rows() {
+  if [[ $SMOKE == 1 ]]; then
+    grep -v '^#' "$HERE/checks.tsv" | grep -v '^$' | awk -F'\t' 'NR==FNR { if ($0 !~ /^#|^$/) { split($0, w, " "); want[w[1] " " w[2]]=1 } next } (($1 " " $3) in want)' "$HERE/smoke.txt" -
+  else
+    grep -v '^#' "$HERE/checks.tsv" | grep -v '^$'
+  fi
+}
+
 case "${1:-}" in
   --list) grep -v '^#' "$HERE/checks.tsv"; exit 0 ;;
 esac
 
 { read -r JAVA; read -r JAR; } < <("$HERE/../threads/run.sh" --tools)
+
+if [[ $SMOKE == 1 ]]; then
+  [[ $(grep -vc '^#\|^$' "$HERE/smoke.txt") -eq $(rows | wc -l) ]] || { echo "run.sh: smoke.txt names a row that is not in checks.tsv" >&2; exit 2; }
+fi
 
 if [[ ${1:-} == --show ]]; then
   kind=$(awk -F'\t' -v v="$2" -v n="$3" '$1==v && $3==n {print $2}' "$HERE/checks.tsv" | head -1)
@@ -60,7 +76,24 @@ while IFS=$'\t' read -r v k p want; do
   [[ $got != error ]] || echo "run.sh: TLC gave no verdict for $v $p: $(grep -m1 -i 'error\|exception' <<<"$out")" >&2
   mark=""; [[ $got == "$want" ]] || { mark="<-- MISMATCH"; bad=1; }
   printf '%-26s %-24s %-5s %-5s %-9s %s\n' "$v" "$p" "$want" "$got" "${states:--}" "$mark"
-done < <(grep -v '^#' "$HERE/checks.tsv" | grep -v '^$')
-echo "$(grep -vc '^#\|^$' "$HERE/checks.tsv") rows in $(( $(date +%s) - start ))s"
+done < <(rows)
+echo "$(rows | wc -l) rows in $(( $(date +%s) - start ))s"
+# The host's reconcile of a core-only revoke (Reconcile.tla): one config per row, all of them every run (132 states).
+run_reconcile() {   # run_reconcile CFG -> TLC's output on stdout
+  local work; work=$(mktemp -d "${TMPDIR:-/tmp}/kith-verify-reconcile.XXXXXX")
+  mkdir -p "$work/tmp"
+  ( cd "$HERE" && "$JAVA" -Djava.io.tmpdir="$work/tmp" -XX:+UseParallelGC -Xmx512m -cp "$JAR" tlc2.TLC -workers 1 -deadlock \
+      -metadir "$work/states" -config "$HERE/reconcile/$1.cfg" Reconcile.tla 2>&1 ) || true
+  rm -rf "$work"
+}
+printf '%-26s %-5s %-5s %s\n' RECONCILE WANT GOT STATES
+while IFS=$'\t' read -r cfg want _; do
+  out=$(run_reconcile "$cfg")
+  got=$(verdict <<<"$out")
+  states=$(sed -n 's/^[0-9]* states generated, \([0-9]*\) distinct states found.*/\1/p' <<<"$out" | head -1)
+  [[ $got != error ]] || echo "run.sh: TLC gave no verdict for reconcile $cfg: $(grep -m1 -i 'error\|exception' <<<"$out")" >&2
+  mark=""; [[ $got == "$want" ]] || { mark="<-- MISMATCH"; bad=1; }
+  printf '%-26s %-5s %-5s %-9s %s\n' "$cfg" "$want" "$got" "${states:--}" "$mark"
+done < <(grep -v '^#' "$HERE/reconcile.tsv" | grep -v '^$')
 if (( bad )); then echo "RESULT: differs from checks.tsv"; exit 1; fi
 echo "RESULT: every row as expected"

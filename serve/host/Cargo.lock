@@ -526,6 +526,7 @@ dependencies = [
  "cipher 0.5.2",
  "cpufeatures 0.3.1",
  "rand_core 0.10.1",
+ "zeroize",
 ]
 
 [[package]]
@@ -538,6 +539,7 @@ dependencies = [
  "chacha20",
  "cipher 0.5.2",
  "poly1305",
+ "zeroize",
 ]
 
 [[package]]
@@ -2107,6 +2109,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-acp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "kith-api"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "kith-attach"
+version = "0.1.0"
+dependencies = [
+ "kith-holder",
+ "libc",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "kith-core"
+version = "0.1.0"
+dependencies = [
+ "chacha20poly1305",
+ "chrono",
+ "fs2",
+ "getrandom 0.4.3",
+ "hmac 0.12.1",
+ "kith-api",
+ "kith-holder",
+ "kith-kernel",
+ "proptest",
+ "rusqlite",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "zeroize",
+]
+
+[[package]]
 name = "kith-guest"
 version = "0.1.0"
 dependencies = [
@@ -2132,6 +2182,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-holder"
+version = "0.1.0"
+dependencies = [
+ "hmac 0.12.1",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "kith-kernel"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "croner",
+ "fs2",
+ "kith-procstart",
+ "libc",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "kith-mem"
 version = "0.1.1"
 dependencies = [
@@ -2139,6 +2217,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "kith-procstart"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2165,7 +2251,12 @@ dependencies = [
  "hmac 0.13.0",
  "if-addrs",
  "keyring",
+ "kith-acp",
+ "kith-api",
+ "kith-attach",
+ "kith-core",
  "kith-guest",
+ "kith-kernel",
  "kith-mem",
  "kith-wire",
  "libc",
@@ -2191,6 +2282,15 @@ dependencies = [
  "uuid",
  "x25519-dalek",
  "zeroize",
+]
+
+[[package]]
+name = "kith-stub"
+version = "0.1.0"
+dependencies = [
+ "kith-procstart",
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

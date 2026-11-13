@@ -22,6 +22,7 @@ impl Drop for Host {
     fn drop(&mut self) {
         common::stop(&mut self.child);
         let _ = std::fs::remove_dir_all(&self.home);
+        common::forget_home(&self.home);
     }
 }
 
@@ -158,7 +159,13 @@ async fn five_bots_at_once_run_two_and_queue_three() {
         assert!(Instant::now() < deadline, "not all finished: {gate}");
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
-    let gate = host.gate().await;
+    // The slot goes back a beat after the last reply is written, so give it a moment before calling it stuck.
+    let settle = Instant::now() + Duration::from_secs(5);
+    let mut gate = host.gate().await;
+    while (gate["running"].clone(), gate["waiting"].clone()) != (json!(0), json!(0)) && Instant::now() < settle {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gate = host.gate().await;
+    }
     assert_eq!((gate["running"].clone(), gate["waiting"].clone()), (json!(0), json!(0)), "gate: {gate}");
 }
 

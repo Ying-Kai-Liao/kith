@@ -53,7 +53,7 @@ fn codex_mode(permission: &str) -> Option<&'static str> {
 /// run on a named account or API profile (`KITH_ACCOUNT`), the agent's main account included.
 fn process_env(saved: Vec<(String, String)>, launch: &hq::Launch, backup: bool) -> Vec<(String, String)> {
     let named = launch.env.get("KITH_ACCOUNT").is_some_and(|a| !a.is_empty());
-    let own_login = named || (backup && !launch.is_codex());
+    let own_login = named || (backup && launch.other_engine().is_none());
     let mut env = if own_login { Vec::new() } else { saved };
     env.extend(launch.env());
     env
@@ -314,10 +314,10 @@ impl Actor {
         }
     }
 
-    /// `session/new` and `session/load` for `launch`: Claude's `_meta` for Claude, ACP's own parameters for a Codex
-    /// backup (its servers as a list, the instructions as `systemPrompt` when it takes them).
+    /// `session/new` and `session/load` for `launch`: Claude's `_meta` for Claude, ACP's own parameters for any other
+    /// engine (its servers as a list, the instructions as `systemPrompt` when it takes them).
     fn hq_params(&self, launch: &hq::Launch, session: Option<&str>) -> Value {
-        if !launch.is_codex() {
+        if launch.other_engine().is_none() {
             return launch.session_params(&self.cfg, session);
         }
         let servers: Vec<Value> = launch
@@ -339,7 +339,10 @@ impl Actor {
         if caps.is_some_and(|c| c.additional_directories) && !launch.add_dirs.is_empty() {
             params["additionalDirectories"] = json!(launch.add_dirs);
         }
-        if caps.is_some_and(|c| c.system_prompt) && !launch.system_prompt.is_empty() {
+        if caps.is_some_and(|c| c.system_prompt)
+            && !launch.system_prompt.is_empty()
+            && launch.role_prompt != Some(hq::RolePrompt::FirstMessage)
+        {
             params["systemPrompt"] = super::system_prompt(&launch.system_prompt);
         }
         params
@@ -399,9 +402,8 @@ impl Actor {
                 _ => Vec::new(),
             };
             if prepared.is_none() {
-                if self.hub.store.kv_read(&format!("agent-env:{}", self.cfg.backend))?.is_some() {
-                    crate::market::vault::unlock(self.hub.clone()).await?;
-                }
+                crate::market::vault::unlock_if_sealed(&self.hub, crate::agent::auth::env_slot(&self.cfg.backend))
+                    .await?;
                 self.hub.set_runtime(&self.rt, |r| r.activity = "Starting agent…".into());
                 let Some(bin) = tokio::task::spawn_blocking(hq::bin).await? else {
                     bail!("{}", hq::missing());
@@ -422,6 +424,10 @@ impl Actor {
                 crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, target.project.as_deref())
             });
             let reservation = access.as_ref().map(|(grant, _)| Reservation::open(grant.run_id(), carried));
+            // A quick chat's thread keeps the engine and model it was started with, on every launch.
+            let engine = slot
+                .filter(|_| self.cfg.builtin && backup.is_none())
+                .and_then(|root| hq::ThreadEngine::of_thread(&self.hub.store, &self.cfg.id, root));
             match hq::launch(
                 bin,
                 &agent,
@@ -432,6 +438,7 @@ impl Actor {
                 &room,
                 &members,
                 access.as_ref(),
+                engine.as_ref(),
             )
             .await
             {
@@ -466,7 +473,7 @@ impl Actor {
             }
         };
         // Only the agent's own Claude run on the owner's behalf switches models for a call.
-        self.call_models = (backup.is_none() && person.is_none() && !launch.is_codex()).then(|| {
+        self.call_models = (backup.is_none() && person.is_none() && launch.other_engine().is_none()).then(|| {
             super::call_model::CallModels { own: launch.model.clone(), launch_call: launch.call_model.clone() }
         });
         // What a person's session runs with (M6): compared with what each loaded session was given at every turn.
@@ -535,7 +542,7 @@ impl Actor {
             self.conn_account.clone_from(&launch.account_id);
             self.conn_room = self.run_room();
             self.conn_members.clone_from(&members);
-            let provider = if launch.is_codex() { "codex" } else { self.cfg.backend.as_str() };
+            let provider = launch.other_engine().unwrap_or(self.cfg.backend.as_str());
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
             // Anyone but the owner asks the host who they are (`kith recall` over the run socket), with a token that
             // is theirs alone; the owner's process gets none.
@@ -545,8 +552,11 @@ impl Actor {
                 crate::runauth::grant_for(p, &agent, room, &conversation, project)
             });
             // The owner's own 1:1 with the agent can raise approval cards (`card.py`): a cards-only token, under
-            // its own env names. Not a group room, not a guest's, and not a Codex process, which has no use for it.
-            if grant.is_none() && owner_may_ask(person.as_deref(), &agent, &self.run_room()) && !launch.is_codex() {
+            // its own env names. Not a group room, not a guest's, and not another engine's process, which has no use for it.
+            if grant.is_none()
+                && owner_may_ask(person.as_deref(), &agent, &self.run_room())
+                && launch.other_engine().is_none()
+            {
                 grant = crate::runauth::owner_ask_grant(&agent, &conversation, None);
             }
             if let Some((_, vars)) = &grant {
@@ -556,10 +566,10 @@ impl Actor {
                 Ok(command) if !command.is_empty() => vec![command],
                 _ => {
                     let (hub, rt) = (self.hub.clone(), self.rt.clone());
-                    // A Codex backup starts Codex's adapter, not the bot's own.
+                    // A Codex backup, or an agent on another engine, starts that engine's adapter, not the bot's own.
                     let mut cfg = self.cfg.clone();
-                    if launch.is_codex() {
-                        cfg.backend = "codex".into();
+                    if let Some(engine) = launch.other_engine() {
+                        cfg.backend = engine.into();
                         cfg.command = None;
                     }
                     launch_commands(&cfg, move |msg: &str| {
@@ -618,7 +628,7 @@ impl Actor {
                             conn.profiles.insert(sid.clone(), Profile { digest: digest.clone(), holds });
                         }
                         self.note_options(&sid, &res, Listing::Session);
-                        if !launch.is_codex() {
+                        if launch.other_engine().is_none() {
                             self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str))
                                 .await;
                         }
@@ -665,7 +675,7 @@ impl Actor {
         self.hq_set_session(slot, &sid);
         if launch.is_codex() {
             self.set_codex_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
-        } else {
+        } else if launch.other_engine().is_none() {
             let mode = self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
             if let Some(entry) = &backup {
                 // What the session reports back (the adapter's current mode, or the one its set_mode accepted), so a
@@ -682,11 +692,17 @@ impl Actor {
         self.turn_session = Some(sid);
         if backup.is_some() {
             self.preface = self.backup_preface();
-            // Codex takes the agent's instructions as ACP's `systemPrompt`; one that can't gets them first.
-            if launch.is_codex()
-                && !self.conn.as_ref().is_some_and(|c| c.sessions.system_prompt)
-                && !launch.system_prompt.is_empty()
-            {
+        } else if moved {
+            self.preface = self.account_preface();
+        } else {
+            self.preface = self.recovery_preface();
+        }
+        // Another engine takes the agent's instructions as ACP's `systemPrompt`; one that can't, or whose table row
+        // says they go in front of the first message, gets them first.
+        if launch.other_engine().is_some() && !launch.system_prompt.is_empty() {
+            let as_prompt = self.conn.as_ref().is_some_and(|c| c.sessions.system_prompt)
+                && launch.role_prompt != Some(hq::RolePrompt::FirstMessage);
+            if !as_prompt {
                 let prompt = std::mem::take(&mut launch.system_prompt);
                 let profile = format!("<agent-profile>\n{prompt}\n</agent-profile>");
                 self.preface = Some(match self.preface.take() {
@@ -694,10 +710,6 @@ impl Actor {
                     None => profile,
                 });
             }
-        } else if moved {
-            self.preface = self.account_preface();
-        } else {
-            self.preface = self.recovery_preface();
         }
         if let Some(root) = slot {
             self.thread_intro = self.thread_intro(root, false);

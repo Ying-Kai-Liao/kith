@@ -21,6 +21,7 @@ All in `serve/host/src/runauth_props.rs`, one function each (`prop_*`), one `#[t
 - P5 `prop_only_recall_is_authorized`: no method other than exactly `recall`, `memorySearch` and `projectId` is ever authorized (case, spaces, NUL, non-strings included), those three are (so refusing everything cannot pass), and an owner token (`TokenScope::OwnerAsk`) gets none of them. Harm: a guest runs a new or write method.
 - P6 `prop_malformed_lines_are_denied`: bad JSON, random bytes, invalid UTF-8, a request over 64 KiB, deeply nested input, missing or mistyped `token`/`method`, non-objects are all denied, never a panic. Harm: a crafted line crashes or confuses the listener.
 - P7 `prop_pid_reuse_and_sibling_runs`: a dead run's pid handed to a new run does not revive the dead token; two runs of one person in different rooms cannot use each other's tokens. Harm: a room's memory read from another room.
+- P8 `prop_once_is_the_askers_alone`: the owner's "Allow once" yes kept by `keep_once` for one run (`consumeOnce`, owner token only, see P5) is taken by that run's `take_once` for that call alone, and once; no other run or call gets it. Harm: another run, or a second try, rides on a card yes.
 
 ## Coverage record
 
@@ -31,6 +32,7 @@ All in `serve/host/src/runauth_props.rs`, one function each (`prop_*`), one `#[t
 | `authorize` | P1, P2, P3, P5, P6 |
 | `recall_args` | P4, P1 and P5 (valid args only) |
 | `memory_args`, `project_args` | P4c, P4d, P4e, P1, P5 |
+| `TokenTable::keep_once` / `take_once` (the card yes behind `consumeOnce`), `drop_onces` in `revoke` / `revoke_token` / `reap` | P8 (taken by the asking run alone, once); example tests in runauth.rs (`a_card_yes_is_used_up_once_and_belongs_to_the_run_that_asked`, `consume_once_is_the_owner_runs_and_only_from_its_own_process` for owner-only, `two_callers_for_one_yes_get_one_between_them`, `a_yes_lasts_a_day_and_a_no_verdict_one_a_few_minutes` for expiry, `a_run_that_loses_its_token_keeps_no_yes`). Owner-only is P5's `consumeOnce` line |
 | `descends` (real `ps` walk) | not here: the table's ancestry is injected (a pid window). `ancestry_follows_real_parents` in runauth.rs covers it |
 | `handle_request`, `run_kernel`, `tool_path`, `SCRUB`, `serve_one`, `bind` | not covered by properties (spawn a process / need a socket); example tests in runauth.rs (`the_host_runs_the_kernel_tools_as_the_tokens_identity` runs a stand-in kernel) |
 | `grant_for`, `grant_for_env` | not covered (need the global socket); example test `env_list_gets_a_token_only_with_a_person`. The project comes from `KITH_PROJECT` in the launch env (`agent/bot/hq.rs`: `launch.env`; `grant_for_env`: the env list), never from a request |
@@ -49,7 +51,7 @@ A guest's shell can unset `KITH_RUN_TOKEN` and `KITH_PERSON` (or set `KITH_PERSO
 
 ## Sync commit
 
-Last confirmed that the properties describe `runauth.rs`, `kernel/bin/kith-recall`'s guest branch and the guest branches of `kith-memory` and `project-id` (`kernel/lib/kith_runsocket.py`): the commit that adds `memorySearch` and `projectId` (flow/guest-tools-via-host-runsocket, 2026-10-25; before it `7b6622a0`). When `git diff <sync> -- serve/host/src/runauth.rs kernel/bin/kith-recall kernel/bin/kith-memory kernel/bin/project-id kernel/lib/kith_runsocket.py` is not empty, re-read the diff against the coverage table before trusting a pass. Move the sync commit forward only after you have confirmed the properties still describe the code at the new commit (`/maintain-formal-verification-skill`).
+Last confirmed that the properties describe `runauth.rs`, `kernel/bin/kith-recall`'s guest branch and the guest branches of `kith-memory` and `project-id` (`kernel/lib/kith_runsocket.py`): the commit that adds `consumeOnce` and the table's `onces` (`keep_once`, `take_once`; flow/rust-m3-10-run-once-host, 2026-11-06; before it the commit that adds `memorySearch` and `projectId`, flow/guest-tools-via-host-runsocket, 2026-10-25, `7b6622a0` before that). When `git diff <sync> -- serve/host/src/runauth.rs kernel/bin/kith-recall kernel/bin/kith-memory kernel/bin/project-id kernel/lib/kith_runsocket.py` is not empty, re-read the diff against the coverage table before trusting a pass. Move the sync commit forward only after you have confirmed the properties still describe the code at the new commit (`/maintain-formal-verification-skill`).
 
 ## Run it
 
@@ -99,3 +101,9 @@ Read from the CI `host-test` job of PR #195 (a temporary commit added a thread-l
 ## Keeping it up to date
 
 When the covered code changes on purpose, update the properties with it and re-run the break table's idea on the new code. For the full routine, see `/maintain-formal-verification-skill`.
+
+## The core's table (M0e, M2-13)
+
+`core/runtime/src/runs.rs` + `runsock.rs` hold the same rules for the core's run socket; `core/runtime/src/runs_props.rs` is the port of P1 to P7 (`p1_` .. `p8_`) plus `p9_end_people_kills_exactly_those` (a revoke's hook ends exactly the tokens of the people it names). Run: `cargo test --manifest-path core/runtime/Cargo.toml --lib runs_props runsock authority::tests::runs`. A revoke (`people.suspend`, `people.removePerson`, `people.removeBot`) ends the tokens inside the same locked core call (`RunTokens::after_authority_write` from the daemon's authority branch); `Core::call_run` re-checks `cut_off` under that lock, so a request that resolved just before is still refused; `run.mint` refuses a revoked person. Undo revives nothing. Tokens are memory only (a restart ends them). The host mints through the core only with `KITH_RUN_TOKENS_VIA_CORE=1` (`core_front.rs`, `RunGrant::from_core`); off, the host's own table is what these P1 to P7 properties above cover.
+
+Switch gates (before the core serves `run.recall` / `run.memorySearch` or host.sock moves to run.sock): (1) the core must re-check `may(person, agent)` under the core lock for each such call, because `people.revoke` (one agent taken from one person) does not end tokens; (2) with `KITH_RUN_TOKENS_VIA_CORE` on, no core answer means no token (fail closed); (3) `run.mint` also should record the host generation and handle a renamed person (a token minted under an old id). Today `run_person_allowed` checks person known and not cut off only.

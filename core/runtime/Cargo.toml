@@ -1,0 +1,65 @@
+[package]
+name = "kith-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The sealed core: the only writer of core.db, the lifetime lock, the generation, and embedded mode"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like kith-kernel.
+workspace = "../../serve/host"
+
+[lib]
+name = "kith_core"
+path = "src/lib.rs"
+
+[dependencies]
+# kith-core depends on the kernel's pure rules, never the other way round (docs/plans/runtime-design.md section 1).
+kith-kernel = { path = "../kernel" }
+# The method table: kith-core calls through it with a principal (kith-api depends on no kith crate).
+kith-api = { path = "../api" }
+# The holder's client, its owner-only sockets (Unix socket with a peer check, named pipe with an owner-only access
+# list), its detached launch and the mutual proof: the owner socket and the holder link reuse them. The holder links
+# nothing of ours (scripts/check-holder-deps.sh).
+kith-holder = { path = "../holder" }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+# core.db is SQLite; the host and kith-kernel link the same bundled copy.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+# The lifetime lock on core.lock: flock on Unix, LockFileEx on Windows.
+fs2 = "0.4.3"
+getrandom = "0.4"
+# Local time to a UTC slot for the schedules import (the same version the host links).
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+# Run tokens and terminal tickets are kept as their SHA-256 (the holder links the same crate).
+sha2 = "0.10"
+# Webhook signatures (X-Hub-Signature-256): the same crate the holder links, on the same digest as sha2 above.
+hmac = "0.12"
+# The secrets envelope (docs/plans/runtime-design.md section 9b): XChaCha20-Poly1305 records under one master key.
+# Pinned exactly; the host links the same version.
+chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
+zeroize = "1"
+
+[dev-dependencies]
+tempfile = "3"
+# Generated checks of the run socket's rules (the port of the host's runauth_props.rs). Pinned like the host's.
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"

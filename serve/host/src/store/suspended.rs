@@ -109,6 +109,33 @@ impl Store {
         Ok(())
     }
 
+    /// The people this host holds live access rows for (devices, memberships, open invites), the owner's NULL device
+    /// aside. What `remote::core_revokes` checks a core-only removal against.
+    pub fn held_people(&self) -> Result<Vec<String>> {
+        let c = self.db.locked();
+        let mut out: Vec<String> = Vec::new();
+        // only what `suspend_person` would move: a used, revoked or expired invite stays in its table and is no access
+        let now = now_ms();
+        for (table, open) in [
+            ("devices", ""),
+            ("memberships", ""),
+            ("invites", " AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?1"),
+        ] {
+            let sql =
+                format!("SELECT DISTINCT person_id FROM {table} WHERE person_id IS NOT NULL AND person_id != ''{open}");
+            let mut q = c.prepare(&sql)?;
+            let rows = if open.is_empty() {
+                q.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?
+            } else {
+                q.query_map([now], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            out.extend(rows);
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
     /// Everyone something is kept for.
     pub fn suspended_people(&self) -> Result<Vec<String>> {
         let c = self.db.locked();

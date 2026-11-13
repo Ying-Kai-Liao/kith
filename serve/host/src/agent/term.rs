@@ -1,6 +1,6 @@
 //! Setup terminals: installing an agent's CLI or signing in to it runs in a
 //! real PTY on this computer, streamed to the client that started it. The
-//! host picks the command (from `backends::HARNESSES`); clients only type.
+//! host picks the command (from `backends::harnesses`); clients only type.
 
 use crate::LockExt;
 use crate::agent::backends;
@@ -107,15 +107,15 @@ impl Terms {
         let command = match step {
             Step::Node => format!("{} node", crate::shell::quote(&crate::service::current_exe()?.to_string_lossy())),
             Step::Install => {
-                let h = h.ok_or_else(|| anyhow!("Kith downloads {name} by itself"))?;
-                h.install.and_then(backends::Install::command).ok_or_else(|| anyhow!("{}", h.setup))?
+                h.ok_or_else(|| anyhow!("Kith downloads {name} by itself"))?;
+                backends::install_line(backend).await?
             }
             // Some CLIs (codex) delete the current credentials the moment a new sign-in starts.
             Step::Login if backends::signed_in(backend) == Some(true) => bail!("{name} is already signed in"),
             Step::Login => match method {
                 Some(m) => crate::agent::auth::terminal_command(backend, m)
                     .ok_or_else(|| anyhow!("That sign-in option is gone; check {name} again"))?,
-                None => backends::login_command(backend).await?,
+                None => backends::engine_line("login", backend).await?,
             },
         };
         self.spawn((backend.to_owned(), step), &command, cols, rows)

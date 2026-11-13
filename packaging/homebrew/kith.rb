@@ -2,7 +2,7 @@
 #
 #   brew install Ying-Kai-Liao/kith/kith
 #
-# It installs the release tarball (.github/workflows/release.yml): bin/kith and share/kith/{kernel,...}, the layout
+# It installs the release tarball (.github/workflows/release.yml): bin/kith, bin/kith-stub and share/kith/{kernel,...}, the layout
 # the binary's kernel lookup expects (../share/kith/kernel from its real path). The copy in the repo has
 # placeholder sha256 values on purpose: scripts/update-formula.sh fills version and checksums at release time and
 # the release workflow attaches the result (kith.rb) to the release. See README.md here.
@@ -28,6 +28,7 @@ class Kith < Formula
 
   def install
     bin.install "bin/kith"
+    bin.install "bin/kith-stub"   # the conversation lock's launcher (every release tarball carries it)
     bin.install "bin/kith-tts" if File.exist?("bin/kith-tts")   # local voice helper, Apple silicon builds only
     bin.install_symlink bin/"kith" => "hq"   # the old name keeps working
     (share/"kith").install Dir["share/kith/*"], Dir["share/kith/.claude-plugin"]
@@ -45,6 +46,7 @@ class Kith < Formula
   test do
     assert_match version.to_s, shell_output("#{bin}/kith --version")
     assert_predicate share/"kith/kernel/bin/kith", :exist?
+    assert_predicate bin/"kith-stub", :exist?
     assert_predicate bin/"hq", :exist?
   end
 end

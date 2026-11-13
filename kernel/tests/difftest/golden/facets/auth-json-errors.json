@@ -1,0 +1,21 @@
+{
+  "fakes": "",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
+  "state:kith/agents/echo/role/capabilities.yaml": "needs: [notion]\n",
+  "state:kith/state/secrets/auth.json.lock": "",
+  "step0.exit": "1\n",
+  "step0.json": "{\n  \"error\": \"no service 'nosuch' (kernel/services/, or an agent's services/)\",\n  \"ok\": false\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "1\n",
+  "step1.json": "{\n  \"error\": \"no agent 'ghost' (kith ls)\",\n  \"ok\": false\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "2\n",
+  "step2.json": "{\n  \"error\": \"a notion grant takes notion/<account> profiles\",\n  \"ok\": false\n}\n",
+  "step2.stderr": "",
+  "step3.exit": "1\n",
+  "step3.json": "{\n  \"error\": \"no agent 'ghost' (kith ls)\",\n  \"ok\": false\n}\n",
+  "step3.stderr": "",
+  "step4.exit": "2\n",
+  "step4.json": "{\n  \"error\": \"granted [--for AGENT] <service> [--json]\",\n  \"ok\": false\n}\n",
+  "step4.stderr": ""
+}

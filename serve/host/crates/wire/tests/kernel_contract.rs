@@ -83,7 +83,14 @@ fn the_kernels_own_output_is_what_a_producer_may_print() {
 #[test]
 fn the_kernels_own_output_reads_as_it_was_printed() {
     let agents: Vec<Agent> = fixture("fixtures", "ls.json");
-    assert_eq!(agents.iter().map(|a| a.harness).collect::<Vec<_>>(), [Some(Harness::Claude), Some(Harness::Codex)]);
+    assert_eq!(
+        agents.iter().map(|a| (a.harness, a.builtin)).collect::<Vec<_>>(),
+        [
+            (Some(Harness::Claude), Some(false)),
+            (Some(Harness::Codex), Some(false)),
+            (Some(Harness::Claude), Some(true))
+        ]
+    );
     let projects: Projects = fixture("fixtures", "project-ls.json");
     assert_eq!(projects.projects[1].parent.as_deref(), Some("alpha"));
     let owner: Launch = fixture("fixtures", "launch.json");

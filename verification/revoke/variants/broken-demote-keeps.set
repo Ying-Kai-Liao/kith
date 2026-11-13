@@ -1,0 +1,6 @@
+\* a demotion leaves the entries the demoted member approved
+CoreGate = TRUE
+Switched = TRUE
+AlwaysOn = TRUE
+RouterDoor = TRUE
+DemoteKeeps = TRUE

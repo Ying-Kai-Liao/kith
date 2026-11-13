@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""kith-scratch — what only the built-in `scratch` agent has: a thread's engine and model, and keeping a thread as an agent.
+
+  kith scratch thread <id> [--json] [--session SID]
+                                                  the harness, model and effort the thread started with (from the cost ledger,
+                                                  which every run is tagged in), and whether it has a summary
+  kith scratch keep <id> <name> [--json] [-H HARNESS] [-m MODEL] [--session SID]
+                                                  make a real agent <name> (kith new) of the thread: the thread's summary becomes
+                                                  its description and a first draft of agent.md, and it runs on the harness and
+                                                  model the thread did (-H / -m override). Refuses a name that is taken.
+
+`kith scratch` itself (a new thread each time, -H / -m per chat, --resume keeps a thread's engine and model unless they
+are given again) is bin/kith. Called as `kith-scratch AGENT keep|thread ...` by bin/kith, only for the built-in.
+
+A thread id is what the host keys its summary by (an app thread's root entry id); the cost ledger keys a run by the
+harness session. The two differ for a thread started in the app, so --session SID names the session too: the run is
+looked up under either, and a thread is known when either (or the summary) is.
+"""
+import json, os, re, subprocess, sys, tempfile
+from pathlib import Path
+
+KERNEL = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(KERNEL / 'lib'))
+import kith_accounts  # noqa: E402
+import kith_trajectory  # noqa: E402
+from kith_paths import paths  # noqa: E402
+
+CLAUDE_MODEL = re.compile(r'^(opus|sonnet|haiku|claude-|best$|opusplan)')   # bin/kith's rule: no other harness knows these
+THREAD = kith_trajectory.THREAD_ID
+
+
+def fail(msg, code=1):
+    print(f'kith scratch: {msg}', file=sys.stderr)
+    sys.exit(code)
+
+
+def summary_of(thread):
+    """The host's summary of the thread (it writes one per thread), redacted; '' when there is none or it was forgotten."""
+    try:
+        host = kith_trajectory.host_open()
+        if host is None or thread in kith_trajectory.forgotten_ids(host) or not kith_trajectory._table(host, 'thread_summaries'):
+            return ''
+        row = host.execute('SELECT text FROM thread_summaries WHERE thread_id = ?', (thread,)).fetchone()
+        return kith_trajectory.redact(row[0]).strip() if row and row[0] else ''
+    except Exception:  # noqa: BLE001 — a summary is a bonus, never a reason to fail
+        return ''
+
+
+def host_agent_of(thread):
+    """The hq agent whose chat the host keeps `thread` in (its root entry's chat, or `main:<chat>`), '' when the host store
+    does not say. A thread known only by its summary has no ledger row, so this is the only proof whose it is."""
+    try:
+        host = kith_trajectory.host_open()
+        if host is None:
+            return ''
+        chat = thread[5:] if thread.startswith('main:') else (host.execute('SELECT bot_id FROM entries WHERE id = ?', (thread,)).fetchone() or [''])[0]
+        row = host.execute('SELECT config FROM bots WHERE id = ?', (chat,)).fetchone() if chat else None
+        return (json.loads(row[0]) or {}).get('hqAgent') or '' if row else ''
+    except Exception:  # noqa: BLE001 — no proof is a refusal below, never a crash
+        return ''
+
+
+def thread_info(thread, session=None):
+    if not THREAD.fullmatch(thread):
+        fail(f'"{thread}" is not a thread id', 2)
+    if session is not None and not THREAD.fullmatch(session):
+        fail(f'"{session}" is not a session id', 2)
+    run = kith_accounts.session_run(thread) or (kith_accounts.session_run(session) if session else None)
+    if run and run['agent'] != 'scratch':
+        fail(f'that thread belongs to {run["agent"]}, not scratch')
+    summary = summary_of(thread)
+    if not run and not summary:
+        fail(f'unknown thread "{thread}" (no run of scratch is recorded under it)')
+    # No ledger row: a summary alone is not proof the thread is scratch's (any agent's thread has one), so the host's own
+    # record of whose chat it is must say scratch.
+    if not run and host_agent_of(thread) != 'scratch':
+        fail(f'that thread is not known to be scratch\'s (no run of scratch is recorded under "{thread}")')
+    run = run or {}
+    return {'thread': thread, 'agent': 'scratch', 'harness': run.get('harness'), 'model': run.get('model'),
+            'effort': run.get('effort'), 'summary': summary}
+
+
+def describe(summary):
+    """One line for the agent's description: the summary's first sentence, without the ': ' kith-new refuses."""
+    text = ' '.join(summary.split())
+    first = re.split(r'(?<=[.!?])\s', text, maxsplit=1)[0] if text else ''
+    first = first.replace(': ', ' - ')[:140].rstrip(' -')
+    return first or 'Started from a scratch chat'
+
+
+def draft(summary):
+    """The opening paragraph of agent.md: what the chat covered, to be refined by whoever builds the agent on it."""
+    if not summary:
+        return 'You carry on from a quick chat that started in scratch. TODO(builder): one paragraph on who you are and what you are for.'
+    body = '\n'.join('-' + x[1:] if x.strip() == '---' else x for x in summary.splitlines())
+    return ('You carry on from a quick chat that started in scratch. What that chat covered:\n\n' + body +
+            '\n\nTODO(builder): turn this into one paragraph on who you are and what you are for.')
+
+
+def run(cmd, **kw):
+    return subprocess.run([str(KERNEL / 'bin' / x) if i == 0 else x for i, x in enumerate(cmd)], capture_output=True, text=True, **kw)
+
+
+def keep(argv):
+    flags = {'-H': None, '--harness': None, '-m': None, '--model': None, '--session': None}
+    pos, as_json, i = [], False, 0
+    while i < len(argv):
+        a = argv[i]
+        if a == '--json':
+            as_json = True
+        elif a in flags:
+            if i + 1 >= len(argv):
+                fail(f'{a} needs a value', 2)
+            flags[a] = argv[i + 1]
+            i += 1
+        else:
+            pos.append(a)
+        i += 1
+    if len(pos) != 2:
+        fail('usage: kith scratch keep <thread-id> <new-name> [--json] [-H HARNESS] [-m MODEL]', 2)
+    thread, name = pos
+    # Refuse a taken name first and plainly (scratch included: the built-in is an agent too).
+    listed = json.loads(run(['kith-pkg', 'list', '--json']).stdout or '{}')
+    if name in listed or (paths()['KITH_AGENTS'] / name).exists():
+        fail(f'there is already an agent called "{name}"')
+    info = thread_info(thread, flags['--session'])
+    harness = flags['-H'] or flags['--harness'] or info['harness'] or 'claude'
+    harness = 'claude' if harness == 'claude-code' else harness
+    model = flags['-m'] or flags['--model'] or info['model']
+    if model and harness != 'claude' and CLAUDE_MODEL.match(model):
+        model = None   # a Claude model means nothing to another harness: its default answers
+    desc, text = describe(info['summary']), draft(info['summary'])
+    with tempfile.NamedTemporaryFile('w', suffix='.md') as f:
+        f.write(text)
+        f.flush()
+        r = run(['kith-new', name, desc, '--instructions', f.name])
+    if r.returncode:
+        sys.stderr.write(r.stderr or r.stdout)
+        sys.exit(r.returncode)
+    if harness != 'claude' or model:
+        r = run(['kith-pkg', 'set-harness', name, harness, *(['--model', model] if model else [])])
+        if r.returncode:
+            sys.stderr.write(r.stderr or r.stdout)
+            sys.exit(r.returncode)
+    agents = paths()['KITH_AGENTS']
+    out = {'agent': name, 'dir': str(agents / name / 'role'), 'home': str(agents / name), 'thread': thread,
+           'description': desc, 'harness': harness, 'model': model, 'from_summary': bool(info['summary'])}
+    if as_json:
+        print(json.dumps(out))
+    else:
+        print(f'{name} is a real agent now (from thread {thread}), on {harness}' + (f' ({model})' if model else '') +
+              f'. Talk to it: kith {name}; fill in {out["dir"]}/agent.md.')
+
+
+def thread(argv):
+    session = None
+    if '--session' in argv:
+        i = argv.index('--session')
+        if i + 1 >= len(argv):
+            fail('--session needs a value', 2)
+        session = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
+    ids = [a for a in argv if a != '--json']
+    if len(ids) != 1:
+        fail('usage: kith scratch thread <thread-id> [--json] [--session SID]', 2)
+    info = thread_info(ids[0], session)
+    if '--json' in argv:
+        print(json.dumps({**info, 'summary': bool(info['summary'])}))
+    else:
+        print(f'{info["thread"]}: {info["harness"] or "unknown"}' + (f', model {info["model"]}' if info['model'] else ', default model') +
+              (', summarised' if info['summary'] else ''))
+
+
+def main(argv):
+    if len(argv) < 2 or argv[0] != 'scratch' or argv[1] not in ('keep', 'thread'):
+        fail('usage: kith scratch keep <thread-id> <new-name> | kith scratch thread <thread-id>', 2)
+    (keep if argv[1] == 'keep' else thread)(argv[2:])
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

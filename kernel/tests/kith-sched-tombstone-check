@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# kith-sched-tombstone-check: once `kith migrate step schedules` has tombstoned <machine>/sched/state.json, kith-sched stops
+# with the note's message instead of carrying on as if it had no state (every job would start again), and leaves the note
+# exactly as it is. A routine job the core fires (a `trigger`, no `cron`) is never listed or ticked by kith-sched. A plain
+# state file, or none, behaves as before. Throwaway folders; nothing real is touched. The Rust half is the runtime's
+# cutover/modules tests (schedules).
+#
+#   kernel/tests/kith-sched-tombstone-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-tombstone-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_AUTH=$T/auth.json
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_MACHINE HQ_MACHINE
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/house/role"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+MACHINE=$(python3 -I -c "import sys; sys.path.insert(0, '$KERNEL/lib'); from kith_paths import paths; print(paths()['KITH_MACHINE'])")
+mkdir -p "$MACHINE/sched"
+S=$MACHINE/sched/state.json
+J=$KITH_HOME/agents/house/jobs.json
+NOTE='{"kith_tombstone": 1, "module": "schedules", "message": "moved", "rollback": "kith rollback schedules"}'
+export KITH_SCHED_NOW=2026-11-04T03:00   # nothing in these jobs is due then
+K() { python3 "$KERNEL/bin/kith-sched" "$@"; }
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; sed 's/^/     | /' "$T/out" 2>/dev/null | tail -6; fails=$((fails + 1)); fi; }
+# Runs kith-sched; it must exit 1 with the note's message and leave the note byte for byte.
+refuses() { K "$@" >"$T/out" 2>&1 </dev/null; rc=$?; [[ $rc -eq 1 ]] && grep -q 'moved to the Kith core' "$T/out" \
+  && grep -q 'kith rollback schedules' "$T/out" && [[ "$(cat "$S")" == "$NOTE" ]] && [[ ! -e "$S.tmp" ]]; }
+
+printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a"}]\n' > "$J"
+printf '%s\n' "$NOTE" > "$S"
+NOTE=$(cat "$S")
+# Tick is the launchd job, once a minute: tombstoned it exits 0 with one quiet line, fires nothing, leaves the note.
+K tick >"$T/out" 2>&1 </dev/null; rc=$?
+check "tick on a tombstoned state.json exits 0 with one quiet line" "[[ $rc -eq 0 ]] && [[ \$(wc -l <'$T/out') -eq 1 ]] && grep -q 'moved to the Kith core' '$T/out' && ! grep -q Traceback '$T/out' && [[ \"\$(cat '$S')\" == \"\$NOTE\" ]]"
+check "ls refuses" "refuses ls"
+check "prune refuses" "refuses prune"
+check "--json says so as an error, exit 1" "K ls --json >'$T/out' 2>&1; rc=\$?; [[ \$rc -eq 1 ]] && grep -q '\"ok\": false' '$T/out' && grep -q 'kith rollback schedules' '$T/out' && [[ \"\$(cat '$S')\" == '$NOTE' ]]"
+check "editing the jobs still works (the file is the agent's, not the state's)" "K pause house a >'$T/out' 2>&1 && grep -q '\"paused\": true' '$J'"
+
+# A plain file (or none) is the old behaviour.
+printf '{"tick": "2026-11-04T08:00", "last": {}}\n' > "$S"
+check "a plain state file reads" "K ls house >'$T/out' 2>&1"
+rm "$S"
+check "no state file reads as empty" "K ls house >'$T/out' 2>&1"
+
+# A routine the core fires has a trigger and no cron: not ours to list or tick.
+printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a"}, {"id": "r1", "task": "routine", "trigger": {"type": "interval", "every": 60}, "mac": "x"}, {"id": "both", "cron": "0 9 * * *", "task": "has both", "trigger": {"type": "interval", "every": 60}}, {"id": "neither", "cron": "0 10 * * *", "task": "plain"}]\n' > "$J"
+K ls house >"$T/out" 2>&1
+check "ls lists the cron job" "grep -q ' a ' '$T/out'"
+check "ls does not list (or crash on) the routine job" "! grep -q 'r1' '$T/out' && ! grep -q Traceback '$T/out'"
+K ls house --json >"$T/out" 2>&1
+check "ls --json lists the cron jobs, including one that also has a trigger" "[[ \"\$(python3 -c \"import json; print(len(json.load(open('$T/out'))['jobs']))\")\" == 3 ]]"
+K tick >"$T/out" 2>&1
+check "tick runs without a traceback beside a routine job" "! grep -q Traceback '$T/out'"
+
+[[ $fails -eq 0 ]] && echo "all ok" || echo "$fails failed"
+exit $((fails > 0))

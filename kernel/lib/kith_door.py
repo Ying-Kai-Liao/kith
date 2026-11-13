@@ -13,8 +13,11 @@ deny-default sandbox-exec profile of the door's own, on one folder of the person
     re-listen/accept only on them. The supervisor keeps its own copy of each socket open until every door process is
     gone, so a port is never freed while the box could take it by an implicit bind.
   - start (D2, model GuestDoor.tla): under the kith-auth lock, the step that reads allowed and not held (`kith-auth door`)
-    writes the claim and starts the box. A revoke takes the same lock, so a door either started before it (and its claim
-    is there for the sweep) or sees it and doesn't start.
+    writes the claim and starts the box. On the file a revoke takes the same lock, so a door either started before it (and its
+    claim is there for the sweep) or sees it and doesn't start. On a switched Mac (authority in the core) the check reads the core
+    under the core's own lock, which a revoke holds instead of this one: a revoke can land between the check and the claim. The
+    guarantee is then the revoke's own sweep (cut_off -> sweep, which waits for this lock and so finds the claim), seconds after
+    the commit, with the 60 s sweep loop as the backstop.
   - stop (D1): `sweep` kills every door of the listed people, every door whose supervisor is gone (a host or kith-permit
     killed with -9), and every door its person may no longer run. A door process is one in this door's sandbox (it may
     read <claim>.in and not <claim>.out: sandbox_check), or one whose environment holds KITH_DOOR=<claim>, or a
@@ -371,8 +374,8 @@ def door_procs(claim, since, parent=None):
     return found - {os.getpid(), 0, 1}
 
 
-def kill(claim, since, parent=None):
-    """Stops every process of the door, rescans until nothing new appears, kills them all, and waits up to 10 s until
+def kill(claim, since, parent=None, limit=10):
+    """Stops every process of the door, rescans until nothing new appears, kills them all, and waits up to `limit` s (10) until
     none is left. Returns the ones still left (none, unless one would not die)."""
     stopped = set()
     while new := door_procs(claim, since, parent) - stopped:
@@ -382,7 +385,7 @@ def kill(claim, since, parent=None):
             except ProcessLookupError:
                 pass
         stopped |= new
-    deadline, left = time.time() + 10, stopped
+    deadline, left = time.time() + limit, stopped
     while left and time.time() < deadline:
         for p in left:    # only what the last scan found: a pid that ended may already be someone else's
             try:
@@ -547,12 +550,14 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None):
         signal.signal(signal.SIGTERM, old)
         left = set()
         if record is not None:   # the box may run even when p is None: a SIGTERM inside Popen, after the fork
-            left = kill(claim, since, os.getpid())
+            # SIGKILL ends a process in milliseconds; the bounds keep this cleanup inside the 3 s grace a helper wait gives a
+            # TERM before its KILL. What would not die inside them keeps its claim for the next sweep (below).
+            left = kill(claim, since, os.getpid(), limit=1)
             if p is not None:
                 if p.poll() is None:
                     p.kill()
                 try:
-                    p.wait(timeout=5)
+                    p.wait(timeout=1)
                 except subprocess.TimeoutExpired:
                     pass
                 left = door_procs(claim, since, os.getpid())

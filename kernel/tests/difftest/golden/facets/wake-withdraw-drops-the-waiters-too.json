@@ -1,0 +1,17 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"unwait\", \"session\": \"s1\", \"waits\": [\"wwwwwwwwwwww\"]}\n{\"at\": \"<TS>\", \"event\": \"withdraw\", \"session\": \"s1\", \"ids\": [\"a\"]}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/answered.json": "{\n  \"a\": {\n    \"how\": \"withdrawn\",\n    \"run\": null,\n    \"t\": \"<MASKED>\"\n  }\n}\n",
+  "state:home/.kith/sessions/waits/.lock": "",
+  "state:home/.kith/sessions/waits/vvvvvvvvvvvv.json": "{\n  \"agent\": \"coder\",\n  \"at\": 4000000000.0,\n  \"checked\": \"<MASKED>\",\n  \"created\": \"<MASKED>\",\n  \"id\": \"vvvvvvvvvvvv\",\n  \"kind\": \"at\",\n  \"note\": \"\",\n  \"on\": \"at:+1h\",\n  \"seen\": null,\n  \"session\": \"s2\",\n  \"until\": \"<MASKED>\",\n  \"v\": 1,\n  \"why\": \"\"\n}\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "withdrew 2\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "s2  coder  waiting vvvvvvvvvvvv on at:+1h until <TS>\n",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "withdrew 0\n"
+}

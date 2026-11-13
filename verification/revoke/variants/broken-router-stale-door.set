@@ -1,0 +1,7 @@
+\* BROKEN: the router answers from the stale file, and a guest door starts on it
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+RouterStale = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE

@@ -59,8 +59,8 @@ cat > "$T/bin/claude" <<'STUB'
 printf '{"result":"pong from %s for %s","session_id":"s1","total_cost_usd":0}' "$KITH_AGENT" "$KITH_PERSON"
 STUB
 chmod +x "$T/bin/claude"
-printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
-export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-fake-host"; chmod +x "$T/bin/kith-fake-host"
+export KITH_BIN=$T/bin/kith-fake-host PATH=$T/bin:$PATH
 
 AUTH=$KERNEL/bin/kith-auth
 fails=0

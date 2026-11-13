@@ -59,20 +59,20 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
         // Writes the thread's summary now (`kith summarise --thread`): `{written: bool}`.
         "summariseThread" => {
             let written = matches!(
-                crate::chat::memory::summary::summarise_now(
+                crate::hqmem::summary::summarise_now(
                     hub,
                     str_arg(&b, "thread")?,
                     b["force"].as_bool().unwrap_or(false)
                 )
                 .await?,
-                crate::chat::memory::summary::Wrote::Yes
+                crate::hqmem::summary::Wrote::Yes
             );
             serde_json::json!({"written": written})
         }
         // The owner forgets a thread (`kith forget --thread`): its summary and its row's copy go.
         "forgetThread" => {
             let thread = str_arg(&b, "thread")?;
-            crate::chat::memory::summary::forget_now(hub, thread)?;
+            crate::hqmem::summary::forget_now(hub, thread)?;
             serde_json::json!({"forgotten": thread})
         }
         // A citation link opened by the owner or, as `asPerson` (set by the host, never the client), an invitee:
@@ -119,7 +119,7 @@ fn parse_citation(link: &str) -> Option<(&str, Option<i64>)> {
 /// Opens a trajectory citation for `person` (None: the owner). Only the people in the thread's audience get the
 /// thread; anyone else, and every thread that doesn't exist, gets `{error: "not_shared"}`.
 pub(super) async fn resolve_citation(hub: &Arc<Hub>, person: Option<&str>, link: &str) -> Value {
-    use crate::chat::memory::summary::{facets, thread_key};
+    use crate::hqmem::summary::{facets, thread_key};
     let Some((id, seq)) = parse_citation(link) else { return not_shared() };
     let (bot, root, root_entry) = match id.strip_prefix("main:") {
         Some(bot) => (bot.to_owned(), None, None),
@@ -149,7 +149,7 @@ pub(super) async fn resolve_citation(hub: &Arc<Hub>, person: Option<&str>, link:
         None => hub.store.history(&bot, seq.map_or(i64::MAX, |s| s.saturating_add(20)), 40),
     };
     let Ok(mut entries) = entries else { return not_shared() };
-    crate::chat::memory::summary::hide_forgotten(&hub.store, &mut entries);
+    crate::hqmem::summary::hide_forgotten(&hub.store, &mut entries);
     let at = seq.and_then(|s| entries.iter().find(|e| e.seq == s)).map(|e| e.id.clone());
     serde_json::json!({"thread": {"id": key, "botId": bot, "rootId": root}, "seq": seq, "at": at, "entries": entries})
 }

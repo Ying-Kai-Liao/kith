@@ -15,6 +15,8 @@ export class PeopleModel extends Observable {
   invites: PendingInvite[] = []
   audit: AuditRow[] = []
   error: string | null = null
+  /** The last `load` failed (kith-auth unreadable, say): the page shows an error with Retry, not an empty list. */
+  loadFailed = false
   /** A host warning from the last change that still went through. */
   notice: string | null = null
   busy = false
@@ -51,9 +53,13 @@ export class PeopleModel extends Observable {
       this.invites = invites
       this.supported = true
       this.error = null
+      this.loadFailed = false
     } catch (e) {
       if (isUnsupportedHost(e)) this.supported = false
-      else this.error = message(e)
+      else {
+        this.error = message(e)
+        this.loadFailed = true
+      }
     }
     this.changed()
   }

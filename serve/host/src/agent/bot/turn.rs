@@ -236,7 +236,7 @@ impl Actor {
         self.lane = lane.clone();
         self.hub.set_task_status(&lane, TaskState::Working);
         if !hidden {
-            memory::summary::resume(&self.hub, &lane);
+            crate::hqmem::summary::resume(&self.hub, &lane);
         }
         self.turn = Some(turn);
         self.project_divider();
@@ -420,6 +420,8 @@ impl Actor {
         // The claim names the run's person (its bot's `person`, set by the host), so revoking them ends this process too,
         // also when a restarted host no longer knows it. The owner's runs carry none and are never swept.
         let (st, id, person, agent) = (state, sid.to_owned(), self.cfg.person.clone(), self.cfg.hq_agent.clone());
+        // The run's folder, for the turn's session row in the core (flag on): the launch's, as the agent works in it.
+        let cwd = self.conn_started_as.as_ref().map_or(self.cfg.cwd.clone(), |s| s.1.clone());
         let taken = tokio::task::spawn_blocking(move || {
             if let Some(p) = &person {
                 // The warm process outlives the turn claim (and can outlive a crashed host): it stays findable.
@@ -427,26 +429,43 @@ impl Actor {
                     tracing::warn!(%error, "couldn't record a person's agent process");
                 }
             }
-            crate::terminal::claim::take_as(&st, &id, kind, pid, false, person.as_deref(), agent.as_deref())
+            crate::terminal::claim::take_for_turn(
+                &st,
+                &id,
+                kind,
+                pid,
+                false,
+                person.as_deref(),
+                agent.as_deref(),
+                Some(&cwd),
+            )
         })
         .await
         .unwrap_or_else(|e| Err(std::io::Error::other(e)));
-        match taken {
-            Ok(Ok(())) => self.turn_claim = Some((sid.to_owned(), pid)),
-            // A terminal got in between the start check and here: it keeps the session.
-            Ok(Err(held)) if held.0.pid == pid => self.turn_claim = Some((sid.to_owned(), pid)),
+        match crate::terminal::claim::judge_turn_claim(&taken, pid, lane.thread.is_none(), bot) {
+            crate::terminal::claim::TurnClaim::Held => self.turn_claim = Some((sid.to_owned(), pid)),
             // A main-lane claim only keeps a terminal out; it never stops the turn (bots of one room or team may
             // hold the same session id, and a terminal can't attach to the main chat). Run without the claim.
-            Ok(Err(held)) if lane.thread.is_none() => {
-                tracing::warn!(holder = held.0.pid, "main-lane turn runs without its writer claim: another holds it");
-            }
-            Ok(Err(_)) => {
-                let held =
-                    crate::terminal::HeldByWriter { code: if bot { "heldByOtherWriter" } else { "liveInTerminal" } };
+            crate::terminal::claim::TurnClaim::Unclaimed => match &taken {
+                Ok(Err(held)) => {
+                    tracing::warn!(
+                        holder = held.0.pid,
+                        "main-lane turn runs without its writer claim: another holds it"
+                    );
+                }
+                Err(error) => tracing::warn!(%error, "couldn't claim a session for a turn"),
+                Ok(Ok(())) => {}
+            },
+            crate::terminal::claim::TurnClaim::Refused(code) => {
+                let held = crate::terminal::HeldByWriter { code };
                 self.notice(&held.to_string(), NoticeStyle::Error);
                 return Err(held.into());
             }
-            Err(error) => tracing::warn!(%error, "couldn't claim a session for a turn"),
+            // The person was revoked after the gate checked: the turn does not run (core claims on).
+            crate::terminal::claim::TurnClaim::Revoked => {
+                self.notice("Access was revoked.", NoticeStyle::Error);
+                return Err(anyhow!("revoked: the turn was refused"));
+            }
         }
         Ok(())
     }
@@ -528,6 +547,7 @@ impl Actor {
                     if let Some(conversation) = &g.conversation {
                         e.data["conversation"] = conversation.clone().into();
                     }
+                    e.data["epoch"] = g.epoch.into();
                     if !crate::chat::group::current(&self.hub.store, &g.lane, g.epoch) {
                         e.data["late"] = true.into();
                         let stopped = g

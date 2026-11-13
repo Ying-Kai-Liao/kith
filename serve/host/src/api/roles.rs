@@ -3,6 +3,7 @@
 //! Everything an allowed method returns is shaped here too, so no handler has to know who is asking.
 //! The owner's devices and Local never come through here (see `dispatch`).
 
+use super::authority::Authority;
 use super::devices::NotAllowed;
 use crate::hub::Hub;
 use crate::remote::account;
@@ -62,6 +63,19 @@ pub async fn may_use_checked(person: &str, agent: &str) -> Option<bool> {
 /// What kith-auth says `person` gets of `agent` (see `kith-auth resolve`); None when it can't be asked or the person
 /// is the owner, who never comes through here.
 pub(crate) async fn resolve(person: &str, agent: &str) -> Option<Value> {
+    // `KITH_CORE_AUTHORITY=1` (M2-16): the core's `people.may` is the truth, asked within a bound; None when it can't be
+    // asked in time, which every caller reads as "no" (or "try again" for `may_use_checked`). The owner is None too.
+    if super::authority::guard_on_core() {
+        use super::authority::Resolved;
+        // The whole bundle, as kith-auth prints it on the file: a guest's launch reads `access` from it (`consumeAccess`).
+        match super::authority::core_resolved(person, agent).await {
+            Resolved::Bundle(v) if v["owner"].as_bool() != Some(true) => return Some(v),
+            Resolved::Bundle(_) | Resolved::Unknown => return None,
+            // The core refused the marked read: authority is back on auth.json (a rollback the host's cache has not
+            // seen yet), so kith-auth answers below, from the file.
+            Resolved::NotSwitched => {}
+        }
+    }
     let bin = account::bin().await?;
     let out = crate::channels::hq::output(&bin, &["resolve", agent, "--person", person]).await?;
     serde_json::from_slice::<Value>(&out.stdout).ok().filter(|v| v["owner"].as_bool() != Some(true))
@@ -91,6 +105,13 @@ pub async fn granted_agents(hub: &Hub, person: &str) -> Vec<Value> {
 /// The owner's name in kith-auth, for "Waiting for <owner>"; None when it has none (or can't be asked).
 pub async fn owner_name(agent: &str) -> Option<String> {
     let bin = account::bin().await?;
+    // A switched host has no auth.json to ask (kith-auth exits 3 on the tombstone): the owner's row in the core has the name.
+    if super::authority::switched() {
+        let rows = super::authority::run_auth(&bin, &["people", "--json"]).await.ok()?;
+        let people: Vec<Value> = serde_json::from_str(&rows).ok()?;
+        let owner = people.iter().find(|p| p["owner"] == true)?;
+        return owner["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned);
+    }
     // No person: kith-auth answers for the owner.
     let out = crate::channels::hq::output(&bin, &["resolve", agent]).await?;
     let v: Value = serde_json::from_slice(&out.stdout).ok()?;
@@ -348,8 +369,16 @@ fn bot_person(store: &Store, id: &str) -> Option<Option<String>> {
 /// One live or catch-up event, for the owner (`who` None) or for `person`: the owner never sees an invitee's chats,
 /// an invitee sees only their own, and no invitee sees usage, screens or the cloud. A permission card says whether
 /// they may answer it (`canAnswer`).
+/// The streams build their [`super::authority::Selected`] once instead (events.rs); this one is for a single call.
+#[cfg(test)]
 pub fn event_for(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
-    let mut v = route(store, who, v)?;
+    super::authority::Selected::from_env().event(store, who, v)
+}
+
+/// [`event_for`] with the answer to "is this person granted this agent" given (`authority::Authority`): the host's
+/// people mirror, or the core's.
+pub fn event_for_with(access: &dyn Authority, store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
+    let mut v = route(access, store, who, v)?;
     if v["type"] == "entry" {
         mark_can_answer(store, who, &mut v["entry"]);
     }
@@ -382,7 +411,7 @@ fn was_approver(e: &Value, me: &str) -> bool {
     e["kind"] == "permission" && e["data"]["formerApprovers"].as_array().is_some_and(|l| l.iter().any(|p| p == me))
 }
 
-fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
+fn route(access: &dyn Authority, store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
     let kind = v["type"].as_str().unwrap_or_default().to_owned();
     // A key or account card goes to the owner's devices and nobody else's.
     if who.is_some() && kind == "entry" && secret_card(&v["entry"]["data"]) {
@@ -428,10 +457,8 @@ fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
             .then_some(v),
         (None, _) => Some(v),
         (Some(me), Some(Some(p))) if p == me => {
-            let agents = store.person(me).map(|p| p.agents).unwrap_or_default();
-            let granted =
-                store.bot(bot.as_deref()?).ok().flatten()?.config.hq_agent.is_some_and(|a| agents.contains_key(&a));
-            if !granted {
+            let agent = store.bot(bot.as_deref()?).ok().flatten()?.config.hq_agent;
+            if !agent.is_some_and(|a| access.granted(me, &a)) {
                 return None;
             }
             let mut v = shape_bot(v);

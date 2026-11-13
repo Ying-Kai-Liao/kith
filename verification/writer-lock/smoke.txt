@@ -1,0 +1,11 @@
+# cfg names (column 2 of checks.tsv) of the fast rows run.sh --smoke checks; CI runs them when nothing the model covers changed.
+# Chosen by the architect (2026-11-05): a fix row and a broken row per module, one of each kind of verdict.
+r4-fix-die-live-takeover
+r4-nostub
+holder-crash-donetruth
+holder-crash-donetruth-nocas
+c4-fix-doubletake
+c4-nofence
+c4-stopall
+c4-fenceleak
+c4-stuckdrop

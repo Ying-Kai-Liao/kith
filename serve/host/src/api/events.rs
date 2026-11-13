@@ -1,5 +1,6 @@
 //! Event streams shared by SSE and channels: catch-up then live events, and setup terminals.
 
+use super::authority::Selected;
 use super::devices::{Caller, Principal, principal};
 use super::roles;
 use crate::LockExt;
@@ -78,6 +79,9 @@ fn bot_events(hub: &Arc<Hub>, since: i64, bot_id: &str) -> impl Stream<Item = Va
     stream::iter(catch_up).chain(tail)
 }
 
+/// The longest a live event waits for the core's answer on who is granted what (`KITH_CORE_AUTHORITY=1`).
+const CORE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Event types only this computer's own apps receive.
 const LOCAL_EVENTS: &[&str] = &["accessRequests", "cloud"];
 
@@ -111,8 +115,11 @@ pub fn events_stream(
     }
     // A call still ringing, for an app that connects (or reconnects) while it does.
     catch_up.extend(hub.calls.ringing(hub));
+    // The catch-up asks the core once per (person, agent). A live event chooses its answer again at its own moment
+    // (`Selected::now`), so a gate that closes mid-stream moves the next event to the host's data and a revoke stops it.
+    let batch = Selected::now().for_catch_up();
     let mut catch_up: Vec<Value> =
-        catch_up.into_iter().filter_map(|v| roles::event_for(&hub.store, who.as_deref(), v)).collect();
+        catch_up.into_iter().filter_map(|v| batch.event(&hub.store, who.as_deref(), v)).collect();
     catch_up.sort_by_key(|v| v["rev"].as_i64().unwrap_or(0));
     let hello = json!({
         "type": "hello",
@@ -139,7 +146,19 @@ pub fn events_stream(
                         .filter(|r| !r["personId"].is_null()).cloned().collect::<Vec<_>>(),
                 })),
                 Ok(v) if !local && v["type"].as_str().is_some_and(|t| LOCAL_EVENTS.contains(&t)) => None,
-                Ok(v) => roles::event_for(&hub.store, who.as_deref(), v),
+                Ok(v) => {
+                    // An event already in flight when the gate flips is decided by the core (at most CORE_WAIT
+                    // after the flip); the next one is asked afresh.
+                    let access = Selected::now();
+                    if access.is_core() {
+                        // The core's answer is a socket round trip: off the async threads, and no longer than a few
+                        // seconds. A core that is too slow drops the event, as one that does not answer does.
+                        let task = tokio::task::spawn_blocking(move || access.event(&hub.store, who.as_deref(), v));
+                        tokio::time::timeout(CORE_WAIT, task).await.ok().and_then(Result::ok).flatten()
+                    } else {
+                        access.event(&hub.store, who.as_deref(), v)
+                    }
+                }
                 // Lagged: tell the client to resync from its last rev.
                 Err(_) => Some(json!({"type": "resync"})),
             }

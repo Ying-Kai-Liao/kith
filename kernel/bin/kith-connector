@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""kith-connector — the connector catalog (MCP servers installed on this Mac), over the host's local API.
+
+  kith connector ls [--json]                      what is installed: id, name, kind, sign-in state (never a secret value)
+  kith connector search [WORDS...] [--json]       the MCP registry (no words: the featured ones)
+  kith connector info REGISTRY_NAME [--json]      how it installs: the options and the inputs each one asks for
+  kith connector install REGISTRY_NAME --option ID [--input K=V ...] [--input-stdin-json] [--json]
+                                                  install it. Secret inputs (API keys) never go in an argument: pipe a JSON
+                                                  object on stdin with --input-stdin-json ({"API_KEY": "..."}).
+  kith connector remove ID [--json]               uninstall it
+
+An installed connector is a service called ID: `kith <agent> connect ID` lets an agent use it. Secrets and sign-in
+tokens stay in the host's vault; this command never reads them.
+Exit: 0 done, 1 refused or the host is not running, 2 usage."""
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def die(msg, code=1):
+    print(f'kith connector: {msg}', file=sys.stderr)
+    sys.exit(code)
+
+
+def host_endpoint():
+    """(data dir, port) of this install's kith serve; the env overrides win. Same as kith-group."""
+    data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
+    if not (data and port):
+        try:
+            d, p = subprocess.run([str(Path(__file__).resolve().parent / 'kith-serve'), 'endpoint'], capture_output=True,
+                                  text=True, timeout=4, check=True).stdout.split()
+        except Exception:  # noqa: BLE001 — fall back to the defaults
+            d, p = str(Path.home() / '.kith' / 'serve'), '19224'
+        data, port = data or d, port or p
+    return Path(data), port
+
+
+def host_call(method, body):
+    """The host's local API (owner token over loopback). The answer, or exit 1 with why not."""
+    import urllib.error
+    import urllib.request
+    down = "the Kith host isn't running here; start it with `kith serve start`"
+    try:
+        data, port = host_endpoint()
+        token = (data / 'token').read_text().strip()
+    except OSError:
+        die(down)
+    req = urllib.request.Request(f'http://127.0.0.1:{port}/api/{method}', json.dumps(body).encode(),
+                                 {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            why = json.load(e).get('error')
+        except (ValueError, AttributeError):
+            why = None
+        die(why if isinstance(why, str) and why else f'the host answered {e.code}')
+    except (urllib.error.URLError, OSError):
+        die(down)
+
+
+def show(args, data, lines):
+    if args.json:
+        print(json.dumps(data))
+    else:
+        for line in lines:
+            print(line)
+
+
+def cmd_ls(args):
+    items = host_call('connectors', {}).get('items', [])
+    show(args, {'items': items}, [f"{c['id']}  {c['name']}  {c['kind']}" + (f"  {c['auth']}" if c.get('auth') not in (None, 'none') else '')
+                                  for c in items] or ['no connectors installed'])
+
+
+def cmd_search(args):
+    ans = host_call('marketConnectors', {'search': ' '.join(args.words)})
+    items = ans.get('items', [])
+    show(args, ans, [f"{c['name']}  {c.get('title', '')}" + ('  (installed)' if c.get('installed') else '') for c in items] or ['nothing found'])
+
+
+def cmd_info(args):
+    c = host_call('connectorInfo', {'registryName': args.name})
+    lines = [f"{c['name']}  {c.get('title', '')}", c.get('description') or '']
+    for o in c.get('options', []):
+        lines.append(f"  --option {o['id']}  {o.get('label', '')}")
+        for i in o.get('inputs', []):
+            flags = ['required'] if i.get('required') else []
+            if i.get('secret'):
+                flags.append('secret: use --input-stdin-json')
+            lines.append(f"      {i.get('name')}" +(f"  ({', '.join(flags)})" if flags else '') + (f"  {i['description']}" if i.get('description') else ''))
+    show(args, c, lines)
+
+
+def cmd_install(args):
+    inputs = {}
+    for kv in args.input or []:
+        k, eq, v = kv.partition('=')
+        if not (k and eq):
+            die(f'--input wants K=V, got "{k}"', 2)
+        inputs[k] = v
+    if args.input_stdin_json:
+        try:
+            given = json.loads(sys.stdin.read())
+        except ValueError:
+            die('--input-stdin-json: stdin is not JSON', 2)
+        if not isinstance(given, dict) or not all(isinstance(v, str) for v in given.values()):
+            die('--input-stdin-json: stdin must be one JSON object of strings', 2)
+        inputs.update(given)
+    ans = host_call('installConnector', {'registryName': args.name, 'option': args.option, 'inputs': inputs})
+    c = ans.get('connector') or {}
+    show(args, ans, [f"installed {c.get('id')} ({c.get('name')}); an agent uses it after `kith <agent> connect {c.get('id')}`"])
+
+
+def cmd_remove(args):
+    host_call('removeConnector', {'id': args.id})
+    show(args, {'removed': args.id}, [f'removed {args.id}'])
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        if message.startswith('unrecognized arguments'):  # argparse would print them, and one may be a secret
+            message = 'unrecognized arguments (not shown). A secret never goes in an argument: pipe it on stdin'
+        die(f'{message}. See: kith connector --help', 2)
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ('-h', '--help'):
+        print(__doc__)
+        sys.exit(0 if argv else 2)
+    ap = Parser(prog='kith connector')
+    sub = ap.add_subparsers(dest='verb', required=True)
+    for verb in ('ls', 'search', 'info', 'install', 'remove'):
+        p = sub.add_parser(verb)
+        p.add_argument('--json', action='store_true')
+        if verb == 'search':
+            p.add_argument('words', nargs='*')
+        if verb in ('info', 'install'):
+            p.add_argument('name', metavar='REGISTRY_NAME')
+        if verb == 'install':
+            p.add_argument('--option', required=True)
+            p.add_argument('--input', action='append', metavar='K=V')
+            p.add_argument('--input-stdin-json', action='store_true')
+        if verb == 'remove':
+            p.add_argument('id')
+    args = ap.parse_args(argv)
+    {'ls': cmd_ls, 'search': cmd_search, 'info': cmd_info, 'install': cmd_install, 'remove': cmd_remove}[args.verb](args)
+
+
+if __name__ == '__main__':
+    main()

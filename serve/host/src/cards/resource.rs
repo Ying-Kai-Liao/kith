@@ -30,11 +30,12 @@ pub const SENSITIVE: &[&str] = &[
     "bridge/**",
     "index/**",
     "memory.db*",
+    "core/**",
 ];
 
 /// The folders below a Kith state or machine folder that a guest's sandbox denies whole (`kith_guard.SECRET_DIRS`). `SENSITIVE`
 /// names the files among them a card for a *tool call* never touches; a grant of *access* is judged by the whole folders.
-pub const SECRET_DIRS: &[&str] = &["secrets", "serve", "browsers", "bridge", "index", "room-ledger"];
+pub const SECRET_DIRS: &[&str] = &["secrets", "serve", "browsers", "bridge", "index", "room-ledger", "core"];
 
 /// Whether `path` is, is below, or holds one of the [`SECRET_DIRS`] of the Kith folders.
 pub fn touches_secret_dirs(path: &Path, roots: &Roots) -> bool {
@@ -152,7 +153,7 @@ pub fn roots() -> Roots {
         return r;
     }
     let mut r = Roots::default();
-    Roots::add(&mut r.kith, crate::kernel::machine_dir(&dirs::home_dir().unwrap_or_default()));
+    Roots::add(&mut r.kith, crate::kernel::state_dir(&dirs::home_dir().unwrap_or_default()));
     Roots::add(&mut r.whole, crate::service::data_dir());
     let mut settled = true;
     if let Some(k) = crate::kernel::current_kernel() {

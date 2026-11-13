@@ -1,0 +1,724 @@
+#!/usr/bin/env -S python3 -I
+"""kith-difftest: the same CLI line, the same result.
+
+Runs every corpus case on two sides (OLD and NEW), each in its own throwaway HOME / KITH_HOME / TMPDIR built from the
+case's setup steps, and compares what each printed (stdout, or --json as data; stderr; the exit code), what it did
+(the state folders afterwards: files by content, SQLite stores by table rows) and what it asked of the outside world
+(the log of the fake gh / security / launchctl / claude ... calls). Both sides are normalised first. A difference that
+is not in intended.json fails the run; an intended difference that no longer occurs is reported as stale.
+
+    kith-difftest                       the corpus, OLD = kernel/bin/kith with KITH_CORE=python, NEW = the same with rust
+    kith-difftest --old 'CMD' --new 'CMD'   two arbitrary command prefixes (the case's arguments follow each)
+    kith-difftest --case NAME --keep    one case (glob), leave the work folders for a look
+    kith-difftest --list
+    kith-difftest --golden golden --record      freeze: run the OLD side alone, store its facets per case (golden/facets/)
+    kith-difftest --golden golden               replay on the Python kernel against the store; add --rust --bin PATH for the Rust program
+
+See README.md for the case format. Standard library only.
+"""
+import argparse
+import concurrent.futures
+import copy
+import difflib
+import fnmatch
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import select
+import sqlite3
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+KERNEL = HERE.parent.parent
+FAKES = HERE / 'fakes'
+ABSENT = '<absent>\n'
+SIDES = ('old', 'new')
+CORE = {'old': 'python', 'new': 'rust'}
+WITH_CORE = False    # --core: the NEW side has its core database before the case runs
+CORE_RAN, CORE_BARE = [], []    # --core: names of the cases that ran with a core, and those that started before any setup
+CORE_INTENDED = {'case': '*', 'facet': 'state:*/core/*',
+                 'why': 'the --core pass: the NEW side made its core database first (kith kernel core-migrate), so its core/ folder '
+                        'exists there and not on the OLD side; everything else must be the same'}
+WITH_DAEMON = False    # --daemon: the NEW side runs the case against a daemon (kith kernel core-daemon) started in its sandbox
+DAEMON_PER_CASE = {}   # --daemon: case name -> calls its daemon answered (refused calls are not counted)
+DAEMON_LOGS = {}   # --daemon: side folder -> the logs folder (relative) the daemon created, when the case had not made it
+DAEMON_RAN, DAEMON_BARE, DAEMON_SERVED = [], [], []    # --daemon: cases that ran against a daemon, those that started before any setup, calls served
+DAEMON_INTENDED = [
+    {'case': '*', 'facet': 'state:*/core/*',
+     'why': 'the --daemon pass: the NEW side runs a daemon (kith kernel core-daemon), so its core/ folder (the core database, the owner token) '
+            'exists there and not on the OLD side; everything else must be the same'},
+]
+GOLDEN = None   # --golden DIR: DIR/*.json are frozen cases, DIR/facets/NAME.json what the OLD (Python) side printed and did for each
+RECORD = False  # --golden --record: run the OLD side alone and store its facets; without it, run the NEW side alone and compare to the store
+REQUIRE_SWITCHED = False   # --require-switched: a golden replay on the Rust program runs the cases marked "unswitched" too (red until they are switched)
+REPLAY_SIDE = 'old'   # which side a golden replay runs: 'old' (KITH_CORE=python), or 'new' (the Rust program) with --rust / --new
+RUST_BIN = ''   # the kith program the NEW side's router uses; main() sets it for a run with the Rust cases
+
+
+def find_rust_bin():
+    """--bin, else $KITH_DIFFTEST_BIN, else a build under $CARGO_TARGET_DIR or serve/host/target (debug, then release)."""
+    for t in (os.environ.get('CARGO_TARGET_DIR'), str(KERNEL.parent / 'serve/host/target')):
+        for kind in ('debug', 'release'):
+            if t and os.access(Path(t) / kind / 'kith', os.X_OK):
+                return str(Path(t) / kind / 'kith')
+    return ''
+TIMEOUT = 90
+# The VCS's binary internals hold commit times and hashes of them; hooks/*.sample and config vary with the runner's version
+# and OS (macOS adds ignorecase/precomposeunicode) and are never kith's state. Refs, HEAD, logs are still compared.
+GIT_NOISE = [r'/\.git/(index|objects/|hooks/|config$)']
+
+# What changes between two runs of the same line and means nothing. Order matters: longest shapes first.
+GENERIC = [
+    (r'\d{4}-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)?', '<TS>'),
+    (r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', '<UUID>'),
+    (r'\b[0-9a-f]{40}\b', '<SHA>'),
+    (r'\b[0-9a-f]{32,}\b', '<HEX>'),
+    (r'\b1[5-9]\d{8}(?:\d{3})?\b', '<EPOCH>'),
+]
+
+
+def roots(side_dir):
+    """The throwaway roots of one side and their placeholders, longest path first (macOS resolves /var to /private/var)."""
+    pairs = []
+    for sub, ph in (('home', '<HOME>'), ('kith', '<KITH_HOME>'), ('tmp', '<TMP>'), ('', '<ROOT>')):
+        p = side_dir / sub if sub else side_dir
+        for form in {str(p), os.path.realpath(p)}:
+            pairs.append((form, ph))
+    pairs.append((str(KERNEL), '<KERNEL>'))   # the checkout the program runs from: a golden record must not hold one machine's path
+    return sorted(pairs, key=lambda x: -len(x[0]))
+
+
+class Normalizer:
+    def __init__(self, side_dir, extra=(), mask_keys=()):
+        self.mask_keys = set(mask_keys)   # a case's own keys whose value means nothing (a clock, a pid): any scalar is masked to <MASKED> (last_started alone is <EPOCH>)
+        self.roots = roots(side_dir)
+        self.own = [(re.compile(p), r) for p, r in extra]
+        self.rules = self.own + [(re.compile(p), r) for p, r in GENERIC]
+
+    def text(self, s):
+        for path, ph in self.roots:
+            s = s.replace(path, ph)
+        # A checkout path with a space is shlex-quoted in a command line ('...<KERNEL>/bin/x' becomes ''"'"'<KERNEL>/bin/x'"'"'
+        # inside a quote); strip those quotes so the record does not depend on the path having a space.
+        s = re.sub(r"'\"'\"'(<KERNEL>[^']*?)'\"'\"'", r"\1", s)
+        for rx, repl in self.rules:
+            s = rx.sub(repl, s)
+        return s
+
+    def own_text(self, s):
+        """Only the case's own rules (a file name is not masked by the generic ones: two sessions' queue files must stay two.)"""
+        for rx, repl in self.own:
+            s = rx.sub(repl, s)
+        return s
+
+    def value(self, k, x):
+        # A case's own key is <MASKED> whatever it holds: a pid is a number on one machine and null on another, so a
+        # value-dependent mask would not replay across machines. Only last_started keeps <EPOCH>.
+        if k in self.mask_keys and not isinstance(x, (dict, list)):
+            return '<MASKED>'
+        if k == 'last_started' and isinstance(x, (int, float)) and not isinstance(x, bool):
+            return '<EPOCH>'
+        return self.data(x)
+
+    def data(self, v):
+        if isinstance(v, str):
+            return self.text(v)
+        if isinstance(v, list):
+            return [self.data(x) for x in v]
+        if isinstance(v, dict):
+            # last_started in a state file is the clock at the launch: two sides run a second apart. Only that key is
+            # masked, so fixture times (out_until, since, cleared_at) are still compared exactly.
+            return {self.text(k): self.value(k, x) for k, x in v.items()}
+        return v
+
+
+# argparse quotes the choices of an invalid choice differently by Python version ("(choose from 'set')" up to 3.11, "(choose from
+# set)" from 3.12.7), and a golden record keeps the Python it was recorded on. Both sides are compared with the quotes taken out.
+CHOICES_RX = re.compile(r"\(choose from ([^)]*)\)")
+
+
+def unquote_choices(v):
+    if isinstance(v, str):
+        return CHOICES_RX.sub(lambda m: '(choose from ' + m.group(1).replace("'", '') + ')', v)
+    if isinstance(v, list):
+        return [unquote_choices(x) for x in v]
+    if isinstance(v, dict):
+        return {k: unquote_choices(x) for k, x in v.items()}
+    return v
+
+
+def sort_lists(v):
+    if isinstance(v, list):
+        return sorted((sort_lists(x) for x in v), key=lambda x: json.dumps(x, sort_keys=True))
+    if isinstance(v, dict):
+        return {k: sort_lists(x) for k, x in v.items()}
+    return v
+
+
+def dumps(v):
+    return json.dumps(v, indent=2, sort_keys=True, ensure_ascii=False) + '\n'
+
+
+# --- building a side -------------------------------------------------------------------------------------------------
+
+def subst(s, side_dir):
+    return (s.replace('{HOME}', str(side_dir / 'home')).replace('{KITH_HOME}', str(side_dir / 'kith'))
+             .replace('{TMP}', str(side_dir / 'tmp')).replace('{ROOT}', str(side_dir)).replace('{KERNEL}', str(KERNEL)))
+
+
+def base_env(side, side_dir, case):
+    py = shutil.which('python3') or sys.executable
+    path = [str(side_dir / 'fakes'), str(FAKES), str(Path(py).parent)]
+    uv = shutil.which('uv')
+    if uv:
+        path.append(str(Path(uv).parent))
+    path += ['/usr/bin', '/bin']
+    env = {
+        'HOME': str(side_dir / 'home'), 'KITH_HOME': str(side_dir / 'kith'), 'TMPDIR': str(side_dir / 'tmp'),
+        'PATH': ':'.join(dict.fromkeys(path)), 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8', 'TZ': 'UTC',
+        'PYTHONHASHSEED': '0', 'PYTHONDONTWRITEBYTECODE': '1', 'NO_COLOR': '1', 'TERM': 'dumb',
+        'DIFFTEST_FAKELOG': str(side_dir / 'fakelog'), 'KITH_CORE': CORE[side],
+        # git, if a case runs it: no user config of the real machine
+        'GIT_CONFIG_NOSYSTEM': '1', 'GIT_AUTHOR_NAME': 'difftest', 'GIT_AUTHOR_EMAIL': 'd@example.invalid',
+        'GIT_COMMITTER_NAME': 'difftest', 'GIT_COMMITTER_EMAIL': 'd@example.invalid',
+        'GIT_AUTHOR_DATE': '2026-01-01T00:00:00Z', 'GIT_COMMITTER_DATE': '2026-01-01T00:00:00Z',
+    }
+    if RUST_BIN and (side == 'new' or case.get('bin_both')):   # bin_both: the OLD side's guest runs need a kith program for the memory check too
+        env['KITH_BIN'] = RUST_BIN   # where the router finds the Rust program (kernel/lib/kith-core.sh)
+    for k, v in case.get('env', {}).items():
+        if v is None:   # null: this variable is not set at all (e.g. no KITH_HOME, to test the folder rules)
+            env.pop(k, None)
+        else:
+            env[k] = subst(v, side_dir)
+    return env
+
+
+def build(side, side_dir, case):
+    """Make the side's fixture from the case's setup steps. Run twice (once per side) rather than copied, so that paths
+    written into fixture files are each side's own."""
+    for sub in ('home', 'kith', 'tmp', 'fakes'):
+        (side_dir / sub).mkdir(parents=True, exist_ok=True)
+    env = base_env(side, side_dir, case)
+    for step in case.get('setup', []):
+        if 'write' in step:
+            p = side_dir / step['write']
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(subst(step.get('text', ''), side_dir))
+            if 'mode' in step:
+                p.chmod(int(step['mode'], 8))
+        elif 'mkdir' in step:
+            (side_dir / step['mkdir']).mkdir(parents=True, exist_ok=True)
+        elif 'link' in step:
+            p = side_dir / step['link']
+            p.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(subst(step['to'], side_dir), p)
+        elif 'fake' in step:
+            p = side_dir / 'fakes' / step['fake']
+            p.write_text(subst(step['script'], side_dir))
+            p.chmod(0o755)
+        elif 'sqlite' in step:
+            p = side_dir / step['sqlite']
+            p.parent.mkdir(parents=True, exist_ok=True)
+            con = sqlite3.connect(p)
+            con.executescript(subst(step['sql'], side_dir))
+            con.commit()
+            con.close()
+        elif 'run' in step:
+            r = subprocess.run([subst(a, side_dir) for a in step['run']], cwd=side_dir / step.get('cwd', 'home'),
+                               env=env, capture_output=True, text=True, timeout=TIMEOUT)
+            if r.returncode != 0:
+                raise RuntimeError(f'setup {step["run"]} failed on {side}: {r.stderr or r.stdout}')
+        else:
+            raise RuntimeError(f'unknown setup step {step}')
+    return env
+
+
+# --- running and snapshotting ----------------------------------------------------------------------------------------
+
+def run_steps(side, side_dir, case, prefix, env, norm):
+    """-> {facet: text} for the case's command lines."""
+    facets = {}
+    cwd = side_dir / case.get('cwd', 'home')
+    for i, line in enumerate(case.get('run_' + side, case['run'])):   # run_old / run_new: a line of one side's own
+        args = [subst(a, side_dir) for a in line]
+        stdin = case.get('stdin')
+        try:
+            r = subprocess.run([*prefix, *args], cwd=cwd, env=env, capture_output=True, text=True,
+                               input=subst(stdin, side_dir) if stdin is not None else '', timeout=TIMEOUT)
+            code, out, err = r.returncode, r.stdout, r.stderr
+        except subprocess.TimeoutExpired:
+            code, out, err = 'timeout', '', ''
+        except OSError as e:
+            code, out, err = 'cannot start', '', str(e)
+        k = f'step{i}'
+        facets[f'{k}.exit'] = f'{code}\n'
+        out_n = norm.text(out)
+        parsed = None
+        if case.get('json', True):
+            try:
+                parsed = json.loads(out)
+            except ValueError:
+                parsed = None
+        pick = case.get('pick', {}).get(side)
+        if pick and parsed is not None:   # compare one field of the JSON as text (the other side prints it bare or under another key)
+            for key in pick.split('.'):
+                parsed = parsed.get(key) if isinstance(parsed, dict) else None
+            facets[f'{k}.pick'] = norm.text(parsed if isinstance(parsed, str) else json.dumps(parsed, sort_keys=True))
+        elif parsed is not None:
+            parsed = norm.data(parsed)
+            if case.get('sort_lists'):
+                parsed = sort_lists(parsed)
+            facets[f'{k}.json'] = dumps(parsed)
+        else:
+            if case.get('sort_lines'):
+                out_n = ''.join(sorted(out_n.splitlines(True)))
+            facets[f'{k}.stdout'] = out_n
+        if case.get('stderr', True):
+            facets[f'{k}.stderr'] = norm.text(err)
+    return facets
+
+
+def sqlite_dump(path, norm):
+    """Rows of every table, sorted: the order of rows means nothing unless the case says so (it never does today)."""
+    with tempfile.TemporaryDirectory() as td:
+        for suffix in ('', '-wal', '-shm'):
+            if Path(str(path) + suffix).exists():
+                shutil.copy(str(path) + suffix, Path(td) / ('db' + suffix))
+        con = sqlite3.connect(Path(td) / 'db')
+        out = []
+        try:
+            for name, sql in con.execute("select name, sql from sqlite_master where type in ('table','index','view','trigger') "
+                                         "and name not like 'sqlite_%' order by type, name"):
+                out.append(f'## {name}: {norm.text(sql or "")}')
+                if not sql or not sql.lstrip().upper().startswith('CREATE TABLE') or 'VIRTUAL' in sql.upper():
+                    continue
+                cur = con.execute(f'select * from "{name}"')
+                cols = [d[0] for d in cur.description]
+                rows = [json.dumps(norm.data(dict(zip(cols, [v if not isinstance(v, bytes) else 'b:' + v.hex() for v in row]))),
+                                   sort_keys=True, ensure_ascii=False) for row in cur]
+                out.extend(sorted(rows))
+        except sqlite3.Error as e:
+            out.append(f'<unreadable: {e}>')
+        con.close()
+    return '\n'.join(out) + '\n'
+
+
+def daemon_core_log(path):
+    """-> the core.log lines the daemon front did not write ('' when there are none), None if the file is unreadable.
+    The daemon's lines start `daemon:` or `holder:` after the pid; anything else (a verb that fell back after an error)
+    is state to compare."""
+    try:
+        lines = path.read_text().splitlines(keepends=True)
+    except (OSError, UnicodeDecodeError):
+        return None
+    return ''.join(l for l in lines if not re.match(r'unix=\d+ pid=\d+ (daemon|holder):', l))
+
+
+def snapshot(side_dir, case, norm):
+    """-> {facet: text} for every file under home, kith and tmp."""
+    facets = {}
+    skip = [re.compile(p) for p in [*GIT_NOISE, *case.get('ignore', [])]]
+    for sub in ('home', 'kith', 'tmp'):
+        base = side_dir / sub
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames.sort()
+            d = Path(dirpath)
+            rel_dir = d.relative_to(side_dir).as_posix()
+            # In the --core pass a folder holding only the core's own folder is as empty as the OLD side's (core/ is
+            # compared on its own, and is an intended difference); the --daemon pass adds the log folder that holds
+            # the daemon's one line.
+            own = daemon_core_log(d / 'core.log') if WITH_DAEMON and 'core.log' in filenames else None
+            if own is not None:
+                filenames = [f for f in filenames if f != 'core.log' or own]   # all its lines were the daemon's: nothing to compare
+            made_by_daemon = WITH_DAEMON and DAEMON_LOGS.get(str(side_dir)) == rel_dir
+            # Only the daemon's own folders are free: `core`, and `logs` when it is the one the daemon made (not a `logs` the case made).
+            daemon_dirs = {'core'} | ({'logs'} if WITH_DAEMON and DAEMON_LOGS.get(str(side_dir)) == f'{rel_dir}/logs' else set())
+            if (not dirnames or (WITH_CORE and dirnames == ['core']) or (WITH_DAEMON and set(dirnames) <= daemon_dirs)) and not filenames and d != base:
+                if not made_by_daemon:   # a folder only the daemon's log made is no state of the case
+                    facets[f'state:{rel_dir}/'] = '<empty dir>\n'
+            for f in sorted(filenames):
+                p = d / f
+                rel = p.relative_to(side_dir).as_posix()
+                if f.endswith(('-wal', '-shm')) or any(rx.search(rel) for rx in skip):
+                    continue
+                if case.get('normalize_paths'):   # files named by an id the program makes up (a waiter's, a turn's log): the name is masked like any text
+                    rel = norm.own_text(rel)
+                    if f'state:{rel}' in facets:   # two files, one masked name: a facet would silently vanish
+                        raise RuntimeError(f'normalize_paths: two files are called {rel} once masked')
+                if p.is_symlink():
+                    facets[f'state:{rel}'] = 'link -> ' + norm.text(os.readlink(p)) + '\n'
+                    continue
+                if p.is_socket():   # a daemon's socket: nothing to compare
+                    continue
+                raw = p.read_bytes()
+                if f == 'core.log' and own:
+                    raw = own.encode()
+                if raw.startswith(b'SQLite format 3\0'):
+                    facets[f'state:{rel}'] = sqlite_dump(p, norm)
+                    continue
+                try:
+                    text = raw.decode()
+                except UnicodeDecodeError:
+                    facets[f'state:{rel}'] = f'binary sha256:{hashlib.sha256(raw).hexdigest()}\n'
+                    continue
+                if f.endswith('.json'):
+                    try:
+                        data = norm.data(json.loads(text))
+                        facets[f'state:{rel}'] = dumps(sort_lists(data) if case.get('sort_lists') else data)
+                        continue
+                    except ValueError:
+                        pass
+                facets[f'state:{rel}'] = norm.text(text)
+    log = side_dir / 'fakelog'
+    facets['fakes'] = norm.text(log.read_text()) if log.exists() else ''
+    if case.get('sort_lines'):   # parallel status checks (kith account list) make the order of fake calls mean nothing
+        facets['fakes'] = '\n'.join(sorted(facets['fakes'].split('\n')))
+    return facets
+
+
+def make_core(side_dir, env, name):
+    """The --core pass: the NEW side's first setup has happened, so its core database exists and every Rust verb of the
+    case runs inside an embedded core (its lock, its checks, a new generation). Only where the machine folder is
+    already there: a case that starts before any setup keeps running bare, as a first run does. A failing
+    `core-migrate` fails the case (it would otherwise run bare and pass); the cases that did run with a core are counted
+    so the pass cannot be green having proved nothing."""
+    got = subprocess.run([RUST_BIN, 'kernel', 'paths', '--json'], cwd=side_dir / 'home', env=env, capture_output=True,
+                         text=True, timeout=TIMEOUT)
+    try:
+        machine = json.loads(got.stdout)['KITH_MACHINE']
+    except (ValueError, KeyError):
+        CORE_BARE.append(name)
+        return
+    if not os.path.isdir(machine):
+        CORE_BARE.append(name)
+        return
+    mig = subprocess.run([RUST_BIN, 'kernel', 'core-migrate'], cwd=side_dir / 'home', env=env, capture_output=True,
+                         text=True, timeout=TIMEOUT)
+    if mig.returncode != 0:
+        raise RuntimeError(f'kith kernel core-migrate exited {mig.returncode}: {(mig.stderr or mig.stdout).strip()[:300]}')
+    CORE_RAN.append(name)
+
+
+def start_daemon(side_dir, env, case):
+    """The --daemon pass: the NEW side's first setup has happened, so a daemon (`kith kernel core-daemon`, the daemon front
+    alone, on this sandbox's machine folder) serves while the case runs, and every Rust verb the daemon answers goes through
+    its owner socket. Only where the machine folder is already there: a case that starts before any setup runs bare, as a
+    first run does. `daemon_env` is the case's own environment for the daemon alone (null unsets), so a case can make the
+    daemon's environment differ from the one the command line has: the answer must follow the command line's."""
+    got = subprocess.run([RUST_BIN, 'kernel', 'paths', '--json'], cwd=side_dir / 'home', env=env, capture_output=True,
+                         text=True, timeout=TIMEOUT)
+    try:
+        found = json.loads(got.stdout)
+        machine = found['KITH_MACHINE']
+        logs = Path(found['KITH_LOGS'])
+    except (ValueError, KeyError):
+        DAEMON_BARE.append(case['name'])
+        return None
+    if not os.path.isdir(machine):
+        DAEMON_BARE.append(case['name'])
+        return None
+    if not logs.is_dir():
+        try:
+            DAEMON_LOGS[str(side_dir)] = Path(os.path.realpath(logs)).relative_to(side_dir).as_posix()   # the walk sees the real folder, not a link to it
+        except ValueError:
+            pass
+    denv = dict(env)
+    for k, v in case.get('daemon_env', {}).items():
+        if v is None:
+            denv.pop(k, None)
+        else:
+            denv[k] = subst(v, side_dir)
+    # No holder in the sandbox: it would outlive the case. (The daemon runs fine without one; that is tested elsewhere.)
+    denv['KITH_HOLDER_BIN'] = str(side_dir / 'no-holder')
+    proc = subprocess.Popen([RUST_BIN, 'kernel', 'core-daemon'], cwd=side_dir / 'home', env=denv, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    ready, _, _ = select.select([proc.stdout], [], [], TIMEOUT)
+    line = proc.stdout.readline().strip() if ready else ''
+    if line != 'ready':
+        proc.kill()
+        _, err = proc.communicate()
+        raise RuntimeError(f'kith kernel core-daemon did not come up ({line!r}): {err.strip()[:300]}')
+    return proc
+
+
+def stop_daemon(proc, name):
+    proc.stdin.close()   # how it is told to stop
+    out = proc.stdout.read()
+    proc.wait(timeout=TIMEOUT)
+    err = proc.stderr.read()
+    served = [l for l in out.splitlines() if l.startswith('served=')]
+    if proc.returncode != 0 or not served:
+        raise RuntimeError(f'kith kernel core-daemon ended badly ({proc.returncode}): {(err or out).strip()[:300]}')
+    DAEMON_SERVED.append(int(served[0].split('=')[1]))
+    DAEMON_PER_CASE[name] = DAEMON_SERVED[-1]
+    DAEMON_RAN.append(name)
+
+
+def run_side(side, work, case, prefix):
+    side_dir = work / side
+    side_dir.mkdir(parents=True)
+    env = build(side, side_dir, case)
+    if WITH_CORE and side == 'new':
+        make_core(side_dir, env, case['name'])
+    # no_daemon: a case that runs `core-migrate` itself needs the core unlocked (a daemon holds the lock), so it runs bare in this pass
+    daemon = start_daemon(side_dir, env, case) if WITH_DAEMON and side == 'new' and not case.get('no_daemon') else None
+    norm = Normalizer(side_dir, case.get('normalize', []), case.get('mask_keys', []))
+    try:
+        facets = run_steps(side, side_dir, case, prefix, env, norm)
+    finally:
+        if daemon:
+            stop_daemon(daemon, case['name'])
+    facets.update(snapshot(side_dir, case, norm))
+    only = case.get('only')   # e.g. ["pick", "exit"]: compare these facets alone (the other side has no state or fakes to match)
+    return {k: v for k, v in facets.items() if k.rsplit('.', 1)[-1] in only} if only else facets
+
+
+# --- comparing -------------------------------------------------------------------------------------------------------
+
+def case_prefix(case, side):
+    """A case's own program for a side (`"program": {"old": [...], "new": [...]}`), for a verb the `kith` router does not
+    reach yet: the Python helper on one side, `kith kernel <module> <verb>` on the other. `{KERNEL}` is the kernel
+    folder and `{BIN}` the Rust program."""
+    argv = case.get('program', {}).get(side)
+    return [a.replace('{KERNEL}', str(KERNEL)).replace('{BIN}', RUST_BIN or '') for a in argv] if argv else None
+
+
+def compare(case, prefixes, keep=False):
+    """-> {facet: (old, new)} of the facets that differ."""
+    # A Unix socket path holds about 100 bytes and macOS's $TMPDIR alone is 50: the --daemon pass works under /tmp.
+    base = '/tmp' if WITH_DAEMON else os.environ.get('TMPDIR') or '/tmp'
+    work = Path(tempfile.mkdtemp(prefix='kith-difftest.', dir=base)).resolve()
+    try:
+        def prefix(s):
+            if case_prefix(case, s):
+                return case_prefix(case, s)
+            if prefixes.get(s):
+                return prefixes[s]
+            if s == 'new' and case.get('new_prog') == 'rust':   # the Rust program itself, for a verb the router does not reach yet
+                return [RUST_BIN]
+            return prefixes['default'][s]
+        if GOLDEN and RECORD:
+            got = {'old': run_side('old', work, case, prefix('old')), 'new': {}}
+        elif GOLDEN:
+            stored = GOLDEN / 'facets' / (case['name'] + '.json')
+            if not stored.exists():
+                raise RuntimeError(f'no recorded facets for this case: run with --golden {GOLDEN} --record ({stored})')
+            got = {'old': json.loads(stored.read_text()), 'new': run_side(REPLAY_SIDE, work, case, prefix(REPLAY_SIDE))}
+        else:
+            got = {s: run_side(s, work, case, prefix(s)) for s in SIDES}
+    finally:
+        if keep:
+            print(f'  kept: {work}')
+        else:
+            shutil.rmtree(work, ignore_errors=True)
+    if GOLDEN and RECORD:
+        out = GOLDEN / 'facets' / (case['name'] + '.json')
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(dumps(got['old']))
+        return {}
+    diffs = {}
+    for facet in sorted(set(got['old']) | set(got['new'])):
+        a, b = unquote_choices(got['old'].get(facet, ABSENT)), unquote_choices(got['new'].get(facet, ABSENT))
+        if a != b:
+            diffs[facet] = (a, b)
+    return diffs
+
+
+def udiff(facet, a, b, limit=30):
+    lines = list(difflib.unified_diff(a.splitlines(), b.splitlines(), 'OLD ' + facet, 'NEW ' + facet, lineterm='', n=2))
+    more = len(lines) - limit
+    return '\n'.join(lines[:limit] + ([f'... {more} more lines'] if more > 0 else []))
+
+
+def load_intended(path):
+    if not path or not Path(path).exists():
+        return []
+    data = json.loads(Path(path).read_text())
+    for e in data:
+        if not all(e.get(k) for k in ('case', 'facet', 'why')):
+            raise SystemExit(f'{path}: every entry needs case, facet and why: {e}')
+    return data
+
+
+def match(entry, case_name, facet):
+    return fnmatch.fnmatchcase(case_name, entry['case']) and fnmatch.fnmatchcase(facet, entry['facet'])
+
+
+def load_corpus(dirs):
+    cases = []
+    for d in dirs:
+        for f in sorted(Path(d).glob('*.json')):
+            data = json.loads(f.read_text())
+            for c in data if isinstance(data, list) else [data]:
+                c['_file'] = f.name
+                cases.append(c)
+    names = [c['name'] for c in cases]
+    dup = {n for n in names if names.count(n) > 1}
+    if dup:
+        raise SystemExit(f'duplicate case names: {sorted(dup)}')
+    return cases
+
+
+def run_all(cases, prefixes, intended, jobs=4, keep=False, out=sys.stdout):
+    """-> (failed case names, stale entries). Prints one block per case."""
+    def one(case):
+        if GOLDEN and not RECORD and REPLAY_SIDE == 'new' and case.get('unswitched') and not REQUIRE_SWITCHED:
+            return case, None, 'SKIP'   # its verb is still Python on the Rust side: not run, said out loud
+        try:
+            return case, compare(copy.deepcopy(case), prefixes, keep), None
+        except Exception as e:  # a broken case is a failure, not a crash of the others
+            return case, None, f'{type(e).__name__}: {e}'
+    with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
+        results = list(pool.map(one, cases))
+    failed, used = [], set()
+    summary = {}  # command -> {"green": bool, "cases": {name: "same"|"intended"|"differs"|"error"}}
+    for case, diffs, err in results:
+        name = case['name']
+        cmd = case_command(case)
+        status = summary.setdefault(cmd, {'green': True, 'cases': {}})
+        if err == 'SKIP':
+            status['cases'][name] = 'unswitched'
+            print(f'skip  {name}  (not switched: {case["unswitched"]})', file=out)
+            continue
+        if err:
+            status['cases'][name] = 'error'
+            print(f'ERROR {name}: {err}', file=out)
+            failed.append(name)
+            continue
+        bad = {}
+        status['cases'][name] = 'intended' if diffs else 'same'
+        for facet, ab in diffs.items():
+            hit = [i for i, e in enumerate(intended) if match(e, name, facet)]
+            used.update(hit)
+            if not hit:
+                bad[facet] = ab
+        if bad:
+            status['cases'][name] = 'differs'
+            failed.append(name)
+            print(f'DIFF  {name}  ({len(bad)} facet(s) differ: {", ".join(bad)})', file=out)
+            for facet, (a, b) in bad.items():
+                print(udiff(facet, a, b), file=out)
+        else:
+            n = len(diffs)
+            print(f'ok    {name}' + (f'  ({n} intended difference(s))' if n else ''), file=out)
+    ran = [c['name'] for c in cases]
+    stale = [e for i, e in enumerate(intended)
+             if i not in used and any(fnmatch.fnmatchcase(n, e['case']) for n in ran)]
+    for e in stale:
+        print(f'STALE intended difference no longer occurs: case {e["case"]!r} facet {e["facet"]!r} ({e["why"]})', file=out)
+    for st in summary.values():
+        st['green'] = all(v in ('same', 'intended') for v in st['cases'].values())
+    return failed, stale, summary
+
+
+def case_command(case):
+    """The command a case is about, for the per-command green/red list: its "command" field, else the first word of its first line."""
+    return case.get('command') or (case['run'][0][0] if case.get('run') and case['run'][0] else '?')
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description='Same CLI line, same result: run the corpus on an OLD and a NEW side.')
+    ap.add_argument('--old', help='command prefix of the OLD side (default: kernel/bin/kith, KITH_CORE=python)')
+    ap.add_argument('--new', help='command prefix of the NEW side (default: kernel/bin/kith, KITH_CORE=rust)')
+    ap.add_argument('--corpus', action='append', help='a folder of case files (default: corpus/ next to this script)')
+    ap.add_argument('--intended', default=str(HERE / 'intended.json'))
+    ap.add_argument('--case', action='append', help='only cases whose name matches this glob')
+    ap.add_argument('--rust', action='store_true', help='also run the cases that need the Rust binary (implied by --new)')
+    ap.add_argument('--bin', help='the kith program for the Rust cases (default: $KITH_DIFFTEST_BIN, else a cargo build in serve/host/target)')
+    ap.add_argument('--core', action='store_true', help='second pass: make the core database on the NEW side first (kith kernel core-migrate), so the Rust verbs run inside an embedded core; its files (core/) are an intended difference. Needs --rust or --new')
+    ap.add_argument('--daemon', action='store_true', help='second pass: the NEW side runs a daemon (kith kernel core-daemon) in its sandbox, so the Rust verbs the daemon answers go through its owner socket; its files (core/) are an intended difference. Needs --rust or --new; not with --core')
+    ap.add_argument('--golden', metavar='DIR', help='golden mode: DIR holds frozen cases (*.json) and their recorded facets (facets/NAME.json). Replay (default) runs one side only and compares it to the record: the Python kernel, or with --rust / --new the Rust program. The same masks and intended.json as the two-sided run apply')
+    ap.add_argument('--record', action='store_true', help='with --golden: run the OLD (Python) side alone and (re)write the recorded facets of the selected cases; compares nothing')
+    ap.add_argument('--require-switched', action='store_true', help='with --golden --rust: also replay the cases marked "unswitched" (their verb has no Rust side yet), which are red until it exists; without it they are listed as skipped')
+    ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--keep', action='store_true', help='keep the throwaway folders')
+    ap.add_argument('--summary', metavar='FILE', help='write a JSON summary per command (green/red) to FILE; "-" for stdout')
+    ap.add_argument('--list', action='store_true')
+    a = ap.parse_args(argv)
+
+    global GOLDEN, RECORD, REPLAY_SIDE, REQUIRE_SWITCHED
+    REQUIRE_SWITCHED = a.require_switched
+    if a.record and not a.golden:
+        raise SystemExit('--record needs --golden DIR')
+    if a.golden and (a.corpus or a.core or a.daemon):
+        raise SystemExit('--golden takes its cases from DIR: not with --corpus, --core or --daemon')
+    GOLDEN = Path(a.golden).resolve() if a.golden else None
+    RECORD = a.record
+    REPLAY_SIDE = 'new' if (a.rust or a.new) else 'old'
+    cases = load_corpus([GOLDEN] if GOLDEN else a.corpus or [HERE / 'corpus'])
+    if a.case:
+        cases = [c for c in cases if any(fnmatch.fnmatchcase(c['name'], g) for g in a.case)]
+    global RUST_BIN, WITH_CORE, WITH_DAEMON
+    WITH_CORE = a.core
+    WITH_DAEMON = a.daemon
+    RUST_BIN = a.bin or os.environ.get('KITH_DIFFTEST_BIN') or (find_rust_bin() if (a.rust or a.new) else '')
+    if (a.rust or a.new) and not RUST_BIN and not RECORD and any(c.get('needs') == 'rust' for c in cases):
+        raise SystemExit('no kith program for the Rust cases: build one (cargo build --bin kith in serve/host) or pass --bin')
+    if not (a.rust or a.new) and not GOLDEN:
+        skipped = [c['name'] for c in cases if c.get('needs') == 'rust']
+        cases = [c for c in cases if c.get('needs') != 'rust']
+        if skipped:
+            print(f'skip  {len(skipped)} case(s) that need the Rust binary (--rust): {", ".join(skipped)}')
+    if a.list:
+        for c in cases:
+            print(c['name'])
+        return 0
+    default = [str(KERNEL / 'bin' / 'kith')]
+    prefixes = {'default': {'old': default, 'new': default},
+                'old': shlex.split(a.old) if a.old else None, 'new': shlex.split(a.new) if a.new else None}
+    intended = [] if GOLDEN else load_intended(a.intended)   # a frozen record has no two sides to differ: any difference fails
+    if WITH_CORE:
+        if not RUST_BIN:
+            raise SystemExit('--core needs the Rust program: pass --rust (and --bin)')
+        intended.append(CORE_INTENDED)
+    if WITH_DAEMON:
+        if WITH_CORE:
+            raise SystemExit('--daemon and --core are two passes: run them one after the other')
+        if not RUST_BIN:
+            raise SystemExit('--daemon needs the Rust program: pass --rust (and --bin)')
+        intended.extend(DAEMON_INTENDED)
+    failed, stale, summary = run_all(cases, prefixes, intended, a.jobs, a.keep)
+    if a.summary:
+        doc = json.dumps({'commands': {k: summary[k] for k in sorted(summary)}, 'stale': [e['case'] + ' ' + e['facet'] for e in stale]},
+                         indent=2, sort_keys=True) + '\n'
+        if a.summary == '-':
+            print(doc, end='')
+        else:
+            Path(a.summary).write_text(doc)
+    unswitched = sum(1 for st in summary.values() for v in st['cases'].values() if v == 'unswitched')
+    if unswitched:
+        print(f'{unswitched} case(s) skipped: not switched to Rust yet (--require-switched replays them)')
+    print(f'{len(cases) - len(failed) - unswitched}/{len(cases) - unswitched} cases the same' + (f', {len(stale)} stale intended' if stale else ''))
+    if WITH_CORE:
+        print(f'core: {len(CORE_RAN)} case(s) ran with a core, {len(CORE_BARE)} started before any setup and ran bare')
+        if not CORE_RAN:
+            print('FAIL  the --core pass ran no case through a core, so it proved nothing')
+            return 1
+    if WITH_DAEMON:
+        print(f'daemon: {len(DAEMON_RAN)} case(s) ran against a daemon ({sum(DAEMON_SERVED)} call(s) served), '
+              f'{len(DAEMON_BARE)} started before any setup and ran bare')
+        if not DAEMON_RAN or not sum(DAEMON_SERVED):
+            print('FAIL  the --daemon pass sent no call through a daemon, so it proved nothing')
+            return 1
+        # Per case: every `paths` case that ran against a daemon must have had a call answered by it, or it proved nothing.
+        silent = sorted(c['name'] for c in cases if c['name'] in DAEMON_PER_CASE and case_command(c) == 'paths'
+                        and not DAEMON_PER_CASE[c['name']])
+        if silent:
+            print(f'FAIL  paths case(s) ran against a daemon that answered nothing: {", ".join(silent)}')
+            return 1
+        # A case that sets a daemon_env is about the daemon: one that started before any setup ran bare and proved nothing.
+        bare = sorted(c['name'] for c in cases if c['name'] in DAEMON_BARE and 'daemon_env' in c)
+        if bare:
+            print(f'FAIL  daemon case(s) ran without a daemon: {", ".join(bare)}')
+            return 1
+    return 1 if failed or stale else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

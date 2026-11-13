@@ -1,6 +1,6 @@
 //! The background service on macOS (a launchd agent) and Linux (a systemd user unit).
 
-use super::{create_parent, current_exe, data_dir, home, run, wait_for_host_exit};
+use super::{create_parent, current_exe, data_dir, holder_words, home, host_program, run, wait_for_host_exit};
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -31,19 +31,20 @@ pub fn start() -> Result<()> {
 pub fn require_executable(expected: &Path) -> Result<()> {
     let configured = if cfg!(target_os = "macos") {
         let output = Command::new("/usr/bin/plutil")
-            .args(["-extract", "ProgramArguments.0", "raw", "-o", "-"])
+            .args(["-extract", "ProgramArguments", "json", "-o", "-"])
             .arg(launchd_plist())
             .output()?;
         if !output.status.success() {
             bail!("cannot read the installed host service");
         }
-        PathBuf::from(String::from_utf8(output.stdout)?.trim())
+        let words: Vec<String> = serde_json::from_slice(&output.stdout).context("invalid service ProgramArguments")?;
+        PathBuf::from(host_program(&words).context("service has no executable")?)
     } else {
         let unit = std::fs::read_to_string(systemd_unit())?;
         let command =
             unit.lines().find_map(|line| line.strip_prefix("ExecStart=")).context("service has no ExecStart")?;
         let args = shlex::split(command).context("invalid service ExecStart")?;
-        let exe = args.first().context("service has no executable")?;
+        let exe = host_program(&args).context("service has no executable")?;
         PathBuf::from(exe.replace("%%", "%").replace("$$", "$"))
     };
     if configured.canonicalize()? != expected.canonicalize()? {
@@ -143,9 +144,18 @@ fn plist_text(
 }
 
 /// The systemd user unit, with the same environment as the launchd job.
-fn unit_text(exe: &str, port: u16, path: &str, data: &str, hq_bin: Option<&str>, kernel: Option<&str>) -> String {
+fn unit_text(
+    prefix: &[String],
+    exe: &str,
+    port: u16,
+    path: &str,
+    data: &str,
+    hq_bin: Option<&str>,
+    kernel: Option<&str>,
+) -> String {
     format!(
-        "[Unit]\nDescription=Kith host\nAfter=network-online.target\n\n[Service]\nExecStart={exe} serve --port {port}\nEnvironment={path}\nEnvironment={data}\n{hq}Restart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n",
+        "[Unit]\nDescription=Kith host\nAfter=network-online.target\n\n[Service]\nExecStart={prefix}{exe} serve --port {port}\nEnvironment={path}\nEnvironment={data}\n{hq}Restart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n",
+        prefix = prefix.iter().fold(String::new(), |out, w| out + &systemd_quote(w, true) + " "),
         exe = systemd_quote(exe, true),
         path = systemd_quote(&format!("PATH={path}"), false),
         data = systemd_quote(&format!("KITH_SERVE_HOME={data}"), false),
@@ -175,9 +185,11 @@ pub fn install(port: u16) -> Result<()> {
     let kernel = std::env::var(crate::kernel::KERNEL_ENV).ok().filter(|s| !s.is_empty());
     let log = data_dir().join("host.log");
     std::fs::create_dir_all(data_dir()).context("creating the data directory")?;
+    // Opt-in: the holder is the supervised program and starts the host (see `holder_wanted`).
+    let holder = holder_words()?.unwrap_or_default();
     if cfg!(target_os = "macos") {
         let plist = plist_text(
-            &launcher(),
+            &[launcher(), holder.clone()].concat(),
             &exe,
             port,
             &path,
@@ -194,7 +206,8 @@ pub fn install(port: u16) -> Result<()> {
         std::fs::write(&file, plist).with_context(|| format!("writing {}", file.display()))?;
         launchd::reload(&mut launchctl, &domain(), &target(), &file)?;
     } else {
-        let unit = unit_text(&exe, port, &path, &data_dir().to_string_lossy(), hq_bin.as_deref(), kernel.as_deref());
+        let unit =
+            unit_text(&holder, &exe, port, &path, &data_dir().to_string_lossy(), hq_bin.as_deref(), kernel.as_deref());
         let file = systemd_unit();
         create_parent(&file)?;
         std::fs::write(&file, unit).with_context(|| format!("writing {}", file.display()))?;
@@ -429,6 +442,23 @@ mod tests {
     }
 
     #[test]
+    fn the_holder_goes_in_front_of_the_host_in_both_job_files() {
+        let holder: Vec<String> =
+            ["/h/kith-holder", "supervise", "--dir", "/d/my core/holder", "--secret-file", "/d/s", "--"]
+                .map(str::to_owned)
+                .to_vec();
+        let args = program_arguments(&holder, "/h/kith-serve", 19224);
+        assert!(args.starts_with("<string>/h/kith-holder</string><string>supervise</string>"), "{args}");
+        assert!(args.ends_with("<string>--</string><string>/h/kith-serve</string><string>serve</string><string>--port</string><string>19224</string>"), "{args}");
+        let unit = unit_text(&holder, "/h/kith-serve", 19224, "/usr/bin", "/d", None, None);
+        let line = unit.lines().find_map(|l| l.strip_prefix("ExecStart=")).unwrap();
+        let words = shlex::split(line).unwrap();
+        assert_eq!(words[0], "/h/kith-holder");
+        assert_eq!(words[3], "/d/my core/holder");
+        assert_eq!(super::super::host_program(&words).unwrap(), "/h/kith-serve");
+    }
+
+    #[test]
     fn unit_values_stay_one_word() {
         let path = r#"/usr/bin:/mnt/c/Program Files/a"b\c:/x%y"#;
         assert_eq!(
@@ -458,7 +488,7 @@ mod tests {
         assert!(plist.contains("<key>KITH_SERVE_HOME</key><string>/d</string>"));
         assert!(plist.contains("<key>KITH_KERNEL</key><string>/co&amp;/kernel</string>"), "{plist}");
         let unit =
-            unit_text("/h/kith-serve", 19224, "/usr/bin", "/d", Some("/my hq/kernel/bin/hq"), Some("/co/kernel"));
+            unit_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", Some("/my hq/kernel/bin/hq"), Some("/co/kernel"));
         assert!(unit.contains("Environment=\"HQ_BIN=/my hq/kernel/bin/hq\"\n"), "{unit}");
         assert!(unit.contains("Environment=\"KITH_KERNEL_BIN=/my hq/kernel/bin/hq\"\n"), "{unit}");
         assert!(unit.contains("Environment=\"KITH_SERVE_HOME=/d\"\n"));
@@ -470,6 +500,6 @@ mod tests {
         assert!(
             !plist_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", None, None, "/d/host.log").contains("HQ_BIN")
         );
-        assert!(!unit_text("/h/kith-serve", 19224, "/usr/bin", "/d", None, None).contains("HQ_BIN"));
+        assert!(!unit_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", None, None).contains("HQ_BIN"));
     }
 }

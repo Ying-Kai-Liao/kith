@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kith-self-update-check — `kith update` with no agent updates kith itself, by how it was installed:
-#   a git checkout is a dev copy: `kith update` says so and changes nothing, `kith update --dev` fast-forwards it (and refuses when dirty, diverged, detached or without an upstream, changing nothing),
+#   a git checkout is a dev copy: `kith update self` says so and changes nothing, `kith update --dev` fast-forwards it (and refuses when dirty, diverged, detached or without an upstream, changing nothing),
 #   Homebrew runs `brew upgrade kith`, the install.sh layout pipes scripts/install.sh from KITH_REPO into sh,
 #   the desktop app prints the download link. `kith update --all` is kith first, then the agents; `kith update <agent>`
 #   is as before. `kith new kith` and `kith install ... --as kith` refuse (exit 2). The doctor's line (kith-self-update
@@ -72,7 +72,7 @@ git -C "$KITH_HOME" checkout -q main
 # --- the doctor's line -----------------------------------------------------------------------------------------
 upstream_commit four
 out=$(KITH_ROOT="$KITH_HOME/kernel" "$KITH_HOME/kernel/bin/kith-self-update" --check 2>&1); rc=$?
-check "doctor line: 1 commit behind" '[[ $rc == 0 && $out == "kith is 1 commit behind origin/main: kith update" ]]'
+check "doctor line: 1 commit behind" '[[ $rc == 0 && $out == "kith is 1 commit behind origin/main: kith update self" ]]'
 git -C "$KITH_HOME" remote set-url origin "$T/gone.git"
 out=$(KITH_ROOT="$KITH_HOME/kernel" "$KITH_HOME/kernel/bin/kith-self-update" --check 2>&1); rc=$?
 check "doctor line: offline is silent, exit 0" '[[ $rc == 0 && -z $out ]]'
@@ -80,7 +80,7 @@ git -C "$KITH_HOME" remote set-url origin "$T/remote.git"
 
 # A checkout reached without --dev is a dev copy: it says so and changes nothing (the installed CLI updates from its own copy)
 before=$(head_of)
-out=$("$KITH_BIN" update 2>&1); rc=$?
+out=$("$KITH_BIN" update self 2>&1); rc=$?
 check "checkout without --dev: says dev checkout, exit 0, nothing pulled" '[[ $rc == 0 && $out == *"dev checkout"* && $out == *"kith update --dev"* && $(head_of) == "$before" ]]'
 
 # --- --all: kith first, then the agents; a dev checkout does not stop the agents ---------------------------------
@@ -119,31 +119,31 @@ link_kernel() { mkdir -p "$(dirname "$1")" && ln -s "$KERNEL" "$1"; }
 
 link_kernel "$T/brewroot/Cellar/kith/1.0/share/kith/kernel"
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" "$T/brewroot/Cellar/kith/1.0/share/kith/kernel/bin/kith" update 2>&1); rc=$?
+out=$(PATH="$T/stub:$PATH" "$T/brewroot/Cellar/kith/1.0/share/kith/kernel/bin/kith" update self 2>&1); rc=$?
 check "Homebrew: runs brew upgrade kith" '[[ $rc == 0 && $(cat "$T/calls") == "brew upgrade kith" ]]'
 
 link_kernel "$T/rel/share/kith/kernel"
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" KITH_REPO=me/fork "$T/rel/share/kith/kernel/bin/kith" update 2>&1); rc=$?
+out=$(PATH="$T/stub:$PATH" KITH_REPO=me/fork "$T/rel/share/kith/kernel/bin/kith" update self 2>&1); rc=$?
 check "install.sh layout: pipes install.sh from KITH_REPO into sh, for this prefix" \
   '[[ $rc == 0 && $(cat "$T/calls") == *"curl -fsSL https://raw.githubusercontent.com/me/fork/main/scripts/install.sh KITH_PREFIX=$T/rel KITH_REPO=me/fork"* && $(cat "$T/calls") == *ran-install-sh* ]]'
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" "$T/rel/share/kith/kernel/bin/kith" update 2>&1)
+out=$(PATH="$T/stub:$PATH" "$T/rel/share/kith/kernel/bin/kith" update self 2>&1)
 check "install.sh layout: default repo" '[[ $(cat "$T/calls") == *"Ying-Kai-Liao/kith/main/scripts/install.sh"* ]]'
 
 link_kernel "$T/mach/cli/0.1.0/share/kith/kernel"
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" "$T/mach/cli/0.1.0/share/kith/kernel/bin/kith" update 2>&1); rc=$?
+out=$(PATH="$T/stub:$PATH" "$T/mach/cli/0.1.0/share/kith/kernel/bin/kith" update self 2>&1); rc=$?
 check "cli layout (cli/<version>): pipes install.sh into sh for the machine folder, not the version folder" \
   '[[ $rc == 0 && $(cat "$T/calls") == *"KITH_PREFIX=$T/mach "* && $(cat "$T/calls") == *ran-install-sh* ]]'
 ln -s 0.1.0 "$T/mach/cli/current"
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" "$T/mach/cli/current/share/kith/kernel/bin/kith" update 2>&1); rc=$?
+out=$(PATH="$T/stub:$PATH" "$T/mach/cli/current/share/kith/kernel/bin/kith" update self 2>&1); rc=$?
 check "cli layout (via cli/current): same machine folder" '[[ $rc == 0 && $(cat "$T/calls") == *"KITH_PREFIX=$T/mach "* ]]'
 
 link_kernel "$T/Kith.app/Contents/Resources/kith/kernel"
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" "$T/Kith.app/Contents/Resources/kith/kernel/bin/kith" update 2>&1); rc=$?
+out=$(PATH="$T/stub:$PATH" "$T/Kith.app/Contents/Resources/kith/kernel/bin/kith" update self 2>&1); rc=$?
 check "desktop app: prints the download link, changes nothing" '[[ $rc == 0 && $out == *https://kithbot.app/download/mac* && ! -s $T/calls ]]'
 
 # --- the name kith is the command's ----------------------------------------------------------------------------------

@@ -1,0 +1,26 @@
+#!/bin/sh
+# The fake of every outside program (gh, security, launchctl, open, osascript, claude, codex): gh, security... are
+# symlinks to this file, which acts by the name it was called as. Each call is logged to $DIFFTEST_FAKELOG (a file in
+# the side's own throwaway root), and the harness compares that log between the two sides: what the kernel asked of
+# the outside world is part of "the same result". Nothing here touches the network, the Keychain or launchd.
+# A case that needs a different answer puts its own program of that name first on PATH (a "fake" setup step).
+name=$(basename "$0")
+[ -n "${DIFFTEST_FAKELOG:-}" ] && printf '%s %s\n' "$name" "$*" >> "$DIFFTEST_FAKELOG"
+case $name in
+  security) exit 44 ;;                    # item not found: an empty Keychain
+  gh) exit 1 ;;                           # not logged in
+  claude)
+    case "$1 $2" in
+      "--version "*) echo "2.1.309 (Claude Code)" ;;
+      "plugin list") echo '[]' ;;
+      "auth status") echo '{"loggedIn":false}'; exit 1 ;;
+      *) echo "fake-claude-run" ;;
+    esac ;;
+  codex)
+    case "$1 $2" in
+      "--version "*) echo "codex-cli 0.1.0" ;;
+      "login status") echo "Not logged in"; exit 1 ;;
+      *) echo "fake-codex-run" ;;
+    esac ;;
+esac
+exit 0

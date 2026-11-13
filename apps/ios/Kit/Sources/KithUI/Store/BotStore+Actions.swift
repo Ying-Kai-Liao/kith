@@ -252,6 +252,10 @@ extension BotStore {
                 let result = try await withLink(replay: true) { try await $0.stopHolder(session: held.session) }
                 if result.ownTurn != nil {
                     phase = HeldRunModel.ownTurnPhase
+                } else if result.stillEnding != nil {
+                    phase = HeldRunModel.stillEndingPhase
+                } else if result.cantStop != nil {
+                    phase = HeldRunModel.cantStopPhase
                 } else if result.stopped != nil {
                     Motion.animate { stoppedRuns[entry.id] = StoppedRun(kind: held.kind, at: .now) }
                 }
@@ -484,6 +488,8 @@ extension BotStore {
 
     public func save(_ draft: BotDraft) async throws -> Bot {
         let client = try await ready()
+        // A kith agent's engine, model and tools are kith's: never send them as changes.
+        let draft = draft.id.flatMap { bots[$0] }.map { draft.keepingKithOwned(from: $0) } ?? draft
         let bot = draft.id == nil ? try await client.createBot(draft) : try await client.updateBot(draft)
         bots[bot.id] = bot
         return bot

@@ -1,0 +1,7 @@
+\* the same, with the core's claim sweep and the kill after the commit: the always does not keep a revoked person's process alive
+CoreGate = TRUE
+Switched = TRUE
+AlwaysOn = TRUE
+RouterDoor = TRUE
+CoreSweep = TRUE
+KillSplit = TRUE

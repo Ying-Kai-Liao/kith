@@ -16,6 +16,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+mod runvalue;
+use runvalue::host_program;
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
@@ -92,6 +94,105 @@ pub(crate) fn default_data_dir() -> PathBuf {
     std::env::temp_dir().join(format!("kith-unit-{}", std::process::id()))
 }
 
+/// Opt-in (M1): the service starts `kith-holder supervise` and the holder starts and restarts the host (and with it the
+/// core daemon), instead of the service starting the host and the host starting a holder. Off unless
+/// `KITH_SERVE_HOLDER=1` is set when `install` runs, or `"holder": true` is in `<data dir>/config.json`; an install
+/// that finds neither writes the job exactly as before. On macOS it is refused while the holder's folder, its secret
+/// or the data folder is on a disk other than the boot volume (see `off_boot_volume`); `KITH_SERVE_HOLDER=force`
+/// installs it anyway. The job file records the choice, so `start`, `stop` and
+/// `restart` follow what `install` wrote; switching needs a new `install`.
+fn holder_wanted() -> bool {
+    if let Some(v) = std::env::var_os("KITH_SERVE_HOLDER") {
+        return matches!(v.to_string_lossy().trim(), "1" | "true" | "yes" | "on" | "force");
+    }
+    std::fs::read_to_string(data_dir().join("config.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .is_some_and(|v| v["holder"] == true)
+}
+
+/// The words in front of the host in a job that runs it under the holder: `kith-holder supervise ... --`. The holder
+/// program is `$KITH_HOLDER_BIN` or `kith-holder` beside this program (where the daemon looks too); the folder and the
+/// secret file are the core's own, so the holder this starts is the one the daemon says hello to. `None`: not opted in.
+fn holder_words() -> Result<Option<Vec<String>>> {
+    if !holder_wanted() {
+        return Ok(None);
+    }
+    let name = if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" };
+    let exe = match std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
+        Some(e) => PathBuf::from(e),
+        None => current_exe().context("locating the kith-serve binary")?.with_file_name(name),
+    };
+    if !exe.is_file() {
+        bail!(
+            "the holder is switched on but {} is missing (set KITH_HOLDER_BIN, or install it beside kith)",
+            exe.display()
+        );
+    }
+    let folders = crate::kernel::folders(&kith_kernel::paths::process_home());
+    let (dir, secret) = crate::core_front::holder_files(&folders).context("preparing the holder's folder")?;
+    if cfg!(target_os = "macos") && !holder_forced() {
+        let paths = [resolved(&dir), resolved(&secret), resolved(&data_dir())];
+        if let Some((path, mount)) = off_boot_volume(&paths, mount_of) {
+            bail!(
+                "{} is on {}, not the boot disk. A launchd job's holder cannot open files there until it has Full Disk \
+                 Access: add the kith-holder binary ({}) in System Settings > Privacy & Security > Full Disk Access \
+                 (at a path that stays put; a rebuilt or moved binary needs it again), then install with \
+                 KITH_SERVE_HOLDER=force. Without it the job hangs on its first open.",
+                path.display(),
+                mount.display(),
+                exe.display()
+            );
+        }
+    }
+    let words = [exe, PathBuf::from("supervise"), PathBuf::from("--dir"), dir, PathBuf::from("--secret-file"), secret];
+    Ok(Some(words.iter().map(|w| w.to_string_lossy().into_owned()).chain(["--".to_owned()]).collect()))
+}
+
+fn holder_forced() -> bool {
+    std::env::var("KITH_SERVE_HOLDER").is_ok_and(|v| v.trim() == "force")
+}
+
+/// The mounts a macOS launchd job reaches without a grant: the boot volume, seen at `/` and as its data half.
+const BOOT_MOUNTS: [&str; 2] = ["/", "/System/Volumes/Data"];
+
+/// The first of `paths` (already resolved) that sits on a mount other than the boot volume, with that mount.
+/// `mount_of` names the mount point holding a path (injectable for tests).
+fn off_boot_volume(paths: &[PathBuf], mount_of: impl Fn(&Path) -> Option<PathBuf>) -> Option<(PathBuf, PathBuf)> {
+    paths.iter().find_map(|path| {
+        let mount = mount_of(path)?;
+        (!BOOT_MOUNTS.iter().any(|boot| mount == Path::new(boot))).then(|| (path.clone(), mount))
+    })
+}
+
+/// `path` with symlinks resolved; a folder not made yet is resolved through its nearest existing parent.
+fn resolved(path: &Path) -> PathBuf {
+    path.ancestors()
+        .find_map(|a| a.canonicalize().ok().map(|real| real.join(path.strip_prefix(a).unwrap_or(path))))
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
+/// The mount point holding `path`, as the kernel reports it (`statfs`).
+#[cfg(target_os = "macos")]
+fn mount_of(path: &Path) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    // SAFETY: `statfs` is plain integers and byte arrays, for which all-zero is a valid value.
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c` is a NUL-terminated path and `st` a live, writable `statfs`.
+    if unsafe { libc::statfs(c.as_ptr(), &raw mut st) } != 0 {
+        return None;
+    }
+    // SAFETY: on success the kernel filled `f_mntonname` with a NUL-terminated path inside the struct.
+    let name = unsafe { std::ffi::CStr::from_ptr(st.f_mntonname.as_ptr()) };
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(name.to_bytes())))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn mount_of(_: &Path) -> Option<PathBuf> {
+    None
+}
+
 fn create_parent(file: &Path) -> Result<()> {
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
@@ -115,6 +216,16 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(10);
 /// A marker older than this is not a host that is leaving now (it crashed or the exit stalled).
 const EXITING_FRESH: Duration = Duration::from_secs(30);
 
+/// Set by [`mark_exiting`]. Waits for another process (the core) end on it: a host that is leaving must not hold its
+/// shutdown for a core that is leaving too (the runtime waits for blocking threads when it drops).
+/// Never cleared: no test may call `mark_exiting`, or every later test in the same binary would skip the core waits.
+static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether this host has begun to exit.
+pub fn is_exiting() -> bool {
+    EXITING.load(std::sync::atomic::Ordering::Acquire)
+}
+
 fn exiting_marker() -> PathBuf {
     data_dir().join("host.exiting")
 }
@@ -122,6 +233,7 @@ fn exiting_marker() -> PathBuf {
 /// Called by a host right before it exits (watchdog or shutdown): tells a starting host that the lock is about
 /// to be freed, so it should wait instead of refusing. Best effort; the OS drops the lock with the process.
 pub fn mark_exiting() {
+    EXITING.store(true, std::sync::atomic::Ordering::Release);
     let _ = std::fs::write(exiting_marker(), std::process::id().to_string());
 }
 
@@ -426,6 +538,37 @@ fn unwrap_statusline(cmd: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_host_program_is_the_one_the_holder_runs_or_the_first_word() {
+        let words = |w: &[&str]| w.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(host_program(&words(&["/h/kith-serve", "serve", "--port", "1"])).unwrap(), "/h/kith-serve");
+        let held = words(&["/h/kith-holder", "supervise", "--dir", "/d", "--", "/h/kith-serve", "serve"]);
+        assert_eq!(host_program(&held).unwrap(), "/h/kith-serve");
+        assert!(host_program(&[]).is_none());
+    }
+
+    #[test]
+    fn a_path_on_another_mount_than_the_boot_volume_is_found() {
+        let mounts = |p: &Path| {
+            Some(PathBuf::from(if p.starts_with("/Volumes/Disk") {
+                "/Volumes/Disk"
+            } else if p.starts_with("/Users") {
+                "/System/Volumes/Data"
+            } else {
+                "/"
+            }))
+        };
+        let on = |paths: &[&str]| off_boot_volume(&paths.iter().map(PathBuf::from).collect::<Vec<_>>(), mounts);
+        assert_eq!(on(&["/Users/me/.kith/core/holder", "/opt/kith/data"]), None);
+        // Any one of the folders is enough; the result names that path and its mount.
+        assert_eq!(
+            on(&["/Users/me/h", "/Users/me/h.secret", "/Volumes/Disk/data"]),
+            Some((PathBuf::from("/Volumes/Disk/data"), PathBuf::from("/Volumes/Disk")))
+        );
+        // A mount lookup that fails is no reason to refuse.
+        assert_eq!(off_boot_volume(&[PathBuf::from("/x")], |_| None), None);
+    }
 
     // One test: both cases use the process-wide host.lock, so they cannot run in parallel.
     #[test]

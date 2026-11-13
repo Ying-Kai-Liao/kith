@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# kith-connector-check — `kith connector ls|search|info|install|remove` against a stub host: the host API calls each makes,
+# --json, secrets only on stdin (never argv), usage errors, and the clear error when the host is down. Throwaway dirs and a
+# stub on a free port (KITH_SERVE_DIR / KITH_SERVE_PORT), never ~/.kith or the real host.
+#
+# Meant as a corpus: each `cli` line is a command line, its exit code and what it prints, so the same lines can later run
+# against the Rust core. (The services/<id>.json files are the host's, covered by its Rust tests; no host runs here.)
+#
+#   kernel/tests/kith-connector-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-connector.XXXXXX"); T=$(cd "$T" && pwd -P)
+SRV=
+trap '[[ -n $SRV ]] && kill $SRV 2>/dev/null; rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_SERVE_DIR=$T/serve KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_AGENTS KITH_SERVE_PORT
+mkdir -p "$HOME" "$KITH_SERVE_DIR"
+KC() { "$KERNEL/bin/kith" connector "$@"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1 [RC=${RC:-} OUT=${OUT:-}]"; fail=1; fi; }
+
+# cli NAME RC SUBSTR ARGS...: `kith connector ARGS` exits RC and its output holds SUBSTR
+cli() { local n=$1 rc=$2 want=$3; shift 3; OUT=$(KC "$@" 2>&1); RC=$?; check "$n" "[[ \$RC == $rc && \$OUT == *\"$want\"* ]]"; }
+
+# --- host down: no token file, then a token with nothing listening ---------------------------------------------------
+export KITH_SERVE_PORT=1
+OUT=$(KC ls 2>&1); RC=$?
+check "no token file: clear error, exit 1"            "[[ \$RC == 1 && \$OUT == *\"host isn't running\"* && \$OUT != *Traceback* ]]"
+echo "tok-$$" > "$KITH_SERVE_DIR/token"
+OUT=$(KC ls --json 2>&1); RC=$?
+check "nothing listening: clear error, exit 1"        "[[ \$RC == 1 && \$OUT == *\"host isn't running\"* && \$OUT != *Traceback* ]]"
+
+# --- the stub host ---------------------------------------------------------------------------------------------------
+cat > "$T/stub.py" <<'PY'
+import http.server, json, sys
+T = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.headers.get('Authorization') != 'Bearer ' + sys.argv[2]:
+            self.send_response(401); self.send_header('Content-Length', '0'); self.end_headers(); return
+        m = self.path.rsplit('/', 1)[1]
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
+        st, out = 200, {}
+        if m == 'connectors':
+            out = {'items': [{'id': 'linear', 'name': 'Linear', 'kind': 'remote', 'auth': 'signedOut'}, {'id': 'files', 'name': 'Files', 'kind': 'local', 'auth': 'none'}]}
+        elif m == 'marketConnectors':
+            out = {'items': [{'name': 'app.linear/linear', 'title': 'Linear', 'installed': True}], 'nextCursor': None}
+        elif m == 'connectorInfo':
+            out = {'name': body['registryName'], 'title': 'Linear', 'description': 'Issues', 'options': [
+                {'id': 'package:0', 'label': 'npm', 'inputs': [{'name': 'API_KEY', 'secret': True, 'required': True}]}]}
+        elif m == 'installConnector':
+            if body['option'] == 'bad:9':
+                st, out = 400, {'error': 'unknown install option'}
+            else:
+                out = {'connector': {'id': 'linear', 'name': 'Linear'}}
+        elif m == 'removeConnector':
+            out = {}
+        with open(T + '/rec.jsonl', 'a') as f:
+            f.write(json.dumps({'m': m, 'body': body}) + '\n')
+        b = json.dumps(out).encode()
+        self.send_response(st); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+open(T + '/port', 'w').write(str(s.server_port))
+s.serve_forever()
+PY
+python3 "$T/stub.py" "$T" "tok-$$" & SRV=$!
+for _ in $(seq 50); do [[ -s $T/port ]] && break; sleep 0.1; done
+export KITH_SERVE_PORT=$(cat "$T/port")
+rec() { : > "$T/rec.jsonl"; }
+last() { grep "\"m\": \"$1\"" "$T/rec.jsonl" | tail -n1 | python3 -c "import json,sys; d=json.load(sys.stdin)['body']; print($2)"; }
+
+OUT=$(KC ls 2>&1); RC=$?
+check "ls prints id, name, kind and a sign-in state"  "[[ \$RC == 0 && \$OUT == *'linear  Linear  remote  signedOut'* && \$OUT == *'files  Files  local'* ]]"
+OUT=$(KC ls --json 2>&1)
+check "ls --json is the host's public list"           "python3 -c 'import json,sys; assert json.loads(sys.argv[1])[\"items\"][0][\"id\"]==\"linear\"' \"\$OUT\""
+
+rec; OUT=$(KC search issue tracker 2>&1); RC=$?
+check "search joins the words"                        "[[ \$RC == 0 && \$OUT == *'(installed)'* && \$(last marketConnectors 'd[\"search\"]') == 'issue tracker' ]]"
+OUT=$(KC info app.linear/linear 2>&1); RC=$?
+check "info lists options and which inputs are secret" "[[ \$RC == 0 && \$OUT == *'--option package:0'* && \$OUT == *'API_KEY'*'secret'* ]]"
+
+rec; OUT=$(KC install app.linear/linear --option package:0 --input TEAM=core 2>&1); RC=$?
+check "install sends the option and --input pairs"    "[[ \$RC == 0 && \$OUT == *'installed linear'* && \$(last installConnector 'd[\"option\"], d[\"inputs\"]') == \"package:0 {'TEAM': 'core'}\" ]]"
+rec; OUT=$(printf '{"API_KEY":"s3cret-value"}' | KC install app.linear/linear --option package:0 --input-stdin-json --json 2>&1); RC=$?
+check "secrets come from stdin JSON and reach the host" "[[ \$RC == 0 && \$(last installConnector 'd[\"inputs\"][\"API_KEY\"]') == 's3cret-value' ]]"
+check "the secret is never in the output"            "[[ \$OUT != *s3cret-value* ]]"
+OUT=$(printf 'not json' | KC install x/y --option package:0 --input-stdin-json 2>&1); RC=$?
+check "bad stdin JSON: exit 2"                        "[[ \$RC == 2 && \$OUT == *'not JSON'* ]]"
+OUT=$(printf '["a"]' | KC install x/y --option package:0 --input-stdin-json 2>&1); RC=$?
+check "stdin JSON that is not an object: exit 2"      "[[ \$RC == 2 ]]"
+OUT=$(KC install x/y --option package:0 --input NOEQUALS 2>&1); RC=$?
+check "--input without = : exit 2"                    "[[ \$RC == 2 ]]"
+OUT=$(KC install x/y 2>&1); RC=$?
+check "install without --option: exit 2"              "[[ \$RC == 2 ]]"
+OUT=$(KC install x/y --option bad:9 2>&1); RC=$?
+check "a host refusal prints its text, exit 1"        "[[ \$RC == 1 && \$OUT == *'unknown install option'* ]]"
+OUT=$(KC install x/y --option package:0 --surprise s3cret-value 2>&1); RC=$?
+check "an unknown argument is not echoed"             "[[ \$RC == 2 && \$OUT != *s3cret-value* ]]"
+
+rec; OUT=$(KC remove linear 2>&1); RC=$?
+check "remove sends the id"                           "[[ \$RC == 0 && \$OUT == 'removed linear' && \$(last removeConnector 'd[\"id\"]') == linear ]]"
+cli "unknown verb" 2 "See: kith connector --help" bogus
+cli "--help prints the usage" 0 "kith connector ls" --help
+cli "install needs --option" 2 "--option" install x/y
+cli "--input needs K=V" 2 "K=V" install x/y --option package:0 --input NOEQUALS
+cli "a host refusal prints its text" 1 "unknown install option" install x/y --option bad:9
+
+exit $fail

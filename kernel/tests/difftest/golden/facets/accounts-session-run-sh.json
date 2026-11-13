@@ -1,0 +1,22 @@
+{
+  "fakes": "",
+  "state:home/.kith/cost.db": "## runs: CREATE TABLE runs (session text, agent text, provider text, account text, account_id text, model text, effort text)\n{\"account\": \"w\", \"account_id\": \"\", \"agent\": \"echo\", \"effort\": \"\", \"model\": \"\", \"provider\": \"claude\", \"session\": \"s-named\"}\n{\"account\": \"work\", \"account_id\": \"claude:work\", \"agent\": \"echo\", \"effort\": \"high\", \"model\": \"opus\", \"provider\": \"claude\", \"session\": \"s-full\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"café\", \"effort\": null, \"model\": null, \"provider\": \"claude\", \"session\": \"s-uni\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"cdx\", \"effort\": null, \"model\": \"gpt-5\", \"provider\": \"codex\", \"session\": \"s-codex\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"echo\", \"effort\": null, \"model\": null, \"provider\": null, \"session\": \"s-bare\"}\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "s_harness=claude s_model=opus s_effort=high\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "s_harness=codex s_model=gpt-5 s_effort=''\n",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "s_harness=claude s_model='' s_effort=''\n",
+  "step3.exit": "0\n",
+  "step3.stderr": "",
+  "step3.stdout": "s_harness=claude s_model='' s_effort=''\n",
+  "step4.exit": "0\n",
+  "step4.stderr": "",
+  "step4.stdout": "s_harness=claude s_model='' s_effort=''\n",
+  "step5.exit": "0\n",
+  "step5.stderr": "",
+  "step5.stdout": "s_harness='' s_model='' s_effort=''\n"
+}

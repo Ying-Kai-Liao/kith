@@ -34,16 +34,22 @@ public struct BotSections: Equatable, Sendable {
 
 /// One of an hq bot's settings as the apps show it, read from hq. Mirrors the desktop's `hqSettings`.
 public struct HqSetting: Equatable, Sendable {
-    public enum Key: String, Sendable { case permission, callModel, model, effort, fastMode }
+    public enum Key: String, Sendable { case permission, callModel, harness, model, effort, fastMode }
     public var key: Key
     public var label: String
     /// What hq reports, or plain words when it has nothing.
     public var value: String
-    /// Written through to hq. The rest hq has no setting for: read-only, "Set in Kith".
+    /// Written through to hq (`kith <agent> set …`). Fast mode has no kith setting, so it is no row at all.
     public var editable: Bool
     public var hint: String
 
-    public static let setInKith = "Set in Kith"
+    /// Effort levels `kith <agent> set effort` takes, plus `default` (forget the choice). Mirrors the desktop's `EFFORT_LEVELS`.
+    public static let effortLevels: [(id: String, label: String)] = [
+        ("default", "Agent's default"), ("low", "Low"), ("medium", "Medium"), ("high", "High"), ("xhigh", "Extra high"), ("max", "Max"),
+    ]
+
+    /// The harnesses the picker offers for a kith agent; the current one is added when it is another.
+    public static let harnesses: [(id: String, label: String)] = [("claude", "Claude"), ("codex", "Codex")]
 
     /// Claude Code's own permission modes, in the order the picker lists them. Kith passes the pick to the agent unchanged.
     public static let permissionModes: [(id: String, label: String)] = [
@@ -90,7 +96,6 @@ public struct HqSetting: Equatable, Sendable {
 
     /// `info` is nil while kith's answer loads or failed: nothing is editable then.
     public static func rows(_ info: KithInfo?) -> [HqSetting] {
-        let agentsDefault = "Agent's default"
         return [
             HqSetting(key: .permission, label: "Permissions", value: info.map { permissionMode($0.permissionMode ?? "auto") } ?? "…",
                       editable: info != nil,
@@ -98,12 +103,29 @@ public struct HqSetting: Equatable, Sendable {
             HqSetting(key: .callModel, label: "Call model", value: info.map { $0.callModel ?? "default" } ?? "…",
                       editable: info != nil,
                       hint: "The model that answers when you talk to this agent in a voice call. Typed messages use the agent's own model."),
-            HqSetting(key: .model, label: "Model", value: info?.model ?? agentsDefault, editable: false,
-                      hint: "\(setInKith): the agent's package picks it."),
-            HqSetting(key: .effort, label: "Effort", value: info?.effort ?? agentsDefault, editable: false,
-                      hint: "\(setInKith): the agent's package picks it."),
-            HqSetting(key: .fastMode, label: "Fast mode", value: "Off", editable: false,
-                      hint: "\(setInKith): hq has no Fast mode."),
+            HqSetting(key: .harness, label: "Harness", value: info.map { $0.harness ?? "claude" } ?? "…", editable: info != nil,
+                      hint: "The program that runs this agent on this computer. Switching drops a model the new harness can't run."),
+            HqSetting(key: .model, label: "Model", value: info.map { $0.model ?? "default" } ?? "…", editable: info != nil,
+                      hint: "Kept by Kith for this agent. Every chat of this agent uses it from its next turn."),
+            HqSetting(key: .effort, label: "Effort", value: info.map { $0.effort ?? "default" } ?? "…", editable: info != nil,
+                      hint: "How hard the agent thinks. Kept by Kith for this agent."),
         ]
+    }
+}
+
+extension BotDraft {
+    /// An hq agent's engine, model, effort and tools are kith's (`kith <agent> set …`): the host refuses a change to them
+    /// through `updateBot`, so a draft of a kith agent goes back to what the bot holds for those fields. Stale values
+    /// in the host's config are never sent as changes.
+    public func keepingKithOwned(from bot: Bot) -> BotDraft {
+        guard let agent = bot.hqAgent, !agent.isEmpty else { return self }
+        var d = self
+        d.backend = bot.backend
+        d.model = bot.model
+        d.modelOptions = bot.modelOptions
+        d.fastMode = bot.fastMode
+        d.connectors = bot.connectors
+        d.skills = bot.skills
+        return d
     }
 }

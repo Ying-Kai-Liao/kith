@@ -1,0 +1,7 @@
+\* removing P leaves the grants made for agent@P
+CoreGate = TRUE
+Switched = TRUE
+ItemsOn = TRUE
+Removal = TRUE
+GrantOn = TRUE
+ForgetKeepsGrant = TRUE

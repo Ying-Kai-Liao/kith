@@ -1,0 +1,22 @@
+[
+  {
+    "name": "account-add-remove-json",
+    "command": "account",
+    "setup": [
+      {"mkdir": "kith/state"}
+    ],
+    "run": [
+      ["account", "add", "claude", "work", "--json"],
+      ["account", "add", "claude", "work", "--json", "--yes"],
+      ["account", "add", "claude", "work", "--json"],
+      ["account", "add", "codex", "main", "--json"],
+      ["account", "add", "claude", "bad name", "--json", "--yes"],
+      ["account", "list", "--json"],
+      ["account", "remove", "claude", "work", "--json"],
+      ["account", "remove", "claude", "work", "--json", "--yes"],
+      ["account", "remove", "claude", "work", "--json", "--yes"]
+    ],
+    "sort_lines": true,
+    "stderr": false
+  }
+]

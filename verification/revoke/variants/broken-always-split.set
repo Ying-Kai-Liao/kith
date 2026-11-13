@@ -1,0 +1,6 @@
+\* the always checks may() in one step and writes in a later one
+CoreGate = TRUE
+Switched = TRUE
+AlwaysOn = TRUE
+RouterDoor = TRUE
+AlwaysSplit = TRUE

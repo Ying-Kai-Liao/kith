@@ -20,6 +20,7 @@ import { BotConversationView, BotMessageRow } from './BotConversation'
 import { TopicCard } from './TopicCard'
 import { TaskCard } from './TaskCard'
 import { TopicPromptHost } from './TopicPrompt'
+import { KeepAgentPromptHost } from './KeepAgentPrompt'
 import { ChatRow, lateQuoteOf, StepsRow, TimeSeparator, WorkingIndicator } from './ChatRows'
 import { AddToRoomSheet } from './AddToRoomSheet'
 import { Composer } from './Composer'
@@ -508,6 +509,7 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
           ) : null}
           <div className="chat-end" />
           <TopicPromptHost />
+          <KeepAgentPromptHost />
         </div>
       </div>
       {jump.mounted ? (

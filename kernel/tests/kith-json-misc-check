@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# kith-json-misc-check — `--json` on doctor, remote ls|add|rm, ask ls, bug create|list|show, backup add|remove|list,
+# update self --check, wake status, lifecycle status, chain seen|sig|ls and project (bare) and project notes. CLI lines in,
+# stdout / exit code / state out, so the same lines can check another implementation. Throwaway HOME, KITH_HOME and
+# KITH_STATE; fake ssh, gh, launchctl, claude and codex on PATH; the update check runs against a local git remote.
+# Nothing touches the real ~/.kith, launchd, the Keychain or the network, and no `kith backup run` / `update self` runs.
+#
+#   kernel/tests/kith-json-misc-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-json-misc-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_OWNER KITH_ROOM KITH_VIA KITH_ROOT KITH_CLAUDE_ARGS KITH_HARNESS \
+  CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_BUG_REPO
+A=$KITH_HOME/agents/echo/role
+mkdir -p "$HOME/.claude" "$HOME/.codex" "$KITH_HOME/state" "$A" "$T/bin" "$T/work/alpha" "$T/work/inner"
+export KITH_STATE=$KITH_HOME/state
+printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$A/agent.md"
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+touch "$T/gitconfig" && export GIT_CONFIG_GLOBAL=$T/gitconfig GIT_CONFIG_NOSYSTEM=1
+git -C "$A" init -q && git -C "$A" add -A && git -C "$A" commit -qm init
+git -C "$KITH_STATE" init -q && cp "$KERNEL/lib/dot-kith.gitignore" "$KITH_STATE/.gitignore"
+
+# fakes: harnesses that only echo, a gh that is not logged in, a launchctl that knows no job, an ssh that is a machine "house"
+for h in claude codex; do printf '#!/bin/sh\necho "%s $*"\n' "$h" > "$T/bin/$h"; chmod +x "$T/bin/$h"; done
+printf '#!/bin/sh\nexit 1\n' > "$T/bin/gh"; printf '#!/bin/sh\nexit 113\n' > "$T/bin/launchctl"
+cat > "$T/bin/ssh" <<'FAKE'
+#!/bin/sh
+# last argument is the remote command; the target is the one before it
+for last; do :; done
+case " $* " in *@down\ *) echo "ssh: connect to host down: Connection refused" >&2; exit 255 ;; esac
+case $last in
+  *"command -v kith"*) echo /fake/bin/kith ;;
+  *" ls"*) printf 'butler  a butler\nhouse   the house\n' ;;
+  *) exit 1 ;;
+esac
+FAKE
+chmod +x "$T/bin"/*
+export PATH=$T/bin:$PATH
+
+KITH=$KERNEL/bin/kith
+mach() { python3 -c "import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])" "$KERNEL/lib"; }   # this Mac's own folder (remotes.json, ask.json)
+
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+# jv EXPR: the python expression over the JSON in $OUT (as d)
+export OUT=
+jv() { python3 -c 'import json,os,sys; d=json.loads(os.environ["OUT"]); print(eval(sys.argv[1]))' "$1"; }
+# one JSON object and nothing else on stdout; nothing on stderr when $T/err is empty
+oneobj() { python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); assert isinstance(d, dict)' 2>/dev/null; }
+errobj() { [ "$(jv '(d.get("ok"), isinstance(d.get("error"), str), len(d))')" = "(False, True, 2)" ]; }
+
+# ---- doctor ----
+# a kernel copy (no git around it), so the doctor's update check has nothing to fetch
+mkdir -p "$KITH_HOME" && cp -R "$KERNEL" "$KITH_HOME/kernel"
+DOC=$KITH_HOME/kernel/bin/kith
+"$DOC" doctor > "$T/doctor.txt" 2>/dev/null; trc=$?
+OUT=$("$DOC" doctor --json 2>"$T/err"); jrc=$?
+check "doctor --json: one object, ok and checks, same exit code as the text" \
+  "oneobj && [ $jrc = $trc ] && [ \"\$(jv 'isinstance(d[\"checks\"], list) and len(d[\"checks\"]) > 3 and d[\"ok\"] == ($jrc == 0)')\" = True ]"
+check "doctor --json: every check has a name, a level and ok; nothing on stderr" \
+  "[ \"\$(jv 'all(set(c) >= {\"name\", \"ok\", \"level\", \"section\"} for c in d[\"checks\"])')\" = True ] && [ ! -s '$T/err' ]"
+check "doctor --json: a problem is listed as not ok, and the count matches" \
+  "[ \"\$(jv 'd[\"problems\"] == sum(not c[\"ok\"] for c in d[\"checks\"])')\" = True ]"
+check "doctor text output is unchanged: sections and marks" "grep -q '^folders' '$T/doctor.txt' && grep -qE '^  [✓!✗·] ' '$T/doctor.txt' && ! grep -q '\"checks\"' '$T/doctor.txt'"
+check "doctor text and json name the same lines" \
+  "[ \"\$(jv 'len(d[\"checks\"])')\" = \"\$(grep -cE '^  [✓!✗·] ' '$T/doctor.txt')\" ]"
+
+# ---- remote ----
+OUT=$("$KITH" remote ls --json 2>"$T/err"); rc=$?
+check "remote ls --json with no machines: {machines: []}" "[ $rc = 0 ] && [ \"\$(jv 'd')\" = \"{'machines': []}\" ] && [ ! -s '$T/err' ]"
+OUT=$("$KITH" remote add mini you@mini --json 2>"$T/err"); rc=$?
+check "remote add --json: name, ssh, kith path and the agents there" \
+  "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"name\"], d[\"ssh\"], d[\"kith\"], d[\"agents\"])')\" = \"(True, 'mini', 'you@mini', '/fake/bin/kith', ['butler', 'house'])\" ] && [ ! -s '$T/err' ]"
+OUT=$("$KITH" remote add down you@down --json 2>"$T/err"); rc=$?
+check "remote add --json to an unreachable machine: error object, exit 1, not saved" "[ $rc = 1 ] && errobj && ! grep -q '\"down\"' \"\$(mach)/remotes.json\""
+OUT=$("$KITH" remote add 'Bad Name' you@mini --json 2>"$T/err"); rc=$?
+check "remote add --json with a bad name: error object" "[ $rc = 1 ] && errobj"
+printf '{"gone":{"ssh":"you@down","kith":"/fake/bin/kith"}}' | python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); r.update(json.load(sys.stdin)); json.dump(r, open(sys.argv[1], "w"))' "$(mach)/remotes.json"
+OUT=$("$KITH" remote ls --json 2>"$T/err"); rc=$?
+check "remote ls --json: reachable machine with agents, unreachable with the reason" \
+  "[ $rc = 0 ] && [ \"\$(jv '[(m[\"name\"], m[\"reachable\"], m[\"agents\"]) for m in d[\"machines\"]]')\" = \"[('mini', True, ['butler', 'house']), ('gone', False, [])]\" ] && [ \"\$(jv '\"refused\" in d[\"machines\"][1][\"error\"]')\" = True ]"
+OUT=$("$KITH" remote rm gone --json); rc=$?
+check "remote rm --json: removed" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"name\"], d[\"removed\"])')\" = \"(True, 'gone', True)\" ]"
+OUT=$("$KITH" remote rm gone --json)
+check "remote rm --json of an unknown machine: ok, removed false (the text mode forgets silently too)" "[ \"\$(jv 'd[\"removed\"]')\" = False ]"
+check "remote ls text is unchanged" "[ \"\$(\"$KITH\" remote ls | head -1 | grep -c 'butler@mini house@mini')\" = 1 ]"
+
+# ---- ask ls ----
+OUT=$("$KITH" ask ls --json 2>"$T/err"); rc=$?
+check "ask ls --json with nothing kept: {conversations: []}" "[ $rc = 0 ] && [ \"\$(jv 'd')\" = \"{'conversations': []}\" ]"
+printf '{"echo|/work/a":{"agent":"echo","at":"2026-10-30T10:00:00","turns":2,"cost":0.5,"last":"hi"},"echo|/work/b":{"agent":"echo","at":"2026-11-01T10:00:00","turns":1,"cost":0.25,"last":"yo"}}' > "$(mach)/ask.json"
+OUT=$("$KITH" ask ls --json 2>"$T/err"); rc=$?
+check "ask ls --json: newest first, agent, dir, turns, cost" \
+  "[ $rc = 0 ] && [ \"\$(jv '[(c[\"agent\"], c[\"dir\"], c[\"turns\"], c[\"cost\"]) for c in d[\"conversations\"]]')\" = \"[('echo', '/work/b', 1, 0.25), ('echo', '/work/a', 2, 0.5)]\" ]"
+check "ask ls text is unchanged" "\"$KITH\" ask ls | head -1 | grep -q '^2026-11-01T10:00:00  echo'"
+
+# ---- bug ----
+export KITH_OWNER=1
+OUT=$("$KITH" bug list --json 2>"$T/err"); rc=$?
+check "bug list --json with no reports: {bugs: []}" "[ $rc = 0 ] && [ \"\$(jv 'd')\" = \"{'bugs': []}\" ]"
+OUT=$("$KITH" bug 'The lamp is off' --details 'it flickers' --json 2>"$T/err"); rc=$?
+ID=$(jv 'd["id"]' 2>/dev/null)
+check "bug create --json (owner): saved locally, id and path, nothing filed" \
+  "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"filed\"], d[\"path\"].endswith(d[\"id\"]))')\" = '(True, False, True)' ] && [ -f '$KITH_STATE/bugs/$ID/report.json' ] && [ ! -s '$T/err' ]"
+OUT=$("$KITH" bug list --json)
+check "bug list --json: the report with its title" "[ \"\$(jv '[(b[\"id\"], b[\"title\"]) for b in d[\"bugs\"]]')\" = \"[('$ID', 'The lamp is off')]\" ]"
+OUT=$("$KITH" bug show "$ID" --json)
+check "bug show --json: report data and the markdown" "[ \"\$(jv '(d[\"id\"], d[\"report\"][\"title\"], d[\"report\"][\"details\"], \"The lamp is off\" in d[\"text\"])')\" = \"('$ID', 'The lamp is off', 'it flickers', True)\" ]"
+OUT=$("$KITH" bug show nope --json 2>"$T/err"); rc=$?
+check "bug show --json of an unknown id: error object, exit 1, nothing on stderr" "[ $rc = 1 ] && errobj && [ ! -s '$T/err' ]"
+"$KITH" bug show nope >/dev/null 2>"$T/err"; rc=$?
+check "bug show text error is unchanged" "[ $rc = 1 ] && grep -q '^kith bug: no bug' '$T/err'"
+unset KITH_OWNER
+printf '{"people":{"anna":{"name":"Annabel Quince"},"kai":{"owner":true}}}' > "$KITH_AUTH"
+OUT=$(KITH_PERSON=anna "$KITH" bug 'Another bug' --json </dev/null 2>"$T/err"); rc=$?
+check "bug create --json (not the owner, no yes): kept as a draft, ok false, exit 3, one object" \
+  "[ $rc = 3 ] && oneobj && [ \"\$(jv '(d[\"ok\"], d[\"status\"])')\" = \"(False, 'kept')\" ]"
+OUT=$(KITH_PERSON=anna "$KITH" bug list --json 2>"$T/err"); rc=$?
+check "bug list --json for a non-owner: error object, exit 1" "[ $rc = 1 ] && errobj"
+
+# ---- backup add / remove / list ----
+OUT=$("$KITH" backup list --json); rc=$?
+check "backup list --json with an empty chain" "[ $rc = 0 ] && [ \"\$(jv 'd[\"backups\"]')\" = '[]' ]"
+OUT=$("$KITH" backup add codex --json 2>"$T/err"); rc=$?
+check "backup add --json: changed, position, the new chain" \
+  "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"], d[\"entry\"], d[\"position\"], d[\"backups\"])')\" = \"(True, True, 'codex', 1, ['codex'])\" ] && [ ! -s '$T/err' ]"
+OUT=$("$KITH" backup add codex --json); rc=$?
+check "backup add --json of an entry already there: ok, changed false, exit 0 (as the text mode)" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"])')\" = '(True, False)' ]"
+OUT=$("$KITH" backup add claude:second --at 1 --agent echo --json); rc=$?
+check "backup add --json --agent --at: scoped to the agent" "[ $rc = 0 ] && [ \"\$(jv '(d[\"agent\"], d[\"position\"], d[\"backups\"])')\" = \"('echo', 1, ['claude:second', 'codex'])\" ]"
+OUT=$("$KITH" backup add claude:x --at 0 --json 2>"$T/err"); rc=$?
+check "backup add --json of a bad entry: error object, exit 2 (as the text mode), nothing on stderr" "[ $rc = 2 ] && errobj && [ ! -s '$T/err' ]"
+"$KITH" backup add claude:x --at 0 >/dev/null 2>&1; rc=$?
+check "backup add text of a bad entry exits 2 too" "[ $rc = 2 ]"
+OUT=$("$KITH" backup remove codex --json); rc=$?
+check "backup remove --json: changed, the chain without it" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"], d[\"backups\"])')\" = \"(True, True, [])\" ]"
+OUT=$("$KITH" backup remove codex --json); rc=$?
+check "backup remove --json of a missing entry: ok, changed false, exit 0 (as the text mode)" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"])')\" = '(True, False)' ]"
+OUT=$("$KITH" backup remove --json 2>"$T/err"); rc=$?
+check "backup remove --json without an id: usage error object, exit 2" "[ $rc = 2 ] && errobj"
+check "backup add text is unchanged" "[ \"\$(\"$KITH\" backup add codex)\" = 'codex is backup 1 for every agent' ]"
+"$KITH" backup remove codex >/dev/null
+
+# ---- update self --check ----
+G=$T/g; mkdir -p "$G"
+git init -q --bare -b main "$G/origin.git"
+git clone -q "$G/origin.git" "$G/clone" 2>/dev/null
+mkdir -p "$G/clone/kernel/bin" && echo x > "$G/clone/kernel/bin/kith" && git -C "$G/clone" add -A && git -C "$G/clone" commit -qm one && git -C "$G/clone" push -q origin HEAD 2>/dev/null
+git -C "$G/clone" branch -q --set-upstream-to=origin/"$(git -C "$G/clone" branch --show-current)" 2>/dev/null
+SU=$KERNEL/bin/kith-self-update
+HEAD0=$(git -C "$G/clone" rev-parse HEAD)
+OUT=$(KITH_ROOT=$G/clone/kernel "$SU" --check --json 2>"$T/err"); rc=$?
+check "update self --check --json when current: behind false, message null" \
+  "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"method\"], d[\"behind\"], d[\"message\"])')\" = \"(True, 'git', False, None)\" ]"
+git clone -q "$G/origin.git" "$G/other" 2>/dev/null && echo y > "$G/other/y" && git -C "$G/other" add -A && git -C "$G/other" commit -qm two && git -C "$G/other" push -q origin HEAD 2>/dev/null
+OUT=$(KITH_ROOT=$G/clone/kernel "$SU" --check --json 2>"$T/err"); rc=$?
+check "update self --check --json when behind: behind true and the doctor's line" \
+  "[ $rc = 0 ] && [ \"\$(jv '(d[\"behind\"], \"1 commit behind\" in d[\"message\"], d[\"message\"].endswith(\"kith update self\"))')\" = '(True, True, True)' ]"
+check "--check only reads: the checkout is where it was, clean" "[ \"\$(git -C '$G/clone' rev-parse HEAD)\" = $HEAD0 ] && [ -z \"\$(git -C '$G/clone' status --porcelain)\" ]"
+check "update self --check text still prints the one line" "[ \"\$(KITH_ROOT=$G/clone/kernel \"$SU\" --check)\" = 'kith is 1 commit behind origin/$(git -C "$G/clone" branch --show-current): kith update self' ]"
+check "no remote, nothing to say: --check --json is ok, behind false" "OUT=\$(KITH_ROOT=$T/kith/kernel \"$SU\" --check --json); [ \"\$(jv 'd[\"ok\"] and not d[\"behind\"]')\" = True ]"
+OUT=$("$SU" --json 2>/dev/null); rc=$?
+check "update self --json without --check: refused before it acts (error object, exit 2)" "[ $rc = 2 ] && errobj && [ \"\$(git -C '$G/clone' rev-parse HEAD)\" = $HEAD0 ]"
+
+# ---- wake status ----
+OUT=$("$KITH" wake status w-1 --json); rc=$?
+check "wake status --json of an unknown id" "[ $rc = 0 ] && [ \"\$(jv '(d[\"id\"], d[\"state\"], d[\"run\"])')\" = \"('w-1', 'unknown', None)\" ]"
+"$KITH" wake enqueue S1 --id w-2 --agent echo --door host -- 'hello' >/dev/null
+OUT=$("$KITH" wake status w-2 --json)
+check "wake status --json of a queued request" "[ \"\$(jv '(d[\"state\"], d[\"run\"])')\" = \"('queued', None)\" ] && [ \"\$(\"$KITH\" wake status w-2)\" = queued ]"
+OUT=$("$KITH" wake ls --json)
+check "wake ls --json: the owed item" "[ \"\$(jv 'len(d)')\" = 1 ]"
+
+# ---- lifecycle status ----
+OUT=$("$KERNEL/bin/kith-lifecycle" status nosuch --json 2>"$T/err"); rc=$?
+check "lifecycle status --json of a session nothing scheduled: one object, empty outstanding" \
+  "[ $rc = 0 ] && oneobj && [ \"\$(jv '(d[\"session\"], d[\"outstanding\"])')\" = \"('nosuch', [])\" ]"
+check "lifecycle status without --json prints the same object" "[ \"\$(\"$KERNEL/bin/kith-lifecycle\" status nosuch)\" = \"\$(jv 'json.dumps(d)' 2>/dev/null || echo \"\$OUT\")\" ] || [ \"\$(\"$KERNEL/bin/kith-lifecycle\" status nosuch)\" = \"\$OUT\" ]"
+
+# ---- chain ----
+CH=$KERNEL/bin/kith-chain
+OUT=$("$CH" ls --json); rc=$?
+check "chain ls --json with an empty ledger: {chains: []}" "[ $rc = 0 ] && [ \"\$(jv 'd')\" = \"{'chains': []}\" ]"
+OUT=$(printf 'boom at 0x12\n' | "$CH" sig svc --json)
+SIG=$(jv 'd["sig"]')
+check "chain sig --json: the signature" "[ -n '$SIG' ] && [ \"\$(printf 'boom at 0x99\n' | \"$CH\" sig svc)\" = '$SIG' ]"
+OUT=$("$CH" seen "$SIG" --json); rc=$?
+check "chain seen --json of an unknown signature: holds false, exit 1 (as the text mode)" "[ $rc = 1 ] && [ \"\$(jv '(d[\"sig\"] == \"$SIG\", d[\"holds\"], d[\"state\"])')\" = '(True, False, None)' ]"
+"$CH" run svc --check 'echo boom at 0x12 >&2; exit 3' >/dev/null 2>&1; rc=$?
+OUT=$("$CH" seen "$SIG" --json); rc2=$?
+check "chain seen --json of an open chain: holds true, state, exit 0" "[ $rc = 10 ] && [ $rc2 = 0 ] && [ \"\$(jv '(d[\"holds\"], d[\"state\"])')\" = \"(True, '\$(\"$CH\" seen $SIG)')\" ]"
+OUT=$("$CH" ls --json)
+check "chain ls --json: the chain with its signature and state" "[ \"\$(jv '[(c[\"sig\"], c[\"service\"]) for c in d[\"chains\"]]')\" = \"[('$SIG', 'svc')]\" ]"
+OUT=$("$CH" sig --json </dev/null 2>"$T/err"); rc=$?
+check "chain sig --json without a service: error object, exit 2, nothing on stderr" "[ $rc = 2 ] && errobj && [ ! -s '$T/err' ]"
+
+# ---- project (bare) and project notes ----
+cd "$T/work/inner"
+OUT=$("$KITH" project --json 2>"$T/err"); rc=$?
+check "project --json where none is registered: error object, exit 1 (the text mode exits 1)" "[ $rc = 1 ] && errobj"
+"$KITH" project add alpha "$T/work/alpha" >/dev/null 2>&1
+"$KITH" project add inner "$T/work/inner" --in alpha >/dev/null 2>&1
+OUT=$("$KITH" project --json 2>"$T/err"); rc=$?
+check "project --json: the project here and the ones it sits in, entries as ls --json" \
+  "[ $rc = 0 ] && [ \"\$(jv '(d[\"project\"], [p[\"id\"] for p in d[\"projects\"]], d[\"projects\"][0][\"exists\"])')\" = \"('inner', ['inner', 'alpha'], True)\" ] && [ ! -s '$T/err' ]"
+check "project text is unchanged" "\"$KITH\" project | head -1 | grep -q '^inner  in alpha'"
+OUT=$("$KITH" project "$T/nowhere" --json 2>/dev/null); rc=$?
+check "project DIR --json for a folder with no project: error object" "[ $rc = 1 ] && errobj"
+OUT=$("$KITH" project notes inner --json 2>"$T/err"); rc=$?
+check "project notes --json with no caller: the empty object, not an error" "[ $rc = 0 ] && [ \"\$(jv 'd')\" = \"{'notes': '', 'more': 0, 'start': {}}\" ] && [ ! -s '$T/err' ]"
+[ -z "$("$KITH" project notes inner)" ]; check "project notes text with no caller prints nothing" "[ -z \"\$(\"$KITH\" project notes inner)\" ]"
+OUT=$(KITH_AGENT=echo "$KITH" project notes inner alpha --json 2>"$T/err"); rc=$?
+check "project notes --json as the agent with no notes: the empty object" "[ $rc = 0 ] && oneobj && [ \"\$(jv 'sorted(d)')\" = \"['more', 'notes', 'start']\" ]"
+mkdir -p "$KITH_STATE/projects/inner"
+printf 'The inner project starts here.\n' > "$KITH_STATE/projects/inner/START.md"
+OUT=$(KITH_AGENT=echo "$KITH" project notes inner --json 2>"$T/err"); rc=$?
+TEXT=$(KITH_AGENT=echo "$KITH" project notes inner 2>/dev/null)
+check "project notes --json carries what the text mode prints" "[ $rc = 0 ] && [ \"\$(jv '(d[\"notes\"] + \"\\\\n\".join(d[\"start\"].values())).strip()')\" = \"\$(printf '%s' \"\$TEXT\" | python3 -c 'import sys; print(sys.stdin.read().strip())')\" ]"
+
+echo
+[ "$fails" = 0 ] && echo "all json-misc checks pass" || { echo "$fails check(s) failed"; exit 1; }

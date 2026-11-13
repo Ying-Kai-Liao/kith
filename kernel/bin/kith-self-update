@@ -8,16 +8,19 @@
   kith-self-update --dev      a git checkout: git pull --ff-only that checkout (never the installed CLI)
   kith-self-update --check    one line on stdout when kith is behind (for kith doctor), nothing otherwise; offline,
                               no remote or a slow one all end in nothing, within a few seconds; always exit 0
+  kith-self-update --check --json   the same, as one object: {"ok", "method", "behind", "message"} (message null when kith is current or the check could not tell)
 
 With --dev, a git checkout that is dirty, has no upstream or can't fast-forward is left as it is and the exit code is 1:
 never a force, a stash or a reset.
+
+KITH_SELF_ROOT=<kernel folder> points it at another checkout (tests); it is read before KITH_ROOT, which `kith` sets for itself.
 """
-import os, re, shutil, subprocess, sys
+import json, os, re, shutil, subprocess, sys
 from pathlib import Path
 
 APP_LINK = 'https://kithbot.app/download/mac'
 # The logical path (symlinks not resolved): it may be a link to a path with spaces, and install layouts are told apart by it.
-KERNEL = Path(os.path.abspath(os.environ.get('KITH_ROOT') or Path(__file__).parent.parent))
+KERNEL = Path(os.path.abspath(os.environ.get('KITH_SELF_ROOT') or os.environ.get('KITH_ROOT') or Path(__file__).parent.parent))
 REPO = os.environ.get('KITH_REPO') or 'Ying-Kai-Liao/kith'
 
 
@@ -112,7 +115,7 @@ def show_version(label, line):
 
 def update_git():
     if git('status', '--porcelain', '--untracked-files=no').stdout.strip():   # agents/ is ignored; untracked files can't block a fast-forward
-        die(f'{KERNEL.parent} has uncommitted changes to tracked files; commit or discard them, then run kith update again. Nothing changed.')
+        die(f'{KERNEL.parent} has uncommitted changes to tracked files; commit or discard them, then run kith update self again. Nothing changed.')
     if git('symbolic-ref', '-q', 'HEAD').returncode:
         die(f'{KERNEL.parent} is on a detached HEAD, so there is nothing to pull from. Check out a branch. Nothing changed.')
     up = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
@@ -156,43 +159,53 @@ def update_release():
 
 
 def check():
+    """The one line to show when kith is behind (None when current, offline or unsure). Only reads: a fetch updates the
+    remote-tracking refs, never the checkout."""
     m = method()
     if m == 'git':
         up = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
         if up.returncode or git('fetch', '-q', up.stdout.strip().split('/', 1)[0], timeout=5).returncode:
-            return
+            return None
         r = git('rev-list', '--count', 'HEAD..@{u}')
         n = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
         if n:
-            print(f'kith is {n} commit{"s" if n != 1 else ""} behind {up.stdout.strip()}: kith update')
+            return f'kith is {n} commit{"s" if n != 1 else ""} behind {up.stdout.strip()}: kith update self'
     elif m in ('brew', 'release'):
         have, latest = binary_version(), latest_release()
         if have and latest and as_tuple(have) < as_tuple(latest):
-            print(f'kith {have} is older than the latest release {latest}: kith update')
+            return f'kith {have} is older than the latest release {latest}: kith update self'
+    return None
 
 
 def say_dev_checkout():
     print(f'kith is running from a dev checkout ({KERNEL.parent}, picked with KITH_KERNEL). The installed CLI is a separate '
-          'release copy and updates with `kith update` run from it (unset KITH_KERNEL); to pull this checkout instead: kith update --dev')
+          'release copy and updates with `kith update self` run from it (unset KITH_KERNEL); to pull this checkout instead: kith update --dev')
 
 
 def main(argv):
     if argv and argv[0] in ('-h', '--help'):
         print(__doc__.strip())
         return
-    if argv == ['--check']:
+    if '--check' in argv and set(argv) <= {'--check', '--json'}:
         try:
-            check()
+            line = check()
         except Exception:   # a doctor line is never worth a crash
-            pass
+            line = None
+        if '--json' in argv:
+            print(json.dumps({'ok': True, 'method': method(), 'behind': bool(line), 'message': line}))
+        elif line:
+            print(line)
         return
     if argv == ['--dev']:
         if method() != 'git':
-            die('--dev is for a checkout picked with KITH_KERNEL=<checkout>/kernel; the installed CLI updates with kith update')
+            die('--dev is for a checkout picked with KITH_KERNEL=<checkout>/kernel; the installed CLI updates with kith update self')
         update_git()
         return
+    if '--json' in argv:
+        print(json.dumps({'ok': False, 'error': 'kith update self --json is only for --check'}))
+        sys.exit(2)
     if argv:
-        die('kith update takes an agent (kith update <agent>), --all, or nothing', 2)
+        die('kith update takes an agent (kith update <agent>), --all, or self', 2)
     m = method()
     if m == 'app':
         print(f'kith runs from the desktop app, which updates by download: {APP_LINK}')

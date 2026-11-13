@@ -148,7 +148,8 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
     </Field>
   )
   // hq is the one source of an hq bot's permission, model, effort and Fast mode: one set of rows replaces Kith's own.
-  const model = kith && !shown.kithSettings ? [<HqSettings key="hq" kith={kith} inSheet={part === 'often'} />] : [
+  // A kith agent's model, effort and harness are the CLI's (`kith <agent> set …`): never the host-native pickers, whose edits the host would drop.
+  const model = kith ? [<HqSettings key="hq" kith={kith} inSheet={part === 'often'} />] : [
     <AgentModelPicker key="model" backend={draft.backend} models={models} selection={draft.model} onChange={setModel} options={draft.modelOptions ?? {}} onOptionsChange={setModelOptions} />,
     (draft.backend !== 'custom' && models.catalog?.fastMode) || draft.fastMode || (saved?.backend === draft.backend && fastModeShown(saved)) ? (
       // Shown while the agent offers it (its model list, or the bot's own sessions), or while it's on.
@@ -293,6 +294,7 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
 
         <CardSection title="Activity">
           <SwitchRow title="Notifications" detail="Get notified when this agent finishes or needs you" on={draft.notify ?? true} onChange={(on) => set('notify', on)} />
+          <SwitchRow title="Show summary on row" detail="The list shows the latest thread's summary instead of the last message, once one is written." on={draft.rowShowsSummary ?? false} onChange={(on) => set('rowShowsSummary', on)} />
           {store.screen ? (
             <SwitchRow
               title="Use the computer"
@@ -311,21 +313,26 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
           ) : null}
         </CardSection>
 
-        <PluginToggles
-          title="Connectors"
-          empty="No connectors yet. Add GitHub, Linear, Notion and more from Extensions."
-          items={connectors.map((c) => ({ id: c.id, name: c.name, detail: c.command ?? c.url ?? '' }))}
-          selection={draft.connectors ?? []}
-          onChange={(ids) => set('connectors', ids)}
-        />
-        <PluginToggles
-          title="Skills"
-          empty="No skills yet. Get some from Extensions, or write your own."
-          items={skills.map((s) => ({ id: s.id, name: s.name, detail: s.description }))}
-          selection={draft.skills ?? []}
-          onChange={(ids) => set('skills', ids)}
-          onInfo={(s) => setViewingSkill({ id: s.id, name: s.name, description: s.detail })}
-        />
+        {/* A kith agent's connectors and skills are the CLI's: its Tools card (`AgentTools`) is the one place. */}
+        {kith ? null : (
+          <>
+            <PluginToggles
+              title="Connectors"
+              empty="No connectors yet. Add GitHub, Linear, Notion and more from Extensions."
+              items={connectors.map((c) => ({ id: c.id, name: c.name, detail: c.command ?? c.url ?? '' }))}
+              selection={draft.connectors ?? []}
+              onChange={(ids) => set('connectors', ids)}
+            />
+            <PluginToggles
+              title="Skills"
+              empty="No skills yet. Get some from Extensions, or write your own."
+              items={skills.map((s) => ({ id: s.id, name: s.name, detail: s.description }))}
+              selection={draft.skills ?? []}
+              onChange={(ids) => set('skills', ids)}
+              onInfo={(s) => setViewingSkill({ id: s.id, name: s.name, description: s.detail })}
+            />
+          </>
+        )}
         {error ? <Text size="footnote" tone="danger" className="fade-in">{error}</Text> : null}
       </div>
       <Sheet open={pickingAvatar} onClose={() => setPickingAvatar(false)} width={380} height={620}>

@@ -22,7 +22,8 @@
 #   KITH_INSTALL_TARBALL  a local kith-<version>-darwin-<arch>.tar.gz to install instead of downloading (tests,
 #                         offline); verified against KITH_INSTALL_SHA256 or the .sha256 file beside it, if there is one
 #   KITH_INSTALL_DIR      an unpacked release folder (bin/kith, share/kith/kernel) to install instead of a tarball
-#   KITH_INSTALL_CLI_ONLY=1   only the CLI, for the Mac app: install the version folder, flip current, link
+#   KITH_INSTALL_ANY_OS=1 tests only: skip the macOS check when KITH_INSTALL_TARBALL or KITH_INSTALL_DIR is given
+#   KITH_INSTALL_CLI_ONLY=1  only the CLI, for the Mac app: install the version folder, flip current, link
 #                         ~/.local/bin/kith (and hq), exit 0 with no `kith init`, no prompts. Pair it with
 #                         KITH_INSTALL_TARBALL or KITH_INSTALL_DIR to stay offline. On failure: one line on stderr, exit 1.
 set -eu
@@ -47,7 +48,9 @@ machine_dir() {
 }
 PREFIX=${KITH_PREFIX:-${KITH_STATE:-${HQ_STATE:-$(machine_dir)}}}
 
-[ "$(uname -s)" = Darwin ] || die "kith's download is for macOS. A Linux VM that only needs the client: curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install-guest.sh | sh. The full kith on Linux: clone https://github.com/$REPO and run ./install.sh"
+# KITH_INSTALL_ANY_OS=1 lets the install tests run on a Linux runner; it counts only with a local tarball or folder, so a real
+# download never puts a macOS binary on Linux.
+[ "$(uname -s)" = Darwin ] || { [ "${KITH_INSTALL_ANY_OS:-}" = 1 ] && { [ -n "${KITH_INSTALL_TARBALL:-}" ] || [ -n "${KITH_INSTALL_DIR:-}" ]; }; } || die "kith's download is for macOS. A Linux VM that only needs the client: curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install-guest.sh | sh. The full kith on Linux: clone https://github.com/$REPO and run ./install.sh"
 case $(uname -m) in
   arm64|aarch64) ARCH=arm64 ;;
   x86_64) ARCH=x86_64 ;;
@@ -168,7 +171,8 @@ for v in $(ls -1t "$CLI"); do
 done
 SWAP
 
-# The swap runs under the auth.json lock, then waits for every kith-auth / kith_settings process that started
+# The swap runs under the auth.json lock, then waits for every kith-auth / kith_settings process, and every Rust
+# `kith kernel settings` / `kith kernel secrets` run (they write settings.json / auth.json too), that started
 # before it (SIGTERM after KITH_INSTALL_DRAIN_S, default 30; auth.json stays whole, its rename is atomic), then lets
 # go. Waiting before the swap would be wrong: an old writer could start in the gap. The old code has no C2 check
 # (no grant for someone removed), so no old writer may touch auth.json or settings.json once the new code is in.
@@ -189,7 +193,7 @@ while pid > 1:
     mine.add(pid)
     out = subprocess.run(['ps', '-o', 'ppid=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
     pid = int(out) if out.isdigit() else 0
-WRITER = re.compile(os.environ.get('KITH_QUIESCE_MATCH') or r'(^|[/\s])(kith-auth|kith_settings(\.py)?)(\s|$)')   # the env is for tests
+WRITER = re.compile(os.environ.get('KITH_QUIESCE_MATCH') or r'(^|[/\s])(kith-auth|kith_settings(\.py)?|kith\s+kernel\s+(settings|secrets))(\s|$)')   # the env is for tests
 # A long-lived process that imported the old kith_settings ignores the lock and can write until it restarts, and its
 # command line need not name kith-auth or kith_settings (the bridge, the host's launcher). So also: a process with no
 # terminal whose program is a file of the installed kernel. Only the program counts (argv[0], or the script an

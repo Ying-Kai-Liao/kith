@@ -1,0 +1,14 @@
+[
+  {
+    "name": "engines-list",
+    "command": "engines",
+    "needs": "rust",
+    "run": [["engines", "--json"], ["engines"]]
+  },
+  {
+    "name": "engines-install-login",
+    "command": "engines",
+    "needs": "rust",
+    "run": [["engines", "install", "claude"], ["engines", "login", "claude"], ["engines", "login", "nope"]]
+  }
+]

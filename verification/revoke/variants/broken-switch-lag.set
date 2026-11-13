@@ -1,0 +1,4 @@
+\* a rollback while the host's cached switched() is still true (<= 2 s): the revoke goes to the core, the file (kith-auth's again) never gets it
+CoreGate = TRUE
+Switched = TRUE
+SwitchLag = TRUE

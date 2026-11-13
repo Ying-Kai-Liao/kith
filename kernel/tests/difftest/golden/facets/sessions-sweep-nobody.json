@@ -1,0 +1,7 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/s1.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "swept 0\n"
+}

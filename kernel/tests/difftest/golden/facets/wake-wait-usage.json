@@ -1,0 +1,9 @@
+{
+  "fakes": "",
+  "step0.exit": "2\n",
+  "step0.stderr": "usage: kith-wake wait [-h] --on ON [--timeout TIMEOUT] [--why WHY]\n                      [--session SESSION] [--agent AGENT]\n                      [note ...]\nkith-wake wait: error: the following arguments are required: --on\n",
+  "step0.stdout": "",
+  "step1.exit": "2\n",
+  "step1.stderr": "usage: kith-wake wait [-h] --on ON [--timeout TIMEOUT] [--why WHY]\n                      [--session SESSION] [--agent AGENT]\n                      [note ...]\nkith-wake wait: error: argument --on: expected one argument\n",
+  "step1.stdout": ""
+}

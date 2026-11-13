@@ -198,8 +198,11 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
 /// connector with the headers and fresh sign-in token the host gives it. Speaks streamable
 /// HTTP, and falls back to the older HTTP+SSE transport when the server doesn't.
 pub async fn serve_remote(connector: String, port: u16) -> Result<()> {
-    let token = std::fs::read_to_string(crate::service::data_dir().join("token")).unwrap_or_default();
+    let token = std::fs::read_to_string(crate::service::data_dir().join("token")).map_err(|_| host_down())?;
     let remote = Remote { port, token: token.trim().to_owned(), connector };
+    // A kith agent's session starts this with no bot to vouch for it: say why it can't work (host down, connector
+    // gone, sign-in missing) on stderr now, instead of answering every request with the same error.
+    remote.target(false).await.map_err(|e| anyhow::anyhow!("{}: {e:#}", remote.connector))?;
     // Both transports answer through one writer: the SSE one answers from its own stream.
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
     let writer = tokio::spawn(async move {
@@ -254,6 +257,10 @@ pub async fn serve_remote(connector: String, port: u16) -> Result<()> {
     drop(tx);
     writer.await??;
     Ok(())
+}
+
+fn host_down() -> anyhow::Error {
+    anyhow::anyhow!("the Kith host isn't running here; start it with `kith serve start`")
 }
 
 struct Remote {
@@ -471,15 +478,16 @@ fn sse_data(event: &str) -> Option<Value> {
 /// Inject secrets into the connector process, never the agent's MCP definition.
 pub async fn serve_local(connector: String, port: u16) -> Result<()> {
     use std::process::Stdio;
-    let token = tokio::fs::read_to_string(crate::service::data_dir().join("token")).await?;
+    let token = tokio::fs::read_to_string(crate::service::data_dir().join("token")).await.map_err(|_| host_down())?;
     let res = crate::http()
         .post(format!("http://127.0.0.1:{port}/api/connectorRuntime"))
         .bearer_auth(token.trim())
         .json(&json!({"id":connector}))
         .send()
-        .await?;
+        .await
+        .map_err(|_| host_down())?;
     if !res.status().is_success() {
-        anyhow::bail!("Connector credentials unavailable; check Credentials in Kith");
+        anyhow::bail!("{connector}: connector credentials unavailable; check that it is still installed in Kith");
     }
     let v: Value = res.json().await?;
     let command = v["command"].as_str().ok_or_else(|| anyhow::anyhow!("Not a local connector"))?;

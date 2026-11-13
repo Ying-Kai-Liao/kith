@@ -1,0 +1,15 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/s1.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"enqueue\", \"session\": \"s1\", \"id\": \"ci:o/r#5@<ID12>/s1\", \"door\": \"run\", \"merged\": false}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"run\",\n  \"next\": \"<MASKED>\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"ci:o/r#5@<ID12>/s1\",\n      \"run\": null,\n      \"text\": \"o/r#5 was merged\",\n      \"why\": \"CI finished on o/r#5 at 0123456\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"s1\",\n  \"tries\": 0,\n  \"turn\": null,\n  \"v\": 1\n}\n",
+  "state:home/.kith/sessions/waits/.lock": "",
+  "state:home/bin/gh-fake": "#!/bin/sh\ncase \"$2\" in\n view) echo '{\"headRefOid\":\"<SHA>\",\"state\":\"MERGED\"}';;\n checks) echo '[]';;\nesac\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.json": "[\n  {\n    \"agent\": \"coder\",\n    \"door\": \"run\",\n    \"next\": \"<MASKED>\",\n    \"person\": null,\n    \"requests\": [\n      {\n        \"at\": \"<TS>\",\n        \"id\": \"ci:o/r#5@<ID12>/s1\",\n        \"run\": null,\n        \"text\": \"o/r#5 was merged\",\n        \"why\": \"CI finished on o/r#5 at 0123456\"\n      }\n    ],\n    \"room\": null,\n    \"session\": \"s1\",\n    \"tries\": 0,\n    \"turn\": null,\n    \"v\": 1\n  }\n]\n",
+  "step1.stderr": ""
+}

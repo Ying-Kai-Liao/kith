@@ -1,0 +1,13 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"ask\": null,\n  \"chain\": \"ask-check\",\n  \"cost_base\": 0.0,\n  \"cross_hops\": 0,\n  \"crossed\": false,\n  \"hop\": 0\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"ask\": null,\n  \"chain\": \"ask-check\",\n  \"cost_base\": 0.0,\n  \"cross_hops\": 1,\n  \"crossed\": true,\n  \"hop\": 0\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"ask\": null,\n  \"chain\": \"ask-9\",\n  \"cost_base\": 0.0,\n  \"cross_hops\": 0,\n  \"crossed\": false,\n  \"hop\": 0\n}\n",
+  "step2.stderr": ""
+}

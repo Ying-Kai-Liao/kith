@@ -103,7 +103,7 @@ pub async fn call(method: &str, b: &Value) -> Result<Option<Value>> {
             let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found"))?;
             {
                 let _w = crate::api::people::AUTH_WRITES.lock().await;
-                crate::remote::account::run(&bin, &["member", agent, person, &format!("budget={budget}")]).await?;
+                crate::api::authority::run_auth(&bin, &["member", agent, person, &format!("budget={budget}")]).await?;
             }
             kith_json(&["cost", "members", agent, "--json"], READ).await?
         }
@@ -126,7 +126,7 @@ pub async fn call(method: &str, b: &Value) -> Result<Option<Value>> {
 async fn set_bots_cap(value: &str) -> Result<()> {
     let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found"))?;
     let _w = crate::api::people::AUTH_WRITES.lock().await;
-    crate::remote::account::run(&bin, &["bots-cap", value]).await.map(drop)
+    crate::api::authority::run_auth(&bin, &["bots-cap", value]).await.map(drop)
 }
 
 /// Where an agent stands against its limit when an owner's turn would start; None when it has none, is under it,
@@ -394,7 +394,7 @@ pub async fn respond(hub: &Hub, entry: &Entry, option: Option<&str>, by: &str) -
             let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found"))?;
             let budget = format!("budget={to}");
             let _w = crate::api::people::AUTH_WRITES.lock().await;
-            crate::remote::account::run(&bin, &["member", agent, person, &budget]).await?;
+            crate::api::authority::run_auth(&bin, &["member", agent, person, &budget]).await?;
             true
         }
         (Some("bots"), "add" | "raise") => {

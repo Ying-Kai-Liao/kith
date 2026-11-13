@@ -2,6 +2,9 @@
 .memory-panel > .tab-choice { flex-wrap: wrap; }
 .memory-layer-note { display: flex; align-items: flex-start; gap: 8px; }
 .memory-layer-note > p { flex: 1; min-width: 0; }
+.memory-forget { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.memory-forget-input { flex: 1; min-width: 160px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--separator, rgba(128, 128, 128, 0.3)); background: var(--background); color: inherit; font: inherit; }
+.memory-forget p { flex-basis: 100%; margin: 0; }
 .memory-header-actions { display: flex; align-items: center; gap: 2px; }
 .memory-menu { width: 28px; height: 28px; border-radius: var(--radius-s); }
 .memory-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 12px; text-align: center; color: var(--secondary); line-height: 1.45; }
