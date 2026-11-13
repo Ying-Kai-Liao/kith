@@ -237,6 +237,14 @@ async fn ask_for(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, input: &Value, a
     if input.to_string().len() > MAX_INPUT {
         return deny("That request is too large to show for approval.");
     }
+    // A person whose access is set aside (revoked) gets no card: a run left alive after the revoke must not ask the owner.
+    // (under every id the host may hold them under: a renamed person's rows stay under the old one)
+    if !who.person.is_empty() && {
+        let held = crate::remote::core_revokes::held_under(&who.person).await;
+        hub.store.suspended_people().is_ok_and(|s| held.iter().any(|id| s.contains(id)))
+    } {
+        return deny("This person's access has been revoked, so no approval was asked for.");
+    }
     let (resource, shown) = match resource::classify(tool, input, &resource::roots()) {
         resource::Classified::Card { key, shown } => (key, shown),
         resource::Classified::Never => {
