@@ -117,6 +117,8 @@ mod wake;
 // The host's claim rows (M3-10f): called only by a host started with KITH_HOST_CORE_CLAIMS=1.
 mod hostclaim;
 
+#[cfg(all(test, unix))]
+mod direct_park_tests;
 #[cfg(test)]
 mod runs_props;
 #[cfg(all(test, unix))]
