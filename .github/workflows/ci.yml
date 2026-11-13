@@ -707,6 +707,17 @@ jobs:
       - name: Access properties, stepped home (kith-auth-props)
         # The access properties again on a home stepped for real (kith migrate step authority): the same answers as the file, and back after a rollback.
         run: PROPS_EXAMPLES=40 PROPS_STEPPED_EXAMPLES=10 KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-props
+      - name: Switched-Mac end to end (stepped scratch home, switch off)
+        # P2 of the migration blockers: a scratch home is stepped for real with KITH_CORE_AUTHORITY off (the runbook's own
+        # configuration) and invites, access, revoke and undo, cards, secrets and the rollback run against the real kith-auth,
+        # daemon and `kith rollback authority` (serve/host/src/api/stepped_e2e_tests.rs). The test is #[ignore]d (so no other job reports it as passed) and this step runs it
+        # with --run-ignored only: a missing kith binary is a failure, never a skip. Same flags as the archive build above, so the test binary is cached.
+        working-directory: serve/host
+        env:
+          KITH_BIN: ${{ github.workspace }}/serve/host/target/debug/kith
+        run: |
+          test -x "$KITH_BIN" || { echo "no kith binary at $KITH_BIN"; exit 1; }
+          cargo nextest run --profile ci --no-tests=fail --run-ignored only --workspace --exclude kith-guest --exclude kith-tts -E 'test(stepped_e2e_tests::a_stepped_mac)'
       - name: Direct lock, stub and held checks
         run: |
           # A direct run holds its conversation's lock under kith-stub (M1-3).

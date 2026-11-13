@@ -24,7 +24,8 @@ check)
   cd "$root/serve/host"
   for f in $(grep -rlE 'CARGO_MANIFEST_DIR.*kernel|rig::Rig|room_secret_tests::' src --include='*.rs' | sort); do
     # wake.rs only holds the helpers the listed resume and revoke tests call.
-    case "$f" in src/api/rig.rs|src/wake.rs) continue ;; esac
+    # stepped_e2e_tests.rs is #[ignore]d: only the host-build step runs it, with the built kith (never a skip).
+    case "$f" in src/api/rig.rs|src/wake.rs|src/api/stepped_e2e_tests.rs) continue ;; esac
     rows | cut -f1 | grep -qxF "$f" || { echo "serve/host/$f reads the kernel but is not in scripts/ci/host-kernel-tests.txt"; bad=1; }
   done
   [ "$bad" = 0 ] && echo "host-kernel-tests: the list covers every host test that reads the kernel"
