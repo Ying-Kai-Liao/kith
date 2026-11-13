@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "98263f4dab0b900f53daf4ee5f6a9af81e8a02c4b97eb674d57fa292e411f863"
+    public static let sha256 = "5f2be9a3e0e7ee07fced0bb57a6198f46c336e5fbff53e036a22860b2ab7bd64"
 }
 
 extension HostContract {
@@ -1026,6 +1026,43 @@ extension HostContract {
         }
     }
 
+    /// One stay of a person in a group room: open while leftGen is null. A gen is the seq of the join or leave line in the room's main lane.
+    public struct RoomPerson: Codable, Hashable, Sendable {
+        public var person: String
+        public var joinedGen: Int64
+        public var leftGen: Int64?
+
+        public init(person: String, joinedGen: Int64, leftGen: Int64? = nil) {
+            self.person = person
+            self.joinedGen = joinedGen
+            self.leftGen = leftGen
+        }
+    }
+
+    /// The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host.
+    public struct RoomPeople: Codable, Hashable, Sendable {
+        public var enabled: Bool
+        public var gen: Int64
+        public var people: [RoomPerson]
+
+        public init(enabled: Bool, gen: Int64, people: [RoomPerson]) {
+            self.enabled = enabled
+            self.gen = gen
+            self.people = people
+        }
+    }
+
+    /// What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).
+    public struct RoomPersonChange: Codable, Hashable, Sendable {
+        public var gen: Int64
+        public var changed: Bool
+
+        public init(gen: Int64, changed: Bool) {
+            self.gen = gen
+            self.changed = changed
+        }
+    }
+
     /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
     public struct BotProof: Codable, Hashable, Sendable {
         public var state: BotGuestState
@@ -1798,6 +1835,37 @@ extension HostContract {
         }
     }
 
+    /// What `addRoomPerson` takes.
+    public struct AddRoomPersonParams: Codable, Hashable, Sendable {
+        public var room: String
+        public var person: String
+
+        public init(room: String, person: String) {
+            self.room = room
+            self.person = person
+        }
+    }
+
+    /// What `removeRoomPerson` takes.
+    public struct RemoveRoomPersonParams: Codable, Hashable, Sendable {
+        public var room: String
+        public var person: String
+
+        public init(room: String, person: String) {
+            self.room = room
+            self.person = person
+        }
+    }
+
+    /// What `roomPeople` takes.
+    public struct RoomPeopleParams: Codable, Hashable, Sendable {
+        public var room: String
+
+        public init(room: String) {
+            self.room = room
+        }
+    }
+
     /// Each method's name, as called.
     public enum Method: String, CaseIterable, Sendable {
         case hello
@@ -1849,10 +1917,13 @@ extension HostContract {
         case botLeave
         case peerAgents
         case peerRevokes
+        case addRoomPerson
+        case removeRoomPerson
+        case roomPeople
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic]
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .addRoomPerson, .removeRoomPerson, .roomPeople]
 
     /// What an invited person may call.
     public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation]
@@ -1917,6 +1988,9 @@ extension HostContract {
         case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
         case "HandleRevoke": _ = try d.decode(HandleRevoke.self, from: data)
         case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
+        case "RoomPerson": _ = try d.decode(RoomPerson.self, from: data)
+        case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
+        case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
         case "BotProof": _ = try d.decode(BotProof.self, from: data)
         case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
         case "BotPosted": _ = try d.decode(BotPosted.self, from: data)
@@ -1977,6 +2051,9 @@ extension HostContract {
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
         case "PeerRevokesParams": _ = try d.decode(PeerRevokesParams.self, from: data)
+        case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
+        case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)
+        case "RoomPeopleParams": _ = try d.decode(RoomPeopleParams.self, from: data)
         default: return false
         }
         return true

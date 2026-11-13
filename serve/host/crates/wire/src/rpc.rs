@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "98263f4dab0b900f53daf4ee5f6a9af81e8a02c4b97eb674d57fa292e411f863";
+pub const CONTRACT_SHA256: &str = "5f2be9a3e0e7ee07fced0bb57a6198f46c336e5fbff53e036a22860b2ab7bd64";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1052,6 +1052,33 @@ pub struct HandleRevokes {
     pub handles: Vec<HandleRevoke>,
 }
 
+/// One stay of a person in a group room: open while leftGen is null. A gen is the seq of the join or leave line in the room's main lane.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPerson {
+    pub person: String,
+    pub joined_gen: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left_gen: Option<i64>,
+}
+
+/// The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPeople {
+    pub enabled: bool,
+    pub r#gen: i64,
+    pub people: Vec<RoomPerson>,
+}
+
+/// What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPersonChange {
+    pub r#gen: i64,
+    pub changed: bool,
+}
+
 /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1652,6 +1679,29 @@ pub struct PeerRevokesParams {
     pub handles: Vec<HandleRevoke>,
 }
 
+/// What `addRoomPerson` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AddRoomPersonParams {
+    pub room: String,
+    pub person: String,
+}
+
+/// What `removeRoomPerson` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveRoomPersonParams {
+    pub room: String,
+    pub person: String,
+}
+
+/// What `roomPeople` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPeopleParams {
+    pub room: String,
+}
+
 /// Each method's name, as called.
 pub mod method {
     /// The connection handshake; answered to a member or a bot without paths, addresses, backends or screen state, with the agents they hold.
@@ -1752,10 +1802,16 @@ pub mod method {
     pub const PEER_AGENTS: &str = "peerAgents";
     /// Mac link: the handle-only revokes and undos the caller knows. Each newer than this computer's own is applied here (the person is revoked or restored); the answer is this computer's list, so a computer that was off catches up.
     pub const PEER_REVOKES: &str = "peerRevokes";
+    /// Rooms with people: lets a person into a group room, one step with one new gen. Refused while the host setting is off, for the owner, for a room with no Kith agent or with an outside bot, and for a person not granted every agent in it (asked live).
+    pub const ADD_ROOM_PERSON: &str = "addRoomPerson";
+    /// Rooms with people: takes a person out of a group room, one step with one new gen. Someone who is not in the room changes nothing.
+    pub const REMOVE_ROOM_PERSON: &str = "removeRoomPerson";
+    /// Rooms with people: every stay in a group room and the room's gen.
+    pub const ROOM_PEOPLE: &str = "roomPeople";
 }
 
 /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC];
+pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC, method::ADD_ROOM_PERSON, method::REMOVE_ROOM_PERSON, method::ROOM_PEOPLE];
 
 /// What an invited person may call.
 pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::SCHEDULE_MESSAGES, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION];
@@ -1838,6 +1894,9 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "PeerAgents", fields: &[("agents", "[PeerAgent]")], may_omit: &[] },
         crate::check::TypeSchema { name: "HandleRevoke", fields: &[("handle", "string"), ("revoked", "bool"), ("at", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "HandleRevokes", fields: &[("handles", "[HandleRevoke]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "RoomPerson", fields: &[("person", "string"), ("joinedGen", "int"), ("leftGen", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "RoomPeople", fields: &[("enabled", "bool"), ("gen", "int"), ("people", "[RoomPerson]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "RoomPersonChange", fields: &[("gen", "int"), ("changed", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
         crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?"), ("room", "string?")], may_omit: &["duplicate", "room"] },
         crate::check::TypeSchema { name: "BotPosted", fields: &[("entryId", "string"), ("seq", "int"), ("turn", "int"), ("room", "string"), ("conversation", "string"), ("replied", "bool"), ("late", "bool"), ("lateWhy", "string?"), ("unprompted", "bool?"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
@@ -1898,6 +1957,9 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotLeaveParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerAgentsParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerRevokesParams", fields: &[("handles", "[HandleRevoke]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "AddRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "RemoveRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "RoomPeopleParams", fields: &[("room", "string")], may_omit: &[] },
     ],
     methods: &[
         crate::check::MethodSchema { name: "hello", who: &["member", "bot", "botPending"], params: "HelloParams", result: "Hello" },
@@ -1949,6 +2011,9 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "botLeave", who: &["bot"], params: "BotLeaveParams", result: "Empty" },
         crate::check::MethodSchema { name: "peerAgents", who: &["peer"], params: "PeerAgentsParams", result: "PeerAgents" },
         crate::check::MethodSchema { name: "peerRevokes", who: &["peer"], params: "PeerRevokesParams", result: "HandleRevokes" },
+        crate::check::MethodSchema { name: "addRoomPerson", who: &["owner"], params: "AddRoomPersonParams", result: "RoomPersonChange" },
+        crate::check::MethodSchema { name: "removeRoomPerson", who: &["owner"], params: "RemoveRoomPersonParams", result: "RoomPersonChange" },
+        crate::check::MethodSchema { name: "roomPeople", who: &["owner"], params: "RoomPeopleParams", result: "RoomPeople" },
     ],
 };
 
@@ -1999,6 +2064,9 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "PeerAgents" => serde_json::from_value::<PeerAgents>(value).map(drop),
         "HandleRevoke" => serde_json::from_value::<HandleRevoke>(value).map(drop),
         "HandleRevokes" => serde_json::from_value::<HandleRevokes>(value).map(drop),
+        "RoomPerson" => serde_json::from_value::<RoomPerson>(value).map(drop),
+        "RoomPeople" => serde_json::from_value::<RoomPeople>(value).map(drop),
+        "RoomPersonChange" => serde_json::from_value::<RoomPersonChange>(value).map(drop),
         "BotProof" => serde_json::from_value::<BotProof>(value).map(drop),
         "BotAsked" => serde_json::from_value::<BotAsked>(value).map(drop),
         "BotPosted" => serde_json::from_value::<BotPosted>(value).map(drop),
@@ -2059,6 +2127,9 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotLeaveParams" => serde_json::from_value::<BotLeaveParams>(value).map(drop),
         "PeerAgentsParams" => serde_json::from_value::<PeerAgentsParams>(value).map(drop),
         "PeerRevokesParams" => serde_json::from_value::<PeerRevokesParams>(value).map(drop),
+        "AddRoomPersonParams" => serde_json::from_value::<AddRoomPersonParams>(value).map(drop),
+        "RemoveRoomPersonParams" => serde_json::from_value::<RemoveRoomPersonParams>(value).map(drop),
+        "RoomPeopleParams" => serde_json::from_value::<RoomPeopleParams>(value).map(drop),
         _ => return None,
     })
 }

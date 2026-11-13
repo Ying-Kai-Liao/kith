@@ -17,6 +17,7 @@ mod botguests_props;
 mod bots;
 mod calls;
 mod cards;
+mod room_people;
 #[cfg(test)]
 mod contract_tests;
 #[cfg(test)]
@@ -42,6 +43,8 @@ mod peers_tests;
 pub(crate) mod people;
 #[cfg(test)]
 mod people_tests;
+#[cfg(test)]
+mod room_people_tests;
 #[cfg(test)]
 mod proof_tests;
 mod remote;
@@ -259,6 +262,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match cards::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match room_people::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

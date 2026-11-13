@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '98263f4dab0b900f53daf4ee5f6a9af81e8a02c4b97eb674d57fa292e411f863'
+export const CONTRACT_SHA256 = '5f2be9a3e0e7ee07fced0bb57a6198f46c336e5fbff53e036a22860b2ab7bd64'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -499,6 +499,26 @@ export interface HandleRevokes {
   handles: HandleRevoke[]
 }
 
+/** One stay of a person in a group room: open while leftGen is null. A gen is the seq of the join or leave line in the room's main lane. */
+export interface RoomPerson {
+  person: string
+  joinedGen: number
+  leftGen?: number | null
+}
+
+/** The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host. */
+export interface RoomPeople {
+  enabled: boolean
+  gen: number
+  people: RoomPerson[]
+}
+
+/** What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen). */
+export interface RoomPersonChange {
+  gen: number
+  changed: boolean
+}
+
 /** Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only. */
 export interface BotProof {
   state: BotGuestState
@@ -912,6 +932,23 @@ export interface PeerRevokesParams {
   handles: HandleRevoke[]
 }
 
+/** What `addRoomPerson` takes. */
+export interface AddRoomPersonParams {
+  room: string
+  person: string
+}
+
+/** What `removeRoomPerson` takes. */
+export interface RemoveRoomPersonParams {
+  room: string
+  person: string
+}
+
+/** What `roomPeople` takes. */
+export interface RoomPeopleParams {
+  room: string
+}
+
 export interface Types {
   Empty: Empty
   StoreHealth: StoreHealth
@@ -957,6 +994,9 @@ export interface Types {
   PeerAgents: PeerAgents
   HandleRevoke: HandleRevoke
   HandleRevokes: HandleRevokes
+  RoomPerson: RoomPerson
+  RoomPeople: RoomPeople
+  RoomPersonChange: RoomPersonChange
   BotProof: BotProof
   BotAsked: BotAsked
   BotPosted: BotPosted
@@ -1017,6 +1057,9 @@ export interface Types {
   BotLeaveParams: BotLeaveParams
   PeerAgentsParams: PeerAgentsParams
   PeerRevokesParams: PeerRevokesParams
+  AddRoomPersonParams: AddRoomPersonParams
+  RemoveRoomPersonParams: RemoveRoomPersonParams
+  RoomPeopleParams: RoomPeopleParams
 }
 export type TypeName = keyof Types
 
@@ -1090,6 +1133,9 @@ export const METHODS = {
   botLeave: { who: ['bot'], params: 'BotLeaveParams', result: 'Empty' },
   peerAgents: { who: ['peer'], params: 'PeerAgentsParams', result: 'PeerAgents' },
   peerRevokes: { who: ['peer'], params: 'PeerRevokesParams', result: 'HandleRevokes' },
+  addRoomPerson: { who: ['owner'], params: 'AddRoomPersonParams', result: 'RoomPersonChange' },
+  removeRoomPerson: { who: ['owner'], params: 'RemoveRoomPersonParams', result: 'RoomPersonChange' },
+  roomPeople: { who: ['owner'], params: 'RoomPeopleParams', result: 'RoomPeople' },
 } as const
 export type MethodName = keyof typeof METHODS
 
@@ -1144,6 +1190,9 @@ export interface Params {
   botLeave: BotLeaveParams
   peerAgents: PeerAgentsParams
   peerRevokes: PeerRevokesParams
+  addRoomPerson: AddRoomPersonParams
+  removeRoomPerson: RemoveRoomPersonParams
+  roomPeople: RoomPeopleParams
 }
 
 /** What each method answers with. */
@@ -1197,10 +1246,13 @@ export interface Results {
   botLeave: Empty
   peerAgents: PeerAgents
   peerRevokes: HandleRevokes
+  addRoomPerson: RoomPersonChange
+  removeRoomPerson: RoomPersonChange
+  roomPeople: RoomPeople
 }
 
 /** What the owner alone (a method no one else may call; the owner may call every method) may call. */
-export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic'] as const satisfies readonly MethodName[]
+export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic', 'addRoomPerson', 'removeRoomPerson', 'roomPeople'] as const satisfies readonly MethodName[]
 
 /** What an invited person may call. */
 export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'scheduleMessages', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation'] as const satisfies readonly MethodName[]
@@ -1295,6 +1347,9 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     PeerAgents: { fields: { agents: '[PeerAgent]' } },
     HandleRevoke: { fields: { handle: 'string', revoked: 'bool', at: 'int' } },
     HandleRevokes: { fields: { handles: '[HandleRevoke]' } },
+    RoomPerson: { fields: { person: 'string', joinedGen: 'int', leftGen: 'int?' } },
+    RoomPeople: { fields: { enabled: 'bool', gen: 'int', people: '[RoomPerson]' } },
+    RoomPersonChange: { fields: { gen: 'int', changed: 'bool' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
     BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?', room: 'string?' }, mayOmit: ['duplicate', 'room'] },
     BotPosted: { fields: { entryId: 'string', seq: 'int', turn: 'int', room: 'string', conversation: 'string', replied: 'bool', late: 'bool', lateWhy: 'string?', unprompted: 'bool?', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
@@ -1355,6 +1410,9 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotLeaveParams: { fields: {} },
     PeerAgentsParams: { fields: {} },
     PeerRevokesParams: { fields: { handles: '[HandleRevoke]' } },
+    AddRoomPersonParams: { fields: { room: 'string', person: 'string' } },
+    RemoveRoomPersonParams: { fields: { room: 'string', person: 'string' } },
+    RoomPeopleParams: { fields: { room: 'string' } },
   },
 }
 

@@ -22,6 +22,7 @@ mod actors;
 mod folders;
 pub(crate) mod hq;
 mod order;
+mod room_people;
 mod sync;
 
 /// What a bot is doing right now (wire values: `idle` / `working` / `needsInput` / `error`).
@@ -263,7 +264,13 @@ impl Hub {
     }
 
     pub fn update_bot(&self, patch: &Value) -> Result<Value> {
-        let id = patch["id"].as_str().ok_or_else(|| anyhow!("id required"))?.to_owned();
+        self.update_bot_checked(patch, None)
+    }
+
+    /// [`Self::update_bot`] with the live check of the members it adds to a room with people (`verified`, made by the
+    /// async handler: `chat::room_people::verify_adds`). Without it such an edit is refused.
+    pub fn update_bot_checked(&self, patch: &Value, verified: Option<&crate::chat::room_people::Verified>) -> Result<Value> {
+        let id =patch["id"].as_str().ok_or_else(|| anyhow!("id required"))?.to_owned();
         let row = self.store.bot(&id)?.filter(|b| !b.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
         let mut merged = serde_json::to_value(&row.config)?;
         for (k, v) in patch.as_object().into_iter().flatten() {
@@ -314,6 +321,10 @@ impl Hub {
             // A room's member list changes under the membership lock, so a bot's post or ask is checked and lands
             // entirely before the edit or entirely after it (always membership, then emit).
             let _members = crate::chat::group::membership_lock();
+            if cfg.is_group() {
+                // A room with people takes only members somebody checked against every person in it just now.
+                crate::chat::room_people::guard_adds(&self.store, &id, &cfg.members, verified)?;
+            }
             let _g = self.emit_lock.locked();
             self.store.save_bot(&cfg)?;
         }
