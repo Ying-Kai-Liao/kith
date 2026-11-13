@@ -119,6 +119,13 @@ SECRET_OPS = [
     # hand edits of a profile: shared on purpose (`*`), someone's own, lent to amy, or nobody's in particular
     st.tuples(st.just('hand-profile'), st.sampled_from(SECRET_PROFILES), st.sampled_from(['*', 'sam', 'lent', 'plain'])),
 ]
+# the profile writers: whose a profile is, who it is lent to, a browser profile (the router sends them to the core on the tombstone)
+PROFILE_WRITERS = [
+    st.tuples(st.just('owner'), st.sampled_from(SECRET_PROFILES + ['nosuch/x']), st.sampled_from(PEOPLE + ['-', 'default', 'ghost'])),
+    st.tuples(st.just('share'), st.sampled_from(SECRET_PROFILES + ['nosuch/x']), st.sampled_from(['sam', 'amy', 'sam,amy', 'amy,sam', 'ghost']),
+              st.booleans()),
+    st.tuples(st.just('browser'), st.sampled_from(['work', 'browser/alt']), st.sampled_from([None, 'chrome', 'edge'])),
+]
 SECRET_KINDS = {'sset', 'sgrant', 'srevoke', 'connect', 'disconnect', 'senv'}
 OPS = st.one_of(
     st.tuples(st.just('person'), st.sampled_from(PEOPLE)),
@@ -147,6 +154,7 @@ OPS = st.one_of(
     st.tuples(st.just('agent-access-rm'), st.sampled_from(AGENTS), st.sampled_from(HOSTS)),
     # S-b, the secret writers the router sends to the core on the tombstone
     *SECRET_OPS,
+    *PROFILE_WRITERS,
 )
 
 
@@ -236,6 +244,12 @@ def apply(op):
         return run('disconnect', op[1], op[2])
     if kind == 'senv':
         return run('env', op[1], op[2], op[3])
+    if kind == 'owner':
+        return run('owner', op[1], op[2])
+    if kind == 'share':
+        return run('share', op[1], op[2], *(['--rm'] if op[3] else []))
+    if kind == 'browser':
+        return run('browser', op[1], *([op[2]] if op[2] else []))
     if kind == 'hand-profile':
         _, profile, what = op
         a = json.loads(ka.AUTH.read_text())
@@ -350,7 +364,7 @@ def state_properties():
     # never handed the owner's login unless it was lent to them (a bot of a guest has the guest's say, not the owner's)
     for name, prof in a['profiles'].items():
         if not prof.get('person'):
-            want = OWNER if name.startswith('lg/') else None
+            want = OWNER if name.startswith(('lg/', 'browser/')) else None
             assert ka.owner_of(a, name) == want, f'{name}: owner {ka.owner_of(a, name)!r}, expected {want!r}'
     for agent in AGENTS:
         for who in PEOPLE + BOTS:
@@ -386,6 +400,36 @@ def test_access_never_exceeds_the_grant(ops):
             p = before['people'].get(op[1])
             assert (op[1] in a['retired']) == (p is not None and not p.get('bot_of')) or op[1] in before['retired'], \
                 f'{op[1]}: retired {op[1] in a["retired"]}'
+        if op[0] in ('owner', 'share', 'browser'):
+            # (the profile writers) they change profiles and nothing else, a refusal writes nothing, a variable is never touched,
+            # `owner -` makes a profile shared and `owner default` gives it back to its service, a share is exactly the list asked for
+            # (in the order asked, no repeats, and an empty list is none), and a guest is never given the owner's personal profile by it
+            for table in ('people', 'members', 'presets', 'invites', 'retired', 'agent_access', 'grants', 'env'):
+                assert a[table] == before[table], f'{op}: changed {table}'
+            if not ok:
+                assert a == before, f'{op}: refused but wrote'
+            for name, prof in before['profiles'].items():
+                keep = {k: v for k, v in prof.items() if k not in ('person', 'with', 'browser')}
+                assert {k: v for k, v in a['profiles'][name].items() if k not in ('person', 'with', 'browser')} == keep, f'{op}: touched a variable of {name}'
+            if ok and op[0] == 'owner':
+                got = a['profiles'][op[1]].get('person')
+                assert got == {'-': ka.SHARED, 'default': None}.get(op[2], op[2]), f'{op}: person is {got}'
+                assert (ka.owner_of(a, op[1]) is None) == (op[2] == '-' or (op[2] == 'default' and not ka.personal(op[1].split('/')[0]))), f'{op}: {ka.owner_of(a, op[1])}'
+            if ok and op[0] == 'share':
+                ids = [i for i in op[2].split(',') if i]
+                lent = a['profiles'][op[1]].get('with', [])
+                assert len(lent) == len(set(lent)), f'{op}: repeats in {lent}'
+                if op[3]:
+                    assert not set(lent) & set(ids), f'{op}: still lent to {lent}'
+                else:
+                    assert set(ids) <= set(lent), f'{op}: not lent to all of {ids}: {lent}'
+                    assert lent[:len(before['profiles'][op[1]].get('with', []))] == before['profiles'][op[1]].get('with', []), f'{op}: reordered'
+                for who in PEOPLE:   # a lent profile is the person's to use; one never lent to them is not
+                    if who not in lent and ka.owner_of(a, op[1]) not in (None, who):
+                        assert ka.canonical(a, who) not in lent
+            if ok and op[0] == 'browser':
+                name = op[1] if op[1].startswith('browser/') else f'browser/{op[1]}'
+                assert name in a['profiles'] and (op[2] is None or a['profiles'][name].get('browser') == op[2]), f'{op}: {a["profiles"].get(name)}'
         if op[0] in SECRET_KINDS:
             # (S-b) the secret writers change profiles, grants and env and nothing else; a profile that is there keeps its owner,
             # its `*` and the people it is lent to; only a host connector's mark is ever dropped, and only by a disconnect;
@@ -551,12 +595,13 @@ def test_access_never_exceeds_the_grant(ops):
 # and the copy is stepped from it. Needs the built kith (KITH_BIN); skipped without it.
 STEP_BIN = os.environ.get('KITH_BIN') or os.environ.get('KITH_DIFFTEST_BIN')
 STEPPED = {'examples': 0, 'refused': 0, 'answers': 0}
+SHORT = Path(tempfile.mkdtemp(prefix='kp', dir='/tmp'))
 
 
-def home_copy(name):
+def home_copy(name, short=False):
     """A home in the layout `kith` finds on a Mac (auth.json under .kith/secrets), holding this example's file, agents and
     services. Returns (env, auth path)."""
-    d = T / 'stepped' / name
+    d = (SHORT if short else T) / 'stepped' / name   # a daemon's socket path is at most ~100 bytes: its homes go under /tmp
     shutil.rmtree(d, ignore_errors=True)
     kh = d / 'home' / '.kith'
     (kh / 'secrets').mkdir(parents=True)
@@ -632,6 +677,84 @@ def test_a_stepped_home_answers_as_the_file(ops):
         assert (rc, same(out)) == (rc2, same(out2)), f'{cmd}: after the rollback rc={rc2} {out2!r}, the file said rc={rc} {out!r}\nops {ops}'
 
 
+# --- the writers that need the daemon, on a home stepped for real ------------------------------------------------------------------
+# `owner`, `share` and `browser` (and the tick, `job ... --shown`) are writes: on the tombstone kith-auth sends each to the core's
+# daemon. After a stepped copy and a daemon, the same commands on the file and on the copy must print the same lines and exit the same
+# way, and the two must then answer every read alike (`keys` names each profile's owner). A guest's KITH_PERSON is refused by the core
+# and changes nothing. The real kith-auth on a stepped home is covered here and by the router check, not by the host's props.
+TICKS = st.tuples(st.just('tick'), st.sampled_from(PEOPLE + BOTS + [OWNER, 'ghost']),
+                  st.sampled_from(['', '{}', '{"domains": ["a.example"]}', '{"helpers": ["garden"], "doors": ["render"]}', 'not json']))
+TAIL = st.lists(st.one_of(*PROFILE_WRITERS, TICKS), min_size=1, max_size=6)
+
+
+def tail_argv(op):
+    if op[0] == 'owner':
+        return ['owner', op[1], op[2]]
+    if op[0] == 'share':
+        return ['share', op[1], op[2], *(['--rm'] if op[3] else [])]
+    if op[0] == 'browser':
+        return ['browser', op[1], *([op[2]] if op[2] else [])]
+    return ['job', 'house', op[1], 'work', *(['--shown', op[2]] if op[2] else [])]
+
+
+def kith_auth(env, argv, person=None):
+    import subprocess
+    e = {**env, **({'KITH_PERSON': person} if person else {})}
+    r = subprocess.run([sys.executable, str(KERNEL / 'bin' / 'kith-auth'), *argv], env=e, capture_output=True, text=True, timeout=120)
+    kith_auth.err = r.stderr
+    return r.returncode, r.stdout.replace(env['HOME'], '<H>')   # a home's path is in what `browser` prints
+
+
+@settings(max_examples=int(os.environ.get('PROPS_STEPPED_WRITER_EXAMPLES', 5)), deadline=None, database=None,
+          suppress_health_check=list(HealthCheck))
+@given(SEQUENCES, TAIL)
+def test_the_profile_writers_and_the_tick_answer_as_the_file_on_a_stepped_home(ops, tail):
+    import subprocess
+    reset()
+    for op in ops:
+        if op[0] != 'sset':
+            apply(op)
+    # profiles to name, whatever the sequence made: a key's reference (not its value) and a login with none yet
+    a = json.loads(ka.AUTH.read_text())
+    a.setdefault('profiles', {}).setdefault('sk/a', {'KEY': 'env:PROPS_KEY'})
+    a['profiles'].setdefault('lg/main', {})
+    ka.AUTH.write_text(json.dumps(a))
+    file_env, _ = home_copy('wfile', short=True)
+    core_env, core_auth = home_copy('wcore', short=True)
+    step = subprocess.run([STEP_BIN, 'migrate', 'step', 'authority'], env={**core_env, 'KITH_KERNEL': str(KERNEL)},
+                          capture_output=True, text=True, timeout=300)
+    assert step.returncode == 0, f'the step refused a generated home: {(step.stdout + step.stderr).strip()}\nops {ops}'
+    daemon = subprocess.Popen([STEP_BIN, 'kernel', 'core-daemon'], env={**core_env, 'KITH_KERNEL': str(KERNEL)}, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        said = ''
+        for _ in range(200):
+            line = daemon.stdout.readline()
+            said += line
+            if line.startswith('ready') or not line:
+                break
+        assert said.startswith('ready') or '\nready' in said, f'the core daemon did not start: {said}'
+        for op in tail:
+            want, got = kith_auth(file_env, tail_argv(op)), kith_auth(core_env, tail_argv(op))
+            assert (want[0], same(want[1])) == (got[0], same(got[1])), \
+                f'{tail_argv(op)}: the file says rc={want[0]} {want[1]!r}, the stepped home rc={got[0]} {got[1]!r} err={kith_auth.err!r}\nops {ops} tail {tail}'
+        for (cmd, rc, out), (_, rc2, out2) in zip(answers(file_env), answers(core_env)):
+            assert (rc, same(out)) == (rc2, same(out2)), f'{cmd}: after the writers the file says rc={rc} {out!r}, the stepped home rc={rc2} {out2!r}\nops {ops} tail {tail}'
+        # a guest's run is refused by the core (the file's permissions stood in for that) and changes nothing
+        before = answers(core_env)
+        for argv in (['owner', 'sk/a', OWNER], ['share', 'sk/a', OWNER], ['browser', 'guestwork', 'chrome']):
+            rc, out = kith_auth(core_env, argv, person='sam')
+            assert rc == 2 and not out, f'{argv}: a guest got rc={rc} {out!r} err={kith_auth.err!r}'
+        assert answers(core_env) == before, 'a refused guest write changed an answer'
+        STEPPED['writers'] = STEPPED.get('writers', 0) + len(tail)
+    finally:
+        try:
+            daemon.stdin.close()
+            daemon.wait(timeout=30)
+        except Exception:
+            daemon.kill()
+
+
 if __name__ == '__main__':
     try:
         test_access_never_exceeds_the_grant()
@@ -640,7 +763,11 @@ if __name__ == '__main__':
             test_a_stepped_home_answers_as_the_file()
             assert STEPPED['examples'] > 0 and STEPPED['answers'] > 0, f'the stepped run compared nothing: {STEPPED}'
             print(f'ok   kith-auth answers on a stepped home equal the file ({STEPPED["examples"]} homes, {STEPPED["refused"]} refused by the import, {STEPPED["answers"]} answers)')
+            test_the_profile_writers_and_the_tick_answer_as_the_file_on_a_stepped_home()
+            assert STEPPED.get('writers'), f'the stepped writers compared nothing: {STEPPED}'
+            print(f'ok   kith-auth profile writers and the tick on a stepped home equal the file ({STEPPED["writers"]} writes)')
         else:
             print('skip kith-auth answers on a stepped home (needs the built kith: KITH_BIN)')
     finally:
         shutil.rmtree(T, ignore_errors=True)
+        shutil.rmtree(SHORT, ignore_errors=True)

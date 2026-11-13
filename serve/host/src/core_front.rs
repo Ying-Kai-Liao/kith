@@ -494,6 +494,9 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.secretGrant",
     "people.secretRevoke",
     "people.secretEnv",
+    "people.secretOwner",
+    "people.secretShare",
+    "people.secretBrowser",
     "people.agentAccess",
     // the probe before a Keychain write: only a daemon that is switched answers it, see `DAEMON_ONLY_READS`
     "people.revision",
@@ -527,6 +530,9 @@ const ROUTED_WRITES: &[&str] = &[
     "people.secretGrant",
     "people.secretRevoke",
     "people.secretEnv",
+    "people.secretOwner",
+    "people.secretShare",
+    "people.secretBrowser",
     "people.agentAccess",
 ];
 

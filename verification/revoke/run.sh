@@ -78,5 +78,22 @@ while IFS=$'\t' read -r v k p want; do
   printf '%-26s %-24s %-5s %-5s %-9s %s\n' "$v" "$p" "$want" "$got" "${states:--}" "$mark"
 done < <(rows)
 echo "$(rows | wc -l) rows in $(( $(date +%s) - start ))s"
+# The host's reconcile of a core-only revoke (Reconcile.tla): one config per row, all of them every run (132 states).
+run_reconcile() {   # run_reconcile CFG -> TLC's output on stdout
+  local work; work=$(mktemp -d "${TMPDIR:-/tmp}/kith-verify-reconcile.XXXXXX")
+  mkdir -p "$work/tmp"
+  ( cd "$HERE" && "$JAVA" -Djava.io.tmpdir="$work/tmp" -XX:+UseParallelGC -Xmx512m -cp "$JAR" tlc2.TLC -workers 1 -deadlock \
+      -metadir "$work/states" -config "$HERE/reconcile/$1.cfg" Reconcile.tla 2>&1 ) || true
+  rm -rf "$work"
+}
+printf '%-26s %-5s %-5s %s\n' RECONCILE WANT GOT STATES
+while IFS=$'\t' read -r cfg want _; do
+  out=$(run_reconcile "$cfg")
+  got=$(verdict <<<"$out")
+  states=$(sed -n 's/^[0-9]* states generated, \([0-9]*\) distinct states found.*/\1/p' <<<"$out" | head -1)
+  [[ $got != error ]] || echo "run.sh: TLC gave no verdict for reconcile $cfg: $(grep -m1 -i 'error\|exception' <<<"$out")" >&2
+  mark=""; [[ $got == "$want" ]] || { mark="<-- MISMATCH"; bad=1; }
+  printf '%-26s %-5s %-5s %-9s %s\n' "$cfg" "$want" "$got" "${states:--}" "$mark"
+done < <(grep -v '^#' "$HERE/reconcile.tsv" | grep -v '^$')
 if (( bad )); then echo "RESULT: differs from checks.tsv"; exit 1; fi
 echo "RESULT: every row as expected"

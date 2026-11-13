@@ -592,6 +592,34 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
     run A agent-access house domain new.example.com --rm
     run A agent-access house domain never.example.com --rm
     run A agent-access house
+    # the profile writers: whose a profile is, who it is lent to, a browser profile. The lines are the file's, and so is what
+    # the reads show after them (`keys` names each profile's owner, `holders` who holds it); a refusal writes nothing
+    run A owner echo/work samuel
+    run A owner echo/work -
+    run A owner echo/work default
+    run A owner login/main amy
+    run A owner login/main default
+    run A owner login/unset tim
+    run A owner echo/work nobody                                                   # no such person now
+    run A owner nosuch/x samuel                                                    # no such profile
+    run A owner echo/work
+    run A share echo/work samuel,amy
+    run A share echo/work amy,tim,samuel
+    run A share echo/work amy --rm
+    run A share echo/work samuel,amy --rm
+    run A share echo/work samuel,,tim
+    run A share echo/work tim --rm
+    run A share echo/work nobody
+    run A share nosuch/x samuel
+    run A share echo/work samuel --nope
+    run A browser work
+    run A browser work chrome
+    run A browser browser/work edge                                                # a note: it was made in chrome
+    run A browser browser/work edge
+    run A browser other
+    run A browser ../outside                                                       # would leave browsers/: refused
+    run A browser browser/a/b
+    run A browser ..
     run A keys --json
     run A holders echo
     run A holders login --json
@@ -647,7 +675,11 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
   before=$(sb_state)
   KITH_PERSON=samuel A grant house echo echo/work >"$T/o-g" 2>"$T/e-g"; rc=$?
   KITH_PERSON=samuel A env house echo GUEST=1 >"$T/o-g2" 2>"$T/e-g2"; rc2=$?
-  if [[ $rc == 2 && $rc2 == 2 && $(sb_state) == "$before" ]] && grep -q 'not available to this run' "$T/e-g" "$T/e-g2"; then
+  KITH_PERSON=samuel A owner echo/work samuel >"$T/o-g3" 2>"$T/e-g3"; rc3=$?
+  KITH_PERSON=samuel A share echo/work samuel >"$T/o-g4" 2>"$T/e-g4"; rc4=$?
+  KITH_PERSON=samuel A browser guestwork chrome >"$T/o-g5" 2>"$T/e-g5"; rc5=$?
+  if [[ $rc == 2 && $rc2 == 2 && $rc3 == 2 && $rc4 == 2 && $rc5 == 2 && $(sb_state) == "$before" ]] \
+     && grep -q 'not available to this run' "$T/e-g" "$T/e-g2" "$T/e-g3" "$T/e-g4" "$T/e-g5"; then
     ok "secret writers: a guest's run is refused by the core (exit 2), nothing changes"
   else bad "secret writers: a guest's run" "rc=$rc rc2=$rc2 $(cat "$T/e-g" "$T/e-g2")"; fi
   # the order: the Keychain item first, the core after, and what each failure leaves
@@ -735,6 +767,10 @@ EOF
   A disconnect writer echo >/dev/null 2>&1                                          # nothing held: nothing sent
   A env house echo K=v >/dev/null 2>&1
   A agent-access house domain sent.example.com >/dev/null 2>&1
+  A owner echo/work samuel >/dev/null 2>&1
+  A share echo/work samuel,amy >/dev/null 2>&1
+  A share echo/work amy --rm >/dev/null 2>&1
+  A browser sent chrome >/dev/null 2>&1
   if python3 - "$T/wsb/calls" "$SENT" <<'PY'
 import json, sys
 text = open(sys.argv[1]).read()
@@ -746,6 +782,12 @@ writes = {m: json.loads(b) for m, b in rows if m not in ('people.secretsView', '
 for m, p in writes.items():
     assert p['viaSwitch'] is True and p['dies'] is True, (m, p)
 assert methods.count('people.secretSet') == 1 and methods.count('people.secretEnv') == 1 and methods.count('people.agentAccess') == 1
+so = [json.loads(b) for m, b in rows if m == 'people.secretOwner']
+assert [(x['profile'], x['person']) for x in so] == [('echo/work', 'samuel')], so
+sh = [json.loads(b) for m, b in rows if m == 'people.secretShare']
+assert [(x['profile'], x['ids'], x['remove']) for x in sh] == [('echo/work', ['samuel', 'amy'], False), ('echo/work', ['amy'], True)], sh
+sb = [json.loads(b) for m, b in rows if m == 'people.secretBrowser']
+assert [(x['profile'], x['browser']) for x in sb] == [('browser/sent', 'chrome')], sb
 s = writes['people.secretSet']
 assert s['profile'] == 'echo/sent' and s['vars'] == ['TOKEN'] and s['grant'] == 'house', s
 assert writes['people.secretEnv']['pairs'] == [['K', 'v']], writes['people.secretEnv']
@@ -940,7 +982,7 @@ mkwrap "$T/w1" pass
 use_home "$T/sw4" "$T/w1/kith"
 # (the lift list in docs/plans/one-bot-model.md: each of these is exit 3 on purpose, with its callers)
 for v in "ls extra" "people" "people --matrix" "people samuel" "bots-cap" "bots-cap 60" "exec --secret rs_0123456789abcdef -- true" "ledger" \
-         "ledger --rm job:house:eve:edit" "browser work chrome" "owner echo/work samuel" "share echo/work samuel" "once put"; do
+         "ledger --rm job:house:eve:edit" "once put"; do
   # shellcheck disable=SC2086
   refuses "no route: $v" A $v
   grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "no route: $v: not today's text" "$(cat "$T/e")"
@@ -1028,6 +1070,7 @@ else bad "no kith program" "rc=$rc out=$out err=$(cat "$T/e")"; fi
 
 # what the core-call does wrong: a timeout, a lost answer, a refusal, no daemon, junk, noCore. Each is exit 3, and a take-once
 # is sent once whatever happens.
+profiles_before=$(sqlite3 "$T/sw4/home/.kith/core/$DBF" "SELECT * FROM secret_profiles")
 for mode in sleep garbage array nocore exit3 exit4 exit5; do
   mkwrap "$T/m-$mode" "$mode"
   use_home "$T/sw4" "$T/m-$mode/kith"
@@ -1041,6 +1084,9 @@ for mode in sleep garbage array nocore exit3 exit4 exit5; do
   refuses "core-call $mode: helper --rm" A helper house amy helper --rm
   refuses "core-call $mode: job --decline" A job house eve edit --decline h1
   refuses "core-call $mode: agent-access" A agent-access house
+  refuses "core-call $mode: owner" A owner echo/work samuel
+  refuses "core-call $mode: share" A share echo/work samuel
+  refuses "core-call $mode: browser" A browser work chrome
   refuses "core-call $mode: jobs" A jobs house --json
   refuses "core-call $mode: door" A door house eve "$DOOR" --json
   refuses "core-call $mode: mcp-names" A mcp-names house
@@ -1058,6 +1104,9 @@ for mode in sleep garbage array nocore exit3 exit4 exit5; do
   [[ $(grep -c 'people.resolve' "$T/m-$mode/calls") == 1 ]] && ok "core-call $mode: the take-once was sent once" \
     || bad "core-call $mode: the take-once was repeated" "$(cat "$T/m-$mode/calls")"
 done
+
+[[ $(sqlite3 "$T/sw4/home/.kith/core/$DBF" "SELECT * FROM secret_profiles") == "$profiles_before" ]] \
+  && ok "core-call failures: owner, share and browser wrote nothing" || bad "core-call failures: a profile writer changed a row"
 
 # --json mode: a refusal is the {"ok": false, "error"} on stdout that json_run gives, with the same exit code
 use_home "$T/sw4" "$T/m-exit3/kith"

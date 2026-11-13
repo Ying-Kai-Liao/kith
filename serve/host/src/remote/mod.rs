@@ -5,6 +5,7 @@ pub mod account;
 pub mod botsync;
 pub mod channel;
 pub mod cloud;
+pub mod core_revokes;
 pub mod crypto;
 pub mod handle_revokes;
 pub mod identity;
