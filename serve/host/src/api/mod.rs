@@ -57,6 +57,8 @@ mod room_points_props;
 #[cfg(test)]
 mod room_secrets_props;
 mod scratch;
+#[cfg(test)]
+mod stepped_e2e_tests;
 mod threads;
 
 pub use events::{events_stream, term_events};

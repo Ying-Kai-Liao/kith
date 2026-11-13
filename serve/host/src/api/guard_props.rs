@@ -181,18 +181,18 @@ impl Rig {
 
     /// The same question under each answer: (kith-auth stand-in, core).
     fn both<T>(&self, f: impl Fn() -> T) -> (T, T) {
-        *authority::TEST_CORE.lock().unwrap() = None;
+        authority::set_test_core(None);
         let host = f();
-        *authority::TEST_CORE.lock().unwrap() = Some(self.core.clone());
+        authority::set_test_core(Some(self.core.clone()));
         let core = f();
-        *authority::TEST_CORE.lock().unwrap() = None;
+        authority::set_test_core(None);
         (host, core)
     }
 }
 
 impl Drop for Rig {
     fn drop(&mut self) {
-        *authority::TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        authority::set_test_core(None);
         *TEST_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         TEST_ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         if let Some(d) = self.daemon.take() {
@@ -340,10 +340,10 @@ fn a_core_that_does_not_answer_refuses_and_a_revoke_is_seen_at_once() {
         rig.core.kernel.clone(),
         rig.core.env.clone(),
     ));
-    *authority::TEST_CORE.lock().unwrap() = Some(none);
+    authority::set_test_core(Some(none));
     assert!(rig.rt.block_on(roles::guard(&rig.hub, "sam", true, "send", &body)).is_err());
     assert_eq!(rig.rt.block_on(roles::may_use_checked("sam", "house")), None);
-    *authority::TEST_CORE.lock().unwrap() = None;
+    authority::set_test_core(None);
 
     // A daemon that knows nobody (the core's database empty before the import): members are refused.
     let blank = Tmp::new();
@@ -354,10 +354,10 @@ fn a_core_that_does_not_answer_refuses_and_a_revoke_is_seen_at_once() {
         rig.core.env.clone(),
     ));
     let daemon = crate::core_front::serve_for_test(&empty.folders);
-    *authority::TEST_CORE.lock().unwrap() = Some(empty);
+    authority::set_test_core(Some(empty));
     assert!(rig.rt.block_on(roles::guard(&rig.hub, "sam", true, "send", &body)).is_err());
     assert!(!rig.rt.block_on(roles::may_use("sam", "house")));
-    *authority::TEST_CORE.lock().unwrap() = None;
+    authority::set_test_core(None);
     daemon.stop();
 }
 
@@ -368,7 +368,7 @@ fn a_flood_against_a_hung_core_is_refused_within_the_wait_and_starts_no_threads(
     let rig = Rig::new();
     let w = World { held: [[2, 0], [0, 0]], star: [false, false], bot: [false, false], suspended: [false, false] };
     rig.load(&w);
-    *authority::TEST_CORE.lock().unwrap() = Some(rig.core.clone());
+    authority::set_test_core(Some(rig.core.clone()));
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let held: Vec<_> =
         (0..authority::MAX_ASKS).map(|_| rt.block_on(authority::asks().acquire_owned()).unwrap()).collect();
@@ -393,5 +393,5 @@ fn a_flood_against_a_hung_core_is_refused_within_the_wait_and_starts_no_threads(
         rt.block_on(authority::core_verdict("sam", "house")).is_some_and(|v| v.allowed),
         "the permits did not come back"
     );
-    *authority::TEST_CORE.lock().unwrap() = None;
+    authority::set_test_core(None);
 }

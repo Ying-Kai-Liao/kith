@@ -225,10 +225,23 @@ fn process_core() -> Arc<CoreData> {
     CORE.get_or_init(|| Arc::new(CoreData::from_process())).clone()
 }
 
-/// A test's core (a daemon on a folder of its own) in place of the process's, and the guard's switch on while it is
-/// set. Tests that set it hold `account::ONE_AT_A_TIME`.
+/// A test's core (a daemon on a folder of its own) in place of the process's. It says which core, not whether the
+/// host is switched on: that is [`TEST_OPT_IN`] (`KITH_CORE_AUTHORITY`), so a test can run the runbook's own
+/// configuration (a stepped Mac with the switch off). Tests that set it hold `account::ONE_AT_A_TIME`.
 #[cfg(test)]
 pub static TEST_CORE: Mutex<Option<Arc<CoreData>>> = Mutex::new(None);
+
+/// A test's `KITH_CORE_AUTHORITY=1`: the guard and the mirror follow the core while it is set. Off unless a test sets
+/// it (`set_test_core` does, with a core).
+#[cfg(test)]
+pub static TEST_OPT_IN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A test hands the host a core with the opt-in on (what `TEST_CORE` alone meant before the split), or takes both away.
+#[cfg(test)]
+pub fn set_test_core(core: Option<Arc<CoreData>>) {
+    TEST_OPT_IN.store(core.is_some(), std::sync::atomic::Ordering::SeqCst);
+    *TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = core;
+}
 
 /// What the core says of `person` and `agent` for the request guard (`KITH_CORE_AUTHORITY=1`). None: it could not be
 /// asked in time (a caller reads that as "no", or "try again" where it can). Off the async threads, [`MAX_ASKS`] at a
@@ -416,9 +429,6 @@ pub fn switched_now() -> bool {
 fn auth_file_now() -> AuthFile {
     #[cfg(test)]
     {
-        if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none() {
-            return AuthFile::Plain;
-        }
         let file = TEST_AUTH_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         file.map_or(AuthFile::Plain, |f| auth_file_at(&f))
     }
@@ -458,8 +468,8 @@ impl SwitchCache {
 #[cfg(test)]
 pub static TEST_STALE_SWITCHED: Mutex<Option<bool>> = Mutex::new(None);
 
-/// A test points the host at an auth.json of its own (a real tombstone file, or none) while it holds `TEST_CORE`; read
-/// only then, like `TEST_GATE_SHUT`.
+/// A test points the host at an auth.json of its own (a real tombstone file, or none); read whenever it is set, with
+/// or without the opt-in.
 #[cfg(test)]
 pub static TEST_AUTH_FILE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -650,11 +660,11 @@ pub fn start_gate() {
     }
 }
 
-/// [`core_selected`] for the request guard: also on while a test has given it a core (`TEST_CORE`), so a test does not
+/// [`core_selected`] for the request guard: also on while a test has given it a core (`TEST_OPT_IN`), so a test does not
 /// have to set a variable the other tests of the process would see.
 pub fn guard_on_core() -> bool {
     #[cfg(test)]
-    if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
+    if TEST_OPT_IN.load(std::sync::atomic::Ordering::SeqCst) {
         return match auth_file() {
             AuthFile::Tombstone => true,
             AuthFile::Unreadable => false,
@@ -665,7 +675,7 @@ pub fn guard_on_core() -> bool {
 }
 
 /// A test shuts the gate while its core stays up and opted in (what a write by kith-auth does for up to `GATE_EVERY`).
-/// Only read while `TEST_CORE` is set, and every test that sets `TEST_CORE` holds the rig's `ONE_AT_A_TIME` first, so
+/// Only read while `TEST_OPT_IN` is set, and every test that sets it holds the rig's `ONE_AT_A_TIME` first, so
 /// no other test sees it.
 #[cfg(test)]
 pub static TEST_GATE_SHUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -673,10 +683,10 @@ pub static TEST_GATE_SHUT: std::sync::atomic::AtomicBool = std::sync::atomic::At
 /// Whether a write to kith-auth is mirrored to the core: the opt-in (`KITH_CORE_AUTHORITY=1`), not the gate. The first
 /// write moves the fingerprint and closes the gate for up to `GATE_EVERY`, so a second change in that window would
 /// skip the mirror and leave the gate closed until `core-migrate --force`. A mirror into a core that differs only
-/// brings it closer to the file. Also on while a test has given the guard a core (`TEST_CORE`).
+/// brings it closer to the file. Also on while a test has the opt-in (`TEST_OPT_IN`).
 pub fn mirrors_to_core() -> bool {
     #[cfg(test)]
-    if TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
+    if TEST_OPT_IN.load(std::sync::atomic::Ordering::SeqCst) {
         return true;
     }
     opted_in() || switched()
