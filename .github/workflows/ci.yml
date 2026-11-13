@@ -706,15 +706,14 @@ jobs:
       - name: Switched-Mac end to end (stepped scratch home, switch off)
         # P2 of the migration blockers: a scratch home is stepped for real with KITH_CORE_AUTHORITY off (the runbook's own
         # configuration) and invites, access, revoke and undo, cards, secrets and the rollback run against the real kith-auth,
-        # daemon and `kith rollback authority` (serve/host/src/api/stepped_e2e_tests.rs). KITH_STEPPED_E2E_REQUIRED makes a
-        # missing kith binary a failure, never a skip. Same flags as the archive build above, so the test binary is cached.
+        # daemon and `kith rollback authority` (serve/host/src/api/stepped_e2e_tests.rs). The test is #[ignore]d (so no other job reports it as passed) and this step runs it
+        # with --run-ignored only: a missing kith binary is a failure, never a skip. Same flags as the archive build above, so the test binary is cached.
         working-directory: serve/host
         env:
-          KITH_STEPPED_E2E_REQUIRED: "1"
           KITH_BIN: ${{ github.workspace }}/serve/host/target/debug/kith
         run: |
           test -x "$KITH_BIN" || { echo "no kith binary at $KITH_BIN"; exit 1; }
-          cargo nextest run --profile ci --no-tests=fail --workspace --exclude kith-guest --exclude kith-tts -E 'test(stepped_e2e_tests::)'
+          cargo nextest run --profile ci --no-tests=fail --run-ignored only --workspace --exclude kith-guest --exclude kith-tts -E 'test(stepped_e2e_tests::a_stepped_mac)'
       - name: Direct lock, stub and held checks
         run: |
           # A direct run holds its conversation's lock under kith-stub (M1-3).

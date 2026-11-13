@@ -5,8 +5,9 @@
 //! Keychain (a `security` stand-in), Telegram and Clerk. Never stubbed: kith-auth, core-call, the daemon, the step, the
 //! rollback.
 //!
-//! It needs the built `kith` program (`KITH_BIN`). Without one it skips, unless `KITH_STEPPED_E2E_REQUIRED` is set: the
-//! named host-build step of `ci.yml` sets it, so a missing binary there fails and never skips.
+//! It needs the built `kith` program (`KITH_BIN`), so it is `#[ignore]`d: the other jobs list it as ignored, never as
+//! passed. Only the named step of host-build runs it (`--run-ignored only`), after building `kith`, and there a missing
+//! binary is a failure: the test never skips.
 //!
 //! Throughout, auth.json is the tombstone byte for byte until the rollback, and a logging wrapper around kith-auth
 //! records each exit code: an exit 3 may only be one of [`EXPECTED_EXIT_3`].
@@ -44,16 +45,11 @@ fn marker() -> String {
     format!("sentinel-e2e-{}", uuid::Uuid::new_v4().simple())
 }
 
-fn kith_bin() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("KITH_BIN").map(PathBuf::from).filter(|p| p.is_file()) {
-        return Some(p);
-    }
-    assert!(
-        std::env::var_os("KITH_STEPPED_E2E_REQUIRED").is_none(),
-        "the stepped e2e needs the built kith program (KITH_BIN): a missing binary is a failure here, not a skip"
-    );
-    eprintln!("skip: the stepped e2e needs the built kith program (KITH_BIN)");
-    None
+fn kith_bin() -> PathBuf {
+    std::env::var_os("KITH_BIN")
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+        .expect("the stepped e2e needs the built kith program (KITH_BIN): a missing binary is a failure, not a skip")
 }
 
 struct World {
@@ -72,9 +68,9 @@ struct World {
 }
 
 impl World {
-    /// Step 0 (the setup on the file, then the real step with the opt-in off). None when there is no `kith` program.
-    async fn new() -> Option<Self> {
-        let kith = kith_bin()?;
+    /// Step 0 (the setup on the file, then the real step with the opt-in off).
+    async fn new() -> Self {
+        let kith = kith_bin();
         let mut r = Rig::new().await;
         std::fs::write(r.dir.join("home/agents/house/capabilities.yaml"), CAPS).unwrap();
         r.owner_bot("house");
@@ -127,7 +123,7 @@ impl World {
         let tomb = std::fs::read(&auth_file).unwrap();
         let w = Self { r, core, kith, log, tomb, rec, sam, auth_file };
         w.assert_off_and_tombstone();
-        Some(w)
+        w
     }
 
     /// The switch is off and auth.json is the tombstone, byte for byte.
@@ -321,8 +317,9 @@ async fn call(r: &Rig, who: &Caller, method: &str, b: Value) -> anyhow::Result<V
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the built kith program: run by the host-build step (--run-ignored only)"]
 async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
-    let Some(mut w) = World::new().await else { return };
+    let mut w = World::new().await;
     let r = &w.r;
 
     // 1. Invitee access: with the switch OFF the guard still asks the core in-process (the tombstone selects it).
