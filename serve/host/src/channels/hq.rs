@@ -227,6 +227,13 @@ pub async fn link(paths: &Paths, platform: &str, uid: &str, code: &str) -> Resul
     }
     // kith-auth rewrites auth.json whole: wait for any other writer, or a revoke could be undone.
     let _w = crate::api::people::AUTH_WRITES.lock().await;
+    // Switched, the core spends the code (`people.link`, one transaction); otherwise kith-auth does, as it always did.
+    if crate::api::authority::switched_now() {
+        return match crate::api::authority::run_auth(&paths.auth_bin, &["link", platform, uid, code]).await {
+            Ok(person) => Ok(person.trim().to_owned()),
+            Err(e) => Err(crate::remote::account::linking_error(&e).to_string()),
+        };
+    }
     match output(&paths.auth_bin, &["link", platform, uid, code]).await {
         Some(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).trim().to_owned()),
         Some(o) => Err(String::from_utf8_lossy(&o.stderr)

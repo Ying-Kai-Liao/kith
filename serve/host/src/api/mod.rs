@@ -19,6 +19,8 @@ mod calls;
 mod cards;
 #[cfg(test)]
 mod contract_tests;
+#[cfg(test)]
+mod core_revokes_tests;
 mod delegations;
 pub mod devices;
 #[cfg(test)]

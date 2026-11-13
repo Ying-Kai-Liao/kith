@@ -776,6 +776,13 @@ fn core_form(args: &[&str]) -> Option<(CoreMethod, Value)> {
         ["handle", person, platform, uid] => {
             (CoreMethod::Handle, json!({"person": person, "platform": platform, "uid": uid}))
         }
+        // A `/link` code and its use (the app's "Link Telegram", chat's `/link CODE`). `minutes` goes as a number: the core
+        // reads it as one, and a string would silently become the 15-minute default.
+        ["invite", person] => (CoreMethod::Invite, json!({"person": person})),
+        ["invite", person, minutes] => {
+            (CoreMethod::Invite, json!({"person": person, "minutes": minutes.parse::<i64>().ok()?}))
+        }
+        ["link", platform, uid, code] => (CoreMethod::Link, json!({"platform": platform, "uid": uid, "code": code})),
         ["bot", id, "--rm"] => (CoreMethod::RemoveBot, json!({"id": id})),
         ["bot", id, "--of", owner, ..] => {
             let mut p = settings(4, &["name", "provider"])?;
@@ -816,6 +823,8 @@ enum CoreMethod {
     Ledger,
     RemoveGrant,
     Handle,
+    Invite,
+    Link,
 }
 
 impl CoreMethod {
@@ -837,6 +846,8 @@ impl CoreMethod {
             Self::Ledger => "people.ledger",
             Self::RemoveGrant => "people.removeGrant",
             Self::Handle => "people.handle",
+            Self::Invite => "people.invite",
+            Self::Link => "people.link",
         }
     }
 
@@ -861,7 +872,9 @@ impl CoreMethod {
             | Self::AddPerson
             | Self::BotsCap
             | Self::RemoveGrant
-            | Self::Handle => true,
+            | Self::Handle
+            | Self::Invite
+            | Self::Link => true,
             Self::ClearTemp => false,
         }
     }
@@ -1012,6 +1025,8 @@ mod gate_tests {
             (&["ledger", "--rm", "k"], CoreMethod::RemoveGrant, true),
             (&["handle", "sam", "telegram", "--rm"], CoreMethod::Handle, true),
             (&["handle", "sam", "telegram", "42"], CoreMethod::Handle, true),
+            (&["invite", "sam", "15"], CoreMethod::Invite, true),
+            (&["link", "telegram", "42", "ABC234"], CoreMethod::Link, true),
         ];
         for (args, want, marked) in shapes {
             let (got, _) = core_form(args).unwrap();
