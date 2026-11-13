@@ -6,7 +6,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::authority::{CoreData, TEST_CORE};
+use super::authority::{CoreData, set_test_core};
 use super::authority_props::{Tmp, folders};
 use super::devices::Caller;
 use super::dispatch;
@@ -85,6 +85,45 @@ impl Core {
         core
     }
 
+    /// The runbook's configuration, on a home laid out as production lays it out: the machine folder holds the core and
+    /// `secrets/auth.json` (the rig's file is moved there), and `KITH_STATE`, `KITH_HOME` and `KITH_AGENTS` are the only
+    /// variables a child (kith-auth, `kith`) is told, so each derives the same folders the daemon has. The real step runs
+    /// (`kith migrate step authority`), a daemon serves the core, and the opt-in (`KITH_CORE_AUTHORITY`) is NOT set: only
+    /// the core's data is given to the host (`TEST_CORE`), never `TEST_OPT_IN`. The rig's `TEST_ENV` is rewritten to match.
+    pub(super) fn start_stepped_on_home(r: &Rig) -> Self {
+        let tmp = Tmp::new();
+        let machine = tmp.path().join("machine");
+        let home = r.dir.join("home");
+        let kernel = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel");
+        let vars = [
+            ("KITH_STATE", machine.to_string_lossy().into_owned()),
+            ("KITH_HOME", home.to_string_lossy().into_owned()),
+            ("KITH_AGENTS", home.join("agents").to_string_lossy().into_owned()),
+        ];
+        let env = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone());
+        let folders = kith_kernel::paths::paths(&home, &kernel, &env);
+        std::fs::create_dir_all(&folders.secrets).unwrap();
+        let file = folders.secrets.join("auth.json");
+        std::fs::rename(r.dir.join("auth.json"), &file).unwrap();
+        let said = crate::core_front::step_authority_for_test(&folders, &kernel).expect("the step");
+        assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
+        {
+            let mut env = crate::channels::hq::TEST_ENV.lock().unwrap();
+            env.retain(|(k, _)| !["KITH_AUTH", "KITH_STATE", "KITH_HOME", "KITH_AGENTS"].contains(k));
+            env.push(("KITH_STATE", machine));
+            env.push(("KITH_HOME", home.clone()));
+            env.push(("KITH_AGENTS", home.join("agents")));
+            env.push(("HOME", home.clone()));
+        }
+        let env_map: serde_json::Map<String, Value> =
+            vars.iter().map(|(k, v)| ((*k).to_owned(), v.clone().into())).collect();
+        let data = Arc::new(CoreData::new(folders, home, kernel, env_map));
+        let daemon = crate::core_front::serve_for_test(&data.folders);
+        *crate::api::authority::TEST_AUTH_FILE.lock().unwrap() = Some(file);
+        *super::authority::TEST_CORE.lock().unwrap() = Some(data.clone());
+        Self { tmp, daemon: Some(daemon), data }
+    }
+
     pub(super) fn ask(&self, method: &str, mut params: Value) -> Option<Value> {
         params["home"] = self.data.home.to_str().unwrap().into();
         params["kernel"] = self.data.kernel.to_str().unwrap().into();
@@ -93,13 +132,13 @@ impl Core {
     }
 
     pub(super) fn on(&self) {
-        *TEST_CORE.lock().unwrap() = Some(self.data.clone());
+        set_test_core(Some(self.data.clone()));
     }
 
     /// The gate closes: the guard falls back to kith-auth.
     #[allow(clippy::unused_self)] // kept a method so it reads next to `on`
     pub(super) fn off(&self) {
-        *TEST_CORE.lock().unwrap() = None;
+        set_test_core(None);
     }
 
     /// What the core says sam holds by their own row: (agent, preset).
@@ -146,6 +185,17 @@ impl Core {
         *crate::api::authority::TEST_AUTH_FILE.lock().unwrap() = Some(auth.to_path_buf());
     }
 
+    /// The core the host was given (its folders are the ones a child `kith` must be told of).
+    pub(super) fn data(&self) -> &Arc<CoreData> {
+        &self.data
+    }
+
+    /// The daemon answers again after `stop`, on the same folders.
+    pub(super) fn restart(&mut self) {
+        assert!(self.daemon.is_none(), "the daemon is still running");
+        self.daemon = Some(crate::core_front::serve_for_test(&self.data.folders));
+    }
+
     pub(super) fn stop(&mut self) {
         if let Some(d) = self.daemon.take() {
             d.stop();
@@ -158,7 +208,7 @@ impl Drop for Core {
         crate::api::authority::TEST_GATE_SHUT.store(false, std::sync::atomic::Ordering::SeqCst);
         *crate::api::authority::TEST_AUTH_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         *crate::api::authority::TEST_STALE_SWITCHED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        *TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        set_test_core(None);
         self.stop();
     }
 }
