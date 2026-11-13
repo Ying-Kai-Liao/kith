@@ -82,6 +82,10 @@ outside: compacted (rc 0), claude failed (rc 1, once per idle period), claude mi
 skipped (a resume cleared the decision, a new turn, Claude compacted it itself, under the floor). The claude is `KITH_CLAUDE`, a
 script that logs its call and whether the claim file was there. `KITH_STUB_BIN` names no program in the frozen cases, and a fake
 `kith-stub` (logs its argv, exits 75 when `<lock dir>/<key>.busy` exists, else execs what follows `--`) in the stub cases.
+Re-recorded when `compact()` moved under the stub (intended; the replay does not read intended.json): the six cases that reach claude
+(`sweep-compacted`, `rc0`, `claude-failed`, `claude-failed-direct`, `claude-missing`, `sweep-twice`) gain the one stderr warning of a
+run with no stub. Added then: `under-stub` (the argv), `busy` (75: outcome `busy`, no decision, again on the next sweep),
+`no-stub-required` (`KITH_REQUIRE_STUB=1`: `failed` with the reason, claude not run), `bad-session-id` (an id outside `a-z0-9._-`).
 
 ### project-id (M5-2)
 

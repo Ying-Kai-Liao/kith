@@ -5,8 +5,10 @@
                           the tick (kith-wake drain starts it): for each listed session with no live writer, the 54-minute
                           decision of its idle period, once (rule 5): compact, sleep or end. Compact runs
                           `claude -p --resume SID "/compact"` only while holding the session's writer claim and after
-                          checking again under it (rule 11); the claim names claude's own pid (claim-then-exec), so it
-                          lasts while claude writes even if the sweep dies. End is written only under the claim too (rule 12). Prints one
+                          checking again under it (rule 11), and under kith-stub, which holds the conversation's lock until claude exits (a run
+                          that holds it already: `busy`, no decision, the next sweep tries again; no stub: a warning, or a refusal
+                          with KITH_REQUIRE_STUB=1); the claim names the stub's pid, or claude's when there is none (claim-then-exec;
+                          claude descends from the stub), so it lasts while claude writes even if the sweep dies. End is written only under the claim too (rule 12). Prints one
                           line per session it acted on. --at-sleep: ask now (a 5-minute cache has no timer; the wrapper
                           calls it as a session goes to sleep).
   kith-lifecycle status SID [--json]   what is known: how it ended (idle, quit, ... or crash), the decision, outstanding work
@@ -19,15 +21,17 @@ never sees them; a session the host keeps a conversation for (resolveThread know
 compactor (memory/compaction.rs while_idle) keeps those. A failed /compact is tried once per idle period. One sweep at a time
 (flock sessions/lifecycle.lock).
 """
-import argparse, fcntl, importlib.machinery, importlib.util, json, os, shutil, signal, sys, time
+import argparse, fcntl, importlib.machinery, importlib.util, json, os, re, shutil, signal, sys, time
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN.parent / 'lib'))
 import kith_lifecycle as lc  # noqa: E402
+import kith_paths  # noqa: E402
 
 KINDS = ('terminal', 'ask', 'schedule', 'helper')
 COMPACT_TIMEOUT = 900
+BUSY = 75   # kith-stub's exit when another run holds the conversation's lock
 
 
 def sessions_mod():
@@ -119,11 +123,12 @@ def failed(sid, why):
     return f'failed: {why}'
 
 
-def parked(argv, cwd, env):
+def parked(argv, cwd, env, group=False):
     """Fork the process that will be claude, parked before its exec: it execs argv (in cwd, with env, stdio on /dev/null)
     when b'1' is written to `go`, and exits without running anything when `go` closes unwritten (also when this process
-    dies). Its pid is claude's pid, so the writer claim can name it before it starts (claim-then-exec, as a one-shot does
-    in kernel/bin/kith). Returns (pid, go, err): an exec that fails writes why to `err`; one that succeeds closes it."""
+    dies). Its pid is claude's pid (or the kith-stub's that runs claude), so the writer claim can name it before it starts
+    (claim-then-exec, as a one-shot does in kernel/bin/kith). `group`: it leads a process group of its own, which reap() kills as
+    a whole. Returns (pid, go, err): an exec that fails writes why to `err`; one that succeeds closes it."""
     go_r, go_w = os.pipe()
     err_r, err_w = os.pipe()   # not inheritable (PEP 446): the exec closes them
     pid = os.fork()
@@ -131,6 +136,8 @@ def parked(argv, cwd, env):
         try:
             os.close(go_w)
             os.close(err_r)
+            if group:
+                os.setpgid(0, 0)
             if os.read(go_r, 1) == b'1':
                 os.chdir(cwd)
                 null = os.open(os.devnull, os.O_RDWR)
@@ -149,18 +156,40 @@ def parked(argv, cwd, env):
     return pid, go_w, err_r
 
 
-def reap(pid, timeout=None):
-    """Wait for pid; its exit code (negative: the signal), or None when it ran past timeout (it is then killed and reaped)."""
+def reap(pid, timeout=None, group=False):
+    """Wait for pid; its exit code (negative: the signal), or None when it ran past timeout (it is then killed and reaped).
+    `group`: pid leads its own process group (parked(group=True)); the kill takes the group, so a kith-stub in front does not
+    leave claude running without the lock."""
     end = time.monotonic() + timeout if timeout else None
     while True:
         got, status = os.waitpid(pid, os.WNOHANG if end else 0)
         if got:
             return os.waitstatus_to_exitcode(status)
         if time.monotonic() >= end:
-            os.kill(pid, signal.SIGKILL)
+            os.killpg(pid, signal.SIGKILL) if group else os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
             return None
         time.sleep(0.2)
+
+
+def lock_stub(sid):
+    """-> (argv prefix, problem): the conversation's writer lock, as kernel/bin/kith takes it for a run with a session id: the
+    run starts under `kith-stub --lock-dir <machine>/core/locks --key SID --`, which holds the lock until claude exits. The
+    program is KITH_STUB_BIN, else beside the kith program (where it really lives first, then as given). No program, or an id
+    kith-stub's keys cannot hold: no prefix, and `problem` says so (a warning; KITH_REQUIRE_STUB=1 makes it a refusal)."""
+    if not re.fullmatch(r'[a-z0-9._-]+', sid):
+        return [], f'session id "{sid}" cannot be locked (only a-z 0-9 . _ - are allowed)'
+    stub = os.environ.get('KITH_STUB_BIN')
+    if not stub:
+        kbin = kith_paths.kith_bin()
+        for d in (os.path.dirname(os.path.realpath(kbin)), os.path.dirname(kbin)) if kbin else ():
+            if os.access(os.path.join(d, 'kith-stub'), os.X_OK):
+                stub = os.path.join(d, 'kith-stub')
+                break
+    if not (stub and os.access(stub, os.X_OK)):
+        return [], 'no kith-stub program beside kith, so this conversation cannot be locked'
+    machine = os.environ.get('KITH_MACHINE') or str(kith_paths.paths()['KITH_MACHINE'])
+    return [stub, '--lock-dir', os.path.join(machine, 'core', 'locks'), '--key', sid, '--'], None
 
 
 def compact(ks, e, since, at):
@@ -170,7 +199,10 @@ def compact(ks, e, since, at):
     claude = os.environ.get('KITH_CLAUDE') or shutil.which('claude') or 'claude'
     env = {k: v for k, v in os.environ.items() if k not in ('KITH_PERSON', 'KITH_VIA', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT')}
     env['CLAUDE_CONFIG_DIR'] = str(Path(t).parents[2])   # the login the session was made under
-    pid, go, err = parked([claude, '-p', '--resume', sid, '/compact'], e.get('cwd') or '/', env)
+    # The conversation's writer lock (a --direct run or a host turn on it is busy, not a second writer). The stub, not claude, is
+    # the process the claim names: claude descends from it, and the claim ends with the stub, which waits for claude.
+    stub, problem = lock_stub(sid)
+    pid, go, err = parked([*stub, claude, '-p', '--resume', sid, '/compact'], e.get('cwd') or '/', env, group=bool(stub))
     reaped = False
     try:
         if ks.take_claim(sid, pid, 'oneshot', lifecycle_owner=True):
@@ -179,6 +211,10 @@ def compact(ks, e, since, at):
             return 'skipped'
         if not (e.get('cwd') and os.path.isdir(e['cwd'])):
             return failed(sid, 'the session\'s folder is gone')   # --resume would look in the wrong project
+        if problem:
+            if os.environ.get('KITH_REQUIRE_STUB') == '1':
+                return failed(sid, problem)
+            print(f'kith-lifecycle: {problem}; this compaction of {sid} is not locked against another run of the conversation', file=sys.stderr)
         os.write(go, b'1')
         why = b''
         while True:
@@ -188,10 +224,12 @@ def compact(ks, e, since, at):
             why += chunk
         if why:   # claude not on PATH, say
             return failed(sid, why.decode(errors='replace'))
-        rc = reap(pid, COMPACT_TIMEOUT)
+        rc = reap(pid, COMPACT_TIMEOUT, group=bool(stub))
         reaped = True
         if rc is None:
             return failed(sid, 'timed out')
+        if stub and rc == BUSY:
+            return 'busy'   # no decision: the pending 'compact' stands, and the next sweep tries again
         if rc == 0:
             lc.write_decision(sid, {**(lc.read_decision(sid) or {}), 'compacted': True, 'compactedAt': time.time()})
             return 'compacted'

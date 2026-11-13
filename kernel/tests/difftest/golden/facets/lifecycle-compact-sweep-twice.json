@@ -8,7 +8,7 @@
   "state:home/claude-fake": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=<TS>\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
   "state:home/work/": "<empty dir>\n",
   "step0.exit": "0\n",
-  "step0.stderr": "",
+  "step0.stderr": "kith-lifecycle: no kith-stub program beside kith, so this conversation cannot be locked; this compaction of lc-twice is not locked against another run of the conversation\n",
   "step0.stdout": "lc-twice compact compacted\n",
   "step1.exit": "0\n",
   "step1.stderr": "",

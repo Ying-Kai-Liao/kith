@@ -791,5 +791,277 @@
     "mkdir": "home/work"
    }
   ]
+ },
+ {
+  "name": "lifecycle-compact-under-stub",
+  "command": "lifecycle",
+  "unswitched": "kith-lifecycle has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "lifecycle",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_MACHINE": "{HOME}/.kith",
+   "KITH_CLAUDE": "{HOME}/claude-fake",
+   "CLAUDE_CONFIG_DIR": "{HOME}/.claude",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_STUB_BIN": "{HOME}/bin/kith-stub"
+  },
+  "run": [
+   [
+    "sweep",
+    "--session",
+    "lc-st"
+   ],
+   [
+    "status",
+    "lc-st"
+   ]
+  ],
+  "mask_keys": [
+   "at",
+   "compactedAt",
+   "failedAt"
+  ],
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/lc-st.jsonl",
+    "text": "{\"type\": \"user\", \"timestamp\": \"2025-12-31T23:59:55.000Z\", \"message\": {\"content\": \"do the thing\"}}\n{\"type\": \"assistant\", \"timestamp\": \"2026-01-01T00:00:00.000Z\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"shall I go on with plan B?\"}], \"usage\": {\"input_tokens\": 10, \"cache_read_input_tokens\": 150000, \"cache_creation_input_tokens\": 5}}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/lc-st.json",
+    "text": "{\"v\": 1, \"sessionId\": \"lc-st\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-st.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/claude-fake",
+    "text": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=2026-01-02T00:00:00.000Z\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
+    "mode": "755"
+   },
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/bin/kith-stub",
+    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nlock=$2; key=$4; shift 5\n[ -f \"$lock/$key.busy\" ] && { echo \"kith-stub: busy\" >&2; exit 75; }\nexec \"$@\"\n",
+    "mode": "755"
+   }
+  ]
+ },
+ {
+  "name": "lifecycle-compact-busy",
+  "command": "lifecycle",
+  "unswitched": "kith-lifecycle has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "lifecycle",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_MACHINE": "{HOME}/.kith",
+   "KITH_CLAUDE": "{HOME}/claude-fake",
+   "CLAUDE_CONFIG_DIR": "{HOME}/.claude",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_STUB_BIN": "{HOME}/bin/kith-stub"
+  },
+  "run": [
+   [
+    "sweep",
+    "--session",
+    "lc-busy"
+   ],
+   [
+    "status",
+    "lc-busy"
+   ],
+   [
+    "sweep",
+    "--session",
+    "lc-busy"
+   ]
+  ],
+  "mask_keys": [
+   "at",
+   "compactedAt",
+   "failedAt"
+  ],
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/lc-busy.jsonl",
+    "text": "{\"type\": \"user\", \"timestamp\": \"2025-12-31T23:59:55.000Z\", \"message\": {\"content\": \"do the thing\"}}\n{\"type\": \"assistant\", \"timestamp\": \"2026-01-01T00:00:00.000Z\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"shall I go on with plan B?\"}], \"usage\": {\"input_tokens\": 10, \"cache_read_input_tokens\": 150000, \"cache_creation_input_tokens\": 5}}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/lc-busy.json",
+    "text": "{\"v\": 1, \"sessionId\": \"lc-busy\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-busy.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/claude-fake",
+    "text": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=2026-01-02T00:00:00.000Z\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
+    "mode": "755"
+   },
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/bin/kith-stub",
+    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nlock=$2; key=$4; shift 5\n[ -f \"$lock/$key.busy\" ] && { echo \"kith-stub: busy\" >&2; exit 75; }\nexec \"$@\"\n",
+    "mode": "755"
+   },
+   {
+    "mkdir": "home/.kith/core/locks"
+   },
+   {
+    "write": "home/.kith/core/locks/lc-busy.busy",
+    "text": ""
+   }
+  ]
+ },
+ {
+  "name": "lifecycle-compact-no-stub-required",
+  "command": "lifecycle",
+  "unswitched": "kith-lifecycle has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "lifecycle",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_MACHINE": "{HOME}/.kith",
+   "KITH_CLAUDE": "{HOME}/claude-fake",
+   "CLAUDE_CONFIG_DIR": "{HOME}/.claude",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_STUB_BIN": "{HOME}/no-stub",
+   "KITH_REQUIRE_STUB": "1"
+  },
+  "run": [
+   [
+    "sweep",
+    "--session",
+    "lc-req"
+   ],
+   [
+    "status",
+    "lc-req"
+   ]
+  ],
+  "mask_keys": [
+   "at",
+   "compactedAt",
+   "failedAt"
+  ],
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/lc-req.jsonl",
+    "text": "{\"type\": \"user\", \"timestamp\": \"2025-12-31T23:59:55.000Z\", \"message\": {\"content\": \"do the thing\"}}\n{\"type\": \"assistant\", \"timestamp\": \"2026-01-01T00:00:00.000Z\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"shall I go on with plan B?\"}], \"usage\": {\"input_tokens\": 10, \"cache_read_input_tokens\": 150000, \"cache_creation_input_tokens\": 5}}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/lc-req.json",
+    "text": "{\"v\": 1, \"sessionId\": \"lc-req\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-req.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/claude-fake",
+    "text": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=2026-01-02T00:00:00.000Z\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
+    "mode": "755"
+   },
+   {
+    "mkdir": "home/work"
+   }
+  ]
+ },
+ {
+  "name": "lifecycle-compact-bad-session-id",
+  "command": "lifecycle",
+  "unswitched": "kith-lifecycle has no Rust side yet",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "lifecycle",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_MACHINE": "{HOME}/.kith",
+   "KITH_CLAUDE": "{HOME}/claude-fake",
+   "CLAUDE_CONFIG_DIR": "{HOME}/.claude",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_STUB_BIN": "{HOME}/bin/kith-stub"
+  },
+  "run": [
+   [
+    "sweep",
+    "--session",
+    "lc-LC-Bad"
+   ]
+  ],
+  "mask_keys": [
+   "at",
+   "compactedAt",
+   "failedAt"
+  ],
+  "setup": [
+   {
+    "write": "home/.claude/projects/p/lc-LC-Bad.jsonl",
+    "text": "{\"type\": \"user\", \"timestamp\": \"2025-12-31T23:59:55.000Z\", \"message\": {\"content\": \"do the thing\"}}\n{\"type\": \"assistant\", \"timestamp\": \"2026-01-01T00:00:00.000Z\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"shall I go on with plan B?\"}], \"usage\": {\"input_tokens\": 10, \"cache_read_input_tokens\": 150000, \"cache_creation_input_tokens\": 5}}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/lc-LC-Bad.json",
+    "text": "{\"v\": 1, \"sessionId\": \"lc-LC-Bad\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-LC-Bad.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
+   },
+   {
+    "write": "home/claude-fake",
+    "text": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=2026-01-02T00:00:00.000Z\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
+    "mode": "755"
+   },
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "write": "home/bin/kith-stub",
+    "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nlock=$2; key=$4; shift 5\n[ -f \"$lock/$key.busy\" ] && { echo \"kith-stub: busy\" >&2; exit 75; }\nexec \"$@\"\n",
+    "mode": "755"
+   }
+  ]
  }
 ]

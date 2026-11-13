@@ -67,6 +67,8 @@ PY
 STUB
 chmod +x "$T/claude-stub"
 export KITH_CLAUDE=$T/claude-stub
+# No kith-stub for the checks above (a compaction runs unlocked, as before the writer lock; the section on the lock names one).
+export KITH_MACHINE=$T/machine KITH_STUB_BIN=$T/no-stub
 calls() { [[ -f $KITH_STATE/stub-calls ]] && wc -l < "$KITH_STATE/stub-calls" | tr -d ' ' || echo 0; }
 dec() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["decision"], "compacted" if d.get("compacted") else "", "ended" if d.get("ended") else "")' "$KITH_STATE/sessions/decisions/$1.json" 2>/dev/null | xargs; }
 intent() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["why"])' "$KITH_STATE/sessions/intent/$1.json" 2>/dev/null; }
@@ -202,6 +204,83 @@ for _ in $(seq 100); do kill -0 "$stub" 2>/dev/null || break; sleep 0.1; done
 KITH_CLAIM_WAIT=0 python3 "$SK" claim k-kill $$ >/dev/null 2>&1
 is "...and once claude has exited the session is free" "$?" 0
 rm -f "$REG/k-kill.claim" "$REG/k-kill.claim.lock"
+
+# --- the conversation's writer lock: a compaction runs claude under kith-stub (M3-14 P4) -------------------------------------------
+# No stub: one stderr line and the compaction goes on (the default stays a warning, q239); KITH_REQUIRE_STUB=1 refuses.
+fx l-nostub 55 150000 "$Q"
+n=$(calls)
+out=$(python3 "$LC" sweep --session l-nostub 2>"$T/err")
+is "with no stub, compact warns once and runs" "$out/$(grep -c 'no kith-stub program' "$T/err")/$(( $(calls) - n ))" "l-nostub compact compacted/1/1"
+fx l-req 55 150000 "$Q"
+n=$(calls)
+out=$(KITH_REQUIRE_STUB=1 python3 "$LC" sweep --session l-req 2>/dev/null)
+is "KITH_REQUIRE_STUB=1 with no stub: failed with the reason, claude not run" "$out/$(( $(calls) - n ))" "l-req compact failed: no kith-stub program beside kith, so this conversation cannot be locked/0"
+fx L-Up 55 150000 "$Q"
+n=$(calls)
+out=$(python3 "$LC" sweep --session L-Up 2>"$T/err")
+is "a session id the stub cannot key: warns and runs unlocked" "$out/$(grep -c 'cannot be locked' "$T/err")/$(( $(calls) - n ))" "L-Up compact compacted/1/1"
+
+STUBBIN=${KITH_REAL_STUB_BIN:-}
+if [[ -z $STUBBIN ]]; then
+  for t in "${CARGO_TARGET_DIR:-}" "$KERNEL/../serve/host/target" "$KERNEL/../target"; do
+    for k in debug release; do [[ -n $t && -x $t/$k/kith-stub ]] && { STUBBIN=$t/$k/kith-stub; break 2; }; done
+  done
+fi
+if [[ -z $STUBBIN || ! -x $STUBBIN ]]; then
+  echo "skip the checks under a real kith-stub (set KITH_REAL_STUB_BIN)"
+else
+  export KITH_STUB_BIN=$STUBBIN
+  LOCKS=$KITH_MACHINE/core/locks
+  mkdir -p "$LOCKS"
+  # busy: another run holds the conversation's lock; the sweep skips, writes no decision of its own, and tries again next time.
+  fx l-busy 55 150000 "$Q"
+  "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- sleep 60 &
+  holder_pid=$!
+  for _ in $(seq 50); do "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- true >/dev/null 2>&1; [[ $? == 75 ]] && break; sleep 0.1; done
+  n=$(calls)
+  out=$(python3 "$LC" sweep --session l-busy)
+  is "busy: the sweep reports it and runs no claude" "$out/$(( $(calls) - n ))" "l-busy compact busy/0"
+  is "...writes no decision of its own (the pending compact stands)" "$(dec l-busy)/$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sorted(set(d)&{"failed","ended"}), d["compacted"])' "$KITH_STATE/sessions/decisions/l-busy.json")" "compact/[] False"
+  is "...and gives the claim back" "$([[ -e $REG/l-busy.claim ]] && echo held || echo free)" free
+  kill $holder_pid 2>/dev/null; wait $holder_pid 2>/dev/null
+  for _ in $(seq 50); do "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- true >/dev/null 2>&1 && break; sleep 0.1; done
+  is "the next sweep, with the lock free, compacts" "$(python3 "$LC" sweep --session l-busy)/$(dec l-busy)" "l-busy compact compacted/compact compacted"
+
+  # the lock is held for the compaction's whole life, and the claim names the stub (claude descends from it)
+  fx l-life 55 150000 "$Q"
+  rm -f "$KITH_STATE/stub-pid" "$KITH_STATE/stub-go"
+  STUB_MODE=slow python3 "$LC" sweep --session l-life >/dev/null &
+  sp=$!
+  for _ in $(seq 100); do [[ -s $KITH_STATE/stub-pid ]] && break; sleep 0.1; done
+  cl=$(cat "$KITH_STATE/stub-pid" 2>/dev/null)
+  "$STUBBIN" --lock-dir "$LOCKS" --key l-life -- true >/dev/null 2>&1
+  is "while claude writes, the conversation's lock is held (a second run is busy, 75)" "$?" 75
+  holder=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/l-life.claim" 2>/dev/null)
+  is "the claim names the kith-stub, and claude is its child" "$(ps -o comm= -p "$holder" | grep -c kith-stub)/$(ps -o ppid= -p "$cl" | tr -d ' ')" "1/$holder"
+  touch "$KITH_STATE/stub-go"
+  wait $sp
+  "$STUBBIN" --lock-dir "$LOCKS" --key l-life -- true >/dev/null 2>&1
+  is "once the compaction is over the lock is free" "$?" 0
+  is "...and the decision says compacted" "$(dec l-life)" "compact compacted"
+
+  # a compaction that runs past its time limit ends claude with the stub, not only the stub: no unguarded writer
+  fx l-slow 55 150000 "$Q"
+  rm -f "$KITH_STATE/stub-pid" "$KITH_STATE/stub-go"
+  cat > "$T/timeout.py" <<'PY'
+import importlib.machinery, importlib.util, sys
+sys.path.insert(0, sys.argv[1] + '/lib')
+loader = importlib.machinery.SourceFileLoader('kl', sys.argv[1] + '/bin/kith-lifecycle')
+spec = importlib.util.spec_from_loader('kl', loader); kl = importlib.util.module_from_spec(spec); loader.exec_module(kl)
+kl.COMPACT_TIMEOUT = 2
+print(kl.sweep('l-slow'))
+PY
+  STUB_MODE=slow python3 "$T/timeout.py" "$KERNEL" >"$T/timeout.out"
+  cl=$(cat "$KITH_STATE/stub-pid" 2>/dev/null)
+  is "past its time limit: failed, and claude is gone too" "$(grep -c 'timed out' "$T/timeout.out")/$(kill -0 "$cl" 2>/dev/null && echo alive || echo gone)" "1/gone"
+  "$STUBBIN" --lock-dir "$LOCKS" --key l-slow -- true >/dev/null 2>&1
+  is "...and the lock is free" "$?" 0
+  export KITH_STUB_BIN=$T/no-stub
+fi
 
 # a session the host keeps a conversation for is the host's to compact (one compactor per session)
 mkdir -p "$T/serve"
