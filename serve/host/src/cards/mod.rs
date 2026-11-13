@@ -237,6 +237,10 @@ async fn ask_for(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, input: &Value, a
     if input.to_string().len() > MAX_INPUT {
         return deny("That request is too large to show for approval.");
     }
+    // A person whose access is set aside (revoked) gets no card: a run left alive after the revoke must not ask the owner.
+    if !who.person.is_empty() && hub.store.suspended_people().is_ok_and(|s| s.contains(&who.person)) {
+        return deny("This person's access has been revoked, so no approval was asked for.");
+    }
     let (resource, shown) = match resource::classify(tool, input, &resource::roots()) {
         resource::Classified::Card { key, shown } => (key, shown),
         resource::Classified::Never => {

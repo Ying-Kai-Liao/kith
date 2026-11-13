@@ -714,7 +714,7 @@ jobs:
           KITH_BIN: ${{ github.workspace }}/serve/host/target/debug/kith
         run: |
           test -x "$KITH_BIN" || { echo "no kith binary at $KITH_BIN"; exit 1; }
-          cargo nextest run --profile ci --workspace --exclude kith-guest --exclude kith-tts -E 'test(stepped_e2e_tests::)'
+          cargo nextest run --profile ci --no-tests=fail --workspace --exclude kith-guest --exclude kith-tts -E 'test(stepped_e2e_tests::)'
       - name: Direct lock, stub and held checks
         run: |
           # A direct run holds its conversation's lock under kith-stub (M1-3).

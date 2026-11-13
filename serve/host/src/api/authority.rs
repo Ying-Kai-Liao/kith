@@ -169,6 +169,36 @@ impl CoreData {
         }
     }
 
+    /// `kith-auth resolve --person` from the core's `people.resolve`: the whole bundle (`allowed`, `preset`, `access`...),
+    /// which is what a guest's launch reads (`consumeAccess`). Marked like [`Self::heard`]; `dies` so a deleted preset
+    /// is no answer, never a "no" the rules did not give.
+    pub fn resolved(&self, person: &str, agent: &str) -> Resolved {
+        if person.is_empty() {
+            return Resolved::Unknown;
+        }
+        let (Some(home), Some(kernel)) = (self.home.to_str(), self.kernel.to_str()) else { return Resolved::Unknown };
+        let mut params = json!({
+            "person": person, "agent": agent, "dies": true, "home": home, "kernel": kernel, "env": self.env,
+        });
+        #[cfg(test)]
+        let follows = TEST_CORE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|c| c.folders.machine == self.folders.machine);
+        #[cfg(not(test))]
+        let follows = true;
+        if follows && switched() {
+            params["viaSwitch"] = true.into();
+        }
+        match crate::core_front::call_owner(&self.folders, "people.resolve", &params, true) {
+            crate::core_front::Answer::Done(a) if a.get("died").is_some_and(|d| !d.is_null()) => Resolved::Unknown,
+            crate::core_front::Answer::Done(a) if a["allowed"].is_boolean() => Resolved::Bundle(a),
+            crate::core_front::Answer::Refused(said) if is_not_switched(&said) => Resolved::NotSwitched,
+            _ => Resolved::Unknown,
+        }
+    }
+
     fn ask(&self, person: &str, agent: &str) -> bool {
         // The owner is never a guest of this seam: the core can not grant more than the mirror does.
         self.verdict(person, agent).is_some_and(|v| v.allowed && !v.owner)
@@ -254,7 +284,8 @@ pub async fn core_verdict(person: &str, agent: &str) -> Option<Verdict> {
     }
 }
 
-/// [`core_verdict`] with the core's "not switched" told apart, for the guard that can then read the file.
+/// [`core_verdict`] with the core's "not switched" told apart (the host's own reads use [`core_resolved`] now).
+#[cfg(test)]
 pub async fn core_heard(person: &str, agent: &str) -> Heard {
     if person.is_empty() {
         return Heard::Unknown;
@@ -287,6 +318,35 @@ impl Authority for CoreData {
         }
         answer
     }
+}
+
+/// [`core_heard`] for the whole `resolve` bundle.
+pub async fn core_resolved(person: &str, agent: &str) -> Resolved {
+    if person.is_empty() {
+        return Resolved::Unknown;
+    }
+    let core = process_core();
+    let (person, agent) = (person.to_owned(), agent.to_owned());
+    let sem = asks();
+    let run = async move {
+        let permit = sem.acquire_owned().await.ok()?;
+        tokio::task::spawn_blocking(move || {
+            let _held = permit;
+            core.resolved(&person, &agent)
+        })
+        .await
+        .ok()
+    };
+    tokio::time::timeout(ASK_WAIT, run).await.ok().flatten().unwrap_or(Resolved::Unknown)
+}
+
+/// What the core said to a `people.resolve`.
+pub enum Resolved {
+    Bundle(Value),
+    /// The core refused the marked read: authority is back on auth.json.
+    NotSwitched,
+    /// It could not be asked in time, or its answer is no answer.
+    Unknown,
 }
 
 /// The answer chosen for one stream (or one call): built once, from the opt-in.

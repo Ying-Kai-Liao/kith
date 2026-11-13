@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 /// Mac: Kai's q236 decision). The rest are the P1 verbs, until the core routes for them land: `invite` and `link` (the
 /// host's `linkCode` and Telegram `/link` still run them through kith-auth), and the terminal `owner`, `share` and
 /// `browser`. Drop each as its route lands.
-const EXPECTED_EXIT_3: &[&str] = &["once", "invite", "link", "owner", "share", "browser"];
+const EXPECTED_EXIT_3: &[&str] = &["once"];
 
 const CAPS: &str = "helpers: [money]\njobs:\n  - name: make-videos\n    label: Make videos\n    domains: [registry.npmjs.org, github.com]\n";
 
@@ -294,13 +294,16 @@ fn sams_chat(r: &Rig, agent: &str) -> String {
     r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned()
 }
 
-async fn until(what: impl Fn() -> bool) {
+/// A claimed run that must be gone within a few seconds, ended by a signal (not one that simply exited).
+async fn killed(child: &mut std::process::Child) -> bool {
+    use std::os::unix::process::ExitStatusExt as _;
     for _ in 0..200 {
-        if what() {
-            return;
+        if let Some(status) = child.try_wait().unwrap() {
+            return status.signal().is_some();
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+    false
 }
 
 async fn shown(r: &Rig) -> crate::store::Card {
@@ -322,7 +325,7 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     let Some(mut w) = World::new().await else { return };
     let r = &w.r;
 
-    // 1. Invitee access: the guard with the switch OFF asks kith-auth `resolve`, which asks the core.
+    // 1. Invitee access: with the switch OFF the guard still asks the core in-process (the tombstone selects it).
     let started = Instant::now();
     assert!(roles::may_use("sam", "house").await, "Sam holds house");
     let one = started.elapsed();
@@ -382,9 +385,13 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     assert_eq!(out["revoked"], true, "{out}");
     assert!(!roles::may_use("sam", "house").await, "Sam is refused at once");
     assert!(roles::guard(&r.hub, "sam", true, "history", &json!({"botId": mine})).await.is_err());
-    assert!(run.wait().is_ok(), "his running turn is stopped");
+    assert!(killed(&mut run).await, "his running turn is killed by a signal");
     assert!(owners.try_wait().unwrap().is_none(), "the owner's claim is never touched");
-    assert_eq!(crate::wake::status(&state, "owed-1").as_deref(), Some("withdrawn"), "his door claim is swept");
+    assert_eq!(
+        crate::wake::status(&state, "owed-1").as_deref(),
+        Some("withdrawn"),
+        "the wake he was owed is withdrawn"
+    );
     assert!(call(r, &w.sam, "hello", json!({})).await.is_err(), "his phone is out");
     w.assert_off_and_tombstone();
     let out = call(r, &Caller::Local, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
@@ -392,17 +399,23 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     assert_eq!(w.core_rows("sam"), before_rows, "exactly the rows he had");
     assert_eq!(blank(&run_auth(r, &["ledger", "--json"]).1), before_ledger, "and the same ledger");
     assert!(roles::may_use("sam", "house").await && call(r, &w.sam, "hello", json!({})).await.is_ok(), "Sam is back");
-    // The core stopped: the revoke is refused whole (the owner is told), the guard refuses Sam meanwhile, and when the core
-    // is back nothing was half done.
+    // The core stopped: the owner is told plainly that the revoke is not complete, and Sam is cut off on this Mac from the
+    // host's own record. The core coming back does not give him back; the owner's undo does.
     w.core.stop();
-    let cut = call(r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await;
-    assert!(cut.is_err(), "the owner is told the revoke did not reach the core: {cut:?}");
+    let mut second = claimed_run(r, "sess-sam-2", "sam");
+    let cut = call(r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap_err().to_string();
+    assert!(cut.contains("cut off on this computer") && cut.contains("revoke again"), "{cut}");
+    assert!(!cut.contains('/') && !cut.contains("people.") && !cut.contains("socket"), "plain words only: {cut}");
     assert!(!roles::may_use("sam", "house").await, "a core that is down grants nothing");
-    assert!(roles::guard(&r.hub, "sam", true, "history", &json!({"botId": mine})).await.is_err());
+    assert!(killed(&mut second).await, "his turn was stopped without the core");
+    assert!(call(r, &w.sam, "hello", json!({})).await.is_err(), "his phone is set aside");
     w.core.restart();
-    assert_eq!(w.core_rows("sam"), before_rows, "the failed revoke wrote nothing");
-    assert!(roles::may_use("sam", "house").await, "and Sam is as he was");
+    assert_eq!(w.core_rows("sam"), before_rows, "nothing reached the core");
+    assert!(call(r, &w.sam, "hello", json!({})).await.is_err(), "and the core coming back does not restore him");
     w.assert_off_and_tombstone();
+    call(r, &Caller::Local, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
+    assert_eq!(w.core_rows("sam"), before_rows);
+    assert!(roles::may_use("sam", "house").await && call(r, &w.sam, "hello", json!({})).await.is_ok(), "the undo does");
     let _ = owners.kill();
     let _ = owners.wait();
 
@@ -421,14 +434,6 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     assert_eq!(said["carded"], true, "{said}");
     let card = shown(r).await;
     cards::answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("always"), None).unwrap();
-    until(|| {
-        let v: Value =
-            serde_json::from_str(&run_auth(r, &["resolve", "house", "--person", "ann"]).1).unwrap_or_default();
-        v["access"]["read"] == json!([docs])
-    })
-    .await;
-    let held: Value = serde_json::from_str(&run_auth(r, &["resolve", "house", "--person", "ann"]).1).unwrap();
-    assert_eq!(held["access"]["read"], json!([docs]), "the always is the core's access row: {held}");
     // An edge card: a host (Always), and a helper once.
     let host = tokio::spawn({
         let hub = r.hub.clone();
@@ -439,12 +444,6 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     let card = shown(r).await;
     cards::answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::ALWAYS), None).unwrap();
     assert!(host.await.unwrap().allow);
-    until(|| {
-        let v: Value =
-            serde_json::from_str(&run_auth(r, &["resolve", "house", "--person", "ann"]).1).unwrap_or_default();
-        v["access"]["domains"] == json!(["github.com"])
-    })
-    .await;
     let helper = tokio::spawn({
         let hub = r.hub.clone();
         async move {
@@ -459,6 +458,28 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
         run_auth(r, &["may", "ann", "money", "--via", "house", "--once"]).0 == 0,
         "the helper's once is the core's"
     );
+    // What reaches her next run: the core's rows through the host's own `consumeAccess`, not through kith-auth.
+    let launch = RunIdentity { run_id: "run-ann-launch".into(), ..guest("ann") };
+    let took = cards::access::consume(&r.hub, &launch).await;
+    assert_eq!(took["grants"]["read"], json!([docs]), "the always read reaches her run: {took}");
+    assert_eq!(took["grants"]["domains"], json!(["github.com"]), "and the host: {took}");
+    // A member's own in-grants card: Sam answers it, and his revoke withdraws it and takes his answer away.
+    let note = tokio::spawn({
+        let hub = r.hub.clone();
+        async move { cards::request_permission(&hub, &guest("sam"), "WebSearch", &json!({"query": "weather"})).await }
+    });
+    let card = shown(r).await;
+    assert_eq!(card.answerable_by.as_deref(), Some("sam"), "Sam is the approver of his own in-grants card");
+    let entry = card.entry_id.clone().unwrap();
+    roles::guard(&r.hub, "sam", true, "respondPermission", &json!({"entryId": entry})).await.expect("Sam may answer");
+    call(r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
+    assert!(!note.await.unwrap().allow, "his card went with the revoke");
+    assert!(roles::guard(&r.hub, "sam", true, "respondPermission", &json!({"entryId": entry})).await.is_err());
+    // A run of his left alive asks no one: no card opens while he is set aside.
+    let open_now = r.hub.store.cards_open(None).len();
+    let late = cards::request_permission(&r.hub, &guest("sam"), "WebSearch", &json!({"query": "late"})).await;
+    assert!(!late.allow && r.hub.store.cards_open(None).len() == open_now, "{late:?}");
+    call(r, &Caller::Local, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
     // A revoked Ann's card goes with the revoke (the call that waited on it is told no), and her phone may not answer one.
     let open_before = r.hub.store.cards_open(None).len();
     let waiting = tokio::spawn({
