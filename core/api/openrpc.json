@@ -13304,6 +13304,22 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "room",
+          "summary": "A room conversation: the conversation of (agent, room, joinEpoch), made when missing. A second one for the same key is refused.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "joinEpoch",
+          "summary": "The room's join epoch (with `room`).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
         }
       ],
       "result": {
@@ -13328,6 +13344,12 @@
             "kind": "caller"
           },
           "engine": {
+            "kind": "caller"
+          },
+          "room": {
+            "kind": "caller"
+          },
+          "joinEpoch": {
             "kind": "caller"
           }
         },
@@ -13472,7 +13494,7 @@
     },
     {
       "name": "hostclaim.enqueue",
-      "summary": "Queues a turn for a conversation (created when missing). Refused when the person was revoked after `revokeSeen`. Answers `{turn}`.",
+      "summary": "Queues a turn for a conversation (created when missing). Refused when the person was revoked after `revokeSeen`, or, for a room turn, when a `basis` person was revoked after their `epochs` entry (`revoked`), the turn has no basis, a bot's post opens a chain, or the conversation belongs to another join epoch (`other`), or the chain's turn budget is spent (`budget`). A room turn's basis, room, gen, level, author and budget are fixed here and never change. `key` makes a retry after a lost reply answer the same turn without spending the budget again. Answers `{turn}`.",
       "params": [
         {
           "name": "conversation",
@@ -13537,6 +13559,92 @@
           "schema": {
             "type": "integer"
           }
+        },
+        {
+          "name": "level",
+          "summary": "`owner` (default) or `room`: a room turn speaks for the people of its basis.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "basis",
+          "summary": "The people the turn speaks for.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "epochs",
+          "summary": "`hostclaim.epoch` of each basis person, read before the may check.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          }
+        },
+        {
+          "name": "room",
+          "summary": "The room.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "gen",
+          "summary": "The room's membership generation at the start.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "joinEpoch",
+          "summary": "The room's join epoch: which conversation it goes to.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "author",
+          "summary": "Whose post made the turn: a person, `bot:<id>` or an agent name.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "budget",
+          "summary": "A person's post: the follow-up rounds the chain may have.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "budgetFrom",
+          "summary": "A bot's or agent's turn: the turn that caused it. It spends one of that turn's rounds.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "key",
+          "summary": "The caller's id for this enqueue, so a retry is not counted twice.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ],
       "result": {
@@ -13576,6 +13684,218 @@
             "kind": "caller"
           },
           "deadline": {
+            "kind": "caller"
+          },
+          "level": {
+            "kind": "caller"
+          },
+          "basis": {
+            "kind": "caller"
+          },
+          "epochs": {
+            "kind": "caller"
+          },
+          "room": {
+            "kind": "caller"
+          },
+          "gen": {
+            "kind": "caller"
+          },
+          "joinEpoch": {
+            "kind": "caller"
+          },
+          "author": {
+            "kind": "caller"
+          },
+          "budget": {
+            "kind": "caller"
+          },
+          "budgetFrom": {
+            "kind": "caller"
+          },
+          "key": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.proc",
+      "summary": "A host engine process, idle or not, with the session it has loaded: registers it or moves its session, so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "instance",
+          "summary": "The host instance that runs it.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Whose process it is (a guest's principal).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "The session it has loaded.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` of `person`, read before the process was started.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "instance": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "conversation": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.procGone",
+      "summary": "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. Answers `{gone}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.adopt",
+      "summary": "This host start's instance takes over: every claim and process of another host instance is ended (a claim never redeemed at once and its turn given back; one with a process goes to `ending`, its process to be killed until gone). Answers `{ended, kill}`.",
+      "params": [
+        {
+          "name": "instance",
+          "summary": "`kith-serve-host/<pid>-<start stamp>`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "instance": {
             "kind": "caller"
           }
         },

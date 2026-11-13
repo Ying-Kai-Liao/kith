@@ -50,11 +50,14 @@ use crate::db::{Core, RecordedProc};
 use crate::error::{Error, Result};
 use crate::gate::{Liveness, same_process};
 
+use super::basis::{self, Fixed};
+use super::warm;
+
 /// `meta` key: the core generation whose reconcile has committed. Claims are refused until it equals the core's.
 pub(super) const RECONCILED: &str = "claims_reconciled_generation";
 
 /// `meta` key prefix: how many times a person was revoked. `revoke_person` bumps it in its transaction.
-const REVOKED: &str = "revoked:";
+pub(super) const REVOKED: &str = "revoked:";
 
 /// What kind of writer a claim is (the SQL CHECK of `claims.kind`; it cannot grow without a table rebuild).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,7 +256,7 @@ fn reconciled(tx: &Transaction<'_>) -> Result<Option<i64>> {
     Ok(text.and_then(|t| t.parse().ok()))
 }
 
-fn kill_of(claim_id: i64, pid: Option<i64>, started: Option<String>) -> Kill {
+pub(super) fn kill_of(claim_id: i64, pid: Option<i64>, started: Option<String>) -> Kill {
     Kill {
         claim_id: Some(claim_id),
         pid: pid.and_then(|p| u32::try_from(p).ok()),
@@ -262,7 +265,7 @@ fn kill_of(claim_id: i64, pid: Option<i64>, started: Option<String>) -> Kill {
 }
 
 /// Puts a turn back in the queue when its claim ends before the turn finished.
-fn requeue_turn(tx: &Transaction<'_>, claim_id: i64) -> Result<()> {
+pub(super) fn requeue_turn(tx: &Transaction<'_>, claim_id: i64) -> Result<()> {
     tx.execute(
         "UPDATE turns SET state = 'queued', claim_id = NULL, requeues = requeues + 1, started_at = NULL
          WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
@@ -353,6 +356,11 @@ fn fence_in(tx: &Transaction<'_>, req: &NewClaim<'_>) -> Result<Option<Fence>> {
     let Some(turn) = req.turn else {
         return Ok(None);
     };
+    // R-b, R-a: a basis person revoked since the turn was queued, or a room turn with no basis (conversations::basis).
+    if basis::epoch_moved(tx, turn)? {
+        return Ok(Some(Fence::Revoked));
+    }
+    basis::claim_gate(tx, turn)?;
     Ok(stopped_in(tx, turn)?.map(Fence::Stopped))
 }
 
@@ -862,9 +870,12 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
          ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
         [format!("{REVOKED}{person}")],
     )?;
+    // R-c: the processes of a basis person are found while their turns' claims are still live; the kills join the claims'.
+    let warm_kill = warm::revoke_in(&tx, person, now)?;
     let cancelled_turns = tx.execute(
         "UPDATE turns SET state = 'cancelled', parked_reason = NULL, parked_at = NULL, finished_at = ?2
-         WHERE person = ?1 AND state IN ('queued', 'parked')",
+         WHERE (person = ?1 OR id IN (SELECT turn FROM turn_people WHERE person = ?1))
+           AND state IN ('queued', 'parked')",
         params![person, now],
     )?;
     tx.execute(
@@ -876,7 +887,8 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
     {
         let mut st = tx.prepare(
             "SELECT claim_id, pid, pid_started FROM claims
-             WHERE person = ?1 AND state IN ('claimed', 'running', 'ending')",
+             WHERE (person = ?1 OR turn IN (SELECT turn FROM turn_people WHERE person = ?1))
+               AND state IN ('claimed', 'running', 'ending')",
         )?;
         for r in st.query_map([person], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))? {
             live.push(r?);
@@ -910,6 +922,7 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
         }
         kill.push(kill_of(id, pid, started));
     }
+    warm::merge_kills(&mut kill, warm_kill);
     tx.commit()?;
     Ok(Revoked {
         cancelled_turns,
@@ -922,7 +935,7 @@ pub(crate) fn revoke_person(core: &mut Core, person: &str, now: i64) -> Result<R
 /// pid and no orphan group of it ([`Liveness::orphan_group`]: a holder spawn's stub leads its group; its engine runs in
 /// it and may outlive it). A group at a gone pid whose record is not from this boot (a reboot, an empty or `lstart`
 /// record) is a stranger's and holds nothing. A probe that cannot tell is not "gone".
-fn recorded_gone(live: &dyn Liveness, pid: u32, started: &str) -> bool {
+pub(super) fn recorded_gone(live: &dyn Liveness, pid: u32, started: &str) -> bool {
     match live.start(pid) {
         Some(current) => !same_process(started, &current),
         None => live.gone(pid) && !live.orphan_group(pid, started),
@@ -970,8 +983,18 @@ pub(crate) fn end_gone(core: &mut Core, live: &dyn Liveness, now: i64) -> Result
 }
 
 /// The serve host's instance name on its own turn claims (`HOST_INSTANCE` in `serve/host/src/terminal/core_claims.rs`).
-/// The host is not a holder: a holder's hello (step 7) never ends its claims, whatever the holder lists.
+/// The host is not a holder: a holder's hello (step 7) never ends its claims, whatever the holder lists. This is the
+/// prefix: each host start names its own instance `kith-serve-host/<pid>-<start stamp>` (B5), and the bare name is the
+/// one the host used before; [`is_host_instance`] tells either from a holder's.
 pub(crate) const HOST_INSTANCE: &str = "kith-serve-host";
+
+/// Whether an instance name is a serve host's (this start's or an earlier one's), not a holder's.
+pub(crate) fn is_host_instance(instance: &str) -> bool {
+    instance == HOST_INSTANCE
+        || instance
+            .strip_prefix(HOST_INSTANCE)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
 
 /// The claims the holder's listing does not cover, ended or moved to `ending` (steps 5 and 7). `foreign_to` limits it
 /// to claims of another holder instance (step 7), never the host's ([`HOST_INSTANCE`]); `None` takes every live claim
@@ -1005,7 +1028,8 @@ fn release_unlisted(
             "SELECT claim_id, state, kind = 'external', pid, pid_started, holder_instance FROM claims
              WHERE state IN ('claimed', 'running', 'ending') AND claim_id <= ?2
                AND (?1 IS NULL OR holder_instance IS NULL
-                    OR (holder_instance <> ?1 AND holder_instance <> ?3))",
+                    OR (holder_instance <> ?1
+                        AND NOT (holder_instance = ?3 OR substr(holder_instance, 1, length(?3) + 1) = ?3 || '/')))",
         )?;
         for r in st.query_map(params![foreign_to, high_water, HOST_INSTANCE], |r| {
             Ok((
@@ -1203,7 +1227,20 @@ fn check_turn(t: &NewTurn<'_>) -> Result<()> {
 /// [`enqueue_turn`] inside a transaction the caller holds (a `Core::claim_tx`) and commits: the schedule fire writes its
 /// fire row, the turn and the watermark in one.
 pub(crate) fn enqueue_turn_in(tx: &Transaction<'_>, t: &NewTurn<'_>, now: i64) -> Result<i64> {
+    enqueue_turn_with_in(tx, t, &Fixed::default(), now)
+}
+
+/// [`enqueue_turn_in`] with the columns a room turn fixes at its insert (`conversations::basis`).
+pub(super) fn enqueue_turn_with_in(
+    tx: &Transaction<'_>,
+    t: &NewTurn<'_>,
+    fixed: &Fixed,
+    now: i64,
+) -> Result<i64> {
     check_turn(t)?;
+    if fixed.level.is_none() {
+        basis::check_plain(tx, t)?;
+    }
     // Inside the transaction that inserts the turn, so a revoke either commits first (refused here) or after (its sweep
     // cancels this turn): no turn is queued past a revoke its enqueuer did not see (Claims4's c4-epochleak).
     if epoch(tx, t.person)? != t.revoke_seen {
@@ -1228,15 +1265,23 @@ pub(crate) fn enqueue_turn_in(tx: &Transaction<'_>, t: &NewTurn<'_>, now: i64) -
         )));
     }
     tx.execute(
-        "INSERT INTO turns (conversation, person, source, prompt, state, deadline, queued_at)
-         VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?6)",
+        "INSERT INTO turns (conversation, person, source, prompt, state, deadline, queued_at,
+                            level, room, start_gen, budget_root, budget_left, author, enq_key)
+         VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?6, COALESCE(?7, 'owner'), ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             t.conversation,
             t.person,
             t.source,
             t.prompt,
             t.deadline,
-            now
+            now,
+            fixed.level,
+            fixed.room,
+            fixed.start_gen,
+            fixed.budget_root,
+            fixed.budget_left,
+            fixed.author,
+            fixed.key
         ],
     )?;
     Ok(tx.last_insert_rowid())

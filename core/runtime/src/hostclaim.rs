@@ -10,13 +10,16 @@
 //! | `{refused: "revoked", why}` | the person's revoke epoch moved after the caller's may check: the caller cancels the turn |
 //! | `{refused: "waiting", why}` | the claims wait for this generation's reconcile |
 //! | `{refused: "notWaiting", why}` | the turn is not waiting for that person (cancelled, expired, claimed) |
+//! | `{refused: "budget", why}` | the turn's per-message budget is spent (R-f): the caller drops the item with the note's line |
 //! | `{refused: "other", why}` | any other refusal (an unknown conversation) |
 //!
 //! A conversation is the Claude session id the host names its claim files by.
 
 use serde_json::{Value, json};
 
+use crate::conversations::basis::{self, Basis, Chain, Level};
 use crate::conversations::claims::{self, Kind, NewClaim, NewTurn, Redeemed, Reported};
+use crate::conversations::warm::{self, WarmProc};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -54,11 +57,79 @@ fn int(p: &Value, key: &str) -> Result<i64> {
         .ok_or_else(|| bad(&format!("{key} is required")))
 }
 
+/// The room fields of `hostclaim.enqueue` (R-a, R-b, R-f, R-g): `None` for a plain turn, which is an owner-level one with
+/// no budget. A turn is a room turn when it names `basis`, `room` or `level`.
+fn basis_of(p: &Value) -> Result<Option<Basis>> {
+    let level = match word(p, "level") {
+        None | Some("owner") => Level::Owner,
+        Some("room") => Level::Room,
+        Some(_) => return Err(bad("level is owner or room")),
+    };
+    let listed: Vec<&str> = match p.get("basis") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| bad("basis is a list of people"))?
+            .iter()
+            .map(|w| w.as_str().ok_or_else(|| bad("basis is a list of people")))
+            .collect::<Result<_>>()?,
+    };
+    let touched = !listed.is_empty()
+        || level == Level::Room
+        || [
+            "room",
+            "joinEpoch",
+            "gen",
+            "author",
+            "budget",
+            "budgetFrom",
+            "key",
+        ]
+        .iter()
+        .any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
+    if !touched {
+        return Ok(None);
+    }
+    let epochs = p.get("epochs").and_then(Value::as_object);
+    let mut people = Vec::new();
+    for who in listed {
+        let seen = epochs
+            .and_then(|e| e.get(who))
+            .and_then(Value::as_i64)
+            .ok_or_else(|| bad(&format!("epochs names no revoke epoch for {who}")))?;
+        people.push((who.to_owned(), seen));
+    }
+    let chain = match (
+        p.get("budget").and_then(Value::as_i64),
+        p.get("budgetFrom").and_then(Value::as_i64),
+    ) {
+        (None, None) => Chain::None,
+        (Some(n), None) => Chain::Root(n),
+        (None, Some(from)) => Chain::Follow(from),
+        (Some(_), Some(_)) => {
+            return Err(bad(
+                "budget opens a chain and budgetFrom follows one: send one of them",
+            ));
+        }
+    };
+    Ok(Some(Basis {
+        people,
+        room: word(p, "room").map(str::to_owned),
+        room_gen: p.get("gen").and_then(Value::as_i64),
+        level,
+        join_epoch: p.get("joinEpoch").and_then(Value::as_i64),
+        author: word(p, "author").map(str::to_owned),
+        chain,
+        key: word(p, "key").map(str::to_owned),
+    }))
+}
+
 /// A refusal of the claims API as data (see the table above); any other error stays an error.
 fn refusal(e: Error) -> Result<Value> {
     let (kind, why) = match &e {
         Error::Stopped(w) => ("stopped", w.clone()),
         Error::Refused(w) if w.contains("has a writer") => ("held", w.clone()),
+        Error::Refused(w) if w.contains("turn budget of the chain") => ("budget", w.clone()),
         Error::Refused(w) if w.contains("was revoked") => ("revoked", w.clone()),
         Error::Refused(w) if w.contains("wait for the reconcile") => ("waiting", w.clone()),
         Error::Refused(w) if w.contains("is not waiting for") => ("notWaiting", w.clone()),
@@ -97,6 +168,21 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
                 need(p, "agent")?,
                 need(p, "engine")?,
             );
+            if let Some(room) = word(p, "room") {
+                // R-g: the conversation of one (agent, room, join epoch); a second one is refused.
+                return match basis::ensure_room(
+                    core,
+                    id,
+                    agent,
+                    engine,
+                    room,
+                    int(p, "joinEpoch")?,
+                    now,
+                ) {
+                    Ok(()) => Ok(json!({ "conversation": id })),
+                    Err(e) => refusal(e),
+                };
+            }
             let tx = core.claim_tx()?;
             // The same insert `enqueue_turn_in` makes; a row that exists keeps its agent and engine.
             tx.execute(
@@ -105,6 +191,35 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             )?;
             tx.commit()?;
             Ok(json!({ "conversation": id }))
+        }
+        "hostclaim.proc" => {
+            let pid = u32::try_from(int(p, "pid")?).map_err(|_| bad("pid"))?;
+            let w = WarmProc {
+                pid,
+                started: need(p, "started")?,
+                instance: need(p, "instance")?,
+                person: word(p, "person").unwrap_or_default(),
+                agent: word(p, "agent").unwrap_or_default(),
+                conversation: word(p, "conversation"),
+                revoke_seen: p.get("revokeSeen").and_then(Value::as_i64),
+            };
+            match warm::register(core, &w) {
+                Ok(()) => Ok(json!({ "registered": true })),
+                Err(e) => refusal(e),
+            }
+        }
+        "hostclaim.procGone" => {
+            let pid = u32::try_from(int(p, "pid")?).map_err(|_| bad("pid"))?;
+            Ok(json!({ "gone": warm::gone(core, pid, need(p, "started")?)? }))
+        }
+        "hostclaim.adopt" => {
+            let a = warm::adopt(core, need(p, "instance")?, now)?;
+            Ok(json!({
+                "ended": a.ended,
+                "kill": a.kill.iter().map(|k| json!({
+                    "claimId": k.claim_id, "pid": k.pid, "started": k.started,
+                })).collect::<Vec<_>>(),
+            }))
         }
         "hostclaim.epoch" => Ok(json!({ "epoch": claims::revoke_epoch(core, person(p)?)? })),
         "hostclaim.claim" => {
@@ -148,7 +263,11 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
                 deadline: p.get("deadline").and_then(Value::as_i64),
                 revoke_seen: int(p, "revokeSeen")?,
             };
-            match claims::enqueue_turn(core, &t, now) {
+            let queued = match basis_of(p)? {
+                Some(b) => basis::enqueue(core, &t, &b, now),
+                None => claims::enqueue_turn(core, &t, now),
+            };
+            match queued {
                 Ok(id) => Ok(json!({ "turn": id })),
                 Err(e) => refusal(e),
             }
@@ -191,6 +310,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
         }
         "hostclaim.settle" => {
             let ended = claims::end_gone(core, &crate::gate::System, now)?;
+            warm::settle(core, &crate::gate::System)?;
             Ok(json!({ "ended": ended }))
         }
         "hostclaim.show" => {
