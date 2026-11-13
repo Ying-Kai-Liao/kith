@@ -575,7 +575,10 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
     if revoke {
         cut_off(hub, id).await;
     } else {
-        restored(hub, id);
+        // an undo gives back what the host set aside under every id it may hold them under
+        for held in crate::remote::core_revokes::held_under(id).await {
+            restored(hub, &held);
+        }
     }
     Ok((core_updated, pending))
 }

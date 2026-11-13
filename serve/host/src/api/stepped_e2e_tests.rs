@@ -12,9 +12,6 @@
 //! Throughout, auth.json is the tombstone byte for byte until the rollback, and a logging wrapper around kith-auth
 //! records each exit code: an exit 3 may only be one of [`EXPECTED_EXIT_3`].
 //!
-//! Pending until the core routes of the P1 package land (`rust-migrate-blockers-routes`): the `/link` and `linkCode`
-//! cases (step 3), the terminal `kith kernel core-call people.suspend` reconcile (step 4), and `kith-auth share`
-//! (step 6). They are the `#[ignore]` tests at the end of this file, and their verbs are in the expected-exit-3 list.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::format_push_string, clippy::many_single_char_names)]
 
@@ -26,6 +23,7 @@ use super::roles;
 use crate::cards::{self, edge};
 use crate::channels::hq::TEST_ENV;
 use crate::remote::account::TEST_BIN;
+use crate::remote::core_revokes::Due;
 use crate::remote::members::{self, Listed};
 use crate::runauth::{RunIdentity, TokenScope};
 use serde_json::{Value, json};
@@ -106,6 +104,12 @@ impl World {
         }];
         members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
         let sam = r.device("sam-phone", Some("sam"));
+        // Tia is renamed on the file before the step (`tia` is an old id of `tiara`), her phone held here under `tia`.
+        dispatch(&r.hub, &Caller::Local, "createInvite", json!({"name": "Tia", "agents": {"house": "guest"}}))
+            .await
+            .unwrap();
+        r.device("tia-phone", Some("tia"));
+        assert_eq!(auth_in(&r, &["person", "tia", "id=tiara"], "").0, 0, "the rename on the file");
         let stored = auth_in(
             &r,
             &["set", "grok/work", "--stdin-json", "--grant", "house"],
@@ -174,7 +178,7 @@ impl World {
     /// `resolve`, then the lists. Times and ids are blanked.
     fn reads(&self) -> String {
         let mut asked: Vec<Vec<&str>> = Vec::new();
-        for p in ["kai", "sam", "ann", "nobody"] {
+        for p in ["kai", "sam", "ann", "tiara", "nobody"] {
             for a in ["house", "money"] {
                 asked.push(vec!["may", p, a]);
                 asked.push(vec!["resolve", a, "--person", p]);
@@ -299,6 +303,32 @@ async fn wait_for(what: impl Fn() -> bool) -> bool {
     false
 }
 
+/// A `linkCode` of `caller`: a six-character code.
+async fn link_code(r: &Rig, caller: &Caller) -> String {
+    let made = call(r, caller, "linkCode", json!({})).await.unwrap();
+    let code = made["code"].as_str().unwrap().to_owned();
+    assert_eq!(code.len(), 6, "{made}");
+    code
+}
+
+/// `kith kernel core-call people.suspend <person>` from a terminal: unmarked, and it tells the host nothing.
+fn terminal_suspend(w: &World, person: &str) {
+    use std::io::Write as _;
+    let data = w.core.data();
+    let body = json!({"id": person, "home": data.home, "kernel": data.kernel, "env": data.env});
+    let mut child = std::process::Command::new(&w.kith)
+        .args(["kernel", "core-call", "people.suspend", "--params-stdin"])
+        .envs(TEST_ENV.lock().unwrap().iter().map(|(k, v)| (*k, v)))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(body.to_string().as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
 /// A claimed run that must be gone within a few seconds, ended by a signal (not one that simply exited).
 async fn killed(child: &mut std::process::Child) -> bool {
     use std::os::unix::process::ExitStatusExt as _;
@@ -377,6 +407,45 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     assert_eq!(w.core_rows("ann"), [("house".to_owned(), "guest".to_owned())], "the core holds ann and her grant");
     w.assert_off_and_tombstone();
 
+    // 3. Links: `linkCode` as the owner and as Sam's device, then Telegram's `/link` (`hq::link`) binds the handle.
+    let paths = crate::channels::hq::Paths {
+        hq_bin: PathBuf::new(),
+        auth_bin: r.bin.clone(),
+        machine: w.core.data().folders.machine.clone(),
+        agent_roots: Vec::new(),
+        data: r.dir.clone(),
+    };
+    let link = |uid: &'static str, code: String| {
+        let paths = paths.clone();
+        async move { crate::channels::hq::link(&paths, "telegram", uid, &code).await }
+    };
+    let (owner_code, sam_code) = (link_code(r, &Caller::Local).await, link_code(r, &w.sam).await);
+    assert_eq!(link("1001", sam_code.clone()).await.as_deref(), Ok("sam"), "Sam's code binds Sam");
+    let who = run_auth(r, &["who", "telegram", "1001"]);
+    assert!(who.0 == 0 && who.1.contains("sam"), "who says sam: {who:?}");
+    for (what, refused) in [
+        ("the same code twice", link("1002", sam_code).await),
+        ("a uid that is already Sam's", link("1001", owner_code.clone()).await),
+    ] {
+        let said = refused.expect_err(what);
+        assert!(!said.is_empty() && !said.contains("kith-auth:") && !said.contains('/'), "{what}: {said}");
+    }
+    // The core stopped: one generic line, and nothing is written. The code is still good when it is back.
+    w.core.stop();
+    let down = link("3003", owner_code.clone()).await.expect_err("a core that is down binds nothing");
+    assert!(down.contains("Linking isn't available"), "{down}");
+    w.core.restart();
+    let unbound = run_auth(r, &["who", "telegram", "3003"]);
+    assert!(unbound.1.contains("\"person\": null"), "nothing was bound: {unbound:?}");
+    assert_eq!(link("3003", owner_code).await.as_deref(), Ok("kai"), "and the code was kept");
+    w.assert_off_and_tombstone();
+
+    // A tick of the poll on a live host cuts no one; Tia (renamed on the file before the step) is held under her old id.
+    let mut due = Due::default();
+    due.tick(&r.hub, true).await;
+    assert!(!r.hub.store.devices_of("tia").unwrap().is_empty(), "a renamed person is not cut by a tick");
+    assert!(!r.hub.store.devices_of("sam").unwrap().is_empty());
+
     // 4. Revoke and undo, from the app.
     let before_rows = w.core_rows("sam");
     let before_ledger = blank(&run_auth(r, &["ledger", "--json"]).1);
@@ -425,12 +494,30 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     w.core.restart();
     assert_eq!(w.core_rows("sam"), before_rows, "nothing reached the core");
     assert!(call(r, &w.sam, "hello", json!({})).await.is_err(), "and the core coming back does not restore him");
+    Due::default().tick(&r.hub, true).await;
+    assert!(r.hub.store.devices_of("sam").unwrap().is_empty(), "nor does a tick: the fail-closed cut stands");
     w.assert_off_and_tombstone();
     call(r, &Caller::Local, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
     assert_eq!(w.core_rows("sam"), before_rows);
     assert!(roles::may_use("sam", "house").await && call(r, &w.sam, "hello", json!({})).await.is_ok(), "the undo does");
     let _ = owners.kill();
     let _ = owners.wait();
+
+    // A revoke made in a terminal (`kith kernel core-call people.suspend`) tells the host nothing: one tick sets him aside.
+    let mut due = Due::default();
+    terminal_suspend(&w, "sam");
+    assert!(!r.hub.store.devices_of("sam").unwrap().is_empty(), "the terminal told the host nothing");
+    due.tick(&r.hub, true).await;
+    assert!(r.hub.store.devices_of("sam").unwrap().is_empty(), "a tick sets him aside");
+    assert!(!roles::may_use("sam", "house").await);
+    assert!(call(r, &w.sam, "hello", json!({})).await.is_err());
+    w.assert_off_and_tombstone();
+    // An undo is the owner's, from the app: it gives back exactly what the core and the host kept.
+    call(r, &Caller::Local, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
+    assert_eq!(w.core_rows("sam"), before_rows);
+    assert!(roles::may_use("sam", "house").await && call(r, &w.sam, "hello", json!({})).await.is_ok());
+    due.tick(&r.hub, true).await;
+    assert!(!r.hub.store.devices_of("sam").unwrap().is_empty(), "a tick gives nothing back and takes nothing again");
 
     // 5. Cards. An escape card, Always, is the core's access row.
     r.hub.store.kv_set("cards.live_window_s", "20").unwrap();
@@ -512,13 +599,17 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
         }
     });
     let card = shown(r).await;
+    let ann_code = link_code(r, &r.device("ann-phone", Some("ann"))).await;
     call(r, &Caller::Local, "revokePerson", json!({"personId": "ann"})).await.unwrap();
+    let refused_code = link("2002", ann_code.clone()).await.expect_err("a revoked person's code binds nothing");
+    assert!(!refused_code.is_empty() && !refused_code.contains("kith-auth:"), "{refused_code}");
     assert!(!waiting.await.unwrap().allow, "the card of a revoked person is not a yes");
     assert_eq!(r.hub.store.cards_open(None).len(), open_before, "her card is withdrawn");
     let refused =
         roles::guard(&r.hub, "ann", true, "respondPermission", &json!({"entryId": card.entry_id.unwrap()})).await;
     assert!(refused.is_err(), "a revoked person answers nothing");
     call(r, &Caller::Local, "unrevokePerson", json!({"personId": "ann"})).await.unwrap();
+    assert_eq!(link("2002", ann_code).await.as_deref(), Ok("ann"), "the refusal kept the code; her undo makes it good");
     w.assert_off_and_tombstone();
 
     // 6. Secrets. A key card: provide, list, revoke; then a room secret fails closed.
@@ -549,6 +640,13 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     let keys = call(r, &Caller::Local, "listKeys", json!({})).await.unwrap().to_string();
     assert!(keys.contains("grok/home") && keys.contains("grok/work"), "{keys}");
     assert!(!keys.contains(&value), "the list carries no value");
+    // `kith-auth share` lends a profile to Sam through the core, and `--rm` takes it away; it is lent again for the rollback.
+    let lent = run_auth(r, &["share", "grok/work", "sam"]);
+    assert!(lent.0 == 0 && lent.1.contains("shared with sam"), "{lent:?}");
+    let back = run_auth(r, &["share", "grok/work", "sam", "--rm"]);
+    assert!(back.0 == 0 && back.1.contains("shared with no one else"), "{back:?}");
+    assert_eq!(run_auth(r, &["share", "grok/work", "sam"]).0, 0);
+    assert_eq!(run_auth(r, &["share", "grok/work", "nobody"]).0, 1, "a person who does not exist");
     let gone =
         call(r, &Caller::Local, "revokeKey", json!({"agent": "house", "service": "grok", "profile": "grok/home"}))
             .await
@@ -590,6 +688,10 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     let file: Value = serde_json::from_slice(&std::fs::read(&w.auth_file).unwrap()).unwrap();
     assert!(file.get("kith_tombstone").is_none(), "{file}");
     let text = file.to_string();
+    assert_eq!(file["people"]["sam"]["handles"]["telegram"], json!("1001"), "Sam's handle is back: {text}");
+    assert_eq!(file["profiles"]["grok/work"]["with"], json!(["sam"]), "the lent list is back: {text}");
+    assert_eq!(file["people"]["tiara"]["was"], json!(["tia"]), "the renamed person keeps her old id: {text}");
+    assert!(file["people"]["sam"]["revoked"].is_null() || file["people"]["sam"]["revoked"] == false, "Sam's state");
     for needle in ["ann", "sam", "grok/work"] {
         assert!(text.contains(needle), "the restored auth.json lacks {needle}: {text}");
     }
@@ -600,29 +702,14 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     w.assert_exit_3s();
 }
 
-// ---- pending until the P1 package (core routes for link, owner, share, browser, the terminal suspend) lands ----
-
+/// With the host not switched (auth.json is a file) the poll does nothing, whatever the core says: no cut happens.
 #[tokio::test]
-#[ignore = "pending P1 (rust-migrate-blockers-routes): linkCode and /link route to the core"]
-async fn pending_links_bind_a_telegram_handle_once_and_refuse_the_rest() {
-    // linkCode as the owner and as Sam's device: a 6-character code each, listed by people.invites for the right person.
-    // hq::link("telegram", uid, code) binds Sam; `who telegram <uid>` (routed) says sam. Refused, with the file's words:
-    // the same code twice; a revoked person's code; a uid that is already another person's. With the core stopped: one
-    // generic line and nothing written.
-    unimplemented!("P1");
-}
-
-#[tokio::test]
-#[ignore = "pending P1 (rust-migrate-blockers-routes): the host reconciles a terminal people.suspend"]
-async fn pending_a_terminal_suspend_is_set_aside_on_the_host_within_one_tick() {
-    // `kith kernel core-call people.suspend sam`, then one poll tick sets him aside on the host; a failed core write
-    // during a revoke (core stopped) is cut fail-closed and a tick does not restore it.
-    unimplemented!("P1");
-}
-
-#[tokio::test]
-#[ignore = "pending P1 (rust-migrate-blockers-routes): kith-auth owner, share and browser write through the core"]
-async fn pending_share_lends_a_profile_to_sam_and_rm_takes_it_away() {
-    // `kith-auth share` lends a profile to Sam (his resolve sees it); `--rm` takes it away; both survive the rollback.
-    unimplemented!("P1");
+async fn a_tick_on_a_host_that_is_not_switched_cuts_no_one() {
+    let r = Rig::new().await;
+    r.device("sam-phone", Some("sam"));
+    let core = Core::start(&r);
+    core.ask("people.suspend", json!({"id": "sam"})).expect("suspended in the core alone");
+    assert!(!super::authority::switched_now());
+    Due::default().tick(&r.hub, true).await;
+    assert!(!r.hub.store.devices_of("sam").unwrap().is_empty(), "nothing was set aside");
 }
