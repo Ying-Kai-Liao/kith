@@ -32,10 +32,8 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-/// The kith-auth verbs allowed to exit 3 on this stepped Mac. `once` is the room secret (it fails closed on a stepped
-/// Mac: Kai's q236 decision). The rest are the P1 verbs, until the core routes for them land: `invite` and `link` (the
-/// host's `linkCode` and Telegram `/link` still run them through kith-auth), and the terminal `owner`, `share` and
-/// `browser`. Drop each as its route lands.
+/// The kith-auth verbs allowed to exit 3 on this stepped Mac: `once`, the room secret, which fails closed (Kai's q236
+/// decision). Phase 2 keeps it at this one; no other verb may exit 3.
 const EXPECTED_EXIT_3: &[&str] = &["once"];
 
 const CAPS: &str = "helpers: [money]\njobs:\n  - name: make-videos\n    label: Make videos\n    domains: [registry.npmjs.org, github.com]\n";
@@ -290,6 +288,17 @@ fn sams_chat(r: &Rig, agent: &str) -> String {
     r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned()
 }
 
+/// True once `what` holds, checked for up to ten seconds.
+async fn wait_for(what: impl Fn() -> bool) -> bool {
+    for _ in 0..400 {
+        if what() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    false
+}
+
 /// A claimed run that must be gone within a few seconds, ended by a signal (not one that simply exited).
 async fn killed(child: &mut std::process::Child) -> bool {
     use std::os::unix::process::ExitStatusExt as _;
@@ -336,12 +345,18 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     let unknown = Caller::Device { key: "nope".into(), scopes: vec![crate::store::Scope::Control] };
     assert!(call(r, &unknown, "hello", json!({})).await.is_err(), "an unknown device");
     assert!(call(r, &Caller::Local, "people", json!({})).await.is_ok(), "the owner");
-    // R6: what one guest request's guard costs with the switch off (a Python kith-auth, which runs core-call).
+    // R6: what one guest request costs with the switch off. The guard asks the core in-process (`people.may`, and now
+    // `people.resolve` for the whole bundle); a launch reads it through a Python kith-auth that runs core-call.
     let timed = Instant::now();
     for _ in 0..5 {
         assert!(roles::may_use("sam", "house").await);
     }
     let guard_mean = timed.elapsed() / 5;
+    let timed = Instant::now();
+    for _ in 0..5 {
+        assert!(roles::resolve("sam", "house").await.is_some_and(|v| v["allowed"] == true));
+    }
+    let bundle_mean = timed.elapsed() / 5;
     // And the path the design names, a Python kith-auth `resolve` that runs core-call (what a launch reads).
     let timed = Instant::now();
     for _ in 0..5 {
@@ -349,6 +364,7 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     }
     eprintln!(
         "R6, switch off: the host's guard (core asked in-process) first {one:?}, mean of 5 {guard_mean:?}; \
+         the whole resolve bundle in-process, mean of 5 {bundle_mean:?}; \
          kith-auth resolve through core-call, mean of 5 {:?}",
         timed.elapsed() / 5
     );
@@ -457,6 +473,16 @@ async fn a_stepped_mac_with_the_switch_off_works_from_invite_to_rollback() {
     );
     // What reaches her next run: the core's rows through the host's own `consumeAccess`, not through kith-auth.
     let launch = RunIdentity { run_id: "run-ann-launch".into(), ..guest("ann") };
+    // The card's write runs after its answer: wait (with a deadline) for the rows, never for a fixed time.
+    assert!(
+        wait_for(|| {
+            let v: Value =
+                serde_json::from_str(&run_auth(r, &["resolve", "house", "--person", "ann"]).1).unwrap_or_default();
+            v["access"]["read"] == json!([docs]) && v["access"]["domains"] == json!(["github.com"])
+        })
+        .await,
+        "the always read and the always host were written"
+    );
     let took = cards::access::consume(&r.hub, &launch).await;
     assert_eq!(took["grants"]["read"], json!([docs]), "the always read reaches her run: {took}");
     assert_eq!(took["grants"]["domains"], json!(["github.com"]), "and the host: {took}");
