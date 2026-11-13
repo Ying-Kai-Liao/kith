@@ -4739,6 +4739,14 @@
       "summary": "Every person the owner knows, as of the last import, as `kith-auth people --json` lists them: the owner first, then everyone by id with each person's bots after them. Each has the id, name, owner flag, the person a bot belongs to (`bot_of`) and the person at the top (`root`), whether their access is removed (`revoked`, `revoked_at`), the cloud link (`kith`), the other accounts (`handles`) and the agents they have a row for (`agents`: agent, role, via). People imported before handles were kept have none until imported again.",
       "params": [
         {
+          "name": "withWas",
+          "summary": "Also each person's former ids (`was`), which `kith-auth people --json` does not list.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -4794,6 +4802,12 @@
         ],
         "requires": [],
         "args": {
+          "withWas": {
+            "kind": "switch",
+            "spellings": [
+              "--with-was"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [

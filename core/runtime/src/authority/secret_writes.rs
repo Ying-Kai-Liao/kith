@@ -539,6 +539,9 @@ pub(crate) fn secret_share(
     Ok(json!({ "ok": true }))
 }
 
+/// What `browser` says of a name that would leave `<machine>/browsers` (kith-auth says the same).
+const BROWSER_NAME: &str = "a browser profile is browser/<name>, a name with no / and not . or ..";
+
 /// `browser <profile> [<browser>]`: a missing profile is made with the owner `owner_of` gives (a browser profile is
 /// personal), and the browser is recorded when named. The note and the grantee list are the caller's to print.
 pub(crate) fn secret_browser(
@@ -554,9 +557,14 @@ pub(crate) fn secret_browser(
     } else {
         format!("browser/{profile}")
     };
-    // no name rule beyond what the file has: `kith-auth browser` accepts any name
+    // The name is a folder under `<machine>/browsers`: it may not leave it (kith-auth refuses the same). Empty names and
+    // control characters are refused as the other writers do.
+    let account = name.trim_start_matches("browser/");
     if !plain(&name) || browser.is_some_and(|b| !plain(b)) {
         return usage("a name may not be empty or hold a control character");
+    }
+    if account.is_empty() || account.contains(['/', '\\']) || account == "." || account == ".." {
+        return usage(BROWSER_NAME);
     }
     ensure_owned(auth, c, life, "browser", &name)?;
     if let Some(b) = browser {

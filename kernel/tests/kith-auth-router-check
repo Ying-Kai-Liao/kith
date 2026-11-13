@@ -617,6 +617,9 @@ if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
     run A browser browser/work edge                                                # a note: it was made in chrome
     run A browser browser/work edge
     run A browser other
+    run A browser ../outside                                                       # would leave browsers/: refused
+    run A browser browser/a/b
+    run A browser ..
     run A keys --json
     run A holders echo
     run A holders login --json

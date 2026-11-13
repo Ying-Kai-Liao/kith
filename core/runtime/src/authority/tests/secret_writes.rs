@@ -737,6 +737,16 @@ fn a_browser_profile_is_made_for_the_owner_and_keeps_its_browser() {
         )
         .unwrap();
     assert_eq!(vars, 0);
+    // a name that would leave <machine>/browsers is refused, and nothing is made
+    let before = rig.tables();
+    for bad in ["../x", "browser/a/b", "..", "browser/", "a\\b"] {
+        let said = died(&rig.call("people.secretBrowser", &b(bad, None)).unwrap());
+        assert!(
+            said.0.contains("browser/<name>") || said.0.contains("empty"),
+            "{bad}: {said:?}"
+        );
+    }
+    assert_eq!(rig.tables(), before);
     rig.c.person = Some("sam".to_owned());
     assert_eq!(
         died(&rig.call("people.secretBrowser", &b("other", None)).unwrap()),

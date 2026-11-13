@@ -9,6 +9,8 @@
 \* A terminal `kith kernel core-call people.suspend|undo` commits in the core and tells the host nothing.
 \* Reconcile (the design): under AUTH_WRITES, read the core's people, and for a person the core shows revoked whom the
 \* host has not set aside, set them aside. Never the other way (narrowing only).
+\* Not modelled: a RENAME in the core (the host keeps its rows under the old id). The code treats a former id (`was`) as listed,
+\* so a rename is no removal (remote/core_revokes.rs `to_cut`; test a_person_renamed_in_the_core_is_not_cut_off_here).
 EXTENDS Naturals, TLC
 
 CONSTANTS MaxOps, SplitRead, RestoreToo

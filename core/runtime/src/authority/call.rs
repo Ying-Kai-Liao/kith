@@ -472,9 +472,10 @@ pub(crate) fn call_in(
             |a| json!({ "rows": write::list(a, c, word(params, "agent"), word(params, "person")) }),
         ),
         // `kith-auth people --json`: every person, bots and revoked ones too, with their agent rows and handles.
-        "people.listPeople" => {
-            store::read(core, |a| json!({ "rows": people_json::people_json(a, c) }))
-        }
+        "people.listPeople" => store::read(
+            core,
+            |a| json!({ "rows": people_json::people_json(a, c, switch(params, "withWas")) }),
+        ),
         // The answer of `may` itself (M2-15): the host's event filter asks it per person and agent. A refusal of the
         // rules is a "no" with its words, as for `kith-auth may`.
         "people.may" => {

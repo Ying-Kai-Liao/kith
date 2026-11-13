@@ -56,10 +56,11 @@ async fn a_core_only_suspend_sets_the_person_aside_here_within_one_tick() {
     due.tick(&r.hub, true).await;
     assert!(set_aside(&r, "sam") && !held(&r, "sam"), "the next tick cut them off here");
     // a second look changes nothing and stops no one again
-    let mut done = BTreeSet::from(["sam".to_owned()]);
+    let mut done = BTreeSet::new();
+    reconcile(&r.hub, &mut done).await;
     reconcile(&r.hub, &mut done).await;
     assert!(set_aside(&r, "sam"));
-    assert!(done.contains("sam"), "the core still shows them revoked");
+    assert!(done.iter().any(|c| c.0 == "sam"), "the core still shows them revoked");
 }
 
 #[tokio::test]
@@ -70,6 +71,15 @@ async fn a_core_only_removal_is_cut_too() {
     assert!(!listed["rows"].as_array().unwrap().iter().any(|p| p["id"] == "sam"), "the core no longer lists them");
     reconcile(&r.hub, &mut BTreeSet::new()).await;
     assert!(set_aside(&r, "sam") && !held(&r, "sam"));
+}
+
+#[tokio::test]
+async fn a_person_renamed_in_the_core_is_not_cut_off_here() {
+    let (r, core) = switched_with_sam().await;
+    // the host's rows stay under `sam`
+    core.ask("people.renamePerson", json!({"id": "sam", "to": "samuel"})).expect("rename");
+    reconcile(&r.hub, &mut BTreeSet::new()).await;
+    assert!(held(&r, "sam") && !set_aside(&r, "sam"), "a rename is no removal");
 }
 
 #[tokio::test]
@@ -105,7 +115,7 @@ async fn an_app_undo_racing_a_tick_ends_restored() {
     reconcile(&r.hub, &mut BTreeSet::new()).await;
     assert!(set_aside(&r, "sam"));
     crate::api::people::local_revoke(&r.hub, &r.bin, "sam", false).await.unwrap();
-    reconcile(&r.hub, &mut BTreeSet::from(["sam".to_owned()])).await;
+    reconcile(&r.hub, &mut BTreeSet::new()).await;
     assert!(held(&r, "sam") && !set_aside(&r, "sam"), "undone from the app, restored, and kept so");
 }
 

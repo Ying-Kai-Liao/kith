@@ -3562,6 +3562,9 @@ def dispatch(cmd, rest):
             print(f'{var}={value}')
     elif cmd == 'browser' and len(rest) in (1, 2):
         name = rest[0] if rest[0].startswith('browser/') else f'browser/{rest[0]}'
+        account = name[len('browser/'):]
+        if not account or '/' in account or '\\' in account or account in ('.', '..'):   # a folder under browsers/, never outside it
+            die('a browser profile is browser/<name>, a name with no / and not . or ..', 2)
         auth, in_core = load_for_write()
         prof = auth['profiles'].setdefault(name, {})
         if len(rest) == 2:
