@@ -245,6 +245,12 @@ LOG = AUTH.with_name('auth.log')   # every secret handed out: when, to whom, for
 SECURITY = os.environ.get('KITH_SECURITY_BIN') or '/usr/bin/security'   # the one tool that reads and writes Keychain items
 
 
+def room_prefix_msg(what):
+    # `room-<id>` is the grant of a room's people (launch/room.rs); a real id there would be that grant's id.
+    # An id that already exists keeps working (and can be removed): only a new one is refused.
+    return f"a {what} id can not start with room-: that is reserved for a room's own grant"
+
+
 def die(msg, code=1):
     print(f'kith-auth: {msg}', file=sys.stderr)
     sys.exit(code)
@@ -2426,6 +2432,8 @@ def cmd_person(args):
             guest_tmp_remove(x)
         return
     auth = load_auth(write=True)
+    if pid.startswith('room-') and pid not in auth['people'] and '--rm' not in flags:
+        die(room_prefix_msg('person'), 2)
     if 'id' in kv:
         return rename(auth, pid, kv.pop('id'))
     if 'owner' in flags and auth['people'].get(pid, {}).get('bot_of'):
@@ -2641,6 +2649,8 @@ def rename(auth, old, new):
     need_person(auth, old)
     if not re.fullmatch(r'[a-z][a-z0-9-]*', new):
         die('a person id is lowercase letters, digits and -, e.g. sam', 2)
+    if new.startswith('room-'):
+        die(room_prefix_msg('person'), 2)
     if new in auth['people'] or any(new in p.get('was', []) for p in auth['people'].values()):
         die(f"'{new}' is already a person (or one's old id)")
     need_free(auth, new)
@@ -2912,6 +2922,8 @@ def cmd_bot(args):
     if not re.fullmatch(r'[a-z][a-z0-9-]*', bid):
         die('a bot id is lowercase letters, digits and -, e.g. bot-3f9a1c2e', 2)
     auth = load_auth(write=True)
+    if bid.startswith('room-') and bid not in auth['people'] and '--rm' not in flags:
+        die(room_prefix_msg('bot'), 2)
     if '--rm' in flags:
         if not auth['people'].get(bid, {}).get('bot_of'):
             die(f"no bot '{bid}'")

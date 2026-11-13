@@ -10,7 +10,7 @@ fn guest(
     write: &[&str],
     domains: &[&str],
 ) -> Value {
-    json!({"person": id, "owner": false, "allowed": true, "why": "", "mode": mode, "trusted": false,
+    json!({"person": id, "owner": false, "allowed": true, "held": false, "why": "", "mode": mode, "trusted": false,
            "deny": deny, "helpers": helpers, "model": "x", "env": {"A": "1"}, "jobs": ["j"], "doors": ["d@1"],
            "access": {"read": read, "write": write, "domains": domains}})
 }
@@ -83,40 +83,92 @@ fn free_shell_is_never_the_meet() {
         let g = room_grant("scout", &[a.clone()]).unwrap();
         assert_eq!(g.mode, "acceptEdits");
         assert!(g.trusted);
-        let owner = json!({"person": "", "owner": true, "allowed": true});
-        assert_eq!(
-            room_grant("scout", &[owner, a]).unwrap().mode,
-            "acceptEdits"
-        );
     }
 }
 
 #[test]
-fn trusted_is_and_and_owner_limits_nothing() {
+fn trusted_is_and() {
     let mut a = guest("a", "default", &[], &["h"], &["/p"], &[], &["a.com"]);
     a["trusted"] = json!(true);
     let b = guest("b", "default", &[], &["h"], &["/p"], &[], &["a.com"]);
-    assert!(!room_grant("s", &[a.clone(), b]).unwrap().trusted);
-    let owner = json!({"person": "", "owner": true, "allowed": true});
-    let g = room_grant("s", &[a, owner]).unwrap();
-    assert!(g.trusted);
-    assert_eq!(
-        (g.helpers, g.read, g.domains),
-        (
-            vec!["h".to_owned()],
-            vec!["/p".to_owned()],
-            vec!["a.com".to_owned()]
-        )
-    );
+    assert!(room_grant("s", &[a.clone()]).unwrap().trusted);
+    assert!(!room_grant("s", &[a, b]).unwrap().trusted);
 }
 
 #[test]
-fn missing_fields_read_as_narrowest() {
-    let a = guest("a", "default", &["D"], &["h"], &["/p"], &[], &["a.com"]);
-    let bare = json!({"person": "b", "allowed": true, "mode": "acceptEdits"});
-    let g = room_grant("s", &[a, bare]).unwrap();
-    assert!(g.helpers.is_empty() && g.read.is_empty() && g.domains.is_empty());
-    assert_eq!(g.deny, ["D"]);
+fn the_owner_is_not_a_room_person() {
+    let a = guest("a", "default", &[], &["h"], &["/p"], &[], &["a.com"]);
+    let owner = json!({"person": "", "owner": true, "allowed": true, "held": false});
+    let named = json!({"person": "kai", "owner": true, "allowed": true, "held": false});
+    let mut empty_id = a.clone();
+    empty_id["person"] = json!("");
+    for bad in [owner, named, empty_id] {
+        assert!(room_grant("s", &[a.clone(), bad.clone()]).is_err(), "{bad}");
+        assert!(room_grant("s", &[bad]).is_err());
+    }
+}
+
+#[test]
+fn held_must_be_exactly_false() {
+    for held in [json!(true), json!(null), json!("false"), json!(0)] {
+        let mut a = guest("a", "default", &[], &[], &[], &[], &[]);
+        a["held"] = held;
+        assert!(room_grant("s", &[a]).is_err());
+    }
+    let mut a = guest("a", "default", &[], &[], &[], &[], &[]);
+    a.as_object_mut().unwrap().remove("held");
+    assert!(room_grant("s", &[a]).is_err());
+}
+
+#[test]
+fn a_missing_or_mistyped_field_refuses() {
+    let ok = || guest("a", "default", &["D"], &["h"], &["/p"], &["/w"], &["a.com"]);
+    assert!(room_grant("s", &[ok()]).is_ok());
+    for k in ["mode", "deny", "helpers", "access", "trusted"] {
+        let mut a = ok();
+        a.as_object_mut().unwrap().remove(k);
+        assert!(room_grant("s", &[a]).is_err(), "missing {k}");
+    }
+    for k in ["read", "write", "domains"] {
+        let mut a = ok();
+        a["access"].as_object_mut().unwrap().remove(k);
+        assert!(room_grant("s", &[a]).is_err(), "missing access.{k}");
+    }
+    let wrong = [
+        ("mode", json!(1)),
+        ("mode", json!("")),
+        ("deny", json!("D")),
+        ("deny", json!(null)),
+        ("helpers", json!({})),
+        ("access", json!([])),
+        ("trusted", json!("true")),
+        ("trusted", json!(null)),
+    ];
+    for (k, v) in wrong {
+        let mut a = ok();
+        a[k] = v;
+        assert!(room_grant("s", &[a]).is_err(), "wrong {k}");
+    }
+    for k in ["read", "write", "domains"] {
+        let mut a = ok();
+        a["access"][k] = json!("x");
+        assert!(room_grant("s", &[a]).is_err(), "wrong access.{k}");
+    }
+}
+
+#[test]
+fn a_non_string_entry_refuses_instead_of_being_dropped() {
+    let mut a = guest("a", "default", &["D"], &["h"], &["/p"], &[], &["a.com"]);
+    a["deny"] = json!(["D", 7]);
+    assert!(room_grant("s", &[a]).is_err());
+    for k in ["read", "write", "domains"] {
+        let mut a = guest("a", "default", &[], &[], &[], &[], &[]);
+        a["access"][k] = json!([null]);
+        assert!(room_grant("s", &[a]).is_err(), "access.{k}");
+    }
+    let mut a = guest("a", "default", &[], &[], &[], &[], &[]);
+    a["helpers"] = json!([["h"]]);
+    assert!(room_grant("s", &[a]).is_err());
 }
 
 struct Rng(u64);
@@ -142,21 +194,15 @@ const PATHS: [&str; 7] = ["/p", "/p/a", "/p/a/b", "/p/c", "/q", "/q/r", "/pp"];
 
 fn random_answer(r: &mut Rng, i: usize) -> Value {
     let modes = ["default", "acceptEdits", "bypassPermissions", "auto"];
-    let mut v = json!({"person": format!("p{i}"), "owner": false, "allowed": true,
+    let v = json!({"person": format!("p{i}"), "owner": false, "allowed": true, "held": false,
         "mode": modes[r.next(4)], "trusted": r.next(2) == 0,
         "deny": r.pick(&["d1", "d2", "d3"], 3), "helpers": r.pick(&["h1", "h2", "h3"], 3),
         "access": {"read": r.pick(&PATHS, 3), "write": r.pick(&PATHS, 2), "domains": r.pick(&["a.com", "b.com", "c.com"], 3)}});
-    if r.next(8) == 0 {
-        v.as_object_mut().unwrap().remove("helpers");
-    }
-    if r.next(8) == 0 {
-        v.as_object_mut().unwrap().remove("access");
-    }
     v
 }
 
 fn list(v: &Value, k: &str) -> Vec<String> {
-    strings(v.get(k))
+    strings(v.get(k)).unwrap_or_default()
 }
 
 #[test]

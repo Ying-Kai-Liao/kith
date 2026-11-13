@@ -12,10 +12,11 @@
 //! - deny: the union. helpers: the intersection. trusted: AND. access (read, write, domains): the intersection, where a
 //!   folder survives as the narrower of two nested ones (the cover `held` in kith-auth gives: write covers read).
 //! - model: the agent's own (empty here). jobs, doors, env: empty in C0 (PR D fills them).
-//! - the owner's answer (no mode, no helpers: the owner holds everything) limits nothing, except that the room person
-//!   is never a free shell.
-//! - missing optional fields: kith-auth gives a non-owner `deny`, `helpers` and `access` always, so a missing one means
-//!   the answer is not a real one; it is read as the narrowest value (no helpers, no access, no deny), never wider.
+//! - the owner is not a room person: an answer with `owner: true`, or an empty id (which `is_owner` counts as the
+//!   owner and `resolve` answers as `acting()`), is a refusal.
+//! - a non-owner answer must carry `held: false`, `mode`, `deny`, `helpers`, `access` (read, write, domains) and
+//!   `trusted`, each of the right JSON type; kith-auth always prints them. A missing or mistyped one, or a non-string
+//!   entry in any list (it would widen `deny`), is a refusal, never read as none.
 //! - fail closed: no basis, an answer that is not allowed, is held (out of sync) or does not parse, is a refusal.
 
 use super::settings::Member;
@@ -88,17 +89,19 @@ fn rank(mode: &str) -> Option<u8> {
 }
 
 fn mode_name(rank: u8) -> &'static str {
-    if rank == 0 { "default" } else { "acceptEdits" }
+    if rank == 0 {
+        "default"
+    } else {
+        "acceptEdits"
+    }
 }
 
-fn strings(v: Option<&Value>) -> Vec<String> {
-    v.and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
+/// A list of strings; anything else (missing, not a list, a non-string entry) is `None`.
+fn strings(v: Option<&Value>) -> Option<Vec<String>> {
+    v?.as_array()?
+        .iter()
+        .map(|x| x.as_str().map(str::to_owned))
+        .collect()
 }
 
 fn within(path: &str, root: &str) -> bool {
@@ -122,7 +125,6 @@ fn narrow(a: &BTreeSet<String>, b: &BTreeSet<String>) -> BTreeSet<String> {
 
 /// One person's answer, read for the meet.
 struct Basis {
-    owner: bool,
     rank: u8,
     deny: BTreeSet<String>,
     helpers: BTreeSet<String>,
@@ -145,9 +147,7 @@ fn read_basis(r: &Value) -> Result<Basis, Refusal> {
     if !r.is_object() {
         return Err(fail("its answer could not be read"));
     }
-    if r.get("held")
-        .is_some_and(|h| h.as_bool() != Some(false) && !h.is_null())
-    {
+    if r.get("held").and_then(Value::as_bool) != Some(false) {
         return Err(fail("this computer is out of sync with the Kith cloud"));
     }
     if r.get("allowed").and_then(Value::as_bool) != Some(true) {
@@ -157,39 +157,39 @@ fn read_basis(r: &Value) -> Result<Basis, Refusal> {
             .filter(|w| !w.is_empty());
         return Err(fail(why.unwrap_or("not allowed")));
     }
-    if r.get("owner").and_then(Value::as_bool) == Some(true) {
-        return Ok(Basis {
-            owner: true,
-            rank: 1,
-            deny: BTreeSet::new(),
-            helpers: BTreeSet::new(),
-            trusted: true,
-            read: BTreeSet::new(),
-            write: BTreeSet::new(),
-            domains: BTreeSet::new(),
-        });
+    if id.is_empty() || r.get("owner").and_then(Value::as_bool) != Some(false) {
+        return Err(fail("the owner is not a room person"));
     }
-    let mode = r.get("mode").and_then(Value::as_str).unwrap_or_default();
+    let bad = |field: &str| fail(&format!("its answer has no usable {field}"));
+    let mode = r
+        .get("mode")
+        .and_then(Value::as_str)
+        .ok_or_else(|| bad("mode"))?;
     let rank = rank(mode).ok_or_else(|| fail("its permission mode is not one a room can use"))?;
+    let list = |v: Option<&Value>, field: &str| {
+        strings(v)
+            .map(|l| l.into_iter().collect::<BTreeSet<String>>())
+            .ok_or_else(|| bad(field))
+    };
     let access = r.get("access").filter(|a| a.is_object());
-    let folders = |k: &str| strings(access.and_then(|a| a.get(k)));
-    let write: BTreeSet<String> = folders("write").into_iter().collect();
+    let access_list = |k: &str| list(access.and_then(|a| a.get(k)), &format!("access.{k}"));
+    let write = access_list("write")?;
     // write covers read
-    let read: BTreeSet<String> = folders("read")
+    let read: BTreeSet<String> = access_list("read")?
         .into_iter()
         .chain(write.iter().cloned())
         .collect();
     Ok(Basis {
-        owner: false,
         rank,
-        deny: strings(r.get("deny")).into_iter().collect(),
-        helpers: strings(r.get("helpers")).into_iter().collect(),
-        trusted: r.get("trusted").and_then(Value::as_bool) == Some(true),
+        deny: list(r.get("deny"), "deny")?,
+        helpers: list(r.get("helpers"), "helpers")?,
+        trusted: r
+            .get("trusted")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| bad("trusted"))?,
         read,
         write,
-        domains: strings(access.and_then(|a| a.get("domains")))
-            .into_iter()
-            .collect(),
+        domains: access_list("domains")?,
     })
 }
 
@@ -224,15 +224,11 @@ pub fn room_grant(agent: &str, basis: &[Value]) -> Result<RoomGrant, Refusal> {
     for b in &rows {
         deny.extend(b.deny.iter().cloned());
         trusted &= b.trusted;
-        // The owner limits nothing: only the people who are not the owner narrow what is shared.
-        if !b.owner {
-            helpers = Some(meet(helpers, &b.helpers, same));
-            domains = Some(meet(domains, &b.domains, same));
-            read = Some(meet(read, &b.read, narrow));
-            write = Some(meet(write, &b.write, narrow));
-        }
+        helpers = Some(meet(helpers, &b.helpers, same));
+        domains = Some(meet(domains, &b.domains, same));
+        read = Some(meet(read, &b.read, narrow));
+        write = Some(meet(write, &b.write, narrow));
     }
-    // A room of owners only has nobody to be wider than; it still gets nothing it was not given by name.
     let list = |s: Option<BTreeSet<String>>| s.unwrap_or_default().into_iter().collect::<Vec<_>>();
     Ok(RoomGrant {
         agent: agent.to_owned(),
@@ -259,6 +255,13 @@ pub fn resolve_basis(
 ) -> Result<RoomGrant, Refusal> {
     let mut answers = Vec::with_capacity(people.len());
     for person in people {
+        // An empty id is the owner to `is_owner`, and resolve falls back to the acting person on it.
+        if person.is_empty() {
+            return Err(Refusal::Person {
+                person: person.clone(),
+                why: "the owner is not a room person".to_owned(),
+            });
+        }
         let mut c = sctx.clone();
         c.person = Some(person.clone());
         let o = secrets::run(&c, "resolve", &[agent.to_owned()]);
