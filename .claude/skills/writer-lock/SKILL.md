@@ -13,15 +13,14 @@ written by the architect and run green in his own folder; M3-0a committed them h
 drift shows. Their origin (path, date) is in each file's header. `results4.md` is the architect's result table plus
 what M3-0a added. This skill is the only other documentation.
 
-State today: the stub's lock primitive exists (`core/stub/src/lib.rs`) and the core's claim transaction with the redeem
-exists (`core/runtime/src/conversations/claims.rs`, M3-2). Since M3-4 the holder runs every Pipes engine under
-`kith-stub --resident` and relays the core's `take`/`release` for a turn to it (claim id on every frame; the holder acts
-only on the current claim or a take in flight; unacked answers are kept per claim and kind, a weaker answer never
-replacing a stronger; a dead stub ends its engine). What is still missing is the core side of the wire (M3-5). The
-holder's relay rules (in-flight take, report keeping) are bookkeeping on top of the modelled safety properties and are
-not in `Holder.tla`; model them at M3-5. A green run says the design holds; it does not say the code follows it.
-`drift.sh` lists the code that exists and tells you when it moves. `Holder.tla` was derived from the holder at 73a03656
-and, for the core's claim record (switch `RedeemWrite`), from `claims.rs` (M3-2); `WriterLock4.tla` models the design only.
+State today (M3-12, 2026-11-14): the stub, the holder (every Pipes engine under `kith-stub --resident`, claim ids on every frame),
+the core's claim transaction, the holder link (claim ids, exit reports, turn lock steps, kill re-send, hello's step 7), the
+wake turns and the host's core claims (`KITH_HOST_CORE_CLAIMS`, off by default) exist; the holder link's per-turn lock steps (`begin_turn` / `finish_turn`, M3-5) are built but have no production caller yet; the
+host's claim files are still the writer until the cutover. The holder's relay rules (in-flight take, report keeping) are bookkeeping on top of the modelled
+safety properties and are not in `Holder.tla`. A green run says the design holds; it does not say the code follows it.
+`drift.sh` lists the code that exists and tells you when it moves. `Holder.tla` was derived from the holder at 73a03656 and,
+for the core's claim record (switch `RedeemWrite`), from `claims.rs` (M3-2); `WriterLock4.tla` models the design only;
+`Claims4.tla` is derived from the claim code and was re-read at 1720d27e.
 
 ## Run it
 
@@ -45,10 +44,10 @@ the architect's version; Temurin JRE 21 only when no Java 11+ is on PATH; cached
 
 ## Sync commit
 
-**Pinned at `73a03656ad207a7abc854136eda0ab848a2ab591`** (the rust-rebuild commit `Holder.tla` was derived from; not
-"confirmed": the covered files have changed since and nobody has re-read them against the models, so `drift.sh` lists
-them on purpose). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have re-read the changes and
-confirmed the models describe the code at the new commit, and change both places.
+**Pinned at `1720d27eef3ac4f1208b94fa7c61f268a9e824b4`** (rust-rebuild, 2026-11-14, the M3-12 gate): `drift.sh` was read change
+by change from the old pin (73a03656) and every covered file's change checked against the three models; `results4.md`
+("Added by M3-12") has each change and its verdict. The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
+re-read the changes and confirmed the models describe the code at the new commit, and change both places.
 
 ## What is promised, and the harm if not
 
@@ -161,7 +160,7 @@ turn of source `ask` or `wake` (`TurnArrive` of an `Auto` turn) for the conversa
 The module does not model the lock itself (WriterLock4 does): "the lock is taken" = no other claim's process is writing.
 Bounds: 1 conversation, 2 turns (turn 2 is an ask/wake turn), 4 claims, 1 holder crash, 1 revoke, 1 take-over.
 
-Code, cited at `origin/rust-rebuild` cf308ebc (`core/runtime/src/...`):
+Code, cited at `origin/rust-rebuild` cf308ebc (`core/runtime/src/...`; line numbers are from then, M3-12 re-read the changes since: `results4.md`):
 
 | Action | Code |
 |---|---|
@@ -199,6 +198,8 @@ about 320k states); `fix-doubletake` = two take-overs, no crash. Broken variants
 | `c4-stopall` | `stop_conversation_in` sparing a person's (take-over) claim | `AskSparesTakeOver` |
 | `c4-fenceleak` / `c4-epochleak` | nothing (the code): a refused turn stays queued; `MaxRev=1` for the epoch | `P3Strict` (the `c4-fencecancel` / `c4-epochcancel` rows, where the caller cancels it, pass) |
 | `WriterLock4 r4-tonolock` | the take-over writer taking the lock | `P1_NoTwoWriters` |
+| `c4-hostconst` (M3-12, `HostHolder`) | one constant host instance (core_claims.rs `HOST_INSTANCE` today): a restarted host reads the old claim as its own and reports it done under the old stub's live engine. `c4-hostholder` (per-start instance, the old claims stopped to `ending` and killed, the group surviving) passes. The design's "fails P4" is `WriterHasClaim` here: the claim ends while the engine writes | `WriterHasClaim` |
+| `c4-pidonly` (M3-12) | `end_gone` waiting for the pid only, not the process group it led (K2): a stub killed alone while the holder is down leaves a writing `orphan` engine | `WriterHasClaim` (`c4-orphan`, the code, passes) |
 
 **Round-4 list to rows**: holder crash with the stub dying `r4-fix-die-*`, `c4-fix-die`; with it surviving `r4-fix-survive-*`,
 `c4-fix-survive`; broken: `r4-nostub` (the lock dies with the holder), `r4-stubfirst`. Leaked lock fd: `r4-inherit` fails
@@ -255,7 +256,7 @@ Park and wake (q217/q218): `r4-edge`, `r4-parkclaim-*`, `c4-fix-*` (`P3`). Take-
 ## Map of the folder
 
 - `WriterLock4.tla`, `r4-*.cfg`: the lock model and its runs (architect's; the `M3-0a` lines are the Q2 variant).
-- `Claims4.tla`, `c4-*.cfg`: the claim and turn rows against the processes (M3-10b1; derived from `claims.rs`, `asks/mod.rs`, `wake/queue.rs` at rust-rebuild cf308ebc).
+- `Claims4.tla`, `c4-*.cfg`: the claim and turn rows against the processes (M3-10b1; derived from `claims.rs`, `asks/mod.rs`, `wake/queue.rs` at rust-rebuild cf308ebc, re-synced at 1720d27e by M3-12).
 - `Holder.tla`, `holder-*.cfg`: the holder model (architect's) and the runs M3-0a added.
 - `results4.md`: the architect's result table, plus what M3-0a added.
 - `checks.tsv`: the table `run.sh` enforces. `run.sh`: runner (tools from `verification/threads/run.sh --tools`).

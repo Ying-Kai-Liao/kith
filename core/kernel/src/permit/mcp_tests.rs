@@ -286,6 +286,37 @@ fn a_waiting_answer_parks_the_ask_that_started_the_run() {
 }
 
 #[test]
+fn park_waits_for_the_ask_box_lock_and_skips_an_ended_ask() {
+    use fs2::FileExt as _;
+    let root = world("park-lock");
+    let mut env = guest(&root, &root.join("no-host"));
+    env.set("KITH_ASK_ID", "ask-8");
+    let boxed = root.join(".kith/live/ask");
+    std::fs::create_dir_all(&boxed).unwrap();
+    let lock = std::fs::File::create(boxed.join(".lock")).unwrap();
+    lock.lock_exclusive().unwrap();
+    let (e, r) = (env.clone(), root.clone());
+    let t = std::thread::spawn(move || super::decide::park(&e, &r));
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(
+        !boxed.join("ask-8.parked").exists(),
+        "park wrote while the lock was held"
+    );
+    drop(lock);
+    t.join().unwrap();
+    assert!(boxed.join("ask-8.parked").is_file());
+    // an ended ask gets no marker: an end already removed it and nothing is left to resume
+    std::fs::remove_file(boxed.join("ask-8.parked")).unwrap();
+    std::fs::write(
+        boxed.join("ask-8.reg"),
+        "{\"state\": \"stopped\", \"ended_at\": 5}",
+    )
+    .unwrap();
+    super::decide::park(&env, &root);
+    assert!(!boxed.join("ask-8.parked").exists());
+}
+
+#[test]
 fn the_guests_pair_is_used_before_the_owners() {
     let root = world("pair");
     let (guest_sock, owner_sock) = (root.join("g"), root.join("o"));
