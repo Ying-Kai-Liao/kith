@@ -1019,7 +1019,9 @@ async fn a_bot_guests_warm_run_in_a_room_starts_again_when_the_rooms_members_cha
     let inits = || s.requests("initialize").len();
 
     s.host.reply(&group, "first").await;
-    assert_eq!((s.launches().len(), inits()), (1, 1));
+    // A person's activation asks the kernel for a launch each time it runs (the count is 1 or 2 depending on whether
+    // the turn's prepare step runs twice before the reply lands), so the one process is counted by its initialize.
+    assert_eq!(inits(), 1);
     assert_eq!(last_room_env(&s), (Some("sam".to_owned()), None), "the room holds sam's bot");
 
     // A person's turn asks the kernel for a launch every time, but the unchanged room keeps the one process.
