@@ -1104,6 +1104,10 @@ mod embedded_authority {
             "people.secretGrant",
             "people.secretRevoke",
             "people.secretEnv",
+            "people.secretOwner",
+            "people.secretShare",
+            "people.secretBrowser",
+            "people.link",
             "people.agentAccess",
             "people.revision",
         ] {

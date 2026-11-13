@@ -99,16 +99,50 @@ struct State {
 /// One thing that happens. Indexes into bots and methods are taken modulo what exists.
 #[derive(Clone, Debug)]
 enum Op {
-    Create { actor: usize, agents: u8 },
-    Allow { bot: usize, always: bool },
-    RevokeBot { actor: usize, bot: usize },
-    RevokeInvite { actor: usize, bot: usize },
-    Reinvite { actor: usize, bot: usize },
-    MyBots { actor: usize },
-    SetLimits { actor: usize, bot: usize, rate: usize, conc: usize },
-    SetAccess { person: usize, roles: [u8; 2] },
-    Remove { person: usize },
-    Call { bot: usize, method: usize },
+    Create {
+        actor: usize,
+        agents: u8,
+    },
+    Allow {
+        bot: usize,
+        always: bool,
+    },
+    RevokeBot {
+        actor: usize,
+        bot: usize,
+    },
+    RevokeInvite {
+        actor: usize,
+        bot: usize,
+    },
+    Reinvite {
+        actor: usize,
+        bot: usize,
+    },
+    MyBots {
+        actor: usize,
+    },
+    SetLimits {
+        actor: usize,
+        bot: usize,
+        rate: usize,
+        conc: usize,
+    },
+    SetAccess {
+        person: usize,
+        roles: [u8; 2],
+    },
+    Remove {
+        person: usize,
+    },
+    /// "Link Telegram": a one-time code for the caller's person (a removed person's device is no one).
+    LinkCode {
+        actor: usize,
+    },
+    Call {
+        bot: usize,
+        method: usize,
+    },
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -123,6 +157,7 @@ fn op() -> impl Strategy<Value = Op> {
             .prop_map(|(actor, bot, rate, conc)| Op::SetLimits { actor, bot, rate, conc }),
         3 => (1..3usize, proptest::array::uniform2(0..3u8)).prop_map(|(person, roles)| Op::SetAccess { person, roles }),
         1 => (1..3usize).prop_map(|person| Op::Remove { person }),
+        1 => (0..3usize).prop_map(|actor| Op::LinkCode { actor }),
         4 => (0..8usize, 0..500usize).prop_map(|(bot, method)| Op::Call { bot, method }),
     ]
 }
@@ -454,6 +489,28 @@ impl State {
                 // Their bots go dormant, not ended (revoke-person): still let in, but `holds` is false for a removed
                 // owner, so each ask is refused `notGranted` and nothing is listed as theirs.
                 self.removed[person] = true;
+            }
+            Op::LinkCode { actor } => {
+                // On the file kith-auth makes the code; switched the core does (`people.invite`), and the stand-in for
+                // kith-auth is never run (the caller's check of its log).
+                let res = self.call(&self.callers[actor], "linkCode", json!({})).await;
+                if self.removed[actor] {
+                    check!(res.is_err(), "a removed person was given a link code");
+                } else {
+                    let v = res.map_err(|e| format!("linkCode of {} failed: {e:#}", WHO[actor]))?;
+                    let code = v["code"].as_str().unwrap_or_default().to_owned();
+                    check!(code.len() == 6, "the link code is {code:?}");
+                    if self.core.is_some() {
+                        let rows = self.core_ask("people.invites", json!({}));
+                        check!(
+                            rows["rows"]
+                                .as_array()
+                                .is_some_and(|r| r.iter().any(|i| i["code"] == code && i["person"] == WHO[actor])),
+                            "the core holds no code {code} for {}",
+                            WHO[actor]
+                        );
+                    }
+                }
             }
             Op::Call { bot, method } if n > 0 => {
                 let bi = bot % n;
