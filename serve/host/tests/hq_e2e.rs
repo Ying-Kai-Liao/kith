@@ -915,7 +915,8 @@ async fn a_bot_guests_warm_run_in_a_room_starts_again_when_the_rooms_members_cha
         .restart(|dir| {
             let db = rusqlite::Connection::open(dir.join("serve.db")).unwrap();
             db.execute("UPDATE bots SET config = json_set(config, '$.person', 'kim') WHERE id = ?1", [&other]).unwrap();
-            db.execute("UPDATE bots SET config = json_set(config, '$.person', 'sam') WHERE id != ?1", [&other]).unwrap();
+            db.execute("UPDATE bots SET config = json_set(config, '$.person', 'sam') WHERE id != ?1", [&other])
+                .unwrap();
         })
         .await;
     s.house().await;
