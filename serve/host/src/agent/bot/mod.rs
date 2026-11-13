@@ -234,6 +234,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         conn_serving: None,
         conn_account: None,
         conn_room: String::new(),
+        conn_room_at: None,
         backup_sessions: HashMap::new(),
         preface: None,
         attempt_prompt: None,
@@ -476,6 +477,8 @@ struct Actor {
     conn_account: Option<String>,
     /// The room the agent process was started for (`KITH_ROOM`): another room starts it again.
     conn_room: String,
+    /// A group room's members and gen when the process started (`None`: no group): a change starts it again.
+    conn_room_at: Option<(crate::agent::hq::Members, i64)>,
     /// The sessions a backup entry holds for this actor, by (entry, thread root or empty). Kept in memory only: the
     /// stored sessions are the agent's own, which come back when its limit lifts.
     backup_sessions: HashMap<(String, String), String>,
@@ -652,7 +655,9 @@ impl Actor {
         if kind == EntryKind::Agent && self.is_hq() {
             data["answeredBy"] = self.serving.clone().into();
         }
-        self.hub.add_entry(&self.lane, kind, turn, &data)
+        // A room turn's lines carry its start gen, however long after a join or leave they land.
+        let room_gen = self.active_group.as_ref().filter(|g| g.lane.chat == self.lane.chat).map(|g| g.room_gen);
+        self.hub.add_entry_gen(&self.lane, kind, turn, &data, room_gen)
     }
 
     /// A notice in the running turn's lane (or the actor's own place between turns).

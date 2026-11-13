@@ -96,6 +96,18 @@ impl Actor {
         }
     }
 
+    /// A group room's members and gen now (`None`: no group), compared with what the live process started with.
+    fn room_at(&self) -> Option<(hq::Members, i64)> {
+        let g = self.active_group.as_ref()?;
+        Some(room_state(&self.hub.store, &g.lane.chat, self.cfg.person.as_deref()))
+    }
+
+    /// Whether the live process may take this turn as far as its room goes (see [`room_reusable`]).
+    fn room_unchanged(&self) -> bool {
+        let chat = self.active_group.as_ref().map(|g| g.lane.chat.as_str());
+        room_reusable(&self.hub.store, chat, self.cfg.person.as_deref(), self.conn_room_at.as_ref())
+    }
+
     /// The notes to put before the first user message of a thread. Once per thread: the session is new only for its
     /// first message, and a resumed one is not.
     pub(super) async fn first_message_recall(&self, text: &str) -> Option<String> {
@@ -375,7 +387,8 @@ impl Actor {
             // been taken away, their budget used up or their mode changed since the last turn.
             warm = matches!((&current, &self.conn), (Some(sid), Some(conn)) if conn.loaded.contains_key(sid))
                 && self.conn_serving == self.serving
-                && self.conn_room == self.run_room();
+                && self.conn_room == self.run_room()
+                && self.room_unchanged();
             // A process on another account than the main one is started again below: its launch says so.
             if warm && person.is_none() && self.conn_on_main(&chain) {
                 self.turn_session = current;
@@ -479,8 +492,11 @@ impl Actor {
             // The membership's mode is set when a session starts: a changed one starts the process again.
             started_as.0.push(("permission_mode".into(), launch.permission_mode.map_or("", |m| m.as_str()).to_owned()));
         }
+        // A room whose people or members changed since the process started gets a new one too (rooms-with-people 4).
         if self.conn.is_some()
-            && (self.conn_started_as.as_ref() != Some(&started_as) || self.conn_serving != self.serving)
+            && (self.conn_started_as.as_ref() != Some(&started_as)
+                || self.conn_serving != self.serving
+                || !self.room_unchanged())
             && let Some(c) = self.conn.take()
         {
             c.acp.kill().await;
@@ -533,6 +549,7 @@ impl Actor {
             self.conn_serving.clone_from(&self.serving);
             self.conn_account.clone_from(&launch.account_id);
             self.conn_room = self.run_room();
+            self.conn_room_at = self.room_at();
             let provider = launch.other_engine().unwrap_or(self.cfg.backend.as_str());
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
             // Anyone but the owner asks the host who they are (`kith recall` over the run socket), with a token that
@@ -709,6 +726,24 @@ impl Actor {
     }
 }
 
+/// A group room's members and gen as the host knows them now: what a process is started with.
+fn room_state(store: &crate::store::Store, chat: &str, run_person: Option<&str>) -> (hq::Members, i64) {
+    (room_members(store, chat, run_person), store.room_gen(chat))
+}
+
+/// Whether a process started with `started` (`None`: not in a group) may take a turn in group `chat` now (`None`: not
+/// a group) (rooms-with-people rule 4): the room has no people, and its members (a bot guest added or removed shows
+/// here) and gen are what the process was started with. A failed read of the people counts as people.
+fn room_reusable(
+    store: &crate::store::Store,
+    chat: Option<&str>,
+    run_person: Option<&str>,
+    started: Option<&(hq::Members, i64)>,
+) -> bool {
+    let Some(chat) = chat else { return started.is_none() };
+    store.room_people(chat).is_ok_and(|p| p.is_empty()) && started == Some(&room_state(store, chat, run_person))
+}
+
 /// [`Actor::run_members`] for the group `chat`, run by the bot of `run_person` (`None` is the owner's).
 fn room_members(store: &crate::store::Store, chat: &str, run_person: Option<&str>) -> hq::Members {
     use hq::Members::{OwnerOnly, People, Unknown};
@@ -841,6 +876,42 @@ mod tests {
         assert_eq!(room_members(&store, "nope", None), Unknown, "group not found is a failed read");
         assert_eq!(room_members(&store, "dead-group", None), Unknown, "a group deleted mid-run");
         assert_eq!(room_members(&store, "solo", Some("sam")), Unknown, "a person's own run is never owner only");
+    }
+
+    #[test]
+    fn a_process_is_reused_only_while_the_room_has_no_people_and_is_as_it_started() {
+        let store = crate::store::Store::open(std::path::Path::new(":memory:")).unwrap();
+        let save = |id: &str, person: Value, members: Value| {
+            let cfg =
+                json!({"id": id, "name": id, "backend": "claude", "cwd": "/tmp", "person": person, "members": members});
+            store.save_bot(&serde_json::from_value(cfg).unwrap()).unwrap();
+        };
+        save("mine", json!(null), json!([]));
+        save("guest", json!("bot-1234abcd"), json!([]));
+        save("room", json!(null), json!(["mine"]));
+        let started = Some(room_state(&store, "room", None));
+        assert!(room_reusable(&store, Some("room"), None, started.as_ref()), "nothing changed");
+        assert!(!room_reusable(&store, Some("room"), None, None), "started outside any room");
+        assert!(room_reusable(&store, None, None, None), "no group, none before");
+        assert!(!room_reusable(&store, None, None, started.as_ref()), "was in a group, now isn't");
+
+        // A bot guest joins: the members read at spawn are no longer run_members().
+        save("room", json!(null), json!(["mine", "guest"]));
+        assert!(!room_reusable(&store, Some("room"), None, started.as_ref()), "a bot guest was added");
+        let started = Some(room_state(&store, "room", None));
+        assert!(room_reusable(&store, Some("room"), None, started.as_ref()), "a process started after the add is fine");
+
+        // A person joins: the gen moves, and the room has people from then on, for any process.
+        store.join_room("room", "sam").unwrap();
+        assert!(!room_reusable(&store, Some("room"), None, started.as_ref()));
+        let started = Some(room_state(&store, "room", None));
+        assert!(!room_reusable(&store, Some("room"), None, started.as_ref()), "never reused while someone is in it");
+
+        // They leave: a new process is needed once more (the gen moved), then reuse works again.
+        store.leave_room("room", "sam").unwrap();
+        assert!(!room_reusable(&store, Some("room"), None, started.as_ref()));
+        let started = Some(room_state(&store, "room", None));
+        assert!(room_reusable(&store, Some("room"), None, started.as_ref()));
     }
 }
 

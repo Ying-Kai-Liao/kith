@@ -22,6 +22,7 @@ mod actors;
 mod folders;
 pub(crate) mod hq;
 mod order;
+pub mod rooms;
 mod sync;
 
 /// What a bot is doing right now (wire values: `idle` / `working` / `needsInput` / `error`).
@@ -115,6 +116,9 @@ struct PendingEntry {
     turn: i64,
     data: Value,
     at: i64,
+    /// The room gen it is written at; `None` is the room's gen when it lands, which is its gen at append since a join
+    /// or leave waits for the held entries ([`Hub::add_room_person`]).
+    room_gen: Option<i64>,
 }
 
 #[derive(Default)]
@@ -263,6 +267,16 @@ impl Hub {
     }
 
     pub fn update_bot(&self, patch: &Value) -> Result<Value> {
+        self.update_bot_granted(patch, &std::collections::BTreeSet::new())
+    }
+
+    /// [`Self::update_bot`], where `granted` holds the (person, agent) pairs the caller found live, for a room with
+    /// people: an agent joins only if every person in the room has it ([`Self::check_room_agents`]).
+    pub fn update_bot_granted(
+        &self,
+        patch: &Value,
+        granted: &std::collections::BTreeSet<(String, String)>,
+    ) -> Result<Value> {
         let id = patch["id"].as_str().ok_or_else(|| anyhow!("id required"))?.to_owned();
         let row = self.store.bot(&id)?.filter(|b| !b.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
         let mut merged = serde_json::to_value(&row.config)?;
@@ -315,6 +329,10 @@ impl Hub {
             // entirely before the edit or entirely after it (always membership, then emit).
             let _members = crate::chat::group::membership_lock();
             let _g = self.emit_lock.locked();
+            if cfg.is_group() {
+                let stored = self.store.bot(&id)?.map(|r| r.config.members).unwrap_or_default();
+                self.check_room_agents(&id, &stored, &cfg.members, granted)?;
+            }
             self.store.save_bot(&cfg)?;
         }
         // Places without a folder of their own follow the bot's: their stored sessions end before the actors learn.
@@ -483,6 +501,19 @@ impl Hub {
     /// kept in memory (bounded) and retried in order (see [`Self::retry_unsaved`]); it yields `None` and the
     /// conversation goes on. Held entries are lost if the host restarts first: there is no disk to keep them on.
     pub fn add_entry(&self, lane: &Lane, kind: EntryKind, turn: i64, data: &Value) -> Option<Entry> {
+        self.add_entry_gen(lane, kind, turn, data, None)
+    }
+
+    /// [`Self::add_entry`] written at room gen `room_gen` (a run's line carries its turn's start gen); `None` is the
+    /// room's gen now.
+    pub fn add_entry_gen(
+        &self,
+        lane: &Lane,
+        kind: EntryKind,
+        turn: i64,
+        data: &Value,
+        room_gen: Option<i64>,
+    ) -> Option<Entry> {
         let (added, mut landed) = {
             let _g = self.emit_lock.locked();
             // Older held entries go first, so a thread's lines stay in order.
@@ -494,6 +525,7 @@ impl Hub {
                 turn,
                 data: data.clone(),
                 at: crate::store::now_ms(),
+                room_gen,
             };
             let added = if self.unsaved.locked().queue.is_empty() {
                 match self.write_pending(&pending) {
@@ -545,6 +577,7 @@ impl Hub {
                 turn: self.store.max_turn(&secret.room),
                 data: notice.clone(),
                 at: crate::store::now_ms(),
+                room_gen: None,
             };
             let written =
                 self.write_pending(&line).and_then(|e| self.store.set_secret_notice(&secret.id, e.seq).map(|()| e));
@@ -566,7 +599,7 @@ impl Hub {
     /// Writes and broadcasts one entry, under `emit_lock`. Clears the store flag when the write lands.
     fn write_pending(&self, p: &PendingEntry) -> Result<Entry> {
         // An entry stored by an attempt that reported an error comes back as it is: no duplicate row.
-        let (e, _) = self.store.insert_entry_as(&p.id, &p.lane, p.kind, p.turn, &p.data, p.at)?;
+        let (e, _) = self.store.insert_entry_as(&p.id, &p.lane, p.kind, p.turn, &p.data, p.at, p.room_gen)?;
         self.set_store_error(None);
         let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));
         Ok(e)
@@ -957,9 +990,10 @@ mod unsaved_tests {
             turn: 1,
             data: json!({"text": "x"}),
             at: 1,
+            room_gen: None,
         };
         hub.hold_queued(p);
-        hub.store.insert_entry_as("same", &lane, EntryKind::User, 1, &json!({"text": "x"}), 1).unwrap();
+        hub.store.insert_entry_as("same", &lane, EntryKind::User, 1, &json!({"text": "x"}), 1, None).unwrap();
         hub.retry_unsaved();
         assert_eq!(texts(&hub), ["x"]);
     }

@@ -53,6 +53,8 @@ mod roles_props;
 #[cfg(test)]
 mod roles_tests;
 #[cfg(test)]
+mod room_people_tests;
+#[cfg(test)]
 mod room_points_props;
 #[cfg(test)]
 mod room_secrets_props;

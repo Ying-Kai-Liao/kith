@@ -16,6 +16,7 @@ mod model;
 mod peers;
 mod people;
 mod room_bots;
+mod room_people;
 mod room_secrets;
 mod schema;
 mod session_grants;
@@ -34,6 +35,8 @@ pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, i
 pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
 pub use room_bots::RoomPoint;
+#[cfg(test)]
+pub use room_people::RoomStay;
 pub use room_secrets::{RoomSecret, SecretTo};
 pub use session_grants::{NewSessionGrant, SessionGrant};
 pub use suspended::HandleRevoke;

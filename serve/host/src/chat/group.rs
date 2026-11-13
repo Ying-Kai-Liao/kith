@@ -54,6 +54,8 @@ pub struct GroupTurn {
     pub epoch: u64,
     /// The conversation this turn belongs to, named on the reply it stores (`data.conversation`).
     pub conversation: Option<String>,
+    /// The room's gen when the turn started: every line the turn writes in the room carries it (rule 1).
+    pub room_gen: i64,
     /// The reply the room sees, or `None` for a pass.
     pub reply: oneshot::Sender<Result<Option<String>>>,
 }
@@ -444,10 +446,10 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         let text = if let Some(guest) = guest_member(hub, &member.id) {
             bot_turn(hub, conv, &group, &guest).await?
         } else {
-            let prompt = member_prompt(hub, &group, &members, member, &lane)?;
+            let (room_gen, prompt) = turn_input(hub, &group, &members, member, &lane)?;
             let (reply, answer) = oneshot::channel();
-            let turn =
-                GroupTurn { lane: lane.clone(), prompt, epoch: conv.epoch, conversation: Some(conv.id.clone()), reply };
+            let conversation = Some(conv.id.clone());
+            let turn = GroupTurn { lane: lane.clone(), prompt, epoch: conv.epoch, conversation, room_gen, reply };
             if hub.send_cmd(&member.id, Cmd::Group(turn)).is_err() {
                 None
             } else {
@@ -505,11 +507,11 @@ pub fn ask_agent(hub: &Arc<Hub>, room: &str, agent_id: &str) -> Result<()> {
     let members = members(hub, &group);
     let Some(agent) = members.iter().find(|m| m.id == agent_id) else { bail!("{agent_id} isn't in this room") };
     let lane = Lane::main(room);
-    let prompt = member_prompt(hub, &group, &members, agent, &lane)?;
+    let (room_gen, prompt) = turn_input(hub, &group, &members, agent, &lane)?;
     let (reply, answer) = oneshot::channel();
     let epoch = hub.store.lane_epoch(&lane);
     let conversation = hub.store.newest_conversation(&lane).map(|c| c.id);
-    hub.send_cmd(agent_id, Cmd::Group(GroupTurn { lane, prompt, epoch, conversation, reply }))?;
+    hub.send_cmd(agent_id, Cmd::Group(GroupTurn { lane, prompt, epoch, conversation, room_gen, reply }))?;
     // The turn is skipped once nobody holds its reply, so something has to.
     tokio::spawn(async move {
         let _ = tokio::time::timeout(crate::chat::team::ASK_TIMEOUT, answer).await;
@@ -832,6 +834,20 @@ fn mentions(text: &str, handle: &str) -> bool {
     lower
         .match_indices(&needle)
         .any(|(i, _)| lower[i + needle.len()..].chars().next().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_')))
+}
+
+/// A member turn's input and the room gen it starts at. The gen is read first and takes no lock (a bot's room ask
+/// already holds the membership lock here): a join that lands before the input is read leaves the turn at the older gen,
+/// so what it writes stays hidden from the one who joined, never shown to them.
+fn turn_input(
+    hub: &Hub,
+    group: &BotConfig,
+    members: &[BotConfig],
+    me: &BotConfig,
+    lane: &Lane,
+) -> Result<(i64, String)> {
+    let room_gen = hub.store.room_gen(&group.id);
+    Ok((room_gen, member_prompt(hub, group, members, me, lane)?))
 }
 
 fn member_prompt(hub: &Hub, group: &BotConfig, members: &[BotConfig], me: &BotConfig, lane: &Lane) -> Result<String> {
@@ -1380,6 +1396,42 @@ mod tests {
         crate::api::dispatch(&room.hub, &Caller::Local, "stop", json!({"botId": room.group})).await.unwrap();
         let after_stop = room.hub.store.lane_epoch(&main);
         assert!(after_stop >= 2, "stop never moves the epoch back");
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_reply_keeps_the_gen_its_turn_started_at_when_someone_joins_meanwhile() {
+        let room = Room::new();
+        let main = Lane::main(&room.group);
+        let asked = room.send("@a BLOCK hold", None).await;
+        assert_eq!(room.hub.store.entry_gen(&asked.id), Some(0));
+        let hub = room.hub.clone();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hub.bot_runtime("a").status != BotStatus::Working {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("a starts");
+        assert_eq!(room.hub.store.join_room(&room.group, "sam").unwrap(), 1);
+        std::fs::write(room.dir.join("a/release"), "").unwrap();
+        room.settle().await;
+        let lines: Vec<_> = room
+            .hub
+            .store
+            .messages_after(&main, 0, 100)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "agent" && e.data["author"] == "a")
+            .collect();
+        assert!(!lines.is_empty(), "a replied");
+        for e in &lines {
+            assert_eq!(room.hub.store.entry_gen(&e.id), Some(0), "a line of a turn started before the join: {e:?}");
+        }
+        // `a`, not `b`: the fixture agent blocks on the word BLOCK anywhere in its room's history, until its release file.
+        let later = room.send("@a and now?", None).await;
+        assert_eq!(room.hub.store.entry_gen(&later.id), Some(1), "a person's post takes the gen at append");
+        room.settle().await;
         room.shutdown().await;
     }
 

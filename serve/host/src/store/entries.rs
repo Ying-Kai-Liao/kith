@@ -27,6 +27,9 @@ pub(super) fn row_entry(r: &rusqlite::Row) -> rusqlite::Result<Entry> {
 pub(super) const ENTRY_COLS: &str = "seq, id, bot_id, rev, kind, turn, data, created_at, updated_at, thread_id";
 /// A bot still winding down after its deletion can't leave lines behind (`?2` is the chat).
 const LIVE_CHAT: &str = "WHERE NOT EXISTS (SELECT 1 FROM bots WHERE id = ?2 AND deleted = 1)";
+/// The generation an entry is written at when the writer names none: its room's now (`?2` is the chat; 0 for a chat
+/// that isn't a room, whose gen never moves).
+const GEN_NOW: &str = "COALESCE((SELECT gen FROM bots WHERE id = ?2), 0)";
 
 impl Store {
     /// Production writes go through `Hub::add_entry` (which holds and retries); this is the tests' direct way in.
@@ -37,11 +40,13 @@ impl Store {
 
     /// [`Self::insert_entry`] stamped `now` (ms): lines imported from a terminal session keep when they were said.
     pub fn insert_entry_at(&self, lane: &Lane, kind: EntryKind, turn: i64, data: &Value, now: i64) -> Result<Entry> {
-        self.insert_entry_as(&uuid::Uuid::new_v4().to_string(), lane, kind, turn, data, now).map(|(e, _)| e)
+        self.insert_entry_as(&uuid::Uuid::new_v4().to_string(), lane, kind, turn, data, now, None).map(|(e, _)| e)
     }
 
     /// [`Self::insert_entry_at`] under a caller-chosen `id`, so a failed write can be retried without a duplicate:
-    /// an `id` already stored comes back as that entry.
+    /// an `id` already stored comes back as that entry. `room_gen` is the room generation it is written at (a run's
+    /// turn's start gen); `None` takes the room's gen now, as a person's post does.
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_entry_as(
         &self,
         id: &str,
@@ -50,6 +55,7 @@ impl Store {
         turn: i64,
         data: &Value,
         now: i64,
+        room_gen: Option<i64>,
     ) -> Result<(Entry, bool)> {
         let c = self.db.locked();
         if let Some(e) =
@@ -60,10 +66,10 @@ impl Store {
         let rev = next_rev(&c)?;
         let added = c.execute(
             &format!(
-                "INSERT INTO entries(id, bot_id, thread_id, rev, kind, turn, data, created_at, updated_at)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8 {LIVE_CHAT}"
+                "INSERT INTO entries(id, bot_id, thread_id, rev, kind, turn, data, created_at, updated_at, gen)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, COALESCE(?9, {GEN_NOW}) {LIVE_CHAT}"
             ),
-            params![id, lane.chat, lane.thread, rev, kind.as_str(), turn, data.to_string(), now],
+            params![id, lane.chat, lane.thread, rev, kind.as_str(), turn, data.to_string(), now, room_gen],
         )?;
         ensure!(added == 1, "the chat was deleted");
         Ok((
@@ -94,7 +100,7 @@ impl Store {
         }
         let rev = next_rev(&tx)?;
         let now = now_ms();
-        let added = tx.execute(&format!("INSERT INTO entries(id, bot_id, thread_id, rev, kind, turn, data, created_at, updated_at) SELECT ?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7 {LIVE_CHAT}"),
+        let added = tx.execute(&format!("INSERT INTO entries(id, bot_id, thread_id, rev, kind, turn, data, created_at, updated_at, gen) SELECT ?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7, {GEN_NOW} {LIVE_CHAT}"),
             params![id, lane.chat, lane.thread, rev, kind.as_str(), data.to_string(), now])?;
         ensure!(added == 1, "the chat was deleted");
         let entry = tx.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?"), [id], row_entry)?;

@@ -16,6 +16,32 @@ fn lane_conversation(hub: &Hub, lane: &Lane) -> Value {
     hub.store.newest_conversation(lane).map_or(Value::Null, |c| crate::chat::group::conversation_view(hub, &c))
 }
 
+/// A room's gen and every stay in it, oldest first.
+fn room_people(hub: &Hub, room: &str) -> Result<Value> {
+    Ok(json!({"gen": hub.store.room_gen(room), "people": hub.store.room_stays(room)?}))
+}
+
+/// For an edit of a room with people: which (person, agent) pairs of the edited members kith-auth grants now. The hub
+/// checks the added agents against these under the room's lock.
+async fn room_grants(hub: &Hub, b: &Value) -> std::collections::BTreeSet<(String, String)> {
+    let mut granted = std::collections::BTreeSet::new();
+    let (Some(room), Some(members)) = (b["id"].as_str(), b["members"].as_array()) else { return granted };
+    // A failed read grants nothing; the hub reads again under the lock and refuses then.
+    let people = hub.store.room_people(room).unwrap_or_default();
+    if people.is_empty() {
+        return granted;
+    }
+    let members: Vec<String> = members.iter().filter_map(|m| m.as_str().map(str::to_owned)).collect();
+    for agent in crate::hub::rooms::room_agents(&hub.store, &members).unwrap_or_default() {
+        for p in &people {
+            if super::roles::may_use(p, &agent).await {
+                granted.insert((p.clone(), agent.clone()));
+            }
+        }
+    }
+    granted
+}
+
 pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
     Ok(ControlFlow::Break(match method {
         "routineSchedule" => crate::routines::schedule_preview(&b, now_ms())?,
@@ -122,8 +148,32 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             if let Some(o) = b.as_object_mut() {
                 o.remove("builtin");
             }
+            let granted = room_grants(hub, &b).await;
             let hub = hub.clone();
-            json!({"bot": tokio::task::spawn_blocking(move || hub.update_bot(&b)).await??})
+            json!({"bot": tokio::task::spawn_blocking(move || hub.update_bot_granted(&b, &granted)).await??})
+        }
+        // People in a room (owner only): each join or leave bumps the room's gen; the answer is the room's stays.
+        "roomPeople" => room_people(hub, str_arg(&b, "roomId")?)?,
+        "addRoomPerson" => {
+            let (room, person) = (str_arg(&b, "roomId")?.to_owned(), str_arg(&b, "person")?.to_owned());
+            let members = hub.store.bot(&room)?.map(|r| r.config.members).unwrap_or_default();
+            let mut granted = std::collections::BTreeSet::new();
+            for agent in crate::hub::rooms::room_agents(&hub.store, &members).unwrap_or_default() {
+                if super::roles::may_use(&person, &agent).await {
+                    granted.insert(agent);
+                }
+            }
+            let h = hub.clone();
+            let r = room.clone();
+            tokio::task::spawn_blocking(move || h.add_room_person(&r, &person, &granted)).await??;
+            room_people(hub, &room)?
+        }
+        "removeRoomPerson" => {
+            let (room, person) = (str_arg(&b, "roomId")?.to_owned(), str_arg(&b, "person")?.to_owned());
+            let h = hub.clone();
+            let r = room.clone();
+            tokio::task::spawn_blocking(move || h.remove_room_person(&r, &person)).await??;
+            room_people(hub, &room)?
         }
         // The roster as the user dragged it, top first.
         "reorderBots" => {
