@@ -246,6 +246,9 @@ fn the_writers_need_viaswitch_a_switched_core_and_refuse_a_damaged_record_except
         "people.secretGrant",
         "people.secretRevoke",
         "people.secretEnv",
+        "people.secretOwner",
+        "people.secretShare",
+        "people.secretBrowser",
     ] {
         let e = rig.call(m, &p).unwrap_err();
         assert!(e.contains("needs viaSwitch"), "{m}: {e}");
@@ -564,5 +567,179 @@ fn a_helper_since_survives_the_core_and_comes_back() {
         row.get("helper_since")
             .is_none_or(|h| h.get("garden").is_none()),
         "{row}"
+    );
+}
+
+fn via(mut p: Value) -> Value {
+    p["viaSwitch"] = json!(true);
+    p["dies"] = json!(true);
+    p
+}
+
+#[test]
+fn an_owner_write_moves_a_profile_to_a_person_to_everyone_or_to_its_service_default() {
+    let mut rig = rig();
+    let own = |profile: &str, person: &str| via(json!({"profile": profile, "person": person}));
+    assert_eq!(
+        rig.call("people.secretOwner", &own("github/work", "sam"))
+            .unwrap(),
+        json!({"ok": true})
+    );
+    assert_eq!(profile(&mut rig, "github/work")["person"], "sam");
+    // `-` is shared: stored `*`
+    rig.call("people.secretOwner", &own("github/work", "-"))
+        .unwrap();
+    assert_eq!(profile(&mut rig, "github/work")["person"], "*");
+    // `default` stores what the service gives: nobody's for a shared service, the owner's for a personal one
+    rig.call("people.secretOwner", &own("github/work", "default"))
+        .unwrap();
+    assert_eq!(profile(&mut rig, "github/work").get("person"), None);
+    rig.call("people.secretSet", &set("chatgpt/main", &["SESSION"], None))
+        .unwrap();
+    rig.call("people.secretOwner", &own("chatgpt/main", "sam"))
+        .unwrap();
+    rig.call("people.secretOwner", &own("chatgpt/main", "default"))
+        .unwrap();
+    assert_eq!(profile(&mut rig, "chatgpt/main")["person"], "kai");
+    // the variables are untouched
+    assert_eq!(
+        profile(&mut rig, "github/work")["GITHUB_TOKEN"],
+        "keychain:kith/github/work#GITHUB_TOKEN"
+    );
+    // refusals write nothing: a profile that is not there, a person who is not
+    let before = rig.tables();
+    for (p, why) in [
+        (own("nope/x", "sam"), "no profile 'nope/x'"),
+        (
+            own("github/work", "ghost"),
+            "no person 'ghost' (kith-auth person ghost name=..)",
+        ),
+    ] {
+        assert_eq!(died(&rig.call("people.secretOwner", &p).unwrap()).0, why);
+    }
+    rig.c.person = Some("sam".to_owned());
+    assert_eq!(
+        died(
+            &rig.call("people.secretOwner", &own("github/work", "sam"))
+                .unwrap()
+        ),
+        ("refused: not available to this run".to_owned(), 2)
+    );
+    assert_eq!(rig.tables(), before);
+}
+
+#[test]
+fn a_share_lends_in_order_without_repeats_takes_back_and_an_empty_list_is_none() {
+    let mut rig = rig();
+    let share =
+        |ids: &[&str], rm: bool| via(json!({"profile": "github/work", "ids": ids, "remove": rm}));
+    rig.call("people.secretShare", &share(&["sam", "pat"], false))
+        .unwrap();
+    rig.call("people.secretShare", &share(&["pat", "kai"], false))
+        .unwrap();
+    assert_eq!(
+        profile(&mut rig, "github/work")["with"],
+        json!(["sam", "pat", "kai"])
+    );
+    rig.call("people.secretShare", &share(&["pat"], true))
+        .unwrap();
+    assert_eq!(
+        profile(&mut rig, "github/work")["with"],
+        json!(["sam", "kai"])
+    );
+    rig.call("people.secretShare", &share(&["sam", "kai", "sam"], true))
+        .unwrap();
+    assert_eq!(profile(&mut rig, "github/work").get("with"), None);
+    let before = rig.tables();
+    assert_eq!(
+        died(
+            &rig.call("people.secretShare", &share(&["sam", "ghost"], false))
+                .unwrap()
+        )
+        .0,
+        "no person 'ghost' (kith-auth person ghost name=..)"
+    );
+    assert_eq!(
+        died(
+            &rig.call(
+                "people.secretShare",
+                &via(json!({"profile": "nope/x", "ids": ["sam"]}))
+            )
+            .unwrap()
+        )
+        .0,
+        "no profile 'nope/x'"
+    );
+    assert_eq!(rig.tables(), before, "all or nothing");
+}
+
+#[test]
+fn a_share_removal_goes_through_a_damaged_record_and_a_lend_does_not() {
+    let mut rig = rig();
+    rig.call(
+        "people.secretShare",
+        &via(json!({"profile": "slack/shared", "ids": ["kai"]})),
+    )
+    .unwrap();
+    let layout = Layout::new(&crate::authority::revoke::Life::beside(&rig.c).machine);
+    std::fs::write(state::path(&layout, "authority").unwrap(), "garbage").unwrap();
+    let lend = via(json!({"profile": "slack/shared", "ids": ["pat"]}));
+    assert!(
+        rig.call("people.secretShare", &lend)
+            .unwrap_err()
+            .contains("not switched")
+    );
+    rig.call(
+        "people.secretShare",
+        &via(json!({"profile": "slack/shared", "ids": ["sam"], "remove": true})),
+    )
+    .unwrap();
+    assert_eq!(profile(&mut rig, "slack/shared")["with"], json!(["kai"]));
+}
+
+#[test]
+fn a_browser_profile_is_made_for_the_owner_and_keeps_its_browser() {
+    let mut rig = rig();
+    spec(&rig, "kernel", "browser", &json!({"kind": "browser"}));
+    let b = |name: &str, browser: Option<&str>| {
+        let mut p = json!({"profile": name});
+        if let Some(x) = browser {
+            p["browser"] = json!(x);
+        }
+        via(p)
+    };
+    rig.call("people.secretBrowser", &b("work", None)).unwrap();
+    assert_eq!(
+        profile(&mut rig, "browser/work"),
+        json!({"person": "kai"}),
+        "the owner's, no browser yet"
+    );
+    rig.call("people.secretBrowser", &b("browser/work", Some("chrome")))
+        .unwrap();
+    assert_eq!(
+        profile(&mut rig, "browser/work"),
+        json!({"person": "kai", "browser": "chrome"})
+    );
+    // a repeat without a browser leaves it; another one replaces it
+    rig.call("people.secretBrowser", &b("work", None)).unwrap();
+    assert_eq!(profile(&mut rig, "browser/work")["browser"], "chrome");
+    rig.call("people.secretBrowser", &b("work", Some("edge")))
+        .unwrap();
+    assert_eq!(profile(&mut rig, "browser/work")["browser"], "edge");
+    // no Keychain item and no variable: the profile row only
+    let vars: i64 = rig
+        .core
+        .conn()
+        .query_row(
+            "SELECT count(*) FROM secret_vars WHERE profile = 'browser/work'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(vars, 0);
+    rig.c.person = Some("sam".to_owned());
+    assert_eq!(
+        died(&rig.call("people.secretBrowser", &b("other", None)).unwrap()),
+        ("refused: not available to this run".to_owned(), 2)
     );
 }

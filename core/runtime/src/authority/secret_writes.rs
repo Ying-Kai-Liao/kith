@@ -458,3 +458,109 @@ pub(crate) fn secret_env(
     }
     Ok(json!({ "ok": true }))
 }
+
+/// `cmd_owner`: whose a profile is. `-` makes it shared (stored `*`), `default` stores what `owner_of` answers for its
+/// service (the owner's id for a personal one, none for a shared one: the table has no "unset"), a person's id needs
+/// that person now, in this same step.
+pub(crate) fn secret_owner(
+    auth: &mut Value,
+    c: &Ctx,
+    life: &Life,
+    profile: &str,
+    person: &str,
+) -> R<Value> {
+    owner_only(c, auth)?;
+    if !peek(auth, "profiles").is_some_and(|p| p.contains_key(profile)) {
+        return die(format!("no profile '{profile}'"));
+    }
+    let set = match person {
+        "-" => Some("*".to_owned()),
+        "default" => {
+            let svc = profile.split_once('/').map_or(profile, |(s, _)| s);
+            if personal(c, life, svc)? {
+                Some(secrets::owner(auth).unwrap_or_else(|| "the owner".to_owned()))
+            } else {
+                None
+            }
+        }
+        id => {
+            need_person(auth, id)?;
+            Some(id.to_owned())
+        }
+    };
+    let prof = entry(top(auth, "profiles"), profile);
+    match set {
+        Some(p) => {
+            prof.insert("person".to_owned(), Value::String(p));
+        }
+        None => {
+            prof.shift_remove("person");
+        }
+    }
+    Ok(json!({ "ok": true }))
+}
+
+/// `cmd_share`: lends a profile to people (`remove`: takes it back). Every id must be a person now, in this step; the
+/// list keeps its order, drops repeats, and an empty one is none.
+pub(crate) fn secret_share(
+    auth: &mut Value,
+    c: &Ctx,
+    profile: &str,
+    ids: &[&str],
+    remove: bool,
+) -> R<Value> {
+    owner_only(c, auth)?;
+    if !peek(auth, "profiles").is_some_and(|p| p.contains_key(profile)) {
+        return die(format!("no profile '{profile}'"));
+    }
+    for id in ids {
+        need_person(auth, id)?;
+    }
+    let prof = entry(top(auth, "profiles"), profile);
+    let have = grant_list(prof.get("with"));
+    let lent: Vec<String> = if remove {
+        have.into_iter()
+            .filter(|x| !ids.contains(&x.as_str()))
+            .collect()
+    } else {
+        let mut all = have;
+        for id in ids {
+            if !all.iter().any(|x| x == id) {
+                all.push((*id).to_owned());
+            }
+        }
+        all
+    };
+    if lent.is_empty() {
+        prof.shift_remove("with");
+    } else {
+        prof.insert("with".to_owned(), json!(lent));
+    }
+    Ok(json!({ "ok": true }))
+}
+
+/// `browser <profile> [<browser>]`: a missing profile is made with the owner `owner_of` gives (a browser profile is
+/// personal), and the browser is recorded when named. The note and the grantee list are the caller's to print.
+pub(crate) fn secret_browser(
+    auth: &mut Value,
+    c: &Ctx,
+    life: &Life,
+    profile: &str,
+    browser: Option<&str>,
+) -> R<Value> {
+    owner_only(c, auth)?;
+    let name = if profile.starts_with("browser/") {
+        profile.to_owned()
+    } else {
+        format!("browser/{profile}")
+    };
+    // no name rule beyond what the file has: `kith-auth browser` accepts any name
+    if !plain(&name) || browser.is_some_and(|b| !plain(b)) {
+        return usage("a name may not be empty or hold a control character");
+    }
+    ensure_owned(auth, c, life, "browser", &name)?;
+    if let Some(b) = browser {
+        entry(top(auth, "profiles"), &name).insert("browser".to_owned(), json!(b));
+    }
+    Ok(json!({ "ok": true }))
+}

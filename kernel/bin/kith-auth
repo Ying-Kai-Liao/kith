@@ -2979,7 +2979,7 @@ def cmd_owner(args):
     if len(args) != 2:
         die('owner <profile> <id>|-|default', 2)
     prof, pid = args
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     if prof not in auth['profiles']:
         die(f"no profile '{prof}'")
     if pid == '-':
@@ -2989,7 +2989,7 @@ def cmd_owner(args):
     else:
         need_person(auth, pid)
         auth['profiles'][prof]['person'] = pid
-    save_auth(auth)
+    commit(auth, in_core, 'people.secretOwner', {'profile': prof, 'person': pid})
     who = owner_of(auth, prof)
     print(f'{prof}: ' + (f'{who}\'s; runs for anyone else never get it' if who else 'shared with everyone who may use '
                          'the agents granted it') + (' (the default for its service)' if pid == 'default' else ''))
@@ -2999,7 +2999,7 @@ def cmd_share(args):
     if len(args) not in (2, 3) or (len(args) == 3 and args[2] != '--rm'):
         die('share <profile> <id>[,..] [--rm]', 2)
     prof, ids = args[0], [i for i in args[1].split(',') if i]
-    auth = load_auth(write=True)
+    auth, in_core = load_for_write()
     if prof not in auth['profiles']:
         die(f"no profile '{prof}'")
     for pid in ids:
@@ -3010,7 +3010,7 @@ def cmd_share(args):
         p['with'] = lent
     else:
         p.pop('with', None)
-    save_auth(auth)
+    commit(auth, in_core, 'people.secretShare', {'profile': prof, 'ids': ids, 'remove': len(args) == 3})
     who = owner_of(auth, prof)
     print(f'{prof}: {who or "shared"}\'s' + (f', shared with {", ".join(lent)}' if lent else ', shared with no one else'))
 
@@ -3562,14 +3562,14 @@ def dispatch(cmd, rest):
             print(f'{var}={value}')
     elif cmd == 'browser' and len(rest) in (1, 2):
         name = rest[0] if rest[0].startswith('browser/') else f'browser/{rest[0]}'
-        auth = load_auth(write=True)
+        auth, in_core = load_for_write()
         prof = auth['profiles'].setdefault(name, {})
         if len(rest) == 2:
             if prof.get('browser') and prof['browser'] != rest[1]:
                 print(f'note: {name} was made in {prof["browser"]}; its logins may not open in {rest[1]}',
                       file=sys.stderr)
             prof['browser'] = rest[1]
-        save_auth(auth)
+        commit(auth, in_core, 'people.secretBrowser', {'profile': name, **({'browser': rest[1]} if len(rest) == 2 else {})})
         folder = paths()['KITH_MACHINE'] / 'browsers' / name.split('/', 1)[1]
         users = [a for a, g in auth['grants'].items() if g.get('browser') == name]
         print(f'{name}: {prof.get("browser") or "browser not set (the first tool to open it picks)"}, {folder}'
