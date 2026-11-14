@@ -386,20 +386,50 @@ fn owe(hub: &Hub, persons: &[String], only_denied: bool, why: String) -> Swept {
     // The stamp is fresh at every owe: a retry settles a row only while it still carries the stamp the retry read, so a sweep
     // owed again while that retry runs is not erased by it.
     let row = json!({"persons": persons, "narrow": only_denied, "suspended": suspended, "stamp": uuid::Uuid::new_v4().to_string()});
+    let mut fresh = false;
     {
         let _lock = locked();
         let mut rows = owed(hub);
         let same = |r: &Value| r["persons"] == row["persons"] && r["narrow"] == row["narrow"];
         match rows.iter().position(same) {
             Some(at) => rows[at] = row,
-            None => rows.push(row),
+            None => {
+                rows.push(row);
+                fresh = true;
+            }
         }
         if let Err(error) = hub.store.kv_set(OWED, &Value::Array(rows).to_string()) {
             tracing::error!(%error, "a revoke sweep the core did not take could not be recorded");
         }
     }
     tracing::warn!(persons = ?persons, why, "warning: the core could not end a revoked person's runs; the sweep is owed and retried");
+    // The owner is told once, when the sweep first becomes owed (a retry that fails again refreshes the row and stays quiet).
+    if fresh {
+        tell_owner(
+            hub,
+            &format!(
+                "The core could not end the runs of {} after their access was removed. It will try again every 30 seconds.",
+                persons.join(", ")
+            ),
+        );
+    }
     Swept::Owed(why)
+}
+
+/// A notice in the owner's own chat and an alert on their devices, the way the host tells them of anything that needs them.
+fn tell_owner(hub: &Hub, text: &str) {
+    let chat = crate::cards::chat_for(hub, "", "kith");
+    let lane = crate::store::Lane::main(&chat.id);
+    let turn = hub.store.max_turn(&lane.chat);
+    hub.add_entry(&lane, crate::store::EntryKind::Notice, turn, &json!({"text": text, "style": "divider"}));
+    crate::remote::push::notify(
+        hub,
+        &chat,
+        Some(&chat.id),
+        "A revoke is not finished",
+        text,
+        crate::remote::push::AlertKind::Failed,
+    );
 }
 
 fn owed(hub: &Hub) -> Vec<Value> {

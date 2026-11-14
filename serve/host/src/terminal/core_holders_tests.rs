@@ -544,3 +544,21 @@ fn a_sweep_owed_again_while_a_retry_runs_is_not_erased_by_that_retry() {
     settle_row(&hub, &fresh);
     assert_eq!(owed(&hub).len(), 0);
 }
+
+#[test]
+fn the_owner_is_told_once_when_a_sweep_first_becomes_owed() {
+    let r = Rig::new(true, true);
+    let hub = test_hub(&r.state);
+    let told = |who: &str| {
+        crate::remote::push::SENT
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.contains("A revoke is not finished") && s.contains(who))
+            .count()
+    };
+    owe(&hub, &["zed".into()], false, "down".into());
+    assert_eq!(told("zed"), 1);
+    owe(&hub, &["zed".into()], false, "down again".into());
+    assert_eq!(told("zed"), 1, "a retry that fails again stays quiet");
+}
