@@ -47,6 +47,11 @@ impl RoomBasis {
     /// The room now, its people and gen read together under the membership lock (no join or leave lands between).
     pub fn read(store: &Store, room: &str) -> Self {
         let _members = membership_lock();
+        Self::read_held(store, room)
+    }
+
+    /// [`Self::read`] for a caller that already holds the membership lock (it is not re-entrant).
+    pub fn read_held(store: &Store, room: &str) -> Self {
         let people = store.room_open_people(room);
         let stays = store.room_stays(room);
         Self::of(room, people, store.room_gen(room), &stays)
@@ -89,11 +94,8 @@ pub fn people_present_at(stays: &[Stay], g: i64) -> bool {
 /// The id a room's people run as for one join gen: `room-<room>-<join_gen>`, a valid person id (lowercase letters,
 /// digits, dashes).
 pub fn room_person_id(room: &str, join_gen: i64) -> String {
-    let slug: String = room
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
-        .take(32)
-        .collect();
+    let slug: String =
+        room.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).take(32).collect();
     format!("room-{slug}-{join_gen}")
 }
 

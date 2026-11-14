@@ -19,9 +19,9 @@
 //! Threads work the same way inside a group: the room turn runs in the thread's lane and
 //! only sees the thread.
 
-use crate::agent::bot::Cmd;
 use super::room_input::{readable, unanswered_note, unreadable};
 use super::room_turn::{Level, RoomBasis};
+use crate::agent::bot::Cmd;
 use crate::hub::Hub;
 use crate::remote::push::{self, AlertKind};
 use crate::store::RoomPoint;
@@ -540,7 +540,8 @@ pub fn ask_agent(hub: &Arc<Hub>, room: &str, agent_id: &str) -> Result<()> {
     let members = members(hub, &group);
     let Some(agent) = members.iter().find(|m| m.id == agent_id) else { bail!("{agent_id} isn't in this room") };
     let lane = Lane::main(room);
-    let (basis, stays) = (RoomBasis::read(&hub.store, room), hub.store.room_stays(room));
+    // Called by `botAsk` with the membership lock held.
+    let (basis, stays) = (RoomBasis::read_held(&hub.store, room), hub.store.room_stays(room));
     let prompt = member_prompt(hub, &group, &members, agent, &lane, &basis, &stays)?;
     let (reply, answer) = oneshot::channel();
     let epoch = hub.store.lane_epoch(&lane);

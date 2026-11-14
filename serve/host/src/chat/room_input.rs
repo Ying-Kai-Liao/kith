@@ -25,6 +25,7 @@ pub fn readable(hub: &Hub, basis: &RoomBasis, stays: &[Stay], lines: Vec<Entry>)
 /// This is what a join or the last leave does to a message nobody answered yet (design-flow, design-r2): a person who
 /// came meanwhile is never answered with what they were not shown, and an owner-level turn after the last leave never
 /// reads what a person wrote.
+#[allow(clippy::option_option, reason = "no cut, a cut without a line and a cut with one are three answers")]
 pub fn unreadable(
     hub: &Hub,
     basis: &RoomBasis,
@@ -42,7 +43,9 @@ pub fn unreadable(
     let name = |person: &str| hub.store.person(person).map_or_else(|| person.to_owned(), |p| p.name);
     let who = match basis.level() {
         // Someone came in after the asking: the newest join is the one.
-        Level::Room => stays.iter().filter(|s| s.left_gen.is_none()).max_by_key(|s| s.joined_gen).map(|s| name(&s.person)),
+        Level::Room => {
+            stays.iter().filter(|s| s.left_gen.is_none()).max_by_key(|s| s.joined_gen).map(|s| name(&s.person))
+        }
         // The room emptied: the last one out.
         Level::Owner => stays.iter().filter_map(|s| s.left_gen.map(|l| (l, &s.person))).max().map(|(_, p)| name(p)),
     };
@@ -64,6 +67,7 @@ pub fn unanswered_note(hub: &Hub, lane: &Lane, speaker: Option<&BotConfig>, trig
     let Some(stamp) = gens.values().max().copied() else { return };
     let (author, name) = speaker.map_or((String::new(), "The room".to_owned()), |m| (m.id.clone(), m.name.clone()));
     let turn = hub.store.max_turn(&lane.chat);
-    let data = json!({"text": format!("{name} didn't answer: {text}"), "author": author, "final": true, "unanswered": true});
+    let data =
+        json!({"text": format!("{name} didn't answer: {text}"), "author": author, "final": true, "unanswered": true});
     hub.add_entry_from(lane, EntryKind::Agent, turn, &data, Some(stamp));
 }

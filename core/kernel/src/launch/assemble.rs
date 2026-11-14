@@ -590,38 +590,42 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             }
         } else {
             loop {
-            let mut args = vec![agent.to_owned()];
-            if !caller.is_empty() {
-                args.extend(["--via".to_owned(), caller.clone(), "--take-once".to_owned()]);
-            }
-            let o = secrets::run(&sctx, "resolve", &args);
-            eprint!("{}", o.stderr);
-            let parsed = (o.code == 0)
-                .then(|| serde_json::from_str::<Value>(&o.stdout).ok())
-                .flatten();
-            let Some(r) = parsed else {
-                say(&format!(
-                    "kith: can't check whether {person} may use {agent} (kith-auth resolve failed)"
-                ));
-                return Err(1);
-            };
-            if !r.get("held").is_some_and(truthy) {
-                break r;
-            }
-            if started.elapsed().as_secs() >= hold {
-                say(&format!(
-                    "kith: out of sync with the Kith cloud, so {person} can't use {agent} on this computer yet; try again in a minute"
-                ));
-                return Err(3);
-            }
-            std::thread::sleep(std::time::Duration::from_secs(2));
+                let mut args = vec![agent.to_owned()];
+                if !caller.is_empty() {
+                    args.extend(["--via".to_owned(), caller.clone(), "--take-once".to_owned()]);
+                }
+                let o = secrets::run(&sctx, "resolve", &args);
+                eprint!("{}", o.stderr);
+                let parsed = (o.code == 0)
+                    .then(|| serde_json::from_str::<Value>(&o.stdout).ok())
+                    .flatten();
+                let Some(r) = parsed else {
+                    say(&format!(
+                        "kith: can't check whether {person} may use {agent} (kith-auth resolve failed)"
+                    ));
+                    return Err(1);
+                };
+                if !r.get("held").is_some_and(truthy) {
+                    break r;
+                }
+                if started.elapsed().as_secs() >= hold {
+                    say(&format!(
+                        "kith: out of sync with the Kith cloud, so {person} can't use {agent} on this computer yet; try again in a minute"
+                    ));
+                    return Err(3);
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
             }
         };
         // What the run costs is written under whoever asked: the cap above is theirs, and so is the ledger it reads.
         if room_run {
             env.insert(
                 "KITH_COST_PERSON".to_owned(),
-                if spend_who.is_empty() { "owner".to_owned() } else { spend_who.clone() },
+                if spend_who.is_empty() {
+                    "owner".to_owned()
+                } else {
+                    spend_who.clone()
+                },
             );
         }
         let txt = |k: &str| r.get(k).map(pystr).unwrap_or_default();

@@ -128,8 +128,9 @@ async fn a_post_is_stamped_with_the_gen_at_its_append_and_a_repeat_writes_one_li
     assert_eq!(r.hub.store.origin_gen(id), Some(joined), "the room's gen at the append");
     assert_eq!(first["entry"]["data"]["sender"], json!({"person": "sam", "name": "Sam"}));
     assert_eq!(texts(&r, &phone, &room).await, ["hello"]);
-    // It reached nobody's turn: no conversation opened.
-    assert!(r.hub.store.newest_conversation(&Lane::main(&room)).is_none());
+    // It opened one conversation, the person's own (PR C), and with no @-mention it starts no agent.
+    let conv = r.hub.store.newest_conversation(&Lane::main(&room)).expect("the post opens a conversation");
+    assert_eq!(conv.opened_by, "sam");
     // Someone else's nonce is not theirs to read back.
     let owner = call(&r, &Caller::Local, "history", json!({"botId": room})).await.unwrap();
     assert!(owner["entries"].as_array().unwrap().iter().any(|e| e["data"]["text"] == "hello"));

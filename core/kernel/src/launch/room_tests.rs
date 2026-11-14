@@ -251,7 +251,8 @@ fn only_a_room_ids_are_room_persons() {
 }
 
 #[test]
-fn the_launch_of_a_room_person_refuses_before_asking_anyone_when_it_has_no_room_or_no_basis_or_a_stranger_asked() {
+fn the_launch_of_a_room_person_refuses_before_asking_anyone_when_it_has_no_room_or_no_basis_or_a_stranger_asked()
+ {
     let ctx = secrets::Ctx::from_process(std::path::Path::new("/nonexistent"));
     // No room named, no people named, or an author who is not one of the people: no launch, and nobody is resolved.
     let no_room = launch_answer(&ctx, "scout", "room-g-1", "", "ann", "");
@@ -259,5 +260,8 @@ fn the_launch_of_a_room_person_refuses_before_asking_anyone_when_it_has_no_room_
     let no_people = launch_answer(&ctx, "scout", "room-g-1", "g", " , ", "");
     assert_eq!(no_people, Err(Refusal::NoBasis));
     let stranger = launch_answer(&ctx, "scout", "room-g-1", "g", "ann,ben", "cy");
-    assert!(matches!(stranger, Err(Refusal::Person { ref person, .. }) if person == "cy"), "{stranger:?}");
+    assert!(
+        matches!(stranger, Err(Refusal::Person { ref person, .. }) if person == "cy"),
+        "{stranger:?}"
+    );
 }

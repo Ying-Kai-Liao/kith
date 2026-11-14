@@ -44,7 +44,9 @@ impl Actor {
             let stored = if self.is_main() {
                 self.hub.store.set_session(&self.cfg.id, sid)
             } else {
-                self.hub.store.kv_set(&lane_key("session", &session_owner(&self.cfg), &self.home), sid.unwrap_or_default())
+                self.hub
+                    .store
+                    .kv_set(&lane_key("session", &session_owner(&self.cfg), &self.home), sid.unwrap_or_default())
             };
             if let Err(error) = stored {
                 tracing::warn!(bot = %self.cfg.id, error = format!("{error:#}"), "couldn't store the session");

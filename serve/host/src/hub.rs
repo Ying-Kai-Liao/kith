@@ -767,7 +767,7 @@ impl Hub {
         self.react_as(id, emoji, None)
     }
 
-    /// [`Self::react`] for a person in a room: `person` is `(who, their stay`s `joined_gen`)`, and the stay and the "no revoke
+    /// [`Self::react`] for a person in a room: `person` is `(who, the stay's joined_gen)`, and the stay and the "no revoke
     /// has set them aside" check are made in the same transaction as the write (as a post's are).
     pub fn react_as(&self, id: &str, emoji: &str, person: Option<(&str, i64)>) -> Result<Entry> {
         let emoji = emoji.trim();

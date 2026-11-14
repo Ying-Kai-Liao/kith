@@ -61,8 +61,13 @@ impl Hub {
     /// stop, which kills the agent process and what it started. Returns the room person ids they ran as, for the sweep of
     /// their claims, helpers and doors that follows a revoke or a removal.
     pub fn end_room_turns_of(&self, person: &str) -> Vec<String> {
-        let keys: Vec<String> =
-            self.room_turns.locked().iter().filter(|(_, people)| people.iter().any(|p| p == person)).map(|(k, _)| k.clone()).collect();
+        let keys: Vec<String> = self
+            .room_turns
+            .locked()
+            .iter()
+            .filter(|(_, people)| people.iter().any(|p| p == person))
+            .map(|(k, _)| k.clone())
+            .collect();
         let mut ids = Vec::new();
         for key in keys {
             if let Some(id) = person_of(&key)

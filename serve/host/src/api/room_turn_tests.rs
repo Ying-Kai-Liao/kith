@@ -111,8 +111,14 @@ async fn a_post_from_before_a_join_is_not_answered_in_the_room_and_its_author_is
     assert!(unreadable(&r.hub, &b, &stays, std::slice::from_ref(&after), "owner").is_none());
     // The note is stamped with the asking's own gen: ben, who came later, is not shown it.
     crate::chat::room_input::unanswered_note(&r.hub, &Lane::main(&room), None, &[pre], &text);
-    let notes: Vec<Entry> =
-        r.hub.store.history(&room, i64::MAX, 50).unwrap().into_iter().filter(|e| e.data["unanswered"] == true).collect();
+    let notes: Vec<Entry> = r
+        .hub
+        .store
+        .history(&room, i64::MAX, 50)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.data["unanswered"] == true)
+        .collect();
     assert_eq!(notes.len(), 1);
     assert!(!seen_by(ben, &notes[0].kind, r.hub.store.origin_gen(&notes[0].id)));
 }
@@ -159,8 +165,8 @@ async fn nobody_answers_a_post_that_mentions_nobody_when_people_are_in_the_room(
     let (r, room) = rig().await;
     let _ = (&r, &room);
     let named = |text: &str| -> BotConfig {
-        let cfg: BotConfig = serde_json::from_value(json!({"id": "b1", "name": "Planner", "backend": "claude", "cwd": "/tmp"}))
-            .unwrap();
+        let cfg: BotConfig =
+            serde_json::from_value(json!({"id": "b1", "name": "Planner", "backend": "claude", "cwd": "/tmp"})).unwrap();
         let _ = text;
         cfg
     };
@@ -216,8 +222,10 @@ async fn a_revoke_ends_the_room_turns_whose_basis_holds_the_person() {
     let ended = r.hub.end_room_turns_of("ben");
     assert_eq!(ended, [b.person_id().unwrap()], "the one whose basis holds ben");
     assert_eq!(r.hub.end_room_turns_of("dan"), Vec::<String>::new());
-    // Every id a person has run as, for the sweep of what a restarted host lost track of.
-    assert_eq!(r.hub.room_person_ids_of("ben"), [b.person_id().unwrap()]);
+    // Every id a person may have run as, for the sweep of what a restarted host lost track of: every epoch of the room
+    // (a sweep of an id nobody ran as finds nothing).
+    let ids = r.hub.room_person_ids_of("ben");
+    assert!(ids.contains(&b.person_id().unwrap()) && ids.len() == 2, "{ids:?}");
     r.hub.room_turn_ends(&mine);
     assert_eq!(r.hub.room_turn_of(&mine), None);
 }
@@ -258,7 +266,10 @@ async fn a_reused_nonce_in_a_new_stay_is_not_answered_with_the_old_stays_line() 
     assert_eq!(r.hub.store.find_person_nonce(&room, "ann", "n1", first).map(|e| e.id), Some(old.id.clone()));
     leave(&r, &room, "ann");
     let second = join(&r, &room, "ann");
-    assert!(r.hub.store.find_person_nonce(&room, "ann", "n1", second).is_none(), "the old stay's line is not theirs now");
+    assert!(
+        r.hub.store.find_person_nonce(&room, "ann", "n1", second).is_none(),
+        "the old stay's line is not theirs now"
+    );
 }
 
 /// PR B SHOULD 2: Kai's send is not answered with a person's line that has the same nonce.
@@ -280,6 +291,15 @@ async fn a_reaction_is_refused_once_a_revoke_is_recorded_even_after_the_check() 
     let ann = join(&r, &room, "ann");
     let e = say(&r, &room, EntryKind::Agent, "react to me", Some(ann));
     assert!(r.hub.react_as(&e.id, "👍", Some(("ann", ann))).is_ok());
+    // A revoke sets aside what the person holds: a membership is something to set aside.
+    let m = crate::store::Membership {
+        membership_id: "m1".into(),
+        user_id: "u1".into(),
+        person_id: "ann".into(),
+        invite_id: "i1".into(),
+        created_at: 0,
+    };
+    r.hub.store.add_membership(&m).unwrap();
     r.hub.store.suspend_person("ann").unwrap();
     let err = r.hub.react_as(&e.id, "🎉", Some(("ann", ann))).unwrap_err();
     assert!(err.is::<super::devices::NotAllowed>(), "{err:#}");
