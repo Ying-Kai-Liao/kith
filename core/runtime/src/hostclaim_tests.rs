@@ -499,3 +499,65 @@ fn the_row_refuses_a_room_principal_or_room_conversation_without_the_room_turn()
     );
     assert_eq!(b["refused"], "other", "{b}");
 }
+
+/// P6: the host sends a key with every enqueue, so a retry after a lost reply is the same turn, also for a plain owner turn
+/// whose basis is empty; `show` names the turn a claim runs, so the host resumes only its own.
+#[test]
+fn a_keyed_owner_turn_retried_is_one_row_and_show_names_the_claims_turn() {
+    use crate::conversations::claims::{Kind, NewClaim, claim};
+    let (_t, mut core, _m) = world();
+    ensure(&mut core, "s1");
+    let ask = |key: &str| {
+        json!({"conversation": "s1", "agent": "echo", "engine": "claude", "source": "app", "person": "owner",
+               "prompt": "", "revokeSeen": 0, "key": key})
+    };
+    let first = row(&mut core, "hostclaim.enqueue", &ask("accept-1"))["turn"]
+        .as_i64()
+        .unwrap();
+    let again = row(&mut core, "hostclaim.enqueue", &ask("accept-1"))["turn"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(first, again, "the retry lands on the same row");
+    let rows: i64 = core
+        .conn()
+        .query_row(
+            "SELECT count(*) FROM turns WHERE conversation = 's1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 1);
+    let other = row(&mut core, "hostclaim.enqueue", &ask("accept-2"))["turn"]
+        .as_i64()
+        .unwrap();
+    assert_ne!(other, first, "another key is another turn");
+    let id = claim(
+        &mut core,
+        &NewClaim {
+            conversation: "s1",
+            kind: Kind::Turn,
+            person: "owner",
+            turn: Some(first),
+            holder_instance: Some("kith-serve-host"),
+            account: None,
+            process: None,
+            revoke_seen: 0,
+        },
+        MS,
+    )
+    .expect("claim")
+    .claim_id;
+    let shown = row(&mut core, "hostclaim.show", &json!({"claimId": id}));
+    assert_eq!(shown["claim"]["turn"], first, "{shown}");
+    ensure(&mut core, "s2");
+    let t = terminal(&mut core, "s2", "");
+    let shown = row(
+        &mut core,
+        "hostclaim.show",
+        &json!({"claimId": t["claimId"]}),
+    );
+    assert!(
+        shown["claim"]["turn"].is_null(),
+        "a terminal claim runs no turn: {shown}"
+    );
+}

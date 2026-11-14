@@ -17,6 +17,11 @@ fn fakes() -> &'static Mutex<HashMap<PathBuf, Fake>> {
     F.get_or_init(Mutex::default)
 }
 
+/// Registers a scripted core of another module's tests (`core_writer_tests`) for a state folder.
+pub(in crate::terminal) fn register(state: &std::path::Path, fake: Fake) {
+    fakes().lock().unwrap().insert(state.to_path_buf(), fake);
+}
+
 pub(super) fn fake_for(f: &Paths) -> Option<Fake> {
     fakes().lock().unwrap().get(&f.state).cloned()
 }
