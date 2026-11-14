@@ -528,3 +528,19 @@ async fn a_retry_that_fails_leaves_the_row_and_a_row_owed_meanwhile_is_kept() {
     let _ = tokio::join!(a, b);
     assert_eq!(owed_count(&hub), 3, "two owed at once lose nothing");
 }
+
+#[test]
+fn a_sweep_owed_again_while_a_retry_runs_is_not_erased_by_that_retry() {
+    let r = Rig::new(true, true);
+    let hub = test_hub(&r.state);
+    owe(&hub, &["sam".into()], true, "down".into());
+    let read_by_the_retry = owed(&hub)[0].clone();
+    // The same sweep fails again meanwhile: the stored row is refreshed, not folded into the one the retry holds.
+    owe(&hub, &["sam".into()], true, "down again".into());
+    assert_eq!(owed(&hub).len(), 1);
+    settle_row(&hub, &read_by_the_retry);
+    assert_eq!(owed(&hub).len(), 1, "the retry's settle left the refreshed row");
+    let fresh = owed(&hub)[0].clone();
+    settle_row(&hub, &fresh);
+    assert_eq!(owed(&hub).len(), 0);
+}

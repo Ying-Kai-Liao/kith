@@ -383,12 +383,16 @@ fn locked() -> std::sync::MutexGuard<'static, ()> {
 /// Records a sweep the core did not take. Retried by [`retry_owed`]; never reported as "nothing to end".
 fn owe(hub: &Hub, persons: &[String], only_denied: bool, why: String) -> Swept {
     let suspended = persons.iter().any(|p| hub.store.is_suspended(p));
-    let row = json!({"persons": persons, "narrow": only_denied, "suspended": suspended});
+    // The stamp is fresh at every owe: a retry settles a row only while it still carries the stamp the retry read, so a sweep
+    // owed again while that retry runs is not erased by it.
+    let row = json!({"persons": persons, "narrow": only_denied, "suspended": suspended, "stamp": uuid::Uuid::new_v4().to_string()});
     {
         let _lock = locked();
         let mut rows = owed(hub);
-        if !rows.contains(&row) {
-            rows.push(row);
+        let same = |r: &Value| r["persons"] == row["persons"] && r["narrow"] == row["narrow"];
+        match rows.iter().position(same) {
+            Some(at) => rows[at] = row,
+            None => rows.push(row),
         }
         if let Err(error) = hub.store.kv_set(OWED, &Value::Array(rows).to_string()) {
             tracing::error!(%error, "a revoke sweep the core did not take could not be recorded");
