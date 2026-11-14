@@ -2,9 +2,11 @@
 //! program and the host both link it, so an engine behaves the same whichever starts it. No web server, no host types.
 
 mod client;
+mod resident;
 mod run_once;
 
 pub use client::*;
+pub use resident::{Ctl, Release, Take, spawn_resident};
 pub use run_once::*;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
