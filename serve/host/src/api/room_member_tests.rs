@@ -136,6 +136,17 @@ async fn a_post_is_stamped_with_the_gen_at_its_append_and_a_repeat_writes_one_li
     assert!(owner["entries"].as_array().unwrap().iter().any(|e| e["data"]["text"] == "hello"));
 }
 
+/// Architect's SHOULD on #998: what a person may spend is the owner's to give, so a `budget` sent with a post changes nothing.
+#[tokio::test]
+async fn a_budget_sent_with_a_post_is_ignored() {
+    let (r, room, phone) = rig().await;
+    let joined = add(&r, &room).await;
+    let body = json!({"botId": room, "text": "hello", "clientNonce": "b1", "stay": joined, "budget": 500});
+    call(&r, &phone, "send", body).await.unwrap();
+    let conv = r.hub.store.newest_conversation(&Lane::main(&room)).expect("the post opens a conversation");
+    assert!(conv.left <= crate::chat::group::budget_of(None), "the default budget, not 500: {} left", conv.left);
+}
+
 #[tokio::test]
 async fn a_post_that_asks_for_more_than_text_is_refused_and_writes_nothing() {
     let (r, room, phone) = rig().await;
