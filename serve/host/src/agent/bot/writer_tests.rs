@@ -705,6 +705,9 @@ actor_test! {
         let w = rig.w();
         assert_eq!(w.turns.len(), 3, "the next message is a turn of its own: {:?}", w.turns);
         assert_eq!(w.turns[2].1, "done");
+        let stop = w.log.iter().position(|m| m == "hostclaim.stop").unwrap();
+        assert!(w.log[stop..].iter().any(|m| m == "hostclaim.settle"), "the abandoned claim ended through settle: {:?}", w.log);
+        assert_eq!(w.claims.iter().filter(|c| c.state == "ending").count(), 0, "nothing left ending");
     }
 }
 

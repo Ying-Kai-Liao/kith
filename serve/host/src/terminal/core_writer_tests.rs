@@ -318,10 +318,7 @@ impl World {
                 let pid = p["pid"].as_u64().unwrap();
                 let had = self.procs.contains(&pid);
                 self.procs.retain(|x| *x != pid);
-                // The core's settle (`end_gone`) ends the stopped claims of a process that is gone.
-                for c in self.claims.iter_mut().filter(|c| c.state == "ending" && c.pid == Some(pid)) {
-                    c.state = "ended".into();
-                }
+                // Only the warm_procs rows go: a stopped claim is ended by `settle`, never here (as in the real core).
                 data(json!({"gone": had}))
             }
             "hostclaim.adopt" => {
@@ -1066,6 +1063,39 @@ async fn abandoning_a_begun_turn_frees_the_lock_and_cancels_the_claim() {
     r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
     assert!(r.lock_free("s1"));
     assert_eq!(r.claim_state(1), "ending", "stopped; the process is the stub's, still there");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_abandon_whose_process_is_killed_is_settled_and_the_conversation_claims_again() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
+    assert_eq!(r.claim_state(run.claim), "ending", "stopped, the process still there: the core keeps it");
+    stub.kill_group();
+    stub.wait_dead();
+    assert!(r.writer.settle_gone(run.pid, &run.started));
+    assert_eq!(r.claim_state(run.claim), "ended", "settled once the process is gone");
+    assert_eq!(r.w().procs.len(), 0, "and forgotten");
+    assert!(r.writer.settle_gone(run.pid, &run.started), "settling again is harmless");
+    let mut next = r.stub("main");
+    running(r.writer.begin(&r.turn("s1", None), &mut next));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_begin_settles_our_own_ending_claim_whose_process_is_gone() {
+    // The abandon's settle was lost (the core was down): the claim stays `ending` with a dead pid and read as `held`.
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
+    stub.kill_group();
+    stub.wait_dead();
+    assert_eq!(r.claim_state(run.claim), "ending");
+    let mut next = r.stub("main");
+    let again = running(r.writer.begin(&r.turn("s1", None), &mut next));
+    assert_eq!(r.claim_state(run.claim), "ended");
+    assert_eq!(r.claim_state(again.claim), "running");
 }
 
 // --- the host restart --------------------------------------------------------------------------------------------------

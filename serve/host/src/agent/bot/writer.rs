@@ -614,6 +614,7 @@ pub(super) fn orphaned(core: &CoreWriter, conversation: &str, begin: &Begin, stu
         Begin::Running(r) => {
             core.abandon(r.turn, r.claim, conversation, stub);
             stub.kill_group();
+            core.settle_gone(r.pid, &r.started);
         }
         Begin::Queued { turn }
         | Begin::Retry { turn, .. }

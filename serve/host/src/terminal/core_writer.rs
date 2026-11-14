@@ -400,6 +400,16 @@ impl CoreWriter {
         // [`CoreWriter::abandon`], an old host's claim is ended by [`CoreWriter::adopt`].
         match self.live(t.conversation) {
             Err(why) => return Begin::CoreDown { turn, why },
+            // A stopped turn claim whose process is gone (an abandon whose settle was lost, or an older host's) holds the
+            // conversation until someone settles it: the core ends it, and this begin goes on to claim.
+            Ok(Some(c)) if c["kind"] == "turn" && c["state"] == "ending" && stub_gone(&c) => {
+                let _ = self.call("hostclaim.settle", &json!({}));
+                if let (Some(pid), Some(started)) =
+                    (c["pid"].as_u64().and_then(|p| u32::try_from(p).ok()), c["started"].as_str())
+                {
+                    let _ = self.proc_gone(pid, started);
+                }
+            }
             Ok(Some(c)) if c["holderInstance"] == self.instance.as_str() && c["kind"] == "turn" => {
                 // The same stub, or a claim not redeemed yet (no pid).
                 let same = c["pid"].is_null() || c["pid"].as_u64() == Some(u64::from(stub.pid()));
@@ -672,15 +682,7 @@ impl CoreWriter {
                 let _ = self.call("hostclaim.stop", &json!({"claimId": run.claim, "reason": "room-turn-end"}));
                 stub.kill_group();
                 // Forgotten once confirmed gone: `end_gone` then ends the claim; until then the core keeps the row to kill.
-                let until = std::time::Instant::now() + Duration::from_secs(3);
-                while pid_runs(run.pid) && std::time::Instant::now() < until {
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-                let gone = !pid_runs(run.pid);
-                if gone {
-                    let _ = self.call("hostclaim.settle", &json!({}));
-                    let _ = self.proc_gone(run.pid, &run.started);
-                }
+                let gone = self.settle_gone(run.pid, &run.started);
                 Finished::RoomEnded { gone }
             }
             End::Killed | End::Died => self.retry_end(run, end),
@@ -694,6 +696,22 @@ impl CoreWriter {
                 self.retry_end(run, end)
             }
         }
+    }
+
+    /// After a stopped claim's process group was killed: waits briefly for the process to exit, then lets the core end the
+    /// claim (`settle`) and forgets the process. A process still there is left to the core, which keeps the claim `ending`
+    /// and has it killed again; settling twice is harmless.
+    pub fn settle_gone(&self, pid: u32, started: &str) -> bool {
+        let until = std::time::Instant::now() + Duration::from_secs(3);
+        while pid_runs(pid) && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let gone = !pid_runs(pid);
+        if gone {
+            let _ = self.call("hostclaim.settle", &json!({}));
+            let _ = self.proc_gone(pid, started);
+        }
+        gone
     }
 
     /// Sends the end report of `run` again, after [`Finished::ReportLost`]: the lock is already released, so only the report
