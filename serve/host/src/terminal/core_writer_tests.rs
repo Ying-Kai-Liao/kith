@@ -48,6 +48,9 @@ pub(crate) struct World {
     pub kill_on_redeem: bool,
     /// The redeem is refused as `killing` (the process is marked for a kill), this many times.
     pub redeem_killing: u32,
+    /// `hostclaim.turn` kills every process registered with `hostclaim.proc` first (the stub dies between the claim and its take),
+    /// this many times.
+    pub kill_procs_on_turn: u32,
     /// What `cutover.mayServe` answers for the claims module.
     pub switched: Option<bool>,
     /// The gate answers `ok: false` with a warning (stepping, rolling back, a marker mismatch), or refuses the call.
@@ -126,6 +129,14 @@ impl World {
                 }
                 if self.live(&conv).is_some() {
                     return refused("held");
+                }
+                if self.kill_procs_on_turn > 0 {
+                    self.kill_procs_on_turn -= 1;
+                    for pid in self.procs.iter().filter_map(|p| i32::try_from(*p).ok()) {
+                        // SAFETY: a signal to a stub group the test's actor started.
+                        unsafe { libc::killpg(pid, libc::SIGKILL) };
+                    }
+                    std::thread::sleep(Duration::from_millis(300));
                 }
                 let n = i64::try_from(self.claims.len()).unwrap() + 1;
                 self.claims.push(C {

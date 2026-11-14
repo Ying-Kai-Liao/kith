@@ -81,6 +81,11 @@ fn folders(dir: &std::path::Path) -> Paths {
 impl Rig {
     /// A host with one native bot per id (their sessions are `sess-<id>`), on a Mac that is `mac`.
     fn new(bots: &[&str], mac: Mac) -> Self {
+        Self::new_as(bots, mac, None)
+    }
+
+    /// [`Self::new`] with the bots running as `person` (a room person's actor, say).
+    fn new_as(bots: &[&str], mac: Mac, person: Option<&str>) -> Self {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!("kw-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
         std::fs::create_dir_all(dir.join("state")).unwrap();
@@ -103,7 +108,7 @@ impl Rig {
             std::fs::create_dir_all(&cwd).unwrap();
             let cfg: BotConfig = serde_json::from_value(json!({
                 "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false,
-                "command": crate::shell::python(&agent), "notify": false,
+                "command": crate::shell::python(&agent), "notify": false, "person": person,
             }))
             .unwrap();
             store.save_bot(&cfg).unwrap();
@@ -569,6 +574,47 @@ actor_test! {
         })
         .await;
     }
+}
+
+actor_test! {
+    /// The 15 s kill: a cancelled turn whose agent ignores the cancel is killed, and that end (only that one) reports `exit`; the turn
+    /// it puts back is cancelled, not left queued.
+    async fn the_fifteen_second_kill_reports_exit_and_cancels_the_turn(rig) {
+        rig.send("a", "STUBBORN").await;
+        rig.until("running", |r| r.running_pid("sess-a").is_some()).await;
+        rig.hub.send_to_actor("a", Cmd::Stop).unwrap();
+        rig.until("the end report", |r| !r.w().reports.is_empty()).await;
+        let w = rig.w();
+        assert_eq!(w.reports[0].0, "exit", "{:?}", w.reports);
+        assert_eq!(w.turns[0].1, "cancelled");
+    }
+}
+
+actor_test! {
+    /// A stub that dies between the claim and its take is restarted under the begin: the claim is reported `exit`, the process comes
+    /// back (a new connection, registered again, its session loaded again) and the SAME turn claims again and runs.
+    async fn a_stub_that_dies_before_its_take_is_restarted_and_the_turn_runs(rig) {
+        rig.send("a", "warm up").await;
+        rig.until("done", |r| r.w().reports.iter().any(|(k, _)| k == "done")).await;
+        rig.w().kill_procs_on_turn = 1;
+        rig.send("a", "after the restart").await;
+        rig.until("the reply", |r| r.replied("a", "after the restart")).await;
+        let w = rig.w();
+        assert!(w.reports.iter().any(|(k, _)| k == "exit"), "the first claim was reported: {:?}", w.reports);
+        assert_eq!(w.turns.len(), 2, "no turn made twice");
+        assert_eq!(w.turns[1].1, "done");
+    }
+}
+
+/// A room-level turn (the actor of a room person, `room-<id>`) ends with `stop room-turn-end` and the process group killed, and the
+/// core forgets the process once it is gone (no warm room process).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_room_turn_ends_with_a_stop_and_no_warm_process() {
+    let rig = Rig::new_as(&["a"], SWITCHED, Some("room-r-1"));
+    rig.send("a", "room words").await;
+    rig.until("the reply", |r| r.replied("a", "room words")).await;
+    rig.until("the stop", |r| r.w().asked.iter().any(|(m, p)| m == "hostclaim.stop" && p["reason"] == "room-turn-end")).await;
+    rig.until("the process forgotten", |r| r.w().procs.is_empty()).await;
 }
 
 // MARK: smaller rules

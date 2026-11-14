@@ -2,7 +2,7 @@
 
 One session per folder, named after it (`sess-<folder>`), so a test can seed the core's claim for the conversation before the agent
 exists. A prompt says what to do: HANG waits for session/cancel, DIE exits at once (a process killed under its turn), WAKE answers
-and then writes by itself half a second later (the agent waking itself), SLOW answers after two seconds, anything else is echoed.
+and then writes by itself half a second later (the agent waking itself), STUBBORN ignores cancel, SLOW answers after two seconds, anything else is echoed.
 """
 
 import json
@@ -34,6 +34,10 @@ def prompt(m):
         log.write(json.dumps(text) + "\n")
     if "DIE" in text:
         os._exit(3)
+    if "STUBBORN" in text:
+        # Ignores session/cancel: only the host's kill ends it.
+        while True:
+            time.sleep(1)
     if "HANG" in text:
         cancel.clear()
         cancel.wait()
