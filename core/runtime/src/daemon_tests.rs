@@ -2608,3 +2608,28 @@ fn the_host_may_ask_the_claim_rows_of_a_revoke_sweep_and_is_refused_by_the_switc
     }
     drop(d);
 }
+
+/// One host process that has loaded two conversations (two `warm_procs` rows) is one kill, signalled once.
+#[cfg(unix)]
+#[test]
+fn a_marked_warm_process_with_two_conversations_is_signalled_once() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    d.shared
+        .with_core(|c| {
+            for conv in ["main", "thread"] {
+                c.conn().execute(
+                    "INSERT INTO warm_procs (pid, started, instance, conversation, kill_at)
+                     VALUES (?1, ?2, ?3, ?4, 1)",
+                    rusqlite::params![pid, start, crate::holder_link::HOST_INSTANCE, conv],
+                )?;
+            }
+            Ok(())
+        })
+        .expect("rows");
+    let got = crate::kill_resend::pass(&d.shared, None, Duration::from_secs(60));
+    assert_eq!(got, vec![pid], "{got:?}");
+    until("the process to be gone", || !alive(pid));
+    d.stop();
+}

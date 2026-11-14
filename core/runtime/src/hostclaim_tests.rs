@@ -230,21 +230,36 @@ fn a_turn_claim_goes_through_claim_next() {
                 "prompt": "hi", "revokeSeen": 0}),
     );
     let turn = q["turn"].as_i64().unwrap();
-    let ask = json!({"conversation": "s1", "turn": turn, "person": "", "revokeSeen": 0, "cwd": "/work",
+    let ask = json!({"conversation": "s1", "turn": turn, "person": "", "revokeSeen": 0, "cwd": "/work", "account": "claude",
         "sessionId": "s1", "home": m.join("home"), "kernel": m.join("kernel"),
         "env": {"KITH_MACHINE": m, "KITH_AGENTS": m.join("agents")}});
-    // A direct turn claim is refused by the claims API itself: this row is the only way in and it is claim_next. No
-    // account is set up on this tmp machine, so it answers claimed or exhausted; it never skips its pick.
+    // A direct turn claim is refused by the claims API itself: this row is the only way in and it is claim_next. Accounts
+    // are not switched on this tmp machine, so the account the host sends (what Shadow and Writer mode both send) is the
+    // one recorded.
     let got = row(&mut core, "hostclaim.turn", &ask);
-    let status = got["status"].as_str().unwrap_or_default();
-    assert!(status == "claimed" || status == "exhausted", "{got}");
-    if status == "claimed" {
-        let again = row(&mut core, "hostclaim.turn", &ask);
-        assert!(
-            again["refused"] == "held" || again["refused"] == "notWaiting",
-            "{again}"
-        );
-    }
+    assert_eq!(got["status"], "claimed", "{got}");
+    assert_eq!(got["account"], "claude", "{got}");
+    let again = row(&mut core, "hostclaim.turn", &ask);
+    assert!(
+        again["refused"] == "held" || again["refused"] == "notWaiting",
+        "{again}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unswitched_turn_claim_without_the_hosts_account_is_an_error_not_a_pick() {
+    let (_t, mut core, m) = world();
+    let q = row(
+        &mut core,
+        "hostclaim.enqueue",
+        &json!({"conversation": "s1", "agent": "echo", "engine": "claude", "source": "app", "person": "",
+                "prompt": "hi", "revokeSeen": 0}),
+    );
+    let ask = json!({"conversation": "s1", "turn": q["turn"], "person": "", "revokeSeen": 0, "cwd": "/work",
+        "sessionId": "s1", "home": m.join("home"), "kernel": m.join("kernel"),
+        "env": {"KITH_MACHINE": m, "KITH_AGENTS": m.join("agents")}});
+    assert!(call_at(&mut core, "hostclaim.turn", &ask, MS).is_err());
 }
 
 /// A queued turn claimed (as `claim_next` does, through the claims API) and redeemed on this process; its claim id and turn.

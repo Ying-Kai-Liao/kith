@@ -223,11 +223,25 @@ fn blocked_in(tx: &Transaction<'_>, conversation: &str, now: i64) -> Result<Opti
             "why": format!("kith-core: conversation {conversation} is being taken over in the app"),
         })));
     }
-    let idle = tx.execute(
-        "UPDATE warm_procs SET kill_at = COALESCE(kill_at, ?2) WHERE conversation = ?1",
+    // A process holds several sessions, and killing it ends them all: one that is running a turn of another of its sessions
+    // is left alone (the terminal waits, as for a running claim) and is marked once it is idle. Only an idle process dies.
+    let has = tx.execute(
+        "UPDATE warm_procs SET kill_at = COALESCE(kill_at, ?2)
+         WHERE (pid, started) IN (SELECT pid, started FROM warm_procs WHERE conversation = ?1)
+           AND NOT EXISTS (
+                SELECT 1 FROM claims c
+                WHERE c.state IN ('claimed', 'running', 'ending') AND c.conversation <> ?1
+                  AND (c.pid = warm_procs.pid
+                       OR c.conversation IN (SELECT w.conversation FROM warm_procs w
+                                             WHERE w.pid = warm_procs.pid AND w.started = warm_procs.started)))",
         params![conversation, now],
     )?;
-    if idle > 0 {
+    let loaded: i64 = tx.query_row(
+        "SELECT count(*) FROM warm_procs WHERE conversation = ?1",
+        [conversation],
+        |r| r.get(0),
+    )?;
+    if has > 0 || loaded > 0 {
         return Ok(Some(waiting(&format!(
             "kith-core: waiting for the app's idle agent on {conversation} to stop"
         ))));

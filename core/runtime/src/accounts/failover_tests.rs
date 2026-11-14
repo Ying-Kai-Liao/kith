@@ -134,6 +134,17 @@ impl World {
         self.next_as(turn, sid, "sam")
     }
     fn next_as(&mut self, turn: i64, sid: &str, person: &str) -> Result<Started, Error> {
+        // The host's process runs as the main account (unswitched the claim needs one; switched it is ignored).
+        self.next_with(turn, sid, person, Some("claude"))
+    }
+    /// The claim as the host asks for it: with the account its warm process runs as.
+    fn next_with(
+        &mut self,
+        turn: i64,
+        sid: &str,
+        person: &str,
+        account: Option<&str>,
+    ) -> Result<Started, Error> {
         let out = SignedIn(RefCell::new(()));
         let ctx = self.ctx(&out);
         let tctx = self.tctx();
@@ -143,7 +154,7 @@ impl World {
             person,
             turn: Some(turn),
             holder_instance: Some("h1"),
-            account: None,
+            account,
             process: None,
             revoke_seen: 0,
         };
@@ -293,8 +304,14 @@ fn the_account_row_is_not_written_while_the_core_is_not_the_writer_but_the_turn_
         w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
         "queued"
     );
-    // The state still says claude is fine, but this turn already ran out there: once per entry.
-    let (_, account) = w.claimed(turn, "s-backup", 101);
+    // The host decides where the turn goes next (it restarts its process on another account and asks again): the core makes
+    // no pick over marks nobody writes, so the account it names is the one that runs.
+    let Started::Claimed { account, .. } = w
+        .next_with(turn, "s-backup", "sam", Some("claude:a"))
+        .expect("claim")
+    else {
+        panic!("exhausted")
+    };
     assert_eq!(account, "claude:a");
 }
 
@@ -747,13 +764,15 @@ fn resets_at_is_capped_and_a_float_is_truncated_like_pythons_int() {
 
 #[test]
 fn the_exhausted_notice_names_accounts_tried_without_a_mark() {
-    // Not switched: no account row is written, so the notice has only the turn's own record to name them.
+    // Switched, but the marks are already past (the provider's time was short): the notice has only the turn's own record to
+    // name them.
     let mut w = world(&["claude", "claude:a"]);
+    w.switch();
     let turn = w.turn();
     let (first, _) = w.claimed(turn, "s-main", 100);
-    w.out_report(first, 100, None);
+    w.out_report(first, 100, Some(T0 - 100));
     let (second, _) = w.claimed(turn, "s-b", 101);
-    w.out_report(second, 101, None);
+    w.out_report(second, 101, Some(T0 - 100));
     match w.next(turn, "s-none").expect("next") {
         Started::Exhausted(text) => {
             assert!(text.contains("claude (ran out on this turn)"), "{text}");
@@ -903,4 +922,92 @@ fn a_stale_revoke_epoch_leaves_the_turn_queued_in_claim_next() {
         w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
         "queued"
     );
+}
+
+#[test]
+fn unswitched_the_claim_uses_the_account_the_host_sends_and_records_it() {
+    let mut w = world(&["claude", "claude:a"]);
+    let turn = w.turn();
+    // The pick would say `claude`; the host's process runs as claude:a, so that is the account, with its own session.
+    let Started::Claimed {
+        claimed,
+        account,
+        fresh,
+        session,
+    } = w
+        .next_with(turn, "s-a", "sam", Some("claude:a"))
+        .expect("claim")
+    else {
+        panic!("exhausted")
+    };
+    assert_eq!(account, "claude:a");
+    assert!(fresh);
+    assert_eq!(session.account, "claude:a");
+    assert_eq!(
+        w.one(&format!(
+            "SELECT account FROM claims WHERE claim_id = {}",
+            claimed.claim_id
+        )),
+        "claude:a"
+    );
+    let sessions = crate::transcripts::rows::list(w.core.conn(), "c1").unwrap();
+    assert_eq!(
+        sessions.len(),
+        1,
+        "no session row or pointer for another account"
+    );
+    assert_eq!(sessions[0].account, "claude:a");
+    assert!(read_all(w.core.conn()).unwrap().is_empty());
+}
+
+#[test]
+fn unswitched_an_account_this_turn_ran_out_on_is_still_the_hosts_to_choose() {
+    // Nobody writes the marks while unswitched, and a turn that ran out is failed over by the host (it restarts on another
+    // account and asks again), so the account it sends is the one that runs.
+    let mut w = world(&["claude", "claude:a"]);
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    w.out_report(first, 100, Some(T0 + 7200));
+    let Started::Claimed { account, .. } = w
+        .next_with(turn, "s-main", "sam", Some("claude"))
+        .expect("claim")
+    else {
+        panic!("exhausted")
+    };
+    assert_eq!(
+        account, "claude",
+        "the host's account stands, it was not picked"
+    );
+}
+
+#[test]
+fn switched_the_pick_stands_whatever_account_the_host_sends() {
+    let mut w = world(&["claude", "claude:a"]);
+    w.switch();
+    let turn = w.turn();
+    let Started::Claimed { account, .. } = w
+        .next_with(turn, "s-main", "sam", Some("claude:a"))
+        .expect("claim")
+    else {
+        panic!("exhausted")
+    };
+    assert_eq!(account, "claude");
+}
+
+#[test]
+fn unswitched_a_claim_without_the_hosts_account_is_refused_and_leaves_the_turn_queued() {
+    let mut w = world(&["claude", "claude:a"]);
+    let turn = w.turn();
+    let e = w
+        .next_with(turn, "s-main", "sam", None)
+        .expect_err("a pick over marks nobody writes is a guess");
+    assert!(matches!(e, Error::BadParams(_)), "{e:?}");
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "queued"
+    );
+    assert_eq!(w.one("SELECT count(*) FROM claims"), "0");
+    // Switched, the core picks and needs no account.
+    w.switch();
+    assert!(w.next_with(turn, "s-main", "sam", None).is_ok());
 }

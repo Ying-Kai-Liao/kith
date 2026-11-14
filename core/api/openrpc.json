@@ -13958,7 +13958,7 @@
     },
     {
       "name": "hostclaim.proc",
-      "summary": "A host engine process, idle or not, with the session it has loaded: registers it or moves its session, so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
+      "summary": "A host engine process, idle or not, with a session it has loaded: registers it or adds one more session to it (one core row per process and session; a process loads its agent's main session and its chat's threads), so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
       "params": [
         {
           "name": "pid",
@@ -14002,7 +14002,7 @@
         },
         {
           "name": "conversation",
-          "summary": "The session it has loaded.",
+          "summary": "A session it has loaded. Leave out for a process with none yet.",
           "required": false,
           "schema": {
             "type": "string"
@@ -14059,7 +14059,7 @@
     },
     {
       "name": "hostclaim.procGone",
-      "summary": "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. Answers `{gone}`.",
+      "summary": "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. With `conversation`, only that session is forgotten (the process stays known, with its other sessions). Answers `{gone}`.",
       "params": [
         {
           "name": "pid",
@@ -14073,6 +14073,14 @@
           "name": "started",
           "summary": "Its start stamp.",
           "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "Forget only this session of the process (it unloaded or forked it away).",
+          "required": false,
           "schema": {
             "type": "string"
           }
@@ -14097,6 +14105,9 @@
             "kind": "caller"
           },
           "started": {
+            "kind": "caller"
+          },
+          "conversation": {
             "kind": "caller"
           }
         },
@@ -14140,7 +14151,7 @@
     },
     {
       "name": "hostclaim.turn",
-      "summary": "The claim for a queued or parked turn, through `claim_next` (it picks the account and starts the session row). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
+      "summary": "The claim for a queued or parked turn, through `claim_next` (it starts the session row on the account: the core picks it once accounts are switched; until then it is the `account` the host sends). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
       "params": [
         {
           "name": "conversation",
@@ -14193,6 +14204,14 @@
         {
           "name": "holderInstance",
           "summary": "The holder instance the spawn goes to.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "account",
+          "summary": "The account the host's warm process runs as. Used and recorded while accounts are not switched (the core does not pick then); ignored once the core owns account state.",
           "required": false,
           "schema": {
             "type": "string"
@@ -14260,6 +14279,9 @@
             "kind": "caller"
           },
           "holderInstance": {
+            "kind": "caller"
+          },
+          "account": {
             "kind": "caller"
           },
           "kernel": {
