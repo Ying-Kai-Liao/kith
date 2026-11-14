@@ -3,7 +3,8 @@
 
 use super::Actor;
 use super::writer::{
-    Accept, Armed, OwnedTurn, Proc, Rel, Run, Seen, Stub, Watch, Why, WriterWait, core, now_ms, orphaned, read_epochs, turn_of,
+    Accept, Armed, OwnedTurn, Proc, Rel, Run, Seen, Stub, Watch, Why, WriterWait, chain, chain_opened, core, now_ms, orphaned, read_epochs,
+    turn_of,
 };
 use crate::terminal::core_writer::{Begin, CoreWriter, Dropped, End, Finished, Mode, Running, WarmStub, new_turn_key};
 use crate::terminal::{pid_runs, proc_start};
@@ -44,6 +45,33 @@ impl State {
     /// Nothing of Writer mode is pending: the actor may rest (stop its agent, retire).
     pub(super) fn idle(&self) -> bool {
         self.parked.is_none() && self.ending.is_none() && self.lost.is_none() && self.run.is_none()
+    }
+}
+
+/// How a release ends the turn at the core: `how` is what the actor noted, `gone` whether the claim's process is gone, `room` whether
+/// the actor is a room person's. The only ends that report `exit` are the 15 s kill, a process that died under its turn and a move to
+/// the next account; a process that is still there ended an ordinary failed turn, which is `done`.
+pub(super) fn end_for(how: Option<Rel>, gone: bool, room: bool) -> End {
+    match how {
+        Some(Rel::Killed) => End::Killed,
+        Some(Rel::Died) if gone => End::Died,
+        Some(Rel::OutOfUsage) => End::OutOfUsage,
+        Some(Rel::Left) => End::Left,
+        _ if room => End::Room,
+        _ => End::Done,
+    }
+}
+
+/// `exit` puts the turn back in the core's queue, and nothing in the host runs a requeued core turn: an end that reports it cancels the
+/// turn after. A stop is the user's; a process that died ends the item as a failed turn does in Files mode (the item has already
+/// failed by now, and what it did can't be repeated); a move goes on as a new turn on the backup's session.
+pub(super) fn cancel_reason(end: End) -> Option<&'static str> {
+    match end {
+        End::Killed => Some("stopped"),
+        End::Died => Some("process died"),
+        End::OutOfUsage => Some("moved to the next account"),
+        End::Left => Some("the session was forked"),
+        End::Done | End::Room => None,
     }
 }
 
@@ -90,8 +118,17 @@ impl Actor {
         let basis = self.turn_basis.as_ref().filter(|b| b.level() == Level::Room)?;
         let group = self.active_group.as_ref()?;
         let epochs: serde_json::Map<String, Value> = seen.basis.iter().map(|(p, e)| (p.clone(), json!(e))).collect();
-        Some(json!({"level": "room", "basis": basis.people, "epochs": epochs, "room": basis.room, "gen": basis.room_gen,
-                    "joinEpoch": basis.join_gen, "author": group.author, "budget": crate::agent::bot::writer::budget()}))
+        let mut fields = json!({"level": "room", "basis": basis.people, "epochs": epochs, "room": basis.room, "gen": basis.room_gen,
+                                "joinEpoch": basis.join_gen, "author": group.author});
+        let (name, value) = chain(self.chain_root());
+        fields[name] = json!(value);
+        Some(fields)
+    }
+
+    /// The turn that opened the chain of the room conversation this turn belongs to (a round after the first follows it).
+    fn chain_root(&self) -> Option<i64> {
+        let conversation = self.active_group.as_ref()?.conversation.as_deref()?;
+        super::writer::chain_root(&self.hub.terminal.env().state, conversation)
     }
 
     /// What the claim names the turn: its source for the core's rows.
@@ -170,9 +207,15 @@ impl Actor {
         for _ in 0..3 {
             self.sync_warm().await?;
             let t = self.writer_turn(&core, &sid, off).await?;
+            let opens = t.room.as_ref().is_some_and(|r| r.get("budget").is_some());
             let (begin, restarted) = self.begin_on_stub(&core, t).await?;
             if let (Some(id), Some(acc)) = (turn_of(&begin), self.writer.acc.as_mut()) {
                 acc.turn = Some(id);
+            }
+            if let (true, Some(id), Some(group)) = (opens, turn_of(&begin), self.active_group.as_ref())
+                && let Some(conversation) = group.conversation.as_deref()
+            {
+                chain_opened(&self.hub.terminal.env().state, conversation, id);
             }
             if restarted {
                 self.rebuild_after_restart(&core).await?;
@@ -181,50 +224,69 @@ impl Actor {
                 Begin::Running(r) => r,
                 Begin::NotWriter { mode: Mode::Files | Mode::Shadow, .. } => return Ok(false),
                 other => {
-                    let error = self.writer_refusal(other);
-                    // The engine is already writing: a begin that did not give it the session stops the process.
-                    if off {
-                        self.writer_kill_process().await;
-                    }
-                    return Err(error);
+                    return Err(self.writer_refusal(other));
                 }
             };
             self.writer.run = Some(Run { run: running, conversation: sid.clone() });
-            if restarted {
-                // A new process has loaded nothing: its session loads under the lock, as a reload does.
-                self.writer_reload(lane).await?;
-            }
-            // Step 7: what a terminal wrote since the session loaded.
-            match crate::terminal::sync_for_turn(&self.hub, lane, &sid).await? {
-                crate::terminal::Synced::Unchanged => return Ok(true),
-                crate::terminal::Synced::Moved => {
-                    if let Some(c) = self.conn.as_mut() {
-                        c.loaded.remove(&sid);
-                    }
-                    self.writer_reload(lane).await?;
-                    return Ok(true);
-                }
-                crate::terminal::Synced::Forked { .. } => {
-                    // The claim is on the session the thread left: given up, and the turn begins again on the lane's session.
-                    self.writer.end = Some(Rel::Abandon);
-                    self.release_turn_claim();
-                    self.writer_settle_end().await;
-                    if let Some(root) = lane.thread.as_deref() {
-                        self.thread_sessions.remove(root);
-                    }
-                    if let Some(c) = self.conn.as_mut() {
-                        c.loaded.remove(&sid);
-                    }
-                    self.writer_reload(lane).await?;
-                    sid = self.turn_session.clone().ok_or_else(|| anyhow!("no session"))?;
-                    if let Some(acc) = self.writer.acc.as_mut() {
-                        acc.turn = None;
-                        acc.key = new_turn_key();
-                    }
+            match self.writer_step7(lane, &sid, restarted).await {
+                Ok(None) => return Ok(true),
+                Ok(Some(next)) => sid = next,
+                // Past the claim and the lock the start cannot go on: they are given up, not left in `run`.
+                Err(error) => {
+                    self.writer_give_up(Rel::Abandon).await;
+                    return Err(error);
                 }
             }
         }
         bail!("the session moved under the turn three times")
+    }
+
+    /// Step 7, after `Begin::Running`: a new process loads its session under the lock, then the transcript sync. `Ok(None)`: the turn
+    /// may prompt `sid`. `Ok(Some(session))`: the thread left `sid` (a fork): the claim is given up and the turn begins again, as a
+    /// new turn, on `session`.
+    async fn writer_step7(&mut self, lane: &crate::store::Lane, sid: &str, restarted: bool) -> Result<Option<String>> {
+        if restarted {
+            // A new process has loaded nothing: its session loads under the lock, as a reload does.
+            self.writer_reload(lane).await?;
+        }
+        match crate::terminal::sync_for_turn(&self.hub, lane, sid).await? {
+            crate::terminal::Synced::Unchanged => Ok(None),
+            crate::terminal::Synced::Moved => {
+                if let Some(c) = self.conn.as_mut() {
+                    c.loaded.remove(sid);
+                }
+                self.writer_reload(lane).await?;
+                Ok(None)
+            }
+            crate::terminal::Synced::Forked { .. } => {
+                // The claim is on the session the thread left: ended with the process alive (an abandon would have the core kill it),
+                // and the turn begins again, as a new one, on the lane's session.
+                self.writer_give_up(Rel::Left).await;
+                if let Some(root) = lane.thread.as_deref() {
+                    self.thread_sessions.remove(root);
+                }
+                if let Some(c) = self.conn.as_mut() {
+                    c.loaded.remove(sid);
+                }
+                self.writer_reload(lane).await?;
+                let next = self.turn_session.clone().ok_or_else(|| anyhow!("no session"))?;
+                if let Some(acc) = self.writer.acc.as_mut() {
+                    acc.turn = None;
+                    acc.key = new_turn_key();
+                }
+                Ok(Some(next))
+            }
+        }
+    }
+
+    /// Gives up the claim the turn holds without having prompted: the lock back, the claim ended, the turn cancelled (`how`: [`Rel::Abandon`]
+    /// stops the claim, which has the core kill its process; [`Rel::Left`] reports `exit` and leaves the process alone).
+    async fn writer_give_up(&mut self, how: Rel) {
+        if self.writer.run.is_some() {
+            self.writer.end = Some(how);
+            self.release_turn_claim();
+        }
+        self.writer_settle_end().await;
     }
 
     /// Loads the lane's session again in the process (it moved, or the process is a new one). Boxed: `ensure_session` reaches
@@ -305,7 +367,7 @@ impl Actor {
     }
 
     /// The agent is already writing and the begin did not give it the session (an off-turn turn): the process is stopped.
-    async fn writer_kill_process(&mut self) {
+    pub(super) async fn writer_kill_process(&mut self) {
         if let Some(proc) = self.conn.as_ref().and_then(|c| c.writer.as_ref())
             && let Some(stub) = proc.stub.as_ref()
         {
@@ -324,16 +386,15 @@ impl Actor {
     pub(super) fn writer_release(&mut self) {
         let Some(run) = self.writer.run.take() else { return };
         let how = self.writer.end.take();
-        let gone = !pid_runs(run.run.pid);
-        let end = match (how, self.is_room_actor()) {
-            (Some(Rel::Killed), _) => End::Killed,
-            (Some(Rel::Died), _) if gone => End::Died,
-            (Some(Rel::OutOfUsage), _) => End::OutOfUsage,
-            (_, true) => End::Room,
-            _ => End::Done,
-        };
-        // A requeue keeps the item's turn (the next begin names it); any other end is the item's last.
-        if how != Some(Rel::OutOfUsage) {
+        let end = end_for(how, !pid_runs(run.run.pid), self.is_room_actor());
+        // The item's last end drops what it carried. A move to the next account keeps the epochs and starts a new turn: the
+        // backup runs another session, and the old turn's row (on the old one) is cancelled below, so the next begin makes its own.
+        if how == Some(Rel::OutOfUsage) {
+            if let Some(acc) = self.writer.acc.as_mut() {
+                acc.turn = None;
+                acc.key = new_turn_key();
+            }
+        } else {
             self.writer.acc = None;
         }
         let Some(proc) = self.conn.as_mut().and_then(|c| c.writer.as_mut()) else {
@@ -359,9 +420,9 @@ impl Actor {
             } else {
                 core.finish(&r, &conv, &mut stub, end)
             };
-            // The user's stop that had to be killed: the turn put back by `exit` is not wanted again.
-            if end == End::Killed {
-                core.cancel_turn(r.turn, "stopped");
+            // The turn `exit` put back is not wanted again (see [`cancel_reason`]).
+            if let Some(why) = cancel_reason(end) {
+                core.cancel_turn(r.turn, why);
             }
             let _ = tx.send((finished, Some(stub)));
         });
@@ -375,8 +436,8 @@ impl Actor {
         let r = run.run.clone();
         tokio::task::spawn_blocking(move || {
             let _ = tx.send((core.retry_end(&r, end), None));
-            if end == End::Killed {
-                core.cancel_turn(r.turn, "stopped");
+            if let Some(why) = cancel_reason(end) {
+                core.cancel_turn(r.turn, why);
             }
         });
         self.writer.ending = Some(InFlight { rx, run: run.run, end });

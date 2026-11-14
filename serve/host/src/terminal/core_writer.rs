@@ -259,6 +259,10 @@ pub enum End {
     Done,
     /// The account's usage ran out: release, then `exit {out_of_usage}`; the core requeues the turn.
     OutOfUsage,
+    /// The turn leaves its claim without prompting, and the process lives on (a thread a terminal forked: the turn goes on another
+    /// session): release, then a plain `exit`. Not `abandon`, whose stop makes the core kill the claim's process, and not
+    /// `OutOfUsage`, which marks the account out. The caller cancels the turn `exit` put back.
+    Left,
     /// A room-level turn: stop the claim, kill the process group. Room processes are never warm.
     Room,
     /// The host killed the process (the 15 s stop): `exit`.
@@ -679,7 +683,7 @@ impl CoreWriter {
                 Finished::RoomEnded { gone }
             }
             End::Killed | End::Died => self.retry_end(run, end),
-            End::Done | End::OutOfUsage => {
+            End::Done | End::OutOfUsage | End::Left => {
                 if !give_lock_back(stub, conversation, run.claim) {
                     let Begin::LockStuck { why } = self.lock_stuck(stub, run.claim, "release failed") else {
                         unreachable!()
@@ -698,7 +702,7 @@ impl CoreWriter {
         let sent = match end {
             End::Done => self.report(run.claim, "done", run.pid, &json!({})),
             End::OutOfUsage => self.report(run.claim, "exit", run.pid, &json!({"out_of_usage": true})),
-            End::Killed | End::Died => self.report(run.claim, "exit", run.pid, &json!({})),
+            End::Killed | End::Died | End::Left => self.report(run.claim, "exit", run.pid, &json!({})),
             End::Room => return Finished::RoomEnded { gone: !pid_runs(run.pid) },
         };
         match sent {

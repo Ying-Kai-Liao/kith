@@ -75,9 +75,12 @@ pub(super) enum Rel {
     Killed,
     /// The turn never prompted (its start failed after the claim): the claim is given up and the turn cancelled.
     Abandon,
+    /// The turn goes on another session (the thread was forked): the claim ends `exit` with the process alive, and the turn is
+    /// cancelled; the next begin is a new turn.
+    Left,
     /// The prompt failed. If the process is gone (the core killed it: a revoke that reached a sibling session, an idle-kill; or it
-    /// crashed) the turn did not finish: `exit` puts it back in the core instead of `done` losing it. A process that is still there
-    /// ended an ordinary failed turn, which the host does not retry: `done`.
+    /// crashed) the turn did not finish: `exit` reports that, and the turn is cancelled after (nothing runs a requeued core turn; the
+    /// item has failed already). A process that is still there ended an ordinary failed turn, which the host does not retry: `done`.
     Died,
 }
 
@@ -85,10 +88,40 @@ pub(super) enum Rel {
 /// after that, `kill_resend`).
 const GONE_WITHIN: Duration = Duration::from_secs(30);
 
-/// The turn budget a room turn opens its chain with: the host's own cap (`chat::group`). The host's count decides; the core's
-/// copy can only refuse more.
+/// The turn budget a room turn opens its chain with: the host's own cap (`chat::group`). The host's count decides: the core's
+/// chain counter does not count rounds yet (see [`chain`]), so it limits nothing.
 pub(super) fn budget() -> i64 {
     crate::chat::group::budget_of(None)
+}
+
+/// The core turn that opened each room conversation's chain (this host run's; a later round follows it). A conversation that is not
+/// here opens a chain of its own, which is what every round did before.
+static ROOTS: OnceLock<Mutex<HashMap<(PathBuf, String), i64>>> = OnceLock::new();
+
+/// How many conversations' roots are kept; past it the map starts again (a round then opens a new chain).
+const ROOTS_KEPT: usize = 512;
+
+/// The turn that opened the chain of `conversation` (a group conversation of the room), if this host run has seen one.
+pub(super) fn chain_root(state: &std::path::Path, conversation: &str) -> Option<i64> {
+    let roots = ROOTS.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    roots.get(&(state.to_path_buf(), conversation.to_owned())).copied()
+}
+
+/// Notes the turn that opened a conversation's chain: the first one stays.
+pub(super) fn chain_opened(state: &std::path::Path, conversation: &str, turn: i64) {
+    let mut roots = ROOTS.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if roots.len() >= ROOTS_KEPT {
+        roots.clear();
+    }
+    roots.entry((state.to_path_buf(), conversation.to_owned())).or_insert(turn);
+}
+
+/// The chain field of a room turn's `hostclaim.enqueue`: the first round opens a chain with the host's cap (`budget`); a later round of
+/// the same conversation follows the first round's turn (`budgetFrom`), which also keeps the core from refusing it once the person
+/// who opened the conversation has left the basis (a root needs its author in it). The core does not count rounds yet: following
+/// the first round's turn, not the previous one's, keeps every round at depth one, and the host's own count decides.
+pub(super) fn chain(root: Option<i64>) -> (&'static str, i64) {
+    root.map_or_else(|| ("budget", budget()), |from| ("budgetFrom", from))
 }
 
 // MARK: the core and the mode

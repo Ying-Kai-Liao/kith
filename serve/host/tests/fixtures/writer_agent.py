@@ -64,6 +64,8 @@ for line in sys.stdin:
     elif method == "session/new":
         send({"id": m["id"], "result": {"sessionId": sid}})
     elif method == "session/load":
+        with open("loads.jsonl", "a") as log:
+            log.write(json.dumps(m["params"]["sessionId"]) + "\n")
         send({"id": m["id"], "result": {}})
     elif method == "session/prompt":
         threading.Thread(target=prompt, args=(m,), daemon=True).start()

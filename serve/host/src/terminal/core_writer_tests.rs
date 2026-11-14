@@ -121,6 +121,11 @@ impl World {
             "hostclaim.turn" => {
                 let turn = p["turn"].as_i64().unwrap();
                 self.sent_accounts.push(p["account"].as_str().map(str::to_owned));
+                // The real core claims a turn on its own conversation only (`failover.rs` "no conversation", and the turn update of
+                // `claim_checked_in` matches on it): a turn id sent with another conversation is refused.
+                if self.keys.iter().any(|k| k.2 == turn && k.0 != conv) {
+                    return data(json!({"refused": "other", "why": "no conversation"}));
+                }
                 if let Some(kind) = self.turn_refusal {
                     return refused(kind);
                 }
@@ -977,6 +982,41 @@ async fn running_out_of_usage_reports_exit_with_the_flag_and_the_core_requeues()
     assert_eq!(r.w().reports[0].1["out_of_usage"], true);
     assert_eq!(r.turn_state(1).0, "queued");
     assert!(r.lock_free("s1"));
+}
+
+/// A usage limit moves the turn to a backup account, whose process runs another session (S'): the old claim ends `exit`, the old turn
+/// is cancelled and the turn begins as a NEW turn on S' (no turn id, a new key). The old turn's id on S' is refused, as the core does.
+/// A turn that leaves its claim because the thread was forked (`End::Left`): the lock back, a plain `exit` (no usage flag, no stop: a
+/// stop would have the core kill the process the next turn runs on), and the claim ended.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn leaving_a_claim_releases_and_reports_a_plain_exit_without_stopping_the_process() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    assert_eq!(r.writer.finish(&run, "s1", &mut stub, End::Left), Finished::Reported);
+    assert!(r.lock_free("s1"));
+    assert_eq!(r.w().reports[0].0, "exit");
+    assert_ne!(r.w().reports[0].1["out_of_usage"], true, "the account is not out of usage: {:?}", r.w().reports);
+    assert!(!r.log().contains(&"hostclaim.stop".to_owned()), "{:?}", r.log());
+    assert_eq!(r.claim_state(1), "ended");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_usage_limit_move_is_a_new_turn_on_the_backups_session() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    assert_eq!(r.writer.finish(&run, "s1", &mut stub, End::OutOfUsage), Finished::Reported);
+    // The old turn on S' is what the first version of the move sent: refused.
+    let mut backup = r.stub("backup");
+    let b = r.writer.begin(&r.turn("s1-backup", Some(run.turn)), &mut backup);
+    assert!(matches!(b, Begin::Failed { turn: Some(_), .. }), "{b:?}");
+    // The move as the host does it: the old turn cancelled, a new one made on S'.
+    r.writer.cancel_turn(run.turn, "moved to the next account");
+    assert_eq!(r.turn_state(run.turn).0, "cancelled", "not left queued with nobody to run it");
+    let next = running(r.writer.begin(&r.turn("s1-backup", None), &mut backup));
+    assert_ne!(next.turn, run.turn, "a new turn");
+    assert_eq!(r.turn_state(next.turn).0, "running");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

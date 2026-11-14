@@ -15,6 +15,15 @@ use tokio::sync::mpsc;
 /// How often a parked start asks the core again (the mode, the unpark). A kick skips the wait.
 const SLOW: Duration = Duration::from_secs(2);
 
+/// The longest a turn parked behind a `--direct` run waits between two tries.
+const LOCK_BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+/// How long a turn that parked `lock_busy` for the `tries`-th time waits before it asks again: a `--direct` run can hold the lock for
+/// an hour, and every try makes a claim row and a busy report. The wait doubles from the slow tick up to [`LOCK_BACKOFF_MAX`].
+pub(super) fn lock_backoff(tries: u32) -> Duration {
+    SLOW.saturating_mul(1u32.checked_shl(tries).unwrap_or(u32::MAX)).min(LOCK_BACKOFF_MAX)
+}
+
 /// What a start is called with, kept so a park can start it again.
 #[derive(Clone, Debug)]
 pub(super) struct StartArgs {
@@ -33,8 +42,10 @@ pub(super) struct Parked {
     /// The core's turn, when it was enqueued.
     turn: Option<i64>,
     since: Instant,
-    /// A retry that waits out a moment (a process being stopped) is not due before it.
+    /// A retry that waits out a moment (a process being stopped, a lock held by a `--direct` run) is not due before it.
     not_before: Option<Instant>,
+    /// How many times in a row it parked for the same reason.
+    tries: u32,
     due: bool,
 }
 
@@ -78,7 +89,12 @@ impl Actor {
             // "core not answering": said once per wait, in the chat.
             self.notice("core not answering", NoticeStyle::Info);
         }
-        let not_before = (wait.why == Why::Retry).then(|| Instant::now() + super::writer::RETRY_AFTER);
+        let tries = self.writer.parked.as_ref().filter(|p| p.why == wait.why).map_or(0, |p| p.tries.saturating_add(1));
+        let not_before = match wait.why {
+            Why::Retry => Some(Instant::now() + super::writer::RETRY_AFTER),
+            Why::Lock => Some(Instant::now() + lock_backoff(tries)),
+            _ => None,
+        };
         self.writer.parked = Some(Parked {
             args,
             why: wait.why.clone(),
@@ -86,6 +102,7 @@ impl Actor {
             turn: wait.turn.or(self.writer.acc.as_ref().and_then(|a| a.turn)),
             since: self.writer.parked.as_ref().map_or_else(Instant::now, |p| p.since),
             not_before,
+            tries,
             due: false,
         });
         true
@@ -129,9 +146,15 @@ impl Actor {
             }
         }
         if let (Some((run, end)), Some(core)) = (self.writer.lost.take(), core(&self.hub)) {
-            let (r, e) = (run.clone(), end);
-            let sent = tokio::task::spawn_blocking(move || core.retry_end(&r, e)).await;
-            if !matches!(sent, Ok(crate::terminal::core_writer::Finished::Reported)) {
+            let (r, e, c) = (run.clone(), end, core.clone());
+            let sent = tokio::task::spawn_blocking(move || c.retry_end(&r, e)).await;
+            if matches!(sent, Ok(crate::terminal::core_writer::Finished::Reported)) {
+                // The end that put the turn back is the one that cancels it (`writer_turn::cancel_reason`), once the core took it.
+                if let Some(why) = super::writer_turn::cancel_reason(end) {
+                    let turn = run.turn;
+                    tokio::task::spawn_blocking(move || core.cancel_turn(turn, why));
+                }
+            } else {
                 self.writer.lost = Some((run, end));
             }
         }
@@ -167,8 +190,8 @@ impl Actor {
             Mode::Files | Mode::Shadow => true,
             Mode::Held => false,
             Mode::Writer => match why {
-                Why::Core | Why::Claim => true,
-                Why::Retry => not_before.is_none_or(|t| Instant::now() >= t),
+                Why::Retry | Why::Lock if not_before.is_some_and(|t| Instant::now() < t) => false,
+                Why::Core | Why::Claim | Why::Retry => true,
                 // The retried take is the probe: the core only has to say the claim that parked the turn is gone.
                 Why::Terminal | Why::Lock => {
                     let woken = tokio::task::spawn_blocking(move || core.unpark(&conv, false)).await;

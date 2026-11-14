@@ -53,12 +53,16 @@ struct Mac {
 
 const SWITCHED: Mac = Mac { file: true, ok: true };
 
+/// What the scripted core does once, after it answers a method (a test's way to change the world between two calls of one begin).
+type Hooks = Arc<Mutex<Vec<(&'static str, Box<dyn FnOnce() + Send>)>>>;
+
 struct Rig {
     hub: Arc<Hub>,
     dir: PathBuf,
     world: Arc<Mutex<World>>,
     locks: PathBuf,
     held: Vec<Child>,
+    hooks: Hooks,
 }
 
 fn folders(dir: &std::path::Path) -> Paths {
@@ -97,7 +101,21 @@ impl Rig {
         }
         let world = Arc::new(Mutex::new(World { account: "fixture".into(), switched: Some(mac.ok), ..World::default() }));
         let w = world.clone();
-        let fake: Fake = Arc::new(move |m, p| w.lock().unwrap().answer(m, p));
+        let hooks: Hooks = Hooks::default();
+        let h = hooks.clone();
+        let fake: Fake = Arc::new(move |m, p| {
+            let answer = w.lock().unwrap().answer(m, p);
+            // Outside the world's lock: a hook may read the world.
+            let due = {
+                let mut all = h.lock().unwrap();
+                let at = all.iter().position(|(on, _)| *on == m);
+                at.map(|i| all.remove(i).1)
+            };
+            if let Some(hook) = due {
+                hook();
+            }
+            answer
+        });
         register(&f.state, fake);
         // The core this host asks (Shadow's `enable` is not it: that would shadow every file claim).
         folders_registry().lock().unwrap().insert(f.state.clone(), f.clone());
@@ -117,7 +135,7 @@ impl Rig {
         let hub = Hub::new(store, "writer-test".into(), identity, "test-token".into(), 19223);
         hub.terminal.set_env(crate::terminal::Env { state: f.state.clone(), sessions: None });
         hub.start().unwrap();
-        Self { hub, locks: f.machine.join("core").join("locks"), dir, world, held: Vec::new() }
+        Self { hub, locks: f.machine.join("core").join("locks"), dir, world, held: Vec::new(), hooks }
     }
 
     fn w(&self) -> MutexGuard<'_, World> {
@@ -126,6 +144,33 @@ impl Rig {
 
     async fn send(&self, bot: &str, text: &str) {
         crate::api::dispatch(&self.hub, &Caller::Local, "send", json!({"botId": bot, "text": text})).await.unwrap();
+    }
+
+    /// A message into the thread whose root is `root` (an entry of the main chat).
+    async fn send_thread(&self, bot: &str, root: &str, text: &str) {
+        crate::api::dispatch(&self.hub, &Caller::Local, "send", json!({"botId": bot, "text": text, "threadId": root}))
+            .await
+            .unwrap();
+    }
+
+    /// The id of the first message in the bot's main chat (a thread's root).
+    fn first_message(&self, bot: &str) -> String {
+        let all = self.hub.store.history(bot, i64::MAX, 300).unwrap();
+        all.into_iter().find(|e| e.kind == "user").map(|e| e.id).expect("a message")
+    }
+
+    /// Runs `f` once, right after the core answers `method` (and outside its lock).
+    fn after(&self, method: &'static str, f: impl FnOnce() + Send + 'static) {
+        self.hooks.lock().unwrap().push((method, Box::new(f)));
+    }
+
+    /// The sessions the fixture agent of `bot` was asked to load, in order.
+    fn loads(&self, bot: &str) -> Vec<String> {
+        std::fs::read_to_string(self.dir.join(bot).join("loads.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<String>(l).ok())
+            .collect()
     }
 
     fn texts(&self, bot: &str, kind: &str) -> Vec<String> {
@@ -137,6 +182,12 @@ impl Rig {
             .filter(|e| e.kind == kind)
             .filter_map(|e| e.data["text"].as_str().map(str::to_owned))
             .collect()
+    }
+
+    /// Whether the agent answered `text` in the thread `root`.
+    fn replied_in(&self, bot: &str, root: &str, text: &str) -> bool {
+        let entries = self.hub.store.thread(bot, root, 500).unwrap();
+        entries.iter().any(|e| e.kind == "agent" && e.data["text"].as_str().is_some_and(|t| t.contains(text)))
     }
 
     fn replied(&self, bot: &str, text: &str) -> bool {
@@ -526,15 +577,18 @@ actor_test! {
 
 actor_test! {
     /// The process is killed under a running turn (the core's revoke reached a sibling session of the same process, or the idle-kill
-    /// before a terminal claim): the end is `exit`, so the core puts the turn back instead of reading it as done.
-    async fn a_process_killed_under_a_turn_leaves_the_turn_requeued_not_done(rig) {
+    /// before a terminal claim): the end is `exit`, not `done`, and the turn it puts back is cancelled after: nothing in the host
+    /// runs a requeued core turn, so it must not be left queued.
+    async fn a_process_killed_under_a_turn_ends_exit_and_the_turn_is_cancelled_not_left_queued(rig) {
         rig.send("a", "HANG").await;
         rig.until("running", |r| r.running_pid("sess-a").is_some()).await;
         kill_group(rig.running_pid("sess-a").unwrap());
         rig.until("the end report", |r| !r.w().reports.is_empty()).await;
-        let w = rig.w();
-        assert_eq!(w.reports[0].0, "exit", "{:?}", w.reports);
-        assert_eq!(w.turns[0].1, "queued", "requeued, not lost and not done");
+        {
+            let w = rig.w();
+            assert_eq!(w.reports[0].0, "exit", "{:?}", w.reports);
+        }
+        rig.until("the turn is cancelled", |r| r.turn_state(1) == "cancelled").await;
     }
 }
 
@@ -619,7 +673,7 @@ async fn a_room_turn_ends_with_a_stop_and_no_warm_process() {
 
 // MARK: smaller rules
 
-/// MUST 8: the host's count decides; the core's chain counter opens with the same cap, so it can only refuse more.
+/// MUST 8: the host's count decides; the core's chain counter opens with the same cap (it does not count rounds yet).
 #[test]
 fn a_room_turn_opens_its_chain_with_the_hosts_own_cap() {
     assert_eq!(super::budget(), crate::chat::group::budget_of(None));
@@ -635,4 +689,132 @@ async fn a_thread_lane_with_no_session_key_is_not_the_turns_session() {
     assert_eq!(got, crate::terminal::Synced::Forked { session: String::new() });
     // A main lane has no thread to follow.
     assert_eq!(crate::terminal::sync_for_turn(&rig.hub, &Lane::main("a"), "sess-a").await.unwrap(), crate::terminal::Synced::Unchanged);
+}
+
+// MARK: step 7 (design 1.3): the transcript sync under the lock
+
+actor_test! {
+    /// A terminal wrote since the session loaded (the thread's stale mark is set between the claim and the sync): the turn holds its
+    /// claim, the session is loaded again before the prompt, and the turn runs on the same claim.
+    async fn a_thread_that_moved_reloads_its_session_under_the_claim(rig) {
+        rig.send("a", "first").await;
+        rig.until("the first reply", |r| r.replied("a", "first")).await;
+        let root = rig.first_message("a");
+        rig.send_thread("a", &root, "in thread").await;
+        rig.until("the thread's reply", |r| r.replied_in("a", &root, "in thread")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 2).await;
+        let before = rig.loads("a").len();
+        let hub = rig.hub.clone();
+        let stale = format!("terminal.stale.a/{root}");
+        rig.after("hostclaim.redeem", move || hub.store.kv_set(&stale, "1").unwrap());
+        rig.send_thread("a", &root, "after the terminal").await;
+        rig.until("the reply", |r| r.replied_in("a", &root, "after the terminal")).await;
+        assert_eq!(rig.loads("a").len(), before + 1, "the session was loaded again before the prompt: {:?}", rig.loads("a"));
+        let w = rig.w();
+        assert_eq!(w.turns.len(), 3, "the same turn, no new one");
+        assert_eq!(w.turns[2].1, "done");
+        assert_eq!(w.claims.len(), 3, "one claim for the turn");
+    }
+}
+
+actor_test! {
+    /// A terminal forked the thread's session between the claim and the sync: the claim on the old session is given up (the turn
+    /// cancelled), and the turn begins again, as a new turn, on the session the lane follows now.
+    async fn a_thread_that_forked_abandons_the_claim_and_begins_on_the_new_session(rig) {
+        rig.send("a", "first").await;
+        rig.until("the first reply", |r| r.replied("a", "first")).await;
+        let root = rig.first_message("a");
+        rig.send_thread("a", &root, "in thread").await;
+        rig.until("the thread's reply", |r| r.replied_in("a", &root, "in thread")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 2).await;
+        let hub = rig.hub.clone();
+        let key = crate::store::lane_key("session", "a", &Lane::in_thread("a", &root));
+        rig.after("hostclaim.redeem", move || hub.store.kv_set(&key, "sess-fork").unwrap());
+        rig.send_thread("a", &root, "after the fork").await;
+        rig.until("the reply", |r| r.replied_in("a", &root, "after the fork")).await;
+        assert!(rig.loads("a").contains(&"sess-fork".to_owned()), "the new session loaded: {:?}", rig.loads("a"));
+        let w = rig.w();
+        assert_eq!(w.turns[2].1, "cancelled", "the turn on the old session is cancelled: {:?}", w.turns);
+        assert_eq!(w.turns[3].1, "done", "a new turn on the new session");
+        let keys: Vec<_> = w.keys.iter().filter(|k| k.2 == 3 || k.2 == 4).collect();
+        assert_eq!(keys.len(), 2);
+        assert_ne!(keys[0].1, keys[1].1, "a new key");
+        assert_eq!(keys[0].0, "sess-a");
+        assert_eq!(keys[1].0, "sess-fork", "on the session the lane follows now");
+    }
+}
+
+// MARK: off-turn: any error stops the process (check-in MUST 6)
+
+actor_test! {
+    /// An error before the begin (the core stops answering after the first turn, so the revoke epochs can't be read) is not a begin
+    /// refusal, and the engine is writing all the same: the process is stopped.
+    async fn an_off_turn_that_fails_before_its_begin_stops_the_process(rig) {
+        rig.send("a", "WAKE").await;
+        rig.until("the first turn", |r| r.w().turns.first().is_some_and(|t| t.1 == "done")).await;
+        let pid = rig.w().claims[0].pid.and_then(|p| i32::try_from(p).ok()).unwrap();
+        rig.w().down = true;
+        rig.until("the process is stopped", |_| {
+            // SAFETY: signal 0 only asks whether the group is still there.
+            unsafe { libc::killpg(pid, 0) != 0 }
+        })
+        .await;
+    }
+}
+
+// MARK: the end choice, the backoff and the chain (units)
+
+mod units {
+    use crate::agent::bot::writer::{Rel, budget, chain, chain_opened, chain_root};
+    use crate::agent::bot::writer_turn::{cancel_reason, end_for};
+    use crate::agent::bot::writer_wait::lock_backoff;
+    use crate::terminal::core_writer::End;
+    use std::path::Path;
+    use std::time::Duration;
+
+    /// What a release reports. `OutOfUsage` only for a move to the next account, which `failover` sets after its refusals (the turn
+    /// acted, was sent, is hidden, is at MAX_MOVES or AllOut: each returns before it); everything else ends `Done`.
+    #[test]
+    fn the_end_is_out_of_usage_only_for_a_move_and_every_other_ending_is_done() {
+        assert_eq!(end_for(Some(Rel::OutOfUsage), false, false), End::OutOfUsage);
+        assert_eq!(end_for(None, false, false), End::Done, "no failover: done");
+        assert_eq!(end_for(Some(Rel::Abandon), false, false), End::Done);
+        assert_eq!(end_for(Some(Rel::Died), false, false), End::Done, "a failed prompt on a live process is an ordinary end");
+        assert_eq!(end_for(Some(Rel::Died), true, false), End::Died, "the process is gone");
+        assert_eq!(end_for(Some(Rel::Killed), false, false), End::Killed);
+        assert_eq!(end_for(Some(Rel::Left), false, false), End::Left, "a fork leaves the claim, the process lives on");
+        assert_eq!(end_for(None, false, true), End::Room, "a room person's turn");
+        assert_eq!(end_for(Some(Rel::OutOfUsage), false, true), End::OutOfUsage);
+    }
+
+    /// An end that reports `exit` cancels its turn after, because nothing in the host runs a requeued core turn.
+    #[test]
+    fn every_end_that_reports_exit_cancels_its_turn() {
+        assert!(cancel_reason(End::Killed).is_some());
+        assert!(cancel_reason(End::Died).is_some());
+        assert!(cancel_reason(End::OutOfUsage).is_some());
+        assert!(cancel_reason(End::Left).is_some());
+        assert!(cancel_reason(End::Done).is_none());
+        assert!(cancel_reason(End::Room).is_none());
+    }
+
+    #[test]
+    fn a_turn_parked_behind_a_direct_run_waits_longer_each_time_up_to_a_cap() {
+        let waits: Vec<_> = (0..8).map(|n| lock_backoff(n).as_secs()).collect();
+        assert_eq!(waits, [2, 4, 8, 16, 30, 30, 30, 30]);
+        assert_eq!(lock_backoff(u32::MAX), Duration::from_secs(30), "no overflow");
+    }
+
+    #[test]
+    fn a_later_round_follows_the_first_rounds_turn_and_the_first_opens_the_chain() {
+        let state = Path::new("kw-chain-test");
+        assert_eq!(chain_root(state, "conv-1"), None);
+        assert_eq!(chain(None), ("budget", budget()));
+        chain_opened(state, "conv-1", 7);
+        chain_opened(state, "conv-1", 9);
+        assert_eq!(chain_root(state, "conv-1"), Some(7), "the first stays");
+        assert_eq!(chain(chain_root(state, "conv-1")), ("budgetFrom", 7));
+        assert_eq!(chain_root(state, "conv-2"), None, "another conversation opens its own chain");
+        assert_eq!(chain_root(Path::new("kw-other"), "conv-1"), None, "another host's state");
+    }
 }

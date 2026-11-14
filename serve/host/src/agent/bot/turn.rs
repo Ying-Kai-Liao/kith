@@ -373,6 +373,8 @@ impl Actor {
         }
         let sid = self.turn_session.clone().ok_or_else(|| anyhow!("no session"))?;
         self.claim_for_turn(&sid, lane).await?;
+        // Writer mode: a thread a terminal forked moves the turn to the session the lane follows now (step 7).
+        let sid = self.turn_session.clone().ok_or_else(|| anyhow!("no session"))?;
         let prompt =
             if std::mem::take(&mut self.raw_prompt) { text.to_owned() } else { self.compose(&sid, text).await? };
         self.hub.set_runtime(&self.rt, |r| r.activity = "Thinking…".into());
