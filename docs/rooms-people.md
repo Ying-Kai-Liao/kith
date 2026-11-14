@@ -14,9 +14,10 @@ To turn it back on: `sqlite3 ~/.kith/serve/serve.db "DELETE FROM kv WHERE k = 'r
 
 ## While it is off
 
-- The apps hide the Rooms part of the invite sheet and the People list of a room (the apps read the setting; see
-  `PeopleView.tsx` and `RoomPeople.tsx`). People who are still in a room can't be seen or removed in the app until the setting
-  is back on. Turn it on again to manage them.
+- The desktop and web apps hide the Rooms part of the invite sheet and the People list of a room (they read the setting; see
+  `PeopleView.tsx` and `RoomPeople.tsx`). People who are still in a room can't be seen or removed there until the setting is
+  back on. Turn it on again to manage them. The iPhone app keeps the section while anyone still has an open stay in the room
+  (`BotStore+RoomPeople.swift`), so people can still be seen and removed from it.
 
 ## Known gaps
 
