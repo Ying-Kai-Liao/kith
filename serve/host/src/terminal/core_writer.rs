@@ -1,6 +1,6 @@
 //! The host's Writer mode (designs/2026-11-14-m3-cutover sections 1.2 to 1.4): each warm turn runs on a core claim plus the
-//! per-turn writer lock, which a resident `kith-stub` holds for the host. Machinery only: nothing calls it until the wiring
-//! package (P7), and nothing turns it on.
+//! per-turn writer lock, which a resident `kith-stub` holds for the host. The host's actors call it
+//! (`agent/bot/writer.rs`, P7b), and nothing in a shipped build turns it on but the switched claims module.
 //!
 //! **The mode** ([`Mode`]) is read from the gate at every begin and at the caller's tick, not once at host start. `Files` is
 //! today's path and the default. `Shadow` is `KITH_HOST_CORE_CLAIMS=1` (`core_claims`). `Writer` only when
@@ -34,9 +34,6 @@
 //!
 //! The caller runs at most one begin per conversation at a time, and retries a lost end report ([`Finished::ReportLost`]) with
 //! [`CoreWriter::retry_end`] on its slow tick.
-
-// Nothing calls this until the wiring package (P7).
-#![allow(dead_code, reason = "machinery with no caller yet")]
 
 use super::core_claims::row_answer;
 use super::registry::{pid_runs, proc_start};
@@ -266,6 +263,9 @@ pub enum End {
     Room,
     /// The host killed the process (the 15 s stop): `exit`.
     Killed,
+    /// The prompt failed and the process is gone (the core killed it, or it crashed): `exit`, so the core puts the turn back
+    /// instead of reading a finished one. The lock went with the stub: nothing is released.
+    Died,
 }
 
 /// What [`CoreWriter::finish`] came to.
@@ -318,8 +318,14 @@ impl CoreWriter {
         Self { folders, instance }
     }
 
+    #[cfg(test)]
     pub fn instance(&self) -> &str {
         &self.instance
+    }
+
+    /// The core's folders this writer asks (its machine folder holds the writer locks).
+    pub fn folders(&self) -> &Paths {
+        &self.folders
     }
 
     fn call(&self, method: &str, params: &Value) -> Answer {
@@ -349,6 +355,12 @@ impl CoreWriter {
 
     fn cancel(&self, turn: i64, why: &str) {
         let _ = self.call("hostclaim.cancel", &json!({"turn": turn, "reason": why}));
+    }
+
+    /// Cancels a turn the host gave up before it ran (the item was stopped while it waited): a turn row left queued would be
+    /// the core's to expire, never the host's to run.
+    pub fn cancel_turn(&self, turn: i64, why: &str) {
+        self.cancel(turn, why);
     }
 
     fn report(&self, claim: i64, kind: &str, pid: u32, extra: &Value) -> Result<(), String> {
@@ -581,6 +593,17 @@ impl CoreWriter {
         for _ in 0..2 {
             match self.call("hostclaim.redeem", &ask) {
                 Answer::Done(v) if v["running"] == true => return running(v["again"] == true),
+                // The process is marked for a kill (a terminal's idle-kill or a revoke, `warm_procs.kill_at`): a turn run on it
+                // would be killed under its prompt. The lock goes back and the turn is put back; the next begin finds the stub
+                // gone (or the mark lifted) and starts on a process that stays.
+                Answer::Done(v) if v["refused"] == "killing" => {
+                    if !give_lock_back(stub, t.conversation, claim) {
+                        return self.lock_stuck(stub, claim, "redeem refused (killing)");
+                    }
+                    let ask = json!({"claimId": claim, "reason": "process is being stopped", "requeue": true});
+                    let _ = self.call("hostclaim.stop", &ask);
+                    return Begin::Retry { turn, after: RECONCILE_RETRY };
+                }
                 Answer::Done(v) if v["refused"].is_string() => {
                     // Revoked, stopped or ended between the claim and the redeem: the lock goes back, the claim is not running.
                     let state = v["refused"].as_str().unwrap_or_default().to_owned();
@@ -655,7 +678,7 @@ impl CoreWriter {
                 }
                 Finished::RoomEnded { gone }
             }
-            End::Killed => self.retry_end(run, end),
+            End::Killed | End::Died => self.retry_end(run, end),
             End::Done | End::OutOfUsage => {
                 if !give_lock_back(stub, conversation, run.claim) {
                     let Begin::LockStuck { why } = self.lock_stuck(stub, run.claim, "release failed") else {
@@ -675,7 +698,7 @@ impl CoreWriter {
         let sent = match end {
             End::Done => self.report(run.claim, "done", run.pid, &json!({})),
             End::OutOfUsage => self.report(run.claim, "exit", run.pid, &json!({"out_of_usage": true})),
-            End::Killed => self.report(run.claim, "exit", run.pid, &json!({})),
+            End::Killed | End::Died => self.report(run.claim, "exit", run.pid, &json!({})),
             End::Room => return Finished::RoomEnded { gone: !pid_runs(run.pid) },
         };
         match sent {
@@ -790,4 +813,4 @@ fn owner_or(person: &str) -> &str {
 
 #[cfg(test)]
 #[path = "core_writer_tests.rs"]
-mod tests;
+pub(crate) mod tests;

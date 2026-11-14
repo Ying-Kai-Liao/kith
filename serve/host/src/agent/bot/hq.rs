@@ -378,6 +378,8 @@ impl Actor {
     /// chain that is ready and not out of usage. A turn already running is never moved.
     pub(super) async fn ensure_hq_session(&mut self, slot: Option<&str>) -> Result<()> {
         let agent = self.cfg.hq_agent.clone().ok_or_else(|| anyhow!("not an hq agent"))?;
+        // Writer mode: the process runs under a resident stub; one that was started without is stopped first. `Held` parks the turn.
+        let resident = self.writer_align().await?;
         let chain = self.hq_chain(&agent).await;
         let mut skip: HashSet<String> = self.turn_tried.clone();
         let mut prepared = None;
@@ -424,7 +426,7 @@ impl Actor {
                 && self.conn.is_some()
                 && let Some(sid) = &current
             {
-                self.claim_for_turn(sid, &lane).await?;
+                self.claim_before_load(sid, &lane).await?;
             }
             // The once grants the loaded session was given before stay with it.
             let carried = match (&current, &self.conn) {
@@ -626,7 +628,17 @@ impl Actor {
             for (i, command) in candidates.iter().enumerate() {
                 // A local CLI too old for ACP just hangs; don't make the user wait long before the fallback.
                 let budget = Duration::from_secs(if i + 1 < candidates.len() { 20 } else { 180 });
-                match start_agent(command, launch.cwd(&self.cfg), &env, budget).await {
+                let started = if resident {
+                    let account = backup
+                        .clone()
+                        .or_else(|| launch.account_id.clone())
+                        .or_else(|| launch.other_engine().map(str::to_owned))
+                        .unwrap_or_else(|| self.cfg.backend.clone());
+                    self.start_resident(command, launch.cwd(&self.cfg), &env, budget, &account).await
+                } else {
+                    start_agent(command, launch.cwd(&self.cfg), &env, budget).await
+                };
+                match started {
                     Ok(mut conn) => {
                         if let Some((grant, _)) = grant.take() {
                             if let Some(pid) = conn.acp.pid() {
@@ -650,8 +662,8 @@ impl Actor {
         if let Some(sid) = current {
             if self.conn.as_ref().is_some_and(|c| c.sessions.load) {
                 self.hub.set_runtime(&self.rt, |r| r.activity = "Resuming session…".into());
-                // The writer claim comes before the load (access-arch rule 4).
-                self.claim_for_turn(&sid, &lane).await?;
+                // The writer claim comes before the load (access-arch rule 4); in Writer mode it is the process's row.
+                self.claim_before_load(&sid, &lane).await?;
                 let params = self.hq_params(&launch, Some(&sid));
                 let res = self.session_request("session/load", params).await;
                 let Some(conn) = self.conn.as_mut() else { return res.map(drop) };

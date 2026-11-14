@@ -186,6 +186,8 @@ impl Actor {
         if self.is_hq() {
             return self.ensure_hq_session(slot).await;
         }
+        // Writer mode: a native bot's process runs under a resident stub too and claims as `bot:<id>` (B10).
+        let resident = self.writer_align().await?;
         if self.cfg.connectors.is_empty() {
             // The key may sit in the envelope alone (saved after M2-7), so ask the vault, not serve.db.
             crate::market::vault::unlock_if_sealed(&self.hub, crate::agent::auth::env_slot(&self.cfg.backend)).await?;
@@ -228,7 +230,12 @@ impl Actor {
                 let fallback_left = i + 1 < candidates.len();
                 // A local CLI too old for ACP just hangs; don't make the user wait long before the fallback.
                 let budget = Duration::from_secs(if fallback_left { 20 } else { 180 });
-                match start_agent(command, &cwd, &env, budget).await {
+                let started = if resident {
+                    self.start_resident(command, &cwd, &env, budget, &self.cfg.backend).await
+                } else {
+                    start_agent(command, &cwd, &env, budget).await
+                };
+                match started {
                     Ok(conn) => {
                         self.conn = Some(conn);
                         break;
@@ -320,6 +327,8 @@ impl Actor {
             if instructions == Instructions::SystemPrompt {
                 params["systemPrompt"] = system_prompt(&self.snapshot(&sid).await?.system);
             }
+            // Writer mode: the process's row for the session, before the load names it.
+            self.warm_session(&sid).await?;
             let res = self.session_request("session/load", params).await;
             let Some(conn) = self.conn.as_mut() else { return res.map(drop) };
             // The agent replays history as session/update before answering; drop it.
@@ -499,12 +508,20 @@ impl Actor {
                 conn.loaded.remove(&sid);
             }
         }
+        // Writer mode: the core's row for the dropped session goes on the next tick.
+        self.writer_forgot();
     }
 
     /// Drops the session of the actor's own place so its next turn starts a fresh one.
     pub(super) fn forget_session(&mut self) {
         let slot = self.slot(&self.home);
+        let old = self.session_for(slot.as_deref());
         self.set_session(slot.as_deref(), None);
+        // Writer mode: a session the process no longer serves has no row (the process's idle release closes it later).
+        if let (Some(old), Some(conn)) = (old, self.conn.as_mut().filter(|c| c.writer.is_some())) {
+            conn.loaded.remove(&old);
+            self.writer_forgot();
+        }
     }
 }
 

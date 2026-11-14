@@ -120,6 +120,7 @@ impl Actor {
         done_tx: &mpsc::UnboundedSender<Done>,
     ) -> Result<()> {
         self.start_entries = entry_ids.to_vec();
+        self.writer_note_start(&lane, entry_ids, text, hidden);
         let stopping = |c: &Cmd| matches!(c, Cmd::Stop | Cmd::Shutdown);
         let cancelled = self.deferred.iter().any(stopping);
         if !cancelled && let Some(mut rx) = self.cmd_rx.take() {
@@ -187,7 +188,9 @@ impl Actor {
                 r.lane = Some(begin_lane);
             });
         };
-        if let Err(held) = crate::terminal::start_gate(&self.hub, &lane, begin).await {
+        // Writer mode: a thread a terminal holds is not refused here; the claim finds it held and the turn parks (design 1.3).
+        let parks = self.writer_parks().await;
+        if let Err(held) = crate::terminal::start_gate_in(&self.hub, &lane, parks, begin).await {
             // The owner's own messages wait for the terminal as wakes instead of failing: the queue starts their turn
             // once it lets go. Anything else (a bot guest's thread, a person's chat, a hidden or room turn) is refused.
             if self.wait_for_terminal(&held, entry_ids).await {
@@ -403,6 +406,10 @@ impl Actor {
     ///
     /// An app chat's session takes it before it loads (`ensure_hq_session`): that claim is the turn's.
     pub(super) async fn claim_for_turn(&mut self, sid: &str, lane: &Lane) -> Result<()> {
+        // Writer mode: the core's claim and the stub's lock are the writer; `Ok(false)` is any other mode, which takes the file path.
+        if self.writer_claim(sid, lane, false).await? {
+            return Ok(());
+        }
         let pid = self.conn.as_ref().and_then(|c| c.acp.pid());
         if pid.is_some() && self.turn_claim.as_ref().is_some_and(|(held, by)| held == sid && Some(*by) == pid) {
             return Ok(());
@@ -471,6 +478,11 @@ impl Actor {
     }
 
     pub(super) fn release_turn_claim(&mut self) {
+        if self.writer.run.is_some() {
+            self.writer_release();
+            return;
+        }
+        self.writer.acc = None;
         if let Some((sid, pid)) = self.turn_claim.take() {
             let state = self.hub.terminal.env().state;
             crate::terminal::claim::release(&state, &sid, pid, false);
@@ -502,6 +514,10 @@ impl Actor {
         let ids: Vec<String> = self.perms.drain().map(|(k, _)| k).collect();
         // Cards nobody answered: an owner's gave up the turn's slot, which comes back with the dropped guard.
         self.parked_prompts.clear();
+        // A room turn a revoke ended: a card that opened after the withdraw looked can't be answered either.
+        if self.ended_by_access() {
+            crate::cards::withdraw_room_person(&self.hub, self.cfg.person.as_deref().unwrap_or_default());
+        }
         for id in ids {
             // A question with a card parks with its asker; an old one can't be answered and shows as expired.
             if crate::cards::park_entry(&self.hub, &id) {
@@ -644,6 +660,9 @@ impl Actor {
             Ok(final_text.clone())
         });
         self.hub.set_task_status(&self.lane, TaskState::after_turn(stopped, failed, &stop_reason));
+        if done.is_err() {
+            self.writer_prompt_failed();
+        }
         self.release_turn_claim();
         self.turn = None;
         if self.routine_completion.is_none() {

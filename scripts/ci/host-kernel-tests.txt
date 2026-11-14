@@ -25,6 +25,7 @@ src/api/room_people_tests.rs	api::room_people_tests::
 src/api/invite_rooms_tests.rs	api::invite_rooms_tests::
 src/api/room_member_tests.rs	api::room_member_tests::
 src/api/room_turn_tests.rs	api::room_turn_tests::
+src/api/room_withdraw_tests.rs	api::room_withdraw_tests::
 src/api/roles_props/rooms.rs	api::roles_props::rooms::
 src/api/botguests_props.rs	api::botguests_props::
 src/api/revoke_tests.rs	api::revoke_tests::
@@ -41,3 +42,7 @@ src/api/room_secrets_props.rs	api::room_secrets_props::
 src/chat/team/tests.rs	chat::team::tests::
 src/cards/session_tests.rs	cards::session_tests::
 src/routines/schedule_golden.rs	routines::schedule_golden::
+# Drive the writer lock the kernel's `kith --direct` shares (a real kith-stub on <machine>/core/locks): a kernel change to the lock or its
+# claim protocol must still pass the host's Writer-mode turns (P7b).
+src/agent/bot/writer_tests.rs	agent::bot::writer::tests::
+src/terminal/core_writer_tests.rs	terminal::core_writer::tests::

@@ -34,6 +34,9 @@ mod room_turn;
 mod session;
 mod turn;
 mod updates;
+mod writer;
+mod writer_turn;
+mod writer_wait;
 
 pub(crate) use launch::{launch_commands, select_model, start_agent, system_prompt};
 pub(crate) use room_turn::session_owner;
@@ -134,24 +137,30 @@ pub enum Cmd {
         lane: Lane,
     },
     Reconfigure(Box<BotConfig>),
+    /// A writer that held this place's session ended (a terminal's claim): a start parked for it asks the core at once (Writer mode).
+    #[allow(dead_code, reason = "sent by the hub's claim-end events once those land; the slow tick covers it until then")]
+    Unpark,
     Shutdown,
 }
 
+/// A turn waiting for the actor. Each carries its [`writer::Accept`]: the key made when it was accepted and the revoke epochs read
+/// then (Writer mode), so a retried enqueue is the same turn and an epoch is never read after the may check.
 enum Queued {
-    Routine(String),
+    Routine(String, writer::Accept),
     User {
         lane: Lane,
         entry_id: String,
         text: String,
         /// A different subject: goes as a turn of its own instead of joining the messages around it.
         alone: bool,
+        acc: writer::Accept,
     },
-    BotRequest(crate::chat::team::BotRequest),
+    BotRequest(crate::chat::team::BotRequest, writer::Accept),
     /// A compaction the host decided on (see `compaction`); `idle` while the user is away.
     Compact {
         idle: bool,
     },
-    Group(GroupTurn),
+    Group(GroupTurn, writer::Accept),
 }
 
 pub struct BotHandle {
@@ -188,6 +197,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         rt,
         turn_session: None,
         turn_claim: None,
+        writer: writer_turn::State::default(),
         thread_intro: None,
         active_group: None,
         turn_basis: None,
@@ -340,6 +350,8 @@ pub(crate) struct Conn {
     profiles: HashMap<String, Profile>,
     /// An invited person's or bot guest's run token: revoked when this process's `Conn` is dropped.
     pub(crate) run_grant: Option<crate::runauth::RunGrant>,
+    /// Writer mode: the process runs under a resident stub, which holds the writer lock (see `writer`).
+    pub(crate) writer: Option<writer::Proc>,
 }
 
 /// What a person's session runs with: a launch with another digest loads the session again before its turn.
@@ -395,6 +407,8 @@ struct Actor {
     turn_session: Option<String>,
     /// The writer claim this turn holds on its session (session id, the agent process' pid); see `claim_for_turn`.
     turn_claim: Option<(String, u32)>,
+    /// Writer mode: the claim the turn holds through the core, what it waits for, what it carries from its accept (see `writer`).
+    writer: writer_turn::State,
     /// Told on the first message of a new thread session: what the thread is about.
     thread_intro: Option<String>,
     active_group: Option<GroupTurn>,
@@ -607,6 +621,8 @@ impl Actor {
                 }
                 _ = flush_tick.tick() => {
                     self.flush(false);
+                    // Writer mode: a lost end report goes again, a parked start asks the core (slow: every couple of seconds).
+                    self.writer_tick(&done_tx).await;
                     if self.routine_completion.is_some() && self.retry_routine_completion() {
                         self.set_inflight(false);
                         self.next_in_queue(&done_tx).await;
@@ -619,6 +635,8 @@ impl Actor {
                     // The agent ignored the cancel: stop its process so the bot is free again.
                     if self.turn.is_some() && self.cancel_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                         self.cancel_deadline = None;
+                        // Only this kill reports `exit` to the core (the user's Stop is `session/cancel` and a normal end).
+                        self.writer_mark_killed();
                         if let Some(c) = self.conn.take() { c.acp.kill().await; }
                     }
                     if self.off_turn_quiet() {
