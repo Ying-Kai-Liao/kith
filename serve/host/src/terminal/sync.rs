@@ -982,14 +982,18 @@ async fn take_over_inner(hub: &Arc<Hub>, t: &Thread) -> Result<Value> {
     // `set_writer` is held without a file. A core that cannot be asked, or that shows no claim of the terminal, refuses: the
     // files are never the fallback.
     let st = env.state.clone();
-    if let Some(f) = tokio::task::spawn_blocking(move || super::core_holders::writer_folders(&st)).await?.map_err(|why| {
-        anyhow!("the claims core cannot be asked ({why}): nothing was changed")
-    })? {
+    if let Some(f) = tokio::task::spawn_blocking(move || super::core_holders::writer_folders(&st))
+        .await?
+        .map_err(|why| anyhow!("the claims core cannot be asked ({why}): nothing was changed"))?
+    {
         let (f2, s2) = (f.clone(), sid.clone());
         let id = tokio::task::spawn_blocking(move || super::core_holders::terminal_claim(&f2, &s2)).await?;
         return match id.map_err(|why| anyhow!("the claims core cannot be asked ({why}): nothing was changed"))? {
             Some(id) => take_over_core(hub, t, reg, &env, f, id).await,
-            None => Err(TerminalBusy("terminalBusy: The core doesn't show this terminal's claim. Close it yourself.").into()),
+            None => {
+                Err(TerminalBusy("terminalBusy: The core doesn't show this terminal's claim. Close it yourself.")
+                    .into())
+            }
         };
     }
     // Taken before the core is asked, so the window between the terminal's `ended` and the host's `set_writer` is held on

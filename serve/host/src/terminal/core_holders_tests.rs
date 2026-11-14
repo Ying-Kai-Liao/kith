@@ -85,7 +85,8 @@ impl World {
                     self.released_first = false;
                     self.claims.iter_mut().filter(|c| c.id == id).for_each(|c| c.state = "ended".into());
                 }
-                match self.claims.iter_mut().find(|c| c.id == id && ["claimed", "running"].contains(&c.state.as_str())) {
+                match self.claims.iter_mut().find(|c| c.id == id && ["claimed", "running"].contains(&c.state.as_str()))
+                {
                     Some(c) if c.pid.is_none() => {
                         c.state = "ended".into();
                         json!({"kill": null})
@@ -102,9 +103,14 @@ impl World {
                        "recent": []})
             }
             "claim.sweepPerson" => {
-                let who: Vec<String> = p["persons"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_owned()).collect();
+                let who: Vec<String> =
+                    p["persons"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_owned()).collect();
                 let mut kill = Vec::new();
-                for c in self.claims.iter_mut().filter(|c| who.contains(&c.person) && ["claimed", "running"].contains(&c.state.as_str())) {
+                for c in self
+                    .claims
+                    .iter_mut()
+                    .filter(|c| who.contains(&c.person) && ["claimed", "running"].contains(&c.state.as_str()))
+                {
                     c.state = if c.pid.is_some() { "ending" } else { "ended" }.into();
                     if c.pid.is_some() {
                         kill.push(json!({"claimId": c.id, "pid": c.pid, "started": c.started}));
@@ -291,8 +297,12 @@ fn this_starts_own_owner_turn_is_no_holder_but_an_earlier_starts_is() {
     let reader = Reader::new(&r.state);
     assert_eq!(reader.read("s1"), Reading::Free, "this start's own turn only keeps a terminal out");
     r.w().claims.iter_mut().find(|c| c.id == id).unwrap().instance = Some("kith-serve-host/1-old".into());
-    assert!(matches!(reader.read("s1"), Reading::By(c, _) if c.kind == Kind::Other), "an older start's turn still writes");
-    r.w().claims.iter_mut().find(|c| c.id == id).unwrap().instance = Some(super::super::core_claims::HOST_INSTANCE.into());
+    assert!(
+        matches!(reader.read("s1"), Reading::By(c, _) if c.kind == Kind::Other),
+        "an older start's turn still writes"
+    );
+    r.w().claims.iter_mut().find(|c| c.id == id).unwrap().instance =
+        Some(super::super::core_claims::HOST_INSTANCE.into());
     assert!(matches!(reader.read("s1"), Reading::By(..)), "the shadow's fixed name is not this start's");
     // A person's turn of this start is a bot guest's holder, as the file claim of the bot is today.
     r.w().claims.iter_mut().find(|c| c.id == id).unwrap().person = "sam".into();
@@ -397,7 +407,8 @@ fn test_hub(state: &Path) -> Arc<Hub> {
     let dir = std::env::temp_dir().join(format!("kith-holders-hub-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let store = crate::store::Store::open(Path::new(":memory:")).unwrap();
-    let hub = Hub::new(store, "t".into(), crate::remote::identity::Identity::load_or_create(&dir).unwrap(), "t".into(), 0);
+    let hub =
+        Hub::new(store, "t".into(), crate::remote::identity::Identity::load_or_create(&dir).unwrap(), "t".into(), 0);
     hub.terminal.set_env(crate::terminal::Env { state: state.to_path_buf(), sessions: None });
     hub
 }
@@ -454,9 +465,7 @@ async fn an_owed_sweep_of_a_person_who_was_restored_kills_nothing() {
     r.put("g1", "turn", "sam", Some((guest, g_start)), Some(own_instance()));
     let hub = test_hub(&r.state);
     // Owed while sam was suspended; then the revoke was undone (nothing is kept for sam any more).
-    hub.store
-        .kv_set(OWED, &json!([{"persons": ["sam"], "narrow": false, "suspended": true}]).to_string())
-        .unwrap();
+    hub.store.kv_set(OWED, &json!([{"persons": ["sam"], "narrow": false, "suspended": true}]).to_string()).unwrap();
     retry_owed(&hub).await;
     assert_eq!(owed_count(&hub), 0, "dropped");
     assert!(!r.log().contains(&"claim.sweepPerson".to_owned()), "the retry revoked nobody");
@@ -514,10 +523,7 @@ async fn a_retry_that_fails_leaves_the_row_and_a_row_owed_meanwhile_is_kept() {
     assert!(matches!(sweep(&hub, &r.state, vec!["sam".into()], false).await, Some(Swept::Owed(_))));
     retry_owed(&hub).await;
     assert_eq!(owed_count(&hub), 1, "the failed retry did not drop its row");
-    let (a, b) = (
-        sweep(&hub, &r.state, vec!["ann".into()], false),
-        sweep(&hub, &r.state, vec!["bob".into()], false),
-    );
+    let (a, b) = (sweep(&hub, &r.state, vec!["ann".into()], false), sweep(&hub, &r.state, vec!["bob".into()], false));
     let _ = tokio::join!(a, b);
     assert_eq!(owed_count(&hub), 3, "two owed at once lose nothing");
 }

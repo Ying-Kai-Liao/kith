@@ -95,7 +95,9 @@ impl Reader {
     pub fn read_now(state: &Path, sid: &str) -> Reading {
         let go = || Self::new(state).read(sid);
         match tokio::runtime::Handle::try_current() {
-            Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(go),
+            Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(go)
+            }
             _ => go(),
         }
     }
