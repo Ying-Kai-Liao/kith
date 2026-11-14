@@ -493,6 +493,7 @@ fn a_live_process_is_not_read_as_gone_and_a_dead_one_is() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn the_rows_serve_only_once_the_claims_are_switched() {
     use crate::cutover::state::{self, Phase, Switch};
