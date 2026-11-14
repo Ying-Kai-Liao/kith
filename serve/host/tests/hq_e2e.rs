@@ -1012,8 +1012,14 @@ fn stay(s: &Setup, room: &str, person: &str, joined: i64, left: Option<i64>) {
 
 #[tokio::test]
 async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_or_while_anyone_is_in() {
-    let s = start().await;
-    let house = s.house().await["id"].as_str().unwrap().to_owned();
+    // `ann` may use the agent (the fixture kith-auth beside the stub kernel says yes for her): a room person's turn asks
+    // the authority live, and without that yes it does not start at all.
+    let home = std::env::temp_dir().join(format!("kith-hq-e2e-{}", uuid::Uuid::new_v4()));
+    let auth = home.join("auth.json").to_string_lossy().into_owned();
+    let s = start_in("instructions_agent.py claude", home, &[("KITH_AUTH", &auth), ("STUB_AUTH_ALLOW", "ann")]).await;
+    let house_bot = s.house().await;
+    let house = house_bot["id"].as_str().unwrap().to_owned();
+    let name = house_bot["name"].as_str().unwrap().to_owned();
     s.host.call("updateBot", json!({"id": house, "tasks": false})).await;
     let group = s.host.call("createBot", json!({"name": "Room", "kind": "group", "members": [house]})).await;
     let group = group["bot"]["id"].as_str().unwrap().to_owned();
@@ -1035,12 +1041,24 @@ async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_
     assert_eq!((s.launches().len(), inits()), (2, 2), "the new process is reused while nothing changes");
 
     // Someone is in the room: a process for it is never reused, though the members are the same as last turn.
+    // (With a person in the room only an @-mentioned agent answers.)
     stay(&s, &group, "ann", 1_000_002, None);
-    s.host.reply(&group, "fifth").await;
+    s.host.reply(&group, &format!("@{name} fifth")).await;
     assert_eq!(initialized(&s, 3).await, 3);
     assert_eq!(last_room_env(&s), (Some("ann".to_owned()), None), "the room's person is in the room's members");
-    s.host.reply(&group, "sixth").await;
+    s.host.reply(&group, &format!("@{name} sixth")).await;
     assert_eq!(initialized(&s, 4).await, 4, "with a person in the room no process is warm");
+    // The scripted agent never passes, so a message's conversation runs every round its budget allows (10) and each
+    // round is a turn that starts its own process: one initialize and one prompt per turn, never more. Counted once the
+    // late ones have landed (the count is read after it stops moving).
+    let (mut last, mut quiet) = (0, 0);
+    while quiet < 30 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let now = inits();
+        (quiet, last) = if now == last { (quiet + 1, now) } else { (0, now) };
+    }
+    assert_eq!(s.launches().len(), last, "one launch for each process");
+    assert!(last <= 2 + 2 * 10, "no more turns than the two messages' budgets allow: {last}");
 }
 
 #[tokio::test]
