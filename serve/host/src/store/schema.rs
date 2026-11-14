@@ -38,7 +38,7 @@ const SCHEMA: i64 = 19;
 /// 18: "This session" grants (`session_grants`, designs/2026-11-02-grant-card): an action the owner allowed for the rest
 /// of one conversation of an owner run.
 /// 19: people in a group room (`room_people`, designs/2026-11-12-rooms-with-people) and the gen each entry came from
-/// (`entries.origin_gen`; NULL is from before any person, the owner's era).
+/// (`entries.origin_gen`; NULL is unstamped, which a person in a room never sees).
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
         c.query_row("SELECT CAST(v AS INTEGER) FROM kv WHERE k = 'schema'", [], |r| r.get(0)).optional()?.unwrap_or(0);

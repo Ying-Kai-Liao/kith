@@ -13,6 +13,7 @@ pub mod outbox;
 pub mod profile;
 pub mod prompt;
 pub mod room_people;
+pub mod room_post;
 pub mod router;
 pub mod tasks;
 pub mod team;

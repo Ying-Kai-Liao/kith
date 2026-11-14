@@ -206,6 +206,17 @@ fn owned_bot_chat_agent(hub: &Hub, person: &str, chat: &str) -> Option<String> {
     row.config.hq_agent
 }
 
+/// The group room a member call names, for the methods a person may use in one (`history`, `thread`, `send`, and
+/// `react` through its entry). `None` for every other call and every other chat.
+pub fn room_named(hub: &Hub, method: &str, b: &Value) -> Option<String> {
+    let id = match method {
+        "history" | "thread" | "send" => b["botId"].as_str()?.to_owned(),
+        "react" => hub.store.entry(b["entryId"].as_str()?)?.bot_id,
+        _ => return None,
+    };
+    crate::chat::room_post::is_room(&hub.store, &id).then_some(id)
+}
+
 /// Checks a call from `person` before it runs. May tighten the body (`b`).
 pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: &Value) -> Result<()> {
     if !proven {
@@ -222,11 +233,20 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
     if !member_may(method) {
         return Err(denied("This isn't available to guests and members on this computer."));
     }
+    // A call on a group room is the room's rules, never `own_bot`'s (a room has no person): an open stay and every agent
+    // of the room granted now. The handlers check again at the moment they read or write (chat/room_post.rs).
+    if let Some(room) = room_named(hub, method, b) {
+        return if crate::chat::room_people::room_member_may(&hub.store, person, &room).await {
+            Ok(())
+        } else {
+            Err(denied("You aren't in that room."))
+        };
+    }
     match method {
         // Checked by their own handlers, or about no chat at all.
         "hello" | "projects" | "linkCode" | "scheduleMessages" | "startChat" | "callAccept" | "callDecline"
         | "callGreet" | "createBotInvite" | "revokeBotInvite" | "revokeBot" | "myBots" | "setBotLimits"
-        | "resolveCitation" => {}
+        | "resolveCitation" | "myRooms" | "leaveRoom" => {}
         // A card or message names its chat only through the entry.
         "respondPermission" | "react" | "editHandoff" | "keepConversation" => {
             let id = b["entryId"].as_str().unwrap_or_default();
@@ -411,11 +431,47 @@ fn was_approver(e: &Value, me: &str) -> bool {
     e["kind"] == "permission" && e["data"]["formerApprovers"].as_array().is_some_and(|l| l.iter().any(|p| p == me))
 }
 
-fn route(access: &dyn Authority, store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
+/// The group room an event is about, when it is one's.
+fn room_of_event(store: &Store, kind: &str, v: &Value) -> Option<String> {
+    let id = match kind {
+        "entry" => v["entry"]["botId"].as_str().or_else(|| v["entry"]["bot_id"].as_str()),
+        "bot" => v["bot"]["id"].as_str(),
+        "conversation" => v["chat"].as_str(),
+        "call" => v["call"]["botId"].as_str(),
+        _ => None,
+    }?;
+    crate::chat::room_post::is_room(store, id).then(|| id.to_owned())
+}
+
+/// What `me` is told of an event of the room: only the messages they are shown now (`room_post::shown_entry`). The
+/// room's row, its conversation and its calls are the owner's: the person lists their rooms with `myRooms`.
+fn room_visible(access: &dyn Authority, store: &Store, me: &str, room: &str, kind: &str, v: &Value) -> Option<Value> {
+    if kind != "entry" {
+        return None;
+    }
+    let seat = crate::chat::room_post::seat_now(access, store, me, room)?;
+    let entry = crate::chat::room_post::shown_entry(store, me, seat, &v["entry"])?;
+    Some(json!({"type": "entry", "rev": v["rev"], "entry": entry}))
+}
+
+fn route(access: &dyn Authority, store: &Store, who: Option<&str>, mut v: Value) -> Option<Value> {
     let kind = v["type"].as_str().unwrap_or_default().to_owned();
     // A key or account card goes to the owner's devices and nobody else's.
     if who.is_some() && kind == "entry" && secret_card(&v["entry"]["data"]) {
         return None;
+    }
+    // A group room is shown by the room rules alone (chat/room_post.rs), before any rule about the card of a person's
+    // own chat: the owner sees everything, a person only the messages from their stay on while they may be there.
+    if let Some(room) = room_of_event(store, &kind, &v) {
+        return match who {
+            None => {
+                if kind == "entry" {
+                    crate::chat::room_post::mark_hidden_event(store, &room, &mut v["entry"]);
+                }
+                Some(v)
+            }
+            Some(me) => room_visible(access, store, me, &room, &kind, &v),
+        };
     }
     // A card reaches the person it names to answer it, wherever it was raised, and still reaches one it named before
     // (who then can't answer it, so it leaves their Needs-you list).
