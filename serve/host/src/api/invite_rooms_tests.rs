@@ -61,6 +61,7 @@ async fn naming_a_room_needs_the_setting_a_room_that_takes_people_and_every_agen
     let r = Rig::new().await;
     let room = room_of(&r, &["house", "money"]);
     let named = json!({"name": "Sam", "agents": {"house": "member", "money": "member"}, "rooms": [room]});
+    r.hub.store.kv_set(FLAG, "off").unwrap();
     let e = owner(&r, "createInvite", named.clone()).await.unwrap_err();
     assert!(format!("{e:#}").contains("aren't turned on"), "{e:#}");
     flag_on(&r);
