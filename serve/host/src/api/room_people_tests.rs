@@ -27,6 +27,13 @@ async fn joined(r: &Rig, agents: Value) {
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
 }
 
+/// A rig with the `rooms.people` setting on, as it will be once the turns for a room's people have landed.
+async fn rig() -> Rig {
+    let r = Rig::new().await;
+    r.hub.store.kv_set(crate::hub::rooms::PEOPLE_KEY, "on").unwrap();
+    r
+}
+
 fn room(r: &Rig, members: &[&str]) -> String {
     let cfg = serde_json::from_value(json!({"id": "", "kind": "group", "name": "Crew", "members": members})).unwrap();
     r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned()
@@ -42,7 +49,7 @@ fn stay(joined_gen: i64, left_gen: Option<i64>) -> RoomStay {
 
 #[tokio::test]
 async fn a_join_and_a_leave_each_move_the_gen_and_the_stay() {
-    let r = Rig::new().await;
+    let r = rig().await;
     joined(&r, json!({"house": "member", "money": "member"})).await;
     let g = room(&r, &[&r.owner_bot("house"), &r.owner_bot("money")]);
     assert!(!may(&r, &g).await, "not in the room yet");
@@ -61,8 +68,27 @@ async fn a_join_and_a_leave_each_move_the_gen_and_the_stay() {
 }
 
 #[tokio::test]
-async fn a_join_is_refused_unless_the_person_has_every_agent_in_the_room() {
+async fn a_join_is_refused_while_the_setting_is_off_but_a_leave_and_the_listing_work() {
     let r = Rig::new().await;
+    joined(&r, json!({"house": "member"})).await;
+    let g = room(&r, &[&r.owner_bot("house")]);
+    let e = call(&r, "addRoomPerson", json!({"roomId": g, "person": "sam"})).await.unwrap_err();
+    assert!(format!("{e:#}").contains("rooms.people"), "{e:#}");
+    assert_eq!(r.hub.store.room_gen(&g), 0);
+    assert_eq!(r.hub.store.room_stays(&g).unwrap(), []);
+    assert_eq!(call(&r, "roomPeople", json!({"roomId": g})).await.unwrap(), json!({"gen": 0, "people": []}));
+
+    // Once it is on the same call works; turned off again, a stay can still be closed.
+    r.hub.store.kv_set(crate::hub::rooms::PEOPLE_KEY, "on").unwrap();
+    call(&r, "addRoomPerson", json!({"roomId": g, "person": "sam"})).await.unwrap();
+    r.hub.store.kv_set(crate::hub::rooms::PEOPLE_KEY, "off").unwrap();
+    let out = call(&r, "removeRoomPerson", json!({"roomId": g, "person": "sam"})).await.unwrap();
+    assert_eq!(out["gen"], 2);
+}
+
+#[tokio::test]
+async fn a_join_is_refused_unless_the_person_has_every_agent_in_the_room() {
+    let r = rig().await;
     joined(&r, json!({"house": "member"})).await;
     let g = room(&r, &[&r.owner_bot("house"), &r.owner_bot("money")]);
     let e = call(&r, "addRoomPerson", json!({"roomId": g, "person": "sam"})).await.unwrap_err();
@@ -80,7 +106,7 @@ async fn a_join_is_refused_unless_the_person_has_every_agent_in_the_room() {
 
 #[tokio::test]
 async fn an_agent_joins_a_room_with_people_only_when_each_of_them_has_it() {
-    let r = Rig::new().await;
+    let r = rig().await;
     joined(&r, json!({"house": "member"})).await;
     let house = r.owner_bot("house");
     let money = r.owner_bot("money");
@@ -96,12 +122,13 @@ async fn an_agent_joins_a_room_with_people_only_when_each_of_them_has_it() {
         .unwrap();
     call(&r, "updateBot", json!({"id": g, "members": [house, money]})).await.unwrap();
     assert_eq!(r.hub.store.room_stays(&g).unwrap(), [stay(1, None)], "an agent edit moves no stay");
+    assert_eq!(r.hub.store.room_gen(&g), 1, "an edit keeps the room's gen");
     assert!(may(&r, &g).await);
 }
 
 #[tokio::test]
 async fn a_revoke_and_its_undo_leave_the_stays_as_they_were() {
-    let r = Rig::new().await;
+    let r = rig().await;
     joined(&r, json!({"house": "member"})).await;
     let g = room(&r, &[&r.owner_bot("house")]);
     call(&r, "addRoomPerson", json!({"roomId": g, "person": "sam"})).await.unwrap();

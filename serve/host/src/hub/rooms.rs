@@ -8,6 +8,15 @@ use crate::store::Store;
 use anyhow::{Result, anyhow, bail};
 use std::collections::BTreeSet;
 
+/// The host setting that lets people join rooms. Off until the turns that run for a room's people have landed (build
+/// plan, "One feature flag"): while it is off a person in a room would let owner-level turns read their posts. A leave
+/// and the listing work either way.
+pub const PEOPLE_KEY: &str = "rooms.people";
+
+pub fn people_enabled(store: &Store) -> bool {
+    store.kv_get(PEOPLE_KEY).as_deref() == Some("on")
+}
+
 /// The Kith agents a room's members run, the ones a person in it must be granted. Bot guests are Kai's own and need
 /// no grant. `None` when a member is a bot with no Kith agent: no grant can cover it, so such a room takes no people.
 pub fn room_agents(store: &Store, members: &[String]) -> Option<BTreeSet<String>> {

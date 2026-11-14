@@ -155,6 +155,11 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
         // People in a room (owner only): each join or leave bumps the room's gen; the answer is the room's stays.
         "roomPeople" => room_people(hub, str_arg(&b, "roomId")?)?,
         "addRoomPerson" => {
+            anyhow::ensure!(
+                crate::hub::rooms::people_enabled(&hub.store),
+                "people can't join rooms yet: this host has the setting {} off",
+                crate::hub::rooms::PEOPLE_KEY
+            );
             let (room, person) = (str_arg(&b, "roomId")?.to_owned(), str_arg(&b, "person")?.to_owned());
             let members = hub.store.bot(&room)?.map(|r| r.config.members).unwrap_or_default();
             let mut granted = std::collections::BTreeSet::new();
