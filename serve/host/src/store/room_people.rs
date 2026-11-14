@@ -49,6 +49,20 @@ impl Store {
         st.query_map([room], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
+    /// The `joined_gen` of `person`'s open stay in `room`: the gen an entry must have come from for them to see it.
+    /// `None` when they have no open stay.
+    pub fn room_open_seat(&self, room: &str, person: &str) -> Option<i64> {
+        let c = self.db.locked();
+        c.query_row(
+            "SELECT joined_gen FROM room_people WHERE room = ?1 AND person = ?2 AND left_gen IS NULL",
+            params![room, person],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
     /// The room's gen: the newest join or leave in it (`0`: no person has ever been in it). Derived, so there is no
     /// second counter to keep in step with the entries.
     pub fn room_gen(&self, room: &str) -> i64 {
@@ -175,7 +189,7 @@ mod tests {
         let lane = Lane::main("r");
         let old = s.insert_entry(&lane, EntryKind::Notice, 0, &line("old")).unwrap();
         let stamped = s.insert_entry_from_gen(&lane, EntryKind::Notice, 0, &line("new"), 5, 42).unwrap();
-        assert_eq!(s.origin_gen(&old.id), None, "from before any person");
+        assert_eq!(s.origin_gen(&old.id), None, "never stamped");
         assert_eq!(s.origin_gen(&stamped.id), Some(42));
         s.update_entry(&stamped.id, &line("edited")).unwrap();
         assert_eq!(s.origin_gen(&stamped.id), Some(42), "an edit never re-stamps it");

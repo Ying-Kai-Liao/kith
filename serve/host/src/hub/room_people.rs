@@ -2,7 +2,9 @@
 
 use super::Hub;
 use crate::LockExt;
-use crate::store::Entry;
+use crate::chat::group::membership_lock;
+use crate::chat::room_people::{Seat, room_agents};
+use crate::store::{Entry, EntryKind, Lane, now_ms};
 use anyhow::Result;
 use serde_json::{Value, json};
 
@@ -30,4 +32,69 @@ impl Hub {
         }
         Ok(written)
     }
+
+    /// A person's post in `room`, written with the check that lets it in as ONE step (rule 4): under the membership
+    /// lock (the one every join, leave and room edit holds) and the emit lock, `person` still has the open stay `seat`
+    /// the live check found and the room still has the agents it asked about, and only then is the line appended,
+    /// stamped with the room's gen as it is in that same step. So a post can't land after its author was taken out,
+    /// nor after a re-add (a new stay has a new `joined_gen`: R4).
+    ///
+    /// A repeat of `nonce` by the same person returns their first line and writes nothing.
+    pub(crate) fn commit_room_post(
+        &self,
+        room: &str,
+        person: &str,
+        seat: &Seat,
+        nonce: &str,
+        data: &Value,
+    ) -> Result<Entry> {
+        let _members = membership_lock();
+        let _g = self.emit_lock.locked();
+        if self.store.room_open_seat(room, person) != Some(seat.joined) {
+            return Err(PostRefused::NotInRoom.into());
+        }
+        if room_agents(&self.store, room).ok().as_ref() != Some(&seat.agents) {
+            return Err(PostRefused::RoomChanged.into());
+        }
+        if !nonce.is_empty()
+            && let Some(e) = self.store.find_by_nonce(room, nonce).filter(|e| e.data["sender"]["person"] == person)
+        {
+            return Ok(e);
+        }
+        // Held entries go first (they keep their order), and a store that still won't write takes no post at all: a
+        // line written ahead of them would be out of order.
+        self.flush_unsaved();
+        if !self.unsaved.locked().queue.is_empty() {
+            return Err(PostRefused::NotWriting.into());
+        }
+        let turn = self.store.max_turn(room) + 1;
+        let origin = self.store.room_gen(room);
+        let e = self.store.insert_entry_from_gen(&Lane::main(room), EntryKind::User, turn, data, now_ms(), origin)?;
+        let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));
+        Ok(e)
+    }
 }
+
+/// Why a person's post was not written, for the handler to say.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PostRefused {
+    /// They have no open stay (any more), or it is not the one the post was checked against: a removal, or a removal
+    /// and a re-add, came between the check and the append.
+    NotInRoom,
+    /// The room's agents are not the ones the live check asked about.
+    RoomChanged,
+    /// The store is not taking writes, so nothing can be written in order.
+    NotWriting,
+}
+
+impl std::fmt::Display for PostRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NotInRoom => "You aren't in that room.",
+            Self::RoomChanged => "The room changed while your message was checked; send it again.",
+            Self::NotWriting => "This computer can't save messages right now; try again in a moment.",
+        })
+    }
+}
+
+impl std::error::Error for PostRefused {}

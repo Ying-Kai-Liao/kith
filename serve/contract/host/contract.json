@@ -421,6 +421,18 @@
       "doc": "What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).",
       "fields": { "gen": "int", "changed": "bool" }
     },
+    "MyRoom": {
+      "doc": "A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents.",
+      "fields": { "id": "string", "name": "string", "agents": "[string]" }
+    },
+    "MyRooms": {
+      "doc": "The group rooms a person is in right now.",
+      "fields": { "rooms": "[MyRoom]" }
+    },
+    "RoomLeft": {
+      "doc": "Whether leaving a room changed anything (false: they had already left).",
+      "fields": { "left": "bool" }
+    },
     "BotProof": {
       "doc": "Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.",
       "fields": { "state": "BotGuestState", "botId": "string?", "owner": "string?", "agents": "[string]?" },
@@ -542,7 +554,7 @@
       "result": "BotAnswer"
     },
     "send": {
-      "doc": "A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10. engine (claude or codex) and engineModel are the owner's, for a new thread of the built-in scratch agent: that quick chat's own engine and model; ignored anywhere else.",
+      "doc": "A message in their own chat, or in a group room they are in (text only there: no attachments, thread, task, project or folder; it starts no turn). attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10. engine (claude or codex) and engineModel are the owner's, for a new thread of the built-in scratch agent: that quick chat's own engine and model; ignored anywhere else.",
       "who": ["member"],
       "params": {
         "botId": "string",
@@ -563,13 +575,13 @@
       "result": "EntryAnswer"
     },
     "thread": {
-      "doc": "A thread's replies (its newest 500); the root is in the main chat.",
+      "doc": "A thread's replies (its newest 500); the root is in the main chat. In a group room they are in: only the messages from their stay on.",
       "who": ["member"],
       "params": { "botId": "string", "rootId": "string" },
       "result": "Entries"
     },
     "history": {
-      "doc": "A page of the main chat, newest first before beforeSeq.",
+      "doc": "A page of the main chat, newest first before beforeSeq. In a group room they are in: only the messages from their stay on, with no folder or conversation.",
       "who": ["member"],
       "params": { "botId": "string", "beforeSeq": "int?", "limit": "int?" },
       "result": "Entries"
@@ -618,7 +630,7 @@
       "result": "UploadChunk"
     },
     "react": {
-      "doc": "Toggles one emoji on an entry of their own chat.",
+      "doc": "Toggles one emoji on an entry of their own chat, or on a message they are shown in a group room they are in.",
       "who": ["member"],
       "params": { "entryId": "string", "emoji": "string" },
       "result": "EntryAnswer"
@@ -880,6 +892,18 @@
       "who": ["owner"],
       "params": { "room": "string" },
       "result": "RoomPeople"
+    },
+    "myRooms": {
+      "doc": "Rooms with people: the group rooms they are in right now (an open stay and every agent of the room still granted). Open them with history, thread, send and react, with the room's id as botId.",
+      "who": ["member"],
+      "params": {},
+      "result": "MyRooms"
+    },
+    "leaveRoom": {
+      "doc": "Rooms with people: leaves a group room they are in. Needs only an open stay, so a person whose agent was taken away can still get out.",
+      "who": ["member"],
+      "params": { "room": "string" },
+      "result": "RoomLeft"
     }
   }
 }

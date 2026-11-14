@@ -54,6 +54,9 @@ pub mod roles;
 mod roles_props;
 #[cfg(test)]
 mod roles_tests;
+mod room_member;
+#[cfg(test)]
+mod room_member_tests;
 mod room_people;
 #[cfg(test)]
 mod room_people_tests;
@@ -155,6 +158,7 @@ fn user_facing(e: &anyhow::Error) -> bool {
         || e.is::<UserError>()
         || e.is::<Forbidden>()
         || e.is::<NotAllowed>()
+        || e.is::<crate::hub::PostRefused>()
         || e.is::<crate::remote::cloud::Conflict>()
         || e.is::<crate::terminal::HeldByWriter>()
         || e.is::<crate::terminal::TerminalBusy>()
@@ -182,6 +186,10 @@ pub async fn dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -
 }
 
 async fn run_dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, mut b: Value) -> Result<Value> {
+    // Never taken from a client: only `member_call` says that a call is a person's in a room.
+    if let Some(o) = b.as_object_mut() {
+        o.remove("asRoomPerson");
+    }
     let permitted = devices::permit(caller, method);
     match devices::principal(&hub.store, caller) {
         Principal::Owner => {
@@ -271,6 +279,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };
+    let b = match room_member::call(hub, caller, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
     let b = match bots::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
@@ -326,6 +338,10 @@ async fn member_call(
     }
     if let Some(o) = b.as_object_mut() {
         o.remove("asMember");
+    }
+    // A call on a group room is the person's own, read and written by the room's rules (`chat::room_post`).
+    if proven && roles::room_named(hub, method, &b).is_some() {
+        b["asRoomPerson"] = person.into();
     }
     if method == "upload" {
         b["asMember"] = person.into();

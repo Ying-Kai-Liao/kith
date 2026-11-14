@@ -100,8 +100,7 @@ impl Store {
 
     /// [`Self::insert_entry_at`] naming the room gen the entry comes from (`origin_gen`): a person's post takes the gen
     /// at its append, a turn's output the gen its turn started in. Written with the row and never changed after, so
-    /// nothing re-stamps it; a row without one is from before any person was in a room.
-    #[cfg_attr(not(test), allow(dead_code))] // the member side's post path (rooms with people, PR B) is its caller
+    /// nothing re-stamps it; a row without one is unstamped, which a person in a room never sees.
     pub fn insert_entry_from_gen(
         &self,
         lane: &Lane,
@@ -116,8 +115,8 @@ impl Store {
         insert_entry_in(&c, &id, lane, kind, turn, data, now, Some(origin_gen)).map(|(e, _)| e)
     }
 
-    /// The room gen entry `id` came from; `None` for an entry from before any person was in a room (or no such entry).
-    #[cfg_attr(not(test), allow(dead_code))] // read by the member side's visibility filter (PR B)
+    /// The room gen entry `id` came from; `None` for an entry that was never stamped (or no such entry). An unstamped
+    /// entry is hidden from every person in a room: only the writers that name a gen make an entry visible to one.
     pub fn origin_gen(&self, id: &str) -> Option<i64> {
         let c = self.db.locked();
         c.query_row("SELECT origin_gen FROM entries WHERE id = ?1", [id], |r| r.get(0))
@@ -125,6 +124,24 @@ impl Store {
             .ok()
             .flatten()
             .flatten()
+    }
+
+    /// The gen of each of `ids` that has one (an unstamped entry is left out), in one read, for marking a page of a
+    /// room's history for its owner.
+    pub fn origin_gens(&self, ids: &[&str]) -> std::collections::HashMap<String, i64> {
+        let c = self.db.locked();
+        let mut out = std::collections::HashMap::new();
+        for chunk in ids.chunks(400) {
+            let marks = vec!["?"; chunk.len()].join(",");
+            let Ok(mut st) = c.prepare(&format!(
+                "SELECT id, origin_gen FROM entries WHERE origin_gen IS NOT NULL AND id IN ({marks})"
+            )) else {
+                continue;
+            };
+            let rows = st.query_map(rusqlite::params_from_iter(chunk.iter()), |r| Ok((r.get(0)?, r.get(1)?)));
+            out.extend(rows.into_iter().flatten().flatten());
+        }
+        out
     }
 
     /// Deterministic IDs make routine transcript publication retryable after a crash.
@@ -264,6 +281,36 @@ impl Store {
         Ok(rows)
     }
 
+    /// [`Self::history`] as a person in a room is shown it: only messages (the user's and the agents') stamped with a gen
+    /// of at least `seat` (their open stay's `joined_gen`). The test is in the query, so a page is full of what they may
+    /// see, and `NULL` (never stamped) matches nothing.
+    pub fn history_seen(&self, bot_id: &str, before_seq: i64, limit: i64, seat: i64) -> Result<Vec<Entry>> {
+        let c = self.db.locked();
+        let mut st = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND thread_id IS NULL AND seq < ?2
+               AND kind IN ('user', 'agent') AND origin_gen >= ?4
+             ORDER BY seq DESC LIMIT ?3"
+        ))?;
+        let mut rows: Vec<Entry> =
+            st.query_map(params![bot_id, before_seq, limit, seat], row_entry)?.collect::<rusqlite::Result<_>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
+    /// [`Self::thread`] as a person in a room is shown it (see [`Self::history_seen`]).
+    pub fn thread_seen(&self, bot_id: &str, root: &str, limit: i64, seat: i64) -> Result<Vec<Entry>> {
+        let c = self.db.locked();
+        let mut st = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND thread_id = ?2
+               AND kind IN ('user', 'agent') AND origin_gen >= ?4
+             ORDER BY seq DESC LIMIT ?3"
+        ))?;
+        let mut rows: Vec<Entry> =
+            st.query_map(params![bot_id, root, limit, seat], row_entry)?.collect::<rusqlite::Result<_>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
     /// Cards still waiting for the user to sign in to agent `backend`, oldest first.
     // ponytail: scans notices without an index; sign-ins are rare, add one if it shows up in profiles.
     pub fn pending_sign_ins(&self, backend: &str) -> Result<Vec<Entry>> {
@@ -296,6 +343,19 @@ impl Store {
     // ponytail: substring scan, no index (CJK needs no tokenizer this way): 0.6 s over 180k messages of one bot.
     // An FTS5 trigram table once a bot's search passes a second.
     pub fn search_messages(&self, bot_id: &str, terms: &[String], from: Option<i64>, limit: i64) -> Result<Vec<Entry>> {
+        self.search_messages_seen(bot_id, terms, from, limit, None)
+    }
+
+    /// [`Self::search_messages`] for a person in a room: with `seat` (their open stay's `joined_gen`) only messages
+    /// stamped with a gen of at least that (see [`Self::history_seen`]).
+    pub fn search_messages_seen(
+        &self,
+        bot_id: &str,
+        terms: &[String],
+        from: Option<i64>,
+        limit: i64,
+        seat: Option<i64>,
+    ) -> Result<Vec<Entry>> {
         let mut sql = format!(
             "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND seq <= ?3 AND
                (kind = 'user' OR (kind = 'agent' AND json_extract(data, '$.final') = 1))"
@@ -303,10 +363,14 @@ impl Store {
         for i in 0..terms.len() {
             let _ = write!(sql, " AND instr(lower(json_extract(data, '$.text')), ?{}) > 0", i + 4);
         }
-        sql.push_str(" ORDER BY seq DESC LIMIT ?2");
         let mut args: Vec<rusqlite::types::Value> =
             vec![bot_id.to_owned().into(), limit.into(), from.unwrap_or(i64::MAX).into()];
         args.extend(terms.iter().map(|t| t.to_lowercase().into()));
+        if let Some(seat) = seat {
+            let _ = write!(sql, " AND origin_gen >= ?{}", args.len() + 1);
+            args.push(seat.into());
+        }
+        sql.push_str(" ORDER BY seq DESC LIMIT ?2");
         let c = self.db.locked();
         let mut st = c.prepare(&sql)?;
         Ok(st.query_map(rusqlite::params_from_iter(args), row_entry)?.collect::<rusqlite::Result<_>>()?)

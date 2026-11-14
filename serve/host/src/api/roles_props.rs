@@ -21,6 +21,8 @@ use std::cell::Cell;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod rooms;
+
 const PEOPLE: [&str; 2] = ["p1", "p2"];
 const AGENTS: [&str; 2] = ["a1", "a2"];
 const PROJECTS: [&str; 2] = ["pr1", "pr2"];
@@ -530,6 +532,7 @@ pub(super) fn router_methods() -> Vec<String> {
         include_str!("bots.rs"),
         include_str!("calls.rs"),
         include_str!("cards.rs"),
+        include_str!("room_member.rs"),
         include_str!("room_people.rs"),
         include_str!("host.rs"),
         include_str!("folders.rs"),
@@ -681,6 +684,9 @@ fn nothing_to_check(m: &str) -> bool {
             | "revokeBot"
             | "myBots"
             | "setBotLimits"
+            // The room methods of a person: each room is judged inside (`chat::room_post`), by the live stay and grant.
+            | "myRooms"
+            | "leaveRoom"
     )
 }
 
@@ -1548,6 +1554,9 @@ fn a_bot_guest_may_call_only_its_short_list() {
         "addRoomPerson",
         "removeRoomPerson",
         "roomPeople",
+        // The room methods of a person: a bot guest reads a room by its own door, never theirs.
+        "myRooms",
+        "leaveRoom",
         "createBot",
         "newKithAgent",
         "kernelStatus",

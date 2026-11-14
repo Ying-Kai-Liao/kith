@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "5f2be9a3e0e7ee07fced0bb57a6198f46c336e5fbff53e036a22860b2ab7bd64";
+pub const CONTRACT_SHA256: &str = "1db1a34afe285a3efec0f8b40c37972ae6dfc328aa5ed56dfdea5fe1b4b7ef6a";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1079,6 +1079,29 @@ pub struct RoomPersonChange {
     pub changed: bool,
 }
 
+/// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MyRoom {
+    pub id: String,
+    pub name: String,
+    pub agents: Vec<String>,
+}
+
+/// The group rooms a person is in right now.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MyRooms {
+    pub rooms: Vec<MyRoom>,
+}
+
+/// Whether leaving a room changed anything (false: they had already left).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomLeft {
+    pub left: bool,
+}
+
 /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1702,6 +1725,17 @@ pub struct RoomPeopleParams {
     pub room: String,
 }
 
+/// What `myRooms` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct MyRoomsParams {}
+
+/// What `leaveRoom` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaveRoomParams {
+    pub room: String,
+}
+
 /// Each method's name, as called.
 pub mod method {
     /// The connection handshake; answered to a member or a bot without paths, addresses, backends or screen state, with the agents they hold.
@@ -1710,11 +1744,11 @@ pub mod method {
     pub const KITH_INFO: &str = "kithInfo";
     /// Their own chat with an agent they hold, one per agent: made on first use.
     pub const START_CHAT: &str = "startChat";
-    /// A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10. engine (claude or codex) and engineModel are the owner's, for a new thread of the built-in scratch agent: that quick chat's own engine and model; ignored anywhere else.
+    /// A message in their own chat, or in a group room they are in (text only there: no attachments, thread, task, project or folder; it starts no turn). attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10. engine (claude or codex) and engineModel are the owner's, for a new thread of the built-in scratch agent: that quick chat's own engine and model; ignored anywhere else.
     pub const SEND: &str = "send";
-    /// A thread's replies (its newest 500); the root is in the main chat.
+    /// A thread's replies (its newest 500); the root is in the main chat. In a group room they are in: only the messages from their stay on.
     pub const THREAD: &str = "thread";
-    /// A page of the main chat, newest first before beforeSeq.
+    /// A page of the main chat, newest first before beforeSeq. In a group room they are in: only the messages from their stay on, with no folder or conversation.
     pub const HISTORY: &str = "history";
     /// The agent starts a new session.
     pub const NEW_SESSION: &str = "newSession";
@@ -1728,7 +1762,7 @@ pub mod method {
     pub const UPLOAD: &str = "upload";
     /// A sent file, back in chunks (chat previews on other devices).
     pub const READ_UPLOAD: &str = "readUpload";
-    /// Toggles one emoji on an entry of their own chat.
+    /// Toggles one emoji on an entry of their own chat, or on a message they are shown in a group room they are in.
     pub const REACT: &str = "react";
     /// Answers an agent's permission card in their own chat; only a member of that agent may (a guest's go to the owner).
     pub const RESPOND_PERMISSION: &str = "respondPermission";
@@ -1808,13 +1842,17 @@ pub mod method {
     pub const REMOVE_ROOM_PERSON: &str = "removeRoomPerson";
     /// Rooms with people: every stay in a group room and the room's gen.
     pub const ROOM_PEOPLE: &str = "roomPeople";
+    /// Rooms with people: the group rooms they are in right now (an open stay and every agent of the room still granted). Open them with history, thread, send and react, with the room's id as botId.
+    pub const MY_ROOMS: &str = "myRooms";
+    /// Rooms with people: leaves a group room they are in. Needs only an open stay, so a person whose agent was taken away can still get out.
+    pub const LEAVE_ROOM: &str = "leaveRoom";
 }
 
 /// What the owner alone (a method no one else may call; the owner may call every method) may call.
 pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC, method::ADD_ROOM_PERSON, method::REMOVE_ROOM_PERSON, method::ROOM_PEOPLE];
 
 /// What an invited person may call.
-pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::SCHEDULE_MESSAGES, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION];
+pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::SCHEDULE_MESSAGES, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION, method::MY_ROOMS, method::LEAVE_ROOM];
 
 /// What an invited person's unproven device may call.
 pub const UNPROVEN_METHODS: &[&str] = &[method::PROVE_INVITE];
@@ -1897,6 +1935,9 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "RoomPerson", fields: &[("person", "string"), ("joinedGen", "int"), ("leftGen", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPeople", fields: &[("enabled", "bool"), ("gen", "int"), ("people", "[RoomPerson]")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPersonChange", fields: &[("gen", "int"), ("changed", "bool")], may_omit: &[] },
+        crate::check::TypeSchema { name: "MyRoom", fields: &[("id", "string"), ("name", "string"), ("agents", "[string]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "MyRooms", fields: &[("rooms", "[MyRoom]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "RoomLeft", fields: &[("left", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
         crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?"), ("room", "string?")], may_omit: &["duplicate", "room"] },
         crate::check::TypeSchema { name: "BotPosted", fields: &[("entryId", "string"), ("seq", "int"), ("turn", "int"), ("room", "string"), ("conversation", "string"), ("replied", "bool"), ("late", "bool"), ("lateWhy", "string?"), ("unprompted", "bool?"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
@@ -1960,6 +2001,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "AddRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "RemoveRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPeopleParams", fields: &[("room", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "MyRoomsParams", fields: &[], may_omit: &[] },
+        crate::check::TypeSchema { name: "LeaveRoomParams", fields: &[("room", "string")], may_omit: &[] },
     ],
     methods: &[
         crate::check::MethodSchema { name: "hello", who: &["member", "bot", "botPending"], params: "HelloParams", result: "Hello" },
@@ -2014,6 +2057,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "addRoomPerson", who: &["owner"], params: "AddRoomPersonParams", result: "RoomPersonChange" },
         crate::check::MethodSchema { name: "removeRoomPerson", who: &["owner"], params: "RemoveRoomPersonParams", result: "RoomPersonChange" },
         crate::check::MethodSchema { name: "roomPeople", who: &["owner"], params: "RoomPeopleParams", result: "RoomPeople" },
+        crate::check::MethodSchema { name: "myRooms", who: &["member"], params: "MyRoomsParams", result: "MyRooms" },
+        crate::check::MethodSchema { name: "leaveRoom", who: &["member"], params: "LeaveRoomParams", result: "RoomLeft" },
     ],
 };
 
@@ -2067,6 +2112,9 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "RoomPerson" => serde_json::from_value::<RoomPerson>(value).map(drop),
         "RoomPeople" => serde_json::from_value::<RoomPeople>(value).map(drop),
         "RoomPersonChange" => serde_json::from_value::<RoomPersonChange>(value).map(drop),
+        "MyRoom" => serde_json::from_value::<MyRoom>(value).map(drop),
+        "MyRooms" => serde_json::from_value::<MyRooms>(value).map(drop),
+        "RoomLeft" => serde_json::from_value::<RoomLeft>(value).map(drop),
         "BotProof" => serde_json::from_value::<BotProof>(value).map(drop),
         "BotAsked" => serde_json::from_value::<BotAsked>(value).map(drop),
         "BotPosted" => serde_json::from_value::<BotPosted>(value).map(drop),
@@ -2130,6 +2178,8 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "AddRoomPersonParams" => serde_json::from_value::<AddRoomPersonParams>(value).map(drop),
         "RemoveRoomPersonParams" => serde_json::from_value::<RemoveRoomPersonParams>(value).map(drop),
         "RoomPeopleParams" => serde_json::from_value::<RoomPeopleParams>(value).map(drop),
+        "MyRoomsParams" => serde_json::from_value::<MyRoomsParams>(value).map(drop),
+        "LeaveRoomParams" => serde_json::from_value::<LeaveRoomParams>(value).map(drop),
         _ => return None,
     })
 }
