@@ -30,11 +30,13 @@ mod offturn;
 mod place;
 mod queue;
 mod room;
+mod room_turn;
 mod session;
 mod turn;
 mod updates;
 
 pub(crate) use launch::{launch_commands, select_model, start_agent, system_prompt};
+pub(crate) use room_turn::session_owner;
 
 use crate::agent::acp::{self, Acp, Incoming};
 use crate::agent::config::FastModeSupport;
@@ -46,7 +48,7 @@ use crate::hub::{BotStatus, Hub};
 use crate::store::{BotConfig, Entry, EntryKind, Lane, lane_key};
 use anyhow::{Result, anyhow};
 use place::inflight_key;
-pub use place::{actor_key, bot_of, forget_inflight, interrupted_places, place_of};
+pub use place::{actor_key, actor_key_as, bot_of, forget_inflight, interrupted_places, person_of, place_of};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -161,14 +163,14 @@ pub struct BotHandle {
 /// Starts the actor for `home`, one of the places the bot talks. All of a bot's actors share its `tidier`.
 pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedSender<memory::TidyEvent>) -> BotHandle {
     let (tx, rx) = mpsc::unbounded_channel();
-    let rt = actor_key(&cfg.id, &home);
+    let rt = actor_key_as(&cfg.id, &home, cfg.person.as_deref().filter(|p| crate::chat::room_turn::is_room_person(p)));
     // The session of the actor's own lane: the bot's main one, or a group lane's. A thread's is found by its root.
     let session_id = if rt == cfg.id {
         hub.store.bot(&cfg.id).ok().flatten().and_then(|b| b.session_id)
     } else if home.chat == cfg.id {
         None
     } else {
-        hub.store.kv_get(&lane_key("session", &cfg.id, &home)).filter(|s| !s.is_empty())
+        hub.store.kv_get(&lane_key("session", &session_owner(&cfg), &home)).filter(|s| !s.is_empty())
     };
     let interrupted = place::interrupted(&hub.store, &rt, &home);
     let fast_support = FastModeSupport::from_stored(hub.store.kv_get(&fast_mode::stored_key(&cfg.id)).as_deref());
@@ -188,6 +190,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         turn_claim: None,
         thread_intro: None,
         active_group: None,
+        turn_basis: None,
         active_routine: None,
         routine_deadline: None,
         routine_timed_out: false,
@@ -395,6 +398,8 @@ struct Actor {
     /// Told on the first message of a new thread session: what the thread is about.
     thread_intro: Option<String>,
     active_group: Option<GroupTurn>,
+    /// The room as the running group turn found it at its start (see `room_turn`); `None` outside one.
+    turn_basis: Option<crate::chat::room_turn::RoomBasis>,
     active_routine: Option<String>,
     routine_deadline: Option<Instant>,
     routine_timed_out: bool,
@@ -655,13 +660,14 @@ impl Actor {
         }
     }
 
-    /// Adds an entry to the current lane, signed by this bot (a group shows who said it).
+    /// Adds an entry to the current lane, signed by this bot (a group shows who said it). A group turn's lines take the gen
+    /// the turn started in (see `room_turn`), whenever they land.
     fn add(&self, kind: EntryKind, turn: i64, mut data: Value) -> Option<Entry> {
         data["author"] = self.cfg.id.clone().into();
         if kind == EntryKind::Agent && self.is_hq() {
             data["answeredBy"] = self.serving.clone().into();
         }
-        self.hub.add_entry(&self.lane, kind, turn, &data)
+        self.hub.add_entry_from(&self.lane, kind, turn, &data, self.turn_stamp())
     }
 
     /// A notice in the running turn's lane (or the actor's own place between turns).

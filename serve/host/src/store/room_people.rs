@@ -8,8 +8,8 @@
 //! authority (`chat::room_people::room_member_may`) says whether they still may, so a revoke writes no row and an undo
 //! puts back exactly what was there.
 
-use super::entries::insert_entry_in;
-use super::{Entry, EntryKind, Lane, Store, now_ms};
+use super::entries::{ENTRY_COLS, insert_entry_in, row_entry};
+use super::{Entry, EntryKind, Lane, Store, next_rev, now_ms};
 use crate::LockExt;
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
@@ -24,6 +24,25 @@ pub struct Stay {
     pub left_gen: Option<i64>,
 }
 
+/// Whether `person` still has the open stay `seat` in `room` and no revoke has set them aside, on the transaction a
+/// write of theirs happens in (`suspend_person` writes under the same connection lock, so none falls in between).
+fn stay_and_not_set_aside(tx: &rusqlite::Transaction<'_>, room: &str, person: &str, seat: i64) -> Result<bool> {
+    let open: Option<i64> = tx
+        .query_row(
+            "SELECT joined_gen FROM room_people WHERE room = ?1 AND person = ?2 AND left_gen IS NULL",
+            params![room, person],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let set_aside = ["suspended_devices", "suspended_memberships", "suspended_invites"].iter().any(|table| {
+        tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE person_id = ?1)"), [person], |r| {
+            r.get::<_, bool>(0)
+        })
+        .unwrap_or(true)
+    });
+    Ok(open == Some(seat) && !set_aside)
+}
+
 impl Store {
     /// Every stay in `room`, oldest first.
     pub fn room_stays(&self, room: &str) -> Vec<Stay> {
@@ -36,6 +55,15 @@ impl Store {
         st.query_map([room], |r| Ok(Stay { person: r.get(0)?, joined_gen: r.get(1)?, left_gen: r.get(2)? }))
             .map(|rows| rows.flatten().collect())
             .unwrap_or_default()
+    }
+
+    /// The rooms `person` has ever had a stay in (open or closed).
+    pub fn rooms_with_person(&self, person: &str) -> Vec<String> {
+        let c = self.db.locked();
+        let Ok(mut st) = c.prepare("SELECT DISTINCT room FROM room_people WHERE person = ?1 ORDER BY room") else {
+            return vec![];
+        };
+        st.query_map([person], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
     /// The people with an open stay in `room`, sorted.
@@ -70,20 +98,7 @@ impl Store {
     pub fn insert_room_post(&self, room: &str, person: &str, seat: i64, data: &Value) -> Result<Option<Entry>> {
         let mut c = self.db.locked();
         let tx = c.transaction()?;
-        let open: Option<i64> = tx
-            .query_row(
-                "SELECT joined_gen FROM room_people WHERE room = ?1 AND person = ?2 AND left_gen IS NULL",
-                params![room, person],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let set_aside = ["suspended_devices", "suspended_memberships", "suspended_invites"].iter().any(|table| {
-            tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE person_id = ?1)"), [person], |r| {
-                r.get::<_, bool>(0)
-            })
-            .unwrap_or(true)
-        });
-        if open != Some(seat) || set_aside {
+        if !stay_and_not_set_aside(&tx, room, person, seat)? {
             return Ok(None);
         }
         let origin: i64 = tx.query_row(
@@ -98,6 +113,33 @@ impl Store {
             insert_entry_in(&tx, &id, &Lane::main(room), EntryKind::User, turn + 1, data, now_ms(), Some(origin))?;
         tx.commit()?;
         Ok(Some(entry))
+    }
+
+    /// Rewrites entry `id` for a person's reaction, in one transaction with the checks that let it in (as
+    /// [`Self::insert_room_post`]): `person` still has the open stay `seat` and no revoke has set them aside. `None`,
+    /// nothing written, when either fails or the entry is gone.
+    pub fn update_entry_for_person(
+        &self,
+        room: &str,
+        person: &str,
+        seat: i64,
+        id: &str,
+        data: &Value,
+    ) -> Result<Option<Entry>> {
+        let mut c = self.db.locked();
+        let tx = c.transaction()?;
+        if !stay_and_not_set_aside(&tx, room, person, seat)? {
+            return Ok(None);
+        }
+        let rev = next_rev(&tx)?;
+        tx.execute(
+            "UPDATE entries SET rev = ?2, data = ?3, updated_at = ?4 WHERE id = ?1",
+            params![id, rev, data.to_string(), now_ms()],
+        )?;
+        let entry =
+            tx.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?1"), [id], row_entry).optional()?;
+        tx.commit()?;
+        Ok(entry)
     }
 
     /// The room's gen: the newest join or leave in it (`0`: no person has ever been in it). Derived, so there is no

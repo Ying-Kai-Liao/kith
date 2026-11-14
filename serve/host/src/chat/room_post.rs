@@ -12,14 +12,14 @@
 //! thought, a card or a notice. The owner sees everything, and each message a current person can't see carries
 //! `hiddenFrom` on the copy that is sent (never stored).
 //!
-//! Posting is one step with the check (`Hub::commit_room_post`). A post starts no turn: the room-person turns are the
-//! next slice, and the setting that lets a person into a room stays off until they exist.
+//! Posting is one step with the check (`Hub::commit_room_post`). A new post opens a conversation (`group::start`), which
+//! runs the room-person turns of the agents it @-mentions (`room_turn`).
 
 use super::room_people::{self, Seat, live_seat};
 use crate::api::authority::Authority;
 use crate::api::devices::NotAllowed;
 use crate::hub::Hub;
-use crate::store::{Entry, Store};
+use crate::store::{Entry, Lane, Store};
 use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
@@ -46,6 +46,12 @@ pub fn is_room(store: &Store, id: &str) -> bool {
 /// Whether a person whose stay opened at `seat` is shown an entry stamped `origin`. `NULL` is never shown.
 pub fn sees(seat: i64, origin: Option<i64>) -> bool {
     origin.is_some_and(|g| seat <= g)
+}
+
+/// Whether a person whose stay opened at `seat` is shown an entry of `kind` stamped `origin`: the one rule a person's
+/// read and a room turn's input (`room_turn::RoomBasis::may_read`) share, so a turn reads exactly what the people read.
+pub fn seen_by(seat: i64, kind: &str, origin: Option<i64>) -> bool {
+    SEEN_KINDS.contains(&kind) && sees(seat, origin)
 }
 
 /// [`live_seat`] for the places that can't wait on the authority (a live event): `access` is the authority the stream
@@ -79,8 +85,8 @@ fn shown_data(data: &Value, viewer: &str) -> Value {
 /// The entry `e` (as JSON) as a person is shown it, or `None` when they are not shown it at all: not a message, or
 /// not from a gen they were in the room for.
 pub fn shown_entry(store: &Store, viewer: &str, seat: i64, e: &Value) -> Option<Value> {
-    if !e["kind"].as_str().is_some_and(|k| SEEN_KINDS.contains(&k)) || !sees(seat, store.origin_gen(e["id"].as_str()?))
-    {
+    let kind = e["kind"].as_str()?;
+    if !seen_by(seat, kind, store.origin_gen(e["id"].as_str()?)) {
         return None;
     }
     let mut out = e.clone();
@@ -161,7 +167,7 @@ pub async fn thread(hub: &Hub, person: &str, b: &Value) -> Result<Value> {
 }
 
 /// `person` says something in the room: checked live, then written in one step with that check ([`Hub::commit_room_post`]).
-/// Text only: a person's attachments, threads, tasks, folders and calls are not part of this slice. The message starts no turn.
+/// Text only: a person's attachments, threads, tasks, folders and calls are not part of this slice. The message asks the agents it @-mentions to answer.
 pub async fn send(hub: &Arc<Hub>, person: &str, b: &Value) -> Result<Value> {
     let room = b["botId"].as_str().unwrap_or_default();
     let text = b["text"].as_str().unwrap_or_default().trim();
@@ -195,7 +201,12 @@ pub async fn send(hub: &Arc<Hub>, person: &str, b: &Value) -> Result<Value> {
     let data = json!({
         "text": text, "clientNonce": nonce, "status": "sent", "sender": {"person": person, "name": name},
     });
-    let entry = hub.commit_room_post(room, person, &seat, nonce, &data)?;
+    let (entry, new) = hub.commit_room_post_new(room, person, &seat, nonce, &data)?;
+    // The post asks the agents it @-mentions to answer (rule 6), at the default budget whatever the post says: what a person
+    // may spend is the owner's to give (their cap), not theirs to raise. A repeat of its nonce asks nothing more.
+    if new {
+        super::group::start(hub, &Lane::main(room), super::group::budget_of(None), person, &entry.id)?;
+    }
     Ok(json!({"entry": shown_entries(person, &[entry]).remove(0)}))
 }
 
@@ -213,7 +224,7 @@ pub async fn react(hub: &Hub, person: &str, b: &Value) -> Result<Value> {
     if !shown {
         return Err(not_in_room());
     }
-    let e = hub.react(id, b["emoji"].as_str().unwrap_or_default())?;
+    let e = hub.react_as(id, b["emoji"].as_str().unwrap_or_default(), Some((person, seat.joined)))?;
     Ok(json!({"entry": shown_entries(person, &[e]).remove(0)}))
 }
 

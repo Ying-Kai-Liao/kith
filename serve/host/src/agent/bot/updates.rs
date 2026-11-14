@@ -301,7 +301,9 @@ impl Actor {
         let tool_name = crate::cards::edge::acp_tool(tool, &title).to_owned();
         // A host or a helper the owner is asked about can be kept: "Always for <person>", or the job that holds it.
         let mut kept = None;
-        if let (Some((person, agent)), None) = (&whose, &answerable_by) {
+        if let (Some((person, agent)), None) = (&whose, &answerable_by)
+            && !self.is_room_actor()
+        {
             let who = self.hub.store.person(person).map(|p| p.name).filter(|n| !n.is_empty());
             let who = who.unwrap_or_else(|| person.clone());
             kept = crate::cards::edge::for_acp(person, &who, agent, &tool_name, raw, &mut options).await;
@@ -426,7 +428,12 @@ impl Actor {
             return;
         }
         self.close_seg();
-        if let Some(e) = self.add(EntryKind::Permission, turn, data.clone()) {
+        let card_entry = if self.is_room_actor() {
+            self.add_room_card(data.clone())
+        } else {
+            self.add(EntryKind::Permission, turn, data.clone())
+        };
+        if let Some(e) = card_entry {
             if let Ok(Opened::New(c) | Opened::Joined(c)) = &opened {
                 let _ = self.hub.store.card_live(&c.id, Some(&e.id), None);
             }

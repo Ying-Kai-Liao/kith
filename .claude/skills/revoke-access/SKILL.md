@@ -355,3 +355,10 @@ and the breaks `broken-router-stale` (R2, R1, R6 fail) and `broken-router-stale-
 file that answers what the core answered. SYNC is not moved: the lift (runtime refusals in `cutover/authority.rs`) adds no revoke step.
 
 Migration blockers P1 (2026-11-13, rust-rebuild): `Reconcile.tla` and its three rows were ported from the architect's design (`verification/revoke/reconcile.tsv`). A terminal revoke on a stepped Mac is `kith kernel core-call people.suspend` (`kith people suspend` does not exist and `kith-auth person --revoke` exits 3); the host half follows in the next poll. An undo is always from the app. The verdicts of the other rows are unchanged: the reconcile is the trigger the `switched-router-door` variant's `CutOffSweep` already stood for. `cards/mod.rs` and `remote/core_revokes.rs` are in `drift.sh`. SYNC is not moved.
+
+## Room turns (2026-11-14, rooms with people, PR C)
+A revoke (and a removal, and an agent taken from a person) ends every room turn whose basis holds the person:
+`Hub::end_room_turns_of` from `api/people.rs` `cut_off` (which the core's reconcile calls too, per held id), then the sweep of
+claims, helpers and doors also names the room persons the person has run as (`room_person_ids_of`). A revoke writes no room
+row, so the undo gives the room back as it was. The models are in `verification/rooms/` (`run.sh`): `jobs-fixed` passes,
+`jobs-revokekeepsturn` (the revoke leaves the turn running, 53 states) and `revokedeletes` (33) fail on purpose.

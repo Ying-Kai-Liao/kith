@@ -258,3 +258,8 @@ commits that touched covered code, update the model from the code, rerun, report
 - `Threads.tla`: the model (actions cite code; properties at the end).
 - `base.consts`: the switches for the code as it is. `variants/*.set`: overrides per variant (what-ifs, broken variants).
 - `checks.tsv`: the table `run.sh` enforces. `run.sh`: pinned tools and the table. `drift.sh`: sync commit and covered files.
+
+## Room-person sessions (2026-11-14, rooms with people, PR C)
+A room turn runs on an actor of its own (`hub/actors.rs`, key `bot|lane#room-<room>-<join gen>`) with a session of its own
+(`session_owner`): one writer per (agent, room, join epoch), claimed through the same `claim_for_turn` as any person's. Nothing
+is steered into a running turn, and its session is never loaded again after the next join. Drift was read; SYNC not moved.

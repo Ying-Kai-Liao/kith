@@ -96,6 +96,9 @@ impl Actor {
     /// [`Self::run_members`] with the room's people already read (see [`Self::run_room_people`]), so a turn start
     /// decides on one read of them.
     fn run_members_with(&self, room_people: &[String]) -> hq::Members {
+        if let Some(room) = self.room_members() {
+            return room;
+        }
         match self.active_group.as_ref() {
             Some(g) => room_members(&self.hub.store, &g.lane.chat, self.cfg.person.as_deref(), room_people),
             None => hq::Members::Unknown,
@@ -106,6 +109,10 @@ impl Actor {
     /// lock (a 1:1, or no room: nobody, gen 0). A warm owner process is reused only with nobody in the room and the gen
     /// it started in.
     fn run_room_people(&self) -> (Vec<String>, i64) {
+        // A group turn reads the room once, at its start: a join meanwhile is not its business (see `room_turn`).
+        if let Some(basis) = &self.turn_basis {
+            return (basis.people.clone(), basis.room_gen);
+        }
         match self.active_group.as_ref() {
             Some(g) => crate::chat::room_people::people_and_gen(&self.hub.store, &g.lane.chat),
             None => (Vec::new(), 0),
@@ -444,7 +451,17 @@ impl Actor {
             // "always"), asked for with a token of its own: one per launch, since a run takes its access once. Its once
             // grants are reserved, and taken when the session started or loaded with them.
             let access = person.as_deref().and_then(|p| {
-                crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, target.project.as_deref())
+                let project = target.project.as_deref();
+                if crate::chat::room_turn::is_room_person(p) {
+                    // A room person's token holds the turn's basis, which only a room turn has (see `runauth::room`).
+                    return match &members {
+                        hq::Members::Room { people, .. } => {
+                            crate::runauth::room::grant_for_room(p, &agent, &room, people, &conversation, project)
+                        }
+                        _ => None,
+                    };
+                }
+                crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, project)
             });
             let reservation = access.as_ref().map(|(grant, _)| Reservation::open(grant.run_id(), carried));
             // A quick chat's thread keeps the engine and model it was started with, on every launch.

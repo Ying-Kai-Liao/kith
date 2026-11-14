@@ -243,3 +243,21 @@ fn never_wider_than_any_person_and_order_free() {
         }
     }
 }
+
+#[test]
+fn only_a_room_ids_are_room_persons() {
+    assert!(is_room_person("room-grp1-9"));
+    assert!(!is_room_person("sam") && !is_room_person("") && !is_room_person("a-room-x"));
+}
+
+#[test]
+fn the_launch_of_a_room_person_refuses_before_asking_anyone_when_it_has_no_room_or_no_basis_or_a_stranger_asked() {
+    let ctx = secrets::Ctx::from_process(std::path::Path::new("/nonexistent"));
+    // No room named, no people named, or an author who is not one of the people: no launch, and nobody is resolved.
+    let no_room = launch_answer(&ctx, "scout", "room-g-1", "", "ann", "");
+    assert_eq!(no_room, Err(Refusal::NoBasis));
+    let no_people = launch_answer(&ctx, "scout", "room-g-1", "g", " , ", "");
+    assert_eq!(no_people, Err(Refusal::NoBasis));
+    let stranger = launch_answer(&ctx, "scout", "room-g-1", "g", "ann,ben", "cy");
+    assert!(matches!(stranger, Err(Refusal::Person { ref person, .. }) if person == "cy"), "{stranger:?}");
+}
