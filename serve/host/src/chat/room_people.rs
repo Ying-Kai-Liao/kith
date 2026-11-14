@@ -9,7 +9,7 @@
 //! writes no room row, so an undo gives back exactly what was there.
 //!
 //! The room's people are Kai's to set (owner-only methods in `api/room_people.rs`), and the whole feature is behind the
-//! host setting [`FLAG`], off until the room-person turns exist.
+//! host setting [`FLAG`], on unless Kai sets it off.
 
 use super::group::membership_lock;
 use crate::api::roles::may_use;
@@ -20,12 +20,15 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-/// The host setting (kv, read each time) that lets a person be added to a room: `on`, `true` or `1`. Off by default.
-/// Only tests write it; Kai turns it on with the last commit of the room-person turns.
+/// The host setting (kv, read each time) that lets a person be added to a room. On unless it is `off`, `false` or `0`
+/// (the room-person turns exist, so it is on by default; the setting stays as Kai's way to turn it off).
 pub const FLAG: &str = "rooms.people";
 
 pub fn enabled(store: &Store) -> bool {
-    matches!(store.kv_get(FLAG).as_deref().map(str::trim), Some("on" | "true" | "1"))
+    // Not on a switched Mac yet: after a rename the core's rows stay under the old id, so B's stays and E's invite marks
+    // could key on different ids (the architect's E review; `held_under` is the fix, owed before this opens there).
+    !matches!(store.kv_get(FLAG).as_deref().map(str::trim), Some("off" | "false" | "0"))
+        && !crate::api::authority::switched()
 }
 
 /// What a join or a leave did: the room's gen after it, and whether it changed anything (a repeat does not).
