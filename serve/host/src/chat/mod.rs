@@ -6,6 +6,7 @@ pub mod context;
 pub mod files;
 pub mod group;
 pub mod handoff;
+pub mod invite_rooms;
 pub mod memory;
 pub mod naming;
 pub mod oneshot;

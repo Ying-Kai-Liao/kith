@@ -9,6 +9,7 @@ use super::devices::{Caller, NotAllowed, Principal, principal};
 use super::{roles, str_arg};
 use crate::LockExt;
 use crate::agent::bot::Cmd;
+use crate::chat::room_people;
 use crate::hub::Hub;
 use crate::remote::{account, cloud, crypto};
 use crate::store::{Invite, PersonRow, now_ms};
@@ -32,7 +33,7 @@ pub(crate) static AUTH_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::cons
 pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
     Ok(ControlFlow::Break(match method {
         "createInvite" => create_invite(hub, &b).await?,
-        "invites" => json!({"invites": hub.store.invites()?}),
+        "invites" => invites(hub)?,
         "revokeInvite" => revoke_invite(hub, str_arg(&b, "inviteId")?).await?,
         "people" => people(hub).await?,
         "setPersonAccess" => set_person_access(hub, &b).await?,
@@ -42,7 +43,7 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         "removeGrant" => remove_grant(str_arg(&b, "kind")?, str_arg(&b, "key")?).await?,
         "audit" => json!({"audit": hub.store.audit_list(b["since"].as_i64().unwrap_or(0), b["personId"].as_str())?}),
         "startChat" => start_chat(hub, caller, &b).await?,
-        "proveInvite" => prove_invite(hub, caller, &b)?,
+        "proveInvite" => prove_invite(hub, caller, &b).await?,
         _ => return Ok(ControlFlow::Continue(b)),
     }))
 }
@@ -157,6 +158,31 @@ impl Undo {
     }
 }
 
+/// The `rooms` of a `createInvite`: group rooms that take people, and only while the setting is on. Plain invites
+/// (no `rooms`) are not asked anything.
+fn invite_rooms_of(hub: &Hub, v: &Value) -> Result<Vec<String>> {
+    let mut rooms: Vec<String> = match v {
+        Value::Null => vec![],
+        Value::Array(a) => a
+            .iter()
+            .map(|r| r.as_str().map(str::to_owned).ok_or_else(|| anyhow!("`rooms` lists room ids")))
+            .collect::<Result<_>>()?,
+        _ => bail!("`rooms` lists room ids"),
+    };
+    rooms.sort();
+    rooms.dedup();
+    if rooms.is_empty() {
+        return Ok(rooms);
+    }
+    if !room_people::enabled(&hub.store) {
+        bail!("People in rooms aren't turned on.");
+    }
+    for room in &rooms {
+        room_people::room_agents(&hub.store, room)?;
+    }
+    Ok(rooms)
+}
+
 async fn create_invite(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     if hub.cloud.status().owner.is_none() {
         bail!("Sign in to a Kith account on this computer first: invites need it to be claimed.");
@@ -165,12 +191,13 @@ async fn create_invite(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         bail!("The Kith cloud is off on this computer, so an invite can't be sent.");
     }
     let agents = roles_of(&b["agents"])?;
+    let rooms = invite_rooms_of(hub, &b["rooms"])?;
     let bin = auth_bin().await?;
     account::person_of(&bin, &Principal::Owner).await?;
     let _w = AUTH_WRITES.lock().await;
 
     let mut undo = Undo::default();
-    let outcome = make_invite(hub, &bin, b, &agents, &mut undo).await;
+    let outcome = make_invite(hub, &bin, b, &agents, &rooms, &mut undo).await;
     if outcome.is_err() {
         undo.run(hub, &bin).await;
     }
@@ -182,6 +209,7 @@ async fn make_invite(
     bin: &Path,
     b: &Value,
     agents: &BTreeMap<String, String>,
+    rooms: &[String],
     undo: &mut Undo,
 ) -> Result<Value> {
     // An owner-supplied id obeys kith-auth's rule: no leading dash, nothing that could pass for a flag.
@@ -223,11 +251,27 @@ async fn make_invite(
         }
         _ => bail!("Give the person's `name`, or the `personId` of someone kith already knows."),
     };
+    // A room part joins only through this invite's own proof, and an account that already joined here is not accepted
+    // again (`members::apply`), so rooms on such an invite would never join.
+    if !rooms.is_empty() && hub.store.memberships()?.iter().any(|m| m.person_id == person) {
+        bail!("{person} is already here: add them to the room directly.");
+    }
     for (agent, role) in agents {
         let had = roles::may_use(&person, agent).await;
         grant(bin, &person, agent, role, !had).await.with_context(|| format!("giving {person} {agent}"))?;
         if !had {
             undo.agents.push((person.clone(), agent.clone()));
+        }
+    }
+    // Rule 5: a person joins a room only when granted every agent in it. Asked live, after the grants above, so the
+    // agents this invite gives count; a refusal puts those grants back (`undo`).
+    for room in rooms {
+        for agent in room_people::room_agents(&hub.store, room)? {
+            if !roles::may_use(&person, &agent).await {
+                bail!(
+                    "{person} isn't granted {agent}, which is in the room; add it to the invite or leave the room out."
+                );
+            }
         }
     }
     // The link carries `token`; the app shows the cloud only `proof` = sha256(token), and the host posts sha256(proof), so
@@ -248,6 +292,7 @@ async fn make_invite(
     };
     hub.store.put_invite(&invite)?;
     undo.invite = Some(invite_id.clone());
+    hub.store.put_invite_rooms(&invite_id, rooms)?;
     let body = CreateInvite {
         invite_id: invite_id.clone(),
         token_hash: hex(&crypto::sha256(&[proof.as_bytes()])),
@@ -284,6 +329,25 @@ async fn make_invite(
     Ok(json!({"inviteId": invite_id, "link": link, "appLink": app_link, "kithLink": app_link, "webLink": web_link,
         "pageLink": page_link,
         "expiresAt": invite.expires_at, "personId": person}))
+}
+
+/// The invites, each with the rooms it names and whether each is done (joined, or the room was gone). A part not done
+/// is waiting for the person to prove the invite, or for the room to take them.
+fn invites(hub: &Hub) -> Result<Value> {
+    let mut out = vec![];
+    for invite in hub.store.invites()? {
+        let mut row = serde_json::to_value(&invite)?;
+        let rooms = hub.store.invite_rooms(&invite.invite_id);
+        if !rooms.is_empty() {
+            let parts: Vec<Value> = rooms
+                .into_iter()
+                .map(|room| json!({"room": room, "done": hub.store.invite_room_done(&invite.invite_id, &room)}))
+                .collect();
+            row["rooms"] = json!(parts);
+        }
+        out.push(row);
+    }
+    Ok(json!({"invites": out}))
 }
 
 async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {
@@ -754,7 +818,7 @@ static PROOF_ATTEMPTS: std::sync::Mutex<BTreeMap<String, Vec<std::time::Instant>
 /// `proveInvite {inviteId, token}`: a new device of an invited account shows the invite token from its link, which the
 /// cloud never saw (it only knows sha256 of sha256 of it). Until it does, the device can call nothing else, so a cloud
 /// that made up a membership can bind and approve devices but still can't reach any chat.
-fn prove_invite(hub: &Hub, caller: &Caller, b: &Value) -> Result<Value> {
+async fn prove_invite(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result<Value> {
     let Principal::Unproven(person) = principal(&hub.store, caller) else {
         bail!("This device has already shown its invite.");
     };
@@ -778,6 +842,8 @@ fn prove_invite(hub: &Hub, caller: &Caller, b: &Value) -> Result<Value> {
     }
     hub.store.set_device_proven(&key)?;
     PROOF_ATTEMPTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&key);
+    // The rooms the invite names: a failure there is logged and retried at the next prove or start, never the prove's.
+    crate::chat::invite_rooms::reconcile(hub.clone()).await;
     Ok(json!({"proven": true}))
 }
 
