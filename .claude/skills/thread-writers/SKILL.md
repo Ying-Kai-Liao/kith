@@ -259,7 +259,10 @@ commits that touched covered code, update the model from the code, rerun, report
 - `base.consts`: the switches for the code as it is. `variants/*.set`: overrides per variant (what-ifs, broken variants).
 - `checks.tsv`: the table `run.sh` enforces. `run.sh`: pinned tools and the table. `drift.sh`: sync commit and covered files.
 
-## Room-person sessions (2026-11-14, rooms with people, PR C)
+## Room-person sessions (2026-11-14, rooms with people, PR C) - prose only, no model row
+Not a checked row: `Threads.tla` has no action for a room-person session and `checks.tsv` has no row for one, so the model says
+nothing about it. This section describes the code. What holds it: `api/room_turn_tests.rs` (the actor key and the session owner)
+and `verification/rooms/` (`steer`, `warmreuse`) for what a turn reads.
 A room turn runs on an actor of its own (`hub/actors.rs`, key `bot|lane#room-<room>-<join gen>`) with a session of its own
 (`session_owner`): one writer per (agent, room, join epoch), claimed through the same `claim_for_turn` as any person's. Nothing
 is steered into a running turn, and its session is never loaded again after the next join. Drift was read; SYNC not moved.

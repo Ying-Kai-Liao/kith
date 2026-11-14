@@ -106,6 +106,8 @@ pub struct Hub {
     unsaved: Mutex<Unsaved>,
     /// The room turns running as a room person (actor key -> the people each is for), see `room_turns`.
     room_turns: Mutex<HashMap<String, Vec<String>>>,
+    /// The owner's display name as kith-auth last answered it, and when (see `owner_name`).
+    owner_name: Mutex<Option<(std::time::Instant, String)>>,
 }
 
 /// How many unsaved entries the host holds; the oldest is dropped (and counted) past it.
@@ -133,7 +135,26 @@ struct Unsaved {
     error: Option<String>,
 }
 
+/// How long the owner's name is kept before kith-auth is asked again, so a rename shows within this.
+const OWNER_NAME_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
 impl Hub {
+    /// The owner's display name, asked of kith-auth through `agent` at most once per [`OWNER_NAME_TTL`]. The owner is one
+    /// person for every agent, so one answer covers them all; no answer is not kept (it is asked again next time).
+    pub async fn owner_name(&self, agent: &str) -> Option<String> {
+        let kept = {
+            let c = self.owner_name.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            c.as_ref().filter(|(at, _)| at.elapsed() < OWNER_NAME_TTL).map(|(_, n)| n.clone())
+        };
+        if kept.is_some() {
+            return kept;
+        }
+        let name = crate::api::roles::owner_name(agent).await?;
+        *self.owner_name.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((std::time::Instant::now(), name.clone()));
+        Some(name)
+    }
+
     pub fn busy(&self) -> bool {
         self.runtime.locked().values().any(|r| matches!(r.status, BotStatus::Working | BotStatus::NeedsInput))
             || self.terms.busy()
@@ -185,6 +206,7 @@ impl Hub {
             gate,
             unsaved: Mutex::default(),
             room_turns: Mutex::default(),
+            owner_name: Mutex::default(),
         })
     }
 

@@ -273,3 +273,33 @@ async fn a_removal_before_the_proof_marks_the_waiting_part_done() {
     prove(&r, "sam-phone", &invite, &token).await;
     assert_eq!(people(&r, &room), Vec::<String>::new());
 }
+
+/// Two invites for the same person, only the first accepted: the second, naming a room, is made before the first is accepted. Proving the first joins
+/// no one into the second's room, and the list says the second isn't accepted.
+#[tokio::test]
+async fn an_unaccepted_invite_beside_an_accepted_one_waits_and_says_why() {
+    let r = Rig::new().await;
+    flag_on(&r);
+    let room = room_of(&r, &["house"]);
+    let first = owner(&r, "createInvite", json!({"name": "Sam", "agents": {"house": "member"}})).await.unwrap();
+    let second = owner(&r, "createInvite", json!({"name": "Sam", "agents": {"house": "member"}, "rooms": [room]}))
+        .await
+        .unwrap();
+    let (first_id, second_id) =
+        (first["inviteId"].as_str().unwrap().to_owned(), second["inviteId"].as_str().unwrap().to_owned());
+    let token = first["link"].as_str().unwrap().rsplit("t=").next().unwrap().to_owned();
+    let listed = [Listed {
+        membership_id: "mem_sam".into(),
+        user_id: "user_sam".into(),
+        invite_id: first_id.clone(),
+        ..Default::default()
+    }];
+    members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
+    prove(&r, "sam-phone", &first_id, &token).await;
+    reconcile(r.hub.clone()).await;
+    assert_eq!(people(&r, &room), Vec::<String>::new());
+    assert!(!r.hub.store.invite_room_done(&second_id, &room));
+    let listed = owner(&r, "invites", json!({})).await.unwrap();
+    let row = listed["invites"].as_array().unwrap().iter().find(|i| i["inviteId"] == second_id.as_str()).unwrap();
+    assert_eq!(row["rooms"][0]["waiting"], "not yet joined: the invite isn't accepted", "{row}");
+}

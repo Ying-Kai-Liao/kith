@@ -341,13 +341,41 @@ fn invites(hub: &Hub) -> Result<Value> {
         if !rooms.is_empty() {
             let parts: Vec<Value> = rooms
                 .into_iter()
-                .map(|room| json!({"room": room, "done": hub.store.invite_room_done(&invite.invite_id, &room)}))
+                .map(|room| {
+                    let done = hub.store.invite_room_done(&invite.invite_id, &room);
+                    let mut part = json!({"room": room, "done": done});
+                    if !done {
+                        part["waiting"] = json!(invite_room_waiting(hub, &invite, &room));
+                    }
+                    part
+                })
                 .collect();
             row["rooms"] = json!(parts);
         }
         out.push(row);
     }
     Ok(json!({"invites": out}))
+}
+
+/// Why a room part of an invite is not done yet, for the invites list: the same rows `invite_rooms::reconcile` reads.
+fn invite_room_waiting(hub: &Hub, invite: &crate::store::Invite, room: &str) -> &'static str {
+    let accepted = hub
+        .store
+        .memberships()
+        .is_ok_and(|ms| ms.iter().any(|m| m.person_id == invite.person_id && m.invite_id == invite.invite_id));
+    if !accepted {
+        return "not yet joined: the invite isn't accepted";
+    }
+    if !hub.store.devices_of(&invite.person_id).is_ok_and(|ds| ds.iter().any(|d| hub.store.device_proven(&d.key))) {
+        return "not yet joined: no device has shown the invite";
+    }
+    if hub.store.bot(room).ok().flatten().is_none_or(|r| r.deleted) {
+        return "room gone";
+    }
+    if !room_people::enabled(&hub.store) {
+        return "not yet joined: people in rooms are turned off";
+    }
+    "not yet joined: the person isn't granted every agent in the room"
 }
 
 async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {

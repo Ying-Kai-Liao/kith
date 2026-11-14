@@ -242,15 +242,13 @@ pub async fn my_rooms(hub: &Hub, person: &str) -> Vec<Value> {
         let agents: Vec<&str> = bots.iter().map(|b| b.config.name.as_str()).collect();
         // A reply's author is the bot id: only id and name of each agent leave here, nothing else of the bot.
         let agent_list: Vec<Value> = bots.iter().map(|b| json!({"id": b.config.id, "name": b.config.name})).collect();
-        // The owner is one person for every room: asked once, through the first bot that has a Kith agent behind it.
+        // The owner is one person for every room and agent: one answer of kith-auth (kept by the hub) covers them all,
+        // asked through the first bot that has a Kith agent behind it.
         if owner.is_none() {
-            let mut name = None;
-            for agent in bots.iter().filter_map(|b| b.config.hq_agent.as_deref()) {
-                name = crate::api::roles::owner_name(agent).await;
-                if name.is_some() {
-                    break;
-                }
-            }
+            let name = match bots.iter().find_map(|b| b.config.hq_agent.as_deref()) {
+                Some(agent) => hub.owner_name(agent).await,
+                None => None,
+            };
             owner = Some(name);
         }
         let stay = hub.store.room_open_seat(&row.config.id, person);
