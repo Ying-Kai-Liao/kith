@@ -67,7 +67,11 @@ impl Actor {
         // Back to waiting: the messages show as queued again, nothing runs, no turn is recorded as running.
         for id in &args.entry_ids {
             if !crate::cards::resume::wake_carries(id)
-                && self.hub.store.entry(id).is_some_and(|e| e.kind == EntryKind::User.as_str() && e.data["status"] == "sent")
+                && self
+                    .hub
+                    .store
+                    .entry(id)
+                    .is_some_and(|e| e.kind == EntryKind::User.as_str() && e.data["status"] == "sent")
             {
                 self.set_user_status(id, RequestStatus::Queued);
             }
@@ -84,12 +88,19 @@ impl Actor {
             r.lane = Some(lane);
             r.message = None;
         });
-        let first = !self.writer.parked.as_ref().is_some_and(|p| p.why == wait.why);
+        // What the wait was before this one: the parked start, or the start that was resumed from one and parked again (its `waited`).
+        let before = self
+            .writer
+            .parked
+            .as_ref()
+            .map(|p| (p.why.clone(), p.tries, p.since))
+            .or_else(|| self.writer.waited.take());
+        let first = !before.as_ref().is_some_and(|b| b.0 == wait.why);
         if wait.why == Why::Core && first {
             // "core not answering": said once per wait, in the chat.
             self.notice("core not answering", NoticeStyle::Info);
         }
-        let tries = self.writer.parked.as_ref().filter(|p| p.why == wait.why).map_or(0, |p| p.tries.saturating_add(1));
+        let tries = before.as_ref().filter(|b| b.0 == wait.why).map_or(0, |b| b.1.saturating_add(1));
         let not_before = match wait.why {
             Why::Retry => Some(Instant::now() + super::writer::RETRY_AFTER),
             Why::Lock => Some(Instant::now() + lock_backoff(tries)),
@@ -100,7 +111,7 @@ impl Actor {
             why: wait.why.clone(),
             conversation: session,
             turn: wait.turn.or(self.writer.acc.as_ref().and_then(|a| a.turn)),
-            since: self.writer.parked.as_ref().map_or_else(Instant::now, |p| p.since),
+            since: before.as_ref().map_or_else(Instant::now, |b| b.2),
             not_before,
             tries,
             due: false,
@@ -135,7 +146,8 @@ impl Actor {
         if self.writer.tick.is_some_and(|t| t.elapsed() < SLOW) {
             return;
         }
-        if self.writer.run.is_none() && self.writer.parked.is_none() && self.writer.lost.is_none() && !self.writer.dirty {
+        if self.writer.run.is_none() && self.writer.parked.is_none() && self.writer.lost.is_none() && !self.writer.dirty
+        {
             return;
         }
         self.writer.tick = Some(Instant::now());
@@ -146,15 +158,10 @@ impl Actor {
             }
         }
         if let (Some((run, end)), Some(core)) = (self.writer.lost.take(), core(&self.hub)) {
-            let (r, e, c) = (run.clone(), end, core.clone());
-            let sent = tokio::task::spawn_blocking(move || c.retry_end(&r, e)).await;
-            if matches!(sent, Ok(crate::terminal::core_writer::Finished::Reported)) {
-                // The end that put the turn back is the one that cancels it (`writer_turn::cancel_reason`), once the core took it.
-                if let Some(why) = super::writer_turn::cancel_reason(end) {
-                    let turn = run.turn;
-                    tokio::task::spawn_blocking(move || core.cancel_turn(turn, why));
-                }
-            } else {
+            let (r, e) = (run.clone(), end);
+            // The end that put the turn back is the one that cancels it (`writer_turn::cancel_reason`), once the core took it.
+            let sent = tokio::task::spawn_blocking(move || super::writer_turn::end_report(&core, &r, e)).await;
+            if !matches!(sent, Ok(crate::terminal::core_writer::Finished::Reported)) {
                 self.writer.lost = Some((run, end));
             }
         }
@@ -181,7 +188,8 @@ impl Actor {
             self.writer_drop_parked();
             return;
         }
-        let (why, conv, turn, not_before) = (parked.why.clone(), parked.conversation.clone(), parked.turn, parked.not_before);
+        let (why, conv, turn, not_before) =
+            (parked.why.clone(), parked.conversation.clone(), parked.turn, parked.not_before);
         let Some(core) = core(&self.hub) else { return };
         let c = core.clone();
         let mode = tokio::task::spawn_blocking(move || c.mode()).await.unwrap_or(Mode::Held);
@@ -219,9 +227,12 @@ impl Actor {
         let Some(parked) = self.writer.parked.take() else { return };
         let a = parked.args;
         tracing::info!(bot = %self.cfg.id, waited_ms = u64::try_from(parked.since.elapsed().as_millis()).unwrap_or(0), "a parked start runs again");
+        // Kept for a park that follows at once: the count of tries and the first wait's time carry on instead of starting over.
+        self.writer.waited = Some((parked.why, parked.tries, parked.since));
         if let Err(error) = self.start_turn(a.lane, &a.entry_ids, &a.text, a.hidden, done_tx).await {
             self.start_failed(&error);
         }
+        self.writer.waited = None;
     }
 
     /// The error a parked turn's session shows while it waits, for the apps: the same words as the notice.

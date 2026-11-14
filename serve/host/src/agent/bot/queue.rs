@@ -59,7 +59,13 @@ impl Actor {
                 // first entry's key and epochs are the turn's.
                 let acc = self.accept(&[]).await;
                 for (entry_id, text) in items {
-                    self.queue.push_back(Queued::User { lane: lane.clone(), entry_id, text, alone: false, acc: acc.clone() });
+                    self.queue.push_back(Queued::User {
+                        lane: lane.clone(),
+                        entry_id,
+                        text,
+                        alone: false,
+                        acc: acc.clone(),
+                    });
                 }
                 if self.turn.is_none() {
                     self.next_in_queue(done_tx).await;
@@ -377,7 +383,9 @@ impl Actor {
             }
             match self.queue.front() {
                 Some(Queued::Routine(..)) => {
-                    let Some(Queued::Routine(id, acc)) = self.queue.pop_front() else { unreachable!("front is a routine") };
+                    let Some(Queued::Routine(id, acc)) = self.queue.pop_front() else {
+                        unreachable!("front is a routine")
+                    };
                     self.writer.acc = Some(acc);
                     self.active_routine = Some(id.clone());
                     self.routine_timed_out = false;
@@ -692,9 +700,7 @@ type Batch = (Lane, Vec<(String, String)>, super::writer::Accept);
 
 /// The messages at the front of the queue that go out together as the next turn, with their lane: the same lane, up to
 /// and including one on a different subject (which goes alone). None when the front is not a user message.
-fn take_batch(
-    queue: &mut std::collections::VecDeque<Queued>,
-) -> Option<Batch> {
+fn take_batch(queue: &mut std::collections::VecDeque<Queued>) -> Option<Batch> {
     let Some(Queued::User { lane, acc, .. }) = queue.front() else { return None };
     // The batch is one turn: its key and epochs are the first message's.
     let (lane, acc) = (lane.clone(), acc.clone());

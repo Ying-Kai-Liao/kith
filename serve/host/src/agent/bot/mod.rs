@@ -138,7 +138,10 @@ pub enum Cmd {
     },
     Reconfigure(Box<BotConfig>),
     /// A writer that held this place's session ended (a terminal's claim): a start parked for it asks the core at once (Writer mode).
-    #[allow(dead_code, reason = "sent by the hub's claim-end events once those land; the slow tick covers it until then")]
+    #[allow(
+        dead_code,
+        reason = "sent by the hub's claim-end events once those land; the slow tick covers it until then"
+    )]
     Unpark,
     Shutdown,
 }

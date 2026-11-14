@@ -317,7 +317,11 @@ fn a_process_marked_for_a_kill_takes_no_new_redeem() {
         redeem(&mut c, id, 321, "e321", "h1", 20).expect("refused"),
         Redeemed::Refused("killing".into())
     );
-    assert_eq!(state(&c, id), "claimed", "nothing moved: the caller stops it with the turn put back");
+    assert_eq!(
+        state(&c, id),
+        "claimed",
+        "nothing moved: the caller stops it with the turn put back"
+    );
     assert_eq!(turn_state(&c, t), "claimed");
     // Another process is not the marked one.
     assert_eq!(

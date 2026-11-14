@@ -91,7 +91,11 @@ impl Rig {
     /// [`Self::new`] with the bots running as `person` (a room person's actor, say).
     fn new_as(bots: &[&str], mac: Mac, person: Option<&str>) -> Self {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!("kw-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+        let dir = std::env::temp_dir().join(format!(
+            "kw-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        ));
         std::fs::create_dir_all(dir.join("state")).unwrap();
         let f = folders(&dir);
         if mac.file {
@@ -99,7 +103,8 @@ impl Rig {
             std::fs::create_dir_all(&switch).unwrap();
             std::fs::write(switch.join("claims.switch"), "").unwrap();
         }
-        let world = Arc::new(Mutex::new(World { account: "fixture".into(), switched: Some(mac.ok), ..World::default() }));
+        let world =
+            Arc::new(Mutex::new(World { account: "fixture".into(), switched: Some(mac.ok), ..World::default() }));
         let w = world.clone();
         let hooks: Hooks = Hooks::default();
         let h = hooks.clone();
@@ -215,7 +220,13 @@ impl Rig {
         let by = Instant::now() + Duration::from_secs(40);
         while !ok(self) {
             assert!(Instant::now() < by, "timed out waiting for {what}; the core was asked: {:?}", self.w().log);
-            let live = |c: &str| self.w().claims.iter().filter(|x| x.conv == c && ["claimed", "running", "ending"].contains(&x.state.as_str())).count();
+            let live = |c: &str| {
+                self.w()
+                    .claims
+                    .iter()
+                    .filter(|x| x.conv == c && ["claimed", "running", "ending"].contains(&x.state.as_str()))
+                    .count()
+            };
             for c in ["sess-a", "sess-b"] {
                 assert!(live(c) <= 1, "two live claims on {c}");
             }
@@ -276,7 +287,12 @@ impl Rig {
 
     /// The stub's pid the claim of `conv` is redeemed on.
     fn running_pid(&self, conv: &str) -> Option<i32> {
-        self.w().claims.iter().find(|c| c.conv == conv && c.state == "running").and_then(|c| c.pid).and_then(|p| i32::try_from(p).ok())
+        self.w()
+            .claims
+            .iter()
+            .find(|c| c.conv == conv && c.state == "running")
+            .and_then(|c| c.pid)
+            .and_then(|p| i32::try_from(p).ok())
     }
 }
 
@@ -667,13 +683,14 @@ async fn a_room_turn_ends_with_a_stop_and_no_warm_process() {
     let rig = Rig::new_as(&["a"], SWITCHED, Some("room-r-1"));
     rig.send("a", "room words").await;
     rig.until("the reply", |r| r.replied("a", "room words")).await;
-    rig.until("the stop", |r| r.w().asked.iter().any(|(m, p)| m == "hostclaim.stop" && p["reason"] == "room-turn-end")).await;
+    rig.until("the stop", |r| r.w().asked.iter().any(|(m, p)| m == "hostclaim.stop" && p["reason"] == "room-turn-end"))
+        .await;
     rig.until("the process forgotten", |r| r.w().procs.is_empty()).await;
 }
 
 // MARK: smaller rules
 
-/// MUST 8: the host's count decides; the core's chain counter opens with the same cap (it does not count rounds yet).
+/// MUST 8: the host's count decides; the chain opens with the conversation's own budget, the default when it is not known.
 #[test]
 fn a_room_turn_opens_its_chain_with_the_hosts_own_cap() {
     assert_eq!(super::budget(), crate::chat::group::budget_of(None));
@@ -688,7 +705,10 @@ async fn a_thread_lane_with_no_session_key_is_not_the_turns_session() {
     let got = crate::terminal::sync_for_turn(&rig.hub, &lane, "sess-a").await.unwrap();
     assert_eq!(got, crate::terminal::Synced::Forked { session: String::new() });
     // A main lane has no thread to follow.
-    assert_eq!(crate::terminal::sync_for_turn(&rig.hub, &Lane::main("a"), "sess-a").await.unwrap(), crate::terminal::Synced::Unchanged);
+    assert_eq!(
+        crate::terminal::sync_for_turn(&rig.hub, &Lane::main("a"), "sess-a").await.unwrap(),
+        crate::terminal::Synced::Unchanged
+    );
 }
 
 // MARK: step 7 (design 1.3): the transcript sync under the lock
@@ -762,6 +782,61 @@ actor_test! {
     }
 }
 
+actor_test! {
+    /// An off-turn turn's engine is already writing the session: a sync that finds it moved (here a fork) cannot be dealt with by
+    /// loading another session, so the process is stopped (check-in MUST 6, the architect's r2 MUST 2).
+    async fn an_off_turn_that_finds_the_thread_forked_stops_the_process(rig) {
+        rig.send("a", "first").await;
+        rig.until("the first reply", |r| r.replied("a", "first")).await;
+        let root = rig.first_message("a");
+        rig.send_thread("a", &root, "in thread").await;
+        rig.until("the thread's reply", |r| r.replied_in("a", &root, "in thread")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 2).await;
+        let pid = rig.w().claims[1].pid.and_then(|p| i32::try_from(p).ok()).unwrap();
+        // The thread's next turn wakes the agent by itself half a second after it answers; the fork happens at the wake's redeem.
+        let (hooks, hub) = (rig.hooks.clone(), rig.hub.clone());
+        let key = crate::store::lane_key("session", "a", &Lane::in_thread("a", &root));
+        rig.after("hostclaim.report", move || {
+            let fork: Box<dyn FnOnce() + Send> = Box::new(move || hub.store.kv_set(&key, "sess-fork").unwrap());
+            hooks.lock().unwrap().push(("hostclaim.redeem", fork));
+        });
+        rig.send_thread("a", &root, "WAKE").await;
+        rig.until("the process is stopped", |_| {
+            // SAFETY: signal 0 only asks whether the group is still there.
+            unsafe { libc::killpg(pid, 0) != 0 }
+        })
+        .await;
+    }
+}
+
+// MARK: parked behind a --direct run: the waits grow
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_turn_parked_behind_a_direct_run_asks_less_and_less_often() {
+    let mut rig = Rig::new(&["a"], SWITCHED);
+    rig.direct("sess-a");
+    rig.send("a", "behind direct").await;
+    // The times the core was asked to claim the turn: the first, then one after each wait (2 s, then 4 s, ...).
+    let mut at: Vec<Instant> = Vec::new();
+    let by = Instant::now() + Duration::from_secs(40);
+    while at.len() < 3 {
+        assert!(Instant::now() < by, "timed out; asked {} times: {:?}", at.len(), rig.w().log);
+        if rig.calls("hostclaim.turn") > at.len() {
+            at.push(Instant::now());
+        }
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+    let (first, second) = (at[1] - at[0], at[2] - at[1]);
+    assert!(first >= Duration::from_millis(1800), "the first wait is the slow tick: {first:?}");
+    assert!(
+        second >= first + Duration::from_secs(1),
+        "the second wait is longer, it was reset every time before: {first:?} then {second:?}"
+    );
+    assert_eq!(rig.calls("hostclaim.enqueue"), 1, "the same turn each time");
+    rig.end_direct();
+    rig.until("the reply", |r| r.replied("a", "behind direct")).await;
+}
+
 // MARK: the end choice, the backoff and the chain (units)
 
 mod units {
@@ -779,7 +854,11 @@ mod units {
         assert_eq!(end_for(Some(Rel::OutOfUsage), false, false), End::OutOfUsage);
         assert_eq!(end_for(None, false, false), End::Done, "no failover: done");
         assert_eq!(end_for(Some(Rel::Abandon), false, false), End::Done);
-        assert_eq!(end_for(Some(Rel::Died), false, false), End::Done, "a failed prompt on a live process is an ordinary end");
+        assert_eq!(
+            end_for(Some(Rel::Died), false, false),
+            End::Done,
+            "a failed prompt on a live process is an ordinary end"
+        );
         assert_eq!(end_for(Some(Rel::Died), true, false), End::Died, "the process is gone");
         assert_eq!(end_for(Some(Rel::Killed), false, false), End::Killed);
         assert_eq!(end_for(Some(Rel::Left), false, false), End::Left, "a fork leaves the claim, the process lives on");
@@ -809,11 +888,20 @@ mod units {
     fn a_later_round_follows_the_first_rounds_turn_and_the_first_opens_the_chain() {
         let state = Path::new("kw-chain-test");
         assert_eq!(chain_root(state, "conv-1"), None);
-        assert_eq!(chain(None), ("budget", budget()));
+        assert_eq!(
+            chain(None, 40),
+            ("budget", 40),
+            "the first round opens the chain with the conversation's own budget"
+        );
+        assert_eq!(chain(None, budget()), ("budget", budget()));
         chain_opened(state, "conv-1", 7);
         chain_opened(state, "conv-1", 9);
         assert_eq!(chain_root(state, "conv-1"), Some(7), "the first stays");
-        assert_eq!(chain(chain_root(state, "conv-1")), ("budgetFrom", 7));
+        assert_eq!(
+            chain(chain_root(state, "conv-1"), 40),
+            ("budgetFrom", 7),
+            "a later round follows, whatever its budget"
+        );
         assert_eq!(chain_root(state, "conv-2"), None, "another conversation opens its own chain");
         assert_eq!(chain_root(Path::new("kw-other"), "conv-1"), None, "another host's state");
     }

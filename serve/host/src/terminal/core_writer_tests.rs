@@ -984,8 +984,6 @@ async fn running_out_of_usage_reports_exit_with_the_flag_and_the_core_requeues()
     assert!(r.lock_free("s1"));
 }
 
-/// A usage limit moves the turn to a backup account, whose process runs another session (S'): the old claim ends `exit`, the old turn
-/// is cancelled and the turn begins as a NEW turn on S' (no turn id, a new key). The old turn's id on S' is refused, as the core does.
 /// A turn that leaves its claim because the thread was forked (`End::Left`): the lock back, a plain `exit` (no usage flag, no stop: a
 /// stop would have the core kill the process the next turn runs on), and the claim ended.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1001,6 +999,8 @@ async fn leaving_a_claim_releases_and_reports_a_plain_exit_without_stopping_the_
     assert_eq!(r.claim_state(1), "ended");
 }
 
+/// A usage limit moves the turn to a backup account, whose process runs another session (S'): the old claim ends `exit`, the old turn
+/// is cancelled and the turn begins as a NEW turn on S' (no turn id, a new key). The old turn's id on S' is refused, as the core does.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_usage_limit_move_is_a_new_turn_on_the_backups_session() {
     let r = Rig::new();

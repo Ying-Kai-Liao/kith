@@ -24,9 +24,9 @@
 
 use super::{Actor, Conn};
 use crate::terminal::core_writer::{Begin, CoreWriter, Mode, Running, Turn, WarmStub, new_turn_key};
-use crate::terminal::{pid_runs, proc_start};
 #[cfg(unix)]
 use crate::terminal::warm_stub::{Launch, ResidentStub};
+use crate::terminal::{pid_runs, proc_start};
 use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -88,8 +88,7 @@ pub(super) enum Rel {
 /// after that, `kill_resend`).
 const GONE_WITHIN: Duration = Duration::from_secs(30);
 
-/// The turn budget a room turn opens its chain with: the host's own cap (`chat::group`). The host's count decides: the core's
-/// chain counter does not count rounds yet (see [`chain`]), so it limits nothing.
+/// The turn budget a room turn opens its chain with when its conversation's own is not known: the host's default (`chat::group`).
 pub(super) fn budget() -> i64 {
     crate::chat::group::budget_of(None)
 }
@@ -116,12 +115,13 @@ pub(super) fn chain_opened(state: &std::path::Path, conversation: &str, turn: i6
     roots.entry((state.to_path_buf(), conversation.to_owned())).or_insert(turn);
 }
 
-/// The chain field of a room turn's `hostclaim.enqueue`: the first round opens a chain with the host's cap (`budget`); a later round of
-/// the same conversation follows the first round's turn (`budgetFrom`), which also keeps the core from refusing it once the person
-/// who opened the conversation has left the basis (a root needs its author in it). The core does not count rounds yet: following
-/// the first round's turn, not the previous one's, keeps every round at depth one, and the host's own count decides.
-pub(super) fn chain(root: Option<i64>) -> (&'static str, i64) {
-    root.map_or_else(|| ("budget", budget()), |from| ("budgetFrom", from))
+/// The chain field of a room turn's `hostclaim.enqueue`: the first round opens a chain with the conversation's own budget (`budget`, the
+/// host's total of member turns); a later round of the same conversation follows the first round's turn (`budgetFrom`), which the
+/// core counts against one counter per chain root (`basis.rs` `chain_of`: a follow takes one off, the root is free, so the core
+/// allows one more turn than the host and the host's own count, which decides, is always the first to stop). A follow also does not
+/// need the person who opened the conversation in the basis (a root does).
+pub(super) fn chain(root: Option<i64>, budget: i64) -> (&'static str, i64) {
+    root.map_or(("budget", budget), |from| ("budgetFrom", from))
 }
 
 // MARK: the core and the mode
@@ -163,13 +163,16 @@ pub(super) async fn mode_of(hub: &Arc<crate::hub::Hub>) -> (Mode, Option<Arc<Cor
 async fn adopt_once(hub: &crate::hub::Hub, core: &Arc<CoreWriter>) {
     static DONE: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
     let state = hub.terminal.env().state;
-    let first = DONE.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(state);
+    let first =
+        DONE.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(state);
     if !first {
         return;
     }
     let c = core.clone();
     match tokio::task::spawn_blocking(move || c.adopt()).await {
-        Ok(Ok(adopted)) => tracing::info!(ended = adopted.ended.len(), kill = adopted.kill.len(), "writer mode: adopted"),
+        Ok(Ok(adopted)) => {
+            tracing::info!(ended = adopted.ended.len(), kill = adopted.kill.len(), "writer mode: adopted")
+        }
         Ok(Err(error)) => tracing::warn!(error, "writer mode: couldn't adopt an earlier host instance's claims"),
         Err(_) => {}
     }
@@ -218,7 +221,8 @@ impl Actor {
 pub(super) async fn read_epochs(core: Arc<CoreWriter>, principal: String, basis: Vec<String>) -> Option<Seen> {
     tokio::task::spawn_blocking(move || {
         let own = core.epoch(&principal).ok()?;
-        let people = basis.iter().map(|p| core.epoch(p).map(|e| (p.clone(), e))).collect::<std::io::Result<Vec<_>>>().ok()?;
+        let people =
+            basis.iter().map(|p| core.epoch(p).map(|e| (p.clone(), e))).collect::<std::io::Result<Vec<_>>>().ok()?;
         Some(Seen { principal: own, basis: people })
     })
     .await
@@ -244,7 +248,15 @@ pub(crate) struct Proc {
 }
 
 impl Proc {
-    pub(super) fn new(core: Arc<CoreWriter>, stub: Stub, pid: u32, started: String, person: String, agent: String, seen: i64) -> Self {
+    pub(super) fn new(
+        core: Arc<CoreWriter>,
+        stub: Stub,
+        pid: u32,
+        started: String,
+        person: String,
+        agent: String,
+        seen: i64,
+    ) -> Self {
         Self { core, stub: Some(stub), pid, started, person, agent, seen, rows: HashSet::new() }
     }
 }
@@ -344,8 +356,10 @@ impl Actor {
             let agent = self.writer_agent();
             // Before any session loads (and before the handshake): a revoke that lands from here on finds the process.
             let (c, p, a, s, st) = (core.clone(), person.clone(), agent.clone(), started.clone(), seen);
-            let registered = tokio::task::spawn_blocking(move || c.register_proc(pid, &s, &p, &a, None, (!p.is_empty()).then_some(st)))
-                .await?;
+            let registered = tokio::task::spawn_blocking(move || {
+                c.register_proc(pid, &s, &p, &a, None, (!p.is_empty()).then_some(st))
+            })
+            .await?;
             if let Err(why) = registered {
                 stub.kill_group();
                 return Err(if why.starts_with("revoked") || why.contains("revoked") {
@@ -439,7 +453,9 @@ impl Actor {
 }
 
 async fn read_epoch(core: Arc<CoreWriter>, person: String) -> Result<i64> {
-    tokio::task::spawn_blocking(move || core.epoch(&person)).await?.map_err(|e| anyhow!("the revoke epoch can't be read: {e}"))
+    tokio::task::spawn_blocking(move || core.epoch(&person))
+        .await?
+        .map_err(|e| anyhow!("the revoke epoch can't be read: {e}"))
 }
 
 // MARK: the turn
@@ -603,7 +619,9 @@ pub(super) fn orphaned(core: &CoreWriter, conversation: &str, begin: &Begin, stu
         | Begin::Retry { turn, .. }
         | Begin::Parked { turn, .. }
         | Begin::Dropped { turn: Some(turn), .. }
-        | Begin::Failed { turn: Some(turn), .. } => core.cancel_turn(*turn, "start stopped"),
+        | Begin::Failed { turn: Some(turn), .. } => {
+            core.cancel_turn(*turn, "start stopped");
+        }
         _ => {}
     }
 }

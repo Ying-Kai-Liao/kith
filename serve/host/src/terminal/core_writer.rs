@@ -357,14 +357,15 @@ impl CoreWriter {
             .filter(Value::is_object))
     }
 
-    fn cancel(&self, turn: i64, why: &str) {
-        let _ = self.call("hostclaim.cancel", &json!({"turn": turn, "reason": why}));
+    /// Whether the core answered the cancel (a turn that could not be cancelled, because it already ended, is an answer too).
+    fn cancel(&self, turn: i64, why: &str) -> bool {
+        matches!(self.call("hostclaim.cancel", &json!({"turn": turn, "reason": why})), Answer::Done(_))
     }
 
     /// Cancels a turn the host gave up before it ran (the item was stopped while it waited): a turn row left queued would be
-    /// the core's to expire, never the host's to run.
-    pub fn cancel_turn(&self, turn: i64, why: &str) {
-        self.cancel(turn, why);
+    /// the core's to expire, never the host's to run. `false`: the core did not answer, the caller may try again.
+    pub fn cancel_turn(&self, turn: i64, why: &str) -> bool {
+        self.cancel(turn, why)
     }
 
     fn report(&self, claim: i64, kind: &str, pid: u32, extra: &Value) -> Result<(), String> {

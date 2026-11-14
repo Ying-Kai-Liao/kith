@@ -3,8 +3,8 @@
 
 use super::Actor;
 use super::writer::{
-    Accept, Armed, OwnedTurn, Proc, Rel, Run, Seen, Stub, Watch, Why, WriterWait, chain, chain_opened, core, now_ms, orphaned, read_epochs,
-    turn_of,
+    Accept, Armed, OwnedTurn, Proc, Rel, Run, Seen, Stub, Watch, Why, WriterWait, chain, chain_opened, core, now_ms,
+    orphaned, read_epochs, turn_of,
 };
 use crate::terminal::core_writer::{Begin, CoreWriter, Dropped, End, Finished, Mode, Running, WarmStub, new_turn_key};
 use crate::terminal::{pid_runs, proc_start};
@@ -34,6 +34,8 @@ pub(super) struct State {
     /// An end the core did not take: sent again on the slow tick.
     pub lost: Option<(Running, End)>,
     pub parked: Option<super::writer_wait::Parked>,
+    /// The wait a resumed start came from (why, tries, since), while that start runs: a park that follows continues it.
+    pub waited: Option<(Why, u32, std::time::Instant)>,
     /// The arguments of the start in progress, kept so a park can start it again.
     pub start: Option<super::writer_wait::StartArgs>,
     /// `loaded` moved (a session forgotten): the next tick brings `warm_procs` in step.
@@ -75,12 +77,30 @@ pub(super) fn cancel_reason(end: End) -> Option<&'static str> {
     }
 }
 
+/// The turn `exit` put back is not wanted again ([`cancel_reason`]): a cancel the core did not answer turns a taken end into a lost one,
+/// so the slow tick sends both again (the report on an ended claim changes nothing).
+pub(super) fn cancelled(core: &CoreWriter, run: &Running, end: End, finished: Finished) -> Finished {
+    match (finished, cancel_reason(end)) {
+        (Finished::Reported, Some(why)) if !core.cancel_turn(run.turn, why) => {
+            Finished::ReportLost("the cancel of the turn did not reach the core".into())
+        }
+        (finished, _) => finished,
+    }
+}
+
+/// The end report again (a lost one, or a stub that is gone), and the cancel that follows it.
+pub(super) fn end_report(core: &CoreWriter, run: &Running, end: End) -> Finished {
+    cancelled(core, run, end, core.retry_end(run, end))
+}
+
 impl Actor {
     /// `begin` on the process's stub, on a blocking thread. The stub goes out of its [`Proc`] for the call and comes back. `Ok` is
     /// the answer and whether the process was restarted meanwhile (a stub that failed, or an account switch): its connection is
     /// then stale.
     async fn begin_on_stub(&mut self, core: &Arc<CoreWriter>, t: OwnedTurn) -> Result<(Begin, bool)> {
-        let Some(proc) = self.conn.as_mut().and_then(|c| c.writer.as_mut()) else { bail!("the agent process has no stub") };
+        let Some(proc) = self.conn.as_mut().and_then(|c| c.writer.as_mut()) else {
+            bail!("the agent process has no stub")
+        };
         let Some(mut stub) = proc.stub.take() else { bail!("the agent process is busy") };
         let gone = Arc::new(AtomicBool::new(false));
         let (tx, rx) = oneshot::channel();
@@ -120,9 +140,15 @@ impl Actor {
         let epochs: serde_json::Map<String, Value> = seen.basis.iter().map(|(p, e)| (p.clone(), json!(e))).collect();
         let mut fields = json!({"level": "room", "basis": basis.people, "epochs": epochs, "room": basis.room, "gen": basis.room_gen,
                                 "joinEpoch": basis.join_gen, "author": group.author});
-        let (name, value) = chain(self.chain_root());
+        let (name, value) = chain(self.chain_root(), self.chain_budget());
         fields[name] = json!(value);
         Some(fields)
+    }
+
+    /// The conversation's own budget (what `send` granted it), which the first round opens the chain with.
+    fn chain_budget(&self) -> i64 {
+        let conversation = self.active_group.as_ref().and_then(|g| g.conversation.as_deref());
+        conversation.and_then(|c| self.hub.store.conversation(c)).map_or_else(super::writer::budget, |c| c.budget)
     }
 
     /// The turn that opened the chain of the room conversation this turn belongs to (a round after the first follows it).
@@ -200,6 +226,7 @@ impl Actor {
         }
         // Another session's claim of this turn (the account moved, a session was reloaded): given up first.
         if self.writer.run.is_some() {
+            self.writer.end = Some(Rel::Left);
             self.release_turn_claim();
             self.writer_settle_end().await;
         }
@@ -228,7 +255,7 @@ impl Actor {
                 }
             };
             self.writer.run = Some(Run { run: running, conversation: sid.clone() });
-            match self.writer_step7(lane, &sid, restarted).await {
+            match self.writer_step7(lane, &sid, restarted, off).await {
                 Ok(None) => return Ok(true),
                 Ok(Some(next)) => sid = next,
                 // Past the claim and the lock the start cannot go on: they are given up, not left in `run`.
@@ -244,12 +271,24 @@ impl Actor {
     /// Step 7, after `Begin::Running`: a new process loads its session under the lock, then the transcript sync. `Ok(None)`: the turn
     /// may prompt `sid`. `Ok(Some(session))`: the thread left `sid` (a fork): the claim is given up and the turn begins again, as a
     /// new turn, on `session`.
-    async fn writer_step7(&mut self, lane: &crate::store::Lane, sid: &str, restarted: bool) -> Result<Option<String>> {
+    async fn writer_step7(
+        &mut self,
+        lane: &crate::store::Lane,
+        sid: &str,
+        restarted: bool,
+        off: bool,
+    ) -> Result<Option<String>> {
         if restarted {
             // A new process has loaded nothing: its session loads under the lock, as a reload does.
             self.writer_reload(lane).await?;
         }
-        match crate::terminal::sync_for_turn(&self.hub, lane, sid).await? {
+        let synced = crate::terminal::sync_for_turn(&self.hub, lane, sid).await?;
+        // An off-turn turn's engine is already writing `sid`: it cannot be moved to another session or made to load this one again,
+        // so anything but `Unchanged` is an error, and the caller stops the process (check-in MUST 6).
+        if off && synced != crate::terminal::Synced::Unchanged {
+            bail!("the session moved under a turn the agent started by itself");
+        }
+        match synced {
             crate::terminal::Synced::Unchanged => Ok(None),
             crate::terminal::Synced::Moved => {
                 if let Some(c) = self.conn.as_mut() {
@@ -307,7 +346,9 @@ impl Actor {
             Begin::NotWriter { turn, .. } | Begin::CoreDown { turn, .. } => wait(Why::Core, turn),
             Begin::Queued { turn } => wait(Why::Claim, Some(turn)),
             Begin::Retry { turn, .. } => wait(Why::Retry, Some(turn)),
-            Begin::Parked { turn, why } => wait(if why == Parked::TerminalLive { Why::Terminal } else { Why::Lock }, Some(turn)),
+            Begin::Parked { turn, why } => {
+                wait(if why == Parked::TerminalLive { Why::Terminal } else { Why::Lock }, Some(turn))
+            }
             Begin::Dropped { why: Dropped::Revoked, .. } => {
                 self.notice("Access was revoked.", super::NoticeStyle::Error);
                 anyhow!("revoked: the turn was refused")
@@ -350,9 +391,10 @@ impl Actor {
             let (c, old_pid, old_started) = (core.clone(), proc.pid, proc.started.clone());
             let _ = tokio::task::spawn_blocking(move || c.proc_gone(old_pid, &old_started)).await;
             let (c, p, a, s) = (core.clone(), person.clone(), agent.clone(), started.clone());
-            let registered =
-                tokio::task::spawn_blocking(move || c.register_proc(pid, &s, &p, &a, None, (!p.is_empty()).then_some(seen)))
-                    .await?;
+            let registered = tokio::task::spawn_blocking(move || {
+                c.register_proc(pid, &s, &p, &a, None, (!p.is_empty()).then_some(seen))
+            })
+            .await?;
             if let Err(why) = registered {
                 stub.kill_group();
                 bail!("couldn't register the restarted agent process: {why}");
@@ -387,9 +429,9 @@ impl Actor {
         let Some(run) = self.writer.run.take() else { return };
         let how = self.writer.end.take();
         let end = end_for(how, !pid_runs(run.run.pid), self.is_room_actor());
-        // The item's last end drops what it carried. A move to the next account keeps the epochs and starts a new turn: the
-        // backup runs another session, and the old turn's row (on the old one) is cancelled below, so the next begin makes its own.
-        if how == Some(Rel::OutOfUsage) {
+        // The item's last end drops what it carried. A move to the next account, or to another session (a fork), keeps the epochs and
+        // starts a new turn: the old turn's row (on the old session) is cancelled below, so the next begin makes its own.
+        if matches!(how, Some(Rel::OutOfUsage | Rel::Left)) {
             if let Some(acc) = self.writer.acc.as_mut() {
                 acc.turn = None;
                 acc.key = new_turn_key();
@@ -408,7 +450,7 @@ impl Actor {
         let (r, conv, abandon) = (run.run.clone(), run.conversation.clone(), how == Some(Rel::Abandon));
         tokio::task::spawn_blocking(move || {
             let Some(mut stub) = stub else {
-                let _ = tx.send((core.retry_end(&r, end), None));
+                let _ = tx.send((end_report(&core, &r, end), None));
                 return;
             };
             let finished = if abandon {
@@ -416,14 +458,11 @@ impl Actor {
                 Finished::Reported
             } else if !pid_runs(r.pid) {
                 // The stub is gone with its lock: nothing to release, only the end to report (`end` is `Died`, or `Killed`).
-                core.retry_end(&r, end)
+                end_report(&core, &r, end)
             } else {
                 core.finish(&r, &conv, &mut stub, end)
             };
-            // The turn `exit` put back is not wanted again (see [`cancel_reason`]).
-            if let Some(why) = cancel_reason(end) {
-                core.cancel_turn(r.turn, why);
-            }
+            let finished = cancelled(&core, &r, end, finished);
             let _ = tx.send((finished, Some(stub)));
         });
         self.writer.ending = Some(InFlight { rx, run: run.run, end });
@@ -435,10 +474,7 @@ impl Actor {
         let (tx, rx) = oneshot::channel();
         let r = run.run.clone();
         tokio::task::spawn_blocking(move || {
-            let _ = tx.send((core.retry_end(&r, end), None));
-            if let Some(why) = cancel_reason(end) {
-                core.cancel_turn(r.turn, why);
-            }
+            let _ = tx.send((end_report(&core, &r, end), None));
         });
         self.writer.ending = Some(InFlight { rx, run: run.run, end });
     }
@@ -463,7 +499,8 @@ impl Actor {
     fn writer_ended(&mut self, run: Running, end: End, finished: Finished, stub: Option<Stub>) {
         let keep = !matches!(finished, Finished::RoomEnded { .. } | Finished::LockStuck(_));
         if let (Some(stub), true) = (stub, keep)
-            && let Some(proc) = self.conn.as_mut().and_then(|c| c.writer.as_mut()).filter(|p| p.stub.is_none() && p.pid == run.pid)
+            && let Some(proc) =
+                self.conn.as_mut().and_then(|c| c.writer.as_mut()).filter(|p| p.stub.is_none() && p.pid == run.pid)
         {
             proc.stub = Some(stub);
         }
