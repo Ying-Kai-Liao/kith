@@ -430,8 +430,20 @@ fn sweep_person(core: &mut Core, p: &Value, now: i64) -> Result<Value> {
     }
     let mut seen = std::collections::HashSet::new();
     kill.retain(|k| seen.insert((k.claim_id, k.pid)));
+    // The conversation of each kill, so the caller can write its "access revoked" intent before it signals.
+    let conversation_of = |id: Option<i64>| -> Option<String> {
+        core.conn()
+            .query_row(
+                "SELECT conversation FROM claims WHERE claim_id = ?1",
+                [id?],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    };
     Ok(json!({ "kill": kill.iter().map(|k| json!({
-        "claimId": k.claim_id, "pid": k.pid, "started": k.started,
+        "claimId": k.claim_id, "pid": k.pid, "started": k.started, "conversation": conversation_of(k.claim_id),
     })).collect::<Vec<_>>() }))
 }
 
@@ -449,18 +461,23 @@ fn list(core: &Core) -> Result<Value> {
                     "person": r.get::<_, String>(4)?,
                     "pid": r.get::<_, Option<i64>>(5)?,
                     "started": r.get::<_, Option<String>>(6)?,
+                    // The conversation's agent (fixed for its life) and the holder instance the claim went to: the host judges a
+                    // narrowed sweep by the agent, and tells its own turn from an earlier start's by the instance.
+                    "agent": r.get::<_, Option<String>>(7)?,
+                    "holderInstance": r.get::<_, Option<String>>(8)?,
                 }))
             })?
             .collect::<std::result::Result<_, _>>()?;
         Ok(out)
     };
-    let cols = "SELECT claim_id, conversation, state, kind, person, pid, pid_started FROM claims";
+    let cols = "SELECT c.claim_id, c.conversation, c.state, c.kind, c.person, c.pid, c.pid_started, v.agent, c.holder_instance
+                FROM claims c LEFT JOIN conversations v ON v.id = c.conversation";
     Ok(json!({
         "live": rows(&format!(
-            "{cols} WHERE state IN ('queued', 'claimed', 'running', 'ending') ORDER BY claim_id"
+            "{cols} WHERE c.state IN ('queued', 'claimed', 'running', 'ending') ORDER BY c.claim_id"
         ))?,
         "recent": rows(&format!(
-            "{cols} WHERE state = 'ended' ORDER BY claim_id DESC LIMIT 20"
+            "{cols} WHERE c.state = 'ended' ORDER BY c.claim_id DESC LIMIT 20"
         ))?,
     }))
 }

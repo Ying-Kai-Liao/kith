@@ -251,3 +251,8 @@ broken-router-stale	INVARIANT	R2	fail
 broken-router-stale	PROPERTY	R1	fail
 broken-router-stale	PROPERTY	R6	fail
 broken-router-stale-door	PROPERTY	DoorD2	fail
+# --- the host's owed sweep (M3 P8): a sweep the core did not take is recorded and retried; a retry after an undo ends nothing ---
+owed-sweep	INVARIANT	TypeOK	pass
+owed-sweep	PROPERTY	RetryKeepsRestored	pass
+owed-sweep	PROPERTY	NoLiveProc	pass
+broken-owed-retry-revokes	PROPERTY	RetryKeepsRestored	fail

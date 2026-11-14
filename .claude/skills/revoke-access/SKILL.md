@@ -78,6 +78,7 @@ confirmed that the model still describes the covered code (see "When you change 
 | `DoorD2c` | D2, R8 | Same, from the moment the cloud has the revoke, on every Mac: a Mac behind the cloud holds the start. | Same, through a Mac that hasn't heard yet. |
 | `DoorD1` | D1 | A door running for a revoked person is stopped (liveness, given the host's sweep runs). | Their render keeps running, writing, after they were cut off. |
 | `BotDoorCut` | I6 | An invitee's bot starts a guest door only while the invitee holds it (its own tick is cut to its owner's). | A bot ticked more than its owner runs a door the owner was never given. |
+| `RetryKeepsRestored` | M3 P8 | A revoke sweep the core did not take is owed (a row in the host store, `terminal/core_holders.rs`) and retried; a retry after the revoke was undone ends nothing (`claim.sweepPerson` is a full `revoke_person`). Rows `owed-sweep`, `broken-owed-retry-revokes` (model: `OwedSweeps`, `SweepOwed`, `RetrySweep`). The model drops the row when P is not revoked now; the code drops it only if the row was owed while P was suspended in the host store and P has no suspend rows now. GAP: a revoke that left nothing to suspend, or whose `suspend_person` failed, is never dropped, so an undo then the retry ends the restored person's runs once (fails safe; fix: judge by the authority's revoked state). | A retry after an undo ends the runs the undo restored. |
 
 The probes (`Never*` that must fail, and `NoBridgeRefusal`) show the good paths are reachable: the bridge serves a
 guest end to end when in sync, an undo gives app turns back, a queued or held message is served once in sync, and the
@@ -198,6 +199,7 @@ The model's "bridge" is this door.
 | `door` (without `CoreDoorHook`) | the core's revoke sweeping the doors in its own step: a revoke leaves a window with a door still running until the sweep action | `DoorsCutWithRevoke` (fails in `door` and `bot-door`, passes in `core-door` and `core-bot-door`); row-level: the rows are swept with the revoke, a box is stopped later by the host |
 | `broken-door-undo-revives` | an undo that puts a swept door row back (the core must leave swept final) | `DoorNoResurrect` |
 | `broken-bot-door-no-cut` | the owner cut in a bot's door check (kith-auth `door_state` before N2) | `BotDoorCut` |
+| `broken-owed-retry-revokes` | the retry's re-judge from the person's state now (it sweeps the restored person again) | `RetryKeepsRestored` |
 | `broken-core-gate-stale` | the gate's fingerprint check (`gate_open_at`): the core's copy answers for the host's guard after auth.json changed and before the mirror told the core | `R1`, `R5` |
 
 On the code (dry run at the sync commit, edits dropped after):
