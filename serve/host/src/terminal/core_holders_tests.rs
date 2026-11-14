@@ -496,3 +496,28 @@ async fn two_sweeps_at_once_end_each_pid_once_and_the_files_mode_asks_nothing() 
     let hub = test_hub(&f.state);
     assert_eq!(sweep(&hub, &f.state, vec!["sam".into()], false).await, None);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_retry_that_fails_leaves_the_row_and_a_row_owed_meanwhile_is_kept() {
+    let r = Rig::new(true, true);
+    let hub = test_hub(&r.state);
+    let w = r.world.clone();
+    register(
+        &r.state,
+        Arc::new(move |m, p| {
+            if m == "claim.sweepPerson" {
+                return Answer::Down { why: "gone".into(), lost: false };
+            }
+            w.lock().unwrap().answer(m, p)
+        }),
+    );
+    assert!(matches!(sweep(&hub, &r.state, vec!["sam".into()], false).await, Some(Swept::Owed(_))));
+    retry_owed(&hub).await;
+    assert_eq!(owed_count(&hub), 1, "the failed retry did not drop its row");
+    let (a, b) = (
+        sweep(&hub, &r.state, vec!["ann".into()], false),
+        sweep(&hub, &r.state, vec!["bob".into()], false),
+    );
+    let _ = tokio::join!(a, b);
+    assert_eq!(owed_count(&hub), 3, "two owed at once lose nothing");
+}

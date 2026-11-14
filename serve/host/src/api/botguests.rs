@@ -737,7 +737,7 @@ pub(crate) async fn revoke_owned_by(hub: &Hub, person: &str, why: &str) {
 /// `terminal::claim::sweep`): the runs a restarted host lost track of. Never the owner's (their claims name nobody).
 /// With `only_denied` (access narrowed, not removed) a holder survives while its person may still use its agent; a claim
 /// that names no agent (from before claims did) cannot be judged and goes.
-pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: bool) {
+pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: bool) -> Option<String> {
     let state = hub.terminal.env().state;
     // Their doors too: all of them, or (access narrowed) those kith-auth no longer allows.
     let doors_of = if only_denied { Vec::new() } else { persons.clone() };
@@ -748,9 +748,18 @@ pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: b
             if !ended.is_empty() {
                 tracing::info!(pids = ?ended, "ended runs left over after access was removed");
             }
-            return crate::doors::sweep(&doors_of).await;
+            crate::doors::sweep(&doors_of).await;
+            return None;
         }
-        Some(crate::terminal::core_holders::Swept::Owed(_)) => return crate::doors::sweep(&doors_of).await,
+        // The core did not take it: owed and retried on the slow tick. The warning is the caller's to give the owner, in the
+        // style of `revokePending`.
+        Some(crate::terminal::core_holders::Swept::Owed(why)) => {
+            crate::doors::sweep(&doors_of).await;
+            return Some(format!(
+                "warning: the core could not end the runs of {}: {why}; the sweep is owed and retried",
+                persons.join(", ")
+            ));
+        }
         None => {}
     }
     let mut allowed: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
@@ -776,6 +785,7 @@ pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: b
         tracing::info!(pids = ?ended, "ended runs left over after access was removed");
     }
     crate::doors::sweep(&doors_of).await;
+    None
 }
 
 /// After `person`'s access changed: a bot's turn on an agent its owner no longer holds stops now, so a long turn

@@ -794,7 +794,7 @@ fn cards_of(hub: &Hub, ids: &[String]) -> Vec<Card> {
 pub fn refused(hub: &Arc<Hub>, entry_ids: &[String], session: Option<&str>) {
     // A holder the core could not name is shown as none: the wake goes back to the queue either way.
     let holder = session.and_then(|sid| {
-        let read = crate::terminal::core_holders::Reader::new(&hub.terminal.env().state).read(sid);
+        let read = crate::terminal::core_holders::Reader::read_now(&hub.terminal.env().state, sid);
         read.holder().cloned().map(|c| (sid, c))
     });
     for entry in entry_ids {
@@ -969,7 +969,10 @@ async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&st
                 started(hub, &turn.run, &ids);
             }
             Exec::Held => {
-                let h = crate::terminal::core_holders::Reader::new(&state).read(&sid).holder().cloned();
+                let (st, id) = (state.clone(), sid.clone());
+                let h = wake::blocking(move || crate::terminal::core_holders::Reader::new(&st).read(&id))
+                    .await
+                    .and_then(|r| r.holder().cloned());
                 for c in live {
                     set_held(hub, c, h.as_ref().map(|h| (session, h)));
                 }

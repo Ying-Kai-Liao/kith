@@ -90,6 +90,16 @@ impl Reader {
         matches!(self.mode, Mode::Writer | Mode::Held)
     }
 
+    /// [`Self::new`] then [`Self::read`] for a sync caller that may run on an async worker: a multi-thread runtime is told the
+    /// thread blocks (the gate is a core row, not a file read), so the other tasks move on.
+    pub fn read_now(state: &Path, sid: &str) -> Reading {
+        let go = || Self::new(state).read(sid);
+        match tokio::runtime::Handle::try_current() {
+            Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(go),
+            _ => go(),
+        }
+    }
+
     /// Who holds `sid` now.
     pub fn read(&self, sid: &str) -> Reading {
         match (self.mode, &self.folders) {
@@ -182,7 +192,7 @@ fn stop_with(reader: &Reader, sid: &str, grace: Duration) -> Stopped {
         return Stopped::CantStop(claim);
     }
     // A claim not redeemed yet has no process: the core ends it by compare-and-set and nothing is signalled.
-    let unspawned = seen.state == "claimed" && claim_pid(f, seen.id).is_none();
+    let unspawned = seen.state == "claimed" && matches!(claim_pid(f, seen.id), Ok(None));
     if !unspawned {
         match claim.identity() {
             Some(true) => {}
@@ -209,7 +219,9 @@ fn stop_with(reader: &Reader, sid: &str, grace: Duration) -> Stopped {
     loop {
         let _ = row(f, "hostclaim.settle", &json!({}));
         match row(f, "hostclaim.show", &json!({"claimId": seen.id})) {
-            Ok(v) if matches!(v["claim"]["state"].as_str(), Some("ended") | None) => return Stopped::Ended(claim),
+            Ok(v) if v["claim"]["state"].as_str() == Some("ended") => return Stopped::Ended(claim),
+            // Claims are never deleted: no claim at the id I stopped is a wrong id, not an end.
+            Ok(v) if v["claim"].is_null() => return Stopped::Unreadable("the core shows no claim of that id".into()),
             Ok(_) if std::time::Instant::now() >= reaped => return Stopped::StillEnding(claim),
             Ok(_) => std::thread::sleep(Duration::from_millis(50)),
             Err(error) => return Stopped::Unreadable(error.to_string()),
@@ -221,9 +233,10 @@ fn state_of(r: &Reader) -> &Path {
     &r.state
 }
 
-fn claim_pid(f: &Paths, id: i64) -> Option<u32> {
-    let v = row(f, "hostclaim.show", &json!({"claimId": id})).ok()?;
-    v["claim"]["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
+/// The pid the core shows for claim `id`; an error is not "unspawned" (the caller treats it as spawned).
+fn claim_pid(f: &Paths, id: i64) -> std::io::Result<Option<u32>> {
+    let v = row(f, "hostclaim.show", &json!({"claimId": id}))?;
+    Ok(v["claim"]["pid"].as_u64().and_then(|p| u32::try_from(p).ok()))
 }
 
 // MARK: the revoke sweep
@@ -266,18 +279,25 @@ async fn sweep_in(hub: &Hub, reader: Reader, persons: Vec<String>, only_denied: 
         return owe(hub, &persons, only_denied, "the claims gate cannot be read".into());
     };
     let grace = Duration::from_secs(2);
-    let killed: std::io::Result<Vec<(u32, Option<String>)>> = if only_denied {
+    // What the core handed out is ended even when a later row failed: the failure is owed, the kills are not dropped.
+    let (held, failed) = if only_denied {
         narrowed(&f, persons.clone()).await
     } else {
         let (f2, p2) = (f.clone(), persons.clone());
-        crate::wake::blocking(move || whole(&f2, &p2)).await.unwrap_or_else(|| Err(std::io::Error::other("sweep failed")))
-    };
-    match killed {
-        Ok(held) => {
-            let ended = crate::wake::blocking(move || claim::end_claimed(&held, grace)).await.unwrap_or_default();
-            Swept::Done(ended)
+        match crate::wake::blocking(move || whole(&f2, &p2)).await {
+            Some(Ok(held)) => (held, None),
+            Some(Err(error)) => (Vec::new(), Some(error)),
+            None => (Vec::new(), Some(std::io::Error::other("sweep failed"))),
         }
-        Err(error) => owe(hub, &persons, only_denied, error.to_string()),
+    };
+    let ended = if held.is_empty() {
+        Vec::new()
+    } else {
+        crate::wake::blocking(move || claim::end_claimed(&held, grace)).await.unwrap_or_default()
+    };
+    match failed {
+        None => Swept::Done(ended),
+        Some(error) => owe(hub, &persons, only_denied, error.to_string()),
     }
 }
 
@@ -312,11 +332,13 @@ fn list(f: &Paths, persons: &[String]) -> std::io::Result<Vec<Listed>> {
         .collect())
 }
 
-async fn narrowed(f: &Paths, persons: Vec<String>) -> std::io::Result<Vec<(u32, Option<String>)>> {
+async fn narrowed(f: &Paths, persons: Vec<String>) -> (Vec<(u32, Option<String>)>, Option<std::io::Error>) {
     let f1 = f.clone();
-    let listed = crate::wake::blocking(move || list(&f1, &persons))
-        .await
-        .unwrap_or_else(|| Err(std::io::Error::other("list failed")))?;
+    let listed = match crate::wake::blocking(move || list(&f1, &persons)).await {
+        Some(Ok(l)) => l,
+        Some(Err(error)) => return (Vec::new(), Some(error)),
+        None => return (Vec::new(), Some(std::io::Error::other("list failed"))),
+    };
     let mut allowed: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
     for l in &listed {
         if let Some(agent) = &l.agent
@@ -335,26 +357,40 @@ async fn narrowed(f: &Paths, persons: Vec<String>) -> std::io::Result<Vec<(u32, 
         let mut held = Vec::new();
         for id in go {
             // Only the claim judged: a claim that ended meanwhile gives no kill.
-            held.extend(kills(&json!({"kill": [row(&f2, "hostclaim.stop", &json!({"claimId": id, "reason": "access narrowed"}))?["kill"].clone()]})));
+            match row(&f2, "hostclaim.stop", &json!({"claimId": id, "reason": "access narrowed"})) {
+                Ok(v) => held.extend(kills(&json!({"kill": [v["kill"].clone()]}))),
+                Err(error) => return (held, Some(error)),
+            }
         }
-        Ok(held)
+        (held, None)
     })
     .await
-    .unwrap_or_else(|| Err(std::io::Error::other("stop failed")))
+    .unwrap_or_else(|| (Vec::new(), Some(std::io::Error::other("stop failed"))))
 }
 
 // MARK: owed sweeps
 
+/// Every read and write of the owed rows goes through this lock (never held across an await), so a row owed while a retry is
+/// under way, or by two threads at once, is not lost.
+static OWED_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn locked() -> std::sync::MutexGuard<'static, ()> {
+    OWED_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Records a sweep the core did not take. Retried by [`retry_owed`]; never reported as "nothing to end".
 fn owe(hub: &Hub, persons: &[String], only_denied: bool, why: String) -> Swept {
     let suspended = persons.iter().any(|p| hub.store.is_suspended(p));
-    let mut rows = owed(hub);
     let row = json!({"persons": persons, "narrow": only_denied, "suspended": suspended});
-    if !rows.contains(&row) {
-        rows.push(row);
-    }
-    if let Err(error) = hub.store.kv_set(OWED, &Value::Array(rows).to_string()) {
-        tracing::error!(%error, "a revoke sweep the core did not take could not be recorded");
+    {
+        let _lock = locked();
+        let mut rows = owed(hub);
+        if !rows.contains(&row) {
+            rows.push(row);
+        }
+        if let Err(error) = hub.store.kv_set(OWED, &Value::Array(rows).to_string()) {
+            tracing::error!(%error, "a revoke sweep the core did not take could not be recorded");
+        }
     }
     tracing::warn!(persons = ?persons, why, "warning: the core could not end a revoked person's runs; the sweep is owed and retried");
     Swept::Owed(why)
@@ -364,16 +400,36 @@ fn owed(hub: &Hub) -> Vec<Value> {
     hub.store.kv_get(OWED).and_then(|s| serde_json::from_str::<Vec<Value>>(&s).ok()).unwrap_or_default()
 }
 
+/// Removes one owed row (a fresh read under the lock), once its sweep was taken or judged unneeded.
+fn settle_row(hub: &Hub, row: &Value) {
+    let _lock = locked();
+    let mut rows = owed(hub);
+    if let Some(at) = rows.iter().position(|r| r == row) {
+        rows.remove(at);
+        let _ = if rows.is_empty() {
+            hub.store.kv_delete(OWED)
+        } else {
+            hub.store.kv_set(OWED, &Value::Array(rows).to_string())
+        };
+    }
+}
+
 /// How many sweeps are owed.
 #[cfg(test)]
 pub fn owed_count(hub: &Hub) -> usize {
+    let _lock = locked();
     owed(hub).len()
 }
 
 /// Tries every owed sweep again, each re-judged from now: a whole sweep of someone who was suspended and has been restored
-/// (undo) is dropped, a narrowing asks `may_use` again. Not Writer any more (switched back): dropped, the files are the truth.
+/// (undo) is dropped, a narrowing asks `may_use` again. A row leaves the store only once its sweep was taken (or dropped):
+/// a retry that fails leaves it as it was. Switched back to Files or Shadow: the rows are dropped with a warning, as the
+/// files are the truth again (runs started under core claims have no claim file: a rollback must end them by hand).
 pub async fn retry_owed(hub: &Hub) {
-    let rows = owed(hub);
+    let rows = {
+        let _lock = locked();
+        owed(hub)
+    };
     if rows.is_empty() {
         return;
     }
@@ -384,24 +440,31 @@ pub async fn retry_owed(hub: &Hub) {
         Mode::Held => return,
         Mode::Writer => {}
         Mode::Files | Mode::Shadow => {
-            let _ = hub.store.kv_delete(OWED);
+            tracing::warn!(
+                owed = rows.len(),
+                "warning: owed revoke sweeps are dropped because the claims module is no longer in Writer mode; runs started under core claims have no claim file and must be ended by hand"
+            );
+            for r in &rows {
+                settle_row(hub, r);
+            }
             return;
         }
     }
-    let _ = hub.store.kv_delete(OWED);
     for r in rows {
         let persons: Vec<String> =
             r["persons"].as_array().into_iter().flatten().filter_map(|p| p.as_str().map(str::to_owned)).collect();
         let narrow = r["narrow"].as_bool().unwrap_or(false);
         if !narrow && r["suspended"].as_bool().unwrap_or(false) && !persons.iter().any(|p| hub.store.is_suspended(p)) {
             tracing::info!(?persons, "an owed revoke sweep was dropped: the person was restored");
+            settle_row(hub, &r);
             continue;
         }
         let again = Reader { state: state.clone(), mode: reader.mode, folders: reader.folders.clone() };
-        if let Swept::Done(ended) = sweep_in(hub, again, persons, narrow).await
-            && !ended.is_empty()
-        {
-            tracing::info!(pids = ?ended, "ended runs left over after access was removed (owed sweep)");
+        if let Swept::Done(ended) = sweep_in(hub, again, persons, narrow).await {
+            settle_row(hub, &r);
+            if !ended.is_empty() {
+                tracing::info!(pids = ?ended, "ended runs left over after access was removed (owed sweep)");
+            }
         }
     }
 }
