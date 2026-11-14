@@ -48,9 +48,10 @@ pub(crate) fn serves(method: &str) -> bool {
     )
 }
 
-/// Whether the claims are the core's on this Mac: the `claims` module reads `switched` (its switch file, the marker in
-/// core.db, and the tombstone in `live/terminal/`), through the same `may_serve` as every module. A core opened without
-/// its folders cannot tell, and says no.
+/// Whether the claims are the core's on this Mac: the `claims` module reads `switched` (its switch file and the marker in
+/// core.db; the tombstone in `live/terminal/` is not read here), through the same `may_serve` as every module. A core
+/// opened without its folders cannot tell, and says no. Off Unix there is no cutover framework, so never switched.
+#[cfg(unix)]
 pub(crate) fn switched(core: &Core) -> bool {
     let Some(folders) = core.folders() else {
         return false;
@@ -66,6 +67,11 @@ pub(crate) fn switched(core: &Core) -> bool {
         false,
     )
     .ok
+}
+
+#[cfg(not(unix))]
+pub(crate) fn switched(_core: &Core) -> bool {
+    false
 }
 
 fn now_ms() -> i64 {

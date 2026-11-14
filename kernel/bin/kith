@@ -1342,9 +1342,15 @@ for k, v in json.load(sys.stdin).get("env", {}).items():
 fi
 # Every run with someone else's profile is findable by the revoke sweep (kith-sessions proc): its pid is the one that execs
 # claude below, so the claim lives as long as claude (or, for an interactive run, the launcher claude runs under).
-# Once the claims are the core's, exit 9 is "the core cannot record this person's run": it does not start (a revoke would miss it).
-[[ $p_owner == 1 || $launch -eq 1 ]] || KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null \
-  || [[ $? -ne 9 ]] || { echo "kith: the Kith core cannot record this run, so ${p_id} cannot start it right now (is kith serve running?)" >&2; exit 1; }
+# Once the claims are the core's (the marker), any failure of proc means this person's run has no core claim, so a revoke
+# could not find it: it does not start (exit 9 is the core saying so; a traceback or a failed import is the same to a revoke).
+if [[ $p_owner != 1 && $launch -ne 1 ]]; then
+  proc_rc=0
+  KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || proc_rc=$?
+  if [[ $proc_rc -eq 9 || ( $proc_rc -ne 0 && -e ${KITH_STATE:-/nonexistent}/live/terminal/claims.tombstone ) ]]; then
+    echo "kith: the Kith core cannot record this run, so ${p_id} cannot start it right now (is kith serve running?)" >&2; exit 1
+  fi
+fi
 # Another harness: the same run, handed to its adapter (prompt in a file, directories and MCP configs as lists).
 if [[ $harness != claude ]]; then
   [[ $want_held -eq 0 ]] || echo "kith: --held holds claude sessions only; $harness runs here (--direct)" >&2

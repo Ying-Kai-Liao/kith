@@ -616,3 +616,65 @@ fn list_shows_the_live_and_the_recent() {
     assert_eq!(l["live"][0]["pid"], 100);
     assert_eq!(l["recent"].as_array().unwrap().len(), 1);
 }
+
+/// MUST 4 of the P5 review: the revoke's sweep with no daemon, through the door the kernel's `kith-sessions sweep` really
+/// uses (`call_authority_embedded`), not through `call_at`.
+#[cfg(unix)]
+#[test]
+fn the_sweep_runs_in_an_embedded_core_when_switched_and_is_refused_when_not() {
+    use crate::cutover::state::{self, Phase, Switch};
+    use crate::{EmbeddedCall, call_authority_embedded};
+    let (_t, m) = machine();
+    let pid = std::process::id();
+    let started = System.start(pid).expect("our own start stamp");
+    let sweep = json!({"persons": ["sam"]});
+    let paths = crate::tests::paths(&m);
+    let claim;
+    {
+        let mut core = start_with(&Layout::new(&m), MIGRATIONS)
+            .expect("start")
+            .with_folders(&paths);
+        reconcile(&mut core, &[], &[], i64::MAX, 1).expect("reconcile");
+        state::write(
+            &Layout::new(&m),
+            "claims",
+            &Switch {
+                phase: Phase::Switched,
+                snapshot: None,
+                at: 5,
+            },
+        )
+        .unwrap();
+        crate::cutover::marker::write(&mut core, "claims", 5, "d", None).unwrap();
+        let seen = claims::revoke_epoch(&core, "sam").unwrap();
+        let took = super::call(
+            &mut core,
+            "claim.external",
+            &json!({"conversation": "s1", "pid": pid, "started": started, "person": "sam", "agent": "echo", "revokeSeen": seen}),
+        )
+        .unwrap();
+        claim = took["claimId"].as_i64().expect("a claim");
+    } // the core is closed: no daemon holds the lock
+    for round in 0..2 {
+        // The second round is the repeat: the claim stays `ending`, and the kill is answered again.
+        let EmbeddedCall::Answered(out) =
+            call_authority_embedded(&paths, "claim.sweepPerson", &sweep).expect("embedded sweep")
+        else {
+            panic!("the sweep did not run in the embedded core");
+        };
+        let kills = out["kill"].as_array().expect("kills");
+        assert_eq!(kills.len(), 1, "round {round}: {out}");
+        assert_eq!(kills[0]["pid"].as_i64(), Some(i64::from(pid)));
+        let core = start_with(&Layout::new(&m), MIGRATIONS).expect("reopen");
+        assert_eq!(state_of(&core, claim), "ending", "round {round}");
+    }
+    // Not switched (the marker gone): the same call is refused and ends nothing.
+    {
+        let mut core = start_with(&Layout::new(&m), MIGRATIONS)
+            .expect("reopen")
+            .with_folders(&paths);
+        crate::cutover::marker::clear(&mut core, "claims").unwrap();
+    }
+    let e = call_authority_embedded(&paths, "claim.sweepPerson", &sweep);
+    assert!(matches!(e, Err(Error::Refused(_))), "{e:?}");
+}

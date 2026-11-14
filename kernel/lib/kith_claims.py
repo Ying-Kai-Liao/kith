@@ -10,8 +10,8 @@ The marker is `$KITH_STATE/live/terminal/claims.tombstone`. `kith migrate step c
 clears it; this module only reads it. Its mere existence is the switch: a damaged or unreadable marker still means Writer
 (fail closed: a taker never goes back to the files by accident).
 
-A call to the core is `kith kernel core-call METHOD --params-stdin` (the daemon over the owner socket; the claim rows are
-never run in an embedded core). Its exit code says what happened, and the callers tell these apart on purpose:
+A call to the core is `kith kernel core-call METHOD --params-stdin` (the daemon over the owner socket; with no daemon, only
+claim.sweepPerson runs in an embedded core, as every revoke must reach a person's runs). Its exit code says what happened, and the callers tell these apart on purpose:
 
   answered   0   the core said something (an answer can be a refusal as data: {"refused": "held", ...})
   refused    4   the core rejected the call (a bad param, a row that is not open to the caller); nothing ran

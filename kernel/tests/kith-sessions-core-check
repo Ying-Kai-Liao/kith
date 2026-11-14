@@ -193,6 +193,14 @@ check "W2 switched, core down: the owner's run goes on (stub lock alone) with on
 check "W2 and no claim file is written (no fallback to the files)" "[ ! -e $REG/w4.claim ] && ! ls $REG/*.claim 2>/dev/null | grep -q ."
 out=$(KITH_REVOKE_SEEN=sam:0 SKR claim w5 "$P1" sam house 2>&1); rc=$?
 check "W2 a person's run refuses when no core answers" "[ $rc -ne 0 ] && grep -q \"not answering, so sam's run cannot be claimed\" <<<\"$out\""
+check "W2 a person's line matches kith-wake's HELD pattern" "grep -Eq 'open in another|being taken over|answering in that thread|session is busy' <<<\"$out\""
+out=$(python3 -I - "$KERNEL/bin" <<'PY' 2>&1
+import importlib.machinery, importlib.util, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1] + '/kith-sessions'); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(m)
+print('lifecycle', m.take_claim('lc1', os.getpid(), 'oneshot', lifecycle_owner=True))
+PY
+)
+check "W2 the lifecycle's background claim is held (not taken) while no core answers" "grep -q \"lifecycle {'pid': 0\" <<<\"\$out\"" 
 out=$(KITH_REVOKE_SEEN=sam:0 SKR terminal w5 "$P1" sam house 2>&1); rc=$?
 check "W2 so does a person's terminal run" "[ $rc -ne 0 ]"
 out=$(SKR epoch sam 2>&1); rc=$?
@@ -268,7 +276,7 @@ check "W6 the sweep made no claim file" "! ls $REG/*.claim 2>/dev/null | grep -q
 reset
 sleeper Q1
 KITH_REVOKE_SEEN=sam:0 SKR proc "$Q1" sam house >/dev/null 2>&1; rc=$?
-check "W7 proc takes a claim on its own per-process key" "[ $rc -eq 0 ] && grep -Eq '\"conversation\": \"proc-$Q1-[a-z0-9.]+\"' $FAKE_DIR/calls && grep -q '\"engine\": \"proc\"' $FAKE_DIR/calls"
+check "W7 proc takes a claim on its own per-process key" "[ $rc -eq 0 ] && grep -Eq '\"conversation\": \"proc-$Q1-[a-z0-9.-]+\"' $FAKE_DIR/calls && grep -q '\"engine\": \"proc\"' $FAKE_DIR/calls"
 check "W7 and writes no proc claim file" "[ ! -e $REG/proc-$Q1.claim ]"
 
 # ---- kith-wake ----------------------------------------------------------------------------------------------------------
@@ -326,6 +334,28 @@ print('free', m.writer_free(ks, {'sessionId': 'old1', 'pid': 0}))
 PY
 )
 check "W10 and in Files mode it still does (the old file's holder lives)" "grep -q 'free False' <<<\"$out\""
+
+# ---- the launcher's proc gate (bin/kith): with the marker, any failure of proc stops a person's run -------------------------
+reset
+python3 - "$KERNEL/bin/kith" > "$T/gate.sh" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+a = s.index('if [[ $p_owner != 1 && $launch -ne 1 ]]; then')
+b = s.index('# Another harness: the same run')
+print(s[a:b])
+PY
+mkdir -p "$T/gk/bin"
+gate() {   # gate <proc exit code> <owner 0|1>: runs the launcher's block against a stand-in kith-sessions
+  printf 'import sys\nsys.exit(%s)\n' "$1" > "$T/gk/bin/kith-sessions"
+  KITH=$T/gk p_owner=${2:-0} launch=0 p_id=sam agent=house claim_seen=sam:0 bash "$T/gate.sh" >/dev/null 2>&1
+}
+touch "$REG/claims.tombstone"
+gate 1; rc1=$?; gate 9; rc9=$?; gate 0; rc0=$?; gate 1 1; rco=$?
+check "W11 marker: proc exit 1 (a traceback) stops a person's run" "[ $rc1 -ne 0 ] && [ $rc9 -ne 0 ] && [ $rc0 -eq 0 ]"
+check "W11 the owner's run is not gated" "[ $rco -eq 0 ]"
+rm -f "$REG/claims.tombstone"
+gate 1; rcf=$?; gate 9; rcf9=$?
+check "W11 no marker (Files): only exit 9 stops it, as before" "[ $rcf -eq 0 ] && [ $rcf9 -ne 0 ]"
 
 echo
 [ $fail -eq 0 ] && echo "all checks passed" || echo "some checks FAILED"

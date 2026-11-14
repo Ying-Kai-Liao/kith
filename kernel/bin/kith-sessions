@@ -297,10 +297,10 @@ def writer_mode():
     return bool(os.environ.get('KITH_STATE')) and claims_lib().switched(os.environ['KITH_STATE'])
 
 
-def core_take(sid, pid, person=None, agent=None, lifecycle_owner=False, engine=None):
+def core_take(sid, pid, person=None, agent=None, lifecycle_owner=False, engine=None, held_when_down=False):
     """Writer mode's take_claim: claim.external for pid (the launcher's shell). None when taken, else a dict that says who holds
     it (kind, pid; `waiting` for an idle agent of the app that is being stopped, retried by claim_waiting).
-    A core that gives no answer: a person's run refuses (a revoke could not end it without a core claim); the owner's goes on
+    A core that gives no answer: the lifecycle's background work counts the session as held (the next sweep tries again); a person's run refuses (a revoke could not end it without a core claim); the owner's goes on
     under the conversation's stub lock alone, with one line saying so (designs/2026-11-14-m3-cutover 1.6)."""
     k = claims_lib()
     # The owner's run on an id the stub cannot lock goes on unlocked with one line, as a missing stub does (bin/kith); only
@@ -333,8 +333,10 @@ def core_take(sid, pid, person=None, agent=None, lifecycle_owner=False, engine=N
     except k.Refused as e:
         sys.exit(f'kith: the Kith core refused the claim: {e}')
     except k.NoAnswer as e:
+        if held_when_down:   # background work (compact, end) is held and tried again at the next sweep; only the owner's interactive run goes on
+            return {'pid': 0, 'kind': 'the Kith core (not answering)'}
         if person:
-            sys.exit(f"kith: the Kith core is not answering, so {person}'s run cannot be claimed ({e.why}); try again when kith serve is running")
+            sys.exit(f"kith: the session is busy until the Kith core answers: the Kith core is not answering, so {person}'s run cannot be claimed ({e.why}); try again when kith serve is running")
         print(f'kith: the Kith core is not answering ({e.why}); this run is held by the conversation lock alone', file=sys.stderr)
         return None
     why = ans.get('refused')
@@ -368,7 +370,7 @@ def read_epoch(person):
     try:
         epoch = k.call('claim.epoch', {'person': person}).get('epoch')
     except (k.Refused, k.NoAnswer) as e:
-        sys.exit(f"kith: the Kith core is not answering, so {person}'s run cannot be claimed ({getattr(e, 'why', e)}); try again when kith serve is running")
+        sys.exit(f"kith: the session is busy until the Kith core answers: the Kith core is not answering, so {person}'s run cannot be claimed ({getattr(e, 'why', e)}); try again when kith serve is running")
     if not isinstance(epoch, int) or isinstance(epoch, bool):
         sys.exit('kith: the Kith core gave no revoke epoch')
     print(f'{person}:{epoch}')
@@ -396,7 +398,7 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_own
     to it, so two takers never both judge it stale and one deletes the other's fresh claim. A taker ends the session's intent and
     pending decision (F12 rules 12, 14); kith-lifecycle, taking it to compact or end, is the one that keeps them."""
     if writer_mode():
-        return core_take(sid, pid, person, agent, lifecycle_owner)
+        return core_take(sid, pid, person, agent, lifecycle_owner, held_when_down=lifecycle_owner)
     dest = claim_path(sid)
     dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     mine = {'pid': pid, 'procStart': proc_start(pid), 'at': now(), 'kind': kind}
