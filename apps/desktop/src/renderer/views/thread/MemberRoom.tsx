@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Bot } from '@shared/models'
-import { BEN_START_LINES, askedLine, ownerLine } from '@shared/room-people'
+import { BEN_START_LINES, askedLine, ownerLine, ownerNameOf, roomAgentNames } from '@shared/room-people'
 import { Button } from '../../components/Controls'
 import { Dialog } from '../../components/Overlay'
 import { Text } from '../../components/Text'
@@ -40,19 +40,19 @@ export function MemberRoomInfo({ room }: { room: Bot }) {
   return (
     <div className="room-people" style={{ padding: '0 20px' }}>
       <Text as="div" size="caption" weight="semibold" tone="secondary" className="details-members-head">AGENTS</Text>
-      {(info?.agents ?? []).map((name) => (
+      {(info ? roomAgentNames(info) : []).map((name) => (
         <div key={name} className="member-row">
           <VStackName name={name} />
         </div>
       ))}
       <Text as="div" size="footnote" tone="secondary" className="room-people-footer">
-        {ownerLine(room.name)}
+        {ownerLine(room.name, ownerNameOf(info))}
       </Text>
       <button className="press bot-member-remove room-leave" onClick={() => setLeaving(true)}>Leave {room.name}</button>
       <Dialog
         open={leaving}
         title={`Leave ${room.name}?`}
-        message={`You stop seeing ${room.name}. Kai can add you again.`}
+        message={`You stop seeing ${room.name}. ${ownerNameOf(info)[0]!.toUpperCase()}${ownerNameOf(info).slice(1)} can add you again.`}
         actions={[{ title: 'Leave', destructive: true, action: () => void store.leaveRoom(room.id) }]}
         onClose={() => setLeaving(false)}
       />
@@ -80,10 +80,10 @@ export function RoomClosed({ name, back }: { name: string; back: () => void }) {
 }
 
 /** The two opening lines at the top of a person's history, once no older page is left. */
-export function MemberStartLines({ room }: { room: string }) {
+export function MemberStartLines({ room, owner }: { room: string; owner?: string }) {
   return (
     <div className="room-line room-line-muted" style={{ flexDirection: 'column', gap: 2, padding: '12px 0' }}>
-      {BEN_START_LINES(room).map((l) => <span key={l}>{l}</span>)}
+      {BEN_START_LINES(room, owner).map((l) => <span key={l}>{l}</span>)}
     </div>
   )
 }
@@ -92,6 +92,6 @@ export function MemberStartLines({ room }: { room: string }) {
 export function AskedLine({ botId }: { botId: string }) {
   const store = useStore()
   const info = store.myRooms.get(botId)
-  const line = info ? askedLine(store.chat(botId), info.agents) : null
+  const line = info ? askedLine(store.chat(botId), roomAgentNames(info)) : null
   return line ? <Text as="div" size="footnote" tone="secondary" className="room-line room-line-muted" style={{ justifyContent: 'flex-end' }}>{line}</Text> : null
 }

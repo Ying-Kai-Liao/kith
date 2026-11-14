@@ -97,7 +97,7 @@ struct Composer: View {
     private var suggestions: [Bot] {
         guard let query = mentionQuery, let bot else { return [] }
         // An invited person's room has no member bots to mention: the agents it names answer when @'d.
-        let pool = model.myRooms[botId].map { room in room.agents.compactMap { name in MemberRoomLogic.bot(for: HostContract.MyRoom(id: "room-agent:\(name)", name: name, agents: [], stay: 0)).map { b -> Bot in var b = b; b.kind = "agent"; return b } } } ?? model.members(of: bot)
+        let pool = model.myRooms[botId].map { room in MemberRoomLogic.agentNames(room).compactMap { name in MemberRoomLogic.bot(for: HostContract.MyRoom(id: "room-agent:\(name)", name: name, agents: [], stay: 0)).map { b -> Bot in var b = b; b.kind = "agent"; return b } } } ?? model.members(of: bot)
         return pool.filter {
             query.isEmpty || $0.name.localizedCaseInsensitiveContains(query)
         }
