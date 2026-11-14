@@ -44,18 +44,18 @@ struct MemberRoomInfoView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("AGENTS").font(.system(size: 13, weight: .semibold)).tracking(0.8).foregroundStyle(Palette.muted).padding(.leading, 4)
                     VStack(spacing: 0) {
-                        ForEach(room?.agents ?? [], id: \.self) { agent in
+                        ForEach(room.map(MemberRoomLogic.agentNames) ?? [], id: \.self) { agent in
                             HStack {
                                 Text(agent).kithText(.agentName).foregroundStyle(Palette.ink)
                                 Spacer()
                                 Text("Answers when @'d").kithText(.secondary).foregroundStyle(Palette.muted)
                             }
                             .padding(.horizontal, 14).frame(minHeight: 56)
-                            if agent != room?.agents.last { Divider().padding(.leading, 14) }
+                            if agent != room.map(MemberRoomLogic.agentNames)?.last { Divider().padding(.leading, 14) }
                         }
                     }
                     .overlay(RoundedRectangle(cornerRadius: KithRadius.card, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
-                    Text(MemberRoomLogic.ownerLine(room: name)).kithText(.secondary).foregroundStyle(Palette.muted).padding(.horizontal, 4)
+                    Text(MemberRoomLogic.ownerLine(room: name, owner: MemberRoomLogic.ownerName(room))).kithText(.secondary).foregroundStyle(Palette.muted).padding(.horizontal, 4)
                     Button { leaving = true } label: {
                         Text("Leave \(name)").font(.system(size: 17, weight: .semibold)).foregroundStyle(Palette.danger)
                             .frame(maxWidth: .infinity, minHeight: 48)
@@ -66,7 +66,7 @@ struct MemberRoomInfoView: View {
             }
         }
         .background(Palette.background)
-        .kithDialog("Leave \(name)?", isPresented: $leaving, message: "You stop seeing \(name). Kai can add you again.") {
+        .kithDialog("Leave \(name)?", isPresented: $leaving, message: "You stop seeing \(name). \(MemberRoomLogic.capitalized(MemberRoomLogic.ownerName(room))) can add you again.") {
             [DialogAction("Leave", destructive: true) {
                 Task { await model.leaveRoom(roomId); dismiss() }
             }]
@@ -97,10 +97,11 @@ struct MemberRoomClosed: View {
 /// The two opening lines at the top of a person's history, once no older page is left.
 struct MemberStartLines: View {
     let room: String
+    let owner: String
 
     var body: some View {
         VStack(spacing: 2) {
-            ForEach(MemberRoomLogic.startLines(room: room), id: \.self) { Text($0).font(.caption).foregroundStyle(Palette.muted) }
+            ForEach(MemberRoomLogic.startLines(room: room, owner: owner), id: \.self) { Text($0).font(.caption).foregroundStyle(Palette.muted) }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 12)
         .accessibilityElement(children: .combine)

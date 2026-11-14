@@ -103,3 +103,13 @@ test('a message in a room carries no pasted marks and no budget', async () => {
   assert.deepEqual(sent[0]![5], [])
   assert.equal(sent[0]![9], null)
 })
+
+test("an agent's reply author resolves from myRooms, falling back to 'A deleted bot'", async () => {
+  const { store } = await rig([])
+  store.myRooms.set('room-1', { id: 'room-1', name: 'Studio', agents: ['Planner'], agentList: [{ id: 'bot-9', name: 'Planner' }], stay: 7 })
+  assert.equal(store.authorName('bot-9'), 'Planner')
+  assert.equal(store.authorName('other'), 'A deleted bot')
+  // A cache written before agentList (agents were names only) loads and names nobody by id.
+  store.myRooms.set('room-1', { id: 'room-1', name: 'Studio', agents: ['Planner'], stay: 7 })
+  assert.equal(store.authorName('bot-9'), 'A deleted bot')
+})

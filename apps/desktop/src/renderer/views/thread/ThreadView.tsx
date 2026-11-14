@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { botGuestReadOnlyLine } from '@shared/bot-guest-chat'
 import { draftOf, isGroup, isWorkingIn, type Bot, type BotDraft } from '@shared/models'
 import { isTask, taskTitle, workingThreadIn } from '@shared/tasks'
+import { ownerNameOf } from '@shared/room-people'
 import { BotAvatar, GroupAvatar } from '../../components/Avatar'
 import { DropdownMenu, Spinner } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
@@ -515,7 +516,7 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
         }}
       >
         <div className="transcript-content">
-          {!more && bot && store.myRooms.has(botId) ? <MemberStartLines room={bot.name} /> : null}
+          {!more && bot && store.myRooms.has(botId) ? <MemberStartLines room={bot.name} owner={ownerNameOf(store.myRooms.get(botId))} /> : null}
           {more ? (
             <button className="load-earlier" disabled={loadingEarlier} onClick={() => void showEarlier()}>
               {loadingEarlier ? <Spinner size={14} /> : 'Load earlier messages'}

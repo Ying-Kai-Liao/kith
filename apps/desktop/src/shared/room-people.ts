@@ -265,8 +265,23 @@ export function waitingAgent(entry: RoomEntryFacts & { data: { agent?: string } 
 }
 
 /** Ben's start-of-history lines and what the room shows him: true when no older page is left to load. */
-/** What a person calls the owner. The host does not send the owner's name yet (follow-up: `myRooms` carries it), so it says "the owner". */
+/** What a person calls the owner when the host (before `ownerName`) did not send a name. */
 export const OWNER_LABEL = 'the owner'
+
+/** The owner's name from a room of `myRooms`; "the owner" when the host sent none. */
+export const ownerNameOf = (room: Pick<MyRoom, 'ownerName'> | undefined | null): string => room?.ownerName?.trim() || OWNER_LABEL
+
+/** An agent's name from the person's rooms, by the bot id a reply carries as its author; undefined when no room names it. */
+export function roomAgentName(rooms: Iterable<Pick<MyRoom, 'agentList'>>, id: string): string | undefined {
+  for (const r of rooms) {
+    const hit = r.agentList?.find((a) => a.id === id)
+    if (hit) return hit.name
+  }
+  return undefined
+}
+
+/** The names of a room's agents. A host before `agentList` sends only `agents` (names); both shapes read the same. */
+export const roomAgentNames = (room: Pick<MyRoom, 'agents' | 'agentList'>): string[] => room.agentList?.length ? room.agentList.map((a) => a.name) : room.agents
 
 export const BEN_START_LINES = (room: string, owner = OWNER_LABEL) => [`You see ${room} from when ${owner} added you.`, `${owner[0]!.toUpperCase()}${owner.slice(1)} sees everything said here.`]
 

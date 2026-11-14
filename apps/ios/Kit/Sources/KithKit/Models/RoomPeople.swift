@@ -261,12 +261,30 @@ public enum MemberRoomLogic {
         return status == 403 || status == 404
     }
 
-    /// What a person calls the owner. The host does not send the owner's name yet (follow-up: `myRooms` carries it).
+    /// What a person calls the owner when the host (before `ownerName`) sent no name.
     public static let ownerLabel = "the owner"
 
-    private static var ownerCapitalized: String { ownerLabel.prefix(1).uppercased() + ownerLabel.dropFirst() }
+    /// The owner's name from a room of `myRooms`; "the owner" when the host sent none.
+    public static func ownerName(_ room: HostContract.MyRoom?) -> String {
+        let name = room?.ownerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? ownerLabel : name
+    }
 
-    public static func startLines(room: String) -> [String] { ["You see \(room) from when \(ownerLabel) added you.", "\(ownerCapitalized) sees everything said here."] }
+    public static func capitalized(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
+
+    public static func startLines(room: String, owner: String = ownerLabel) -> [String] { ["You see \(room) from when \(owner) added you.", "\(capitalized(owner)) sees everything said here."] }
+
+    /// A room's agent names. A host before `agentList` sends only `agents` (names); both shapes read the same.
+    public static func agentNames(_ room: HostContract.MyRoom) -> [String] {
+        if let list = room.agentList, !list.isEmpty { return list.map(\.name) }
+        return room.agents
+    }
+
+    /// An agent's name from the person's rooms, by the bot id a reply carries as its author.
+    public static func agentName(in rooms: some Collection<HostContract.MyRoom>, id: String) -> String? {
+        for room in rooms { if let hit = room.agentList?.first(where: { $0.id == id }) { return hit.name } }
+        return nil
+    }
 
     /// A cached room whose stay differs from the list's (or that no stay was kept for): its messages belong to an earlier stay.
     public static func stayChanged(known: HostContract.MyRoom?, fresh: HostContract.MyRoom) -> Bool { known?.stay != fresh.stay }
@@ -296,7 +314,7 @@ public enum MemberRoomLogic {
     }
 
     /// Room info for a person: one muted line, never a people list.
-    public static func ownerLine(room: String) -> String { "\(room) is \(ownerLabel)'s room, on \(ownerLabel)'s computer. \(ownerCapitalized) sees everything said here." }
+    public static func ownerLine(room: String, owner: String = ownerLabel) -> String { "\(room) is \(owner)'s room, on \(owner)'s computer. \(capitalized(owner)) sees everything said here." }
 }
 
 public extension RoomPeopleLogic {

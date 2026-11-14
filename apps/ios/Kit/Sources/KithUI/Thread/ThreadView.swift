@@ -596,7 +596,7 @@ extension ThreadView {
             })
         }
         if !moreOnComputer, let bot, model.myRooms[botId] != nil {
-            rows.append(ConversationRow("member-start") { MemberStartLines(room: bot.name) })
+            rows.append(ConversationRow("member-start") { MemberStartLines(room: bot.name, owner: MemberRoomLogic.ownerName(model.myRooms[botId])) })
         }
         if items.isEmpty, let bot {
             rows.append(ConversationRow("intro") {
@@ -617,7 +617,7 @@ extension ThreadView {
                 })
             }
         }
-        if let room = model.myRooms[botId], let asked = MemberRoomLogic.askedLine(entries: model.chat(botId), agents: room.agents) {
+        if let room = model.myRooms[botId], let asked = MemberRoomLogic.askedLine(entries: model.chat(botId), agents: MemberRoomLogic.agentNames(room)) {
             rows.append(ConversationRow("asked") { AskedLine(text: asked) })
         }
         // Offline, "working" is only what the computer last said; don't show it as live. In a group the live line above

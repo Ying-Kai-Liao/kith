@@ -217,21 +217,36 @@ pub async fn react(hub: &Hub, person: &str, b: &Value) -> Result<Value> {
     Ok(json!({"entry": shown_entries(person, &[e]).remove(0)}))
 }
 
-/// The rooms `person` is in right now (an open stay and every agent still granted), for `myRooms`.
+/// The rooms `person` is in right now (an open stay and every agent still granted), for `myRooms`. Agents come as names
+/// and as `agentList` `{id, name}`; `ownerName` is the owner's display name, left out when kith-auth has none.
 pub async fn my_rooms(hub: &Hub, person: &str) -> Vec<Value> {
     let mut out = vec![];
+    let mut owner: Option<Option<String>> = None;
     for row in hub.store.bots().unwrap_or_default() {
         if row.deleted || !row.config.is_group() || live_seat(&hub.store, person, &row.config.id).await.is_none() {
             continue;
         }
-        let agents: Vec<String> = row
-            .config
-            .members
-            .iter()
-            .filter_map(|m| hub.store.bot(m).ok().flatten().filter(|b| !b.deleted).map(|b| b.config.name))
-            .collect();
+        let bots: Vec<_> = row.config.members.iter().filter_map(|m| hub.store.bot(m).ok().flatten().filter(|b| !b.deleted)).collect();
+        let agents: Vec<&str> = bots.iter().map(|b| b.config.name.as_str()).collect();
+        // A reply's author is the bot id: only id and name of each agent leave here, nothing else of the bot.
+        let agent_list: Vec<Value> = bots.iter().map(|b| json!({"id": b.config.id, "name": b.config.name})).collect();
+        // The owner is one person for every room: asked once, through the first bot that has a Kith agent behind it.
+        if owner.is_none() {
+            let mut name = None;
+            for agent in bots.iter().filter_map(|b| b.config.hq_agent.as_deref()) {
+                name = crate::api::roles::owner_name(agent).await;
+                if name.is_some() {
+                    break;
+                }
+            }
+            owner = Some(name);
+        }
         let stay = hub.store.room_open_seat(&row.config.id, person);
-        out.push(json!({"id": row.config.id, "name": row.config.name, "agents": agents, "stay": stay}));
+        let mut room = json!({"id": row.config.id, "name": row.config.name, "agents": agents, "agentList": agent_list, "stay": stay});
+        if let Some(Some(name)) = &owner {
+            room["ownerName"] = json!(name);
+        }
+        out.push(room);
     }
     out
 }
