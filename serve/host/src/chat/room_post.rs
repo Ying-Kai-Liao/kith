@@ -226,7 +226,8 @@ pub async fn my_rooms(hub: &Hub, person: &str) -> Vec<Value> {
         if row.deleted || !row.config.is_group() || live_seat(&hub.store, person, &row.config.id).await.is_none() {
             continue;
         }
-        let bots: Vec<_> = row.config.members.iter().filter_map(|m| hub.store.bot(m).ok().flatten().filter(|b| !b.deleted)).collect();
+        let bots: Vec<_> =
+            row.config.members.iter().filter_map(|m| hub.store.bot(m).ok().flatten().filter(|b| !b.deleted)).collect();
         let agents: Vec<&str> = bots.iter().map(|b| b.config.name.as_str()).collect();
         // A reply's author is the bot id: only id and name of each agent leave here, nothing else of the bot.
         let agent_list: Vec<Value> = bots.iter().map(|b| json!({"id": b.config.id, "name": b.config.name})).collect();

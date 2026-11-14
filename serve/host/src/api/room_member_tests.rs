@@ -388,7 +388,10 @@ async fn my_rooms_names_the_granted_agents_by_id_and_shows_nothing_else_of_a_bot
     assert_eq!(shown["agentList"], json!([{"id": house, "name": "Housekeeper"}]));
     assert_eq!(shown["agents"], json!(["Housekeeper"]));
     for key in shown.as_object().unwrap().keys() {
-        assert!(["agentList", "agents", "id", "name", "ownerName", "stay"].contains(&key.as_str()), "unexpected field {key}");
+        assert!(
+            ["agentList", "agents", "id", "name", "ownerName", "stay"].contains(&key.as_str()),
+            "unexpected field {key}"
+        );
     }
     assert_eq!(shown["agentList"][0].as_object().unwrap().len(), 2, "an agent is its id and name, nothing else");
     // The owner's name is a string when kith-auth has one, and absent otherwise.
