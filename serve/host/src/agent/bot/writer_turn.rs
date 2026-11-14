@@ -455,6 +455,9 @@ impl Actor {
             };
             let finished = if abandon {
                 core.abandon(r.turn, r.claim, &conv, &mut stub);
+                // The core ends a stopped running claim only once its process is gone (`end_gone`), and `stop` only names the kill: a
+                // process left alive would hold the conversation `ending` for as long as it lives. The next begin restarts the stub.
+                stub.kill_group();
                 Finished::Reported
             } else if !pid_runs(r.pid) {
                 // The stub is gone with its lock: nothing to release, only the end to report (`end` is `Died`, or `Killed`).

@@ -171,7 +171,7 @@ async fn adopt_once(hub: &crate::hub::Hub, core: &Arc<CoreWriter>) {
     let c = core.clone();
     match tokio::task::spawn_blocking(move || c.adopt()).await {
         Ok(Ok(adopted)) => {
-            tracing::info!(ended = adopted.ended.len(), kill = adopted.kill.len(), "writer mode: adopted")
+            tracing::info!(ended = adopted.ended.len(), kill = adopted.kill.len(), "writer mode: adopted");
         }
         Ok(Err(error)) => tracing::warn!(error, "writer mode: couldn't adopt an earlier host instance's claims"),
         Err(_) => {}

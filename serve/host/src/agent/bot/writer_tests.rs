@@ -688,6 +688,26 @@ async fn a_room_turn_ends_with_a_stop_and_no_warm_process() {
     rig.until("the process forgotten", |r| r.w().procs.is_empty()).await;
 }
 
+actor_test! {
+    /// A reload that fails after `Running` (the restarted process's session row is refused) gives the claim up instead of leaving it in
+    /// `writer.run`: the turn is cancelled, nothing is prompted, and the next message is a turn of its own.
+    async fn a_reload_that_fails_after_running_gives_the_claim_up(rig) {
+        rig.send("a", "warm up").await;
+        rig.until("done", |r| r.turn_state(1) == "done").await;
+        rig.w().kill_procs_on_turn = 1;
+        rig.w().session_register_refused = true;
+        rig.send("a", "doomed").await;
+        rig.until("the turn is cancelled", |r| r.turn_state(2) == "cancelled").await;
+        assert!(rig.texts("a", "agent").iter().all(|t| !t.contains("doomed")), "never prompted");
+        rig.w().session_register_refused = false;
+        rig.send("a", "after").await;
+        rig.until("the reply", |r| r.replied("a", "after")).await;
+        let w = rig.w();
+        assert_eq!(w.turns.len(), 3, "the next message is a turn of its own: {:?}", w.turns);
+        assert_eq!(w.turns[2].1, "done");
+    }
+}
+
 // MARK: smaller rules
 
 /// MUST 8: the host's count decides; the chain opens with the conversation's own budget, the default when it is not known.

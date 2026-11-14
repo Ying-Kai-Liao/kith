@@ -62,6 +62,8 @@ pub(crate) struct World {
     pub enqueue_lost: u32,
     /// The `account` each `hostclaim.turn` was sent with (the account the host's process runs as).
     pub sent_accounts: Vec<Option<String>>,
+    /// `hostclaim.proc` refuses the row of a session (not the process's own), as data and not as a revoke.
+    pub session_register_refused: bool,
 }
 
 fn data(v: Value) -> Answer {
@@ -233,6 +235,13 @@ impl World {
                     }
                 } else {
                     c.state = "ending".into();
+                    // As the core's `stop`: the claim's turn is put back, or cancelled.
+                    let turn = c.turn;
+                    if let Some(t) =
+                        turn.and_then(|t| self.turn(t)).filter(|t| ["claimed", "running"].contains(&t.1.as_str()))
+                    {
+                        t.1 = if requeue { "queued".into() } else { "cancelled".into() };
+                    }
                 }
                 data(json!({"kill": null}))
             }
@@ -299,6 +308,9 @@ impl World {
                 data(json!({"turns": woken}))
             }
             "hostclaim.proc" => {
+                if self.session_register_refused && p["conversation"].is_string() {
+                    return refused("other");
+                }
                 self.procs.push(p["pid"].as_u64().unwrap());
                 data(json!({"registered": true}))
             }
@@ -306,6 +318,10 @@ impl World {
                 let pid = p["pid"].as_u64().unwrap();
                 let had = self.procs.contains(&pid);
                 self.procs.retain(|x| *x != pid);
+                // The core's settle (`end_gone`) ends the stopped claims of a process that is gone.
+                for c in self.claims.iter_mut().filter(|c| c.state == "ending" && c.pid == Some(pid)) {
+                    c.state = "ended".into();
+                }
                 data(json!({"gone": had}))
             }
             "hostclaim.adopt" => {
