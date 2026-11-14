@@ -26,6 +26,13 @@
   kith-sessions run AGENT -- CMD...        run CMD (claude) as a child: signals and exit code pass through; afterwards gives back the
                                            claims of this process and says how to get the session back: `kith AGENT --resume ID` (also when the host took it over)
 
+  kith-sessions epoch PERSON               Writer mode only: prints PERSON:N, the core's revoke epoch for them (bin/kith reads it before kith-auth decides)
+
+Writer mode (the claims are the core's: the marker $KITH_STATE/live/terminal/claims.tombstone, kernel/lib/kith_claims.py). The claim files
+below are then neither read nor written: claim, terminal, resolve, release, proc and sweep are rows of the core (claim.external,
+claim.release, claim.sweepPerson). A core that gives no answer never turns into the files: a person's run refuses, the owner's goes
+on under the conversation's stub lock alone, `sweep` exits 3. No marker (today): everything below, unchanged.
+
 Registry file (contract with the host, serve/): dir 0700, file 0600, written by tmp + rename:
   {"v":1,"sessionId","agent","cwd","transcriptPath","pid" (the claude process),"project","source","resumedFrom","startedAt",
    "account" (the login it was made under: KITH_ACCOUNT_ID, e.g. claude or claude:work; bin/kith resumes it only there)}
@@ -274,11 +281,124 @@ def claim_claimer(c):
     return bool(c) and pid_alive(c.get('pid')) and procstart().claimer(c['pid'], c.get('procStart')) is True
 
 
+def claims_lib():
+    """kernel/lib/kith_claims.py: the claims as rows in the Kith core (Writer mode) and the marker that says so."""
+    lib = str(Path(__file__).resolve().parent.parent / 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_claims
+    return kith_claims
+
+
+def writer_mode():
+    """Whether the writer claims are the core's (the claims tombstone, kith_claims.switched). Then no claim file is read or
+    written here: every claim, release and sweep goes to the core, and a core that does not answer is never answered with
+    the files. Off by default: the files below are today's behaviour exactly."""
+    return bool(os.environ.get('KITH_STATE')) and claims_lib().switched(os.environ['KITH_STATE'])
+
+
+def core_take(sid, pid, person=None, agent=None, lifecycle_owner=False, engine=None, held_when_down=False):
+    """Writer mode's take_claim: claim.external for pid (the launcher's shell). None when taken, else a dict that says who holds
+    it (kind, pid; `waiting` for an idle agent of the app that is being stopped, retried by claim_waiting).
+    A core that gives no answer: the lifecycle's background work counts the session as held (the next sweep tries again); a person's run refuses (a revoke could not end it without a core claim); the owner's goes on
+    under the conversation's stub lock alone, with one line saying so (designs/2026-11-14-m3-cutover 1.6)."""
+    k = claims_lib()
+    # The owner's run on an id the stub cannot lock goes on unlocked with one line, as a missing stub does (bin/kith); only
+    # KITH_REQUIRE_STUB=1 or a person's run refuses. The same for a start time that cannot be read.
+    unclaimable = None
+    if not k.lockable(sid):
+        unclaimable = f'session id "{sid}" cannot be locked (only a-z 0-9 . _ - are allowed), so it cannot be claimed'
+    started = None if unclaimable else proc_start(pid)
+    if not unclaimable and not started:
+        unclaimable = f'cannot read the start time of pid {pid}, so its claim cannot be made'
+    if unclaimable:
+        if person or os.environ.get('KITH_REQUIRE_STUB') == '1':
+            sys.exit(f'kith: {unclaimable}')
+        print(f'kith: {unclaimable}; this run is not claimed', file=sys.stderr)
+        return None
+    params = {'conversation': sid, 'pid': pid, 'started': started, 'person': person or ''}
+    if agent:
+        params['agent'] = agent
+    if engine:
+        params['engine'] = engine
+    if person:
+        # The person's revoke epoch as bin/kith read it BEFORE kith-auth decided they may run (`kith-sessions epoch`): a revoke
+        # after it refuses this claim. Without it the core refuses a person's claim.
+        seen = os.environ.get('KITH_REVOKE_SEEN', '')
+        who, _, n = seen.rpartition(':')
+        if who == person and n.isdigit():
+            params['revokeSeen'] = int(n)
+    try:
+        ans = k.call('claim.external', params)
+    except k.Refused as e:
+        sys.exit(f'kith: the Kith core refused the claim: {e}')
+    except k.NoAnswer as e:
+        if held_when_down:   # background work (compact, end) is held and tried again at the next sweep; only the owner's interactive run goes on
+            return {'pid': 0, 'kind': 'the Kith core (not answering)'}
+        if person:
+            sys.exit(f"kith: the session is busy until the Kith core answers: the Kith core is not answering, so {person}'s run cannot be claimed ({e.why}); try again when kith serve is running")
+        print(f'kith: the Kith core is not answering ({e.why}); this run is held by the conversation lock alone', file=sys.stderr)
+        return None
+    why = ans.get('refused')
+    if why == 'held':
+        h = ans.get('holder') or {}
+        return {'pid': h.get('pid') or 0, 'kind': h.get('kind') or 'terminal'}
+    if why == 'waiting':
+        return {'pid': 0, 'kind': "the app's idle agent", 'waiting': True}
+    if why == 'takeover':
+        sys.exit('kith: that session is being taken over in the app right now; try again in a moment')
+    if why:
+        sys.exit(f'kith: the Kith core refused the claim ({why}): {ans.get("why", "")}')
+    if ans.get('claimId') is None:
+        sys.exit('kith: the Kith core gave no claim for that session')
+    if not lifecycle_owner:   # a taker ends the intent and the 54-minute decision of the period before it (rules 12, 14)
+        try:
+            lifecycle().taken(sid)
+        except Exception:  # noqa: BLE001 — bookkeeping must never stop a session from starting
+            pass
+    return None
+
+
+def read_epoch(person):
+    """`kith-sessions epoch PERSON`: prints `PERSON:N`, how many times the core revoked them. bin/kith reads it before
+    kith-auth decides that PERSON may run, and hands it to the run's claim (KITH_REVOKE_SEEN): a revoke that lands in between
+    refuses the claim. Only meaningful in Writer mode; prints nothing and exits 0 in Files mode. A core that does not answer
+    is exit 1 with the reason."""
+    if not writer_mode():
+        return
+    k = claims_lib()
+    try:
+        epoch = k.call('claim.epoch', {'person': person}).get('epoch')
+    except (k.Refused, k.NoAnswer) as e:
+        sys.exit(f"kith: the session is busy until the Kith core answers: the Kith core is not answering, so {person}'s run cannot be claimed ({getattr(e, 'why', e)}); try again when kith serve is running")
+    if not isinstance(epoch, int) or isinstance(epoch, bool):
+        sys.exit('kith: the Kith core gave no revoke epoch')
+    print(f'{person}:{epoch}')
+
+
+def core_release(pid, sid=None):
+    """Writer mode: give back the claims pid holds (only sid's, when given). True when one was given back. A core that does not
+    answer leaves the claim to end with its process (the core ends a claim whose pid is gone), so this never fails the run."""
+    started = proc_start(pid)
+    if not started:
+        return False
+    params = {'pid': pid, 'started': started}
+    if sid:
+        params['conversation'] = sid
+    k = claims_lib()
+    try:
+        return bool(k.call('claim.release', params).get('ended'))
+    except (k.Refused, k.NoAnswer):
+        return False
+
+
 def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_owner=False):
     """Take the writer claim on sid for pid. Returns None when taken, else the live claim that holds it. The claim is made
     whole in a temp file and linked into place (exclusive); a stale one is removed and replaced under a lock file next
     to it, so two takers never both judge it stale and one deletes the other's fresh claim. A taker ends the session's intent and
     pending decision (F12 rules 12, 14); kith-lifecycle, taking it to compact or end, is the one that keeps them."""
+    if writer_mode():
+        return core_take(sid, pid, person, agent, lifecycle_owner, held_when_down=lifecycle_owner)
     dest = claim_path(sid)
     dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     mine = {'pid': pid, 'procStart': proc_start(pid), 'at': now(), 'kind': kind}
@@ -349,11 +469,14 @@ def claim_wait():
 def claim_waiting(sid, pid, kind, wait, person=None, agent=None):
     """take_claim, retried for up to `wait` seconds while a live writer holds the session. None when taken (also when pid
     already holds it), else the live claim that still holds it."""
-    end = time.monotonic() + wait
+    began = time.monotonic()
+    end = began + wait
     while True:
         held = take_claim(sid, pid, kind, person, agent)
         if not held or held.get('pid') == pid:
             return None
+        if held.get('waiting'):   # the app's idle agent is being stopped: worth the usual wait even for a terminal
+            end = max(end, began + claim_wait())
         if time.monotonic() >= end:
             return held
         time.sleep(0.25)
@@ -378,8 +501,10 @@ def claim_start(sid, pid, kind, wait, person=None, agent=None):
         sys.exit('kith: KITH_STATE is not set, so the session cannot be claimed')
     held = claim_waiting(sid, pid, kind, wait, person, agent)
     if held:
+        if held.get('waiting'):
+            sys.exit("kith: that session is busy: the app's idle agent is still stopping; try again in a moment")
         sys.exit(f'kith: that session is busy: held by {held.get("kind", "terminal")} (pid {held.get("pid")}); try again in a moment')
-    taking = read_claim(claim_path(sid, True))
+    taking = None if writer_mode() else read_claim(claim_path(sid, True))   # Writer mode: a take-over is a queued claim, answered above
     if claim_live(taking):
         release_claims(pid)
         sys.exit('kith: that session is being taken over in the app right now; try again in a moment')
@@ -392,6 +517,18 @@ def proc_claim(pid, person, agent):
     Claims of processes that are gone are cleaned up here."""
     d = reg_dir()
     if not d:
+        return
+    if writer_mode():
+        # A conversation of its own per process (`proc-<pid>-<start stamp>`: a reused pid is another key), so a run with no
+        # session (-c) is still a claim the core's revoke finds. Its engine is `proc`: readers of conversations skip those.
+        # A person's run the core cannot claim must not go on: exit 9 tells the launcher (its `|| true` stops there).
+        started = proc_start(pid) or ''
+        key = f'proc-{pid}-{started}'.lower().replace(':', '.')
+        try:
+            core_take(key, pid, person, agent, True, engine='proc')
+        except SystemExit as e:
+            print(e.code, file=sys.stderr)
+            sys.exit(9)
         return
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
     for f in d.glob('proc-*.claim'):
@@ -411,10 +548,24 @@ def sweep_persons(persons, grace=2.0):
     start time, positively: a claim from before stamps whose old text ps cannot match is not signalled), so a reused pid is left alone. Returns the pids it signalled."""
     d = reg_dir()
     holders = []
-    for f in (d.glob('*.claim') if d and d.is_dir() else ()):
-        c = read_claim(f)
-        if c and c.get('person') in persons and claim_claimer(c) and c.get('pid', 0) > 1:
-            holders.append(c['pid'])
+    if writer_mode():
+        # The core says whose claims these are and ends the rows; the signals are ours. Not answering is exit 3: the files
+        # are not the claims any more, and a sweep that guessed from them would miss every run.
+        k = claims_lib()
+        try:
+            kills = k.call('claim.sweepPerson', {'persons': sorted(persons)}).get('kill') or []
+        except (k.Refused, k.NoAnswer) as e:
+            print(f'kith-sessions: the claims moved to the core, and it gave no answer ({getattr(e, "why", e)}); start kith serve and sweep again', file=sys.stderr)
+            sys.exit(3)
+        for kill in kills:
+            pid, started = kill.get('pid'), kill.get('started')
+            if isinstance(pid, int) and pid > 1 and started and claim_claimer({'pid': pid, 'procStart': started}):
+                holders.append(pid)
+    else:
+        for f in (d.glob('*.claim') if d and d.is_dir() else ()):
+            c = read_claim(f)
+            if c and c.get('person') in persons and claim_claimer(c) and c.get('pid', 0) > 1:
+                holders.append(c['pid'])
     if not holders:
         return []
     try:
@@ -456,6 +607,9 @@ def pid_alive(pid):
 
 def release_claims(pid):
     """Give back every claim pid holds (the terminal's own run ended)."""
+    if writer_mode():
+        core_release(pid)
+        return
     d = reg_dir()
     for f in (d.glob('*.claim') if d and d.is_dir() else ()):
         # Under the claim lock, re-reading: a taker may have replaced the claim since the glob.
@@ -472,6 +626,8 @@ def release_claims(pid):
 def release_own(sid):
     """Give back sid's claim, only if it is the caller's parent's (a launcher shell that took it in `resolve`) and that process is
     the one that took it (same start time). True when it was given back."""
+    if writer_mode():
+        return core_release(os.getppid(), sid)
     f = claim_path(sid)
     if not f or not f.exists():
         return False
@@ -619,12 +775,14 @@ def resolve(agent, thread, claimer=None, wait=0):
     def claim(sid):
         if not d:
             die('KITH_STATE is not set, so the session cannot be claimed')
-        held = claim_waiting(sid, claimer, 'oneshot' if wait else 'terminal', wait)
+        held = claim_waiting(sid, claimer, 'oneshot' if wait else 'terminal', wait, agent=agent)
         if held:
+            if held.get('waiting'):
+                die("that session is busy: the app's idle agent is still stopping; try again in a moment")
             die(f'that session is open in another writer (pid {held.get("pid")}, {held.get("kind", "terminal")}); close it first')
         claimed.append(sid)
-        # The host ending a terminal holds its own claim until the session is imported.
-        taking = read_claim(claim_path(sid, True))
+        # The host ending a terminal holds its own claim until the session is imported (Writer mode: a queued claim, answered above).
+        taking = None if writer_mode() else read_claim(claim_path(sid, True))
         if claim_live(taking):
             die('that session is being taken over in the app right now; try again in a moment')
 
@@ -913,6 +1071,8 @@ if __name__ == '__main__':
         sys.exit(0 if release_own(a[1]) else 1)
     elif a[:1] == ['proc'] and len(a) == 4:
         proc_claim(int(a[1]), a[2], a[3])
+    elif a[:1] == ['epoch'] and len(a) == 2:
+        read_epoch(a[1])
     elif a[:1] == ['sweep'] and len(a) > 1:
         print('swept %d' % len(sweep_persons(set(a[1:]))))
     elif a[:1] == ['pick'] and len(a) == 2:

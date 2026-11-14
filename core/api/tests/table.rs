@@ -84,8 +84,18 @@ fn every_row_is_well_formed() {
         {
             &[Principal::Host]
         // The host also reads two owner rows: the lease counter (`mark`) and the cutover gate (`cutover.mayServe`, which
-        // the host-start guard calls). `kernel.cutover`, the write side, stays Owner only.
-        } else if m.name == "syncLease.mark" || m.name == "cutover.mayServe" {
+        // the host-start guard calls). `kernel.cutover`, the write side, stays Owner only. The kernel takers' claim rows
+        // (P5: kith-sessions through `core-call`) are the owner's and the host's.
+        } else if m.name == "syncLease.mark"
+            || m.name == "cutover.mayServe"
+            || [
+                "claim.external",
+                "claim.release",
+                "claim.sweepPerson",
+                "claim.epoch",
+            ]
+            .contains(&m.name)
+        {
             &[Principal::Owner, Principal::Host]
         } else {
             &[Principal::Owner]
