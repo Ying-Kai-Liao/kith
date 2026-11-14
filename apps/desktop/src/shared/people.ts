@@ -39,6 +39,8 @@ export interface PendingInvite {
   expiresAt: number
   usedAt: number | null
   revokedAt: number | null
+  /** The group rooms this invite adds the person to, and whether each part is done (absent from a host before rooms with people). */
+  rooms?: { room: string; done: boolean }[]
 }
 
 export interface CreatedInvite {
@@ -101,6 +103,7 @@ export function parseInvites(raw: unknown): PendingInvite[] {
       expiresAt: num(r.expiresAt) ?? 0,
       usedAt: num(r.usedAt),
       revokedAt: num(r.revokedAt),
+      ...(Array.isArray(r.rooms) ? { rooms: list(r.rooms).map((x) => ({ room: str(rec(x).room), done: rec(x).done === true })) } : {}),
     }
   })
 }

@@ -20,6 +20,8 @@ import { botGuestsFor } from '../../store/bot-guests-store'
 import { useModel } from '../../lib/observable'
 import { botRowLine } from '@shared/room-join'
 import { roomBotsOf } from './room-bots'
+import { RoomPeopleSection, type PersonPreset } from './RoomPeople'
+import { MemberRoomInfo } from './MemberRoom'
 import { BotTag } from './Tags'
 import './conversation.css'
 import '../bots/bots.css'
@@ -36,7 +38,7 @@ const TABS: { id: DetailsTab; label: string }[] = [
 ]
 
 /** The inspector beside a conversation (Grok Bot's): who the bot is, then its details, memory and settings. */
-export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTab, editGroup, addMember, share, close }: {
+export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTab, editGroup, addMember, addPerson, share, close }: {
   botId: string
   routineId: string | null
   /** Why a call can't start now (offline, no voice); null when it can. */
@@ -48,6 +50,8 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
   editGroup: () => void
   /** Opens the Add sheet (agents and bots) for this group. */
   addMember: () => void
+  /** Opens the Add person sheet for this room (SPEC §2). */
+  addPerson: (preset?: PersonPreset) => void
   share: () => void
   close: () => void
 }) {
@@ -79,8 +83,10 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
             </button>
           </div>
         ) : null}
-        {bot && group ? (
-          <GroupMembersList group={bot} editGroup={editGroup} addMember={addMember} />
+        {bot && group && store.myRooms.has(bot.id) ? (
+          <MemberRoomInfo room={bot} />
+        ) : bot && group ? (
+          <GroupMembersList group={bot} editGroup={editGroup} addMember={addMember} addPerson={addPerson} />
         ) : (
           <>
             <TabChoice label="Conversation details" selection={shownTab} options={tabs} onChange={setTab} />
@@ -142,7 +148,7 @@ function Identity({ bot, kith }: { bot: Bot; kith: KithInfoStore | null }) {
 }
 
 /** A group's agents and outside bots (Grok Bot's member list); clicking an agent opens its own chat. */
-function GroupMembersList({ group, editGroup, addMember }: { group: Bot; editGroup: () => void; addMember: () => void }) {
+function GroupMembersList({ group, editGroup, addMember, addPerson }: { group: Bot; editGroup: () => void; addMember: () => void; addPerson: (preset?: PersonPreset) => void }) {
   const store = useStore()
   // The owner's bot list names the outside bots and says where each runs.
   const guests = useModel(botGuestsFor(store))
@@ -150,6 +156,7 @@ function GroupMembersList({ group, editGroup, addMember }: { group: Bot; editGro
   const total = group.members.length
   return (
     <div className="details-members">
+      {store.isOwner ? <RoomPeopleSection group={group} openAdd={addPerson} /> : null}
       <div className="details-members-head">
         <Text size="caption" weight="semibold" tone="secondary">AGENTS AND BOTS</Text>
         {store.isOwner ? <button className="press details-members-add" onClick={addMember}>Add</button> : null}

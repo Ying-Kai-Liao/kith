@@ -11,6 +11,8 @@ public struct RoomInfoView: View {
     @State private var editing = false
     @State private var removing: String?
     @State private var error: String?
+    @State private var roomPeople: RoomPeopleStore?
+    @State private var addingPerson: PersonPreset?
 
     public init(groupId: String, adding: Bool = false) {
         self.groupId = groupId
@@ -38,6 +40,16 @@ public struct RoomInfoView: View {
         .background(Palette.background)
         .kithSheet(isPresented: $adding) { if let group { AddToRoomSheet(group: group) } }
         .kithSheet(isPresented: $editing) { GroupEditorView(group: group) }
+        .kithSheet(item: $addingPerson) { preset in
+            if let group, let roomPeople { AddPersonSheet(group: group, store: roomPeople, preset: preset.personId == nil && !preset.giveOnly ? nil : preset) }
+        }
+        .task {
+            // Only the owner reads a room's people; refreshed when Room info opens and after every change.
+            guard model.isOwner, roomPeople == nil else { return }
+            let store = RoomPeopleStore(room: groupId, store: model)
+            roomPeople = store
+            await store.load()
+        }
     }
 
     // MARK: sections
@@ -60,7 +72,15 @@ public struct RoomInfoView: View {
         }
     }
 
-    private var people: some View {
+    @ViewBuilder private var people: some View {
+        if let group, let roomPeople {
+            RoomPeopleSection(group: group, store: roomPeople) { addingPerson = $0 ?? PersonPreset() }
+        } else {
+            plainPeople
+        }
+    }
+
+    private var plainPeople: some View {
         section("People") {
             card { row(face: Circle().fill(LinearGradient(colors: [Color(hex: 0xF9C3D3), Color(hex: 0xF4A6C4)], startPoint: .top, endPoint: .bottom)).frame(width: 40, height: 40),
                        title: Text("You").kithText(.topBar), detail: "Owner", trailing: EmptyView()) }
