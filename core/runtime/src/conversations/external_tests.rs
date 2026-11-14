@@ -679,3 +679,25 @@ fn the_sweep_runs_in_an_embedded_core_when_switched_and_is_refused_when_not() {
     let e = call_authority_embedded(&paths, "claim.sweepPerson", &sweep);
     assert!(matches!(e, Err(Error::Refused(_))), "{e:?}");
 }
+
+/// M3 P8: the host reads `claim.list` (a narrowed sweep judges by `agent`, the host tells its own turn by `holderInstance`) and
+/// the sweep's kill rows name their conversation (the intent is written before the signal).
+#[test]
+fn list_carries_the_agent_and_the_holder_and_a_kill_names_its_conversation() {
+    let (_t, mut core) = world();
+    let live = Alive::of(&[(100, "e1")]);
+    take(&mut core, &live, "s1", 100, "e1", "sam");
+    let l = ask(&mut core, &live, "claim.list", &json!({}));
+    assert_eq!(l["live"][0]["agent"], "echo", "{l}");
+    assert!(
+        l["live"][0]["holderInstance"].is_null(),
+        "an external claim has no holder instance: {l}"
+    );
+    let swept = ask(
+        &mut core,
+        &live,
+        "claim.sweepPerson",
+        &json!({"persons": ["sam"]}),
+    );
+    assert_eq!(swept["kill"][0]["conversation"], "s1", "{swept}");
+}

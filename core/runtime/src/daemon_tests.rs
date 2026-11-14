@@ -2579,3 +2579,32 @@ fn a_second_pass_after_the_process_is_gone_does_nothing() {
     assert_eq!(resend(&d), Vec::<u32>::new());
     d.stop();
 }
+
+/// M3 P8: the host reads the claims the revoke sweep needs (`claim.list`, `claim.sweepPerson`) on a real daemon. Not switched, the
+/// core refuses them as "not switched" (the module's own gate): the host is NOT refused as a principal, which is what an owner-only
+/// `claim.list` would have answered it. Every other principal is still refused.
+#[test]
+fn the_host_may_ask_the_claim_rows_of_a_revoke_sweep_and_is_refused_by_the_switch_not_the_principal()
+ {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, hosted());
+    for (name, params) in [
+        ("claim.list", json!({})),
+        ("claim.sweepPerson", json!({"persons": ["sam"]})),
+    ] {
+        for (who, reached) in [
+            ("host", host(&p, name, &params)),
+            ("owner", read(&p, name, &params)),
+        ] {
+            match reached {
+                Reached::Refused(Error::NotAllowed(note)) => {
+                    panic!("{name}: the {who} was refused as a principal: {note}")
+                }
+                Reached::Refused(_) => {}
+                other => panic!("{name}: the {who} got {other:?}"),
+            }
+        }
+    }
+    drop(d);
+}

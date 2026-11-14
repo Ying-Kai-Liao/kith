@@ -114,7 +114,7 @@ impl World {
                 {
                     c.state = if c.pid.is_some() { "ending" } else { "ended" }.into();
                     if c.pid.is_some() {
-                        kill.push(json!({"claimId": c.id, "pid": c.pid, "started": c.started}));
+                        kill.push(json!({"claimId": c.id, "pid": c.pid, "started": c.started, "conversation": c.conv}));
                     }
                 }
                 json!({"kill": kill})
@@ -426,6 +426,7 @@ async fn a_revoke_sweep_in_writer_mode_ends_the_persons_claims_through_the_core(
     assert_eq!(got, Some(Swept::Done(vec![guest])), "{:?}", r.log());
     assert!(pid_runs(owner), "the owner's claim is never swept");
     assert!(r.log().contains(&"claim.sweepPerson".to_owned()));
+    assert!(crate::terminal::intent::path(&r.state, "g1").exists(), "the intent was written before the signal");
     assert_eq!(owed_count(&hub), 0);
 }
 

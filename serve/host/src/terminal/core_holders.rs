@@ -247,6 +247,7 @@ fn claim_pid(f: &Paths, id: i64) -> std::io::Result<Option<u32>> {
 #[derive(Debug, Clone)]
 struct Listed {
     id: i64,
+    conversation: String,
     person: String,
     agent: Option<String>,
 }
@@ -292,10 +293,22 @@ async fn sweep_in(hub: &Hub, reader: Reader, persons: Vec<String>, only_denied: 
             None => (Vec::new(), Some(std::io::Error::other("sweep failed"))),
         }
     };
+    let state = reader.state.clone();
     let ended = if held.is_empty() {
         Vec::new()
     } else {
-        crate::wake::blocking(move || claim::end_claimed(&held, grace)).await.unwrap_or_default()
+        crate::wake::blocking(move || {
+            // Recorded before the signal (F12 rule 8): a session gone with no intent reads as a crash.
+            for (pid, _, conversation) in &held {
+                if let Some(c) = conversation {
+                    super::intent::write(&state, c, "access revoked", *pid);
+                }
+            }
+            let plain: Vec<(u32, Option<String>)> = held.into_iter().map(|(p, s, _)| (p, s)).collect();
+            claim::end_claimed(&plain, grace)
+        })
+        .await
+        .unwrap_or_default()
     };
     match failed {
         None => Swept::Done(ended),
@@ -303,16 +316,25 @@ async fn sweep_in(hub: &Hub, reader: Reader, persons: Vec<String>, only_denied: 
     }
 }
 
-fn kills(v: &Value) -> Vec<(u32, Option<String>)> {
+/// A process the core handed out to end: its pid and start stamp, and the conversation its claim was on (for the intent).
+type Killed = (u32, Option<String>, Option<String>);
+
+fn kills(v: &Value) -> Vec<Killed> {
     v["kill"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|k| Some((u32::try_from(k["pid"].as_u64()?).ok()?, k["started"].as_str().map(str::to_owned))))
+        .filter_map(|k| {
+            Some((
+                u32::try_from(k["pid"].as_u64()?).ok()?,
+                k["started"].as_str().map(str::to_owned),
+                k["conversation"].as_str().map(str::to_owned),
+            ))
+        })
         .collect()
 }
 
-fn whole(f: &Paths, persons: &[String]) -> std::io::Result<Vec<(u32, Option<String>)>> {
+fn whole(f: &Paths, persons: &[String]) -> std::io::Result<Vec<Killed>> {
     Ok(kills(&row(f, "claim.sweepPerson", &json!({"persons": persons}))?))
 }
 
@@ -327,6 +349,7 @@ fn list(f: &Paths, persons: &[String]) -> std::io::Result<Vec<Listed>> {
             let person = c["person"].as_str().filter(|p| persons.iter().any(|x| x == p))?;
             Some(Listed {
                 id: c["claimId"].as_i64()?,
+                conversation: c["conversation"].as_str().unwrap_or_default().to_owned(),
                 person: person.to_owned(),
                 agent: c["agent"].as_str().filter(|a| !a.is_empty()).map(str::to_owned),
             })
@@ -334,7 +357,7 @@ fn list(f: &Paths, persons: &[String]) -> std::io::Result<Vec<Listed>> {
         .collect())
 }
 
-async fn narrowed(f: &Paths, persons: Vec<String>) -> (Vec<(u32, Option<String>)>, Option<std::io::Error>) {
+async fn narrowed(f: &Paths, persons: Vec<String>) -> (Vec<Killed>, Option<std::io::Error>) {
     let f1 = f.clone();
     let listed = match crate::wake::blocking(move || list(&f1, &persons)).await {
         Some(Ok(l)) => l,
@@ -349,18 +372,25 @@ async fn narrowed(f: &Paths, persons: Vec<String>) -> (Vec<(u32, Option<String>)
             allowed.insert((l.person.clone(), agent.clone()));
         }
     }
-    let go: Vec<i64> = listed
+    let go: Vec<(i64, String)> = listed
         .iter()
         .filter(|l| !l.agent.as_ref().is_some_and(|a| allowed.contains(&(l.person.clone(), a.clone()))))
-        .map(|l| l.id)
+        .map(|l| (l.id, l.conversation.clone()))
         .collect();
     let f2 = f.clone();
     crate::wake::blocking(move || {
         let mut held = Vec::new();
-        for id in go {
+        for (id, conversation) in go {
             // Only the claim judged: a claim that ended meanwhile gives no kill.
             match row(&f2, "hostclaim.stop", &json!({"claimId": id, "reason": "access narrowed"})) {
-                Ok(v) => held.extend(kills(&json!({"kill": [v["kill"].clone()]}))),
+                Ok(v) => {
+                    // The stop's own row names no conversation: the one listed is the claim's.
+                    let mut one = v["kill"].clone();
+                    if one.is_object() {
+                        one["conversation"] = json!(conversation);
+                    }
+                    held.extend(kills(&json!({"kill": [one]})));
+                }
                 Err(error) => return (held, Some(error)),
             }
         }
@@ -391,12 +421,11 @@ fn owe(hub: &Hub, persons: &[String], only_denied: bool, why: String) -> Swept {
         let _lock = locked();
         let mut rows = owed(hub);
         let same = |r: &Value| r["persons"] == row["persons"] && r["narrow"] == row["narrow"];
-        match rows.iter().position(same) {
-            Some(at) => rows[at] = row,
-            None => {
-                rows.push(row);
-                fresh = true;
-            }
+        if let Some(at) = rows.iter().position(same) {
+            rows[at] = row;
+        } else {
+            rows.push(row);
+            fresh = true;
         }
         if let Err(error) = hub.store.kv_set(OWED, &Value::Array(rows).to_string()) {
             tracing::error!(%error, "a revoke sweep the core did not take could not be recorded");
