@@ -23,6 +23,7 @@ mod folders;
 pub(crate) mod hq;
 mod order;
 mod room_people;
+pub use room_people::PostRefused;
 mod sync;
 
 /// What a bot is doing right now (wire values: `idle` / `working` / `needsInput` / `error`).
