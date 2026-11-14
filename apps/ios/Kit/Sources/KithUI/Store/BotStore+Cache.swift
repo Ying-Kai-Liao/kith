@@ -8,6 +8,8 @@ extension BotStore {
         var hostId: String?
         var rev: Int64
         var bots: [Bot]
+        /// An invited person's rooms with their stay: the first list after a launch closes what is gone and drops what a new stay replaced. Nil in an older cache.
+        var rooms: [HostContract.MyRoom]?
         var entries: [Entry]
     }
 
@@ -30,6 +32,7 @@ extension BotStore {
         hostId = cache.hostId
         rev = cache.rev
         bots = Dictionary(cache.bots.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        myRooms = Dictionary((cache.rooms ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         entries = Dictionary(grouping: cache.entries, by: \.botId)
     }
 
@@ -50,7 +53,7 @@ extension BotStore {
             list.filter { !$0.id.hasPrefix("local-") }.suffix(200)
                 + list.filter { $0.id.hasPrefix("local-") && ["waiting", "delivering", "failed"].contains($0.data.status) }
         }
-        let cache = Cache(stamp: "\(Self.appBuild)/\(hello?.version ?? "")\(Self.cacheSchema)", hostId: hostId, rev: rev, bots: Array(bots.values), entries: kept)
+        let cache = Cache(stamp: "\(Self.appBuild)/\(hello?.version ?? "")\(Self.cacheSchema)", hostId: hostId, rev: rev, bots: Array(bots.values), rooms: Array(myRooms.values), entries: kept)
         if let data = try? JSONEncoder().encode(cache) {
             try? data.write(to: cacheURL, options: .atomic)
         }

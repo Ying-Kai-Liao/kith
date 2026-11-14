@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { isGroup, isWorkingIn, type Bot } from '@shared/models'
+import { isGroup, isWorkingIn, normalizeBot, type Bot } from '@shared/models'
+import type { BotStore } from '../../store/bot-store'
 import { defaultFolderOf } from '@shared/place-folders'
+import { roomAgentNames } from '@shared/room-people'
 import { currentTask, sendInTask, takesOver, taskTitle } from '@shared/tasks'
 import { threadWriterMessage } from '@shared/thread-writer'
+import { useDimmedAgents } from './room-facts'
 import { BotAvatar } from '../../components/Avatar'
 import { Icon } from '../../components/Icon'
 import { usePresence } from '../../components/Overlay'
@@ -43,6 +46,12 @@ export function Composer({ botId, onCall, onInterrupt, liveLine = false }: {
   // Remount transient editor state (selection, attachments, IME) when its destination changes.
   return <DestinationComposer key={JSON.stringify([store.contextId, store.computer.id, botId])}
     botId={botId} onCall={onCall} onInterrupt={onInterrupt} liveLine={liveLine} />
+}
+
+/** A group's bots, or for an invited person's room the agents it names (they have no bots of their own to mention). */
+function roomMembers(store: BotStore, bot: Bot): Bot[] {
+  const room = store.myRooms.get(bot.id)
+  return room ? roomAgentNames(room).map((name) => normalizeBot({ id: `room-agent:${name}`, name })) : store.members(bot)
 }
 
 function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
@@ -90,7 +99,7 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
   const canSend = !empty && !taking && (store.connection.kind === 'online' || (store.canQueue && !files.length))
   const canAttach = !!bot
 
-  const placeholder = bot && isGroup(bot) ? 'Message everyone · @ to ask one bot' : startsNew ? `Tell ${bot?.name ?? ''}…` : working ? `Queue a message for ${bot?.name ?? ''}` : `Tell ${bot?.name ?? ''}…`
+  const placeholder = store.myRooms.has(botId) ? 'Message, or @ an agent' : bot && isGroup(bot) ? 'Message everyone · @ to ask one bot' : startsNew ? `Tell ${bot?.name ?? ''}…` : working ? `Queue a message for ${bot?.name ?? ''}` : `Tell ${bot?.name ?? ''}…`
 
   // A routine's "Try it" fills the box.
   const routineDraft = store.routineDrafts.get(botId)
@@ -139,8 +148,9 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
     const query = draft.slice(at + 1)
     return /\n/.test(query) || query.length > 24 ? null : query
   })()
+  const dimmed = useDimmedAgents(botId)
   const suggestions: Bot[] =
-    mentionQuery !== null && bot ? store.members(bot).filter((m) => !mentionQuery || m.name.toLowerCase().includes(mentionQuery.toLowerCase())) : []
+    mentionQuery !== null && bot ? roomMembers(store, bot).filter((m) => !mentionQuery || m.name.toLowerCase().includes(mentionQuery.toLowerCase())) : []
 
   const mention = (member: Bot) => {
     const at = draft.lastIndexOf('@')
@@ -229,9 +239,10 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
       <ComposerReveal open={suggestions.length > 0}>
         <div className="mentions">
           {suggestions.map((m) => (
-            <button key={m.id} className="press mention" onClick={() => mention(m)}>
+            <button key={m.id} className={`press mention ${m.hqAgent && dimmed.has(m.hqAgent) ? 'dimmed' : ''}`} onClick={() => mention(m)}>
               <BotAvatar bot={m} size={18} animated={false} />
               <Text size="subheadline" tone="text">{m.name}</Text>
+              {m.hqAgent && dimmed.has(m.hqAgent) ? <Text size="footnote" tone="secondary">won't answer here</Text> : null}
             </button>
           ))}
         </div>

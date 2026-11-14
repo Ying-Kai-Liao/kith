@@ -79,6 +79,7 @@ struct Composer: View {
     private var placeholder: String {
         let name = bot?.name ?? ""
         if thread != nil { return "Reply…" }
+        if model.myRooms[botId] != nil { return "Message, or @ an agent" }
         if bot?.isGroup == true { return "Message everyone · @ to ask one bot" }
         if startsNew { return "Tell \(name)…" }
         if working { return "Queue a message for \(name)" }
@@ -95,7 +96,9 @@ struct Composer: View {
 
     private var suggestions: [Bot] {
         guard let query = mentionQuery, let bot else { return [] }
-        return model.members(of: bot).filter {
+        // An invited person's room has no member bots to mention: the agents it names answer when @'d.
+        let pool = model.myRooms[botId].map { room in MemberRoomLogic.agentNames(room).compactMap { name in MemberRoomLogic.bot(for: HostContract.MyRoom(id: "room-agent:\(name)", name: name, agents: [], stay: 0)).map { b -> Bot in var b = b; b.kind = "agent"; return b } } } ?? model.members(of: bot)
+        return pool.filter {
             query.isEmpty || $0.name.localizedCaseInsensitiveContains(query)
         }
     }

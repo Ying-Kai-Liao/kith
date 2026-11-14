@@ -264,6 +264,8 @@ pub const EMBEDDED_WRITES: &[&str] = &[
     "people.removePerson",
     "people.removeBot",
     "people.revoke",
+    // a revoke's claim sweep (`kith-sessions sweep` once the claims are the core's): it only ends access
+    "claim.sweepPerson",
 ];
 
 /// The reads `kith-auth` routes to the core on the authority tombstone (`ROUTED_READS` in the host's `core_front.rs`, which
@@ -323,6 +325,11 @@ pub fn call_authority_embedded(
         return Ok(EmbeddedCall::NoCore(layout.dir));
     }
     match open_embedded(paths)? {
+        // The claim sweep of a revoke with no daemon (P5): a claim transaction like the revoke itself, refused until the
+        // claims are switched. The caller signals the kills it returns.
+        Embedded::Open(mut core) if conversations::external::serves(method) => {
+            conversations::external::call(&mut core, method, params).map(EmbeddedCall::Answered)
+        }
         Embedded::Open(mut core) => {
             authority::call::call(&mut core, method, params).map(EmbeddedCall::Answered)
         }

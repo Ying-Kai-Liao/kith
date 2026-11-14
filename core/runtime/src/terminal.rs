@@ -106,6 +106,8 @@ use serde_json::{Value, json};
 use crate::attach::Relay;
 #[cfg(unix)]
 use crate::conversations::claims::{self, Kind, NewClaim};
+#[cfg(unix)]
+use crate::conversations::external;
 use crate::daemon::Shared;
 #[cfg(unix)]
 use crate::db::Core;
@@ -721,21 +723,31 @@ impl Terminals {
         layout: &Layout,
     ) -> Result<Value> {
         let me = std::process::id();
-        match claim::take(state, &req.session, me, "starting")? {
-            Ok(()) => {}
-            Err(held) => {
-                return Ok(json!({
-                    "status": "busy",
-                    "note": format!("session {} is being written by pid {} ({})", req.session, held.pid, held.kind),
-                    "held_by": {"pid": held.pid, "kind": held.kind},
-                }));
+        // Once the claims are the core's (the `claims` module switched) the claim file is not taken, read or given back: the
+        // `terminal` claim row is the writer (made below, refused as data when a writer, a take-over or an idle agent of the
+        // app stands in the way) and nothing falls back to the file.
+        let core_claims = shared.with_core(|c| Ok(external::switched(c)))?;
+        if !core_claims {
+            match claim::take(state, &req.session, me, "starting")? {
+                Ok(()) => {}
+                Err(held) => {
+                    return Ok(json!({
+                        "status": "busy",
+                        "note": format!("session {} is being written by pid {} ({})", req.session, held.pid, held.kind),
+                        "held_by": {"pid": held.pid, "kind": held.kind},
+                    }));
+                }
             }
         }
         // From here every way out but the open one gives the claim back.
-        let give_back = |pid: u32| claim::release(state, &req.session, pid);
+        let give_back = |pid: u32| {
+            if !core_claims {
+                claim::release(state, &req.session, pid);
+            }
+        };
         // The app taking the session over holds `<sid>.takeover.claim` until it has imported it: no writer starts meanwhile
         // (`kith-sessions claim_start` and `resolve` refuse the same way).
-        if claim::takeover_live(state, &req.session) {
+        if !core_claims && claim::takeover_live(state, &req.session) {
             give_back(me);
             return Ok(json!({
                 "status": "busy",
@@ -755,11 +767,22 @@ impl Terminals {
                 return Err(e);
             }
         };
-        let wire = match wire_claim(shared, &req.session) {
-            Ok(w) => w,
-            Err(e) => {
-                give_back(me);
-                return Err(e);
+        let wire = if core_claims {
+            match wire_claim_core(shared, req)? {
+                Ok(w) => {
+                    // What the file take did for a taker: the session's pending intent and 54-minute decision end.
+                    kith_kernel::threads::intent::taken(state, &req.session);
+                    w
+                }
+                Err(busy) => return Ok(busy),
+            }
+        } else {
+            match wire_claim(shared, &req.session) {
+                Ok(w) => w,
+                Err(e) => {
+                    give_back(me);
+                    return Err(e);
+                }
             }
         };
         // The core.db claim of this terminal, ended with an exit report on every way out but the open one. A report
@@ -828,6 +851,8 @@ impl Terminals {
                 let injected = false;
                 let handed = if injected {
                     Err(std::io::Error::other("injected"))
+                } else if core_claims {
+                    Ok(true) // the claim row is redeemed to the stub's pid below; there is no file to hand over
                 } else {
                     claim::retarget(state, &req.session, me, pid)
                 };
@@ -862,6 +887,21 @@ impl Terminals {
                     let redeemed = shared.with_core(|c| {
                         claims::redeem(c, wire.id, pid, &started, &held.instance, now_ms())
                     });
+                    if core_claims && !matches!(redeemed, Ok(claims::Redeemed::Running { .. })) {
+                        // No file still holds the session: a terminal whose claim row is not its own must not run.
+                        let _ = self.queue.send(Req::End(held));
+                        end_claim(Some(pid), "exit", "the claim could not be redeemed");
+                        crate::log::note(
+                            &shared.logs,
+                            &format!(
+                                "terminal: claim {} of {} was not redeemed ({redeemed:?}); the terminal was ended",
+                                wire.id, req.session
+                            ),
+                        );
+                        return Err(Error::Io(
+                            "kith-core: could not give the session's claim to the terminal; it was ended".into(),
+                        ));
+                    }
                     if !matches!(redeemed, Ok(claims::Redeemed::Running { .. })) {
                         crate::log::note(
                             &shared.logs,
@@ -967,6 +1007,45 @@ fn wire_claim(shared: &Shared, session: &str) -> Result<Wire> {
             }
             Err(e) => Err(e),
         }
+    })
+}
+
+/// [`wire_claim`] once the claims are the core's: the `terminal` claim row is the writer, so a refusal is the answer
+/// (`Ok(Err(busy))`, the JSON `terminal.open` gives) and nothing falls back to a counter or a file.
+#[cfg(unix)]
+fn wire_claim_core(shared: &Shared, req: &OpenParams) -> Result<std::result::Result<Wire, Value>> {
+    let now = now_ms();
+    let session = req.session.as_str();
+    shared.with_core(|core| {
+        Ok(
+            match external::claim_terminal(core, session, &req.agent, now)? {
+                Ok(c) => Ok(Wire {
+                    id: c.claim_id,
+                    row: true,
+                }),
+                Err(why) => Err(match why["refused"].as_str() {
+                    Some("held") => {
+                        let pid = why["holder"]["pid"].as_u64().unwrap_or(0);
+                        let kind = why["holder"]["kind"].as_str().unwrap_or("terminal");
+                        json!({
+                            "status": "busy",
+                            "note": format!("session {session} is being written by pid {pid} ({kind})"),
+                            "held_by": {"pid": pid, "kind": kind},
+                        })
+                    }
+                    Some("takeover") => json!({
+                        "status": "busy",
+                        "note": format!("session {session} is being taken over in the app right now; try again in a moment"),
+                        "held_by": {"pid": 0, "kind": "takeover"},
+                    }),
+                    _ => json!({
+                        "status": "busy",
+                        "note": why["why"].as_str().unwrap_or("the claim was refused").to_owned(),
+                        "held_by": {"pid": 0, "kind": "waiting"},
+                    }),
+                }),
+            },
+        )
     })
 }
 
@@ -1117,6 +1196,9 @@ mod claim {
     }
 }
 
+#[cfg(all(test, unix))]
+#[path = "terminal_core_claims_tests.rs"]
+mod core_claims_tests;
 #[cfg(test)]
 #[path = "terminal_tests.rs"]
 pub(crate) mod tests;

@@ -91,6 +91,7 @@ extension BotStore {
         hello = h
         // Pending bots come back from the host on every connect, so a card survives a restart.
         Task { [weak self] in await self?.botGuests.refresh() }
+        Task { [weak self] in await self?.refreshMyRooms() }
         noteHostVersion(HostVersion(version: h.version, protocolLevel: h.protocolLevel, minProtocol: h.minProtocol))
     }
 
@@ -133,6 +134,7 @@ extension BotStore {
             // Live changes come as events; what was already waiting is read once per connection.
             Task { [weak self] in await self?.refreshAccessRequests() }
         case let .bot(bot):
+            guard closedRooms[bot.id] == nil else { break }
             let neededInput = bots[bot.id]?.needsInput == true
             let before = bots[bot.id]
             bots[bot.id] = bot
@@ -284,6 +286,8 @@ extension BotStore {
     }
 
     func upsert(_ e: Entry) {
+        // A room the person left or was removed from is gone: nothing more of it is kept.
+        guard closedRooms[e.botId] == nil else { return }
         var list = entries[e.botId] ?? []
         if let i = list.firstIndex(where: { $0.id == e.id }) {
             // A late API response mustn't undo a newer SSE update.

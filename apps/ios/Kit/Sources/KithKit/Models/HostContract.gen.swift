@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "bcf448cf7c0cd2c80ed77231f0f648c2ba6931c765dce71cd1374af2386be877"
+    public static let sha256 = "a04de8abd0a0da6eb7e07b7eb1146f44214035f99ee7351f9e5d750507cdcdce"
 }
 
 extension HostContract {
@@ -1086,17 +1086,32 @@ extension HostContract {
         }
     }
 
-    /// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).
+    /// One of a room's agents as a person is shown it: the member bot's id (a reply's author is this id) and its live name. Nothing else of the bot.
+    public struct MyRoomAgent: Codable, Hashable, Sendable {
+        public var id: String
+        public var name: String
+
+        public init(id: String, name: String) {
+            self.id = id
+            self.name = name
+        }
+    }
+
+    /// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; agentList is the same agents with the bot id each reply is authored by (absent from a host before it, then the app has only the names); ownerName is the owner's display name (absent the same way, then the app says "the owner"); stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).
     public struct MyRoom: Codable, Hashable, Sendable {
         public var id: String
         public var name: String
         public var agents: [String]
+        public var agentList: [MyRoomAgent]?
+        public var ownerName: String?
         public var stay: Int64
 
-        public init(id: String, name: String, agents: [String], stay: Int64) {
+        public init(id: String, name: String, agents: [String], agentList: [MyRoomAgent]? = nil, ownerName: String? = nil, stay: Int64) {
             self.id = id
             self.name = name
             self.agents = agents
+            self.agentList = agentList
+            self.ownerName = ownerName
             self.stay = stay
         }
     }
@@ -2083,6 +2098,7 @@ extension HostContract {
         case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
         case "CreatedInvite": _ = try d.decode(CreatedInvite.self, from: data)
         case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
+        case "MyRoomAgent": _ = try d.decode(MyRoomAgent.self, from: data)
         case "MyRoom": _ = try d.decode(MyRoom.self, from: data)
         case "MyRooms": _ = try d.decode(MyRooms.self, from: data)
         case "RoomLeft": _ = try d.decode(RoomLeft.self, from: data)

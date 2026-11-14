@@ -173,10 +173,9 @@ async fn nobody_outside_the_stay_reads_posts_or_reacts_and_a_leave_cuts_the_next
     let body = json!({"botId": room, "text": "hi", "stay": joined});
     let sent = call(&r, &phone, "send", body.clone()).await.unwrap();
     let id = sent["entry"]["id"].as_str().unwrap();
-    assert_eq!(
-        call(&r, &phone, "myRooms", json!({})).await.unwrap(),
-        json!({"rooms": [{"id": room, "name": "Crew", "agents": ["house"], "stay": joined}]})
-    );
+    let mine = call(&r, &phone, "myRooms", json!({})).await.unwrap();
+    assert_eq!(mine["rooms"][0]["agents"], json!(["house"]));
+    assert_eq!(mine["rooms"][0]["stay"], joined);
     let reacted = call(&r, &phone, "react", json!({"entryId": id, "emoji": "👍"})).await.unwrap();
     assert_eq!(reacted["entry"]["data"]["reactions"], json!(["👍"]));
 
@@ -375,4 +374,26 @@ async fn a_message_id_is_shown_only_to_its_sender() {
     let v = call(&r, &phone, "history", json!({"botId": room})).await.unwrap();
     let kai = v["entries"].as_array().unwrap().iter().find(|e| e["data"]["text"] == "from kai").unwrap();
     assert!(kai["data"]["clientNonce"].is_null(), "{kai}");
+}
+
+#[tokio::test]
+async fn my_rooms_names_the_granted_agents_by_id_and_shows_nothing_else_of_a_bot() {
+    let (r, room, phone) = rig().await;
+    add(&r, &room).await;
+    let house = r.hub.store.bots().unwrap().into_iter().find(|b| b.config.name == "house").unwrap().config.id;
+    // A renamed agent shows its live name; the id (a reply's author) stays.
+    r.hub.update_bot(&json!({"id": house, "name": "Housekeeper"})).unwrap();
+    let mine = call(&r, &phone, "myRooms", json!({})).await.unwrap();
+    let shown = &mine["rooms"][0];
+    assert_eq!(shown["agentList"], json!([{"id": house, "name": "Housekeeper"}]));
+    assert_eq!(shown["agents"], json!(["Housekeeper"]));
+    for key in shown.as_object().unwrap().keys() {
+        assert!(
+            ["agentList", "agents", "id", "name", "ownerName", "stay"].contains(&key.as_str()),
+            "unexpected field {key}"
+        );
+    }
+    assert_eq!(shown["agentList"][0].as_object().unwrap().len(), 2, "an agent is its id and name, nothing else");
+    // The owner's name is a string when kith-auth has one, and absent otherwise.
+    assert!(shown.get("ownerName").is_none_or(|n| n.as_str().is_some_and(|s| !s.is_empty())));
 }
