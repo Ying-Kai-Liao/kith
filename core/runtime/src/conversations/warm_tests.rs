@@ -54,6 +54,23 @@ fn a_process_registers_each_session_it_loads_and_the_placeholder_goes() {
     // Registering with no session names the process again without adding a row.
     reg(&mut c, 10, None);
     assert_eq!(rows(&c, 10), 2);
+    // Whose process it is, is one fact for every row of it.
+    warm::register(&mut c, &proc_of(10, "", Some("third"))).unwrap();
+    c.conn()
+        .execute(
+            "UPDATE warm_procs SET agent = 'old' WHERE pid = 10 AND conversation = 'main'",
+            [],
+        )
+        .unwrap();
+    reg(&mut c, 10, Some("thread"));
+    assert_eq!(
+        count(
+            &c,
+            "SELECT count(DISTINCT agent) FROM warm_procs WHERE pid = 10"
+        ),
+        1,
+        "a registration restates the process on every row"
+    );
 }
 
 #[test]

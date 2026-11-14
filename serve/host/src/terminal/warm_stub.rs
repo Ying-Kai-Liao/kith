@@ -30,16 +30,20 @@ use tokio::sync::mpsc::UnboundedReceiver;
 /// How long a restart waits for the old process group to leave before it starts the next one.
 const OLD_GONE_WITHIN: Duration = Duration::from_secs(3);
 
-/// What to run for a warm process: the engine's shell line (`kith-stub` execs it), its folder and its environment.
+/// What to run for a warm process: the account it runs as, the engine's shell line (`kith-stub` execs it), its folder and its
+/// environment.
 #[derive(Clone, Debug, Default)]
 pub struct Launch {
+    /// The account the process runs as, by name, also when the caller asked for the default (`None`): until accounts are
+    /// switched the core records the account the host sends and does not pick one, so the host must always be able to say it.
+    pub account: String,
     pub command: String,
     pub cwd: String,
     pub env: Vec<(String, String)>,
 }
 
-/// Makes the [`Launch`] for an account (`None`: the one the process had, or the default). The wiring package builds it from the
-/// agent's config, so a restart on another account gets that account's `CLAUDE_CONFIG_DIR`.
+/// Makes the [`Launch`] for an account (`None`: the default). The wiring package builds it from the agent's config, so a
+/// restart on another account gets that account's `CLAUDE_CONFIG_DIR`, and names the account the default turned out to be.
 pub type Launcher = Box<dyn Fn(Option<&str>) -> Launch + Send + Sync>;
 
 /// A warm process with a resident stub.
@@ -47,7 +51,7 @@ pub struct ResidentStub {
     stub: PathBuf,
     lock_dir: PathBuf,
     launcher: Launcher,
-    account: Option<String>,
+    account: String,
     acp: Arc<Acp>,
     incoming: Option<UnboundedReceiver<Incoming>>,
     ctl: Ctl,
@@ -56,10 +60,10 @@ pub struct ResidentStub {
 
 impl ResidentStub {
     /// Starts the stub and the engine under it, as `account` (`None`: the launcher's default). Needs a tokio runtime.
-    pub fn spawn(stub: &Path, lock_dir: &Path, launcher: Launcher, account: Option<String>) -> anyhow::Result<Self> {
+    pub fn spawn(stub: &Path, lock_dir: &Path, launcher: Launcher, account: Option<&str>) -> anyhow::Result<Self> {
         let handle = tokio::runtime::Handle::try_current()?;
         std::fs::create_dir_all(lock_dir)?;
-        let (acp, incoming, ctl) = start(stub, lock_dir, &launcher, account.as_deref())?;
+        let (acp, incoming, ctl, account) = start(stub, lock_dir, &launcher, account)?;
         Ok(Self {
             stub: stub.to_path_buf(),
             lock_dir: lock_dir.to_path_buf(),
@@ -111,9 +115,11 @@ fn start(
     lock_dir: &Path,
     launcher: &Launcher,
     account: Option<&str>,
-) -> anyhow::Result<(Arc<Acp>, UnboundedReceiver<Incoming>, Ctl)> {
+) -> anyhow::Result<(Arc<Acp>, UnboundedReceiver<Incoming>, Ctl, String)> {
     let l = launcher(account);
-    spawn_resident(stub, lock_dir, &l.command, &l.cwd, &l.env)
+    anyhow::ensure!(!l.account.is_empty(), "the launcher did not name the account the process runs as");
+    let (acp, incoming, ctl) = spawn_resident(stub, lock_dir, &l.command, &l.cwd, &l.env)?;
+    Ok((acp, incoming, ctl, l.account))
 }
 
 impl WarmStub for ResidentStub {
@@ -122,7 +128,7 @@ impl WarmStub for ResidentStub {
     }
 
     fn account(&self) -> Option<String> {
-        self.account.clone()
+        Some(self.account.clone())
     }
 
     fn take(&self, key: &str, claim: i64) -> std::io::Result<Take> {
@@ -141,11 +147,11 @@ impl WarmStub for ResidentStub {
         while pid_runs(old) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(20));
         }
-        let account = account.map(str::to_owned).or_else(|| self.account.clone());
+        let account = account.map_or_else(|| self.account.clone(), str::to_owned);
         // A runtime context for the spawn: this runs on a blocking thread, where the handle's runtime is current already,
         // and from a plain thread, where it is not.
         let _in_runtime = self.handle.enter();
-        let (acp, incoming, ctl) = start(&self.stub, &self.lock_dir, &self.launcher, account.as_deref())
+        let (acp, incoming, ctl, account) = start(&self.stub, &self.lock_dir, &self.launcher, Some(&account))
             .map_err(|e| std::io::Error::other(format!("{e:#}")))?;
         self.acp = acp;
         self.incoming = Some(incoming);

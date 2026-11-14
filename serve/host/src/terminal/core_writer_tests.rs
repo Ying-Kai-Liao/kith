@@ -780,11 +780,6 @@ async fn the_claim_carries_the_account_the_warm_process_runs_as() {
     r.w().account = "spare".into();
     running(r.writer.begin(&r.turn("s1", None), &mut stub));
     assert_eq!(r.w().sent_accounts, [Some("spare".to_owned())]);
-    // A process whose account the host does not know sends none: the core picks.
-    let r = Rig::new();
-    let mut unknown = Real::start(&r.locks(), None);
-    running(r.writer.begin(&r.turn("s1", None), &mut unknown));
-    assert_eq!(r.w().sent_accounts, [None]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

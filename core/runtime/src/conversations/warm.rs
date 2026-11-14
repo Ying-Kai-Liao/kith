@@ -99,6 +99,11 @@ fn insert_row(tx: &Transaction<'_>, w: &WarmProc<'_>, conversation: &str) -> Res
             instance = excluded.instance, person = excluded.person, agent = excluded.agent",
         params![w.pid, w.started, w.instance, w.person, w.agent, conversation],
     )?;
+    // One process, one owner: the rows of its other sessions say the same.
+    tx.execute(
+        "UPDATE warm_procs SET instance = ?3, person = ?4, agent = ?5 WHERE pid = ?1 AND started = ?2",
+        params![w.pid, w.started, w.instance, w.person, w.agent],
+    )?;
     Ok(())
 }
 

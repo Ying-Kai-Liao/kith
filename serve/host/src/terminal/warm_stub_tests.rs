@@ -43,9 +43,15 @@ fn warm(locks: &std::path::Path, account: Option<&str>) -> (ResidentStub, Arc<Mu
     let seen = asked.clone();
     let launcher = Box::new(move |account: Option<&str>| {
         seen.lock().unwrap().push(account.map(str::to_owned));
-        Launch { command: "cat".into(), cwd: "/tmp".into(), env: Vec::new() }
+        // The default account is named, so the host can always say which one the process runs as.
+        Launch {
+            account: account.unwrap_or("main").to_owned(),
+            command: "cat".into(),
+            cwd: "/tmp".into(),
+            env: Vec::new(),
+        }
     });
-    let stub = ResidentStub::spawn(&stub_bin(), locks, launcher, account.map(str::to_owned)).unwrap();
+    let stub = ResidentStub::spawn(&stub_bin(), locks, launcher, account).unwrap();
     (stub, asked)
 }
 
@@ -62,6 +68,7 @@ async fn the_lock_is_taken_held_against_another_stub_and_released() {
     let dir = locks("lock");
     let (a, _) = warm(&dir, Some("main"));
     let (b, _) = warm(&dir, None);
+    assert_eq!(b.account().as_deref(), Some("main"), "the default account has a name");
     assert_ne!(a.pid(), b.pid());
     assert!(pid_runs(a.pid()));
     assert_eq!(a.account().as_deref(), Some("main"));

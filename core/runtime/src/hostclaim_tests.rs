@@ -230,7 +230,7 @@ fn a_turn_claim_goes_through_claim_next() {
                 "prompt": "hi", "revokeSeen": 0}),
     );
     let turn = q["turn"].as_i64().unwrap();
-    let ask = json!({"conversation": "s1", "turn": turn, "person": "", "revokeSeen": 0, "cwd": "/work",
+    let ask = json!({"conversation": "s1", "turn": turn, "person": "", "revokeSeen": 0, "cwd": "/work", "account": "claude",
         "sessionId": "s1", "home": m.join("home"), "kernel": m.join("kernel"),
         "env": {"KITH_MACHINE": m, "KITH_AGENTS": m.join("agents")}});
     // A direct turn claim is refused by the claims API itself: this row is the only way in and it is claim_next. No

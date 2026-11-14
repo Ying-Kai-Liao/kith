@@ -743,14 +743,19 @@ fn send_gate_blocking(hub: &Hub, t: &Thread, may_wait: bool) -> Result<SendGate>
 }
 
 /// What [`sync_for_turn`] found.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
 pub enum Synced {
     /// The transcript has nothing the thread lacked (or the lane is no terminal thread): the loaded session is current.
     Unchanged,
-    /// Lines a terminal wrote were imported since the session was loaded: the caller reloads the session
-    /// (`session/load`) before `session/prompt`, or the engine answers from a transcript that lacks them.
+    /// Lines a terminal wrote were imported since the session was loaded (or the sync could not tell): the caller reloads the
+    /// session (`session/load`) before `session/prompt`, or the engine answers from a transcript that lacks them. A reload is
+    /// cheap and the engine reads its own transcript file, so doubt reads as `Moved`.
     Moved,
+    /// The lane's session is another one now: a terminal forked it and the thread follows the fork (`mapped` adopts it). The
+    /// turn holds its claim on the old session, so it must not be prompted on the fork: the caller stops the claim with the
+    /// turn requeued and begins again on `session`, where the core says `held` while the terminal still has it.
+    Forked { session: String },
 }
 
 /// Writer mode, step 7 (design 1.3): after `Begin::Running` (the turn holds the claim and the lock) and before the prompt is
@@ -772,10 +777,17 @@ pub(crate) fn sync_for_turn_blocking(hub: &Hub, lane: &Lane) -> Synced {
     let t = Thread { bot: lane.chat.clone(), root: root.clone() };
     let lock = hub.terminal.thread_lock(&t.key());
     let _one = lock.locked();
+    let session = |hub: &Hub| hub.store.kv_get(&lane_key("session", &t.bot, &t.lane()));
+    let before = session(hub);
     let imported = sync_one(hub, &t);
-    // A fork adopted, or a terminal seen live, marks the thread stale: the loaded session no longer matches the file.
-    let stale = hub.store.kv_get(&stale_key(&t)).is_some() && hub.store.kv_delete(&stale_key(&t)).is_ok();
+    // `mapped` adopts a fork: the lane's session id changed under the turn's claim.
+    if let Some(now) = session(hub).filter(|now| Some(now) != before.as_ref()) {
+        return Synced::Forked { session: now };
+    }
+    // A terminal seen live, or a fork adopted earlier, marks the thread stale: the loaded session no longer matches the file.
+    let stale = hub.store.kv_get(&stale_key(&t)).is_some();
     if stale {
+        let _ = hub.store.kv_delete(&stale_key(&t));
         // Other lanes' actors that cached the session learn of it too (this lane's own does nothing while it runs a turn).
         forget_loaded(hub, &t);
     }
@@ -853,7 +865,7 @@ pub async fn bot_gate(hub: &Arc<Hub>, chat: &str, root: &str) -> Result<(), Held
 
 /// Brings this one thread in step with the registry now, with its lock held: a fork becomes the lane's session
 /// (`mapped` adopts it), the file's last lines are imported, and the cache is forgotten when any were. True when lines
-/// were imported.
+/// were imported, or an import failed (what the thread holds is then not known to match the file).
 fn sync_one(hub: &Hub, t: &Thread) -> bool {
     let mut imported = false;
     let env = hub.terminal.env();
@@ -875,6 +887,7 @@ fn sync_one(hub: &Hub, t: &Thread) -> bool {
             Ok(more) => imported |= more,
             Err(error) => {
                 tracing::warn!(error = format!("{error:#}"), "couldn't catch up a terminal thread before a send");
+                imported = true;
             }
         }
     }
