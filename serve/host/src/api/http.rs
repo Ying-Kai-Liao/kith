@@ -214,27 +214,30 @@ async fn routine_hook(
     Path(id): Path<String>,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<Json<Value>, Response> {
+) -> Response {
     use crate::routines::hooks::{MAX_BODY, Refused};
     if body.len() > MAX_BODY {
-        return Err(ApiError(StatusCode::PAYLOAD_TOO_LARGE, "event too large".into()).into_response());
+        return ApiError(StatusCode::PAYLOAD_TOO_LARGE, "event too large".into()).into_response();
     }
     let headers =
         headers.iter().filter_map(|(k, v)| Some((k.as_str().to_owned(), v.to_str().ok()?.to_owned()))).collect();
-    hub.routines.receive(&hub, &id, &headers, &body).map(Json).map_err(|e| {
-        let status = match e {
-            Refused::Unauthorized => StatusCode::UNAUTHORIZED,
-            Refused::Paused | Refused::NotHere => StatusCode::CONFLICT,
-            Refused::Invalid(_) => StatusCode::BAD_REQUEST,
-            // 409 reads as "do not retry"; a delivery refused only for now says when to come back.
-            Refused::Busy | Refused::Held => StatusCode::SERVICE_UNAVAILABLE,
-        };
-        let mut response = ApiError(status, e.to_string()).into_response();
-        if e.retry() {
-            response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static(HOOK_RETRY_AFTER_SECS));
+    match hub.routines.receive(&hub, &id, &headers, &body) {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => {
+            let status = match e {
+                Refused::Unauthorized => StatusCode::UNAUTHORIZED,
+                Refused::Paused | Refused::NotHere => StatusCode::CONFLICT,
+                Refused::Invalid(_) => StatusCode::BAD_REQUEST,
+                // 409 reads as "do not retry"; a delivery refused only for now says when to come back.
+                Refused::Busy | Refused::Held => StatusCode::SERVICE_UNAVAILABLE,
+            };
+            let mut response = ApiError(status, e.to_string()).into_response();
+            if e.retry() {
+                response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static(HOOK_RETRY_AFTER_SECS));
+            }
+            response
         }
-        response
-    })
+    }
 }
 
 /// Matches the cloud queue's `HOOK_RETRY_MIN_MS` (30 s).
@@ -297,11 +300,11 @@ mod tests {
             routine_hook(State(hub.clone()), Path(id.clone()), headers, Bytes::from_static(b"{}"))
         };
 
-        let busy = post(key.clone()).await.expect_err("the routine is running").into_response();
+        let busy = post(key.clone()).await;
         assert_eq!(busy.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(busy.headers().get(header::RETRY_AFTER).expect("Retry-After"), "30");
 
-        let wrong = post("wrong".into()).await.expect_err("bad key").into_response();
+        let wrong = post("wrong".into()).await;
         assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
         assert!(wrong.headers().get(header::RETRY_AFTER).is_none());
         let _ = std::fs::remove_dir_all(dir);
