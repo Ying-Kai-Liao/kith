@@ -78,7 +78,8 @@ async fn naming_a_room_needs_the_setting_a_room_that_takes_people_and_every_agen
     let invite = made["inviteId"].as_str().unwrap();
     assert_eq!(r.hub.store.invite_rooms(invite), vec![room.clone()]);
     let listed = owner(&r, "invites", json!({})).await.unwrap();
-    assert_eq!(listed["invites"][0]["rooms"], json!([{"room": room, "done": false}]), "Kai sees the part waiting");
+    assert_eq!(listed["invites"][0]["rooms"], json!([{"room": room, "done": false, "waiting": "not yet joined: the invite isn't accepted"}]),
+        "Kai sees the part waiting and why");
 }
 
 #[tokio::test]
