@@ -9,7 +9,7 @@ use super::devices::{Caller, NotAllowed, Principal, principal};
 use super::{roles, str_arg};
 use crate::LockExt;
 use crate::agent::bot::Cmd;
-use crate::chat::room_people;
+use crate::chat::{invite_rooms, room_people};
 use crate::hub::Hub;
 use crate::remote::{account, cloud, crypto};
 use crate::store::{Invite, PersonRow, now_ms};
@@ -358,24 +358,33 @@ fn invites(hub: &Hub) -> Result<Value> {
 }
 
 /// Why a room part of an invite is not done yet, for the invites list: the same rows `invite_rooms::reconcile` reads.
-fn invite_room_waiting(hub: &Hub, invite: &Invite, room: &str) -> &'static str {
-    let accepted = hub
-        .store
-        .memberships()
-        .is_ok_and(|ms| ms.iter().any(|m| m.person_id == invite.person_id && m.invite_id == invite.invite_id));
-    if !accepted {
-        return "not yet joined: the invite isn't accepted";
+fn invite_room_waiting(hub: &Hub, invite: &Invite, room: &str) -> String {
+    if !invite_rooms::proved(hub, invite) {
+        // A revoked person's membership is set aside, so it would read as never accepted.
+        if hub.store.is_suspended(&invite.person_id) {
+            return "not joined: the person's access was revoked".into();
+        }
+        let accepted = hub
+            .store
+            .memberships()
+            .is_ok_and(|ms| ms.iter().any(|m| m.person_id == invite.person_id && m.invite_id == invite.invite_id));
+        return if accepted {
+            "not yet joined: no device has shown the invite".into()
+        } else {
+            "not yet joined: the invite isn't accepted".into()
+        };
     }
-    if !hub.store.devices_of(&invite.person_id).is_ok_and(|ds| ds.iter().any(|d| hub.store.device_proven(&d.key))) {
-        return "not yet joined: no device has shown the invite";
-    }
-    if hub.store.bot(room).ok().flatten().is_none_or(|r| r.deleted) {
-        return "room gone";
+    if invite_rooms::room_gone(hub, room) != Some(false) {
+        return "room gone".into();
     }
     if !room_people::enabled(&hub.store) {
-        return "not yet joined: people in rooms are turned off";
+        return "not yet joined: people in rooms are turned off".into();
     }
-    "not yet joined: the person isn't granted every agent in the room"
+    // A room that takes no people says so; the grant is the reason only when the room itself is fine.
+    match room_people::room_agents(&hub.store, room) {
+        Err(e) => format!("not yet joined: {e}"),
+        Ok(_) => "not yet joined: the person isn't granted every agent in the room".into(),
+    }
 }
 
 async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {

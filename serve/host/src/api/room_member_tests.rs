@@ -413,3 +413,20 @@ async fn my_rooms_names_the_granted_agents_by_id_and_shows_nothing_else_of_a_bot
     let again = call(&r, &phone, "myRooms", json!({})).await.unwrap();
     assert_eq!(again["rooms"][0]["ownerName"], "Kai", "asked once, kept");
 }
+
+/// The owner's name is asked through the room's agents in turn (the first answer stops the loop), and a missing
+/// answer is not kept (the next call asks again).
+#[tokio::test]
+async fn the_owners_name_asks_the_room_agents_and_a_missing_answer_is_not_kept() {
+    let r = Rig::new().await;
+    r.hub.store.kv_set(FLAG, "on").unwrap();
+    sam_with(&r, json!({"money": "member", "house": "member"})).await;
+    let room = room_of(&r, &["money", "house"]);
+    let phone = r.device("sam-phone", Some("sam"));
+    add(&r, &room).await;
+    let said = call(&r, &phone, "myRooms", json!({})).await.unwrap();
+    assert!(said["rooms"][0].get("ownerName").is_none(), "no name yet: {said}");
+    r.auth(&["person", "kai", "name=Kai"]);
+    let said = call(&r, &phone, "myRooms", json!({})).await.unwrap();
+    assert_eq!(said["rooms"][0]["ownerName"], "Kai", "{said}");
+}

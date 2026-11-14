@@ -56,15 +56,3 @@ Nothing is lost. Your chats are on the owner's Mac, and the web client shows the
 
 The Kith app for Mac or iPhone opens the same invites (`kith://invite`, or the `kithbot.app/i/…` page). Accounts in
 the apps show only in builds made with the Kith account key, so for now the web client is the easiest way in.
-
-## Runbook: turning people in rooms off on a Mac (owner)
-
-People in rooms (an invited person joining your group rooms) is on by default. The setting is the host's `rooms.people` row,
-read each time, so no restart is needed. To turn it off on this Mac (new adds and invites that name a room are refused; people
-already in a room stay and their turns go on):
-
-    sqlite3 ~/.kith/serve/serve.db "INSERT INTO kv(k, v) VALUES('rooms.people', 'off') ON CONFLICT(k) DO UPDATE SET v = 'off'"
-
-To turn it back on: `sqlite3 ~/.kith/serve/serve.db "DELETE FROM kv WHERE k = 'rooms.people'"`. `off`, `false` and `0` all mean
-off. A Mac that has stepped its authority to the core (`kith migrate step authority`) has it off regardless, until `held_under`
-lands.
