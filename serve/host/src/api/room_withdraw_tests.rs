@@ -157,10 +157,18 @@ async fn an_access_change_withdraws_the_card_of_the_room_turn_it_ended() {
     running(&r, &room, &c);
     call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {}})).await.unwrap();
     assert_only_sams_turn_ended(&r, &c);
+    // Adding an agent (house kept, money given) takes nothing: no turn ends, no card goes.
+    let kept = card_of(&r, &room_person_id(&room, r.hub.store.room_gen(&room)));
+    let key = crate::agent::bot::actor_key_as(&r.owner_bot("house"), &Lane::main(&room), Some(&kept.person));
+    r.hub.room_turn_begins(&key, &["ann".into(), "sam".into()]);
+    call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"house": "member", "money": "member"}}))
+        .await
+        .unwrap();
+    assert_eq!(state(&r, &kept), CardState::Live);
+    assert!(r.hub.room_turn_registered(&key), "the turn runs on");
     // A projects-only change names no agents and ends nothing.
-    let again = card_of(&r, &room_person_id(&room, r.hub.store.room_gen(&room)));
     call(&r, "setPersonAccess", json!({"personId": "sam", "projects": []})).await.unwrap();
-    assert_eq!(state(&r, &again), CardState::Live);
+    assert_eq!(state(&r, &kept), CardState::Live);
 }
 
 /// A card under a secret write is left to its own steps.
@@ -180,8 +188,10 @@ async fn a_revoke_ends_a_parked_turn_and_withdraws_its_card() {
     let (r, room) = rig().await;
     let c = open_cards(&r, &room);
     r.hub.store.card_park(&c.with_sam.id).unwrap();
-    running(&r, &room, &c);
-    assert_eq!(r.hub.end_room_turns_of("sam"), [c.with_sam.person.clone()]);
+    let key = running(&r, &room, &c);
+    assert_eq!(r.hub.end_room_turns_of("sam"), std::slice::from_ref(&c.with_sam.person));
+    // The actor learns it was ended by access (it withdraws what it opens late, not parks it) from the registry.
+    assert!(!r.hub.room_turn_registered(&key));
     crate::api::people::cut_off(&r.hub, "sam").await;
     assert_eq!(state(&r, &c.with_sam), CardState::Withdrawn);
 }
