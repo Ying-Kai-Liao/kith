@@ -883,7 +883,7 @@ async fn prove_invite(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result<Valu
     hub.store.set_device_proven(&key)?;
     PROOF_ATTEMPTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&key);
     // The rooms the invite names: a failure there is logged and retried at the next prove or start, never the prove's.
-    crate::chat::invite_rooms::reconcile(hub.clone()).await;
+    invite_rooms::reconcile(hub.clone()).await;
     Ok(json!({"proven": true}))
 }
 
