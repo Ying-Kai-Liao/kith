@@ -320,3 +320,55 @@ fn a_version_81_database_with_live_claims_migrates_and_its_rows_stay_owner_level
         .expect("state");
     assert_eq!(state, "ending");
 }
+
+#[test]
+fn a_version_82_database_with_warm_processes_migrates_each_row_as_its_one_conversation() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    let v82: Vec<_> = MIGRATIONS
+        .iter()
+        .copied()
+        .filter(|s| s.version <= 82)
+        .collect();
+    {
+        let c = start_with(&l, &v82).expect("v82 db");
+        assert_eq!(c.schema_version(), 82);
+        // A process with a conversation, one with none, one marked for a kill.
+        for (pid, conv, kill) in [
+            (10, Some("c1"), None),
+            (11, None, None),
+            (12, Some("c2"), Some(7)),
+        ] {
+            c.conn()
+                .execute(
+                    "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation, kill_at)
+                     VALUES (?1, 'e', 'kith-serve-host/1-a', 'ann', 'echo', ?2, ?3)",
+                    params![pid, conv, kill],
+                )
+                .expect("warm row");
+        }
+    }
+    let c = start_with(&l, MIGRATIONS).expect("migrates");
+    assert_eq!(c.migrated_from(), Some(82));
+    let db = c.conn();
+    let row = |pid: i64| -> (String, Option<i64>, String) {
+        db.query_row(
+            "SELECT conversation, kill_at, person FROM warm_procs WHERE pid = ?1",
+            [pid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("row")
+    };
+    assert_eq!(row(10), ("c1".into(), None, "ann".into()));
+    assert_eq!(row(11), (String::new(), None, "ann".into()));
+    assert_eq!(row(12), ("c2".into(), Some(7), "ann".into()));
+    // Now one process may hold several conversations; the same one twice is refused.
+    let ins = |conv: &str| {
+        db.execute(
+            "INSERT INTO warm_procs (pid, started, instance, conversation) VALUES (10, 'e', 'i', ?1)",
+            [conv],
+        )
+    };
+    ins("c9").expect("a second conversation");
+    assert!(ins("c9").is_err(), "one row per process and conversation");
+}

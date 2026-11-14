@@ -433,19 +433,19 @@ fn thread_value(reg: &Registry, origin: &str, live: bool, busy: bool) -> Value {
 pub(super) fn import(hub: &Hub, t: &Thread, reg: &Registry) -> Result<()> {
     let lock = hub.terminal.thread_lock(&t.key());
     let _one = lock.locked();
-    import_locked(hub, t, reg)
+    import_locked(hub, t, reg).map(drop)
 }
 
-/// `import` for a caller that holds the thread's lock already.
-fn import_locked(hub: &Hub, t: &Thread, reg: &Registry) -> Result<()> {
-    let Some(size) = transcript_size(reg) else { return Ok(()) };
+/// `import` for a caller that holds the thread's lock already. True when lines were imported.
+fn import_locked(hub: &Hub, t: &Thread, reg: &Registry) -> Result<bool> {
+    let Some(size) = transcript_size(reg) else { return Ok(false) };
     let live = registry::liveness(reg, hub.terminal.env().sessions.as_deref()).is_live();
     let (dev, ino) = file_id(reg.transcript());
     let (from, since, keep) = match load_cursor(hub, t) {
         Some(c) if (c.dev != 0 && (c.dev, c.ino) != (dev, ino)) || c.offset > size => {
             (0, newest_at(hub, t), FIRST_IMPORT)
         }
-        Some(c) if c.offset == size => return Ok(()),
+        Some(c) if c.offset == size => return Ok(false),
         Some(c) => (c.offset, 0, LATER_IMPORT),
         None => (0, newest_at(hub, t), FIRST_IMPORT),
     };
@@ -460,7 +460,7 @@ fn import_locked(hub: &Hub, t: &Thread, reg: &Registry) -> Result<()> {
     if !read.items.is_empty() {
         forget_loaded(hub, t);
     }
-    Ok(())
+    Ok(!read.items.is_empty())
 }
 
 /// When the thread last changed (ms).
@@ -742,6 +742,46 @@ fn send_gate_blocking(hub: &Hub, t: &Thread, may_wait: bool) -> Result<SendGate>
     Ok(SendGate::Free)
 }
 
+/// What [`sync_for_turn`] found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
+pub enum Synced {
+    /// The transcript has nothing the thread lacked (or the lane is no terminal thread): the loaded session is current.
+    Unchanged,
+    /// Lines a terminal wrote were imported since the session was loaded: the caller reloads the session
+    /// (`session/load`) before `session/prompt`, or the engine answers from a transcript that lacks them.
+    Moved,
+}
+
+/// Writer mode, step 7 (design 1.3): after `Begin::Running` (the turn holds the claim and the lock) and before the prompt is
+/// composed, brings the lane's thread in step with the transcript. The accept-time catch-up of [`send_gate`] can be minutes old
+/// by now (the turn may have waited behind another), and a terminal that wrote since left lines the loaded session lacks.
+/// Under the thread's lock, as `send_gate` is. The caller acts on `Moved` itself: the actor's `ForgetLoaded` (which an import
+/// sends) does nothing for a lane that has a turn running. The thread's stale mark is cleared, as `send_gate` does, so a mark
+/// left set would not reload once more for nothing.
+#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
+pub async fn sync_for_turn(hub: &Arc<Hub>, lane: &Lane) -> Result<Synced> {
+    let (hub, lane) = (hub.clone(), lane.clone());
+    // File reads and the store: off the runtime.
+    Ok(tokio::task::spawn_blocking(move || sync_for_turn_blocking(&hub, &lane)).await?)
+}
+
+#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
+pub(crate) fn sync_for_turn_blocking(hub: &Hub, lane: &Lane) -> Synced {
+    let Some(root) = &lane.thread else { return Synced::Unchanged };
+    let t = Thread { bot: lane.chat.clone(), root: root.clone() };
+    let lock = hub.terminal.thread_lock(&t.key());
+    let _one = lock.locked();
+    let imported = sync_one(hub, &t);
+    // A fork adopted, or a terminal seen live, marks the thread stale: the loaded session no longer matches the file.
+    let stale = hub.store.kv_get(&stale_key(&t)).is_some() && hub.store.kv_delete(&stale_key(&t)).is_ok();
+    if stale {
+        // Other lanes' actors that cached the session learn of it too (this lane's own does nothing while it runs a turn).
+        forget_loaded(hub, &t);
+    }
+    if imported || stale { Synced::Moved } else { Synced::Unchanged }
+}
+
 /// Who holds a thread, as far as a send into it is concerned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Writer {
@@ -812,8 +852,10 @@ pub async fn bot_gate(hub: &Arc<Hub>, chat: &str, root: &str) -> Result<(), Held
 }
 
 /// Brings this one thread in step with the registry now, with its lock held: a fork becomes the lane's session
-/// (`mapped` adopts it), the file's last lines are imported, and the cache is forgotten when any were.
-fn sync_one(hub: &Hub, t: &Thread) {
+/// (`mapped` adopts it), the file's last lines are imported, and the cache is forgotten when any were. True when lines
+/// were imported.
+fn sync_one(hub: &Hub, t: &Thread) -> bool {
+    let mut imported = false;
     let env = hub.terminal.env();
     for reg in registry::read_all(&env.state) {
         // `mapped` adopts a fork (the lane's session becomes the fork); only the lane's current session is imported.
@@ -829,10 +871,14 @@ fn sync_one(hub: &Hub, t: &Thread) {
         {
             let _ = hub.store.kv_set(&info_key(t), &stored);
         }
-        if let Err(error) = import_locked(hub, t, &reg) {
-            tracing::warn!(error = format!("{error:#}"), "couldn't catch up a terminal thread before a send");
+        match import_locked(hub, t, &reg) {
+            Ok(more) => imported |= more,
+            Err(error) => {
+                tracing::warn!(error = format!("{error:#}"), "couldn't catch up a terminal thread before a send");
+            }
         }
     }
+    imported
 }
 
 /// A turn of the host is about to start in `lane`: refused while a terminal holds the thread. `begin` marks the turn

@@ -11,6 +11,10 @@
 //! One writer per conversation, never per (conversation, account): the main account coming back while the backup's claim
 //! is live is no reason to start another, and `claims_one_writer` refuses it.
 //!
+//! While accounts are not switched `claim_next` makes no pick: the account the host's process runs as (`req.account`) is
+//! used and recorded (P7a, architect MUST 1), because the marks a pick reads are written by nobody then. Without a
+//! `req.account` it picks as before.
+//!
 //! UNSWITCHED. The account row is written only while `meta.accounts_core_writes` is `1` ([`super::core_writes`]); nothing
 //! sets it, so live Python stays the only writer of account state and this changes no account row in production. The
 //! requeue, the recorded reason and the "tried" memory (the claims of the turn that ended `out_of_usage`) are core.db's
@@ -251,7 +255,9 @@ pub(crate) enum Started {
 
 #[cfg(unix)]
 /// The claim after a usage-limit exit (or any claim that should choose its account): picks, claims with `account` set,
-/// starts the engine session on it. `req.account` is ignored. The claim is the usual step 1, so a second writer, a
+/// starts the engine session on it. `req.account` is the account the host's process runs as: while the core does not own
+/// account state (`accounts_core_writes` off) it is used as it is and recorded, and no pick is made; once it does,
+/// `req.account` is ignored and the pick stands. The claim is the usual step 1, so a second writer, a
 /// revoked person or an unreconciled generation refuse it exactly as before. When nothing is left the turn is failed,
 /// once (a turn that is no longer queued or parked is left as it is).
 pub(crate) fn claim_next(
@@ -272,7 +278,18 @@ pub(crate) fn claim_next(
         .ok_or_else(|| {
             Error::Refused(format!("kith-core: no conversation {}", req.conversation))
         })?;
-    let account = match next_account(core, ctx, &agent, req.turn, now_ms)? {
+    // Until accounts are switched (architect MUST 1, P7a) the marks this pick reads are written by nobody, so it would
+    // ignore the account the host's warm process runs as and write a session pointer for another one: the host's account
+    // is used and recorded as it is. Once switched the core picks, and the host follows its answer.
+    let host_account = match req.account {
+        Some(a) if !super::core_writes(core.conn())? => Some(a.to_owned()),
+        _ => None,
+    };
+    let picked = match host_account {
+        Some(a) => Next::Account(a),
+        None => next_account(core, ctx, &agent, req.turn, now_ms)?,
+    };
+    let account = match picked {
         Next::Account(a) => a,
         Next::Exhausted(text) => {
             if let Some(t) = req.turn {

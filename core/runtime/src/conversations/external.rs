@@ -224,7 +224,8 @@ fn blocked_in(tx: &Transaction<'_>, conversation: &str, now: i64) -> Result<Opti
         })));
     }
     let idle = tx.execute(
-        "UPDATE warm_procs SET kill_at = COALESCE(kill_at, ?2) WHERE conversation = ?1",
+        "UPDATE warm_procs SET kill_at = COALESCE(kill_at, ?2)
+         WHERE (pid, started) IN (SELECT pid, started FROM warm_procs WHERE conversation = ?1)",
         params![conversation, now],
     )?;
     if idle > 0 {

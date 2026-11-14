@@ -1478,3 +1478,26 @@ async fn a_mirrored_ask_card_reaches_the_owner_and_no_invited_person_or_bot_gues
 
 #[path = "core_claims_flow_tests.rs"]
 mod core_claims;
+
+#[tokio::test]
+async fn the_step_7_sync_says_whether_the_session_moved_and_must_be_reloaded() {
+    let r = Rig::new();
+    let root = r.app_thread("s9");
+    let lane = Lane::in_thread(&r.bot, &root);
+    r.append("s9", &user("2020-01-01T00:00:00Z", "from the app"));
+    r.register("s9", "builder", DEAD, Some("s9"));
+    // The first look at a session the host has not imported yet catches it up (and says so); then nothing is new.
+    sync::sync_for_turn(&r.hub, &lane).await.unwrap();
+    let before = r.forgets();
+    assert_eq!(sync::sync_for_turn(&r.hub, &lane).await.unwrap(), sync::Synced::Unchanged);
+    assert_eq!(r.forgets(), before);
+    // A terminal wrote while the turn waited: the lines are imported and the session must be reloaded.
+    r.append("s9", &user("2099-01-01T00:00:00Z", "typed in the terminal, then closed"));
+    assert_eq!(sync::sync_for_turn(&r.hub, &lane).await.unwrap(), sync::Synced::Moved);
+    assert!(r.texts(&root).iter().any(|t| t.contains("typed in the terminal")), "imported");
+    assert!(r.forgets() > before, "other actors that cached the session forget it");
+    // Told once: the mark is cleared, so the next turn does not reload for nothing.
+    assert_eq!(sync::sync_for_turn(&r.hub, &lane).await.unwrap(), sync::Synced::Unchanged);
+    // A lane that is no thread has nothing to sync.
+    assert_eq!(sync::sync_for_turn(&r.hub, &Lane::main(&r.bot)).await.unwrap(), sync::Synced::Unchanged);
+}

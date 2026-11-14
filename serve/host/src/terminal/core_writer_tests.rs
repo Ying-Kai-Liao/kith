@@ -51,6 +51,8 @@ struct World {
     keys: Vec<(String, String, i64)>,
     /// The enqueue is applied but its reply is lost, this many times.
     enqueue_lost: u32,
+    /// The `account` each `hostclaim.turn` was sent with (the account the host's process runs as).
+    sent_accounts: Vec<Option<String>>,
 }
 
 fn data(v: Value) -> Answer {
@@ -108,6 +110,7 @@ impl World {
             }
             "hostclaim.turn" => {
                 let turn = p["turn"].as_i64().unwrap();
+                self.sent_accounts.push(p["account"].as_str().map(str::to_owned));
                 if let Some(kind) = self.turn_refusal {
                     return refused(kind);
                 }
@@ -767,6 +770,61 @@ async fn a_stub_that_died_is_reported_exit_restarted_and_the_claim_made_again_on
     assert_eq!(r.claim_state(2), "running");
     assert_eq!(run.turn, 1, "the same turn, claimed again");
     assert_eq!(r.log().iter().filter(|m| *m == "hostclaim.enqueue").count(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_claim_carries_the_account_the_warm_process_runs_as() {
+    // Until accounts are switched the core uses it as sent and records it; switched, it picks and the host follows.
+    let r = Rig::new();
+    let mut stub = r.stub("spare");
+    r.w().account = "spare".into();
+    running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    assert_eq!(r.w().sent_accounts, [Some("spare".to_owned())]);
+    // A process whose account the host does not know sends none: the core picks.
+    let r = Rig::new();
+    let mut unknown = Real::start(&r.locks(), None);
+    running(r.writer.begin(&r.turn("s1", None), &mut unknown));
+    assert_eq!(r.w().sent_accounts, [None]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn our_own_claim_on_a_stub_that_is_gone_is_stopped_with_the_turn_put_back_and_claimed_again() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let first = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    // The stub restarts under a running claim (a crash the host noticed, an account switch): another pid now, and nothing
+    // will redeem or end the old claim. It used to read as `held` and the turn stayed queued until the next host start.
+    stub.kill_now();
+    stub.wait_dead();
+    stub.restart(None).unwrap();
+    assert_ne!(stub.pid(), first.pid);
+    let run = running(r.writer.begin(&r.turn("s1", Some(first.turn)), &mut stub));
+    assert_eq!(run.turn, first.turn, "the same turn");
+    assert_eq!(run.pid, stub.pid(), "on the new stub");
+    assert_eq!(r.claim_state(first.claim), "ended");
+    assert_eq!(r.claim_state(run.claim), "running");
+    let log = r.log();
+    let (stop, settle) = (
+        log.iter().position(|m| m == "hostclaim.stop").unwrap(),
+        log.iter().position(|m| m == "hostclaim.settle").unwrap(),
+    );
+    let second_claim = log.iter().rposition(|m| m == "hostclaim.turn").unwrap();
+    assert!(stop < settle && settle < second_claim, "stop, let the core end it, claim again: {log:?}");
+    assert_eq!(log.iter().filter(|m| *m == "hostclaim.enqueue").count(), 1, "never enqueued twice");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn our_own_claim_on_a_live_other_stub_is_not_ended() {
+    // Another warm process of this host running this very turn is no orphan: begin ends nothing it was not asked to.
+    let r = Rig::new();
+    let mut other = r.stub("main");
+    let first = running(r.writer.begin(&r.turn("s1", None), &mut other));
+    let mut stub = r.stub("main");
+    assert_ne!(stub.pid(), first.pid);
+    let b = r.writer.begin(&r.turn("s1", Some(first.turn)), &mut stub);
+    assert_eq!(b, Begin::Queued { turn: first.turn });
+    assert_eq!(r.claim_state(first.claim), "running");
+    assert!(!r.log().contains(&"hostclaim.stop".to_owned()));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
