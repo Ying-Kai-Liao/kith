@@ -752,36 +752,36 @@ pub enum Synced {
     /// session (`session/load`) before `session/prompt`, or the engine answers from a transcript that lacks them. A reload is
     /// cheap and the engine reads its own transcript file, so doubt reads as `Moved`.
     Moved,
-    /// The lane's session is another one now: a terminal forked it and the thread follows the fork (`mapped` adopts it). The
-    /// turn holds its claim on the old session, so it must not be prompted on the fork: the caller stops the claim with the
-    /// turn requeued and begins again on `session`, where the core says `held` while the terminal still has it.
+    /// The lane's session is not the one the turn claimed: a terminal forked it and the thread follows the fork (the scan or
+    /// this sync adopted it, either before or after the claim). The turn holds its claim on the old session, so it must not
+    /// be prompted on the fork: the caller stops the claim with the turn requeued and begins again on `session`, where the
+    /// core says `held` while the terminal still has it.
     Forked { session: String },
 }
 
-/// Writer mode, step 7 (design 1.3): after `Begin::Running` (the turn holds the claim and the lock) and before the prompt is
+/// Writer mode, step 7 (design 1.3): after `Begin::Running` (the turn holds the claim, on session `claimed`, and the lock) and before the prompt is
 /// composed, brings the lane's thread in step with the transcript. The accept-time catch-up of [`send_gate`] can be minutes old
 /// by now (the turn may have waited behind another), and a terminal that wrote since left lines the loaded session lacks.
 /// Under the thread's lock, as `send_gate` is. The caller acts on `Moved` itself: the actor's `ForgetLoaded` (which an import
 /// sends) does nothing for a lane that has a turn running. The thread's stale mark is cleared, as `send_gate` does, so a mark
 /// left set would not reload once more for nothing.
 #[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
-pub async fn sync_for_turn(hub: &Arc<Hub>, lane: &Lane) -> Result<Synced> {
-    let (hub, lane) = (hub.clone(), lane.clone());
+pub async fn sync_for_turn(hub: &Arc<Hub>, lane: &Lane, claimed: &str) -> Result<Synced> {
+    let (hub, lane, claimed) = (hub.clone(), lane.clone(), claimed.to_owned());
     // File reads and the store: off the runtime.
-    Ok(tokio::task::spawn_blocking(move || sync_for_turn_blocking(&hub, &lane)).await?)
+    Ok(tokio::task::spawn_blocking(move || sync_for_turn_blocking(&hub, &lane, &claimed)).await?)
 }
 
 #[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
-pub(crate) fn sync_for_turn_blocking(hub: &Hub, lane: &Lane) -> Synced {
+pub(crate) fn sync_for_turn_blocking(hub: &Hub, lane: &Lane, claimed: &str) -> Synced {
     let Some(root) = &lane.thread else { return Synced::Unchanged };
     let t = Thread { bot: lane.chat.clone(), root: root.clone() };
     let lock = hub.terminal.thread_lock(&t.key());
     let _one = lock.locked();
-    let session = |hub: &Hub| hub.store.kv_get(&lane_key("session", &t.bot, &t.lane()));
-    let before = session(hub);
     let imported = sync_one(hub, &t);
-    // `mapped` adopts a fork: the lane's session id changed under the turn's claim.
-    if let Some(now) = session(hub).filter(|now| Some(now) != before.as_ref()) {
+    // `mapped` adopts a fork, here or in a scan between the claim and now (a scan takes no thread lock): the lane is on a
+    // session the turn did not claim.
+    if let Some(now) = hub.store.kv_get(&lane_key("session", &t.bot, &t.lane())).filter(|now| now != claimed) {
         return Synced::Forked { session: now };
     }
     // A terminal seen live, or a fork adopted earlier, marks the thread stale: the loaded session no longer matches the file.
