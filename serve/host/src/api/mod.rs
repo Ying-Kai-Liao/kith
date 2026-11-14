@@ -32,6 +32,8 @@ mod folders;
 mod guard_props;
 mod host;
 mod http;
+#[cfg(test)]
+mod invite_rooms_tests;
 mod kith_info;
 mod kith_new;
 pub(crate) mod kith_tools;
