@@ -31,6 +31,8 @@ public struct HostPerson: Codable, Hashable, Sendable, Identifiable {
     public var personId: String
     public var name: String
     public var agents: [String: InviteRole]
+    /// Agents everyone holds (the `*` row): counted as held, never edited per person. Empty from an older host.
+    public var everyoneAgents: [String: InviteRole]
     public var projects: [String]
     public var joined: Bool
     public var openInvites: Int
@@ -41,11 +43,12 @@ public struct HostPerson: Codable, Hashable, Sendable, Identifiable {
     public var revoked: Bool
     public var id: String { personId }
 
-    public init(personId: String, name: String, agents: [String: InviteRole] = [:], projects: [String] = [],
+    public init(personId: String, name: String, agents: [String: InviteRole] = [:], everyoneAgents: [String: InviteRole] = [:], projects: [String] = [],
                 joined: Bool = false, openInvites: Int = 0, devices: [HostPersonDevice] = [], autoBots: Bool = false, revoked: Bool = false) {
         self.personId = personId
         self.name = name
         self.agents = agents
+        self.everyoneAgents = everyoneAgents
         self.projects = projects
         self.joined = joined
         self.openInvites = openInvites
@@ -54,7 +57,7 @@ public struct HostPerson: Codable, Hashable, Sendable, Identifiable {
         self.revoked = revoked
     }
 
-    private enum CodingKeys: String, CodingKey { case personId, name, agents, projects, joined, openInvites, devices, autoBots, revoked }
+    private enum CodingKeys: String, CodingKey { case personId, name, agents, everyoneAgents, projects, joined, openInvites, devices, autoBots, revoked }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -62,6 +65,7 @@ public struct HostPerson: Codable, Hashable, Sendable, Identifiable {
         let name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         self.name = name.isEmpty ? personId : name
         agents = try c.decodeIfPresent([String: InviteRole].self, forKey: .agents) ?? [:]
+        everyoneAgents = try c.decodeIfPresent([String: InviteRole].self, forKey: .everyoneAgents) ?? [:]
         projects = try c.decodeIfPresent([String].self, forKey: .projects) ?? []
         joined = try c.decodeIfPresent(Bool.self, forKey: .joined) ?? false
         openInvites = try c.decodeIfPresent(Int.self, forKey: .openInvites) ?? 0
@@ -83,6 +87,8 @@ public struct HostInvite: Codable, Hashable, Sendable, Identifiable {
     public var expiresAt: Int64
     public var usedAt: Int64?
     public var revokedAt: Int64?
+    /// The group rooms this invite adds the person to, and whether each part is done. Nil from a host before rooms with people.
+    public var rooms: [InviteRoom]?
     public var id: String { inviteId }
 
     public var expiry: Date { Date(timeIntervalSince1970: Double(expiresAt) / 1000) }
@@ -91,6 +97,12 @@ public struct HostInvite: Codable, Hashable, Sendable, Identifiable {
     public func isOpen(at now: Date = .now) -> Bool {
         usedAt == nil && revokedAt == nil && expiry > now
     }
+}
+
+/// One room an invite adds its person to; `done` once they joined it (or it can no longer happen).
+public struct InviteRoom: Codable, Hashable, Sendable {
+    public var room: String
+    public var done: Bool
 }
 
 /// What `createInvite` returns.
