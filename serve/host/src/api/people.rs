@@ -539,7 +539,7 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         // So does any other turn of theirs on an agent they may no longer use.
         stop_runs(hub, id, true).await;
         // A room turn they are part of runs on the meet of everyone's grant: one of them losing an agent ends it too.
-        hub.end_room_turns_of(id);
+        hub.end_room_turns_and_cards_of(id);
     }
     for w in &warnings {
         tracing::warn!(person = id, "{w}");
@@ -678,10 +678,7 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
     stop_runs(hub, person, false).await;
     // Every room turn whose basis holds them ends (rooms with people, rule 12); the room persons those turns run as are
     // swept below with their own claims, helpers and doors (a run's id is the room's, not theirs).
-    let room_turns = hub.end_room_turns_of(person);
-    for id in &room_turns {
-        crate::cards::withdraw_person(hub, id, None);
-    }
+    let room_turns = hub.end_room_turns_and_cards_of(person);
     // Their bots too, and the runs a restarted host no longer knows, found by their claims.
     let mut ids = vec![person.to_owned()];
     ids.extend(room_turns);
