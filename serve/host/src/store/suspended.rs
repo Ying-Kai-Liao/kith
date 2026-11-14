@@ -103,6 +103,12 @@ impl Store {
     /// Removal: what a revoke kept goes for good.
     pub fn forget_suspended(&self, person: &str) -> Result<()> {
         let c = self.db.locked();
+        // The room parts of their invites go first: they name the invites by the person's rows.
+        c.execute(
+            "DELETE FROM invite_rooms WHERE invite_id IN
+             (SELECT invite_id FROM invites WHERE person_id = ?1 UNION SELECT invite_id FROM suspended_invites WHERE person_id = ?1)",
+            [person],
+        )?;
         for table in ["suspended_devices", "suspended_memberships", "suspended_invites"] {
             c.execute(&format!("DELETE FROM {table} WHERE person_id = ?1"), [person])?;
         }

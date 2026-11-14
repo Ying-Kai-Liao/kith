@@ -21,9 +21,22 @@ impl Hub {
         join: bool,
         notice: &Value,
     ) -> Result<Option<Entry>> {
+        self.commit_room_person_for(room, person, join, notice, None)
+    }
+
+    /// [`Self::commit_room_person`] for an invite's room part: `part` is the invite whose done mark for `room` lands in
+    /// the join's own transaction (`Store::join_room_person_for`). Only a join carries one.
+    pub(crate) fn commit_room_person_for(
+        &self,
+        room: &str,
+        person: &str,
+        join: bool,
+        notice: &Value,
+        part: Option<&str>,
+    ) -> Result<Option<Entry>> {
         let _g = self.emit_lock.locked();
         let written = if join {
-            self.store.join_room_person(room, person, notice)?
+            self.store.join_room_person_for(room, person, notice, part)?
         } else {
             self.store.leave_room_person(room, person, notice)?
         };
