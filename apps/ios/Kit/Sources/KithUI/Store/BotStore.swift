@@ -310,7 +310,10 @@ public final class BotStore {
     }
 
     /// Display name of an entry's author in a group chat.
-    public func authorName(_ id: String?) -> String { id.flatMap { bots[$0]?.name } ?? "A deleted bot" }
+    /// An invited person has no row for a room's agents: their name comes from `myRooms`.
+    public func authorName(_ id: String?) -> String {
+        id.flatMap { bots[$0]?.name ?? MemberRoomLogic.agentName(in: myRooms.values, id: $0) } ?? "A deleted bot"
+    }
 
     func updateComputer(_ change: (inout Computer) -> Void) {
         var c = computer

@@ -37,6 +37,21 @@ private func entry(seq: Int64, kind: String, text: String? = nil) -> Entry {
     #expect(MemberRoomLogic.ownerLine(room: "Studio") == "Studio is the owner's room, on the owner's computer. The owner sees everything said here.")
 }
 
+@Test func theOwnersNameAndTheAgentsComeFromMyRooms() throws {
+    let room = HostContract.MyRoom(id: "r", name: "Studio", agents: ["Planner"], agentList: [.init(id: "bot-9", name: "Planner")], ownerName: "Sam", stay: 7)
+    #expect(MemberRoomLogic.ownerName(room) == "Sam")
+    #expect(MemberRoomLogic.startLines(room: "Studio", owner: "Sam") == ["You see Studio from when Sam added you.", "Sam sees everything said here."])
+    #expect(MemberRoomLogic.ownerLine(room: "Studio", owner: "Sam") == "Studio is Sam's room, on Sam's computer. Sam sees everything said here.")
+    #expect(MemberRoomLogic.agentName(in: [room], id: "bot-9") == "Planner")
+    #expect(MemberRoomLogic.agentName(in: [room], id: "gone") == nil)
+    // A host before these fields: the room decodes, names come from agents, the owner stays "the owner".
+    let old = try JSONDecoder().decode(HostContract.MyRoom.self, from: Data(#"{"id":"r","name":"Studio","agents":["planner"],"stay":7}"#.utf8))
+    #expect(old.agentList == nil && old.ownerName == nil)
+    #expect(MemberRoomLogic.agentNames(old) == ["planner"])
+    #expect(MemberRoomLogic.ownerName(old) == "the owner")
+    #expect(MemberRoomLogic.agentName(in: [old], id: "bot-9") == nil)
+}
+
 @Test func askedLineUntilAnAgentReplies() {
     #expect(MemberRoomLogic.askedLine(entries: [entry(seq: 1, kind: "user", text: "hi @planner check")], agents: ["planner", "coder"]) == "Asked planner")
     #expect(MemberRoomLogic.askedLine(entries: [entry(seq: 1, kind: "user", text: "@planner and @coder please")], agents: ["planner", "coder"]) == "Asked planner and coder")
