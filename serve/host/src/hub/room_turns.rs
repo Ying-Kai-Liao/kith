@@ -35,6 +35,11 @@ impl Hub {
         self.add_entry_from(lane, EntryKind::User, turn, data, Some(room_gen))
     }
 
+    /// Whether the actor `key` still has a turn in the registry (a revoke takes an ended one out first).
+    pub fn room_turn_registered(&self, key: &str) -> bool {
+        self.room_turns.locked().contains_key(key)
+    }
+
     /// The people the actor `key` runs a room turn for now.
     #[cfg(test)]
     pub fn room_turn_of(&self, key: &str) -> Option<Vec<String>> {
@@ -61,13 +66,15 @@ impl Hub {
     /// stop, which kills the agent process and what it started. Returns the room person ids they ran as, for the sweep of
     /// their claims, helpers and doors that follows a revoke or a removal.
     pub fn end_room_turns_of(&self, person: &str) -> Vec<String> {
-        let keys: Vec<String> = self
-            .room_turns
-            .locked()
-            .iter()
-            .filter(|(_, people)| people.iter().any(|p| p == person))
-            .map(|(k, _)| k.clone())
-            .collect();
+        // Taken out of the registry now, before the stop: the actor sees it is gone when its turn ends and withdraws what it
+        // opened since the cards were read, rather than parking it (`Actor::ended_by_access`).
+        let mut turns = self.room_turns.locked();
+        let keys: Vec<String> =
+            turns.iter().filter(|(_, people)| people.iter().any(|p| p == person)).map(|(k, _)| k.clone()).collect();
+        for key in &keys {
+            turns.remove(key);
+        }
+        drop(turns);
         let mut ids = Vec::new();
         for key in keys {
             if let Some(id) = person_of(&key)
@@ -80,5 +87,44 @@ impl Hub {
             }
         }
         ids
+    }
+
+    /// The ids a room person ran as in epochs `person` was part of: for each of their stays, every room person id whose
+    /// join gen falls inside it (a stay holds from its join to just before its leave). Unlike `room_person_ids_of`, never
+    /// an epoch from before they joined or after they left, whose turns had a basis without them. Found from the stored
+    /// stays, so it still names a turn the registry lost in a host restart.
+    pub fn room_person_ids_holding(&self, person: &str) -> Vec<String> {
+        let mut ids = Vec::new();
+        for room in self.store.rooms_with_person(person) {
+            let stays = self.store.room_stays(&room);
+            for mine in stays.iter().filter(|s| s.person == person) {
+                for stay in &stays {
+                    let inside =
+                        stay.joined_gen >= mine.joined_gen && mine.left_gen.is_none_or(|l| stay.joined_gen < l);
+                    let id = crate::chat::room_turn::room_person_id(&room, stay.joined_gen);
+                    if inside && !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+        ids
+    }
+
+    /// Ends every room turn whose basis holds `person` and withdraws the open cards of those turns (an access change or a
+    /// revoke): the running turns' ids, and the stored epochs they may have had before a restart. The one place a room
+    /// turn's cards close. Returns the room person ids of the turns that were running, for the sweep that follows a revoke.
+    pub fn end_room_turns_and_cards_of(&self, person: &str) -> Vec<String> {
+        let running = self.end_room_turns_of(person);
+        let mut ids = running.clone();
+        for id in self.room_person_ids_holding(person) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        for id in &ids {
+            crate::cards::withdraw_room_person(self, id);
+        }
+        running
     }
 }

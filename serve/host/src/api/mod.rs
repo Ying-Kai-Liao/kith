@@ -68,6 +68,8 @@ mod room_points_props;
 mod room_secrets_props;
 #[cfg(test)]
 mod room_turn_tests;
+#[cfg(test)]
+mod room_withdraw_tests;
 mod scratch;
 #[cfg(test)]
 mod stepped_e2e_tests;

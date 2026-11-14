@@ -465,6 +465,7 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     let person = invited_or_core_person(hub, &bin, id).await?;
     let changed_agents = !b["agents"].is_null();
     let mut warnings: Vec<String> = Vec::new();
+    let mut lost_agent = false;
     {
         let _w = AUTH_WRITES.lock().await;
         if changed_agents {
@@ -481,6 +482,8 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
                 .filter(|r| r.via == "own")
                 .map(|r| r.agent)
                 .collect();
+            // An agent taken away: a grant or a role change alone ends nothing in a room.
+            lost_agent = held.iter().any(|a| !want.contains_key(a));
             let mut made = person.made.clone();
             // With KITH_CORE_AUTHORITY=1 the core is told after kith-auth, the order of kith-auth's own `mirror_to_core`
             // (M2-18a): the file is the truth until the switch, so a change that reached only the core would close the
@@ -538,8 +541,11 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         super::botguests::enforce(hub, id).await;
         // So does any other turn of theirs on an agent they may no longer use.
         stop_runs(hub, id, true).await;
-        // A room turn they are part of runs on the meet of everyone's grant: one of them losing an agent ends it too.
-        hub.end_room_turns_of(id);
+        // A room turn they are part of runs on the meet of everyone's grant: one of them losing an agent ends it too, and
+        // its cards go. Adding an agent ends nothing.
+        if lost_agent {
+            hub.end_room_turns_and_cards_of(id);
+        }
     }
     for w in &warnings {
         tracing::warn!(person = id, "{w}");
@@ -678,10 +684,7 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
     stop_runs(hub, person, false).await;
     // Every room turn whose basis holds them ends (rooms with people, rule 12); the room persons those turns run as are
     // swept below with their own claims, helpers and doors (a run's id is the room's, not theirs).
-    let room_turns = hub.end_room_turns_of(person);
-    for id in &room_turns {
-        crate::cards::withdraw_person(hub, id, None);
-    }
+    let room_turns = hub.end_room_turns_and_cards_of(person);
     // Their bots too, and the runs a restarted host no longer knows, found by their claims.
     let mut ids = vec![person.to_owned()];
     ids.extend(room_turns);
