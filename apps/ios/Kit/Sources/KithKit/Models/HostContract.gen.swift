@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "f876a8953708c58526a1d5120ee36b33337bacc827331d7e70f6f7d2c536395d"
+    public static let sha256 = "bcf448cf7c0cd2c80ed77231f0f648c2ba6931c765dce71cd1374af2386be877"
 }
 
 extension HostContract {
@@ -1052,6 +1052,29 @@ extension HostContract {
         }
     }
 
+    /// What making an invite answers: its id and links, when it lapses, and the person it is for.
+    public struct CreatedInvite: Codable, Hashable, Sendable {
+        public var inviteId: String
+        public var link: String
+        public var appLink: String
+        public var kithLink: String
+        public var webLink: String?
+        public var pageLink: String?
+        public var expiresAt: Int64
+        public var personId: String
+
+        public init(inviteId: String, link: String, appLink: String, kithLink: String, webLink: String? = nil, pageLink: String? = nil, expiresAt: Int64, personId: String) {
+            self.inviteId = inviteId
+            self.link = link
+            self.appLink = appLink
+            self.kithLink = kithLink
+            self.webLink = webLink
+            self.pageLink = pageLink
+            self.expiresAt = expiresAt
+            self.personId = personId
+        }
+    }
+
     /// What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).
     public struct RoomPersonChange: Codable, Hashable, Sendable {
         public var gen: Int64
@@ -1870,6 +1893,21 @@ extension HostContract {
         }
     }
 
+    /// What `createInvite` takes.
+    public struct CreateInviteParams: Codable, Hashable, Sendable {
+        public var agents: [String: String]
+        public var name: String?
+        public var personId: String?
+        public var rooms: [String]?
+
+        public init(agents: [String: String], name: String? = nil, personId: String? = nil, rooms: [String]? = nil) {
+            self.agents = agents
+            self.name = name
+            self.personId = personId
+            self.rooms = rooms
+        }
+    }
+
     /// What `addRoomPerson` takes.
     public struct AddRoomPersonParams: Codable, Hashable, Sendable {
         public var room: String
@@ -1967,6 +2005,7 @@ extension HostContract {
         case botLeave
         case peerAgents
         case peerRevokes
+        case createInvite
         case addRoomPerson
         case removeRoomPerson
         case roomPeople
@@ -1975,7 +2014,7 @@ extension HostContract {
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .addRoomPerson, .removeRoomPerson, .roomPeople]
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople]
 
     /// What an invited person may call.
     public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation, .myRooms, .leaveRoom]
@@ -2042,6 +2081,7 @@ extension HostContract {
         case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
         case "RoomPerson": _ = try d.decode(RoomPerson.self, from: data)
         case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
+        case "CreatedInvite": _ = try d.decode(CreatedInvite.self, from: data)
         case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
         case "MyRoom": _ = try d.decode(MyRoom.self, from: data)
         case "MyRooms": _ = try d.decode(MyRooms.self, from: data)
@@ -2106,6 +2146,7 @@ extension HostContract {
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
         case "PeerRevokesParams": _ = try d.decode(PeerRevokesParams.self, from: data)
+        case "CreateInviteParams": _ = try d.decode(CreateInviteParams.self, from: data)
         case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
         case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)
         case "RoomPeopleParams": _ = try d.decode(RoomPeopleParams.self, from: data)

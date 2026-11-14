@@ -417,6 +417,20 @@
       "doc": "The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host.",
       "fields": { "enabled": "bool", "gen": "int", "people": "[RoomPerson]" }
     },
+    "CreatedInvite": {
+      "doc": "What making an invite answers: its id and links, when it lapses, and the person it is for.",
+      "fields": {
+        "inviteId": "string",
+        "link": "string",
+        "appLink": "string",
+        "kithLink": "string",
+        "webLink": "string?",
+        "pageLink": "string?",
+        "expiresAt": "int",
+        "personId": "string"
+      },
+      "mayOmit": ["webLink", "pageLink"]
+    },
     "RoomPersonChange": {
       "doc": "What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).",
       "fields": { "gen": "int", "changed": "bool" }
@@ -874,6 +888,12 @@
       "who": ["peer"],
       "params": { "handles": "[HandleRevoke]" },
       "result": "HandleRevokes"
+    },
+    "createInvite": {
+      "doc": "Makes an invite for a new person (`name`) or one kith already knows (`personId`), with the agents offered (agent -> member|guest). `rooms` (rooms with people) names group rooms the person is put in once a device of theirs has proved the invite, or at the next host start if the host stopped between; a room the person left or Kai took them out of is never joined again by the invite. The cloud's invite is the same with or without rooms. Refused with rooms while the host setting is off, for a room that takes no people, for an agent in the room the person is not granted, and for a person who has already joined here.",
+      "who": ["owner"],
+      "params": { "agents": "{string}", "name": "string?", "personId": "string?", "rooms": "[string]?" },
+      "result": "CreatedInvite"
     },
     "addRoomPerson": {
       "doc": "Rooms with people: lets a person into a group room, one step with one new gen. Refused while the host setting is off, for the owner, for a room with no Kith agent or with an outside bot, and for a person not granted every agent in it (asked live).",
