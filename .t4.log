@@ -1,0 +1,16 @@
+warning: Cargo.toml: file `/Volumes/Macos 1TB/kith/.claude/worktrees/agent-ab83898881b3a0b8b/serve/host/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `kith`
+  * `bin` target `kith-serve`
+warning: `kith-serve` (manifest) generated 1 warning
+   Compiling kith-core v0.1.0 (/Volumes/Macos 1TB/kith/.claude/worktrees/agent-ab83898881b3a0b8b/core/runtime)
+   Compiling kith-acp v0.1.0 (/Volumes/Macos 1TB/kith/.claude/worktrees/agent-ab83898881b3a0b8b/core/acp)
+   Compiling kith-serve v0.1.3 (/Volumes/Macos 1TB/kith/.claude/worktrees/agent-ab83898881b3a0b8b/serve/host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 35s
+     Running tests/hq_e2e.rs (../../.target-c/debug/deps/hq_e2e-0df56d9b3c960079)
+
+running 2 tests
+test a_warm_owner_process_in_a_room_starts_again_when_the_rooms_members_change ... ok
+test a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_or_while_anyone_is_in ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 13.84s
+
