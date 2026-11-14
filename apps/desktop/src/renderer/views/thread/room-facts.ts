@@ -32,7 +32,8 @@ export function useRoomFacts(group: Bot) {
   return {
     model,
     people,
-    enabled: model.enabled === true && people.supported !== false,
+    // Off hides the section, unless someone still has an open stay: the owner can still remove them.
+    enabled: (model.enabled === true || model.stays.some((s) => (s.leftGen ?? null) === null)) && people.supported !== false,
     agents: parts.agents as RoomAgent[],
     outside: parts.outside,
     block: roomBlock(parts),

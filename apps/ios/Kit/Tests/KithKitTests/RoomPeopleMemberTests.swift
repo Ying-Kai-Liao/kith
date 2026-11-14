@@ -32,9 +32,9 @@ private func entry(seq: Int64, kind: String, text: String? = nil) -> Entry {
 }
 
 @Test func aPersonsRoomWords() {
-    #expect(MemberRoomLogic.startLines(room: "Studio") == ["You see Studio from when Kai added you.", "Kai sees everything said here."])
+    #expect(MemberRoomLogic.startLines(room: "Studio") == ["You see Studio from when the owner added you.", "The owner sees everything said here."])
     #expect(MemberRoomLogic.closedLine(room: "Studio") == "You're no longer in Studio.")
-    #expect(MemberRoomLogic.ownerLine(room: "Studio") == "Studio is Kai's room, on Kai's Mac. Kai sees everything said here.")
+    #expect(MemberRoomLogic.ownerLine(room: "Studio") == "Studio is the owner's room, on the owner's computer. The owner sees everything said here.")
 }
 
 @Test func askedLineUntilAnAgentReplies() {
@@ -67,4 +67,30 @@ private func entry(seq: Int64, kind: String, text: String? = nil) -> Entry {
     #expect(RoomPeopleLogic.closingRooms(person: ben, newRoles: ["planner": .guest, "coder": .member], inRooms: inRooms).isEmpty)
     #expect(RoomPeopleLogic.revokeLine(person: "Ben", rooms: ["Studio"]) == "Studio closes for Ben, and no agent answers there until you remove Ben from it.")
     #expect(RoomPeopleLogic.revokeLine(person: "Ben", rooms: []) == nil)
+}
+
+@Test func aCachedRoomTheFirstListDoesNotNameIsClosedAfterALaunch() throws {
+    func bot(_ json: String) throws -> Bot { try JSONDecoder().decode(Bot.self, from: Data(json.utf8)) }
+    let legacy = try bot(#"{"id":"room-old","kind":"group","name":"Old"}"#)
+    let agent = try bot(#"{"id":"a","name":"planner","hqAgent":"planner"}"#)
+    let owners = try bot(#"{"id":"mixed","kind":"group","name":"Mixed","members":["a"]}"#)
+    let cached = MemberRoomLogic.cachedRoomIds(restored: ["room-1"], bots: [legacy, agent, owners])
+    #expect(cached == ["room-1", "room-old"])
+    let fresh = [HostContract.MyRoom(id: "room-2", name: "Launch", agents: [], stay: 3)]
+    #expect(MemberRoomLogic.closed(before: cached, after: fresh) == ["room-1", "room-old"])
+}
+
+@Test func aNewStayOrAnUnknownOneDropsTheOldMessages() {
+    let seven = HostContract.MyRoom(id: "r", name: "Studio", agents: [], stay: 7)
+    let twelve = HostContract.MyRoom(id: "r", name: "Studio", agents: [], stay: 12)
+    #expect(!MemberRoomLogic.stayChanged(known: seven, fresh: seven))
+    #expect(MemberRoomLogic.stayChanged(known: seven, fresh: twelve))
+    #expect(MemberRoomLogic.stayChanged(known: nil, fresh: seven))
+}
+
+@Test func aRoomsCacheKeepsItsStay() throws {
+    struct Shape: Codable { var rooms: [HostContract.MyRoom]? }
+    let data = try JSONEncoder().encode(Shape(rooms: [HostContract.MyRoom(id: "r", name: "Studio", agents: ["planner"], stay: 7)]))
+    #expect(try JSONDecoder().decode(Shape.self, from: data).rooms?.first?.stay == 7)
+    #expect(try JSONDecoder().decode(Shape.self, from: Data("{}".utf8)).rooms == nil)
 }

@@ -14,6 +14,8 @@ private struct MemberRoomRefresh: ViewModifier {
         content.task(id: scenePhase) {
             guard model.myRooms[botId] != nil, scenePhase == .active else { return }
             while !Task.isCancelled {
+                // The list first: a new stay drops the old messages before the room is read again.
+                await model.refreshMyRooms()
                 await model.loadRoom(botId)
                 try? await Task.sleep(for: .seconds(8))
             }

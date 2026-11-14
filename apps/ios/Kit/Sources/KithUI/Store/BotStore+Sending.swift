@@ -120,8 +120,8 @@ extension BotStore {
                         }
                     }
                     return try await client.send(botId: botId, text: text, clientNonce: nonce, threadId: thread, attachments: ids,
-                                                 pasted: pasted, newTask: newTask, start: start, via: via, budget: budget,
-                                                 stay: self.myRooms[botId]?.stay)
+                                                 pasted: self.myRooms[botId] != nil ? [] : pasted, newTask: newTask, start: start, via: via,
+                                                 budget: self.myRooms[botId] != nil ? nil : budget, stay: self.myRooms[botId]?.stay)
                 }
                 outgoingFiles[nonce] = nil
                 outgoingStarts[nonce] = nil

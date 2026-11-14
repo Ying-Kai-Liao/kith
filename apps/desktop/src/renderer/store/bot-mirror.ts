@@ -284,11 +284,13 @@ export class BotMirror extends Observable {
     try {
       const raw = localStorage.getItem(this.cacheKey)
       if (!raw) return
-      const cache = JSON.parse(raw) as { stamp?: string; hostId?: string; rev: number; bots: Bot[]; entries: Entry[] }
+      const cache = JSON.parse(raw) as { stamp?: string; hostId?: string; rev: number; bots: Bot[]; rooms?: MyRoom[]; entries: Entry[] }
       this.cacheStamp = cache.stamp ?? ''
       this.hostId = cache.hostId ?? null
       this.rev = cache.rev
       this.bots = new Map(cache.bots.map((b) => [b.id, b]))
+      // A person's rooms are kept with their stay, so the first fresh list after a launch can close what is gone and drop what a new stay replaced.
+      this.myRooms = new Map((cache.rooms ?? []).map((r) => [r.id, r]))
       const grouped = new Map<string, Entry[]>()
       for (const e of cache.entries) grouped.set(e.botId, [...(grouped.get(e.botId) ?? []), e])
       this.entries = grouped
@@ -325,7 +327,7 @@ export class BotMirror extends Observable {
       kept.push(...list.filter((e) => !e.id.startsWith('local-')).slice(-200))
       kept.push(...list.filter((e) => e.id.startsWith('local-') && e.data.status === 'failed'))
     }
-    const cache = { stamp: mirrorStamp(this.appVersion, this.hello?.version ?? ''), hostId: this.hostId, rev: this.rev, bots: [...this.bots.values()], entries: kept }
+    const cache = { stamp: mirrorStamp(this.appVersion, this.hello?.version ?? ''), hostId: this.hostId, rev: this.rev, bots: [...this.bots.values()], rooms: [...this.myRooms.values()], entries: kept }
     try {
       localStorage.setItem(this.cacheKey, JSON.stringify(cache))
     } catch {}

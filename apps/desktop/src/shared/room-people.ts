@@ -265,7 +265,12 @@ export function waitingAgent(entry: RoomEntryFacts & { data: { agent?: string } 
 }
 
 /** Ben's start-of-history lines and what the room shows him: true when no older page is left to load. */
-export const BEN_START_LINES = (room: string) => [`You see ${room} from when Kai added you.`, 'Kai sees everything said here.']
+/** What a person calls the owner. The host does not send the owner's name yet (follow-up: `myRooms` carries it), so it says "the owner". */
+export const OWNER_LABEL = 'the owner'
+
+export const BEN_START_LINES = (room: string, owner = OWNER_LABEL) => [`You see ${room} from when ${owner} added you.`, `${owner[0]!.toUpperCase()}${owner.slice(1)} sees everything said here.`]
+
+export const ownerLine = (room: string, owner = OWNER_LABEL) => `${room} is ${owner}'s room, on ${owner}'s computer. ${owner[0]!.toUpperCase()}${owner.slice(1)} sees everything said here.`
 
 /** The people's side: a room Ben is in, from `myRooms`, or null once it is gone from a refreshed list. */
 export const stillIn = (rooms: readonly MyRoom[], id: string): MyRoom | null => rooms.find((r) => r.id === id) ?? null

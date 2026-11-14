@@ -92,7 +92,9 @@ export class BotStore extends BotSync {
               ids.push(id)
             }
           }
-          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via, budget, this.outgoingEngines.get(nonce) ?? null, this.myRooms.get(botId)?.stay ?? null)
+          // A person's room takes neither pasted marks nor a turn budget (the host refuses them).
+          const room = this.myRooms.has(botId)
+          return client.send(botId, trimmed, nonce, thread, ids, room ? [] : pasted, newTask, place, via, room ? null : budget, this.outgoingEngines.get(nonce) ?? null, this.myRooms.get(botId)?.stay ?? null)
         }, true)
         this.outgoingFiles.delete(nonce)
         this.outgoingPlaces.delete(nonce)
@@ -774,8 +776,15 @@ export class BotStore extends BotSync {
     }
     const next = new Map(rooms.map((r) => [r.id, r]))
     for (const id of this.myRooms.keys()) if (!next.has(id)) this.closeRoom(id)
+    // A person's cached rooms that no list names (the app was closed meanwhile) are closed too.
+    for (const b of [...this.bots.values()]) if (b.kind === 'group' && !b.hqAgent && !next.has(b.id) && !this.isOwner && b.members.length === 0) this.closeRoom(b.id)
     for (const r of rooms) {
       this.closedRooms.delete(r.id)
+      // A removed-and-added-again person has a new stay: what the old one showed is dropped before the room is read again.
+      if (this.myRooms.get(r.id)?.stay !== r.stay) {
+        this.entries.delete(r.id)
+        this.historyComplete.delete(r.id)
+      }
       const old = this.bots.get(r.id)
       const last = this.chat(r.id).at(-1)
       this.bots.set(r.id, normalizeBot({ ...(old ?? {}), id: r.id, kind: 'group', name: r.name, members: [], ...(last ? { lastAt: last.createdAt } : {}) } as Parameters<typeof normalizeBot>[0]))
@@ -783,6 +792,7 @@ export class BotStore extends BotSync {
     this.myRooms = next
     this.onRosterChanged?.()
     this.changed()
+    this.scheduleSave()
   }
 
   /** The room is gone for this person (left, removed, closed): the cache is dropped and the view says so. */

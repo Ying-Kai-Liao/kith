@@ -249,13 +249,27 @@ public enum MemberRoomLogic {
         before.subtracting(after.map(\.id))
     }
 
+    /// The rooms a launch may have cached: the ones kept with their stay, and a group bot with no agent or member behind it
+    /// (a cache from before rooms were kept). The first fresh list closes whichever it does not name.
+    public static func cachedRoomIds(restored: [String], bots: [Bot]) -> Set<String> {
+        Set(restored).union(bots.filter { $0.isGroup && $0.hqAgent == nil && $0.members.isEmpty }.map(\.id))
+    }
+
     /// The host refused the call because the stay is over (403/404), as opposed to a link that dropped.
     public static func isClosedRefusal(_ error: Error) -> Bool {
         guard case let HostError.http(status, _) = error else { return false }
         return status == 403 || status == 404
     }
 
-    public static func startLines(room: String) -> [String] { ["You see \(room) from when Kai added you.", "Kai sees everything said here."] }
+    /// What a person calls the owner. The host does not send the owner's name yet (follow-up: `myRooms` carries it).
+    public static let ownerLabel = "the owner"
+
+    private static var ownerCapitalized: String { ownerLabel.prefix(1).uppercased() + ownerLabel.dropFirst() }
+
+    public static func startLines(room: String) -> [String] { ["You see \(room) from when \(ownerLabel) added you.", "\(ownerCapitalized) sees everything said here."] }
+
+    /// A cached room whose stay differs from the list's (or that no stay was kept for): its messages belong to an earlier stay.
+    public static func stayChanged(known: HostContract.MyRoom?, fresh: HostContract.MyRoom) -> Bool { known?.stay != fresh.stay }
 
     public static func closedLine(room: String) -> String { "You're no longer in \(room)." }
 
@@ -282,7 +296,7 @@ public enum MemberRoomLogic {
     }
 
     /// Room info for a person: one muted line, never a people list.
-    public static func ownerLine(room: String) -> String { "\(room) is Kai's room, on Kai's Mac. Kai sees everything said here." }
+    public static func ownerLine(room: String) -> String { "\(room) is \(ownerLabel)'s room, on \(ownerLabel)'s computer. \(ownerCapitalized) sees everything said here." }
 }
 
 public extension RoomPeopleLogic {

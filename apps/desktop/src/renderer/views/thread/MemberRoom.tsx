@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Bot } from '@shared/models'
-import { BEN_START_LINES, askedLine } from '@shared/room-people'
+import { BEN_START_LINES, askedLine, ownerLine } from '@shared/room-people'
 import { Button } from '../../components/Controls'
 import { Dialog } from '../../components/Overlay'
 import { Text } from '../../components/Text'
@@ -18,9 +18,11 @@ export function useMemberRoom(botId: string) {
   const inRoom = store.myRooms.has(botId)
   useEffect(() => {
     if (!inRoom) return
-    void store.loadRoom(botId)
-    const timer = setInterval(() => void store.loadRoom(botId), POLL_MS)
-    const onFocus = () => void store.loadRoom(botId)
+    // The list first: a new stay drops the old messages before the room is read again.
+    const refresh = () => void store.refreshMyRooms().then(() => store.loadRoom(botId))
+    refresh()
+    const timer = setInterval(refresh, POLL_MS)
+    const onFocus = refresh
     window.addEventListener('focus', onFocus)
     return () => {
       clearInterval(timer)
@@ -44,7 +46,7 @@ export function MemberRoomInfo({ room }: { room: Bot }) {
         </div>
       ))}
       <Text as="div" size="footnote" tone="secondary" className="room-people-footer">
-        {room.name} is Kai's room, on Kai's Mac. Kai sees everything said here.
+        {ownerLine(room.name)}
       </Text>
       <button className="press bot-member-remove room-leave" onClick={() => setLeaving(true)}>Leave {room.name}</button>
       <Dialog

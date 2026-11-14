@@ -23,7 +23,8 @@ extension BotStore {
 
     /// The room's agents and what the "won't answer here" line says, nil while nothing is wrong or the setting is off.
     public func wontAnswerLine(in group: Bot) -> String? {
-        guard isOwner, roomPeopleEnabled[group.id] == true else { return nil }
+        // Off hides the line, unless someone still has an open stay.
+        guard isOwner, roomPeopleEnabled[group.id] == true || (roomStays[group.id] ?? []).contains(where: { $0.leftGen == nil }) else { return nil }
         let parts = RoomPeopleLogic.parts(members: group.members, find: { bots[$0] }, outsideName: { _ in "Bot" })
         let rows = RoomPeopleLogic.needsKai(stays: roomStays[group.id] ?? [], people: roomPeopleList, agents: parts.agents)
         return RoomPeopleLogic.wontAnswerLine(rows, agents: parts.agents)

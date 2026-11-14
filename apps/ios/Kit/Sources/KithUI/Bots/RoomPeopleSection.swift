@@ -26,7 +26,8 @@ struct RoomPeopleSection: View {
         RoomPeopleLogic.parts(members: group.members, find: { model.bots[$0] }, outsideName: { _ in "Bot" })
     }
 
-    private var enabled: Bool { store.enabled == true && !store.people.unsupported }
+    // Off hides the section, unless someone still has an open stay: the owner can still remove them.
+    private var enabled: Bool { (store.enabled == true || store.stays.contains { $0.leftGen == nil }) && !store.people.unsupported }
 
     var body: some View {
         let agents = parts.agents
