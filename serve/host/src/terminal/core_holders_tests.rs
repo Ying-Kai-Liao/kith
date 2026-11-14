@@ -28,6 +28,7 @@ struct C {
 }
 
 #[derive(Default)]
+#[allow(clippy::struct_excessive_bools, reason = "one switch per scripted answer")]
 struct World {
     claims: Vec<C>,
     log: Vec<String>,
@@ -184,7 +185,7 @@ impl Rig {
     }
 
     /// A process that has exited and been reaped.
-    fn gone(&self) -> (u32, String) {
+    fn gone() -> (u32, String) {
         let mut kid = Command::new("sleep").arg("60").stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
         let (pid, started) = (kid.id(), proc_start(kid.id()).unwrap());
         kid.kill().unwrap();
@@ -313,12 +314,12 @@ fn this_starts_own_owner_turn_is_no_holder_but_an_earlier_starts_is() {
 #[test]
 fn a_recorded_gone_claim_is_settled_free_unless_its_group_still_has_processes() {
     let r = Rig::new(true, true);
-    r.put("s1", "terminal", "owner", Some(r.gone()), None);
+    r.put("s1", "terminal", "owner", Some(Rig::gone()), None);
     let reader = Reader::new(&r.state);
     assert_eq!(reader.read("s1"), Reading::Free, "settle ends it once the pid is confirmed gone");
     assert!(r.log().contains(&"hostclaim.settle".to_owned()));
     // The core keeps it live (its group still runs): the reader never calls it free.
-    r.put("s2", "terminal", "owner", Some(r.gone()), None);
+    r.put("s2", "terminal", "owner", Some(Rig::gone()), None);
     r.w().stuck = true;
     assert!(matches!(reader.read("s2"), Reading::By(..)), "not free while the core still holds it");
 }
@@ -378,7 +379,7 @@ fn end_claimed_needs_only_the_cores_kill_list() {
     assert_eq!(ended, vec![pid]);
     // A claim with no recorded start is never signalled.
     let (pid2, _) = r.proc();
-    assert!(claim::end_claimed(&[(pid2, None)], GRACE).is_empty());
+    assert_eq!(claim::end_claimed(&[(pid2, None)], GRACE), Vec::<u32>::new());
     assert!(pid_runs(pid2));
 }
 
