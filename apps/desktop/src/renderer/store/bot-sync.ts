@@ -137,6 +137,7 @@ export class BotSync extends BotMirror {
         }
         // After the hello the role is known, so the model knows which half to read; a pending bot survives a restart this way.
         this.onBotGuests?.('connect')
+        void this.refreshMyRooms()
         if (!alive()) return
         await new Promise<void>((resolve, reject) => {
           this.requestedSince = this.rev
@@ -170,6 +171,9 @@ export class BotSync extends BotMirror {
     }
     void attempt()
   }
+
+  /** An invited person's rooms; `BotStore` reads them. */
+  async refreshMyRooms(): Promise<void> {}
 
   /** Resubscribes from the current `rev` on the same link. */
   private restartEvents() {

@@ -308,17 +308,17 @@ public extension HostClient {
     /// `budget`: to a group only, the turns this message gives the room (clamped to 1...100).
     func send(botId: String, text: String, clientNonce: String, threadId: String? = nil, attachments: [String]? = nil,
               pasted: [String]? = nil, newTask: Bool = false, start: FolderChoice? = nil, via: String? = nil,
-              budget: Int? = nil) async throws -> Entry {
+              budget: Int? = nil, stay: Int64? = nil) async throws -> Entry {
         struct Body: Encodable {
             var botId: String; var text: String; var clientNonce: String; var threadId: String?; var attachments: [String]?
             var pasted: [String]?; var newTask: Bool?; var project: String?; var folder: String?; var via: String?
-            var budget: Int?
+            var budget: Int?; var stay: Int64?
         }
         struct Res: Decodable { var entry: Entry }
         let body = Body(botId: botId, text: text, clientNonce: clientNonce, threadId: threadId, attachments: attachments,
                         pasted: pasted?.isEmpty == false ? pasted : nil, newTask: newTask ? true : nil,
                         project: start?.projectId, folder: start?.folderPath, via: via,
-                        budget: budget.map(Turns.clamp))
+                        budget: budget.map(Turns.clamp), stay: stay)
         do {
             let res: Res = try await call(.send, body)
             return res.entry

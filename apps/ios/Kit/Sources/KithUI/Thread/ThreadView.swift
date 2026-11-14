@@ -50,6 +50,8 @@ public struct ThreadView: View {
         transcript
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
+                // Rooms with people: which agents won't answer, and why. Fix opens Room info (owner only).
+                if let bot, bot.isGroup { WontAnswerLine(group: bot) { roomInfo = true }.padding(.horizontal, 16) }
                 // A bot's tasks carry their own writer banner on the card, so the box stays (a send to a held task
                 // takes it over first, or waits for the terminal); elsewhere the banner sits over the box.
                 switch ThreadFeed.chatBottom(held: bot?.usesTasks == true && bot?.botGuest == nil ? nil : ThreadFeed.heldTask(in: model.chat(botId)),
@@ -107,6 +109,7 @@ public struct ThreadView: View {
                 guard bot?.isGroup == true else { return }
                 await model.botGuests.refresh()
                 await model.refreshConversation(botId)
+                await model.refreshRoomPeople(botId)
             }
             .kithSheet(isPresented: $roomInfo) {
                 RoomInfoView(groupId: botId)

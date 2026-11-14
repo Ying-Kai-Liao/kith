@@ -1,5 +1,6 @@
 import { ConversationBook } from '@shared/conversation'
 import type { IncomingCall } from '@shared/incoming-call'
+import type { MyRoom } from '@shared/host-contract.gen'
 import { mirrorStamp } from '@shared/mirror-stamp'
 import { checkHost, PROTOCOL, type HostVersion, type VersionMismatch } from '@shared/compat'
 import {
@@ -40,6 +41,11 @@ export class BotMirror extends Observable {
   hello: Hello | null = null
   hostVersion: HostVersion | null = null
   bots = new Map<string, Bot>()
+  /** An invited person's group rooms (`myRooms`): each shown as a group in the roster, with the stay its posts must carry. Never persisted. */
+  myRooms = new Map<string, MyRoom>()
+  /** A room that went away under an open view: the view shows the one neutral closed state. */
+  closedRooms = new Set<string>()
+  closedRoomNames = new Map<string, string>()
   entries = new Map<string, Entry[]>()
   /** The room conversations of the group chats (owner's app only: the host sends them to nobody else). */
   conversations = new ConversationBook()
@@ -156,7 +162,7 @@ export class BotMirror extends Observable {
 
   /** Roster order: pinned first, then where the user dragged them, then most recent activity. */
   get roster(): Bot[] {
-    return visibleBots([...this.bots.values()], this.granted).filter((b) => !b.hidden).sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin) || Number(b.pinned) - Number(a.pinned) || a.position - b.position || b.lastAt - a.lastAt)
+    return visibleBots([...this.bots.values()].filter((b) => !this.myRooms.has(b.id)), this.granted).concat([...this.myRooms.keys()].flatMap((id) => this.bots.get(id) ?? [])).filter((b) => !b.hidden).sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin) || Number(b.pinned) - Number(a.pinned) || a.position - b.position || b.lastAt - a.lastAt)
   }
 
   /** The built-in scratch bot Quick chat talks to; none on a kernel from before it, or on a computer that isn't yours. */

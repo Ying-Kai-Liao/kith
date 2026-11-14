@@ -1,4 +1,4 @@
-import type { LinkCode } from '@shared/host-contract.gen'
+import type { LinkCode, MyRoom } from '@shared/host-contract.gen'
 import type { HostClient } from '../client/host-client'
 import type { QuickEngine } from '@shared/quick-chat'
 import {
@@ -92,7 +92,7 @@ export class BotStore extends BotSync {
               ids.push(id)
             }
           }
-          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via, budget, this.outgoingEngines.get(nonce) ?? null)
+          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via, budget, this.outgoingEngines.get(nonce) ?? null, this.myRooms.get(botId)?.stay ?? null)
         }, true)
         this.outgoingFiles.delete(nonce)
         this.outgoingPlaces.delete(nonce)
@@ -103,6 +103,8 @@ export class BotStore extends BotSync {
       } catch (error) {
         if (this.outgoingFiles.has(nonce)) this.lastError = `Couldn't send the files: ${error instanceof Error ? error.message : error}`
         this.markLocal(nonce, botId, 'failed')
+        // A refused room send may mean the stay ended: the room list says so.
+        if (this.myRooms.has(botId)) void this.refreshMyRooms()
       }
     })()
   }
@@ -755,6 +757,68 @@ export class BotStore extends BotSync {
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error)
       this.changed()
+    }
+  }
+
+  /**
+   * An invited person's rooms: each becomes a group in the roster (no member bots; the room's agents are `myRooms`).
+   * A room missing from the answer is closed for them: its cache goes and an open view shows the closed state.
+   */
+  override async refreshMyRooms() {
+    if (this.isOwner || !this.client || this.retired) return
+    let rooms: MyRoom[]
+    try {
+      rooms = await this.client.myRooms()
+    } catch {
+      return // a host before rooms with people (or the setting off) has none
+    }
+    const next = new Map(rooms.map((r) => [r.id, r]))
+    for (const id of this.myRooms.keys()) if (!next.has(id)) this.closeRoom(id)
+    for (const r of rooms) {
+      this.closedRooms.delete(r.id)
+      const old = this.bots.get(r.id)
+      const last = this.chat(r.id).at(-1)
+      this.bots.set(r.id, normalizeBot({ ...(old ?? {}), id: r.id, kind: 'group', name: r.name, members: [], ...(last ? { lastAt: last.createdAt } : {}) } as Parameters<typeof normalizeBot>[0]))
+    }
+    this.myRooms = next
+    this.onRosterChanged?.()
+    this.changed()
+  }
+
+  /** The room is gone for this person (left, removed, closed): the cache is dropped and the view says so. */
+  closeRoom(id: string) {
+    const name = this.bots.get(id)?.name
+    if (name) this.closedRoomNames.set(id, name)
+    this.myRooms.delete(id)
+    this.bots.delete(id)
+    this.entries.delete(id)
+    this.closedRooms.add(id)
+    this.onRosterChanged?.()
+    this.changed()
+    this.scheduleSave()
+  }
+
+  /** A room's messages the person may see; a refusal means the room closed under them. */
+  async loadRoom(id: string) {
+    if (!this.client || !this.myRooms.has(id)) return
+    try {
+      for (const e of await this.client.history(id, Number.MAX_SAFE_INTEGER, 100)) this.upsert(e)
+      this.changed()
+    } catch (error) {
+      // The host's refusal (403) or the room missing from a fresh list closes it; a dropped link only retries later.
+      const status = (error as { status?: number }).status
+      if (status === 403 || status === 404) this.closeRoom(id)
+      else await this.refreshMyRooms()
+    }
+  }
+
+  async leaveRoom(id: string) {
+    try {
+      await this.withLink((c) => c.leaveRoom(id))
+      this.closeRoom(id)
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error)
+      await this.refreshMyRooms()
     }
   }
 
