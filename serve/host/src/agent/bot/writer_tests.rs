@@ -219,7 +219,12 @@ impl Rig {
     async fn until(&self, what: &str, mut ok: impl FnMut(&Self) -> bool) {
         let by = Instant::now() + Duration::from_secs(40);
         while !ok(self) {
-            assert!(Instant::now() < by, "timed out waiting for {what}; the core was asked: {:?}", self.w().log);
+            assert!(
+                Instant::now() < by,
+                "timed out waiting for {what}; the core was asked: {:?}; the bot said: {:?}",
+                self.w().log,
+                self.texts("a", "notice").into_iter().chain(self.texts("a", "agent")).collect::<Vec<_>>()
+            );
             let live = |c: &str| {
                 self.w()
                     .claims
@@ -699,6 +704,17 @@ actor_test! {
         rig.send("a", "doomed").await;
         rig.until("the turn is cancelled", |r| r.turn_state(2) == "cancelled").await;
         assert!(rig.texts("a", "agent").iter().all(|t| !t.contains("doomed")), "never prompted");
+        // The actor recovers from the failed start on its own (it may try a fresh session, and that fails the same way); the
+        // registration works again only once it is quiet, or the next message lands in a start being torn down.
+        rig.until("the failed start's notice", |r| r.texts("a", "notice").iter().any(|t| t.contains("Couldn't start"))).await;
+        let mut quiet = (rig.w().log.len(), Instant::now());
+        while quiet.1.elapsed() < Duration::from_millis(1500) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let now = rig.w().log.len();
+            if now != quiet.0 {
+                quiet = (now, Instant::now());
+            }
+        }
         rig.w().session_register_refused = false;
         rig.send("a", "after").await;
         rig.until("the reply", |r| r.replied("a", "after")).await;
