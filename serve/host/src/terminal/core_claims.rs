@@ -155,7 +155,7 @@ pub(super) fn row_answer(f: &Paths, method: &str, params: &Value) -> Answer {
 }
 
 /// One host row. A refusal and a core that is not there are both errors here; the rows that refuse as data answer `Ok`.
-fn row(f: &Paths, method: &str, params: &Value) -> std::io::Result<Value> {
+pub(super) fn row(f: &Paths, method: &str, params: &Value) -> std::io::Result<Value> {
     match row_answer(f, method, params) {
         Answer::Done(v) => Ok(v),
         Answer::Refused(said) => Err(failed(said)),
@@ -168,7 +168,7 @@ fn owner_or(person: Option<&str>) -> &str {
 }
 
 /// A claim the core shows, as the host's [`Claim`].
-fn claim_of(v: &Value) -> Claim {
+pub(super) fn claim_of(v: &Value) -> Claim {
     let person = v["person"].as_str().filter(|p| !p.is_empty() && *p != "owner").map(str::to_owned);
     let kind = match v["kind"].as_str() {
         Some("terminal") => Kind::Terminal,
@@ -190,14 +190,14 @@ fn claim_of(v: &Value) -> Claim {
 }
 
 /// The core's live claim on `sid` (claimed, running or ending), as the row shows it.
-fn live(f: &Paths, sid: &str) -> std::io::Result<Option<Value>> {
+pub(super) fn live(f: &Paths, sid: &str) -> std::io::Result<Option<Value>> {
     let shown = row(f, "hostclaim.show", &json!({"conversation": sid}))?;
     Ok(Some(shown["claim"].clone()).filter(Value::is_object))
 }
 
 /// [`live`] after `settle`: a holder that crashed with its claim still `running` is ended by the core once its pid is
 /// confirmed gone, so it does not keep the session for ever.
-fn live_settled(f: &Paths, sid: &str) -> std::io::Result<Option<Value>> {
+pub(super) fn live_settled(f: &Paths, sid: &str) -> std::io::Result<Option<Value>> {
     let Some(c) = live(f, sid)? else { return Ok(None) };
     let gone = c["pid"].as_u64().and_then(|p| u32::try_from(p).ok()).is_some_and(|p| !pid_runs(p));
     if !gone {
