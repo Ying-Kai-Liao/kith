@@ -17,6 +17,21 @@ fn lane_conversation(hub: &Hub, lane: &Lane) -> Value {
 }
 
 pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
+    // An invited person in a group room (set by `member_call` alone): the room's rules read and write for them, never
+    // the owner's arms below.
+    if let Some(person) = b["asRoomPerson"].as_str() {
+        use crate::chat::room_post;
+        let answer = match method {
+            "history" => Some(room_post::history(hub, person, &b).await?),
+            "thread" => Some(room_post::thread(hub, person, &b).await?),
+            "send" => Some(room_post::send(hub, person, &b).await?),
+            "react" => Some(room_post::react(hub, person, &b).await?),
+            _ => None,
+        };
+        if let Some(answer) = answer {
+            return Ok(ControlFlow::Break(answer));
+        }
+    }
     Ok(ControlFlow::Break(match method {
         "routineSchedule" => crate::routines::schedule_preview(&b, now_ms())?,
         "routines" => hub.routines.list(str_arg(&b, "botId")?),
@@ -62,6 +77,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let before = b["beforeSeq"].as_i64().unwrap_or(i64::MAX);
             let limit = b["limit"].as_i64().unwrap_or(100).clamp(1, 500);
             let mut entries = hub.store.history(bot, before, limit)?;
+            crate::chat::room_post::mark_hidden(&hub.store, bot, &mut entries);
             crate::hqmem::summary::hide_forgotten(&hub.store, &mut entries);
             let conversation = lane_conversation(hub, &Lane::main(bot));
             json!({"entries": entries, "folder": hub.place_folder(bot, &Lane::main(bot)).await?, "conversation": conversation})
@@ -71,6 +87,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let (bot, root) = (str_arg(&b, "botId")?, str_arg(&b, "rootId")?);
             let lane = Lane::in_thread(bot, root);
             let mut entries = hub.store.thread(bot, root, 500)?;
+            crate::chat::room_post::mark_hidden(&hub.store, bot, &mut entries);
             crate::hqmem::summary::hide_forgotten(&hub.store, &mut entries);
             let conversation = lane_conversation(hub, &lane);
             json!({"entries": entries, "folder": hub.place_folder(bot, &lane).await?, "conversation": conversation})

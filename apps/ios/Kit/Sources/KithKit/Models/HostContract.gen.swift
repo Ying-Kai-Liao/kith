@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "8622ed909714feb630e1b98b3f369fc89a9f48db67a1bed84da76ddaef223111"
+    public static let sha256 = "bcf448cf7c0cd2c80ed77231f0f648c2ba6931c765dce71cd1374af2386be877"
 }
 
 extension HostContract {
@@ -1086,6 +1086,39 @@ extension HostContract {
         }
     }
 
+    /// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).
+    public struct MyRoom: Codable, Hashable, Sendable {
+        public var id: String
+        public var name: String
+        public var agents: [String]
+        public var stay: Int64
+
+        public init(id: String, name: String, agents: [String], stay: Int64) {
+            self.id = id
+            self.name = name
+            self.agents = agents
+            self.stay = stay
+        }
+    }
+
+    /// The group rooms a person is in right now.
+    public struct MyRooms: Codable, Hashable, Sendable {
+        public var rooms: [MyRoom]
+
+        public init(rooms: [MyRoom]) {
+            self.rooms = rooms
+        }
+    }
+
+    /// Whether leaving a room changed anything (false: they had already left).
+    public struct RoomLeft: Codable, Hashable, Sendable {
+        public var left: Bool
+
+        public init(left: Bool) {
+            self.left = left
+        }
+    }
+
     /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
     public struct BotProof: Codable, Hashable, Sendable {
         public var state: BotGuestState
@@ -1335,10 +1368,11 @@ extension HostContract {
         public var folder: String?
         public var clear: Bool?
         public var budget: Int64?
+        public var stay: Int64?
         public var engine: String?
         public var engineModel: String?
 
-        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
+        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, stay: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
             self.botId = botId
             self.text = text
             self.clientNonce = clientNonce
@@ -1351,6 +1385,7 @@ extension HostContract {
             self.folder = folder
             self.clear = clear
             self.budget = budget
+            self.stay = stay
             self.engine = engine
             self.engineModel = engineModel
         }
@@ -1904,6 +1939,21 @@ extension HostContract {
         }
     }
 
+    /// What `myRooms` takes.
+    public struct MyRoomsParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
+    /// What `leaveRoom` takes.
+    public struct LeaveRoomParams: Codable, Hashable, Sendable {
+        public var room: String
+
+        public init(room: String) {
+            self.room = room
+        }
+    }
+
     /// Each method's name, as called.
     public enum Method: String, CaseIterable, Sendable {
         case hello
@@ -1959,13 +2009,15 @@ extension HostContract {
         case addRoomPerson
         case removeRoomPerson
         case roomPeople
+        case myRooms
+        case leaveRoom
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
     public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople]
 
     /// What an invited person may call.
-    public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation]
+    public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation, .myRooms, .leaveRoom]
 
     /// What an invited person's unproven device may call.
     public static let unprovenMethods: [Method] = [.proveInvite]
@@ -2031,6 +2083,9 @@ extension HostContract {
         case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
         case "CreatedInvite": _ = try d.decode(CreatedInvite.self, from: data)
         case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
+        case "MyRoom": _ = try d.decode(MyRoom.self, from: data)
+        case "MyRooms": _ = try d.decode(MyRooms.self, from: data)
+        case "RoomLeft": _ = try d.decode(RoomLeft.self, from: data)
         case "BotProof": _ = try d.decode(BotProof.self, from: data)
         case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
         case "BotPosted": _ = try d.decode(BotPosted.self, from: data)
@@ -2095,6 +2150,8 @@ extension HostContract {
         case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
         case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)
         case "RoomPeopleParams": _ = try d.decode(RoomPeopleParams.self, from: data)
+        case "MyRoomsParams": _ = try d.decode(MyRoomsParams.self, from: data)
+        case "LeaveRoomParams": _ = try d.decode(LeaveRoomParams.self, from: data)
         default: return false
         }
         return true

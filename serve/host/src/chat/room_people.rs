@@ -69,21 +69,32 @@ pub fn people_and_gen(store: &Store, room: &str) -> (Vec<String>, i64) {
     (store.room_open_people(room), store.room_gen(room))
 }
 
-/// Whether `person` may be in `room` right now: an open stay AND the live may(person, agent) for every agent in it,
-/// and a room that takes people at all. Never stored; fails closed on any doubt. The member side asks this before
-/// every read, post and event.
-#[cfg_attr(not(test), allow(dead_code))] // the member side (rooms with people, PR B) is its caller
-pub async fn room_member_may(store: &Store, person: &str, room: &str) -> bool {
-    if !store.room_open_people(room).iter().any(|p| p == person) {
-        return false;
-    }
-    let Ok(agents) = room_agents(store, room) else { return false };
+/// What a live check found: the open stay's `joined_gen` (the gen an entry must have come from for the person to see
+/// it) and the room's agents the check asked about.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Seat {
+    pub joined: i64,
+    pub agents: Vec<String>,
+}
+
+/// [`room_member_may`] with what it found. `None` when `person` has no open stay, the room takes no people, or any
+/// agent in it is a no (or could not be asked). Never stored.
+pub async fn live_seat(store: &Store, person: &str, room: &str) -> Option<Seat> {
+    let joined = store.room_open_seat(room, person)?;
+    let agents = room_agents(store, room).ok()?;
     for agent in &agents {
         if !may_use(person, agent).await {
-            return false;
+            return None;
         }
     }
-    true
+    Some(Seat { joined, agents })
+}
+
+/// Whether `person` may be in `room` right now: an open stay AND the live may(person, agent) for every agent in it,
+/// and a room that takes people at all. Never stored; fails closed on any doubt. The member side asks this before
+/// every read, post and event (the events through `Authority`, which answers the same question synchronously).
+pub async fn room_member_may(store: &Store, person: &str, room: &str) -> bool {
+    live_seat(store, person, room).await.is_some()
 }
 
 fn notice(store: &Store, person: &str, joined: bool) -> Value {

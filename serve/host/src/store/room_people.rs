@@ -49,6 +49,57 @@ impl Store {
         st.query_map([room], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
+    /// The `joined_gen` of `person`'s open stay in `room`: the gen an entry must have come from for them to see it.
+    /// `None` when they have no open stay.
+    pub fn room_open_seat(&self, room: &str, person: &str) -> Option<i64> {
+        let c = self.db.locked();
+        c.query_row(
+            "SELECT joined_gen FROM room_people WHERE room = ?1 AND person = ?2 AND left_gen IS NULL",
+            params![room, person],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
+    /// A person's post, written in the same transaction as the checks that let it in: `person` still has the open stay
+    /// `seat` and no revoke has set them aside (`suspend_person` writes under this same connection lock), then the line
+    /// is appended stamped with the room's gen as it stands in that transaction. `None`, nothing written, when either
+    /// check fails.
+    pub fn insert_room_post(&self, room: &str, person: &str, seat: i64, data: &Value) -> Result<Option<Entry>> {
+        let mut c = self.db.locked();
+        let tx = c.transaction()?;
+        let open: Option<i64> = tx
+            .query_row(
+                "SELECT joined_gen FROM room_people WHERE room = ?1 AND person = ?2 AND left_gen IS NULL",
+                params![room, person],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let set_aside = ["suspended_devices", "suspended_memberships", "suspended_invites"].iter().any(|table| {
+            tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE person_id = ?1)"), [person], |r| {
+                r.get::<_, bool>(0)
+            })
+            .unwrap_or(true)
+        });
+        if open != Some(seat) || set_aside {
+            return Ok(None);
+        }
+        let origin: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(MAX(joined_gen), MAX(COALESCE(left_gen, 0))), 0) FROM room_people WHERE room = ?1",
+            [room],
+            |r| r.get(0),
+        )?;
+        let turn: i64 =
+            tx.query_row("SELECT COALESCE(MAX(turn), 0) FROM entries WHERE bot_id = ?1", [room], |r| r.get(0))?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let (entry, _) =
+            insert_entry_in(&tx, &id, &Lane::main(room), EntryKind::User, turn + 1, data, now_ms(), Some(origin))?;
+        tx.commit()?;
+        Ok(Some(entry))
+    }
+
     /// The room's gen: the newest join or leave in it (`0`: no person has ever been in it). Derived, so there is no
     /// second counter to keep in step with the entries.
     pub fn room_gen(&self, room: &str) -> i64 {
@@ -222,7 +273,7 @@ mod tests {
         let lane = Lane::main("r");
         let old = s.insert_entry(&lane, EntryKind::Notice, 0, &line("old")).unwrap();
         let stamped = s.insert_entry_from_gen(&lane, EntryKind::Notice, 0, &line("new"), 5, 42).unwrap();
-        assert_eq!(s.origin_gen(&old.id), None, "from before any person");
+        assert_eq!(s.origin_gen(&old.id), None, "never stamped");
         assert_eq!(s.origin_gen(&stamped.id), Some(42));
         s.update_entry(&stamped.id, &line("edited")).unwrap();
         assert_eq!(s.origin_gen(&stamped.id), Some(42), "an edit never re-stamps it");

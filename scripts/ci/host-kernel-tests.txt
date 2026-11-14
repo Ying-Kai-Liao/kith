@@ -23,6 +23,8 @@ src/api/core_revokes_tests.rs	api::core_revokes_tests::
 src/api/bot_guests_tests.rs	api::bot_guests_tests::
 src/api/room_people_tests.rs	api::room_people_tests::
 src/api/invite_rooms_tests.rs	api::invite_rooms_tests::
+src/api/room_member_tests.rs	api::room_member_tests::
+src/api/roles_props/rooms.rs	api::roles_props::rooms::
 src/api/botguests_props.rs	api::botguests_props::
 src/api/revoke_tests.rs	api::revoke_tests::
 src/api/roles_tests.rs	api::roles_tests::
