@@ -217,6 +217,7 @@ async fn a_persons_launch_with_access_carries_what_their_conversation_was_given(
             session: "run:g:3:sam:acp:chat:".into(),
             project: None,
             reply: None,
+            members: Vec::new(),
         };
         let grant = RunGrant::issue(&table, identity).unwrap();
         let env = grant.env(&sock);

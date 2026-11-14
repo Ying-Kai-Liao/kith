@@ -74,6 +74,7 @@ jobs:
       writer_lock: ${{ steps.f.outputs.writer_lock }}
       revoke: ${{ steps.f.outputs.revoke }}
       secrets: ${{ steps.f.outputs.secrets }}
+      rooms: ${{ steps.f.outputs.rooms }}
       lease: ${{ steps.f.outputs.lease }}
       schedule_fire: ${{ steps.f.outputs.schedule_fire }}
       ios: ${{ steps.h.outputs.ios }}
@@ -226,6 +227,19 @@ jobs:
               - 'core/runtime/src/secrets/**'
               - 'core/runtime/src/authority/secret_writes.rs'
               - 'core/api/src/table/cards.rs'
+              - '.github/workflows/ci.yml'
+            # The TLA+ models of rooms with people (what a room turn reads, stamps and is reused for; what a revoke ends) and
+            # the code they cover (the room parts of the invitee-access and revoke-access skills).
+            rooms:
+              - 'verification/rooms/**'
+              - 'verification/threads/run.sh'
+              - 'serve/host/src/chat/room_turn.rs'
+              - 'serve/host/src/chat/room_input.rs'
+              - 'serve/host/src/chat/group.rs'
+              - 'serve/host/src/hub/room_turns.rs'
+              - 'serve/host/src/agent/bot/room_turn.rs'
+              - 'serve/host/src/runauth/room.rs'
+              - 'core/kernel/src/launch/room.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ model of the holder lease and the code it covers (the list in the holder-lease skill).
             lease:
@@ -513,6 +527,25 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/secrets/run.sh
+
+  # The same for rooms with people (a room turn's input, stamps and reuse; a revoke ending its turns): verification/rooms/checks.tsv.
+  rooms-with-people:
+    needs: changes
+    if: needs.changes.outputs.rooms == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check
+        run: verification/rooms/run.sh
 
   # The same for the holder lease (ping-anchored deadline, sleep-aware clock): verification/lease/checks.tsv.
   holder-lease:
@@ -1205,7 +1238,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

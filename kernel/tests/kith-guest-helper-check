@@ -131,4 +131,14 @@ has "tools/list: ask_helper for a guest's run" "$(tools KITH_PERSON=guest KITH_A
 listed=$(tools X=1)
 expect "tools/list: not for a process with no person" "${listed//ask_helper/LISTED}" "$listed"
 
+# a room person's run (the turns of a group room with people): no helper, no door, and neither tool listed
+room() { env KITH_PERSON=room-grp1-9 KITH_AGENT=front KITH_AGENT_DIR="$KITH_HOME/agents/front/role" python3 -c '
+import importlib.machinery, importlib.util, sys, os
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+print(eval(sys.argv[2]))' "$KERNEL/bin/kith-permit" "$1"; }
+has "a room person asks no helper" "$(room 'kp.ask_helper({"agent": "helper", "task": "x"})')" "can't ask helpers"
+has "a room person runs no door" "$(room 'kp.run_door({"door": "render", "path": "/tmp"})')" "can't ask helpers"
+case $(tools KITH_PERSON=room-grp1-9 KITH_AGENT=front) in *ask_helper*|*run_door*) echo "FAIL a room person is offered helpers or doors"; fails=$((fails + 1)) ;; *) echo "ok   a room person is offered neither tool" ;; esac
+
 exit $((fails > 0))

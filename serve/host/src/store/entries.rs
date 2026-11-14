@@ -98,6 +98,22 @@ impl Store {
         insert_entry_in(&c, id, lane, kind, turn, data, now, None)
     }
 
+    /// [`Self::insert_entry_as`] naming the room gen the line comes from (`origin_gen`), written with the row.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_entry_stamped(
+        &self,
+        id: &str,
+        lane: &Lane,
+        kind: EntryKind,
+        turn: i64,
+        data: &Value,
+        now: i64,
+        origin_gen: Option<i64>,
+    ) -> Result<(Entry, bool)> {
+        let c = self.db.locked();
+        insert_entry_in(&c, id, lane, kind, turn, data, now, origin_gen)
+    }
+
     /// [`Self::insert_entry_at`] naming the room gen the entry comes from (`origin_gen`): a person's post takes the gen
     /// at its append, a turn's output the gen its turn started in. Written with the row and never changed after, so
     /// nothing re-stamps it; a row without one is unstamped, which a person in a room never sees.
@@ -200,14 +216,17 @@ impl Store {
 
     /// [`Self::find_by_nonce`] among the lines `person` posted in a room: another sender's line with the same nonce is
     /// never theirs to be handed back.
-    pub fn find_person_nonce(&self, room: &str, person: &str, nonce: &str) -> Option<Entry> {
+    pub fn find_person_nonce(&self, room: &str, person: &str, nonce: &str, stay: i64) -> Option<Entry> {
         let c = self.db.locked();
+        // Only this stay's lines: a nonce the person used in an earlier stay (before a leave and a re-add) names a line
+        // they were never shown, and answering with it would hand it back.
         let row = c.query_row(
             &format!(
                 "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND kind = 'user'
-                   AND json_extract(data, '$.clientNonce') = ?2 AND json_extract(data, '$.sender.person') = ?3"
+                   AND json_extract(data, '$.clientNonce') = ?2 AND json_extract(data, '$.sender.person') = ?3
+                   AND origin_gen >= ?4"
             ),
-            params![room, nonce, person],
+            params![room, nonce, person, stay],
             row_entry,
         );
         logged("entry by person nonce", row.optional()).flatten()
@@ -215,9 +234,12 @@ impl Store {
 
     pub fn find_by_nonce(&self, bot_id: &str, nonce: &str) -> Option<Entry> {
         let c = self.db.locked();
+        // The owner's own lines: a person's post in the same room with the same nonce is another sender's, and the owner
+        // must not be answered with it.
         let row = c.query_row(
             &format!(
-                "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND kind = 'user' AND json_extract(data, '$.clientNonce') = ?2"
+                "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND kind = 'user' AND json_extract(data, '$.clientNonce') = ?2
+                   AND json_extract(data, '$.sender.person') IS NULL"
             ),
             params![bot_id, nonce],
             row_entry,

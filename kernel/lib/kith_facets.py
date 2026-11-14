@@ -507,7 +507,10 @@ def main(argv):
     members = None if ids is None else [{'kind': 'person', 'id': m, 'rooms': [room]} for m in ids]
     # Room membership lives with the host, not kith-auth: a person its member list names is in this group room, like
     # every other member above (the ledger still decides which notes reach them). A bot guest's KITH_ROOM is not trusted.
-    if a.kind == 'person' and ids and a.person in ids and ID.match(room) and room not in reader['rooms']:
+    # A room person (room-<id>, the host's own id for the turns of a room with people) is the room itself: never named in
+    # the list, which is its basis.
+    if a.kind == 'person' and ids and (a.person in ids or a.person.startswith('room-')) and ID.match(room) \
+            and room not in reader['rooms']:
         reader['rooms'].append(room)
     ledger = read_ledger(a.agent, room) if room not in ('', '?') and ID.match(room) else {}
     out = load_memory(a.agent, a.home, a.person_file, reader, room, [a.project] if a.project else [], cap, members, ledger)
