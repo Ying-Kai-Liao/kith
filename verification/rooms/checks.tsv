@@ -1,0 +1,15 @@
+# variant	module	expected	what it is (the states TLC found when the model was checked, 2026-11-12/13)
+# --- the design as built (PR C): every one of its invariants holds ---------------------------------------
+fixed-A	Rooms2	pass	reads, replies, owner level, no widening, removal (1,783,558 states)
+fixed-B	Rooms2	pass	undo restores exactly, removal (50,553)
+jobs-fixed	RoomJobs	pass	a revoke ends the room turn whose basis holds the person; never wider than the basis (72,480)
+# --- each rule is load-bearing: take it away and an invariant breaks -------------------------------------
+design-r2	Rooms2	fail	an owner turn after the last leave reads the person's post: input is not cut (214)
+design-flow	Rooms2	fail	a room turn after a join answers a pre-join post: the trigger is not checked (3,148)
+steer	Rooms2	fail	a person's post is steered into a running owner turn (4,632)
+warmreuse	Rooms2	fail	a warm owner process is reused across a join: reuse ignores gen and level (8,753)
+warmreuse-check	Rooms2	fail	same, with the edit ending the other warm processes (20,065)
+notag	Rooms2	fail	a viewer filter of "member now" shows a pre-join post (202)
+revokedeletes	Rooms2	fail	a revoke that closes the person's rows: the undo does not restore the room (61)
+jobs-revokekeepsturn	RoomJobs	fail	a revoke does not end the room turn whose basis holds the person (78)
+jobs-sweepperson	RoomJobs	fail	the sweep names the person, not the room persons: their room door keeps running (311)

@@ -1027,8 +1027,14 @@ fn stay(s: &Setup, room: &str, person: &str, joined: i64, left: Option<i64>) {
 
 #[tokio::test]
 async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_or_while_anyone_is_in() {
-    let s = start().await;
-    let house = s.house().await["id"].as_str().unwrap().to_owned();
+    // `ann` may use the agent (the fixture kith-auth beside the stub kernel says yes for her): a room person's turn asks
+    // the authority live, and without that yes it does not start at all.
+    let home = std::env::temp_dir().join(format!("kith-hq-e2e-{}", uuid::Uuid::new_v4()));
+    let auth = home.join("auth.json").to_string_lossy().into_owned();
+    let s = start_in("instructions_agent.py claude", home, &[("KITH_AUTH", &auth), ("STUB_AUTH_ALLOW", "ann")]).await;
+    let house_bot = s.house().await;
+    let house = house_bot["id"].as_str().unwrap().to_owned();
+    let name = house_bot["name"].as_str().unwrap().to_owned();
     s.host.call("updateBot", json!({"id": house, "tasks": false})).await;
     let group = s.host.call("createBot", json!({"name": "Room", "kind": "group", "members": [house]})).await;
     let group = group["bot"]["id"].as_str().unwrap().to_owned();
@@ -1050,22 +1056,20 @@ async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_
     assert_eq!((s.launches().len(), inits()), (2, 2), "the new process is reused while nothing changes");
 
     // Someone is in the room: a process for it is never reused, though the members are the same as last turn.
+    // (With a person in the room only an @-mentioned agent answers.)
     stay(&s, &group, "ann", 1_000_002, None);
-    s.host.reply(&group, "fifth").await;
-    // A person's activation may ask the kernel for a launch twice (see the guest test below), so the turn's count is read once
-    // it has stopped changing, and the next turn is measured against it.
+    s.host.reply(&group, &format!("@{name} fifth")).await;
+    // The scripted agent never passes, so a message's conversation runs every round its budget allows (10), and each round
+    // is a turn of the room person that starts its own process (no process is warm for one): the "about nine initializes a
+    // turn" is those rounds, not a restart within a turn. The count is read once it stops moving.
     let n5 = settled(&s).await;
     assert!(n5 >= 3, "the person's turn started a process: {n5} initializes");
     assert_eq!(last_room_env(&s), (Some("ann".to_owned()), None), "the room's person is in the room's members");
-    s.host.reply(&group, "sixth").await;
+    s.host.reply(&group, &format!("@{name} sixth")).await;
     let n6 = settled(&s).await;
-    // Not `n5 + 1`: a person's turn in this rig starts the process several times over (about nine initializes a turn,
-    // measured on rust-rebuild itself with no writer code in the tree; the cause was not looked into here). What matters here is that the sixth
-    // turn started its own process instead of reusing the fifth's.
-    assert!(
-        n6 > n5,
-        "with a person in the room no process is warm: {n5} initializes after turn five, {n6} after turn six"
-    );
+    assert!(n6 > n5, "with a person in the room no process is warm: {n5} initializes after turn five, {n6} after six");
+    assert_eq!(s.launches().len(), n6, "one launch for each process");
+    assert!(n6 <= 2 + 2 * 10, "no more turns than the two messages' budgets allow: {n6}");
 }
 
 #[tokio::test]

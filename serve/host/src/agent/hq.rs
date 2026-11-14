@@ -849,6 +849,10 @@ pub enum Members {
     OwnerOnly,
     /// The person each member bot runs as (an invitee, or a bot guest). Never empty.
     People(Vec<String>),
+    /// A room turn with people in the room (rooms with people): the turn's basis, which is the list the kernel reads for
+    /// the launch's grant, the room's notes and recall, and who wrote the message that asked (`owner`, or a person whose
+    /// monthly cap the run spends).
+    Room { people: Vec<String>, author: String },
 }
 
 /// `KITH_ROOM_MEMBERS` (the people in a group room) or `KITH_ROOM_OWNER_ONLY` (nobody but the owner), so memory and
@@ -865,9 +869,19 @@ fn room_env(room: &str, members: &Members) -> Vec<(String, String)> {
                 env.push((MEMBERS_ENV.to_owned(), ids.join(",")));
             }
         }
+        Members::Room { people, author } => {
+            env.push((MEMBERS_ENV.to_owned(), people.join(",")));
+            if author != "owner" {
+                env.push((ROOM_AUTHOR_ENV.to_owned(), author.clone()));
+            }
+        }
     }
     env
 }
+
+/// The person whose monthly cap a room turn spends (the one who wrote the message that asked); unset for the owner's.
+/// The launch reads it with the basis in [`MEMBERS_ENV`] (core `launch::room`).
+pub const ROOM_AUTHOR_ENV: &str = "KITH_ROOM_AUTHOR";
 
 /// The kernel reads only this spelling (there was no `HQ_` one).
 pub const MEMBERS_ENV: &str = "KITH_ROOM_MEMBERS";

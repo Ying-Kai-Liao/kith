@@ -24,6 +24,7 @@ pub(super) fn guest_run(person: &str, room: &str) -> RunIdentity {
         session: format!("run:{room}"),
         project: None,
         reply: None,
+        members: Vec::new(),
     }
 }
 

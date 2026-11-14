@@ -297,7 +297,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 None
             };
             let e = hub
-                .add_entry(&lane, EntryKind::User, turn, &data)
+                .add_owner_post(&lane, turn, &data, row.config.is_group())
                 .ok_or_else(|| anyhow!("couldn't save the message"))?;
             // Before the turn starts, which launches with it.
             if let Some(engine) = engine

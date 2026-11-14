@@ -142,7 +142,12 @@ impl Actor {
                 let _ = self.tidier.send(memory::TidyEvent::Flush);
             }
             Cmd::Reconfigure(cfg) => {
-                let cfg = *cfg;
+                let mut cfg = *cfg;
+                // A room person's actor runs as that person for as long as it lives: an edit of the bot (its whole config
+                // arrives here) must not make it the owner's.
+                if self.is_room_actor() {
+                    cfg.person.clone_from(&self.cfg.person);
+                }
                 // The harness reads its own memory's switch when it starts: an agent that can resume its session
                 // restarts into it, one that can't starts afresh.
                 let memory_changed = own_memory::kept(&cfg) != own_memory::kept(&self.cfg);
@@ -402,6 +407,12 @@ impl Actor {
                     if turn.reply.is_closed() || !crate::chat::group::current(&self.hub.store, &turn.lane, turn.epoch) {
                         continue;
                     }
+                    // The room as it is now, fixed for the turn; one that is not the room the turn was written for is dropped (the
+                    // room then counts it as a pass, and what its author asked is answered or told in its next step).
+                    if let Err(why) = self.begin_room_turn(&turn).await {
+                        tracing::info!(bot = %self.cfg.id, why, "a room turn did not start");
+                        continue;
+                    }
                     let (lane, prompt) = (turn.lane.clone(), turn.prompt.clone());
                     self.active_group = Some(turn);
                     let result = self.start_turn(lane, &[], &prompt, false, done_tx).await;
@@ -558,6 +569,7 @@ impl Actor {
         if let Some(turn) = self.active_group.take() {
             let _ = turn.reply.send(result);
         }
+        self.end_room_turn();
     }
 
     pub(super) fn finish_routine(

@@ -76,6 +76,11 @@ async fn derive(store: &Store, req: &Request<'_>) -> Option<Option<String>> {
 
 /// Who answers `req` besides the owner (None: the owner alone). Fails toward the owner.
 pub async fn approver(store: &Store, req: &Request<'_>) -> Option<String> {
+    // A room person's run (rooms with people) is for everyone in the room at once, so only the owner answers it, whoever
+    // wrote the message that asked (rule 7): kith-auth is not even asked about an id it does not know.
+    if crate::chat::room_turn::is_room_person(req.person) {
+        return None;
+    }
     derive(store, req).await.flatten()
 }
 
@@ -96,7 +101,8 @@ pub fn can_answer(viewer: Option<&str>, card: &Card) -> bool {
 /// is withdrawn; nothing else closes a card here. A card kith-auth couldn't be asked about stays as it was.
 pub async fn rederive(hub: &Arc<Hub>) {
     for card in hub.store.cards_open_all() {
-        if card.tool == crate::cards::secret::TOOL {
+        // A room person's cards are the owner's, and end with their turn (or a revoke of anyone in its basis).
+        if card.tool == crate::cards::secret::TOOL || crate::chat::room_turn::is_room_person(&card.person) {
             continue;
         }
         if !card.person.is_empty() && roles::may_use_checked(&card.person, &card.agent).await == Some(false) {

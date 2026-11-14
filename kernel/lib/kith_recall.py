@@ -306,22 +306,25 @@ def caller():
         if owner:
             # known members, so the room's notes are in play: the owner's own set cut to what every member may see
             # (no member at all: nothing is cut but other people's notes)
-            sets = [_member_audiences(m, who['agent']) for m in members]
+            sets = [_member_audiences(m, who['agent'], room) for m in members]
             base = {'owner', 'shared', 'room:' + room}
             return {**who, 'audiences': sorted(base.intersection(*sets)), 'present': members}
-        # everyone present reads the answer: the asker's set cut to what every member may also see
-        sets = [_member_audiences(m, who['agent']) for m in members]
-        return {**who, 'audiences': sorted(set(who['audiences']).intersection(*sets)), 'present': members}
+        # everyone present reads the answer: the asker's set cut to what every member may also see. Room membership
+        # lives with the host (as in kith_facets load): a person its member list names is in this room.
+        own = set(who['audiences']) | ({'room:' + room} if who['who'] in members and not who.get('bot') else set())
+        sets = [_member_audiences(m, who['agent'], room) for m in members]
+        return {**who, 'audiences': sorted(own.intersection(*sets)), 'present': members}
     return who
 
 
-def _member_audiences(pid, agent):
-    """What a room member may see of this agent's memory; empty when kith-auth does not know them."""
+def _member_audiences(pid, agent, room):
+    """What a member of group room `room` may see of this agent's memory (the room among it: the host's member list
+    named them); empty when kith-auth does not know them."""
     r = _auth('resolve', agent or '-', '--person', pid)
     if not r or not r.get('allowed'):
         return set()
     rooms = [x for x in r.get('rooms', []) if isinstance(x, str) and kith_facets.ID.match(x)]
-    return {'shared', 'person:' + pid, *('room:' + x for x in rooms)}
+    return {'shared', 'person:' + pid, 'room:' + room, *('room:' + x for x in rooms)}
 
 
 def _caller():
@@ -334,12 +337,23 @@ def _caller():
     if not person:   # an owner run sets KITH_AGENT (kernel/bin/kith); neither set is not a known caller
         return {'who': 'owner', 'agent': agent, 'audiences': None} if agent and not guest_sandbox() else nobody
     rows = _rows(_auth('people', '--json'))
+    if person.startswith('room-') and person not in rows and not guest_sandbox():
+        # A room person (rooms with people): the host's id for the turns of a group room that has people in it. It has no
+        # row in kith-auth; what it reads is the room's notes and shared craft, cut by caller() to what every person the
+        # host named in KITH_ROOM_MEMBERS (its basis) may see. No room or no members: nothing. Only outside a guest's
+        # sandbox: the host runs `kith recall` itself for the token (runauth run_kernel) with the room and members of the
+        # token, so a sandboxed room-<id> caller (no token) falls through to nothing, like the owner branch above.
+        room = os.environ.get('KITH_ROOM') or ''
+        members = kith_facets.env_members('person')
+        if not agent or not members or not kith_facets.ID.match(room):
+            return nobody
+        return {**nobody, 'present': members, 'audiences': ['shared', 'room:' + room]}
     if rows.get(person, {}).get('bot_of'):
         # guest level of the root owner: shared craft only, never the owner's or a person's, and only for an agent
         # bot_may lets the bot use (resolve runs it). No answer from kith-auth, no access.
         r = _auth('resolve', agent or '-', '--person', person) if agent else None
         ok = bool(r and r.get('allowed')) and bot_root(rows, person)
-        return {**nobody, 'audiences': ['shared']} if ok else nobody
+        return {**nobody, 'audiences': ['shared'], 'bot': True} if ok else nobody
     r = _auth('resolve', agent or '-', '--person', person)
     pid = (r or {}).get('person') or ''
     if not r or not r.get('allowed') or not agent or not re.fullmatch(r'[a-z][a-z0-9-]*', pid):

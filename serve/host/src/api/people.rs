@@ -62,7 +62,7 @@ pub(super) fn hex(bytes: &[u8]) -> String {
 }
 
 /// A person id from a name: lowercase letters, digits and dashes, starting with a letter (kith-auth's rule).
-fn slug(name: &str) -> String {
+pub(super) fn slug(name: &str) -> String {
     let mut out = String::new();
     for c in name.trim().to_lowercase().chars() {
         if c.is_ascii_alphanumeric() {
@@ -73,6 +73,9 @@ fn slug(name: &str) -> String {
     }
     let out = out.trim_end_matches('-').to_owned();
     match out.chars().next() {
+        // `room-<id>` is a room's own id (rooms with people): kith-auth refuses a person by it, so a name that would make one
+        // is given another.
+        Some(_) if crate::chat::room_turn::is_room_person(&out) => format!("p-{out}"),
         Some(c) if c.is_ascii_lowercase() => out,
         Some(_) => format!("p-{out}"),
         None => "guest".to_owned(),
@@ -535,6 +538,8 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         super::botguests::enforce(hub, id).await;
         // So does any other turn of theirs on an agent they may no longer use.
         stop_runs(hub, id, true).await;
+        // A room turn they are part of runs on the meet of everyone's grant: one of them losing an agent ends it too.
+        hub.end_room_turns_of(id);
     }
     for w in &warnings {
         tracing::warn!(person = id, "{w}");
@@ -671,8 +676,16 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
     hub.auth_changed();
     super::botguests::enforce(hub, person).await;
     stop_runs(hub, person, false).await;
+    // Every room turn whose basis holds them ends (rooms with people, rule 12); the room persons those turns run as are
+    // swept below with their own claims, helpers and doors (a run's id is the room's, not theirs).
+    let room_turns = hub.end_room_turns_of(person);
+    for id in &room_turns {
+        crate::cards::withdraw_person(hub, id, None);
+    }
     // Their bots too, and the runs a restarted host no longer knows, found by their claims.
     let mut ids = vec![person.to_owned()];
+    ids.extend(room_turns);
+    ids.extend(hub.room_person_ids_of(person));
     ids.extend(
         hub.store
             .bot_guests()
