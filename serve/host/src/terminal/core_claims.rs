@@ -46,7 +46,9 @@
 //!   (held, revoked, a stale epoch, a failed redeem, no account left), the adapter cancels it with `hostclaim.cancel`
 //!   instead of leaving it queued. (A stopped ask's turn the core cancels itself.) A redeem whose reply was lost is checked
 //!   with `show` first: a claim that is `running` on the agent's pid stands.
-//! - **Every turn claim is `claim_next`'s**: `hostclaim.turn` is the only way, and it picks the account (the host ignores it).
+//! - **Every turn claim is `claim_next`'s**: `hostclaim.turn` is the only way. Until accounts are switched the core makes no
+//!   pick and needs the account the process runs as; Shadow's file claim is the writer and does not know it, so it sends the
+//!   main account ([`SHADOW_ACCOUNT`]), recorded on the shadow claim only. Switched, the core picks and the host ignores it.
 //! - **Release reports what the claim is**: `done` for a turn claim (a host turn's normal end; it never requeues, the host
 //!   retries on its own), `exit` for an external claim. A claim whose process is gone is ended by `hostclaim.settle`
 //!   (a crashed holder), never by the host guessing.
@@ -304,6 +306,9 @@ pub(super) fn take_as(
     Err(failed("held and not settled"))
 }
 
+/// The account Shadow mode names on its shadow claims (the main account's id); the core only records it.
+const SHADOW_ACCOUNT: &str = "claude";
+
 /// A turn's claim: queue the turn, claim it through `claim_next`, redeem it on `pid`. `Err(refused)` is the core's refusal
 /// as data, after the turn was cancelled.
 #[allow(clippy::too_many_arguments, reason = "one claim's inputs")]
@@ -332,7 +337,8 @@ fn turn_claim(
         let _ = row(f, "hostclaim.cancel", &json!({"turn": turn, "reason": why}));
     };
     let mut ask = json!({"conversation": sid, "turn": turn, "person": person, "revokeSeen": seen,
-                         "cwd": cwd.unwrap_or(""), "sessionId": sid, "holderInstance": holder_instance});
+                         "cwd": cwd.unwrap_or(""), "sessionId": sid, "holderInstance": holder_instance,
+                         "account": SHADOW_ACCOUNT});
     for (k, v) in crate::core_front::caller_env() {
         ask["env"][k] = v;
     }
