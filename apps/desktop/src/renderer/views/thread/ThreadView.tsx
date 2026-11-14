@@ -23,6 +23,10 @@ import { TopicPromptHost } from './TopicPrompt'
 import { KeepAgentPromptHost } from './KeepAgentPrompt'
 import { ChatRow, lateQuoteOf, StepsRow, TimeSeparator, WorkingIndicator } from './ChatRows'
 import { AddToRoomSheet } from './AddToRoomSheet'
+import { AddPersonSheet } from './AddPersonSheet'
+import type { PersonPreset } from './RoomPeople'
+import { WontAnswerLine } from './RoomChatBits'
+import { AskedLine, MemberStartLines, RoomClosed, useMemberRoom } from './MemberRoom'
 import { Composer } from './Composer'
 import { EndLine, LiveLine } from './ConversationLine'
 import { isOpen } from '@shared/conversation'
@@ -58,6 +62,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
   const [botChat, setBotChat] = useState<string | null>(null)
   const [editingGroup, setEditingGroup] = useState(false)
   const [addingMember, setAddingMember] = useState(false)
+  const [addingPerson, setAddingPerson] = useState<{ preset: PersonPreset | null } | null>(null)
   const [sharing, setSharing] = useState(false)
   const canShare = useCanShareAgent(store, bot)
   const [templateDraft, setTemplateDraft] = useState<BotDraft | null>(null)
@@ -70,6 +75,9 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
   const guestChat = bot?.botGuest ?? null
   // A group's room run: the live line above the box while one is open in this chat's main lane (nothing in a 1:1 chat).
   const group = !!bot && isGroup(bot)
+  // An invited person's room: read from when they were added, refreshed while open; gone, it shows one neutral state.
+  const memberRoom = useMemberRoom(botId)
+  const roomClosed = store.closedRooms.has(botId)
   const run = group ? store.conversations.inLane(botId, null) : null
   const liveRun = run && isOpen(run) && !store.isOffline ? run : null
   // What the run did while this window was away comes from the host, and the owner's bots list names who is in the room.
@@ -172,6 +180,13 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
     if (!wide) setCompactDetails(true)
   }, [wide])
 
+  // "Fix" on the won't-answer line: Room info, scrolled to the needs-you row.
+  const fixRoom = () => {
+    setShowSettings(true)
+    if (!wide) setCompactDetails(true)
+    setTimeout(() => document.getElementById('room-people')?.scrollIntoView({ block: 'start' }), 60)
+  }
+
   const details = (
     <DetailsPanel
       key={routineRequest}
@@ -183,6 +198,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
       setTab={setDetailsTab}
       editGroup={() => setEditingGroup(true)}
       addMember={() => setAddingMember(true)}
+      addPerson={(preset) => setAddingPerson({ preset: preset ?? null })}
       share={() => {
         setCompactDetails(false)
         if (bot) setTemplateDraft(draftOf(bot))
@@ -248,8 +264,12 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
           ) : null}
           </div>
         </div>
-        <Transcript botId={botId} focusId={focusId} openTrace={openTrace} openRoutine={presentRoutine} openBotChat={setBotChat} />
-        <div className="composer-dock" ref={dock}>
+        {roomClosed ? (
+          <RoomClosed name={store.closedRoomNames.get(botId) ?? 'this room'} back={() => store.setSelection(null)} />
+        ) : (
+          <Transcript botId={botId} focusId={focusId} openTrace={openTrace} openRoutine={presentRoutine} openBotChat={setBotChat} />
+        )}
+        <div className="composer-dock" ref={dock} hidden={roomClosed}>
           <div className="composer-fade" />
           {bot && guestChat ? (
             <Text as="div" size="footnote" tone="secondary" className="composer-read-only">{botGuestReadOnlyLine(guestChat, bot.name)}</Text>
@@ -259,6 +279,8 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
             </div>
           ) : (
             <>
+            {bot && group && store.isOwner ? <WontAnswerLine group={bot} fix={fixRoom} /> : null}
+            {memberRoom ? <AskedLine botId={botId} /> : null}
             {liveRun ? <LiveLine conversation={liveRun} botId={botId} lane={null} /> : <WorkingNow botId={botId} />}
             <Composer
               botId={botId}
@@ -298,6 +320,9 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
       {bot && canShare ? <ShareAgentSheet store={store} bot={bot} open={sharing} onClose={() => setSharing(false)} /> : null}
       <Sheet open={addingMember} onClose={() => setAddingMember(false)} width={420} height={620}>
         {bot && isGroup(bot) ? <AddToRoomSheet group={bot} /> : null}
+      </Sheet>
+      <Sheet open={addingPerson !== null} onClose={() => setAddingPerson(null)} width={420} height={620}>
+        {bot && isGroup(bot) && addingPerson ? <AddPersonSheet group={bot} preset={addingPerson.preset} /> : null}
       </Sheet>
       <Sheet open={editingGroup} onClose={() => setEditingGroup(false)} width={420} height={560}>
         <GroupEditorView group={bot} />
@@ -490,6 +515,7 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
         }}
       >
         <div className="transcript-content">
+          {!more && bot && store.myRooms.has(botId) ? <MemberStartLines room={bot.name} /> : null}
           {more ? (
             <button className="load-earlier" disabled={loadingEarlier} onClick={() => void showEarlier()}>
               {loadingEarlier ? <Spinner size={14} /> : 'Load earlier messages'}

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
 import { botsOf, ownersOwn } from '@shared/bot-guests'
+import { closingRooms, followAgents, inviteJoinsLine, joinNames, roomInviteStart, roomNeeds, roomParts, type InviteRoomOption, type RoomAgent } from '@shared/room-people'
+import { isGroup } from '@shared/models'
 import { isOpenInvite, type CreatedInvite, type PendingInvite, type Person, type Role } from '@shared/people'
 import type { ProjectInfo } from '@shared/place-folders'
 import { Button, CardForm, CardSection, IconButton, SegmentedChoice, Switch } from '../../components/Controls'
@@ -13,6 +15,8 @@ import type { BotStore } from '../../store/bot-store'
 import { useApp } from '../../store/context'
 import { botGuestsFor } from '../../store/bot-guests-store'
 import { peopleFor } from '../../store/people-store'
+import { roomPeopleFor } from '../../store/room-people-store'
+import { usePersonRooms } from '../thread/room-facts'
 import { BotList, InviteBotSheet, OwnBotsSection, ownerAgents } from './BotGuestsView'
 import { deviceIcon, relativeDay } from './parts'
 
@@ -26,6 +30,7 @@ export function PeopleView() {
   const [invitingBot, setInvitingBot] = useState(false)
   const [editing, setEditing] = useState<Person | null>(null)
   const [removing, setRemoving] = useState<Person | null>(null)
+  const removingRooms = usePersonRooms(local, removing?.personId ?? '')
   const [activity, setActivity] = useState(false)
   const online = local?.connection.kind === 'online'
   useEffect(() => void (online && people ? people.load() : undefined), [online, people])
@@ -99,7 +104,7 @@ export function PeopleView() {
       <Dialog
         open={removing !== null}
         title={`Remove ${removing?.name ?? 'this person'}?`}
-        message="They lose access to your agents and their devices are signed out of this computer. Their memory and chats stay on this Mac."
+        message={`They lose access to your agents and their devices are signed out of this computer. Their memory and chats stay on this Mac.${removingRooms.length ? ` ${joinNames(removingRooms.map((r) => r.name))} closes for ${removing?.name}, and no agent answers there until you remove ${removing?.name} from it.` : ''}`}
         actions={[{ title: 'Remove', destructive: true, action: () => removing && void people.removePerson(removing.personId) }]}
         onClose={() => setRemoving(null)}
       />
@@ -198,24 +203,47 @@ function AgentRoles({ agents, value, onChange }: { agents: { id: string; name: s
   )
 }
 
-function InviteSheet({ store, personId }: { store: BotStore; personId?: string }) {
+/** The group rooms that take people (only Kith agents in them, at least one), for the invite sheet's Rooms group. */
+export function inviteRoomOptions(store: BotStore): InviteRoomOption[] {
+  return store.roster.filter(isGroup).flatMap((group) => {
+    const parts = roomParts(group.members, (id) => store.bots.get(id), () => 'Bot')
+    return parts.outside.length || !parts.agents.length ? [] : [{ id: group.id, name: group.name, agents: parts.agents }]
+  })
+}
+
+/** `room`: opened from a room's Add (SPEC §3): its agents on as guest and the room ticked. */
+export function InviteSheet({ store, personId, room }: { store: BotStore; personId?: string; room?: { id: string; name: string; agents: RoomAgent[] } }) {
   const people = peopleFor(store)
   useModel(people)
   const agents = useMemo(() => ownerAgents(store), [store])
+  const allRooms = useMemo(() => inviteRoomOptions(store), [store])
+  // The Rooms group is hidden while the host's `rooms.people` setting is off.
+  const gate = allRooms[0] ? roomPeopleFor(store, allRooms[0].id) : null
+  useModel(gate)
+  useEffect(() => void gate?.load(), [gate])
+  const rooms = gate?.enabled ? allRooms : []
   const existing = people.people
+  const start = room ? roomInviteStart(room) : null
   const [pick, setPick] = useState<string>(personId ?? '')
   const [name, setName] = useState('')
-  const [roles, setRoles] = useState<Record<string, Role>>({})
+  const [roles, setRoles] = useState<Record<string, Role>>(start?.roles ?? {})
+  const [ticked, setTicked] = useState<string[]>(start?.rooms ?? [])
   const [made, setMade] = useState<CreatedInvite | null>(null)
   const chosen = existing.find((p) => p.personId === pick)
   useEffect(() => {
-    if (chosen) setRoles(chosen.agents)
+    // A known person starts from what they hold, plus this room's agents when the sheet came from a room.
+    if (chosen) setRoles({ ...chosen.agents, ...(start?.roles ?? {}) })
   }, [chosen])
   const ready = (pick !== '' || name.trim() !== '') && Object.keys(roles).length > 0
+  // Rooms never switch agents on; switching a needed agent off turns its room off.
+  const changeRoles = (next: Record<string, Role>) => {
+    setRoles(next)
+    setTicked((t) => followAgents(t, rooms, next))
+  }
 
   const create = async () => {
     if (people.busy) return
-    const result = await people.create(pick ? { personId: pick } : { name: name.trim() }, roles)
+    const result = await people.create(pick ? { personId: pick } : { name: name.trim() }, roles, followAgents(ticked, rooms, roles))
     if (result) setMade(result)
   }
 
@@ -223,7 +251,7 @@ function InviteSheet({ store, personId }: { store: BotStore; personId?: string }
     <SheetPage>
       <ModalHeader title={made ? 'Invite ready' : 'Invite someone'} />
       {made ? (
-        <InviteLinkCard invite={made} />
+        <InviteLinkCard invite={made} joins={inviteJoinsLine(chosen?.name ?? (name.trim() || 'They'), followAgents(ticked, rooms, roles).map((id) => rooms.find((r) => r.id === id)?.name ?? id))} />
       ) : (
         <VStack gap={14} className="settings-invite-body">
           {existing.length > 0 ? (
@@ -240,8 +268,21 @@ function InviteSheet({ store, personId }: { store: BotStore; personId?: string }
           ) : null}
           <VStack gap={6}>
             <Text size="caption" tone="secondary">What they can use</Text>
-            <AgentRoles agents={agents} value={roles} onChange={setRoles} />
+            <AgentRoles agents={agents} value={roles} onChange={changeRoles} />
           </VStack>
+          {rooms.length ? (
+            <VStack gap={6}>
+              <Text size="caption" tone="secondary">ROOMS</Text>
+              {rooms.map((r) => {
+                const needs = roomNeeds(r, roles)
+                return (
+                  <Switch key={r.id} on={ticked.includes(r.id) && needs.length === 0} disabled={needs.length > 0} onChange={(on) => setTicked(on ? [...ticked, r.id] : ticked.filter((x) => x !== r.id))}>
+                    {r.name}{needs.length ? ` · Needs ${joinNames(needs.map((a) => a.name))}` : ''}
+                  </Switch>
+                )
+              })}
+            </VStack>
+          ) : null}
           {people.error ? <Text size="footnote" tone="danger">{people.error}</Text> : null}
           <HStack>
             <Spacer />
@@ -254,7 +295,7 @@ function InviteSheet({ store, personId }: { store: BotStore; personId?: string }
 }
 
 /** The link, Copy and a QR code. The link is a secret for one person: it stays on screen only. */
-export function InviteLinkCard({ invite }: { invite: CreatedInvite }) {
+export function InviteLinkCard({ invite, joins }: { invite: CreatedInvite; joins?: string | null }) {
   const [qr, setQr] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   useEffect(() => {
@@ -272,6 +313,7 @@ export function InviteLinkCard({ invite }: { invite: CreatedInvite }) {
       <Text size="callout" tone="secondary" className="settings-centered">
         Single use, expires in 24 hours. Send it to them; they sign in with Google, Apple or GitHub.
       </Text>
+      {joins ? <Text size="callout" tone="text" className="settings-centered">{joins}</Text> : null}
     </VStack>
   )
 }
@@ -288,6 +330,8 @@ function EditSheet({ store, person: opened }: { store: BotStore; person: Person 
   const [projects, setProjects] = useState<string[]>(person.projects)
   const [available, setAvailable] = useState<ProjectInfo[]>([])
   const [saved, setSaved] = useState(false)
+  const inRooms = usePersonRooms(store, person.personId)
+  const closing = closingRooms(person, roles, inRooms)
   useEffect(() => {
     void store.projects().then((r) => setAvailable(r.projects), () => {})
   }, [store])
@@ -297,6 +341,11 @@ function EditSheet({ store, person: opened }: { store: BotStore; person: Person 
       <ModalHeader title={person.name} subtitle="What they can use" />
       <VStack gap={14} className="settings-invite-body">
         <AgentRoles agents={agents} value={roles} onChange={(r) => { setRoles(r); setSaved(false) }} />
+        {closing.map((c) => (
+          <Text key={c.room} size="footnote" tone="text">
+            {person.name} is in {c.name}. Without {joinNames(c.lost.map((a) => a.name))}, {c.name} closes for {person.name} and {joinNames(c.lost.map((a) => a.name))} {c.lost.length === 1 ? 'stops' : 'stop'} answering there.
+          </Text>
+        ))}
         {available.length > 0 ? (
           <VStack gap={6}>
             <Text size="caption" tone="secondary">Shared projects</Text>

@@ -94,6 +94,14 @@ public final class BotStore {
     /// Bots whose older history has been fully paged in.
     public internal(set) var historyComplete: Set<String> = []
     var composerDrafts: [String: String] = [:]
+    /// The owner's view of each group room's people (stays, and the names behind them), read when a room opens. Never persisted.
+    public internal(set) var roomStays: [String: [RoomStay]] = [:]
+    public internal(set) var roomPeopleEnabled: [String: Bool] = [:]
+    public internal(set) var roomPeopleList: [HostPerson] = []
+    /// An invited person's rooms (`myRooms`): shown as groups, each with the stay its posts must carry. Never persisted.
+    public internal(set) var myRooms: [String: HostContract.MyRoom] = [:]
+    /// A room that went away under an open view (id to name): it shows the one neutral closed state.
+    public internal(set) var closedRooms: [String: String] = [:]
     /// What was pasted into each draft, sent along so memory never takes it as the user's own words.
     @ObservationIgnored var composerPasted: [String: [String]] = [:]
     public var routineDrafts: [String: String] = [:]
@@ -265,7 +273,7 @@ public final class BotStore {
     var shownBots: [Bot] {
         guard let granted = hello?.grantedAgents else { return Array(bots.values) }
         let agents = Set(granted.map(\.agent))
-        return bots.values.filter { $0.hqAgent.map(agents.contains) ?? false }
+        return bots.values.filter { myRooms[$0.id] != nil || ($0.hqAgent.map(agents.contains) ?? false) }
     }
 
     /// Cards outside this account's chats that wait for it on this computer (see `GuestPrompt`); `isOwner` is the

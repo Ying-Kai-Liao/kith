@@ -1,0 +1,124 @@
+/* Rooms with people: Room info's People section, the add sheet, join dividers, markers and the room lines. */
+.room-people {
+  padding-bottom: 12px;
+}
+.room-person-pic {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.room-needs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: 14px;
+  background: var(--panel, var(--background-secondary, rgba(127, 127, 127, 0.08)));
+}
+.room-row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.room-action {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: var(--text-callout);
+  font-weight: 600;
+  border: 1px solid var(--separator, rgba(127, 127, 127, 0.3));
+  background: var(--background);
+  color: var(--text);
+}
+.room-action.ink {
+  background: var(--kith-ink);
+  border-color: var(--kith-ink);
+  color: var(--background);
+}
+.room-action:disabled {
+  opacity: 0.5;
+}
+.room-people-footer {
+  padding-top: 6px;
+}
+.room-invite-new {
+  margin-top: 10px;
+}
+
+/* In the chat. */
+.room-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 2px 0;
+  text-align: center;
+}
+.room-line-muted {
+  color: var(--tertiary);
+  font-size: var(--text-caption);
+}
+.room-hidden-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: var(--text-caption);
+  color: var(--secondary);
+}
+.room-unanswered {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--secondary);
+}
+.room-pointer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.room-pointer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
+  color: var(--text);
+}
+.room-wont {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--panel, var(--background-secondary, rgba(127, 127, 127, 0.08)));
+}
+.room-wont-fix {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--accent);
+}
+.room-origin {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-caption);
+  color: var(--secondary);
+}
+.room-closed {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.mention.dimmed {
+  opacity: 0.55;
+}
