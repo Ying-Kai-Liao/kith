@@ -730,7 +730,8 @@ fn send_gate_blocking(hub: &Hub, t: &Thread, may_wait: bool) -> Result<SendGate>
     let lock = hub.terminal.thread_lock(&t.key());
     let _one = lock.locked();
     match writer(hub, t) {
-        Some(Writer::Terminal) if may_wait => return Ok(SendGate::Waits),
+        // An unreadable core holds the owner's message too (begin holds in the same case); a bot is refused below.
+        Some(Writer::Terminal | Writer::Unreadable) if may_wait => return Ok(SendGate::Waits),
         Some(w) => return Err(HeldByWriter { code: w.code() }.into()),
         None => {}
     }
@@ -748,13 +749,15 @@ enum Writer {
     Terminal,
     /// A bot guest's turn (`Kind::Bot` claim, taken by `agent/bot/turn.rs` with the agent process's pid).
     Bot,
+    /// Writer mode and the core cannot say who holds the thread: refused like a held one, never read as free.
+    Unreadable,
 }
 
 impl Writer {
     fn code(self) -> &'static str {
         match self {
             Self::Terminal => "liveInTerminal",
-            Self::Bot => "heldByOtherWriter",
+            Self::Bot | Self::Unreadable => "heldByOtherWriter",
         }
     }
 }
@@ -769,12 +772,18 @@ fn writer(hub: &Hub, t: &Thread) -> Option<Writer> {
     let lane_sid = hub.store.kv_get(&lane_key("session", &t.bot, &t.lane())).filter(|s| !s.is_empty());
     let known = info(hub, t);
     let sids = lane_sid.into_iter().chain(known.iter().map(|r| r.session_id.clone()));
+    // One mode decision for the whole call (the thread's lock is held): Files and Shadow read the claim files, Writer the core.
+    let reader = super::core_holders::Reader::new(&env.state);
     for sid in sids {
         if !registry::safe_id(&sid) {
             continue;
         }
-        if let Some(c) = claim::holder(&env.state, &sid) {
-            return Some(if c.kind == claim::Kind::Bot { Writer::Bot } else { Writer::Terminal });
+        match reader.read(&sid) {
+            super::core_holders::Reading::By(c, _) => {
+                return Some(if c.kind == claim::Kind::Bot { Writer::Bot } else { Writer::Terminal });
+            }
+            super::core_holders::Reading::Unreadable(_) => return Some(Writer::Unreadable),
+            super::core_holders::Reading::Free => {}
         }
         if let Some(reg) = registry::read_one(&env.state, &sid)
             && registry::liveness(&reg, env.sessions.as_deref()).is_live()
@@ -794,7 +803,7 @@ pub async fn bot_gate(hub: &Arc<Hub>, chat: &str, root: &str) -> Result<(), Held
         let lock = hub.terminal.thread_lock(&t.key());
         let _one = lock.locked();
         match writer(&hub, &t) {
-            Some(Writer::Terminal) => Err(HeldByWriter { code: "heldByOtherWriter" }),
+            Some(Writer::Terminal | Writer::Unreadable) => Err(HeldByWriter { code: "heldByOtherWriter" }),
             Some(Writer::Bot) | None => Ok(()),
         }
     })
@@ -844,7 +853,7 @@ pub async fn start_gate(
         let lock = hub.terminal.thread_lock(&t.key());
         let _one = lock.locked();
         // A bot's claim is a turn of the host's own, which the thread's lane queue already orders; only others refuse.
-        if writer(&hub, &t) == Some(Writer::Terminal) {
+        if matches!(writer(&hub, &t), Some(Writer::Terminal | Writer::Unreadable)) {
             let bot = hub.store.bot_conversation_of_thread(&lane.chat, root).is_some();
             return Err(HeldByWriter { code: if bot { "heldByOtherWriter" } else { "liveInTerminal" } });
         }
@@ -968,6 +977,21 @@ async fn take_over_inner(hub: &Arc<Hub>, t: &Thread) -> Result<Value> {
     // Held from here to the end: nobody resumes or sends into the session while it is being ended and imported. The
     // terminal's own claim stays its own; this one is the host's, named for the take-over.
     let sid = reg.session_id.clone();
+    // Writer mode: the core's claim is the writer, and no claim file is taken or read. The `taking` set (held by the caller)
+    // already keeps a second take-over out, and `writer()` reads it, so the window between the core's `ended` and the host's
+    // `set_writer` is held without a file. A core that cannot be asked, or that shows no claim of the terminal, refuses: the
+    // files are never the fallback.
+    let st = env.state.clone();
+    if let Some(f) = tokio::task::spawn_blocking(move || super::core_holders::writer_folders(&st)).await?.map_err(|why| {
+        anyhow!("the claims core cannot be asked ({why}): nothing was changed")
+    })? {
+        let (f2, s2) = (f.clone(), sid.clone());
+        let id = tokio::task::spawn_blocking(move || super::core_holders::terminal_claim(&f2, &s2)).await?;
+        return match id.map_err(|why| anyhow!("the claims core cannot be asked ({why}): nothing was changed"))? {
+            Some(id) => take_over_core(hub, t, reg, &env, f, id).await,
+            None => Err(TerminalBusy("terminalBusy: The core doesn't show this terminal's claim. Close it yourself.").into()),
+        };
+    }
     // Taken before the core is asked, so the window between the terminal's `ended` and the host's `set_writer` is held on
     // both paths (the `holder()` checks of `cards/resume.rs` and a second take-over see it).
     if claim::take(&env.state, &sid, claim::Kind::App, std::process::id(), true)?.is_err() {

@@ -741,6 +741,18 @@ pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: b
     let state = hub.terminal.env().state;
     // Their doors too: all of them, or (access narrowed) those kith-auth no longer allows.
     let doors_of = if only_denied { Vec::new() } else { persons.clone() };
+    // Writer mode (or a gate that cannot be read): the core's claims are the runs, not the files. A sweep the core did not
+    // take is owed and retried (core_holders), never reported as "nothing to end".
+    match crate::terminal::core_holders::sweep(hub, &state, persons.clone(), only_denied).await {
+        Some(crate::terminal::core_holders::Swept::Done(ended)) => {
+            if !ended.is_empty() {
+                tracing::info!(pids = ?ended, "ended runs left over after access was removed");
+            }
+            return crate::doors::sweep(&doors_of).await;
+        }
+        Some(crate::terminal::core_holders::Swept::Owed(_)) => return crate::doors::sweep(&doors_of).await,
+        None => {}
+    }
     let mut allowed: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
     if only_denied {
         let (st, ps) = (state.clone(), persons.clone());

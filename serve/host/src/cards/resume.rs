@@ -30,6 +30,7 @@ use super::Card;
 use crate::channels::Wake;
 use crate::hub::Hub;
 use crate::store::{CardState, Entry, EntryKind, Lane, now_ms};
+use crate::terminal::core_holders::Reading;
 use crate::wake::{self, Queued, Request, Turn};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -349,10 +350,12 @@ fn enqueued(state: &Path) -> usize {
 async fn show_holder(hub: &Arc<Hub>, card: &Card) {
     let Some(Door::Run { session }) = door_of(card) else { return };
     let (state, sid) = (state_of(hub), session.clone());
-    let held = wake::blocking(move || crate::terminal::claim::holder(&state, &sid)).await.flatten();
+    let held = wake::blocking(move || crate::terminal::core_holders::Reader::new(&state).read(&sid)).await;
     match held {
-        Some(h) => set_held(hub, card, Some((&session, &h))),
-        None => clear_held(hub, std::slice::from_ref(card)),
+        Some(Reading::By(h, _)) => set_held(hub, card, Some((&session, &h))),
+        Some(Reading::Free) => clear_held(hub, std::slice::from_ref(card)),
+        // The core could not say (Writer mode): the card keeps what it shows, neither cleared nor changed.
+        Some(Reading::Unreadable(_)) | None => {}
     }
 }
 
@@ -789,8 +792,11 @@ fn cards_of(hub: &Hub, ids: &[String]) -> Vec<Card> {
 /// A wake turn on a bot's actor could not start because the session's writer is held: it is owed again, with the
 /// holder shown on the card. Called from the actor's `start_failed`.
 pub fn refused(hub: &Arc<Hub>, entry_ids: &[String], session: Option<&str>) {
-    let holder =
-        session.and_then(|sid| crate::terminal::claim::holder(&hub.terminal.env().state, sid).map(|c| (sid, c)));
+    // A holder the core could not name is shown as none: the wake goes back to the queue either way.
+    let holder = session.and_then(|sid| {
+        let read = crate::terminal::core_holders::Reader::new(&hub.terminal.env().state).read(sid);
+        read.holder().cloned().map(|c| (sid, c))
+    });
     for entry in entry_ids {
         let Some(c) = lock(&ENTRIES).remove(entry) else { continue };
         for card in cards_of(hub, &c.cards) {
@@ -917,13 +923,22 @@ async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&st
     let sid = session.to_owned();
     let held = {
         let (state, sid) = (state.clone(), sid.clone());
-        wake::blocking(move || crate::terminal::claim::holder(&state, &sid)).await.flatten()
+        wake::blocking(move || crate::terminal::core_holders::Reader::new(&state).read(&sid)).await
     };
-    if let Some(h) = held {
-        for c in live {
-            set_held(hub, c, Some((session, &h)));
+    match held {
+        Some(Reading::By(h, _)) => {
+            for c in live {
+                set_held(hub, c, Some((session, &h)));
+            }
+            return unstarted(hub, &turn.run, true, true);
         }
-        return unstarted(hub, &turn.run, true, true);
+        // Writer mode and the core cannot say who writes: no resume starts on a guess; the wake stays owed.
+        Some(Reading::Unreadable(why)) => {
+            tracing::warn!(run = %turn.run, why, "a card's resume waits: the claims core cannot say who holds the session");
+            return unstarted(hub, &turn.run, true, true);
+        }
+        Some(Reading::Free) => {}
+        None => return unstarted(hub, &turn.run, true, true),
     }
     #[cfg(not(test))]
     let Some(bin) = crate::agent::hq::bin() else { return unstarted(hub, &turn.run, true, true) };
@@ -954,7 +969,7 @@ async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&st
                 started(hub, &turn.run, &ids);
             }
             Exec::Held => {
-                let h = crate::terminal::claim::holder(&state, &sid);
+                let h = crate::terminal::core_holders::Reader::new(&state).read(&sid).holder().cloned();
                 for c in live {
                     set_held(hub, c, h.as_ref().map(|h| (session, h)));
                 }
