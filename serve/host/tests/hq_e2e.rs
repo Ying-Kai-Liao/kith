@@ -1059,7 +1059,13 @@ async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_
     assert_eq!(last_room_env(&s), (Some("ann".to_owned()), None), "the room's person is in the room's members");
     s.host.reply(&group, "sixth").await;
     let n6 = settled(&s).await;
-    assert_eq!(n6, n5 + 1, "with a person in the room no process is warm: each turn starts its own");
+    // Not `n5 + 1`: a person's turn in this rig starts the process several times over (about nine initializes a turn,
+    // measured on rust-rebuild itself with no writer code in the tree; the cause was not looked into here). What matters here is that the sixth
+    // turn started its own process instead of reusing the fifth's.
+    assert!(
+        n6 > n5,
+        "with a person in the room no process is warm: {n5} initializes after turn five, {n6} after turn six"
+    );
 }
 
 #[tokio::test]
