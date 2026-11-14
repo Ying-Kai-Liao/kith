@@ -502,6 +502,10 @@ impl Actor {
         let ids: Vec<String> = self.perms.drain().map(|(k, _)| k).collect();
         // Cards nobody answered: an owner's gave up the turn's slot, which comes back with the dropped guard.
         self.parked_prompts.clear();
+        // A room turn a revoke ended: a card that opened after the withdraw looked can't be answered either.
+        if self.ended_by_access() {
+            crate::cards::withdraw_room_person(&self.hub, self.cfg.person.as_deref().unwrap_or_default());
+        }
         for id in ids {
             // A question with a card parks with its asker; an old one can't be answered and shows as expired.
             if crate::cards::park_entry(&self.hub, &id) {

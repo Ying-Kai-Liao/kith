@@ -450,6 +450,12 @@ impl Slot {
     }
 }
 
+/// A held slot, as an answer in flight holds one.
+#[cfg(test)]
+pub fn hold_for_test(card_id: &str) -> impl Drop {
+    Slot::take(card_id).expect("the slot is free")
+}
+
 /// Whether an answer of this card is in flight (a write is under the claim). The closers that would withdraw an open
 /// card ask first: closing it under a writer would let the key land on a closed card (Secrets.tla `Withdraw`).
 pub fn claimed(card_id: &str) -> bool {
