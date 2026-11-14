@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { isGroup, isWorkingIn, normalizeBot, type Bot } from '@shared/models'
 import type { BotStore } from '../../store/bot-store'
 import { defaultFolderOf } from '@shared/place-folders'
+import { roomAgentNames } from '@shared/room-people'
 import { currentTask, sendInTask, takesOver, taskTitle } from '@shared/tasks'
 import { threadWriterMessage } from '@shared/thread-writer'
 import { useDimmedAgents } from './room-facts'
@@ -50,7 +51,7 @@ export function Composer({ botId, onCall, onInterrupt, liveLine = false }: {
 /** A group's bots, or for an invited person's room the agents it names (they have no bots of their own to mention). */
 function roomMembers(store: BotStore, bot: Bot): Bot[] {
   const room = store.myRooms.get(bot.id)
-  return room ? room.agents.map((name) => normalizeBot({ id: `room-agent:${name}`, name })) : store.members(bot)
+  return room ? roomAgentNames(room).map((name) => normalizeBot({ id: `room-agent:${name}`, name })) : store.members(bot)
 }
 
 function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {

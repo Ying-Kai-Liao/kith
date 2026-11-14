@@ -2,6 +2,7 @@ import { ConversationBook } from '@shared/conversation'
 import type { IncomingCall } from '@shared/incoming-call'
 import type { MyRoom } from '@shared/host-contract.gen'
 import { mirrorStamp } from '@shared/mirror-stamp'
+import { roomAgentName } from '@shared/room-people'
 import { checkHost, PROTOCOL, type HostVersion, type VersionMismatch } from '@shared/compat'
 import {
   type AccessRequest,
@@ -206,7 +207,8 @@ export class BotMirror extends Observable {
   }
 
   authorName(id: string | null | undefined) {
-    return (id && this.bots.get(id)?.name) || 'A deleted bot'
+    // An invited person has no row for the room's agents: their name comes from `myRooms`.
+    return (id && (this.bots.get(id)?.name ?? roomAgentName(this.myRooms.values(), id))) || 'A deleted bot'
   }
 
   /** The latest thinking of the turn running in a chat (`thread` null) or thread. */

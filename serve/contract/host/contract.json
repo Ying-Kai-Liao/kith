@@ -435,9 +435,14 @@
       "doc": "What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).",
       "fields": { "gen": "int", "changed": "bool" }
     },
+    "MyRoomAgent": {
+      "doc": "One of a room's agents as a person is shown it: the member bot's id (a reply's author is this id) and its live name. Nothing else of the bot.",
+      "fields": { "id": "string", "name": "string" }
+    },
     "MyRoom": {
-      "doc": "A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).",
-      "fields": { "id": "string", "name": "string", "agents": "[string]", "stay": "int" }
+      "doc": "A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; agentList is the same agents with the bot id each reply is authored by (absent from a host before it, then the app has only the names); ownerName is the owner's display name (absent the same way, then the app says \"the owner\"); stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).",
+      "fields": { "id": "string", "name": "string", "agents": "[string]", "agentList": "[MyRoomAgent]?", "ownerName": "string?", "stay": "int" },
+      "mayOmit": ["agentList", "ownerName"]
     },
     "MyRooms": {
       "doc": "The group rooms a person is in right now.",

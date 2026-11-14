@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'bcf448cf7c0cd2c80ed77231f0f648c2ba6931c765dce71cd1374af2386be877'
+export const CONTRACT_SHA256 = 'a04de8abd0a0da6eb7e07b7eb1146f44214035f99ee7351f9e5d750507cdcdce'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -531,11 +531,19 @@ export interface RoomPersonChange {
   changed: boolean
 }
 
-/** A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused). */
+/** One of a room's agents as a person is shown it: the member bot's id (a reply's author is this id) and its live name. Nothing else of the bot. */
+export interface MyRoomAgent {
+  id: string
+  name: string
+}
+
+/** A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; agentList is the same agents with the bot id each reply is authored by (absent from a host before it, then the app has only the names); ownerName is the owner's display name (absent the same way, then the app says "the owner"); stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused). */
 export interface MyRoom {
   id: string
   name: string
   agents: string[]
+  agentList?: MyRoomAgent[] | null
+  ownerName?: string | null
   stay: number
 }
 
@@ -1045,6 +1053,7 @@ export interface Types {
   RoomPeople: RoomPeople
   CreatedInvite: CreatedInvite
   RoomPersonChange: RoomPersonChange
+  MyRoomAgent: MyRoomAgent
   MyRoom: MyRoom
   MyRooms: MyRooms
   RoomLeft: RoomLeft
@@ -1414,7 +1423,8 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     RoomPeople: { fields: { enabled: 'bool', gen: 'int', people: '[RoomPerson]' } },
     CreatedInvite: { fields: { inviteId: 'string', link: 'string', appLink: 'string', kithLink: 'string', webLink: 'string?', pageLink: 'string?', expiresAt: 'int', personId: 'string' }, mayOmit: ['webLink', 'pageLink'] },
     RoomPersonChange: { fields: { gen: 'int', changed: 'bool' } },
-    MyRoom: { fields: { id: 'string', name: 'string', agents: '[string]', stay: 'int' } },
+    MyRoomAgent: { fields: { id: 'string', name: 'string' } },
+    MyRoom: { fields: { id: 'string', name: 'string', agents: '[string]', agentList: '[MyRoomAgent]?', ownerName: 'string?', stay: 'int' }, mayOmit: ['agentList', 'ownerName'] },
     MyRooms: { fields: { rooms: '[MyRoom]' } },
     RoomLeft: { fields: { left: 'bool' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },

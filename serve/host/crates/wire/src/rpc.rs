@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "bcf448cf7c0cd2c80ed77231f0f648c2ba6931c765dce71cd1374af2386be877";
+pub const CONTRACT_SHA256: &str = "a04de8abd0a0da6eb7e07b7eb1146f44214035f99ee7351f9e5d750507cdcdce";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1095,13 +1095,25 @@ pub struct RoomPersonChange {
     pub changed: bool,
 }
 
-/// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).
+/// One of a room's agents as a person is shown it: the member bot's id (a reply's author is this id) and its live name. Nothing else of the bot.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MyRoomAgent {
+    pub id: String,
+    pub name: String,
+}
+
+/// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; agentList is the same agents with the bot id each reply is authored by (absent from a host before it, then the app has only the names); ownerName is the owner's display name (absent the same way, then the app says "the owner"); stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MyRoom {
     pub id: String,
     pub name: String,
     pub agents: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_list: Option<Vec<MyRoomAgent>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_name: Option<String>,
     pub stay: i64,
 }
 
@@ -1970,7 +1982,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "RoomPeople", fields: &[("enabled", "bool"), ("gen", "int"), ("people", "[RoomPerson]")], may_omit: &[] },
         crate::check::TypeSchema { name: "CreatedInvite", fields: &[("inviteId", "string"), ("link", "string"), ("appLink", "string"), ("kithLink", "string"), ("webLink", "string?"), ("pageLink", "string?"), ("expiresAt", "int"), ("personId", "string")], may_omit: &["webLink", "pageLink"] },
         crate::check::TypeSchema { name: "RoomPersonChange", fields: &[("gen", "int"), ("changed", "bool")], may_omit: &[] },
-        crate::check::TypeSchema { name: "MyRoom", fields: &[("id", "string"), ("name", "string"), ("agents", "[string]"), ("stay", "int")], may_omit: &[] },
+        crate::check::TypeSchema { name: "MyRoomAgent", fields: &[("id", "string"), ("name", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "MyRoom", fields: &[("id", "string"), ("name", "string"), ("agents", "[string]"), ("agentList", "[MyRoomAgent]?"), ("ownerName", "string?"), ("stay", "int")], may_omit: &["agentList", "ownerName"] },
         crate::check::TypeSchema { name: "MyRooms", fields: &[("rooms", "[MyRoom]")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomLeft", fields: &[("left", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
@@ -2150,6 +2163,7 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "RoomPeople" => serde_json::from_value::<RoomPeople>(value).map(drop),
         "CreatedInvite" => serde_json::from_value::<CreatedInvite>(value).map(drop),
         "RoomPersonChange" => serde_json::from_value::<RoomPersonChange>(value).map(drop),
+        "MyRoomAgent" => serde_json::from_value::<MyRoomAgent>(value).map(drop),
         "MyRoom" => serde_json::from_value::<MyRoom>(value).map(drop),
         "MyRooms" => serde_json::from_value::<MyRooms>(value).map(drop),
         "RoomLeft" => serde_json::from_value::<RoomLeft>(value).map(drop),

@@ -142,3 +142,22 @@ test('the @ picker dims the agents that will not answer', async () => {
   assert.deepEqual([...dimmedAgents(w)], ['coder'])
   assert.equal(dimmedAgents(null).size, 0)
 })
+
+test('an agent reply is labelled from myRooms by its bot id, and the owner by name', async () => {
+  const { roomAgentName, ownerNameOf, ownerLine } = await import('./room-people.ts')
+  const rooms = [{ agentList: [{ id: 'bot-9', name: 'Planner' }] }]
+  assert.equal(roomAgentName(rooms, 'bot-9'), 'Planner')
+  assert.equal(roomAgentName(rooms, 'gone'), undefined)
+  assert.equal(ownerNameOf({ ownerName: 'Sam' }), 'Sam')
+  assert.equal(ownerNameOf({}), 'the owner')
+  assert.equal(ownerNameOf(undefined), 'the owner')
+  assert.match(ownerLine('Crew', ownerNameOf({ ownerName: 'Sam' })), /^Crew is Sam's room, on Sam's computer\. Sam sees everything/)
+})
+
+test('a room from a host before agentList (agents are names only, no owner) still reads', async () => {
+  const { roomAgentName, roomAgentNames } = await import('./room-people.ts')
+  const old: { agents: string[]; agentList?: undefined } = { agents: ['planner', 'coder'] }
+  assert.deepEqual(roomAgentNames(old), ['planner', 'coder'])
+  assert.equal(roomAgentName([old], 'bot-9'), undefined)
+  assert.deepEqual(roomAgentNames({ agents: ['x'], agentList: [{ id: 'b', name: 'X2' }] }), ['X2'])
+})
