@@ -563,33 +563,71 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             })
             .unwrap_or(120);
         let started = std::time::Instant::now();
-        let r: Value = loop {
-            let mut args = vec![agent.to_owned()];
-            if !caller.is_empty() {
-                args.extend(["--via".to_owned(), caller.clone(), "--take-once".to_owned()]);
-            }
-            let o = secrets::run(&sctx, "resolve", &args);
-            eprint!("{}", o.stderr);
-            let parsed = (o.code == 0)
-                .then(|| serde_json::from_str::<Value>(&o.stdout).ok())
-                .flatten();
-            let Some(r) = parsed else {
-                say(&format!(
-                    "kith: can't check whether {person} may use {agent} (kith-auth resolve failed)"
-                ));
-                return Err(1);
-            };
-            if !r.get("held").is_some_and(truthy) {
-                break r;
-            }
-            if started.elapsed().as_secs() >= hold {
-                say(&format!(
-                    "kith: out of sync with the Kith cloud, so {person} can't use {agent} on this computer yet; try again in a minute"
-                ));
-                return Err(3);
-            }
-            std::thread::sleep(std::time::Duration::from_secs(2));
+        // A room person (the turns of a group room with people) has no row in kith-auth: its answer is the meet of the
+        // room's people (`KITH_ROOM_MEMBERS`), holding the cap of whoever asked (`KITH_ROOM_AUTHOR`), and it is the only
+        // way such a person launches. Anything that does not resolve is no launch.
+        let room_run = super::room::is_room_person(&person);
+        let spend_who = if room_run {
+            get(&env, "KITH_ROOM_AUTHOR").trim().to_owned()
+        } else {
+            person.clone()
         };
+        let r: Value = if room_run {
+            let answer = super::room::launch_answer(
+                &sctx,
+                agent,
+                &person,
+                get(&env, "KITH_ROOM"),
+                get(&env, "KITH_ROOM_MEMBERS"),
+                &spend_who,
+            );
+            match answer {
+                Ok(r) => r,
+                Err(refusal) => {
+                    say(&format!("kith: {refusal}"));
+                    return Err(3);
+                }
+            }
+        } else {
+            loop {
+                let mut args = vec![agent.to_owned()];
+                if !caller.is_empty() {
+                    args.extend(["--via".to_owned(), caller.clone(), "--take-once".to_owned()]);
+                }
+                let o = secrets::run(&sctx, "resolve", &args);
+                eprint!("{}", o.stderr);
+                let parsed = (o.code == 0)
+                    .then(|| serde_json::from_str::<Value>(&o.stdout).ok())
+                    .flatten();
+                let Some(r) = parsed else {
+                    say(&format!(
+                        "kith: can't check whether {person} may use {agent} (kith-auth resolve failed)"
+                    ));
+                    return Err(1);
+                };
+                if !r.get("held").is_some_and(truthy) {
+                    break r;
+                }
+                if started.elapsed().as_secs() >= hold {
+                    say(&format!(
+                        "kith: out of sync with the Kith cloud, so {person} can't use {agent} on this computer yet; try again in a minute"
+                    ));
+                    return Err(3);
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        };
+        // What the run costs is written under whoever asked: the cap above is theirs, and so is the ledger it reads.
+        if room_run {
+            env.insert(
+                "KITH_COST_PERSON".to_owned(),
+                if spend_who.is_empty() {
+                    "owner".to_owned()
+                } else {
+                    spend_who.clone()
+                },
+            );
+        }
         let txt = |k: &str| r.get(k).map(pystr).unwrap_or_default();
         p_owner = r.get("owner").is_some_and(truthy);
         p_id = txt("person");
@@ -687,13 +725,13 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                     &env,
                     &home_dir,
                     &p_was,
-                    &["spent", &person, &p_budget_agent],
+                    &["spent", &spend_who, &p_budget_agent],
                 )
             } else {
                 let sys = Sys { env: &env };
                 let mut c = sys.cmd(
                     kernel.join("bin/kith-cost"),
-                    &["spent", &person, &p_budget_agent],
+                    &["spent", &spend_who, &p_budget_agent],
                 );
                 c.env("KITH_PERSON_WAS", &p_was).stderr(Stdio::null());
                 c.output().ok().filter(|o| o.status.success()).map(|o| {
@@ -1425,7 +1463,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     sync_env(&mut env);
     let mut names: Vec<String> = p.entries().into_iter().map(|(k, _)| k).collect();
     names.extend(
-        "KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT"
+        "KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_COST_PERSON KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT"
             .split(' ')
             .map(str::to_owned),
     );

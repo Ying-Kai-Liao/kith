@@ -151,7 +151,7 @@ impl Actor {
             return false;
         }
         let (Some(own), Some(rx)) = (self.own_tx.upgrade(), self.cmd_rx.as_mut()) else { return false };
-        let retired = self.hub.retire_actor(&self.cfg.id, &self.home, &own, rx);
+        let retired = self.hub.retire_actor(&self.rt, &own, rx);
         if retired {
             tracing::info!(bot = %self.cfg.id, place = %self.rt, "retiring an unused actor");
         }

@@ -128,11 +128,23 @@ async fn a_post_is_stamped_with_the_gen_at_its_append_and_a_repeat_writes_one_li
     assert_eq!(r.hub.store.origin_gen(id), Some(joined), "the room's gen at the append");
     assert_eq!(first["entry"]["data"]["sender"], json!({"person": "sam", "name": "Sam"}));
     assert_eq!(texts(&r, &phone, &room).await, ["hello"]);
-    // It reached nobody's turn: no conversation opened.
-    assert!(r.hub.store.newest_conversation(&Lane::main(&room)).is_none());
+    // It opened one conversation, the person's own (PR C), and with no @-mention it starts no agent.
+    let conv = r.hub.store.newest_conversation(&Lane::main(&room)).expect("the post opens a conversation");
+    assert_eq!(conv.opened_by, "sam");
     // Someone else's nonce is not theirs to read back.
     let owner = call(&r, &Caller::Local, "history", json!({"botId": room})).await.unwrap();
     assert!(owner["entries"].as_array().unwrap().iter().any(|e| e["data"]["text"] == "hello"));
+}
+
+/// Architect's SHOULD on #998: what a person may spend is the owner's to give, so a `budget` sent with a post changes nothing.
+#[tokio::test]
+async fn a_budget_sent_with_a_post_is_ignored() {
+    let (r, room, phone) = rig().await;
+    let joined = add(&r, &room).await;
+    let body = json!({"botId": room, "text": "hello", "clientNonce": "b1", "stay": joined, "budget": 500});
+    call(&r, &phone, "send", body).await.unwrap();
+    let conv = r.hub.store.newest_conversation(&Lane::main(&room)).expect("the post opens a conversation");
+    assert!(conv.left <= crate::chat::group::budget_of(None), "the default budget, not 500: {} left", conv.left);
 }
 
 #[tokio::test]

@@ -53,6 +53,7 @@ impl Hub {
     /// nor after a re-add (a new stay has a new `joined_gen`: R4).
     ///
     /// A repeat of `nonce` by the same person returns their first line and writes nothing.
+    #[cfg(test)]
     pub(crate) fn commit_room_post(
         &self,
         room: &str,
@@ -61,12 +62,25 @@ impl Hub {
         nonce: &str,
         data: &Value,
     ) -> Result<Entry> {
+        self.commit_room_post_new(room, person, seat, nonce, data).map(|(e, _)| e)
+    }
+
+    /// [`Self::commit_room_post`] saying whether the line is new: `false` for a repeat of `nonce`, which must not start
+    /// a second round of answers.
+    pub(crate) fn commit_room_post_new(
+        &self,
+        room: &str,
+        person: &str,
+        seat: &Seat,
+        nonce: &str,
+        data: &Value,
+    ) -> Result<(Entry, bool)> {
         let _members = membership_lock();
         let _g = self.emit_lock.locked();
         if !nonce.is_empty()
-            && let Some(e) = self.store.find_person_nonce(room, person, nonce)
+            && let Some(e) = self.store.find_person_nonce(room, person, nonce, seat.joined)
         {
-            return Ok(e);
+            return Ok((e, false));
         }
         if self.store.room_open_seat(room, person) != Some(seat.joined) {
             return Err(PostRefused::NotInRoom.into());
@@ -86,7 +100,7 @@ impl Hub {
             return Err(PostRefused::NotInRoom.into());
         };
         let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));
-        Ok(e)
+        Ok((e, true))
     }
 }
 

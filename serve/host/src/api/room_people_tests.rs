@@ -48,6 +48,7 @@ async fn remove(r: &Rig, room: &str, person: &str) -> anyhow::Result<Value> {
 #[tokio::test]
 async fn adding_is_refused_while_the_setting_is_off_and_taking_out_is_not() {
     let r = Rig::new().await;
+    r.hub.store.kv_set(FLAG, "off").unwrap();
     sam_with(&r, json!({"house": "member"})).await;
     let room = room_of(&r, &["house"]);
     let e = add(&r, &room, "sam").await.unwrap_err();
@@ -56,6 +57,14 @@ async fn adding_is_refused_while_the_setting_is_off_and_taking_out_is_not() {
     assert_eq!(remove(&r, &room, "sam").await.unwrap()["changed"], false, "nobody to take out, still fine");
     let listed = call(&r, "roomPeople", json!({"room": room})).await.unwrap();
     assert_eq!(listed, json!({"enabled": false, "gen": 0, "people": []}));
+}
+
+#[tokio::test]
+async fn the_setting_is_on_unless_it_is_set_off() {
+    let r = Rig::new().await;
+    assert!(room_people::enabled(&r.hub.store), "on by default");
+    r.hub.store.kv_set(FLAG, "off").unwrap();
+    assert!(!room_people::enabled(&r.hub.store));
 }
 
 #[tokio::test]

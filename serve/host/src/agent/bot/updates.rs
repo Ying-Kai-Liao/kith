@@ -301,7 +301,9 @@ impl Actor {
         let tool_name = crate::cards::edge::acp_tool(tool, &title).to_owned();
         // A host or a helper the owner is asked about can be kept: "Always for <person>", or the job that holds it.
         let mut kept = None;
-        if let (Some((person, agent)), None) = (&whose, &answerable_by) {
+        if let (Some((person, agent)), None) = (&whose, &answerable_by)
+            && !self.is_room_actor()
+        {
             let who = self.hub.store.person(person).map(|p| p.name).filter(|n| !n.is_empty());
             let who = who.unwrap_or_else(|| person.clone());
             kept = crate::cards::edge::for_acp(person, &who, agent, &tool_name, raw, &mut options).await;
@@ -426,7 +428,12 @@ impl Actor {
             return;
         }
         self.close_seg();
-        if let Some(e) = self.add(EntryKind::Permission, turn, data.clone()) {
+        let card_entry = if self.is_room_actor() {
+            self.add_room_card(data.clone())
+        } else {
+            self.add(EntryKind::Permission, turn, data.clone())
+        };
+        if let Some(e) = card_entry {
             if let Ok(Opened::New(c) | Opened::Joined(c)) = &opened {
                 let _ = self.hub.store.card_live(&c.id, Some(&e.id), None);
             }
@@ -712,6 +719,19 @@ mod tests {
         assert_eq!(kept, ["exit-plan-default", "reject"]);
         let card = json!({"options": [{"optionId": "reject"}]});
         assert!(crate::api::roles::offered(&card, "reject") && !crate::api::roles::offered(&card, "exit-plan-bypass"));
+    }
+
+    /// A room person's actor has a person (`room-<id>`), so its cards go through the same filter: Allow once and Deny, and
+    /// a forged always answer is not one the card offered. Kept as its own test so that dropping the generic filter shows.
+    #[test]
+    fn a_room_persons_card_offers_only_once_choices_and_a_forged_always_is_refused() {
+        let kept = once_only(claude_options());
+        assert_eq!(ids(&kept), ["allow", "reject"]);
+        let card = json!({"options": kept});
+        for forged in ["allow-always", DERIVED_ALWAYS, "reject-always"] {
+            assert!(!crate::api::roles::offered(&card, forged), "{forged}");
+        }
+        assert!(crate::api::roles::offered(&card, "allow") && crate::api::roles::offered(&card, "reject"));
     }
 
     fn claude_options() -> Vec<Value> {

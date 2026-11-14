@@ -3,8 +3,9 @@
 //! nobody in the room can be answered with more than they could get alone (design rule R5).
 //!
 //! `room_grant` is a pure function of the answers. `resolve_basis` runs `kith-auth resolve` through the router (the same
-//! call `assemble` makes, so it works with the authority switched or not) and feeds it. Nothing calls either in the live
-//! launch path yet (PR C does).
+//! call `assemble` makes, so it works with the authority switched or not) and feeds it. `launch_answer` is what the launch
+//! of a room person (`KITH_PERSON=room-<id>`, set by the host for a turn of a group room with people) takes in place of
+//! one `resolve`: the basis is `KITH_ROOM_MEMBERS`, and the run spends the cap of its author (`KITH_ROOM_AUTHOR`).
 //!
 //! The rules, field by field (a person's answer is the widest the meet may be on that field):
 //! - mode: the strictest. `default` < `acceptEdits`; a free-shell mode (`bypassPermissions`, `auto`) counts as
@@ -240,6 +241,76 @@ pub fn room_grant(agent: &str, basis: &[Value]) -> Result<RoomGrant, Refusal> {
         doors: vec![],
         env: Map::new(),
     })
+}
+
+/// Whether `person` is a room person's id (the host's own, never a human's: kith-auth refuses to create one).
+pub fn is_room_person(person: &str) -> bool {
+    person.starts_with("room-")
+}
+
+/// The answer of `resolve` the launch reads for a room person: the grant of its basis (the people in `KITH_ROOM_MEMBERS`),
+/// and the cap of the author of the message that asked (`KITH_ROOM_AUTHOR`; none is the owner, who has none).
+///
+/// Fail closed, as `room_grant`: no room or no basis, a basis person who may not use the agent, an author who is not in
+/// the basis, a held or unreadable answer for any of them, is a refusal and no launch.
+pub fn launch_answer(
+    sctx: &secrets::Ctx,
+    agent: &str,
+    id: &str,
+    room: &str,
+    members: &str,
+    author: &str,
+) -> Result<Value, Refusal> {
+    if room.is_empty() {
+        return Err(Refusal::NoBasis);
+    }
+    let basis: Vec<String> = members
+        .split(',')
+        .map(|m| m.trim().to_lowercase())
+        .filter(|m| !m.is_empty())
+        .collect();
+    let author = author.trim();
+    if !author.is_empty() && !basis.iter().any(|p| p == author) {
+        return Err(Refusal::Person {
+            person: author.to_owned(),
+            why: "they are not in the room".to_owned(),
+        });
+    }
+    let grant = resolve_basis(sctx, agent, &basis)?;
+    // The author's own cap: their answer says it (the budget and the agent it is for), and the launch holds the run to
+    // the ledger of their runs.
+    let (budget, budget_agent) = if author.is_empty() {
+        (Value::Null, Value::Null)
+    } else {
+        let mut c = sctx.clone();
+        c.person = Some(author.to_owned());
+        let o = secrets::run(&c, "resolve", &[agent.to_owned()]);
+        let a = (o.code == 0)
+            .then(|| serde_json::from_str::<Value>(&o.stdout).ok())
+            .flatten()
+            .ok_or_else(|| Refusal::Person {
+                person: author.to_owned(),
+                why: "kith-auth resolve failed".to_owned(),
+            })?;
+        (
+            a.get("budget").cloned().unwrap_or(Value::Null),
+            a.get("budget_agent").cloned().unwrap_or(Value::Null),
+        )
+    };
+    let mut answer = serde_json::json!({
+        "allowed": true, "held": false, "owner": false, "why": "",
+        "person": id, "name": "", "lang": "", "tz": "", "model": grant.model,
+        "mode": grant.mode, "deny": grant.deny, "trusted": grant.trusted, "helpers": grant.helpers,
+        "access": {"read": grant.read, "write": grant.write, "domains": grant.domains},
+        "was": [], "rooms": [], "env": {},
+    });
+    // Absent when there is no cap (a present null would read as the text "None").
+    for (key, value) in [("budget", budget), ("budget_agent", budget_agent)] {
+        if !value.is_null() {
+            answer[key] = value;
+        }
+    }
+    Ok(answer)
 }
 
 /// Runs `kith-auth resolve AGENT` for each person through the router, then `room_grant`. Any call that fails or prints
