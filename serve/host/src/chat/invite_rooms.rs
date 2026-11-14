@@ -20,7 +20,7 @@ static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(())
 
 /// Whether a device of the invite's person has shown its token: the host recorded the membership of that invite, and a
 /// device of the person is proven. A revoked person's devices and memberships are set aside, so they never pass.
-fn proved(hub: &Hub, invite: &Invite) -> bool {
+pub(crate) fn proved(hub: &Hub, invite: &Invite) -> bool {
     let member = hub
         .store
         .memberships()
@@ -30,7 +30,7 @@ fn proved(hub: &Hub, invite: &Invite) -> bool {
 
 /// Whether the room is gone: no bot row, or a deleted one. Decided from the row alone: a room that gained an outside bot
 /// or lost its agents is not gone, its part waits (and says why in the log). `None` only on a store error.
-fn room_gone(hub: &Hub, room: &str) -> Option<bool> {
+pub(crate) fn room_gone(hub: &Hub, room: &str) -> Option<bool> {
     hub.store.bot(room).ok().map(|r| r.is_none_or(|r| r.deleted))
 }
 

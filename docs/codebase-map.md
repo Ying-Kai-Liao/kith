@@ -10,7 +10,8 @@ reasons behind it are in [architecture.md](architecture.md); commands are in the
 kith/                               this repo (public): README, docs/, install.sh, .claude-plugin/
   docs/                             architecture.md (the model), this map, how-hq-runs.html (+ .architecture.json,
                                     its source) and img/how-hq-runs-{light,dark}.png (the README's picture)
-                                    ci.md (CI jobs, path filters, the merge queue)
+                                    ci.md (CI jobs, path filters, the merge queue),
+                                    rooms-people.md (owner's runbook for people in rooms)
 kith/kernel/                        the code: what kith is (bin/, lib/, adapters/, PROTOCOL.md, services/)
 kith/agents/                        the agents folder, $KITH_AGENTS: your private repo (<you>/hq-agents), each agent's life
   <name>/                           one agent

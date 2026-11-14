@@ -144,7 +144,7 @@ async fn a_budget_sent_with_a_post_is_ignored() {
     let body = json!({"botId": room, "text": "hello", "clientNonce": "b1", "stay": joined, "budget": 500});
     call(&r, &phone, "send", body).await.unwrap();
     let conv = r.hub.store.newest_conversation(&Lane::main(&room)).expect("the post opens a conversation");
-    assert!(conv.left <= crate::chat::group::budget_of(None), "the default budget, not 500: {} left", conv.left);
+    assert_eq!(conv.left, crate::chat::group::budget_of(None), "the default budget, not 500");
 }
 
 #[tokio::test]
@@ -392,6 +392,7 @@ async fn a_message_id_is_shown_only_to_its_sender() {
 async fn my_rooms_names_the_granted_agents_by_id_and_shows_nothing_else_of_a_bot() {
     let (r, room, phone) = rig().await;
     add(&r, &room).await;
+    r.auth(&["person", "kai", "name=Kai"]);
     let house = r.hub.store.bots().unwrap().into_iter().find(|b| b.config.name == "house").unwrap().config.id;
     // A renamed agent shows its live name; the id (a reply's author) stays.
     r.hub.update_bot(&json!({"id": house, "name": "Housekeeper"})).unwrap();
@@ -406,6 +407,26 @@ async fn my_rooms_names_the_granted_agents_by_id_and_shows_nothing_else_of_a_bot
         );
     }
     assert_eq!(shown["agentList"][0].as_object().unwrap().len(), 2, "an agent is its id and name, nothing else");
-    // The owner's name is a string when kith-auth has one, and absent otherwise.
-    assert!(shown.get("ownerName").is_none_or(|n| n.as_str().is_some_and(|s| !s.is_empty())));
+    assert_eq!(shown["ownerName"], "Kai", "the owner's name in kith-auth");
+    // The hub keeps the answer: a rename shows once the kept name is old, so a second call still says Kai.
+    r.auth(&["person", "kai", "name=Kay"]);
+    let again = call(&r, &phone, "myRooms", json!({})).await.unwrap();
+    assert_eq!(again["rooms"][0]["ownerName"], "Kai", "asked once, kept");
+}
+
+/// The owner's name is asked through the room's agents in turn (the first answer stops the loop), and a missing
+/// answer is not kept (the next call asks again).
+#[tokio::test]
+async fn the_owners_name_asks_the_room_agents_and_a_missing_answer_is_not_kept() {
+    let r = Rig::new().await;
+    r.hub.store.kv_set(FLAG, "on").unwrap();
+    sam_with(&r, json!({"money": "member", "house": "member"})).await;
+    let room = room_of(&r, &["money", "house"]);
+    let phone = r.device("sam-phone", Some("sam"));
+    add(&r, &room).await;
+    let said = call(&r, &phone, "myRooms", json!({})).await.unwrap();
+    assert!(said["rooms"][0].get("ownerName").is_none(), "no name yet: {said}");
+    r.auth(&["person", "kai", "name=Kai"]);
+    let said = call(&r, &phone, "myRooms", json!({})).await.unwrap();
+    assert_eq!(said["rooms"][0]["ownerName"], "Kai", "{said}");
 }
