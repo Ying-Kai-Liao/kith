@@ -12,7 +12,7 @@
 //! | `members.<agent>.<person>`                  | `memberships (agent, person)`; a `null` row is REFUSED (it means no row and no `*` fallback) |
 //! |   `preset` `mode` `model` `budget`          |   text columns                                       |
 //! |   `trusted`                                 |   `trusted` 0/1                                      |
-//! |   `deny` `env` `helpers` `access` `jobs` `helper_once` `access_by` `access_since` | JSON text columns, order kept |
+//! |   `deny` `env` `helpers` `access` `jobs` `helper_once` `access_by` `access_since` `helper_since` | JSON text columns, order kept |
 //! | `presets.<name>` `mode` `trusted` `deny`    | `presets`                                            |
 //! | `invites.<code>` `person` `expires`         | `invites` (every code, expired ones too: the owner's next write prunes them) |
 //! | `retired.<id>` `at`                         | `retired`                                            |
@@ -23,7 +23,7 @@
 //! |   every other key (VAR -> source)           |   `secret_vars (profile, var, source)`: the reference (`keychain:..`, `env:..`, `env-file:..`), never a value |
 //! | `grants.<agent>.<service>` (`coder`, `coder@<person>`) | `secret_grants` rows, `seq` = the place in a list of profiles |
 //!
-//! A profile's `person` is what `kith-auth`'s `owner_of` answers: the named person; `*` (shared on purpose) is NULL; with
+//! A profile's `person` is what `kith-auth`'s `owner_of` answers: the named person, `*` (shared on purpose) included; with
 //! none named, the owner's id (the text `the owner` while the file has no owner) when the service is personal (its
 //! `"personal"` or else a `login`/`browser` `kind`, read from the kernel's `services/` then this Mac's), else NULL. The
 //! core has no service specs of its own, so this is worked out here, once; a file whose service spec cannot be read is
@@ -33,18 +33,22 @@
 //! A key that is absent stays NULL (the reader leaves the key out, so the rules' default applies); a key that is JSON
 //! `null` is read as absent. A key of the wrong type refuses the whole file (`Error::Refused`) rather than guess.
 //!
+//! | `env.<agent>.<service>.<VAR>`               | `secret_env (agent, service, var, value, seq)`: `value` as JSON text, `seq` = the place among the service's variables |
+//!
+//! `env` is the plain settings an agent's service starts with (`kith-auth mcp-config` and `exec` read it); a secret is a
+//! profile's variable and never goes there. A level that is no object refuses the file, as `kith-auth` would fail on it.
+//! An agent or service with no variable is nothing to keep.
+//!
 //! Left behind, on purpose (the report lists which of these the file at hand has):
-//! - `env`: the plaintext values agents' env keeps in auth.json. No table holds them (m0021 has profiles, variables and
-//!   grants only) and a plaintext value does not belong in core.db; they move with kith-auth itself (M2-18).
-//!   A `keychain:` reference in a profile has its Keychain item sealed into the envelope (`items.rs`).
 //! - `once`: one-time secrets that live at most an hour; they are not worth a copy.
+//!   (A `keychain:` reference in a profile has its Keychain item sealed into the envelope, `items.rs`.)
 //! - a person's `root`, `kith` (it is in `handles`), `agents`: derived by `kith-auth people --json`; the decision reads
 //!   none of them. (`handles` is kept since m0015: `people.listPeople`, `retired` and `--rm --unused` read it.)
 //! - any other key, at any level: not read by the decision, so not copied.
 //!
 //! Not imported here at all: cards (PR #711) and access requests (M2-3).
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Map, Value};
 
 use crate::error::{Error, Result};
@@ -67,6 +71,7 @@ const MEMBER_KEYS: &[&str] = &[
     "helper_once",
     "access_by",
     "access_since",
+    "helper_since",
 ];
 const TOP_KEYS: &[&str] = &[
     "people",
@@ -78,9 +83,10 @@ const TOP_KEYS: &[&str] = &[
     "agent_access",
     "profiles",
     "grants",
+    "env",
 ];
 /// Top-level tables left behind by design.
-const LEFT_TOP: &[&str] = &["env", "once"];
+const LEFT_TOP: &[&str] = &["once"];
 /// The keys of a profile that are not variables.
 const PROFILE_KEYS: &[&str] = &["person", "with", "browser"];
 
@@ -233,7 +239,8 @@ fn parse_profiles(auth: &Value, services: &Services) -> Result<Vec<ProfileRow>> 
         let row = Value::Object(p.clone());
         let named = text(&row, "person", &what)?.filter(|s| !s.is_empty());
         let person = match named.as_deref() {
-            Some("*") => None,
+            // Kept as `*`, not NULL: NULL means "none named", which `kith-auth` decides from the service's current
+            // `personal` setting, so a shared login never turns into a default owner's.
             Some(_) => named,
             None if services.personal(name.split('/').next().unwrap_or(name))? => {
                 Some(owner.clone().unwrap_or_else(|| "the owner".to_owned()))
@@ -320,6 +327,37 @@ fn parse_grants(auth: &Value) -> Result<Vec<(String, String, String, i64)>> {
     Ok(out)
 }
 
+/// `env` as `(agent, service, var, value as JSON text, seq)`. A level that is no object refuses the file; an agent or a
+/// service with no variable keeps nothing.
+fn parse_env(auth: &Value) -> Result<Vec<EnvRow>> {
+    let mut out = Vec::new();
+    for (agent, by_service) in table(auth, "env")?.into_iter().flatten() {
+        let what = format!("env.{agent}");
+        for (service, vars) in object(by_service, &what)? {
+            let what = format!("{what}.{service}");
+            for (seq, (var, value)) in object(vars, &what)?.iter().enumerate() {
+                out.push(EnvRow {
+                    agent: agent.clone(),
+                    service: service.clone(),
+                    var: var.clone(),
+                    value: value.to_string(),
+                    seq: i64::try_from(seq).unwrap_or(i64::MAX),
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// One `secret_env` row.
+struct EnvRow {
+    agent: String,
+    service: String,
+    var: String,
+    value: String,
+    seq: i64,
+}
+
 /// A file the import can store faithfully, or the reason it cannot. Run before anything is written.
 pub(super) fn refuse_what_it_cannot_keep(auth: &Value, services: &Services) -> Result<()> {
     object(auth, "the file")?;
@@ -358,6 +396,7 @@ pub(super) fn refuse_what_it_cannot_keep(auth: &Value, services: &Services) -> R
     // `profiles` and `grants` are kept (m0021): a wrong shape, or a variable that could be a plain secret, refuses the file.
     parse_profiles(auth, services)?;
     parse_grants(auth)?;
+    parse_env(auth)?;
     Ok(())
 }
 
@@ -404,8 +443,8 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value, services: &Services) -
             object(r, &what)?;
             conn.execute(
                 "INSERT INTO memberships (agent, person, preset, mode, trusted, deny, model, env, helpers, budget, \
-                 access, jobs, helper_once, access_by, access_since) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                 access, jobs, helper_once, access_by, access_since, helper_since) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
                     agent,
                     person,
@@ -422,6 +461,7 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value, services: &Services) -
                     json(r, "helper_once"),
                     json(r, "access_by"),
                     json(r, "access_since"),
+                    json(r, "helper_since"),
                 ],
             )?;
         }
@@ -507,6 +547,12 @@ pub(super) fn insert_all(conn: &Connection, auth: &Value, services: &Services) -
             params![agent, service, profile, seq],
         )?;
     }
+    for e in parse_env(auth)? {
+        conn.execute(
+            "INSERT INTO secret_env (agent, service, var, value, seq) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![e.agent, e.service, e.var, e.value, e.seq],
+        )?;
+    }
     Ok(())
 }
 
@@ -523,27 +569,37 @@ pub(super) fn removals(conn: &Connection, auth: &Value) -> Result<Vec<(String, V
         .flatten()
         .map(|(id, _)| id.as_str())
         .collect();
-    let mut st = conn.prepare("SELECT id, bot_of, owner FROM people ORDER BY id")?;
-    let rows: Vec<(String, Option<String>, i64)> = st
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+    let mut st = conn.prepare("SELECT id, bot_of, owner, was FROM people ORDER BY id")?;
+    let rows: Vec<(String, Option<String>, i64, Option<String>)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<std::result::Result<_, _>>()?;
+    // Every id some core.db row's `was` already lists: renames it has already imported. `was` carries earlier ids forward
+    // (samuel{was:[sam]} renamed to sammy is sammy{was:[sam,samuel]}), so this is a set over all rows, not the new id's row.
+    let had: std::collections::BTreeSet<String> = rows
+        .iter()
+        .filter_map(|(.., was)| serde_json::from_str::<Vec<String>>(was.as_deref()?).ok())
+        .flatten()
+        .collect();
     // An id in a kept person's `was` is a rename (`kith-auth rename`), not a removal: the person lives on under the new id.
     // Moving its claims and asks to the new id is a follow-up; revoking a live person's work is the wrong failure.
+    // Only while no core.db row's `was` lists it yet: then the rename was imported before, and a row under the old id is
+    // someone who took it again, whose removal must end their work.
     let renamed: std::collections::BTreeSet<&str> = table(auth, "people")?
         .into_iter()
         .flatten()
         .filter_map(|(_, p)| p.get("was").and_then(Value::as_array))
         .flatten()
         .filter_map(Value::as_str)
+        .filter(|old| !had.contains(*old))
         .collect();
     let gone: std::collections::BTreeMap<&str, Option<&str>> = rows
         .iter()
         .filter(|(id, ..)| !keep.contains(id.as_str()) && !renamed.contains(id.as_str()))
-        .map(|(id, bot_of, _)| (id.as_str(), bot_of.as_deref()))
+        .map(|(id, bot_of, ..)| (id.as_str(), bot_of.as_deref()))
         .collect();
     if let Some((id, ..)) = rows
         .iter()
-        .find(|(id, _, owner)| *owner == 1 && gone.contains_key(id.as_str()))
+        .find(|(id, _, owner, _)| *owner == 1 && gone.contains_key(id.as_str()))
     {
         return Err(Error::Refused(format!(
             "auth.json: the owner {id} is in core.db and not in the file; removing the owner is never right, so nothing was \
@@ -607,12 +663,51 @@ pub(super) fn record_removals(conn: &Connection, auth: &Value, now_ms: f64) -> R
     Ok(found.into_iter().map(|(id, _)| id).collect())
 }
 
+/// The people the file has suspended and core.db holds as not suspended (a missed suspend mirror). Reads only. The owner
+/// (an old file may still mark one revoked) and bots are skipped: the order refuses the owner, so a row would replay
+/// forever. A person new to core.db is not listed: nothing of theirs is in the core to sweep. Only the file's current id
+/// is read, not its `was` ids (a rename is the rename follow-up's).
+pub(super) fn suspends(conn: &Connection, auth: &Value) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for (id, p) in table(auth, "people")?.into_iter().flatten() {
+        if !truthy(p.get("revoked"), &format!("people.{id}.revoked"))? {
+            continue;
+        }
+        if truthy(p.get("owner"), &format!("people.{id}.owner"))?
+            || p.get("bot_of").is_some_and(|b| !b.is_null())
+        {
+            continue;
+        }
+        // core.db's owner is never listed, whatever the file says of them.
+        let held: Option<(i64, i64)> = conn
+            .query_row(
+                "SELECT revoked, owner FROM people WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if held == Some((0, 0)) {
+            out.push(id.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// Writes the open record for each of [`suspends`]'s ids, in the caller's transaction, before `clear()`. Returns the ids.
+pub(super) fn record_suspends(conn: &Connection, auth: &Value, now_ms: f64) -> Result<Vec<String>> {
+    let found = suspends(conn, auth)?;
+    for id in &found {
+        crate::revoke_order::record_suspend(conn, id, now_ms)?;
+    }
+    Ok(found)
+}
+
 /// Empties the tables `insert_all` fills (a forced re-import). `authority_settings` keeps any key it does not own.
 pub(super) fn clear(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "DELETE FROM people; DELETE FROM memberships; DELETE FROM presets; DELETE FROM invites; DELETE FROM retired; DELETE FROM agent_access; \
-         DELETE FROM secret_profiles; DELETE FROM secret_vars; DELETE FROM secret_grants; DELETE FROM secret_stale; \
-         DELETE FROM authority_settings WHERE key IN ('owner_bots_budget', 'handles_stale');",
+         DELETE FROM secret_profiles; DELETE FROM secret_vars; DELETE FROM secret_grants; DELETE FROM secret_env; DELETE FROM secret_stale; \
+         DELETE FROM authority_settings WHERE key IN ('owner_bots_budget', 'handles_stale', 'helper_since_stale');",
     )?;
     Ok(())
 }
@@ -684,13 +779,9 @@ pub(super) fn left_behind(auth: &Value) -> Vec<String> {
     out
 }
 
-fn why(key: &str) -> &'static str {
-    match key {
-        "env" => {
-            "agent env values (plaintext in auth.json today) have no table in core.db and move with kith-auth (M2-18); never copied here"
-        }
-        _ => "one-time secrets expire within the hour",
-    }
+/// Why a left-behind table is not copied (`once` is the only one).
+fn why(_key: &str) -> &'static str {
+    "one-time secrets expire within the hour"
 }
 
 /// A short count line for the log and the report.

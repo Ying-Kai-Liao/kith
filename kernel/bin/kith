@@ -156,7 +156,7 @@ case $1 in
   connectors)         exec "$KITH/bin/kith-auth" "$@" ;;
   skills)             exec "$KITH/bin/kith-skills" "$@" ;;
   door)               shift; exec "$KITH/bin/kith-door" "${@:---help}" ;;
-  cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;
+  cost)               shift; . "$KITH/lib/kith-core.sh"; kith_cost "${@:-agents}"; exit $? ;;   # the ported verbs are the core's when `cost` is switched
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
   allow)              shift; exec "$KITH/bin/kith-allow" "${@:---help}" ;;
   cards)              shift; exec "$KITH/bin/kith-cards" "${@:---help}" ;;
@@ -167,7 +167,14 @@ case $1 in
        kith backup list|add|remove ...                the backup chain (kith account)" >&2; exit 2; }
                       [[ $2 == run ]] && shift
                       shift; exec "$KITH/bin/kith-state" backup "$@" ;;
-  account)            shift; exec "$KITH/bin/kith-account" "${@:---help}" ;;
+  account)            shift
+                      # The state verbs are the Rust core's when `account-state` is switched (lib/core-switched.txt) and a
+                      # program lists it: the file until `kith migrate step accounts`, the core's table after. Same words,
+                      # same exit codes (golden/account-state.json). Otherwise the Python answers.
+                      case ${1:-} in
+                        list|ls|pick|out|clear|usage) . "$KITH/lib/kith-core.sh"; kith_core_exec account-state --kernel "$KITH" "$@" || true ;;
+                      esac
+                      exec "$KITH/bin/kith-account" "${@:---help}" ;;
   new)                shift; exec "$KITH/bin/kith-new" "$@" ;;
   remote)             shift; exec "$KITH/bin/kith-remote" "${@:---help}" ;;
   recall)             shift; exec "$KITH/bin/kith-recall" "${@:---help}" ;;
@@ -347,6 +354,18 @@ if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/
 nested=0; [[ -n ${KITH_AGENT:-} ]] && nested=1   # started by another run (KITH_AGENT is exported further down)
 caller_env=${KITH_AGENT:-}   # the caller's name as it came in (exported over with this agent's a little below)
 caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trusted=0 p_mode="" p_model="" p_deny="" p_line="" p_env_names="" p_rooms=""
+# A room person (room-<id>, the meet of everyone in a room with people) has no row in auth.json: only the Rust launch
+# builds its grant (launch/room.rs), so this script never starts a run for one.
+if [[ ${KITH_PERSON:-} == room-* ]]; then
+  echo "kith: ${KITH_PERSON} is a room person; it only launches through the Rust launch, not this script" >&2; exit 3
+fi
+# Once the claims are the core's (the claims tombstone, kernel/lib/kith_claims.py), a person's revoke epoch is read BEFORE
+# kith-auth decides that they may run, and travels with the run's claim (KITH_REVOKE_SEEN): a revoke that lands in between
+# refuses the claim instead of being missed by the sweep that ran before it. Files mode (no marker): nothing is read.
+claim_seen=""
+if [[ -n ${KITH_PERSON:-} && -e ${KITH_STATE:-/nonexistent}/live/terminal/claims.tombstone ]]; then
+  claim_seen=$(python3 "$KITH/bin/kith-sessions" epoch "$KITH_PERSON") || exit 1
+fi
 if [[ -n ${KITH_PERSON:-} ]]; then
   # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
   # kith-auth says held, a revoke made in the app or on another Mac may not be here yet, so ask again every 2 s for up
@@ -385,8 +404,14 @@ for k, v in r.get("env", {}).items():
 print("p_env_names=%s" % q(" ".join(env)))')"
   [[ $p_allowed == 1 ]] || { echo "kith: $p_why (kith-auth member $agent ${KITH_PERSON})" >&2; exit 3; }
   if [[ -n $p_budget ]]; then   # the membership's monthly cap, for the agent they reached (the caller, for a helper)
+    # A limit that can't be read is not "no limit": anyone but the owner stops here (NaN, inf, a sign or text all fail).
+    if [[ $p_owner == 0 && ! $p_budget =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      echo "kith: your spending limit on ${p_budget_agent:-$agent} can't be read; ask the owner to set it again" >&2; exit 3
+    fi
     # Fails closed for anyone but the owner: a spend that can't be read is not $0.
-    if ! spent=$(KITH_PERSON_WAS=$p_was "$KITH/bin/kith-cost" spent "$KITH_PERSON" "$p_budget_agent" 2>/dev/null); then
+    . "$KITH/lib/kith-core.sh"
+    [[ -n ${_kith_core_primed:-} ]] || kith_core_prime
+    if ! spent=$(KITH_PERSON_WAS=$p_was kith_cost spent "$KITH_PERSON" "$p_budget_agent" 2>/dev/null); then
       [[ $p_owner == 1 ]] && spent=0 || { echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost failed); not running without the budget check" >&2; exit 3; }
     elif [[ $p_owner == 0 && ! $spent =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
       echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost gave '$spent'); not running without the budget check" >&2; exit 3
@@ -439,7 +464,11 @@ shared=$home/memory/shared
 
 # The pinned package (prompt.md = agent.md body + PROTOCOL.md). If versioning itself breaks, run the live folder
 # rather than not at all.
-pkg=$("$KITH/bin/kith-pkg" resolve "$agent") && [[ -f $pkg/prompt.md ]] \
+# `resolve` is the Rust core's when `pkg` is switched (lib/core-switched.txt); kith_core_exec returns otherwise (or with
+# KITH_CORE=python) and the Python answers. The rest of kith-pkg stays Python.
+. "$KITH/lib/kith-core.sh"
+[[ -n ${_kith_core_primed:-} ]] || kith_core_prime   # one program lookup for the pkg call and the project_id calls below
+pkg=$({ kith_core_exec pkg --kernel "$KITH" resolve "$agent" || "$KITH/bin/kith-pkg" resolve "$agent"; }) && [[ -f $pkg/prompt.md ]] \
   || { echo "kith: $agent: package snapshot failed; running the live folder" >&2; pkg=$src_pkg; }
 export KITH_AGENT=$agent KITH_AGENT_DIR=$pkg KITH_AGENT_HOME=$home KITH_AGENT_VERSION=${pkg##*@}
 [[ $pkg == "$src_pkg" ]] && KITH_AGENT_VERSION=live
@@ -546,7 +575,7 @@ fi
 # it asks (a terminal run asks here; a one-shot or the host's launch says so and goes on: the host asks before the
 # turn with a card), tells and goes on, or holds only when this Mac chose hold (kith AGENT set at-limit hold). A spend
 # that can't be read is no reason to stop the owner. Anyone else's runs keep their membership budget above.
-if [[ $p_owner == 1 ]] && lim=$("$KITH/bin/kith-cost" limit "$agent" --sh 2>/dev/null) && [[ -n $lim ]]; then
+if [[ $p_owner == 1 ]] && lim=$(kith_cost limit "$agent" --sh 2>/dev/null) && [[ -n $lim ]]; then
   l_over=0 l_at=ask l_text=""
   eval "$lim"
   if [[ $l_over == 1 ]]; then
@@ -567,18 +596,21 @@ if [[ $p_owner == 1 ]] && lim=$("$KITH/bin/kith-cost" limit "$agent" --sh 2>/dev
   fi
 fi
 # Launch-time lookups are the kernel's own, whoever the run is for: a guest token in the environment would narrow them.
+# They are the Rust core's when `project-id` is switched. A guest's own calls never come through here (the token is dropped
+# above): they reach bin/project-id, which asks the host over the run socket and which the core does not replace.
+project_id() { ( unset KITH_RUN_TOKEN; kith_core_exec project-id --kernel "$KITH" "$@" || true; exec "$KITH/bin/project-id" "$@" ); }
 if [[ -n $project ]]; then
-  env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \
-    || { echo "kith: unknown project '$project'. Known: $(env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --list | cut -f1 | cut -d' ' -f1 | tr '\n' ' ')" >&2
+  project_id --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \
+    || { echo "kith: unknown project '$project'. Known: $(project_id --list | cut -f1 | cut -d' ' -f1 | tr '\n' ' ')" >&2
          echo "    register one with: $KITH/bin/project-id --register $project [dir]" >&2; exit 1; }
 else
-  project=$(env -u KITH_RUN_TOKEN "$KITH/bin/project-id" || true)
+  project=$(project_id || true)
 fi
 
 # The project's parents (closest first) and the home folders along the chain (bin/project-id --info).
-info=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --info "$project" || true)
+info=$([[ -n $project ]] && project_id --info "$project" || true)
 parents=$(printf '%s\n' "$info" | tail -n +2 | cut -f1 | paste -sd' ' -)
-held=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --children "$project" --all || true)
+held=$([[ -n $project ]] && project_id --children "$project" --all || true)
 
 # Body without frontmatter, then long-term memory: the load filter of docs/memory-context.md (lib/kith_facets.py, the
 # same one the host's runs get through KITH_ROOM). The owner's run: about them, the agent's memory, then the shared part
@@ -1310,7 +1342,15 @@ for k, v in json.load(sys.stdin).get("env", {}).items():
 fi
 # Every run with someone else's profile is findable by the revoke sweep (kith-sessions proc): its pid is the one that execs
 # claude below, so the claim lives as long as claude (or, for an interactive run, the launcher claude runs under).
-[[ $p_owner == 1 || $launch -eq 1 ]] || python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || true
+# Once the claims are the core's (the marker), any failure of proc means this person's run has no core claim, so a revoke
+# could not find it: it does not start (exit 9 is the core saying so; a traceback or a failed import is the same to a revoke).
+if [[ $p_owner != 1 && $launch -ne 1 ]]; then
+  proc_rc=0
+  KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || proc_rc=$?
+  if [[ $proc_rc -eq 9 || ( $proc_rc -ne 0 && -e ${KITH_STATE:-/nonexistent}/live/terminal/claims.tombstone ) ]]; then
+    echo "kith: the Kith core cannot record this run, so ${p_id} cannot start it right now (is kith serve running?)" >&2; exit 1
+  fi
+fi
 # Another harness: the same run, handed to its adapter (prompt in a file, directories and MCP configs as lists).
 if [[ $harness != claude ]]; then
   [[ $want_held -eq 0 ]] || echo "kith: --held holds claude sessions only; $harness runs here (--direct)" >&2
@@ -1444,7 +1484,7 @@ if [[ $# -gt 0 ]]; then
   [[ $want_held -eq 0 ]] || echo "kith: --held is for an interactive session; this task runs here (--direct)" >&2
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
-  [[ -z $csid ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  [[ -z $csid ]] || KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" "$claim_person" "$agent" || exit 1
   [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
   # A permission prompt in this run asks for approval through a card (--permission-prompt-tool) instead of being refused.
   # A guest run was given KITH_RUN_TOKEN/KITH_RUN_SOCKET by the host, an owner run KITH_ASK_*, or gets them here: the
@@ -1493,7 +1533,7 @@ fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
 if [[ -n $csid && $csid != "${r_sid:-}" ]]; then
-  python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" "$claim_person" "$agent" || exit 1
 fi
 # An interactive owner run is listed in the apps (the SessionStart hook above) and may be taken over from there, which ends
 # claude: it runs as a child of kith-sessions so the note about getting it back can follow it (signals and the exit code

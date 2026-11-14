@@ -1,6 +1,8 @@
 import { ConversationBook } from '@shared/conversation'
 import type { IncomingCall } from '@shared/incoming-call'
+import type { MyRoom } from '@shared/host-contract.gen'
 import { mirrorStamp } from '@shared/mirror-stamp'
+import { roomAgentName } from '@shared/room-people'
 import { checkHost, PROTOCOL, type HostVersion, type VersionMismatch } from '@shared/compat'
 import {
   type AccessRequest,
@@ -40,6 +42,11 @@ export class BotMirror extends Observable {
   hello: Hello | null = null
   hostVersion: HostVersion | null = null
   bots = new Map<string, Bot>()
+  /** An invited person's group rooms (`myRooms`): each shown as a group in the roster, with the stay its posts must carry. Never persisted. */
+  myRooms = new Map<string, MyRoom>()
+  /** A room that went away under an open view: the view shows the one neutral closed state. */
+  closedRooms = new Set<string>()
+  closedRoomNames = new Map<string, string>()
   entries = new Map<string, Entry[]>()
   /** The room conversations of the group chats (owner's app only: the host sends them to nobody else). */
   conversations = new ConversationBook()
@@ -156,7 +163,7 @@ export class BotMirror extends Observable {
 
   /** Roster order: pinned first, then where the user dragged them, then most recent activity. */
   get roster(): Bot[] {
-    return visibleBots([...this.bots.values()], this.granted).filter((b) => !b.hidden).sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin) || Number(b.pinned) - Number(a.pinned) || a.position - b.position || b.lastAt - a.lastAt)
+    return visibleBots([...this.bots.values()].filter((b) => !this.myRooms.has(b.id)), this.granted).concat([...this.myRooms.keys()].flatMap((id) => this.bots.get(id) ?? [])).filter((b) => !b.hidden).sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin) || Number(b.pinned) - Number(a.pinned) || a.position - b.position || b.lastAt - a.lastAt)
   }
 
   /** The built-in scratch bot Quick chat talks to; none on a kernel from before it, or on a computer that isn't yours. */
@@ -200,7 +207,8 @@ export class BotMirror extends Observable {
   }
 
   authorName(id: string | null | undefined) {
-    return (id && this.bots.get(id)?.name) || 'A deleted bot'
+    // An invited person has no row for the room's agents: their name comes from `myRooms`.
+    return (id && (this.bots.get(id)?.name ?? roomAgentName(this.myRooms.values(), id))) || 'A deleted bot'
   }
 
   /** The latest thinking of the turn running in a chat (`thread` null) or thread. */
@@ -278,11 +286,13 @@ export class BotMirror extends Observable {
     try {
       const raw = localStorage.getItem(this.cacheKey)
       if (!raw) return
-      const cache = JSON.parse(raw) as { stamp?: string; hostId?: string; rev: number; bots: Bot[]; entries: Entry[] }
+      const cache = JSON.parse(raw) as { stamp?: string; hostId?: string; rev: number; bots: Bot[]; rooms?: MyRoom[]; entries: Entry[] }
       this.cacheStamp = cache.stamp ?? ''
       this.hostId = cache.hostId ?? null
       this.rev = cache.rev
       this.bots = new Map(cache.bots.map((b) => [b.id, b]))
+      // A person's rooms are kept with their stay, so the first fresh list after a launch can close what is gone and drop what a new stay replaced.
+      this.myRooms = new Map((cache.rooms ?? []).map((r) => [r.id, r]))
       const grouped = new Map<string, Entry[]>()
       for (const e of cache.entries) grouped.set(e.botId, [...(grouped.get(e.botId) ?? []), e])
       this.entries = grouped
@@ -319,7 +329,7 @@ export class BotMirror extends Observable {
       kept.push(...list.filter((e) => !e.id.startsWith('local-')).slice(-200))
       kept.push(...list.filter((e) => e.id.startsWith('local-') && e.data.status === 'failed'))
     }
-    const cache = { stamp: mirrorStamp(this.appVersion, this.hello?.version ?? ''), hostId: this.hostId, rev: this.rev, bots: [...this.bots.values()], entries: kept }
+    const cache = { stamp: mirrorStamp(this.appVersion, this.hello?.version ?? ''), hostId: this.hostId, rev: this.rev, bots: [...this.bots.values()], rooms: [...this.myRooms.values()], entries: kept }
     try {
       localStorage.setItem(this.cacheKey, JSON.stringify(cache))
     } catch {}

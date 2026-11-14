@@ -111,6 +111,7 @@ impl Tree {
             cwd: &cwd,
             user_home: &home,
             kith_bin: Some("/usr/local/bin/kith"),
+            fence_bin: Some("/usr/local/bin/kith"),
             plugins_json: "[]",
             owner_terminal: false,
             api_helper: "",
@@ -221,9 +222,10 @@ fn guest_sandbox_is_closed_and_fails_closed() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|h| h["hooks"][0]["command"]
-                .as_str()
-                .is_some_and(|c| c.contains("kith_readfence.py")))
+            .any(|h| h["hooks"][0]["command"].as_str().is_some_and(|c| c
+                .starts_with("out=$(/usr/local/bin/kith kernel readfence --root ")
+                && c.contains(") || out=")
+                && !c.contains("kith_readfence.py")))
     );
     // no broad Bash rule for an untrusted guest
     let allow = strs(&s["permissions"]["allow"]);
@@ -275,6 +277,7 @@ fn guest_work_dir_is_never_the_home_folder() {
         cwd: &cwd,
         user_home: &home,
         kith_bin: Some("/usr/local/bin/kith"),
+        fence_bin: Some("/usr/local/bin/kith"),
         plugins_json: "[]",
         owner_terminal: false,
         api_helper: "",
@@ -317,6 +320,7 @@ fn guest_without_the_memory_check_does_not_run() {
         cwd: "/",
         user_home: &home,
         kith_bin: None,
+        fence_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
         api_helper: "",

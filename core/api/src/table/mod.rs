@@ -26,6 +26,7 @@ mod accounts;
 mod build;
 mod cards;
 mod children;
+mod claims_host;
 mod contract;
 mod conversations;
 mod doors;
@@ -96,6 +97,8 @@ const PARTS: &[&[Method]] = &[
     accounts::ROWS,
     // M3-10b3: the holder's record in the core.
     holder::ROWS,
+    // M3-10f: the host's claim rows (host principal, unswitched).
+    claims_host::ROWS,
 ];
 
 const LEN: usize = {

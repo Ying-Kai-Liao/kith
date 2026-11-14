@@ -118,7 +118,9 @@ fn field(row: &Value, key: &str, default: &str) -> Value {
 }
 
 /// The array `kith-auth people --json` prints.
-pub(super) fn people_json(auth: &Value, c: &Ctx) -> Value {
+/// `with_was` adds each person's former ids (`was`), which `kith-auth people --json` does not carry: the host's reconcile
+/// needs them to tell a renamed person from a removed one.
+pub(super) fn people_json(auth: &Value, c: &Ctx, with_was: bool) -> Value {
     let all = people(auth);
     let mut out = Vec::new();
     for pid in ordered(auth) {
@@ -133,7 +135,7 @@ pub(super) fn people_json(auth: &Value, c: &Ctx) -> Value {
             .filter(|(k, _)| k.as_str() != "kith")
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        out.push(json!({
+        let mut row = json!({
             "id": pid,
             "name": field(p, "name", ""),
             "owner": truthy(p.get("owner")),
@@ -145,7 +147,11 @@ pub(super) fn people_json(auth: &Value, c: &Ctx) -> Value {
             "kith": handles.get("kith").cloned().unwrap_or_else(|| json!("")),
             "agents": agent_rows(auth, c, &pid),
             "handles": others,
-        }));
+        });
+        if with_was {
+            row["was"] = p.get("was").cloned().unwrap_or_else(|| json!([]));
+        }
+        out.push(row);
     }
     Value::Array(out)
 }
@@ -176,7 +182,7 @@ mod tests {
             "people": {"a": {"name": null, "provider": null}, "b": {}},
             "members": {"house": {"a": {"preset": null}, "b": {}}}
         });
-        let rows = people_json(&auth, &c);
+        let rows = people_json(&auth, &c, false);
         assert_eq!(rows[0]["name"], json!(null));
         assert_eq!(rows[0]["provider"], json!(null));
         assert_eq!(rows[0]["agents"][0]["role"], json!(null));

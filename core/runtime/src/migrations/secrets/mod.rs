@@ -6,9 +6,11 @@ use super::Migration;
 mod m0020_secret_records;
 mod m0021_secret_grants;
 mod m0022_secret_stale;
+mod m0023_secret_env;
 
 pub(super) const STEPS: &[Migration] = &[
     m0020_secret_records::MIGRATION,
     m0021_secret_grants::MIGRATION,
     m0022_secret_stale::MIGRATION,
+    m0023_secret_env::MIGRATION,
 ];

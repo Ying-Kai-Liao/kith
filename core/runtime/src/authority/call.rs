@@ -8,13 +8,15 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
+use super::card;
 use super::people_json;
 use super::requests;
 use super::revoke::{self, Life};
+use super::secret_writes;
 use super::store;
-use super::write::{self, Settings};
+use super::write::{self, Settings, usage};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -29,9 +31,16 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.may"
             | "people.resolve"
             | "people.bridgeHeld"
+            | "people.who"
+            | "people.granted"
+            | "people.secretsView"
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
+            | "people.budgets"
+            | "people.ledger"
+            | "people.removeGrant"
+            | "people.handle"
             | "people.invite"
             | "people.invites"
             | "people.removeInvite"
@@ -49,6 +58,37 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.approve"
             | "people.deny"
             | "people.fileRequest"
+            | "people.access"
+            | "people.helper"
+            | "people.job"
+            | "people.secretSet"
+            | "people.secretGrant"
+            | "people.secretRevoke"
+            | "people.secretEnv"
+            | "people.secretOwner"
+            | "people.secretShare"
+            | "people.secretBrowser"
+            | "people.link"
+            | "people.revision"
+    )
+}
+
+/// The card writes (C-a, C-b) and the secret writers (S-b) `kith-auth` routes here on the tombstone. They widen access,
+/// so they run only for a caller that says `viaSwitch` and only through the daemon (`kith_core::EMBEDDED_WRITES` does
+/// not list them).
+fn routed_write(method: &str) -> bool {
+    matches!(
+        method,
+        "people.access"
+            | "people.helper"
+            | "people.job"
+            | "people.secretSet"
+            | "people.secretGrant"
+            | "people.secretRevoke"
+            | "people.secretEnv"
+            | "people.secretOwner"
+            | "people.secretShare"
+            | "people.secretBrowser"
     )
 }
 
@@ -95,7 +135,19 @@ pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let home = home_of(params, kith_kernel::paths::known_home())?;
     let mut ctx = ctx_from(&folders, kernel);
     ctx.serve = ServeDir::Fixed(serve_dir_of(params, &home));
+    ctx.person = person_of(params);
     Ok(ctx)
+}
+
+/// The `KITH_PERSON` of the caller's environment (`env`), which only the secret writers send: they are the owner's, and a
+/// guest's MCP server runs outside the box with its own. Anything else leaves it unset (the owner), as before.
+pub(super) fn person_of(params: &Value) -> Option<String> {
+    params
+        .get("env")
+        .and_then(|e| e.get("KITH_PERSON"))
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned)
 }
 
 /// The rules' context over a caller's folders (also the cutover module's, which has no params to read them from; its
@@ -132,6 +184,106 @@ fn need<'a>(params: &'a Value, key: &str) -> std::result::Result<&'a str, Die> {
         msg: format!("{key} is required"),
         code: 2,
     })
+}
+
+/// A required list of names: its absence or a wrong shape is the request's fault.
+fn names<'a>(params: &'a Value, key: &str) -> std::result::Result<Vec<&'a str>, Die> {
+    let bad = || Die {
+        msg: format!("{key} must be a list of names"),
+        code: 2,
+    };
+    params
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(bad)?
+        .iter()
+        .map(|v| v.as_str().ok_or_else(bad))
+        .collect()
+}
+
+/// `pairs`: `[[VAR, value], ...]` in the order `kith-auth env` was given them (an empty value clears the variable).
+fn pairs(params: &Value) -> std::result::Result<Vec<(&str, &str)>, Die> {
+    let bad = || Die {
+        msg: "pairs must be a list of [variable, value]".to_owned(),
+        code: 2,
+    };
+    params
+        .get("pairs")
+        .and_then(Value::as_array)
+        .ok_or_else(bad)?
+        .iter()
+        .map(|p| match p.as_array().map(Vec::as_slice) {
+            Some([Value::String(k), Value::String(v)]) => Ok((k.as_str(), v.as_str())),
+            _ => Err(bad()),
+        })
+        .collect()
+}
+
+/// What a `viaSwitch` write is refused with while authority is not switched; the host reads it to fall back to kith-auth.
+pub(crate) const NOT_SWITCHED: &str = "not switched: authority is back on auth.json";
+
+/// How the authority module's cutover record reads for a marked write.
+#[derive(PartialEq)]
+enum Record {
+    /// Phase `switched` or `rollingBack`. A rollback that failed or is stuck leaves the tombstone in auth.json and the
+    /// phase at `RollingBack` (a running one can not coexist with the daemon: the lifetime lock excludes it, so
+    /// `RollingBack` seen here is always a stuck one), and the core is still the only store there.
+    Switched,
+    /// The record exists but can not be read. A tombstone with a record like that means the record was damaged.
+    Damaged,
+    /// No record, or another phase (stepping, rolled back): the file is the store.
+    Other,
+}
+
+fn authority_record(machine: &Path) -> Record {
+    use crate::cutover::state::Phase;
+    let layout = crate::layout::Layout::new(machine);
+    match crate::cutover::state::read(&layout, "authority") {
+        Ok(Some(s)) if matches!(s.phase, Phase::Switched | Phase::RollingBack) => Record::Switched,
+        Ok(_) => Record::Other,
+        Err(_) => Record::Damaged,
+    }
+}
+
+/// A marked method that only takes access away. On a damaged record these still go through (the host sent them
+/// because auth.json is a tombstone, and refusing one leaves access in place); a grant never does.
+fn removal_only(method: &str, params: &Value) -> bool {
+    matches!(
+        method,
+        "people.revoke"
+            | "people.removeBot"
+            | "people.removePerson"
+            | "people.suspend"
+            | "people.secretRevoke"
+    ) || (switch(params, "remove")
+        && matches!(
+            method,
+            "people.access"
+                | "people.helper"
+                | "people.job"
+                | "people.agentAccess"
+                | "people.secretShare"
+        ))
+}
+
+/// The methods that only look, which the host's guard marks with `viaSwitch` (`CoreMethod::marked`, `core_verdict`).
+pub(crate) fn is_read(method: &str, params: &Value) -> bool {
+    matches!(
+        method,
+        "people.list"
+            | "people.listPeople"
+            | "people.may"
+            | "people.resolve"
+            | "people.bridgeHeld"
+            | "people.who"
+            | "people.granted"
+            | "people.secretsView"
+            | "people.invites"
+            | "people.budgets"
+            | "people.ledger"
+            | "people.retired"
+            | "people.revision"
+    ) || (method == "people.botsCap" && word(params, "amount").is_none())
 }
 
 fn switch(params: &Value, key: &str) -> bool {
@@ -189,7 +341,12 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
         let wants = take && res.get("allowed") == Some(&Value::Bool(false)) && !held;
         Ok((res, held, wants))
     };
-    let (res, held, wants) = store::read(core, |a| asked(a))?.map_err(|d| store::refusal(&d))?;
+    let dies = switch(params, "dies");
+    let (res, held, wants) = match store::read(core, |a| asked(a))? {
+        Ok(asked) => asked,
+        Err(d) if dies => return Ok(died(&d)),
+        Err(d) => return Err(store::refusal(&d)),
+    };
     if !wants {
         return Ok(answer(res, held));
     }
@@ -206,7 +363,66 @@ fn resolve(core: &mut Core, c: &Ctx, params: &Value) -> Result<Value> {
     Ok(answer(res, held))
 }
 
-fn answer(mut res: serde_json::Map<String, Value>, held: bool) -> Value {
+/// The keys of the view, and no others: what `mcp-config`, `mcp-names`, `get`, `exec`, `holders`, `keys`, `account-state`,
+/// `ls` and `connectors` read (`may` and its rules over people, memberships and presets; the profiles, grants and env), the
+/// hosts kept for every guest of an agent (`agent_access`: what `agent-access` and the guest's rules over `agent_domains`
+/// read; C-b), and what `jobs` and `door` read of a membership's ticked jobs (they are in the memberships). Anything the core
+/// holds later (`once`, the retired ids, kept hosts, the bots' cap) joins only when someone decides a verb needs it.
+pub(super) const VIEW_KEYS: &[&str] = &[
+    "people",
+    "members",
+    "presets",
+    "profiles",
+    "grants",
+    "env",
+    "agent_access",
+];
+
+/// What the secret-read verbs of `kith-auth` read, from the tables as auth.json's value. Refused on a database imported
+/// before profiles, grants and env were kept: its empty tables say nothing, and answering "no grant" or "no env" from
+/// them would start a service without what the file gave it.
+pub(super) fn secrets_view(a: &Value, switched: bool) -> std::result::Result<Value, Die> {
+    if a.get("secrets_stale").is_some() {
+        // On a switched home auth.json is the tombstone, so there is no file to import again.
+        let way_out = if switched {
+            "roll back and step again (kith rollback authority, then kith migrate step authority)"
+        } else {
+            "import again before the step (kith kernel core-migrate --authority --force)"
+        };
+        return Err(Die {
+            msg: format!(
+                "cannot read the secrets: this database was imported before profiles, grants and env were kept; {way_out}"
+            ),
+            code: 1,
+        });
+    }
+    let mut view = Map::new();
+    for key in VIEW_KEYS {
+        if let Some(v) = a.get(*key) {
+            view.insert((*key).to_owned(), v.clone());
+        }
+    }
+    // no chat handles (nothing here reads them)
+    for p in view
+        .get_mut("people")
+        .and_then(Value::as_object_mut)
+        .into_iter()
+        .flat_map(|o| o.values_mut())
+    {
+        if let Some(p) = p.as_object_mut() {
+            p.shift_remove("handles");
+        }
+    }
+    Ok(Value::Object(view))
+}
+
+/// The rules have no answer (a member on a deleted preset): where `kith-auth` dies with this line and exit code, a caller that
+/// asks with `dies` (its router, on the tombstone) is told them, so it can print the same and exit the same.
+fn died(d: &Die) -> Value {
+    json!({ "died": d.code, "why": d.msg })
+}
+
+fn answer(mut res: Map<String, Value>, held: bool) -> Value {
     res.insert("held".to_owned(), held.into());
     Value::Object(res)
 }
@@ -233,15 +449,33 @@ pub(crate) fn call_in(
     method: &str,
     params: &Value,
 ) -> Result<Value> {
+    // A host that read through the switch (its guard reads, `viaSwitch`) is refused unless authority is switched, like a
+    // marked write below, so the host's cached "switched" is not part of the safety argument: right after a rollback
+    // the file is the truth again, and this store may be missing a revoke that only reached the file. A damaged record
+    // is refused too (a read answers from a store nobody can vouch for; the host then reads the file, which fails closed).
+    if switch(params, "viaSwitch") && is_read(method, params) {
+        let machine = core
+            .folders()
+            .map_or_else(|| life.machine.clone(), |f| f.machine.clone());
+        if authority_record(&machine) != Record::Switched {
+            return Err(Error::Refused(format!("authority: {NOT_SWITCHED}")));
+        }
+    }
+    if routed_write(method) && !switch(params, "viaSwitch") {
+        return Err(Error::Refused(format!(
+            "authority: {method} is for kith-auth's router: it needs viaSwitch"
+        )));
+    }
     match method {
         "people.list" => store::read(
             core,
             |a| json!({ "rows": write::list(a, c, word(params, "agent"), word(params, "person")) }),
         ),
         // `kith-auth people --json`: every person, bots and revoked ones too, with their agent rows and handles.
-        "people.listPeople" => {
-            store::read(core, |a| json!({ "rows": people_json::people_json(a, c) }))
-        }
+        "people.listPeople" => store::read(
+            core,
+            |a| json!({ "rows": people_json::people_json(a, c, switch(params, "withWas")) }),
+        ),
         // The answer of `may` itself (M2-15): the host's event filter asks it per person and agent. A refusal of the
         // rules is a "no" with its words, as for `kith-auth may`.
         "people.may" => {
@@ -249,9 +483,14 @@ pub(crate) fn call_in(
                 need(params, "person").map_err(|d| store::refusal(&d))?,
                 need(params, "agent").map_err(|d| store::refusal(&d))?,
             );
+            // `via` and `once` as `kith-auth may --via CALLER --once` takes them (kith-permit asks whether the caller may
+            // call a helper for the person, a "just this once" counted); the answer is still a read.
+            let via = word(params, "via").filter(|v| !v.is_empty());
+            let once = switch(params, "once");
+            let dies = switch(params, "dies");
             store::read(core, |a| {
                 let rules = Rules::new(c, a);
-                match rules.may(person, agent, None, false) {
+                match rules.may(person, agent, via, once) {
                     Ok((allowed, why)) => {
                         // M2-16: the host's guard also needs to know the owner (never a guest) and the preset (a
                         // member answers their own cards), so `resolve`'s preset rides along. No preset when the
@@ -266,7 +505,11 @@ pub(crate) fn call_in(
                         json!({ "allowed": allowed, "why": why, "owner": owner, "preset": preset })
                     }
                     Err(d) => {
-                        json!({ "allowed": false, "why": d.msg, "owner": false, "preset": null })
+                        if dies {
+                            died(&d)
+                        } else {
+                            json!({ "allowed": false, "why": d.msg, "owner": false, "preset": null })
+                        }
                     }
                 }
             })
@@ -310,7 +553,74 @@ pub(crate) fn call_in(
                 |a| json!({ "held": Rules::new(c, a).bridge_held(person) }),
             )
         }
+        // `kith-auth who <platform> <user-id>` and `granted` (M2-23): the reads kith-auth routes here on the tombstone.
+        "people.who" => {
+            let (platform, id) = (
+                need(params, "platform").map_err(|d| store::refusal(&d))?,
+                need(params, "id").map_err(|d| store::refusal(&d))?,
+            );
+            store::read(core, |a| Rules::new(c, a).who(platform, id))?
+                .map_err(|d| store::refusal(&d))
+        }
+        "people.granted" => {
+            let (agent, service) = (
+                need(params, "agent").map_err(|d| store::refusal(&d))?,
+                need(params, "service").map_err(|d| store::refusal(&d))?,
+            );
+            let grants = store::read(core, |a| Rules::new(c, a).granted(agent, service))?
+                .map_err(|d| store::refusal(&d))?;
+            Ok(json!({ "grants": grants }))
+        }
+        // The tables `kith-auth mcp-config`, `exec`, `get`, `holders`, `keys` and `account-state` decide from, in
+        // auth.json's shape, so its router runs the verb's own code over them (S-a). Where a value lives (`keychain:..`),
+        // never the value; no invite codes, no chat handles.
+        "people.secretsView" => {
+            let machine = core
+                .folders()
+                .map_or_else(|| life.machine.clone(), |f| f.machine.clone());
+            let switched = authority_record(&machine) == Record::Switched;
+            let view = store::read(core, |a| secrets_view(a, switched))?
+                .map_err(|d| store::refusal(&d))?;
+            Ok(json!({ "auth": view }))
+        }
+        // The authority revision (C-b): a digest of the tables, which changes with any write to them. The host's cards
+        // compare it between polls to re-derive who answers a card once auth.json is a tombstone that never changes.
+        "people.revision" => Ok(json!({ "digest": store::digest(core)? })),
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
+        // `kith-auth budgets AGENT --json`: the lines are that one JSON line, so a caller that reads the CLI's output reads
+        // this one's. A budget that is no number is an error, never "no limit".
+        "people.budgets" => {
+            let agent = need(params, "agent").map_err(|d| store::refusal(&d))?;
+            let said =
+                store::read(core, |a| write::budgets(a, agent))?.map_err(|d| store::refusal(&d))?;
+            Ok(json!({ "budgets": said, "lines": [said.to_string()] }))
+        }
+        // `kith-auth ledger [--person ID] [--agent AGENT] --json`: rows, and the same as the one JSON line.
+        "people.ledger" => {
+            let named = |k: &str| -> std::result::Result<Option<&str>, Die> {
+                match word(params, k) {
+                    Some(v) if v.is_empty() || v.starts_with('-') => Err(Die {
+                        msg: "ledger [--person ID] [--agent AGENT] [--json] | ledger --rm <key>"
+                            .into(),
+                        code: 2,
+                    }),
+                    v => Ok(v),
+                }
+            };
+            let (person, agent) = (
+                named("person").map_err(|d| store::refusal(&d))?,
+                named("agent").map_err(|d| store::refusal(&d))?,
+            );
+            let rows = store::read(core, |a| {
+                let person = person.map(|p| secrets::canonical(a, p));
+                write::ledger(a, c, person.as_deref(), agent)
+            })?;
+            Ok(json!({ "rows": rows, "lines": [Value::Array(rows.clone()).to_string()] }))
+        }
+        // `bots-cap --json` (kith-cost bots): the cap as written and every id the owner's bots spend under.
+        "people.botsCap" if word(params, "amount").is_none() && switch(params, "json") => {
+            store::read(core, write::bots_cap_json)?.map_err(|d| store::refusal(&d))
+        }
         "people.botsCap" if word(params, "amount").is_none() => {
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))
         }
@@ -336,11 +646,51 @@ pub(crate) fn call_in(
                 String::new()
             };
             // A person cut off, removed or renamed takes their guest doors with it, in the same transaction (M2-14).
+            // The core's own machine folder (where its cutover records are), not the caller's view of it.
+            let machine = core
+                .folders()
+                .map_or_else(|| life.machine.clone(), |f| f.machine.clone());
             let said = store::run_with(
                 core,
                 c,
-                |a| write_in(m, params, c, life, a, &fresh),
+                |a| {
+                    // A router (`dies`) is told a refusal as an answer, to print it the way `kith-auth` does; the
+                    // tables are put back, so nothing of a half-done verb stays.
+                    // (`agent-access ... domain` is a routed write too, though an owner may still ask for it unmarked)
+                    if !((routed_write(m) || m == "people.agentAccess") && switch(params, "dies")) {
+                        return write_in(m, params, c, life, a, &fresh);
+                    }
+                    let before = a.clone();
+                    write_in(m, params, c, life, a, &fresh).or_else(|d| {
+                        *a = before;
+                        Ok(died(&d))
+                    })
+                },
                 |tx, said| {
+                    // A host that routed this write here because auth.json held the tombstone says so (`viaSwitch`).
+                    // Its look at the file and this write are two steps. The cutover lifetime lock is what
+                    // excludes `kith rollback authority` while the daemon lives (the rollback takes it before it
+                    // writes RollingBack), so this check is for a phase left behind (rolled back, never switched).
+                    // RollingBack counts as switched: a stuck rollback keeps the tombstone, and removals must work.
+                    // A tombstone with no Switched/RollingBack record, seen by a live daemon, means the record is
+                    // damaged or removed. Damaged: a write that only removes access still goes through (refusing it
+                    // would leave access in place), a grant is refused. Removed: everything is refused.
+                    // The phase is read here, in the write's own transaction. A write without the marker
+                    // (kith-auth's mirror, the terminal) keeps today's behaviour.
+                    if switch(params, "viaSwitch") {
+                        let ok = match authority_record(&machine) {
+                            Record::Switched => true,
+                            Record::Damaged => removal_only(m, params),
+                            Record::Other => false,
+                        };
+                        if !ok {
+                            return Err(Error::Refused(format!("authority: {NOT_SWITCHED}")));
+                        }
+                    }
+                    // Read inside the transaction by `write_in` (not answers): whether an add names a new id, and the
+                    // bot's line of owners.
+                    let joining = take_flag(said, "joining");
+                    let lineage = take_lineage(said);
                     revoke::follow_in_doors(tx, m, params, said, c.now_ms)?;
                     revoke::follow_in_cards(tx, m, params, said)?;
                     // A removal drops the bots' rows: record the person and the bot set (possibly empty) in this
@@ -361,11 +711,32 @@ pub(crate) fn call_in(
                             .collect();
                         crate::revoke_order::record_removal(tx, id, &bots, c.now_ms)?;
                     }
-                    // An id an open removal names can not join again until its order has run.
-                    if matches!(m, "people.addPerson" | "people.addBot")
-                        && let Some(id) = word(params, "id")
-                        && let Some(of) = crate::revoke_order::open_removal_naming(tx, id)?
-                    {
+                    // A suspension keeps the rows, so its record names no bots (the table walk finds them); it
+                    // means "suspended, order not finished" all the same.
+                    if let Some(id) = said.get("suspendedPerson").and_then(Value::as_str) {
+                        crate::revoke_order::record_suspend(tx, id, c.now_ms)?;
+                    }
+                    // An id an open removal names can not join again until its order has run (an edit of someone
+                    // who is already in `people` is not joining). Nor can a rename or a bot removal move a name the
+                    // order still has to find: the suspend row names no bots, the table walk finds them by `bot_of`.
+                    let named = match m {
+                        "people.addPerson" | "people.addBot" if joining => word(params, "id")
+                            .map_or(Ok(None), |id| {
+                                crate::revoke_order::open_removal_naming(tx, id)
+                            })?,
+                        "people.renamePerson" => word(params, "id").map_or(Ok(None), |id| {
+                            crate::revoke_order::open_removal_naming(tx, id)
+                        })?,
+                        "people.removeBot" => {
+                            let mut hit = None;
+                            for x in &lineage {
+                                hit = hit.or(crate::revoke_order::open_removal_naming(tx, x)?);
+                            }
+                            hit
+                        }
+                        _ => None,
+                    };
+                    if let Some(of) = named {
                         return Err(Error::Refused(format!(
                             "authority: finishing the revoke of {of} first, retry"
                         )));
@@ -376,13 +747,14 @@ pub(crate) fn call_in(
             // The removal is committed: run the revoke order now. An error leaves the record, and the replay at start
             // and on the supervisor's pass runs it again, so the removal itself still stands.
             let mut said = said;
-            let removed = said
-                .as_object_mut()
-                .and_then(|o| o.remove("removedPerson"))
-                .and_then(|v| v.as_str().map(str::to_owned));
+            let removed = said.as_object_mut().and_then(|o| {
+                let gone = o.remove("removedPerson");
+                let held = o.remove("suspendedPerson");
+                gone.or(held).and_then(|v| v.as_str().map(str::to_owned))
+            });
             if let Some(id) = removed.as_deref() {
                 #[allow(clippy::cast_possible_truncation)]
-                match crate::revoke_order::revoke_everywhere(core, id, &[], c.now_ms as i64) {
+                match crate::revoke_order::run_open(core, id, c.now_ms as i64) {
                     Ok(out) if !out.kill.is_empty() => {
                         said["kill"] = out
                             .kill
@@ -461,18 +833,23 @@ pub(super) fn write_in(
         )?)),
         "people.addBot" => {
             let kv = settings(params, &["name", "provider"]);
-            Ok(lines(write::bot_add(
+            let joining = !write::people(a).contains_key(need(params, "id")?);
+            let mut out = lines(write::bot_add(
                 a,
                 need(params, "id")?,
                 word(params, "of"),
                 &kv,
-            )?))
+            )?);
+            out["joining"] = json!(joining);
+            Ok(out)
         }
         "people.removeBot" => {
             // read before the row goes: a renamed bot's cards may still sit under its old ids
             let was = revoke::was_ids(a, need(params, "id")?);
+            let lineage = lineage_of(a, need(params, "id")?);
             let mut out = lines(write::bot_remove(a, need(params, "id")?)?);
             out["was"] = json!(was);
+            out["lineage"] = json!(lineage);
             Ok(out)
         }
         "people.agentAccess" => Ok(lines(write::agent_access(
@@ -482,6 +859,174 @@ pub(super) fn write_in(
             need(params, "domain")?,
             switch(params, "remove"),
         )?)),
+        "people.access" => {
+            let (agent, person, kind, value) = (
+                need(params, "agent")?,
+                need(params, "person")?,
+                need(params, "kind")?,
+                need(params, "value")?,
+            );
+            if switch(params, "remove") {
+                return Ok(lines(card::access_remove(a, agent, person, kind, value)?));
+            }
+            let home = home_of(params, kith_kernel::paths::known_home()).map_err(|e| Die {
+                msg: e.to_string(),
+                code: 1,
+            })?;
+            Ok(lines(card::access_grant(
+                a,
+                c,
+                life,
+                &home.to_string_lossy(),
+                (agent, person, kind, value),
+                word(params, "by"),
+            )?))
+        }
+        "people.helper" => {
+            let mode = if switch(params, "remove") {
+                card::HelperMode::Remove
+            } else if switch(params, "once") {
+                card::HelperMode::Once
+            } else {
+                card::HelperMode::Always
+            };
+            Ok(lines(card::helper_set(
+                a,
+                c,
+                need(params, "agent")?,
+                need(params, "person")?,
+                need(params, "helper")?,
+                &mode,
+            )?))
+        }
+        "people.job" => {
+            let (agent, person, name) = (
+                need(params, "agent")?,
+                need(params, "person")?,
+                need(params, "job")?,
+            );
+            if switch(params, "remove") {
+                return Ok(lines(card::job_remove(a, agent, person, name)));
+            }
+            if switch(params, "tick") {
+                return Ok(lines(card::job_tick(
+                    a,
+                    c,
+                    agent,
+                    person,
+                    name,
+                    word(params, "shown"),
+                )?));
+            }
+            Ok(lines(card::job_decline(
+                a,
+                c,
+                agent,
+                person,
+                name,
+                need(params, "decline")?,
+            )?))
+        }
+        "people.secretSet" => {
+            // names only: the Keychain has the value, and nothing of it may reach core.db (or a log of this call)
+            if ["value", "values", "secret"]
+                .iter()
+                .any(|k| params.get(*k).is_some())
+            {
+                return usage("the core takes the names of the variables, never a value");
+            }
+            let vars = names(params, "vars")?;
+            secret_writes::secret_set(
+                a,
+                c,
+                life,
+                need(params, "profile")?,
+                &vars,
+                word(params, "grant"),
+            )
+        }
+        "people.secretGrant" => {
+            let (agents, profiles) = (names(params, "agents")?, names(params, "profiles")?);
+            secret_writes::secret_grant(
+                a,
+                c,
+                life,
+                &secret_writes::GrantArgs {
+                    agents: &agents,
+                    service: need(params, "service")?,
+                    profiles: &profiles,
+                    known_only: switch(params, "knownOnly"),
+                    if_have: params.get("ifHave").and_then(Value::as_object),
+                },
+            )
+        }
+        "people.secretRevoke" => secret_writes::secret_revoke(
+            a,
+            c,
+            need(params, "agent")?,
+            need(params, "service")?,
+            word(params, "profile"),
+            switch(params, "dropHostProfiles"),
+        ),
+        "people.secretEnv" => {
+            let pairs = pairs(params)?;
+            secret_writes::secret_env(
+                a,
+                c,
+                life,
+                need(params, "agent")?,
+                need(params, "service")?,
+                &pairs,
+            )
+        }
+        "people.secretOwner" => secret_writes::secret_owner(
+            a,
+            c,
+            life,
+            need(params, "profile")?,
+            need(params, "person")?,
+        ),
+        "people.secretShare" => {
+            let ids = names(params, "ids")?;
+            secret_writes::secret_share(
+                a,
+                c,
+                need(params, "profile")?,
+                &ids,
+                switch(params, "remove"),
+            )
+        }
+        "people.secretBrowser" => secret_writes::secret_browser(
+            a,
+            c,
+            life,
+            need(params, "profile")?,
+            word(params, "browser"),
+        ),
+        "people.link" => {
+            let said = write::link(
+                a,
+                c,
+                need(params, "platform")?,
+                need(params, "uid")?,
+                need(params, "code")?,
+            )?;
+            Ok(json!({ "person": said.first(), "lines": said }))
+        }
+        "people.removeGrant" => Ok(lines(write::remove_grant(a, c, need(params, "key")?)?)),
+        "people.handle" => {
+            let uid = if switch(params, "remove") {
+                None
+            } else {
+                Some(need(params, "uid")?)
+            };
+            Ok(lines(write::handle(
+                a,
+                need(params, "person")?,
+                need(params, "platform")?,
+                uid,
+            )?))
+        }
         "people.botsCap" => Ok(lines(write::bots_cap(a, need(params, "amount")?)?)),
         "people.invite" => {
             let said = write::invite_create(
@@ -513,13 +1058,16 @@ pub(super) fn write_in(
         )?)),
         "people.addPerson" => {
             let kv = settings(params, &["name", "lang", "tz"]);
-            Ok(lines(revoke::person_set(
+            let joining = !write::people(a).contains_key(need(params, "id")?);
+            let mut out = lines(revoke::person_set(
                 a,
                 life,
                 need(params, "id")?,
                 &kv,
                 switch(params, "owner"),
-            )?))
+            )?);
+            out["joining"] = json!(joining);
+            Ok(out)
         }
         "people.renamePerson" => Ok(lines(revoke::person_rename(
             a,
@@ -546,6 +1094,8 @@ pub(super) fn write_in(
             let mut out = lines(said);
             if method == "people.suspend" {
                 out["was"] = json!(revoke::was_ids(a, need(params, "id")?));
+                // keyed on the suspension (the canonical id), for the record and the order after the commit
+                out["suspendedPerson"] = json!(ids.first());
             }
             out["ids"] = json!(ids);
             Ok(out)
@@ -555,6 +1105,34 @@ pub(super) fn write_in(
             code: 2,
         }),
     }
+}
+
+/// `id` and the owners above it by `bot_of` (a loop stops at the repeat), read from the snapshot `auth`.
+fn lineage_of(auth: &Value, id: &str) -> Vec<String> {
+    let mut out = vec![id.to_owned()];
+    while let Some(up) = secrets::parent_of(auth, out.last().map_or("", String::as_str)) {
+        if out.contains(&up) {
+            break;
+        }
+        out.push(up);
+    }
+    out
+}
+
+/// Takes the in-transaction `joining` flag out of a write's answer, so it never reaches the caller.
+fn take_flag(said: &mut Value, key: &str) -> bool {
+    said.as_object_mut()
+        .and_then(|o| o.remove(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Takes the in-transaction `lineage` out of a write's answer.
+fn take_lineage(said: &mut Value) -> Vec<String> {
+    said.as_object_mut()
+        .and_then(|o| o.remove("lineage"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
 }
 
 /// The answer of a committed rename, with the folders that really moved and a note for each that did not.

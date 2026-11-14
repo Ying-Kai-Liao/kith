@@ -78,11 +78,24 @@ fn every_row_is_well_formed() {
         // The sync lease's writes are the host's (M2-10b); the sync-lease test below holds each of those rows.
         let want: &[Principal] = if on_the_run_socket.contains(&m.name) {
             &[Principal::RunToken]
-        } else if HOST_ROWS.contains(&m.name) || m.name == SECRET_VALUE_ROW {
+        } else if HOST_ROWS.contains(&m.name)
+            || m.name == SECRET_VALUE_ROW
+            || m.name.starts_with("hostclaim.")
+        {
             &[Principal::Host]
         // The host also reads two owner rows: the lease counter (`mark`) and the cutover gate (`cutover.mayServe`, which
-        // the host-start guard calls). `kernel.cutover`, the write side, stays Owner only.
-        } else if m.name == "syncLease.mark" || m.name == "cutover.mayServe" {
+        // the host-start guard calls). `kernel.cutover`, the write side, stays Owner only. The kernel takers' claim rows
+        // (P5: kith-sessions through `core-call`) are the owner's and the host's.
+        } else if m.name == "syncLease.mark"
+            || m.name == "cutover.mayServe"
+            || [
+                "claim.external",
+                "claim.release",
+                "claim.sweepPerson",
+                "claim.epoch",
+            ]
+            .contains(&m.name)
+        {
             &[Principal::Owner, Principal::Host]
         } else {
             &[Principal::Owner]
@@ -449,6 +462,44 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people undo ann", "people.undo"),
         ("people person clear-temp ann", "people.clearTemp"),
         ("people retired ann", "people.retired"),
+        ("people budgets echo", "people.budgets"),
+        ("people secrets-view", "people.secretsView"),
+        (
+            "people access-always echo ann read /tmp/x --by ann",
+            "people.access",
+        ),
+        (
+            "people access-always echo ann domain a.example.com --rm",
+            "people.access",
+        ),
+        ("people helper echo ann scratch --once", "people.helper"),
+        ("people job echo ann tidy --decline abc", "people.job"),
+        ("people job echo ann tidy --tick", "people.job"),
+        (
+            "people secret-set github/work --grant echo",
+            "people.secretSet",
+        ),
+        (
+            "people secret-grant github --known-only",
+            "people.secretGrant",
+        ),
+        (
+            "people secret-revoke echo github --profile github/work",
+            "people.secretRevoke",
+        ),
+        ("people secret-env echo github", "people.secretEnv"),
+        ("people secret-owner github/work sam", "people.secretOwner"),
+        ("people secret-share github/work", "people.secretShare"),
+        ("people secret-browser work", "people.secretBrowser"),
+        ("people link telegram 42 ABC234", "people.link"),
+        ("people revision", "people.revision"),
+        ("people ledger --person ann", "people.ledger"),
+        (
+            "people ledger-remove read:echo:ann:/tmp/x",
+            "people.removeGrant",
+        ),
+        ("people handle ann telegram 12345", "people.handle"),
+        ("people handle ann telegram --rm", "people.handle"),
         (
             "people agent-access echo api.example.com --rm",
             "people.agentAccess",

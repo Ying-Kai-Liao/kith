@@ -1,0 +1,11 @@
+{
+  "fakes": "host-sock {\"input\": {\"agent\": \"third\", \"task\": \"say pong\"}, \"method\": \"requestPermission\", \"token\": \"run-tok-1\", \"tool\": \"mcp__kithpermit__ask_helper\"}\nkith-ask third | task=say pong | person=ex agent=front ask-token= run-token=set\nkith-ask helper | task=say pong | person=ex agent=front ask-token= run-token=set\n",
+  "state:home/auth.json": "{\n  \"env\": {},\n  \"grants\": {},\n  \"members\": {\n    \"front\": {\n      \"ex\": {\n        \"helpers\": [\n          \"helper\"\n        ],\n        \"mode\": \"default\"\n      },\n      \"guest\": {\n        \"helpers\": [\n          \"helper\"\n        ],\n        \"mode\": \"default\"\n      }\n    }\n  },\n  \"people\": {\n    \"ex\": {\n      \"name\": \"Ex\",\n      \"revoked\": {\n        \"at\": \"<MASKED>\"\n      }\n    },\n    \"guest\": {\n      \"name\": \"Guest\"\n    },\n    \"kai\": {\n      \"owner\": true\n    },\n    \"stranger\": {\n      \"name\": \"Stranger\"\n    }\n  },\n  \"profiles\": {}\n}\n",
+  "state:home/auth.json.lock": "",
+  "state:kith/agents/front/role/agent.md": "---\nname: front\ndescription: test agent\n---\nYou are front.\n",
+  "state:kith/agents/helper/role/agent.md": "---\nname: helper\ndescription: test agent\n---\nYou are helper.\n",
+  "state:kith/agents/third/role/agent.md": "---\nname: third\ndescription: test agent\n---\nYou are third.\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"content\": [{\"type\": \"text\", \"text\": \"Could not ask third: kith: no: ex's access was removed\"}]}}\n{\"jsonrpc\": \"2.0\", \"id\": 2, \"result\": {\"content\": [{\"type\": \"text\", \"text\": \"Could not ask helper: kith: no: ex's access was removed\"}]}}\n"
+}

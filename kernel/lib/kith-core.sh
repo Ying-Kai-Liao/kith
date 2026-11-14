@@ -7,8 +7,8 @@
 #                                    - this Mac has a kith program that lists the module in `kith kernel version`.
 #                                    Otherwise it returns 1 and the caller runs the Python, silently.
 #
-# lib/core-switched.txt is read here at run time, never baked into the program, so a git pull and an older program
-# cannot disagree about what is switched. Removing a line is the rollback.
+# lib/core-switched.txt (`verb<TAB>module[<TAB>cutover module]`) is read here at run time, never baked into the program, so a
+# git pull and an older program cannot disagree about what is switched. Removing a line is the rollback.
 # kith_cutover_refuse MODULE   exits 1 with one line when MODULE has been switched to the core on this Mac (or is part-way
 # through a rollback), so KITH_CORE=python cannot hand it back to the Python. The state is one file per module,
 # <machine>/core/cutover/MODULE.switch (core/runtime/src/cutover/state.rs); a missing file means unswitched. Returns
@@ -27,24 +27,62 @@ kith_cutover_refuse() {
   return 0
 }
 
+# kith_core_prime   looks up the program and its module list once and keeps them in shell variables, so the launch's
+# several kith_core_exec calls (pkg, project-id x3) do not each spawn `kith_paths.py --bin` and `kith kernel version`.
+# Subshells inherit the variables; nothing is exported. The decision is the same as without it, made earlier.
+kith_core_prime() {
+  _kith_core_bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || _kith_core_bin=""
+  _kith_core_ver=""
+  [[ -z $_kith_core_bin ]] || _kith_core_ver=$("$_kith_core_bin" kernel version 2>/dev/null) || _kith_core_ver=""
+  _kith_core_primed=1
+}
+
 kith_core_exec() {
-  local verb=$1 module bin
+  local verb=$1 module cutover bin ver
   shift
-  module=$(awk -F'\t' -v v="$verb" '$1 == v { print $2; exit }' "$KITH/lib/core-switched.txt" 2>/dev/null)
+  # A third column names the cutover module when it is not the one `kernel version` lists (account-state is the verbs of
+  # the accounts module).
+  read -r module cutover < <(awk -F'\t' -v v="$verb" '$1 == v { print $2, ($3 != "" ? $3 : $2); exit }' "$KITH/lib/core-switched.txt" 2>/dev/null) || true
   if [[ ${KITH_CORE:-} == python ]]; then
     # After a module's cutover (kith migrate step) Python must not write its files again: refuse, never fall back.
-    kith_cutover_refuse "${module:-${verb%% *}}"
+    kith_cutover_refuse "${cutover:-${verb%% *}}"
     return 1
   fi
   if [[ -z $module ]]; then
     [[ ${KITH_CORE:-} == rust ]] || return 1
     module=${verb%% *}
   fi
-  bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
-  "$bin" kernel version 2>/dev/null | grep -q "\"$module\"" || return 1
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
   # KITH_BIN names the program that was checked, so the core launch (which takes KITH_BIN as it is, once it answers
   # `memory hook`) and the router agree on one binary.
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"
+}
+
+# kith_cost_ported ARGS...   succeeds when `kith-cost ARGS` is a line the Rust core answers (core/kernel/src/cost/mod.rs `run`):
+# limit AGENT, sync, spent PERSON, usage --json, agent NAME --json, members AGENT, bots --json. Every other line (tag and record,
+# which write the ledger, the text reports, a bare `kith cost`, -h) is Python's, so `cost` in core-switched.txt moves exactly these.
+kith_cost_ported() {
+  local a json=0
+  for a in "$@"; do [[ $a == --json ]] && json=1; done
+  case ${1:-} in
+    limit|spent|members) [[ $# -ge 2 ]] ;;
+    sync) return 0 ;;
+    usage|bots) [[ $json == 1 ]] ;;
+    agent) [[ $# -ge 2 && $json == 1 ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+# kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the line is one it answers, else the Python.
+# A subshell, because kith_core_exec execs; `KITH_PERSON_WAS=.. kith_cost ..` reaches whichever answers.
+kith_cost() {
+  ( if kith_cost_ported "$@"; then kith_core_exec cost --kernel "$KITH" "$@" || :; fi; exec "$KITH/bin/kith-cost" "$@" )
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag

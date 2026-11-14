@@ -4,6 +4,7 @@
 //! cloud stops listing the membership.
 
 use super::account;
+use crate::LockExt;
 use crate::hub::Hub;
 use crate::store::{Membership, Store, now_ms};
 use anyhow::{Context, Result};
@@ -11,6 +12,7 @@ use kith_wire::cloud::path;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;
+use std::sync::Mutex;
 
 /// kv: membership ids the cloud has not yet confirmed as revoked (JSON array).
 const PENDING_REVOKES: &str = "membership_revokes";
@@ -61,9 +63,10 @@ async fn forget_removed(hub: &Hub, bin: &Path) {
 
 /// A kith-auth change that rewrites auth.json, one writer at a time with the owner's own changes (`AUTH_WRITES`).
 /// Callers here never hold the lock.
-async fn locked_run(bin: &Path, args: &[&str]) -> Result<String> {
+pub(crate) async fn locked_run(bin: &Path, args: &[&str]) -> Result<String> {
+    // A switched host sends it to the core (`people.handle`) and never runs kith-auth on the tombstone.
     let _w = crate::api::people::AUTH_WRITES.lock().await;
-    account::run(bin, args).await
+    crate::api::authority::run_auth(bin, args).await
 }
 
 /// A Kith account id as kith-auth takes it. Anything else the cloud sends is not an account.
@@ -193,7 +196,7 @@ pub struct AuthAgent {
 }
 
 pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {
-    let out = account::run(bin, &["people", "--json"]).await?;
+    let out = crate::api::authority::run_auth(bin, &["people", "--json"]).await?;
     serde_json::from_str(&out).context("reading kith-auth people --json")
 }
 
@@ -204,7 +207,19 @@ pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {
 pub async fn auth_people_now(bin: &Path) -> Result<Vec<AuthPerson>> {
     let mut people = auth_people(bin).await?;
     if crate::api::authority::guard_on_core() {
-        let rows = crate::api::authority::owner_call("people.list", json!({}), true).await?;
+        // Marked while the host believes it is switched: the core refuses it once authority is back on auth.json, and
+        // the list kith-auth gave above (the file's rows) then stands.
+        let marked = json!({ "viaSwitch": crate::api::authority::switched() });
+        let rows = match crate::api::authority::owner_call("people.list", marked, true).await {
+            Ok(rows) => rows,
+            Err(e)
+                if e.downcast_ref::<crate::api::authority::CoreRefused>()
+                    .is_some_and(|r| crate::api::authority::is_not_switched(&r.0)) =>
+            {
+                return Ok(people);
+            }
+            Err(e) => return Err(e),
+        };
         let rows = rows["rows"].as_array().cloned().unwrap_or_default();
         let agent = |r: &serde_json::Value| AuthAgent {
             agent: r["agent"].as_str().unwrap_or_default().to_owned(),
@@ -298,7 +313,7 @@ pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Res
         // per person, because kith-auth exits 0 for it.
         let said = {
             let _w = crate::api::people::AUTH_WRITES.lock().await;
-            account::run_noted(bin, &["person", &p.id, flag, "--local"]).await
+            crate::api::authority::run_auth_noted(bin, &["person", &p.id, flag, "--local"]).await
         }
         .with_context(|| format!("kith-auth person {} {flag}", p.id))?
         .1;
@@ -328,8 +343,15 @@ fn pending(store: &Store) -> Vec<String> {
     store.kv_get(PENDING_REVOKES).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
 }
 
-fn set_pending(store: &Store, ids: &[String]) {
-    let saved = serde_json::to_string(ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(PENDING_REVOKES, &v));
+/// Changes the queue in one step: it is read again here, so a membership queued while a retry was awaiting the cloud
+/// is kept, and no `.await` sits between the read and the write (same shape as cloud.rs `update_pending_revokes`).
+fn update_pending(store: &Store, change: impl FnOnce(&mut Vec<String>)) {
+    static WRITING: Mutex<()> = Mutex::new(());
+    let _one_at_a_time = WRITING.locked();
+    let mut ids = pending(store);
+    change(&mut ids);
+    let saved =
+        serde_json::to_string(&ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(PENDING_REVOKES, &v));
     if let Err(e) = saved {
         tracing::warn!(error = format!("{e:#}"), "couldn't remember a membership to revoke");
     }
@@ -342,16 +364,79 @@ pub async fn retry_revokes(hub: &Hub) {
     if ids.is_empty() {
         return;
     }
-    let mut left = vec![];
+    let mut confirmed = vec![];
     for id in ids {
         match super::cloud::post(hub, &path::host_revoke_membership(&id), &json!({})).await {
-            Ok(_) => {}
-            Err(e) if super::cloud::refused_with(&e, 404) => {}
+            Ok(_) => confirmed.push(id),
+            Err(e) if super::cloud::refused_with(&e, 404) => confirmed.push(id),
             Err(e) => {
                 tracing::warn!(error = format!("{e:#}"), membership = id, "couldn't revoke a membership in the cloud");
-                left.push(id);
             }
         }
     }
-    set_pending(&hub.store, &left);
+    // Only what the cloud confirmed leaves the queue: an id queued during the awaits above stays.
+    update_pending(&hub.store, |ids| ids.retain(|i| !confirmed.contains(i)));
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+    use crate::remote::identity::Identity;
+    use axum::response::IntoResponse;
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    #[derive(Default)]
+    struct Gate {
+        entered: Notify,
+        release: Notify,
+        first: std::sync::atomic::AtomicBool,
+    }
+
+    /// A cloud that holds its first revoke call until released and refuses every other.
+    async fn gated_cloud(gate: Arc<Gate>) -> String {
+        use axum::extract::State as Ax;
+        use axum::http::StatusCode;
+        use std::sync::atomic::Ordering;
+        let app = axum::Router::new()
+            .route(
+                "/v1/host/memberships/{id}/revoke",
+                axum::routing::post(|Ax(g): Ax<Arc<Gate>>| async move {
+                    if g.first.swap(true, Ordering::SeqCst) {
+                        return (StatusCode::INTERNAL_SERVER_ERROR, "no").into_response();
+                    }
+                    g.entered.notify_one();
+                    g.release.notified().await;
+                    axum::Json(json!({})).into_response()
+                }),
+            )
+            .with_state(gate);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    }
+
+    #[tokio::test]
+    async fn a_membership_queued_during_a_retry_is_kept() {
+        let dir = std::env::temp_dir().join(format!("kith-members-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("t.db")).unwrap();
+        let hub = Hub::new(store, "host".into(), Identity::load_or_create(&dir).unwrap(), "token".into(), 0);
+        let gate = Arc::new(Gate::default());
+        hub.store.kv_set("test_cloud_url", &gated_cloud(gate.clone()).await).unwrap();
+        update_pending(&hub.store, |ids| ids.push("mem_a".into()));
+
+        let retry = tokio::spawn({
+            let hub = hub.clone();
+            async move { retry_revokes(&hub).await }
+        });
+        gate.entered.notified().await;
+        update_pending(&hub.store, |ids| ids.push("mem_b".into()));
+        gate.release.notify_one();
+        retry.await.unwrap();
+
+        assert_eq!(pending(&hub.store), ["mem_b"], "the confirmed id is gone, the one queued meanwhile is not");
+    }
 }

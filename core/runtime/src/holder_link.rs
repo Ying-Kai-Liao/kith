@@ -12,7 +12,7 @@
 //! frame is only ever a failed connection: generation authority stays in core.db, so a fake holder cannot make a
 //! core step down.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
@@ -165,9 +165,21 @@ pub(crate) fn supervise(shared: &Arc<Shared>, layout: &Layout, cfg: &HolderConfi
     shared.terminals.set_stub(cfg.stub.clone());
     shared.terminals.set_remote(cfg.command.is_some());
     while !shared.stopping() {
+        // Read before the holder is asked (and before it is started): a claim opened after this is newer than anything
+        // its welcome can list, and `different_holder` leaves it alone. Read in `connected`, after the welcome, a claim
+        // taken between the holder composing its welcome and that read would be ended as unlisted.
+        let high_water = match shared.with_core(|c| claims::claim_high_water(c)) {
+            Ok(h) => h,
+            Err(e) => {
+                // Not a holder failure, and a core.db that fails here fails on every try: back off, don't reconnect.
+                fail(shared, &mut last_error, "blocked", &e.to_string());
+                sleep_unless_stopped(shared, cfg.retry_max);
+                continue;
+            }
+        };
         match connect(shared, layout, cfg) {
             Ok(client) => {
-                let ended = connected(shared, client, cfg);
+                let ended = connected(shared, client, high_water, cfg);
                 // Attached clients are told the link is gone; terminals asked for while it was down are answered, not
                 // left to run late.
                 shared.terminals.relay.link_lost();
@@ -381,6 +393,7 @@ fn start_renewing(
 fn connected(
     shared: &Arc<Shared>,
     mut client: Client,
+    high_water: i64,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), Lost> {
     // First thing after the welcome: a deadline left over from before this link must not lapse while we reconcile.
@@ -407,22 +420,25 @@ fn connected(
             "holder: linked through a command; its pids are not this machine's, so nothing is recorded or ended here",
         );
     } else {
-        reconcile(shared, &instance, &procs, cfg)?;
+        let listed = listed_claims(&client.welcome.procs);
+        reconcile(shared, &instance, &procs, &listed, high_water, cfg)?;
     }
     // Before the state says connected: whoever waits for that state may call terminal.open at once.
     // What the core keeps of each held process (its claim, pid and conversation), so an exit the holder reports can be
     // told to the claim it ended, including one that happened while this core was down (the welcome lists it).
     let mut seen = Known::default();
     seen.note_all(&client.welcome.procs);
-    for h in client.welcome.procs.iter().filter(|h| h.exit.is_some()) {
-        if let Some(exit) = &h.exit {
-            report_exit(shared, h.claim, h.pid, exit);
+    // An exit the claim could not record reaches the relay as a live process: the relay would take its end and ack it.
+    let mut offered = client.welcome.procs.clone();
+    for h in &mut offered {
+        if let Some(exit) = &h.exit
+            && !report_exit(shared, h.claim, h.pid, exit)
+        {
+            seen.owed.insert(h.id);
+            h.exit = None;
         }
     }
-    shared
-        .terminals
-        .relay
-        .link_up(client.sender(), &client.welcome.procs);
+    shared.terminals.relay.link_up(client.sender(), &offered);
     shared.terminals.set_link(true);
     shared.set_holder(|h| {
         h.state = "connected";
@@ -481,6 +497,18 @@ fn connected(
         let held = client
             .list()
             .map_err(|e| format!("the holder stopped answering: {e}"))?;
+        for h in &held {
+            if let Some(exit) = h.exit.as_ref().filter(|_| seen.owed.contains(&h.id)) {
+                take_exit(
+                    shared,
+                    &mut client,
+                    &shared.terminals.relay,
+                    &mut seen,
+                    h.id,
+                    exit,
+                )?;
+            }
+        }
         if remote {
             let live = held.iter().filter(|h| h.exit.is_none()).count();
             shared.set_holder(|h| h.procs = live);
@@ -489,7 +517,17 @@ fn connected(
         seen.note_all(&held);
         let now = record_procs(&held);
         if now != known {
-            reconcile(shared, &instance, &now, cfg)?;
+            // Same instance as the record: the claims are not looked at, the list is for the signature's sake, and
+            // `high_water` (read before this connection's hello) is never used: only a new instance reaches
+            // `different_holder`.
+            reconcile(
+                shared,
+                &instance,
+                &now,
+                &listed_claims(&held),
+                high_water,
+                cfg,
+            )?;
             shared.set_holder(|h| {
                 h.procs = now.len();
                 h.pids = now.iter().map(|p| p.pid).collect();
@@ -567,25 +605,14 @@ fn pump(
         wait = Duration::ZERO;
         match kind {
             proto::OUTPUT => relay.output(id, &payload),
-            proto::EXITED => {
-                // An exit the relay does not know (or cannot read) is acked all the same, so the holder forgets it.
-                let known = match serde_json::from_slice::<proto::Exit>(&payload) {
-                    Ok(exit) => {
-                        // The claim hears of it before the relay does: a claim never outlives the process it names.
-                        if let Some((claim, pid, _)) = seen.of(id) {
-                            report_exit(shared, claim, pid, &exit);
-                        }
-                        relay.exited(id, &exit)
-                    }
-                    Err(e) => {
-                        log::note(
-                            logs,
-                            &format!("holder: unreadable exit of process {id} ({e}); acked"),
-                        );
-                        false
-                    }
-                };
-                if !known {
+            proto::EXITED => match serde_json::from_slice::<proto::Exit>(&payload) {
+                Ok(exit) => take_exit(shared, client, relay, seen, id, &exit)?,
+                Err(e) => {
+                    // An exit nobody can read is acked all the same, so the holder forgets it.
+                    log::note(
+                        logs,
+                        &format!("holder: unreadable exit of process {id} ({e}); acked"),
+                    );
                     let held = proto::HeldId {
                         instance: instance.clone(),
                         id,
@@ -594,7 +621,7 @@ fn pump(
                         .ack(&held)
                         .map_err(|e| format!("the holder stopped answering: {e}"))?;
                 }
-            }
+            },
             proto::TAILED => {
                 if let Some(held) = relay.tailed(id, &payload) {
                     client
@@ -744,14 +771,46 @@ pub(crate) fn record_procs(held: &[proto::Held]) -> Vec<RecordedProc> {
         .collect()
 }
 
+/// The claim ids a holder's listing names, exited entries included: the holder still knows them until they are acked.
+fn listed_claims(held: &[proto::Held]) -> Vec<i64> {
+    held.iter()
+        .filter_map(|h| i64::try_from(h.claim).ok())
+        .collect()
+}
+
+/// The serve host's instance name on its turn claims; no holder may say hello under it (see [`reconcile`]).
+#[cfg(test)]
+pub(crate) const HOST_INSTANCE: &str = claims::HOST_INSTANCE;
+
 /// Step 7: a hello that meets an instance other than the recorded one ends what the old one held, confirms it gone,
 /// and only then records the new instance. A record from M0a has no instance: nothing is ended on its account.
+///
+/// Instance ids and the host: the serve host names its own turn claims `kith-serve-host` (`HOST_INSTANCE` in
+/// `serve/host/src/terminal/core_claims.rs`) and, after a restart, ends any claim carrying that name as its own stale
+/// one. A holder that said hello under the same id would have its live claims ended by the host, so the hello is
+/// refused and nothing is recorded. A record stored before this rule is not re-read as a refusal: only the hello is
+/// checked.
+///
+/// The claims: once the old instance's process groups are confirmed gone, `claims::different_holder` ends the old
+/// instance's claims the new one does not list (`listed`, read at `high_water` before the holder was asked). It never
+/// touches the host's claims ([`HOST_INSTANCE`]). If a group would not end, the claims are left as they are: that process
+/// may still hold the writer lock, and the next hello looks again. A `running` claim whose process was alive but not in
+/// the record goes to `ending`; its group is ended here too (pid and start stamp matched, as for the record), and a
+/// group that will not end is only logged: `end_gone` ends the claim once the pid is gone. The pass is idempotent: after it nothing is left
+/// under the old instance, and the record then names the new one, so a repeated hello does not come back here.
 pub(crate) fn reconcile(
     shared: &Shared,
     instance: &str,
     procs: &[RecordedProc],
+    listed: &[i64],
+    high_water: i64,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), Lost> {
+    if claims::is_host_instance(instance) {
+        return Err(Lost::Blocked(format!(
+            "the holder's instance id {instance:?} is the serve host's own claim name; not recorded"
+        )));
+    }
     let recorded = shared
         .with_core(|c| c.holder_record())
         .map_err(|e| Lost::Link(e.to_string()))?;
@@ -786,6 +845,57 @@ pub(crate) fn reconcile(
         for n in notes {
             log::note(&shared.logs, &n);
         }
+        // A core.db that fails here fails again on the next hello: back off like a blocked pass, not a link loss that
+        // resets the delay to `retry_min`.
+        let released = shared
+            .with_core(|c| claims::different_holder(c, instance, listed, &[], high_water, now_ms()))
+            .map_err(|e| Lost::Blocked(format!("ending the old instance's claims failed: {e}")))?;
+        if !released.ended.is_empty() || !released.kill.is_empty() {
+            log::note(
+                &shared.logs,
+                &format!(
+                    "holder: instance {old} is gone; ended {} claim(s) it held, {} more wait for their process",
+                    released.ended.len(),
+                    released.kill.len()
+                ),
+            );
+        }
+        // A process of the old instance that was alive but missing from the record has its claim `ending` now, and
+        // nothing else would signal it: end its group the same way, matched by pid and start stamp (a reused pid is
+        // left alone, as above). A group that will not end is logged, not a block: the claim stays `ending` and
+        // `end_gone` ends it once the pid is gone.
+        // Only claims the old instance started: a NULL-instance or `--direct` run (an imported claim file, the user's
+        // own terminal) was started by no holder, may lead no group of its own, and is left to `end_gone`. Nor a pid
+        // the new instance lists.
+        let stray: Vec<RecordedProc> = released
+            .holder_kill
+            .iter()
+            .filter(|(_, inst)| inst.as_deref() == Some(old))
+            .filter_map(|(k, _)| Some((k.pid?, k.started.clone()?)))
+            .filter(|(pid, _)| {
+                !stale.iter().any(|p| p.pid == *pid) && !procs.iter().any(|n| n.pid == *pid)
+            })
+            .map(|(pid, started)| RecordedProc {
+                pid,
+                started,
+                conv: String::new(),
+            })
+            .collect();
+        if !stray.is_empty() {
+            let mut notes = Vec::new();
+            let result = end_groups(&mut notes, &stray, cfg.kill_wait);
+            for n in notes {
+                log::note(&shared.logs, &n);
+            }
+            if let Err(stuck) = result {
+                log::note(
+                    &shared.logs,
+                    &format!(
+                        "holder: claims of the old instance {old} still wait for their process: {stuck}"
+                    ),
+                );
+            }
+        }
     }
     if recorded.instance.as_deref() != Some(instance) || recorded.procs != procs {
         let rec = HolderRecord {
@@ -799,8 +909,10 @@ pub(crate) fn reconcile(
     Ok(())
 }
 
-/// Ends the process group of each recorded process whose pid still has the recorded start stamp, and waits for the
-/// groups to be empty. A pid that is gone, or has another start in the same form, is not ours: left alone. So is a
+/// Ends the process group of each recorded process whose pid still has the recorded start stamp, or whose pid is gone
+/// while its group still has a process and its record is a start from this boot, and waits for the groups to be empty. A
+/// pid that is gone with its group, gone with a record from an earlier boot or of unknown form, or has another start in
+/// the same form, is not ours: left alone. So is a
 /// live pid that is not a session leader: every holder spawn calls `setsid`, so the recorded process leads its session
 /// and anything else at that pid is a stranger, whatever the record says. A start that cannot be told otherwise (the
 /// pid's own cannot be read, or the record is empty, old `ps` text, or of another form) is neither: nothing is
@@ -816,17 +928,32 @@ fn end_groups(
     let mut stuck: Vec<String> = Vec::new();
     for p in procs {
         match procstart::probe(p.pid) {
-            procstart::Probe::Gone => {
-                notes.push(format!("holder: pid {} is gone; nothing to end", p.pid));
-            }
+            // The leader died but its group may not have: the engine it started runs on in it. Whether that group is
+            // still the recorded one is `procstart::orphan_group`'s one rule (this boot, group not ours, still held).
+            procstart::Probe::Gone => match procstart::orphan_group(p.pid, &p.started) {
+                Some(group) => {
+                    notes.push(format!(
+                        "holder: pid {} is gone but its process group still runs; ending the group",
+                        p.pid
+                    ));
+                    mine.push(group);
+                }
+                None => notes.push(format!("holder: pid {} is gone; nothing to end", p.pid)),
+            },
             procstart::Probe::Alive(Some(now)) if procstart::comparable(&p.started, &now) => {
-                if procstart::same_process(&p.started, &now) {
-                    mine.push(p.pid);
-                } else {
+                if !procstart::same_process(&p.started, &now) {
                     notes.push(format!(
                         "holder: pid {} is not the process that was recorded (another start); left alone",
                         p.pid
                     ));
+                } else if procstart::session_id(p.pid).is_some_and(|sid| sid != p.pid) {
+                    // The same process, but not a group of its own: signalling -pid would hit another group.
+                    notes.push(format!(
+                        "holder: pid {} is not a session leader; left alone",
+                        p.pid
+                    ));
+                } else {
+                    mine.push(p.pid);
                 }
             }
             procstart::Probe::Alive(_) | procstart::Probe::Unknown => {
@@ -875,7 +1002,9 @@ fn end_groups(
             std::thread::sleep(Duration::from_millis(50));
         }
         for pid in signalled.into_iter().filter(|pid| !mine.contains(pid)) {
-            notes.push(format!("holder: ended the process group of pid {pid}"));
+            notes.push(format!(
+                "holder: the process group of pid {pid} is gone after the signal"
+            ));
         }
     }
     if stuck.is_empty() {
@@ -1034,6 +1163,8 @@ pub(crate) struct Known {
     procs: HashMap<u32, (u64, u32, String)>,
     /// Ends that did not finish in a spawn's late path; the supervisor puts them back in the queue.
     unfinished: Vec<proto::HeldId>,
+    /// Exits whose claim report did not commit: not acked, so the holder lists them again and each listing retries.
+    owed: HashSet<u32>,
 }
 
 impl Known {
@@ -1075,20 +1206,55 @@ pub(crate) fn exit_body(
     body.to_string()
 }
 
-/// A holder exit for the claim the process was spawned for. A claim id the core does not know (a terminal started
-/// before claims, a process of another core) is stored nowhere and changes nothing. A failure is logged, never raised: the
-/// exit stays in the holder until acked and the next listing offers it again.
-fn report_exit(shared: &Shared, claim: u64, pid: u32, exit: &proto::Exit) {
+/// A holder exit for the claim the process was spawned for. True once core.db has it: committed, or nothing to record (a
+/// claim id the core does not know, from a terminal started before claims or a process of another core, changes
+/// nothing). False when the write failed: it is logged, and the caller neither acks the exit nor tells the relay, so the
+/// holder keeps it and the next listing offers it again.
+fn report_exit(shared: &Shared, claim: u64, pid: u32, exit: &proto::Exit) -> bool {
     let Ok(claim) = i64::try_from(claim) else {
-        return;
+        return true;
     };
     let body = exit_body(Some(pid), Some(exit), false, None);
-    if let Err(e) = shared.with_core(|c| claims::report(c, claim, "exit", &body, now_ms())) {
-        log::note(
-            &shared.logs,
-            &format!("holder: could not report the exit of pid {pid} for claim {claim}: {e}"),
-        );
+    match shared.with_core(|c| claims::report(c, claim, "exit", &body, now_ms())) {
+        Ok(_) => true,
+        Err(e) => {
+            log::note(
+                &shared.logs,
+                &format!("holder: could not report the exit of pid {pid} for claim {claim}: {e}"),
+            );
+            false
+        }
     }
+}
+
+/// An exit the holder reported or listed: the claim hears of it first (a claim never outlives the process it names),
+/// then the relay sends EXIT to the viewers and takes the tail, which is acked when it comes. An exit the relay does not
+/// know is acked here. One the claim could not record is owed: no EXIT, no ack, retried at the next listing.
+fn take_exit(
+    shared: &Shared,
+    client: &mut Client,
+    relay: &Relay,
+    seen: &mut Known,
+    id: u32,
+    exit: &proto::Exit,
+) -> std::result::Result<(), String> {
+    if let Some((claim, pid, _)) = seen.of(id)
+        && !report_exit(shared, claim, pid, exit)
+    {
+        seen.owed.insert(id);
+        return Ok(());
+    }
+    seen.owed.remove(&id);
+    if !relay.exited(id, exit) {
+        let held = proto::HeldId {
+            instance: client.welcome.instance.clone(),
+            id,
+        };
+        client
+            .ack(&held)
+            .map_err(|e| format!("the holder stopped answering: {e}"))?;
+    }
+    Ok(())
 }
 
 /// How the process `pid` started, as the system says now (empty when it cannot be read: a later kill then treats it as

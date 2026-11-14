@@ -3,7 +3,7 @@
 //! Values are sealed by the core's secrets envelope (`core/runtime/src/secrets`, runtime-design section 9b): one master
 //! key per machine in the OS store, XChaCha20-Poly1305 with the slot name as associated data, records in the core's database. The
 //! host may not link the core's internals, so it reaches the envelope as a client of the owner socket's `secrets.*`
-//! rows ([`CoreLink`], through `core_front`). There is no plaintext fallback: with no daemon, no key store (Windows
+//! rows (`CoreLink`, a thin `Link` over `core_front::secrets`). There is no plaintext fallback: with no daemon, no key store (Windows
 //! until M2-6) or a locked one, reads and writes refuse and nothing is stored.
 //!
 //! Before M2-7 the values lived in `serve.db`'s `kv` table under a key of their own (service
@@ -18,7 +18,6 @@ use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, Payload},
 };
-use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -95,56 +94,33 @@ impl Vault {
     }
 }
 
-/// The real link: the owner socket's `secrets.*` rows (`core_front` is the host's one door to the core).
+/// The real link: the owner socket's `secrets.*` rows, through `core_front::secrets` (the host's one door to the core).
 #[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
 struct CoreLink;
 
-#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
-impl CoreLink {
-    fn call(method: &str, params: &Value, wait: Duration) -> Result<Value> {
-        crate::core_front::secrets_call(method, params, wait).map_err(|e| {
-            anyhow!(
-                "Secure credential storage refused: {e:#}. Credentials are never saved as plain text, and nothing was changed."
-            )
-        })
-    }
-}
-
 impl Link for CoreLink {
     fn open(&self) -> Result<()> {
-        Self::call("secrets.open", &json!({}), DAEMON_WAIT).map(drop)
+        crate::core_front::secrets::open(DAEMON_WAIT)
     }
 
     fn has(&self, name: &str) -> Result<bool> {
-        // One try: `has` runs on message paths, which must not wait for a core that is not there.
-        Ok(Self::call("secrets.has", &json!({"name": name}), Duration::ZERO)?["has"] == true)
+        crate::core_front::secrets::has(name)
     }
 
     fn has_waiting(&self, name: &str, wait: Duration) -> Result<bool> {
-        crate::core_front::secrets_has_waiting(name, wait).map_err(|e| {
-            anyhow!(
-                "Secure credential storage refused: {e:#}. Credentials are never saved as plain text, and nothing was changed."
-            )
-        })
+        crate::core_front::secrets::has_waiting(name, wait)
     }
 
     fn delete(&self, name: &str) -> Result<bool> {
-        Ok(Self::call("secrets.delete", &json!({"name": name}), Duration::ZERO)?["deleted"] == true)
+        crate::core_front::secrets::delete(name)
     }
 
     fn get(&self, name: &str) -> Result<Option<String>> {
-        let answer = Self::call("secrets.get", &json!({"name": name}), Duration::ZERO)?;
-        if answer["found"] != true {
-            return Ok(None);
-        }
-        answer["value"]
-            .as_str()
-            .map(|s| Some(s.to_owned()))
-            .ok_or_else(|| anyhow!("The credential store answered without a value"))
+        crate::core_front::secrets::get(name)
     }
 
     fn put(&self, name: &str, value: &str) -> Result<()> {
-        Self::call("secrets.put", &json!({"name": name, "value": value}), Duration::ZERO).map(drop)
+        crate::core_front::secrets::put(name, value)
     }
 
     fn legacy_key(&self, store: &Store) -> Result<Option<Zeroizing<Vec<u8>>>> {

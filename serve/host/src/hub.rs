@@ -22,6 +22,8 @@ mod actors;
 mod folders;
 pub(crate) mod hq;
 mod order;
+mod room_people;
+pub use room_people::PostRefused;
 mod sync;
 
 /// What a bot is doing right now (wire values: `idle` / `working` / `needsInput` / `error`).
@@ -263,6 +265,16 @@ impl Hub {
     }
 
     pub fn update_bot(&self, patch: &Value) -> Result<Value> {
+        self.update_bot_checked(patch, None)
+    }
+
+    /// [`Self::update_bot`] with the live check of the members it adds to a room with people (`verified`, made by the
+    /// async handler: `chat::room_people::verify_adds`). Without it such an edit is refused.
+    pub fn update_bot_checked(
+        &self,
+        patch: &Value,
+        verified: Option<&crate::chat::room_people::Verified>,
+    ) -> Result<Value> {
         let id = patch["id"].as_str().ok_or_else(|| anyhow!("id required"))?.to_owned();
         let row = self.store.bot(&id)?.filter(|b| !b.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
         let mut merged = serde_json::to_value(&row.config)?;
@@ -311,6 +323,13 @@ impl Hub {
         crate::agent::own_memory::settle(&mut cfg, &row.config, patch);
         let default_moved = !cfg.is_group() && folder::default_of(&cfg) != folder::default_of(&row.config);
         {
+            // A room's member list changes under the membership lock, so a bot's post or ask is checked and lands
+            // entirely before the edit or entirely after it (always membership, then emit).
+            let _members = crate::chat::group::membership_lock();
+            if cfg.is_group() {
+                // A room with people takes only members somebody checked against every person in it just now.
+                crate::chat::room_people::guard_adds(&self.store, &id, &cfg.members, verified)?;
+            }
             let _g = self.emit_lock.locked();
             self.store.save_bot(&cfg)?;
         }
@@ -321,8 +340,6 @@ impl Hub {
         if cfg.is_group() {
             crate::chat::group::members_changed(self, &id, &row.config.members, &cfg.members);
             self.close_group_places(&id, &cfg.members);
-            // An outside bot taken out of the room is no longer waited for.
-            crate::chat::group::cancel_bot_turns(|t| t.lane.chat == id && !cfg.members.contains(&t.bot_id));
         } else {
             if crate::chat::memory::shared(&cfg) != crate::chat::memory::shared(&row.config) {
                 crate::chat::memory::changed(self, Some(&id));
@@ -365,6 +382,7 @@ impl Hub {
             if !row.deleted && group.is_group() && group.members.iter().any(|m| m == id) {
                 group.members.retain(|m| m != id);
                 {
+                    let _members = crate::chat::group::membership_lock();
                     let _g = self.emit_lock.locked();
                     self.store.save_bot(&group)?;
                 }

@@ -38,7 +38,9 @@ check "read_state refuses a tombstoned file" "refuses 'a.read_state()'"
 check "update_state refuses and does not swallow it as a disk error" "refuses 'a.update_state(lambda d: d.setdefault(\"claude\", {}))'"
 check "mark_out refuses" "refuses 'a.mark_out(\"claude\", until=1900000000)'"
 check "clear_out refuses" "refuses 'a.clear_out(\"claude\")'"
-check "record_started refuses" "refuses 'a.record_started(\"claude\")'"
+# A start time only feeds the spread policy: with no core to take it the run goes on, one line says so, the note stays.
+check "record_started notes the loss and does not stop the run" "python3 -I -c \"$PY
+a.record_started('claude')\" >'$T/out' 2>&1 && grep -q 'was not noted' '$T/out' && [[ \"\$(cat '$S')\" == '$NOTE' ]] && [[ ! -e '$S.corrupt' ]]"
 echo '{"claude": {"out_until": 1900000000}}' > "$KITH_MACHINE/serve/kernel-backups-out.json"
 check "the old kernel's marks are neither merged nor renamed while tombstoned" "refuses 'a.read_state()' && [[ -e '$KITH_MACHINE/serve/kernel-backups-out.json' ]]"
 rm "$KITH_MACHINE/serve/kernel-backups-out.json"

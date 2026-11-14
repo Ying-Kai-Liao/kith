@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '8c73c5229c55c9757a5ac051d498a77ba8bf5e5e585e05c2bd50aacb209264ae'
+export const CONTRACT_SHA256 = 'a04de8abd0a0da6eb7e07b7eb1146f44214035f99ee7351f9e5d750507cdcdce'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -499,6 +499,64 @@ export interface HandleRevokes {
   handles: HandleRevoke[]
 }
 
+/** One stay of a person in a group room: open while leftGen is null. A gen is the seq of the join or leave line in the room's main lane. */
+export interface RoomPerson {
+  person: string
+  joinedGen: number
+  leftGen?: number | null
+}
+
+/** The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host. */
+export interface RoomPeople {
+  enabled: boolean
+  gen: number
+  people: RoomPerson[]
+}
+
+/** What making an invite answers: its id and links, when it lapses, and the person it is for. */
+export interface CreatedInvite {
+  inviteId: string
+  link: string
+  appLink: string
+  kithLink: string
+  webLink?: string | null
+  pageLink?: string | null
+  expiresAt: number
+  personId: string
+}
+
+/** What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen). */
+export interface RoomPersonChange {
+  gen: number
+  changed: boolean
+}
+
+/** One of a room's agents as a person is shown it: the member bot's id (a reply's author is this id) and its live name. Nothing else of the bot. */
+export interface MyRoomAgent {
+  id: string
+  name: string
+}
+
+/** A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; agentList is the same agents with the bot id each reply is authored by (absent from a host before it, then the app has only the names); ownerName is the owner's display name (absent the same way, then the app says "the owner"); stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused). */
+export interface MyRoom {
+  id: string
+  name: string
+  agents: string[]
+  agentList?: MyRoomAgent[] | null
+  ownerName?: string | null
+  stay: number
+}
+
+/** The group rooms a person is in right now. */
+export interface MyRooms {
+  rooms: MyRoom[]
+}
+
+/** Whether leaving a room changed anything (false: they had already left). */
+export interface RoomLeft {
+  left: boolean
+}
+
 /** Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only. */
 export interface BotProof {
   state: BotGuestState
@@ -533,11 +591,12 @@ export interface BotPosted {
   duplicate?: boolean | null
 }
 
-/** A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next. */
+/** A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), the bot's membership generation gen (what a post or room ask names; it rises each time the bot is put back in the room), and the cursor to read from next. */
 export interface BotRoom {
   room: string
   conversation?: string | null
   epoch?: number | null
+  gen?: number | null
   entries: BotEntry[]
   cursor: number
   secrets?: BotRoomSecret[] | null
@@ -636,6 +695,7 @@ export interface SendParams {
   folder?: string | null
   clear?: boolean | null
   budget?: number | null
+  stay?: number | null
   engine?: string | null
   engineModel?: string | null
 }
@@ -854,6 +914,7 @@ export interface BotAskParams {
   conversation?: string | null
   ref?: string | null
   room?: string | null
+  gen?: number | null
   speaker?: string | null
   clientNonce: string
   noQueue?: boolean | null
@@ -865,6 +926,7 @@ export interface BotPostParams {
   conversation: string
   epoch: number
   turnKey?: string | null
+  gen?: number | null
   text: string
   clientNonce: string
 }
@@ -907,6 +969,39 @@ export type PeerAgentsParams = Record<string, never>
 /** What `peerRevokes` takes. */
 export interface PeerRevokesParams {
   handles: HandleRevoke[]
+}
+
+/** What `createInvite` takes. */
+export interface CreateInviteParams {
+  agents: Record<string, string>
+  name?: string | null
+  personId?: string | null
+  rooms?: string[] | null
+}
+
+/** What `addRoomPerson` takes. */
+export interface AddRoomPersonParams {
+  room: string
+  person: string
+}
+
+/** What `removeRoomPerson` takes. */
+export interface RemoveRoomPersonParams {
+  room: string
+  person: string
+}
+
+/** What `roomPeople` takes. */
+export interface RoomPeopleParams {
+  room: string
+}
+
+/** What `myRooms` takes. */
+export type MyRoomsParams = Record<string, never>
+
+/** What `leaveRoom` takes. */
+export interface LeaveRoomParams {
+  room: string
 }
 
 export interface Types {
@@ -954,6 +1049,14 @@ export interface Types {
   PeerAgents: PeerAgents
   HandleRevoke: HandleRevoke
   HandleRevokes: HandleRevokes
+  RoomPerson: RoomPerson
+  RoomPeople: RoomPeople
+  CreatedInvite: CreatedInvite
+  RoomPersonChange: RoomPersonChange
+  MyRoomAgent: MyRoomAgent
+  MyRoom: MyRoom
+  MyRooms: MyRooms
+  RoomLeft: RoomLeft
   BotProof: BotProof
   BotAsked: BotAsked
   BotPosted: BotPosted
@@ -1014,6 +1117,12 @@ export interface Types {
   BotLeaveParams: BotLeaveParams
   PeerAgentsParams: PeerAgentsParams
   PeerRevokesParams: PeerRevokesParams
+  CreateInviteParams: CreateInviteParams
+  AddRoomPersonParams: AddRoomPersonParams
+  RemoveRoomPersonParams: RemoveRoomPersonParams
+  RoomPeopleParams: RoomPeopleParams
+  MyRoomsParams: MyRoomsParams
+  LeaveRoomParams: LeaveRoomParams
 }
 export type TypeName = keyof Types
 
@@ -1087,6 +1196,12 @@ export const METHODS = {
   botLeave: { who: ['bot'], params: 'BotLeaveParams', result: 'Empty' },
   peerAgents: { who: ['peer'], params: 'PeerAgentsParams', result: 'PeerAgents' },
   peerRevokes: { who: ['peer'], params: 'PeerRevokesParams', result: 'HandleRevokes' },
+  createInvite: { who: ['owner'], params: 'CreateInviteParams', result: 'CreatedInvite' },
+  addRoomPerson: { who: ['owner'], params: 'AddRoomPersonParams', result: 'RoomPersonChange' },
+  removeRoomPerson: { who: ['owner'], params: 'RemoveRoomPersonParams', result: 'RoomPersonChange' },
+  roomPeople: { who: ['owner'], params: 'RoomPeopleParams', result: 'RoomPeople' },
+  myRooms: { who: ['member'], params: 'MyRoomsParams', result: 'MyRooms' },
+  leaveRoom: { who: ['member'], params: 'LeaveRoomParams', result: 'RoomLeft' },
 } as const
 export type MethodName = keyof typeof METHODS
 
@@ -1141,6 +1256,12 @@ export interface Params {
   botLeave: BotLeaveParams
   peerAgents: PeerAgentsParams
   peerRevokes: PeerRevokesParams
+  createInvite: CreateInviteParams
+  addRoomPerson: AddRoomPersonParams
+  removeRoomPerson: RemoveRoomPersonParams
+  roomPeople: RoomPeopleParams
+  myRooms: MyRoomsParams
+  leaveRoom: LeaveRoomParams
 }
 
 /** What each method answers with. */
@@ -1194,13 +1315,19 @@ export interface Results {
   botLeave: Empty
   peerAgents: PeerAgents
   peerRevokes: HandleRevokes
+  createInvite: CreatedInvite
+  addRoomPerson: RoomPersonChange
+  removeRoomPerson: RoomPersonChange
+  roomPeople: RoomPeople
+  myRooms: MyRooms
+  leaveRoom: RoomLeft
 }
 
 /** What the owner alone (a method no one else may call; the owner may call every method) may call. */
-export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic'] as const satisfies readonly MethodName[]
+export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic', 'createInvite', 'addRoomPerson', 'removeRoomPerson', 'roomPeople'] as const satisfies readonly MethodName[]
 
 /** What an invited person may call. */
-export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'scheduleMessages', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation'] as const satisfies readonly MethodName[]
+export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'scheduleMessages', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation', 'myRooms', 'leaveRoom'] as const satisfies readonly MethodName[]
 
 /** What an invited person's unproven device may call. */
 export const UNPROVEN_METHODS = ['proveInvite'] as const satisfies readonly MethodName[]
@@ -1292,10 +1419,18 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     PeerAgents: { fields: { agents: '[PeerAgent]' } },
     HandleRevoke: { fields: { handle: 'string', revoked: 'bool', at: 'int' } },
     HandleRevokes: { fields: { handles: '[HandleRevoke]' } },
+    RoomPerson: { fields: { person: 'string', joinedGen: 'int', leftGen: 'int?' } },
+    RoomPeople: { fields: { enabled: 'bool', gen: 'int', people: '[RoomPerson]' } },
+    CreatedInvite: { fields: { inviteId: 'string', link: 'string', appLink: 'string', kithLink: 'string', webLink: 'string?', pageLink: 'string?', expiresAt: 'int', personId: 'string' }, mayOmit: ['webLink', 'pageLink'] },
+    RoomPersonChange: { fields: { gen: 'int', changed: 'bool' } },
+    MyRoomAgent: { fields: { id: 'string', name: 'string' } },
+    MyRoom: { fields: { id: 'string', name: 'string', agents: '[string]', agentList: '[MyRoomAgent]?', ownerName: 'string?', stay: 'int' }, mayOmit: ['agentList', 'ownerName'] },
+    MyRooms: { fields: { rooms: '[MyRoom]' } },
+    RoomLeft: { fields: { left: 'bool' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
     BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?', room: 'string?' }, mayOmit: ['duplicate', 'room'] },
     BotPosted: { fields: { entryId: 'string', seq: 'int', turn: 'int', room: 'string', conversation: 'string', replied: 'bool', late: 'bool', lateWhy: 'string?', unprompted: 'bool?', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
-    BotRoom: { fields: { room: 'string', conversation: 'string?', epoch: 'int?', entries: '[BotEntry]', cursor: 'int', secrets: '[BotRoomSecret]?' } },
+    BotRoom: { fields: { room: 'string', conversation: 'string?', epoch: 'int?', gen: 'int?', entries: '[BotEntry]', cursor: 'int', secrets: '[BotRoomSecret]?' } },
     BotRoomSecret: { fields: { id: 'string', from: 'string', label: 'string?', expiresAt: 'int' } },
     BotSecret: { fields: { id: 'string', room: 'string', from: 'string', label: 'string?', value: 'string' } },
     BotSender: { fields: { botId: 'string', name: 'string', speaker: 'string?' } },
@@ -1306,7 +1441,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HelloParams: { fields: {} },
     KithInfoParams: { fields: { botId: 'string', refresh: 'bool?' } },
     StartChatParams: { fields: { agent: 'string' } },
-    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?', budget: 'int?', engine: 'string?', engineModel: 'string?' } },
+    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?', budget: 'int?', stay: 'int?', engine: 'string?', engineModel: 'string?' } },
     ThreadParams: { fields: { botId: 'string', rootId: 'string' } },
     HistoryParams: { fields: { botId: 'string', beforeSeq: 'int?', limit: 'int?' } },
     NewSessionParams: { fields: { botId: 'string' } },
@@ -1342,8 +1477,8 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     ProveInviteParams: { fields: { inviteId: 'string', token: 'string' } },
     BotStatusParams: { fields: {} },
     ProveBotInviteParams: { fields: { inviteId: 'string', token: 'string' } },
-    BotAskParams: { fields: { agent: 'string?', text: 'string', conversation: 'string?', ref: 'string?', room: 'string?', speaker: 'string?', clientNonce: 'string', noQueue: 'bool?' } },
-    BotPostParams: { fields: { room: 'string', conversation: 'string', epoch: 'int', turnKey: 'string?', text: 'string', clientNonce: 'string' } },
+    BotAskParams: { fields: { agent: 'string?', text: 'string', conversation: 'string?', ref: 'string?', room: 'string?', gen: 'int?', speaker: 'string?', clientNonce: 'string', noQueue: 'bool?' } },
+    BotPostParams: { fields: { room: 'string', conversation: 'string', epoch: 'int', turnKey: 'string?', gen: 'int?', text: 'string', clientNonce: 'string' } },
     BotRoomReadParams: { fields: { room: 'string', since: 'int?', limit: 'int?' } },
     BotSecretFetchParams: { fields: { id: 'string' } },
     BotThreadParams: { fields: { conversation: 'string', afterSeq: 'int?', limit: 'int?' } },
@@ -1352,6 +1487,12 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotLeaveParams: { fields: {} },
     PeerAgentsParams: { fields: {} },
     PeerRevokesParams: { fields: { handles: '[HandleRevoke]' } },
+    CreateInviteParams: { fields: { agents: '{string}', name: 'string?', personId: 'string?', rooms: '[string]?' } },
+    AddRoomPersonParams: { fields: { room: 'string', person: 'string' } },
+    RemoveRoomPersonParams: { fields: { room: 'string', person: 'string' } },
+    RoomPeopleParams: { fields: { room: 'string' } },
+    MyRoomsParams: { fields: {} },
+    LeaveRoomParams: { fields: { room: 'string' } },
   },
 }
 

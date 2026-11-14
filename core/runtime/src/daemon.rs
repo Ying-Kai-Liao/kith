@@ -88,6 +88,8 @@ pub(crate) struct Shared {
     key_load: crate::secrets::KeyLoader,
     /// The master key once read, kept here so the read never happens under the core lock.
     loaded_key: Mutex<Option<zeroize::Zeroizing<[u8; 32]>>>,
+    /// What the kill re-send remembers between ticks (`kill_resend`).
+    pub(crate) resend: Mutex<crate::kill_resend::Resend>,
 }
 
 impl Shared {
@@ -165,6 +167,14 @@ impl Shared {
             ))?;
             Ok(has.is_some())
         })
+    }
+
+    /// The holder's state and instance now.
+    pub(crate) fn holder_snapshot(&self) -> HolderState {
+        self.holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub(crate) fn set_holder(&self, f: impl FnOnce(&mut HolderState)) {
@@ -288,6 +298,19 @@ impl Shared {
                 return Ok(answer);
             }
         }
+        // The host's claim rows (M3-10f): the host's connection only (`check` above); claim transactions.
+        if crate::hostclaim::serves(method) {
+            let answer = self.with_core(|c| crate::hostclaim::call(c, method, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
+        // The kernel takers' claim rows (P5): claim transactions; nothing calls them until the claims are switched.
+        if crate::conversations::external::serves(method) {
+            let answer =
+                self.with_core(|c| crate::conversations::external::call(c, method, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         // The wake queue (M3-7): nothing calls these until kith-wake is switched; the daemon runs no drain and fires no waiter.
         if crate::wake::serves(method) {
             let answer = self.with_core(|c| crate::wake::call(c, method, params))?;
@@ -348,7 +371,14 @@ impl Shared {
     }
 
     fn running_status(&self) -> Result<Value> {
-        let (generation, schema) = self.with_core(|c| Ok((c.generation(), c.schema_version())))?;
+        let (generation, schema, claims, group_held) = self.with_core(|c| {
+            Ok((
+                c.generation(),
+                c.schema_version(),
+                crate::conversations::claims::live_counts(c)?,
+                crate::conversations::claims::group_held(c, &crate::gate::System)?,
+            ))
+        })?;
         let h = self
             .holder
             .lock()
@@ -369,6 +399,11 @@ impl Shared {
                 "uptime_secs": self.started.elapsed().as_secs(),
             },
             "holder": holder_json(&h),
+            "claims": claims
+                .iter()
+                .map(|(s, n)| (s.to_string(), json!(n)))
+                .chain([("held_by_group".to_string(), json!(group_held))])
+                .collect::<serde_json::Map<_, _>>(),
         }))
     }
 }
@@ -440,6 +475,7 @@ impl Daemon {
                 .clone()
                 .unwrap_or_else(|| Arc::new(crate::secrets::os_load)),
             loaded_key: Mutex::new(None),
+            resend: Mutex::new(crate::kill_resend::Resend::default()),
         });
         let (s, p) = (shared.clone(), paths.clone());
         let spawned = std::thread::Builder::new()
@@ -655,6 +691,28 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         return;
     }
     shared.set_outcome(Outcome::Serving);
+    // The kill re-send runs on its own tick, not inside the holder link: a remote, down or failing holder must not stop
+    // the host's kills being re-sent.
+    let for_resend = shared.clone();
+    if let Err(e) = std::thread::Builder::new()
+        .name("kith-core-kill-resend".into())
+        .spawn(move || {
+            while !for_resend.stopping() {
+                let mut waited = Duration::ZERO;
+                while waited < crate::kill_resend::EVERY && !for_resend.stopping() {
+                    std::thread::sleep(Duration::from_millis(100));
+                    waited += Duration::from_millis(100);
+                }
+                if for_resend.stopping() {
+                    break;
+                }
+                let holder = crate::kill_resend::connected_instance(&for_resend);
+                crate::kill_resend::pass(&for_resend, holder.as_deref(), crate::kill_resend::GRACE);
+            }
+        })
+    {
+        log::note(&shared.logs, &format!("daemon: no kill re-send tick: {e}"));
+    }
     if cfg.holder_on {
         holder_link::supervise(shared, layout, &cfg.holder);
     }

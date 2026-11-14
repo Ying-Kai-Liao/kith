@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below (see the skill's "Sync commit").
-SYNC=fb5f140f6c84bc079684575a8ce93373eba51275
+SYNC=f5b92e19daddcfdfc92162abfc38be2b63dd3e4d
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
@@ -34,6 +34,14 @@ FILES=(
   core/runtime/src/doors/mod.rs           # M2-14: the door table (start, mark_live, sweep, sweep_ids, end: DoorStart, DoorSweep)
   core/runtime/src/doors/call.rs          # M2-14: the doors.* rows
   core/runtime/src/migrations/doors/m0060_doors.rs  # M2-14: the doors table
+  core/runtime/src/revoke_order.rs        # M3-10d/M2-18c: the order (claims of P and B, then the asks), open_removals, replay_open (ClaimSweep, AskSweep)
+  core/runtime/src/authority/call.rs      # which writes run the order (a removal does; a suspend does not yet), the open-removal join refusal
+  core/runtime/src/authority/card.rs      # C-a/C-b: the always, helper and job writes of the router (AlwaysWrite, AlwaysRemove, Demote's approver rule)
+  serve/host/src/remote/core_revokes.rs   # P1: the host's reconcile of a revoke made in the core alone (Reconcile.tla)
+  serve/host/src/cards/mod.rs             # P1: the 3 s authority poll that calls it
+  core/runtime/src/authority/secret_writes.rs  # S-b: the secret grant for agent@P (GrantWrite: need_person in the one locked step)
+  serve/host/src/api/authority.rs         # the host's gate for KITH_CORE_AUTHORITY=1: fingerprint latch (CoreGate, GuardP)
+  core/runtime/src/import/authority.rs    # M2-18c: record_suspends (a revoke the file has and the core missed gets the open_removals row), record_removals
   core/runtime/src/authority/mod.rs       # the readers: snapshot (revoked), may/resolve/cut_off over secrets
 )
 paths=()

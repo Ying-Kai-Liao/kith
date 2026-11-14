@@ -77,6 +77,7 @@ pub fn post_body(args: &RoomPostArgs, text: &str, nonce: &str) -> serde_json::Va
         conversation: args.conversation.clone(),
         epoch: i64::try_from(args.epoch).unwrap_or(i64::MAX),
         turn_key: args.turn_key.clone(),
+        r#gen: args.r#gen,
         text: text.to_string(),
         client_nonce: nonce.to_string(),
     })
@@ -108,9 +109,12 @@ async fn read(client: &mut Client<'_>, args: &RoomReadArgs, out: &Out) -> Result
     });
     let room: BotRoom = answer(client.call(method::BOT_ROOM_READ, body).await?)?;
     out.event(&json!({"type": "room", "room": room.room, "conversation": room.conversation, "epoch": room.epoch,
-                      "entries": room.entries, "cursor": room.cursor, "secrets": room.secrets}));
+                      "gen": room.r#gen, "entries": room.entries, "cursor": room.cursor, "secrets": room.secrets}));
     if !out.json {
         out.stdout(&format!("room {}\n", room.room));
+        if let Some(g) = room.r#gen {
+            out.stdout(&format!("gen {g}\n"));
+        }
         if let (Some(c), Some(e)) = (&room.conversation, room.epoch) {
             out.stdout(&format!("conversation {c} epoch {e}\n"));
         }
@@ -157,8 +161,14 @@ fn lapses_in(expires_at_ms: i64) -> String {
 /// Opens the file the value will go to before asking the host: the host hands the value over once, so a path that
 /// can't be written must be found out first. New file only, mode 0600; a symlink or an existing file is refused.
 fn open_new(path: &std::path::Path) -> Result<std::fs::File, CliError> {
-    use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).map_err(|e| match e.kind() {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path).map_err(|e| match e.kind() {
         std::io::ErrorKind::AlreadyExists => CliError::usage(format!(
             "{} already exists: pick a path that doesn't, so no existing file is overwritten. The secret was not taken.",
             path.display()
@@ -264,6 +274,8 @@ mod tests {
             json!({"room": "rm", "conversation": "cv", "epoch": 3, "turnKey": "k1", "text": "hi", "clientNonce": "n-1"})
         );
         assert!(post_body(&post_args(&["hi"]), "hi", "n").get("turnKey").is_none());
+        assert!(b.get("gen").is_none());
+        assert_eq!(post_body(&post_args(&["--gen", "42", "hi"]), "hi", "n")["gen"], 42);
     }
 
     #[test]
@@ -277,16 +289,22 @@ mod tests {
 
     #[test]
     fn open_new_is_private_and_never_replaces() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("k");
         drop(open_new(&path).unwrap());
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         assert!(open_new(&path).is_err());
-        let link = dir.path().join("l");
-        std::os::unix::fs::symlink(dir.path().join("target"), &link).unwrap();
-        assert!(open_new(&link).is_err());
-        assert!(!dir.path().join("target").exists());
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("l");
+            std::os::unix::fs::symlink(dir.path().join("target"), &link).unwrap();
+            assert!(open_new(&link).is_err());
+            assert!(!dir.path().join("target").exists());
+        }
     }
 
     #[test]

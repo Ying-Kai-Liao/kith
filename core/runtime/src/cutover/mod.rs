@@ -10,7 +10,7 @@
 //! `restore_secrets` (write secrets back to the OS store: Keychain, DPAPI ...; run before the files so a file never
 //! appears without its keys) and `live` (module-specific reasons not to roll back now). `depends_on` orders modules:
 //! a step refuses until the dependencies are switched, a rollback refuses while a dependent is switched.
-//! The cutover module name is the `module` column of `kernel/lib/core-switched.txt` for its verbs (that is how the router
+//! The cutover module name is the third column of `kernel/lib/core-switched.txt` for its verbs when there is one, else the `module` column (that is how the router
 //! knows which switch to look at).
 //!
 //! # Operations (all idempotent, all under core.db's lifetime lock, so two shells or a daemon refuse instead of racing)
@@ -44,6 +44,7 @@ use crate::error::{Error, Result};
 use crate::layout::Layout;
 
 pub(crate) mod authority;
+pub(crate) mod authority_preflight;
 #[cfg(test)]
 mod authority_tests;
 pub(crate) mod marker;
@@ -162,6 +163,15 @@ pub(crate) trait Module {
     fn dry_run_despite_refusal(&self) -> bool {
         false
     }
+    /// What `step` counts before it writes anything (the dry run prints it, a real step stops on it). `import` is the dry
+    /// run's import result, or `None` for a real step. Read-only. Default: nothing to count.
+    fn preflight(
+        &self,
+        _env: &Env,
+        _import: Option<&Result<Vec<String>>>,
+    ) -> Result<Option<authority_preflight::Preflight>> {
+        Ok(None)
+    }
     /// Informational lines `check` appends (never a difference, never counted). Default none.
     fn check_notes(&self, _env: &Env) -> Vec<String> {
         Vec::new()
@@ -172,11 +182,24 @@ pub(crate) trait Module {
     fn source_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
         Ok(None)
     }
+    /// What the marker also keeps of this import (stored beside it, removed with it): the rows that existed when the switch
+    /// was made, for a rollback that must not give a row added since the keys of an older row with the same id. Read after
+    /// the import, before the marker. Default none.
+    fn seed(&self, _env: &Env, _db: &rusqlite::Connection) -> Result<Option<String>> {
+        Ok(None)
+    }
     /// Runs under the source lock, just before the tombstones are put: a module that recorded what its import read
     /// refuses here when a source changed since (a writer that does not take the lock), so the step never tombstones a
     /// file it did not import. Default: nothing to check.
     fn before_tombstone(&self, _env: &Env) -> Result<()> {
         Ok(())
+    }
+    /// Under the source lock, for a switched (or stepping-with-marker) record whose source is still a real file with no copy
+    /// kept at the switch: is it exactly what the switch imported (`Imported`: finish only the tombstone, the core's newer
+    /// rows stay), a file written since (`Changed`: import again), or a state no import can be told safe (`Refuse`)? Default:
+    /// `Changed`, the old behaviour.
+    fn switched_file(&self, _env: &Env, _db: &rusqlite::Connection) -> Result<SwitchedFile> {
+        Ok(SwitchedFile::Changed)
     }
     /// The lock the old store's writers take, held by `rollback` from before the rolling-back record to the end: a
     /// refusal at the lock then writes nothing (no record, no secret restored). Default: none.
@@ -232,6 +255,13 @@ fn lock(env: &Env) -> Result<Core> {
     crate::start_with(&env.layout, MIGRATIONS)
 }
 
+/// What `Module::switched_file` finds.
+pub(crate) enum SwitchedFile {
+    Imported,
+    Changed,
+    Refuse(String),
+}
+
 pub(crate) fn step(
     reg: &[Box<dyn Module>],
     env: &Env,
@@ -244,7 +274,12 @@ pub(crate) fn step(
     {
         return Err(Error::Refused(format!("cutover: {name}: {why}")));
     }
-    let cur = state::read(&env.layout, name)?;
+    // A damaged record is read as "no record" only for the repair below, under the locks; anything else about it refuses.
+    let (cur, damaged) = match state::read(&env.layout, name) {
+        Ok(c) => (c, None),
+        Err(e @ Error::Refused(_)) if !opts.dry_run => (None, Some(e)),
+        Err(e) => return Err(e),
+    };
     let mut lines = Vec::new();
     if cur.as_ref().is_some_and(|s| s.phase == Phase::RollingBack) {
         return Err(Error::Refused(format!(
@@ -259,7 +294,21 @@ pub(crate) fn step(
         }
     }
     if opts.dry_run {
-        lines.extend(m.import(env, None, opts)?);
+        let imp = m.import(env, None, opts);
+        if let Some(p) = m.preflight(env, Some(&imp))? {
+            if let Ok(l) = imp {
+                lines.extend(l);
+            }
+            lines.extend(p.lines());
+            if !p.ready() {
+                return Err(Error::Refused(format!(
+                    "cutover: {name}: dry run: not ready\n{}",
+                    lines.join("\n")
+                )));
+            }
+        } else {
+            lines.extend(imp?);
+        }
         lines.push(format!(
             "dry run: {name} is {}; nothing was changed",
             cur.map_or("not switched", |s| s.phase.word())
@@ -269,17 +318,102 @@ pub(crate) fn step(
     let mut core = lock(env)?;
     // Held to the end of the step: the import, the check, the marker, the record and the tombstones.
     let _source = m.source_lock(env)?;
+    // A crash after the switched record and before the tombstones leaves the file a real auth.json that kith-auth still
+    // writes (the host sees no tombstone, so it is unswitched). Those writes were never imported: step the module again
+    // from the import, under the source lock this step holds, not over them.
+    let cur = match cur {
+        Some(s)
+            if s.phase == Phase::Switched
+                && m.tombstones(env)
+                    .iter()
+                    .any(|p| !tombstone::is_tombstone(p)) =>
+        {
+            // Only a real file with no copy kept at the switch is the half-step. A missing file, or a real one beside a
+            // copy a finished tombstone kept (an old file put back), is something else: the record stays as it is.
+            if let Some(p) = m.tombstones(env).into_iter().find(|p| {
+                !tombstone::is_tombstone(p)
+                    && (!tombstone::is_real(p) || tombstone::kept_since(p, s.at))
+            }) {
+                return Err(Error::Refused(if tombstone::is_real(&p) {
+                    // The file may hold writes since the switch (kith-auth replaced it after the crash): putting the
+                    // tombstone over it would lose them. Rollback leaves the real file, skips secrets and clears the marker.
+                    format!(
+                        "cutover: {name} is switched but {} is a real file beside the copy the switch kept (an old file put back, or one kith-auth wrote after a crash); nothing was changed and the record stays. If the file may hold changes since the switch, run `kith rollback {name}` first: it leaves the real file as it is and clears the marker. Put the tombstone back only if you know the file is older than the switch",
+                        p.display()
+                    )
+                } else {
+                    format!(
+                        "cutover: {name} is switched but {} is missing; nothing was changed and the record stays. Put the tombstone back, or to take the file as it is run `kith rollback {name}`",
+                        p.display()
+                    )
+                }));
+            }
+            // Every real file is the same as a copy kept since the switch (the crash came after the link): it holds exactly
+            // what the switch imported, made under the source lock after the sha check. Nothing to import; the record
+            // stays Switched and only the tombstone is finished below. Rows the core changed since are the newer side.
+            if m.tombstones(env)
+                .iter()
+                .filter(|p| !tombstone::is_tombstone(p))
+                .all(|p| tombstone::has_copy_since(p, s.at))
+            {
+                Some(s)
+            } else {
+                // The module may know the file is the one the switch imported (nothing to import, as with a kept copy), or
+                // that neither side can be preferred; the refusal comes before the record moves to Stepping.
+                match m.switched_file(env, core.conn())? {
+                    SwitchedFile::Imported => Some(s),
+                    SwitchedFile::Refuse(why) => {
+                        return Err(Error::Refused(format!("cutover: {name}: {why}")));
+                    }
+                    SwitchedFile::Changed => {
+                        let s = Switch {
+                            phase: Phase::Stepping,
+                            ..s
+                        };
+                        state::write(&env.layout, name, &s)?;
+                        Some(s)
+                    }
+                }
+            }
+        }
+        // A crash between the marker and the switched record leaves Stepping with this step's marker beside it: when the
+        // source is still exactly what the marker's import read, it is a finished import, not one to run over the core.
+        Some(s)
+            if s.phase == Phase::Stepping
+                && marker::read(core.conn(), name).is_some_and(|(at, _)| at == s.at)
+                && matches!(m.switched_file(env, core.conn())?, SwitchedFile::Imported) =>
+        {
+            let s = Switch {
+                phase: Phase::Switched,
+                ..s
+            };
+            state::write(&env.layout, name, &s)?;
+            Some(s)
+        }
+        c => c,
+    };
     let mut snapshot = cur.as_ref().and_then(|s| s.snapshot.clone());
-    // A finished switch whose record was lost: every tombstone names this module and the core holds the marker. The
-    // sources are gone, so there is nothing to import; the record is written again and that is all.
+    // A finished switch whose record was lost or damaged: every tombstone names this module and the core holds the
+    // marker. The sources are gone, so there is nothing to import; the record is written again and that is all.
     if cur.is_none() {
         let tombs = m.tombstones(env);
-        if let Some((at, _)) = marker::read(core.conn(), name).filter(|_| {
+        let finished = marker::read(core.conn(), name).filter(|_| {
             !tombs.is_empty()
                 && tombs
                     .iter()
                     .all(|p| tombstone::module_of(p).as_deref() == Some(name))
-        }) {
+        });
+        if finished.is_none()
+            && let Some(e) = damaged
+        {
+            // A damaged record still counts as switched: nothing may step over it unless the tombstones and the marker
+            // say the switch had finished.
+            return Err(Error::Refused(format!(
+                "{e}. Repair: if no source is a tombstone, remove the record ({}) and run `kith migrate step {name}` again. If the sources are tombstones but the core holds no marker, core.db was restored from before the switch: stop, do not step (restore a core.db from after it, or roll the sources back by hand)",
+                state::path(&env.layout, name)?.display()
+            )));
+        }
+        if let Some((at, _)) = finished {
             state::write(
                 &env.layout,
                 name,
@@ -297,6 +431,15 @@ pub(crate) fn step(
     if cur.as_ref().is_none_or(|s| s.phase == Phase::Stepping) {
         // One `at` for the whole step: the file's, and then the marker's.
         let at = cur.as_ref().map_or_else(now_secs, |s| s.at);
+        // Before the snapshot and the record: a preflight that stops leaves nothing behind.
+        if let Some(p) = m.preflight(env, None)?
+            && !p.ready()
+        {
+            return Err(Error::Refused(format!(
+                "cutover: {name}: preflight not ready; nothing was changed\n{}",
+                p.lines().join("\n")
+            )));
+        }
         if snapshot.is_none() {
             let p = core.backup(&env.layout, &format!("cutover-{name}"))?;
             snapshot = Some(p.display().to_string());
@@ -324,7 +467,8 @@ pub(crate) fn step(
         // Before the marker and the switched record: a refusal here leaves the module stepping, so a rerun imports again.
         m.before_tombstone(env)?;
         let digest = m.digest(env, core.conn())?;
-        marker::write(&mut core, name, at, &digest)?;
+        let seed = m.seed(env, core.conn())?;
+        marker::write(&mut core, name, at, &digest, seed.as_deref())?;
         state::write(
             &env.layout,
             name,
@@ -372,6 +516,8 @@ pub(crate) fn rollback(
     let mut core = lock(env)?;
     if cur.phase == Phase::Stepping {
         // Nothing was tombstoned and Python never stopped writing; the imported rows stay (a re-step is idempotent).
+        // A crash repair (S1) leaves a marker on a Stepping module; none must outlive the record.
+        marker::clear(&mut core, name)?;
         state::clear(&env.layout, name)?;
         lines.push(format!("{name}: an unfinished step was cancelled"));
         return Ok(lines);
@@ -408,9 +554,20 @@ pub(crate) fn rollback(
             ..cur
         },
     )?;
-    lines.extend(m.restore_secrets(env, &mut core)?);
-    lines.extend(m.export_back(env, &mut core)?);
-    for p in m.tombstones(env) {
+    // export_back never replaces a real file: the rename is its last act, so a file that is not a tombstone means the
+    // export finished (a crash before the record was cleared) or the switch never got to tombstone it. Either way
+    // kith-auth may have written it since, and the core's older rows would undo that. The secrets are skipped too: the
+    // sealed copy would bring back an item the owner deleted since.
+    let tombs = m.tombstones(env);
+    if !tombs.is_empty() && tombs.iter().all(|p| tombstone::is_real(p)) {
+        lines.push(format!(
+            "{name}: the source files are already real files; they are left as they are"
+        ));
+    } else {
+        lines.extend(m.restore_secrets(env, &mut core)?);
+        lines.extend(m.export_back(env, &mut core)?);
+    }
+    for p in tombs {
         if tombstone::is_tombstone(&p) {
             return Err(Error::Refused(format!(
                 "cutover: {name}: export-back left a tombstone at {}; still rolling back (re-run `kith rollback {name}`)",

@@ -14,8 +14,10 @@ struct Composer: View {
     var onCall: (() -> Void)?
     /// Interrupts the bot while it is speaking in a voice call.
     var onInterrupt: (() -> Void)?
-    /// Every message starts a new task: set while a terminal holds the current thread, so nothing sent here lands in it.
-    var alwaysNewTask = false
+    /// The task cards on screen: a working task whose card is not gets the "working now" line over the box.
+    var visibleTasks: VisibleTasks?
+    /// Scrolls the chat to a task's card.
+    var jump: ((String) -> Void)?
     @Environment(BotStore.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The field owns its text; the store only keeps a copy. A field bound straight to the
@@ -32,8 +34,8 @@ struct Composer: View {
     /// The box when dictation started; the words heard go after it.
     @State private var dictatedAfter = ""
 
-    /// The next message starts a task of its own.
-    @State private var newTask = false
+    /// A send waiting on a take-over from the terminal: the box holds still until it is done.
+    @State private var taking = false
     /// Where the new task starts, when picked up front; nil follows the bot's default.
     @State private var startFolder: FolderChoice?
     @State private var pickingFolder = false
@@ -42,18 +44,26 @@ struct Composer: View {
 
     private var bot: Bot? { model.bots[botId] }
     private var tasks: Bool { thread == nil && bot?.usesTasks == true }
-    /// In a bot's chat a message goes on with the current task: Stop and "working" are that task's.
-    private var place: String? { thread ?? (tasks ? Tasks.current(in: model.chat(botId))?.id : nil) }
-    /// The next message starts a task of its own: asked for, or the reader just left a thread (see `BotStore.leftThread`).
-    private var startsNew: Bool {
-        alwaysNewTask || model.startsNewTask(botId, thread: thread, requested: newTask, currentOpen: tasks ? model.isCurrentTaskOpen(botId) : nil)
+    /// Where the chat's one box sends: the task a Reply picked, else the one the host would go on with; "New task"
+    /// starts another. nil outside a bot's main chat.
+    private var destination: TaskDestination? { tasks ? model.destination(botId) : nil }
+    /// A message goes on with this task: "working" is that task's.
+    private var place: String? { thread ?? (tasks ? destination?.into?.id ?? Tasks.current(in: model.chat(botId))?.id : nil) }
+    private var startsNew: Bool { destination?.newTask == true }
+    private var working: Bool {
+        !startsNew && (bot?.isWorking(in: botId, thread: place) == true || (tasks && bot?.isWorking(in: botId, thread: nil) == true))
     }
-    /// The chip is for a task asked for or one reached by leaving a thread; a folded task just changes the placeholder.
-    private var showsNewTaskChip: Bool { startsNew && (alwaysNewTask || newTask || model.leftThread.contains(botId)) }
-    private var working: Bool { !startsNew && bot?.isWorking(in: botId, thread: place) == true }
     /// The run in progress in this room, whose line (with its Stop) sits above the box.
     private var openConversation: RoomConversation? {
         bot?.isGroup == true ? model.roomConversations.open(chat: botId, lane: thread) : nil
+    }
+
+    /// Working tasks whose card is off screen, newest first.
+    private var workingNow: [Entry] {
+        guard tasks, let visibleTasks, let bot else { return [] }
+        let lanes = Set((bot.workingLanes ?? []).filter { $0.chat == botId }.compactMap(\.thread))
+        guard !lanes.isEmpty else { return [] }
+        return model.chat(botId).filter { $0.isTask && lanes.contains($0.id) && !visibleTasks.ids.contains($0.id) }.reversed()
     }
 
     private var isEmpty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty }
@@ -69,8 +79,8 @@ struct Composer: View {
     private var placeholder: String {
         let name = bot?.name ?? ""
         if thread != nil { return "Reply…" }
+        if model.myRooms[botId] != nil { return "Message, or @ an agent" }
         if bot?.isGroup == true { return "Message everyone · @ to ask one bot" }
-        if alwaysNewTask { return "New task…" }
         if startsNew { return "Tell \(name)…" }
         if working { return "Queue a message for \(name)" }
         return "Tell \(name)…"
@@ -86,7 +96,9 @@ struct Composer: View {
 
     private var suggestions: [Bot] {
         guard let query = mentionQuery, let bot else { return [] }
-        return model.members(of: bot).filter {
+        // An invited person's room has no member bots to mention: the agents it names answer when @'d.
+        let pool = model.myRooms[botId].map { room in MemberRoomLogic.agentNames(room).compactMap { name in MemberRoomLogic.bot(for: HostContract.MyRoom(id: "room-agent:\(name)", name: name, agents: [], stay: 0)).map { b -> Bot in var b = b; b.kind = "agent"; return b } } } ?? model.members(of: bot)
+        return pool.filter {
             query.isEmpty || $0.name.localizedCaseInsensitiveContains(query)
         }
     }
@@ -123,9 +135,20 @@ struct Composer: View {
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            if tasks, let first = workingNow.first {
+                WorkingNowLine(task: first, more: workingNow.count - 1, bot: bot) { jump?(first.id) }
+                    .padding(.horizontal, KithSpacing.gutter)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if showsPills, let destination {
+                pills(destination)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             dock
         }
         .animation(Motion.layout, value: suggestions.map(\.id))
+        .animation(Motion.reduced(Motion.layout, reduceMotion), value: showsPills)
+        .animation(Motion.reduced(Motion.layout, reduceMotion), value: workingNow.map(\.id))
         .animation(Motion.layout, value: commands.map(\.id))
         .animation(Motion.reduced(Motion.layout, reduceMotion), value: openConversation?.conversation)
     }
@@ -161,6 +184,8 @@ struct Composer: View {
         .photosPicker(isPresented: $pickingPhotos, selection: $photoItems, maxSelectionCount: 10, matching: .images)
         // Replying to a message puts the cursor in the box.
         .onChange(of: model.replyQuotes[botId]?.id) { _, id in if id != nil { focused = true } }
+        // A task's Reply or a take-over picks where the message goes: the cursor follows, as on the Mac.
+        .onChange(of: model.taskTargets[botId]) { _, target in if target != nil { focused = true } }
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
@@ -190,30 +215,51 @@ struct Composer: View {
         }
     }
 
-    /// Paste and New task join Photos / Camera / Files in the + menu.
+    /// The pills show while there is something to send, or once a Reply or "New task" picked where it goes.
+    private var showsPills: Bool { tasks && (!isEmpty || model.taskTargets[botId] != nil) }
+
+    /// Above the box: where the message goes, one tap to switch. "Continues" stays after picking New task, so the
+    /// way back is one tap too.
+    private func pills(_ destination: TaskDestination) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                if let going = destination.going {
+                    let note = Tasks.takesOver(going.data.thread, picked: destination.picked) && !destination.newTask ? " · takes over from the terminal" : ""
+                    TaskPill(on: !destination.newTask, systemImage: "arrow.turn.down.right",
+                             label: Text("Continues ") + Text(Tasks.title(going)).fontWeight(.semibold) + Text(note)) {
+                        model.taskTargets[botId] = .task(going.id)
+                        focused = true
+                    }
+                    .accessibilityLabel("Continues \(Tasks.title(going))\(note)")
+                }
+                TaskPill(on: destination.newTask || destination.going == nil, systemImage: "plus", label: Text("New task")) {
+                    model.taskTargets[botId] = .new
+                    focused = true
+                }
+                if destination.newTask { folderButton }
+            }
+            .padding(.horizontal, KithSpacing.gutter)
+        }
+        .kithSheet(isPresented: $pickingFolder) {
+            PlaceFolderPicker(current: nil, offersDefault: startFolder != nil) { startFolder = $0 }
+        }
+    }
+
+    /// Paste joins Photos / Camera / Files in the + menu.
     private var extraActions: [ChatDockAction] {
         guard canAttach else { return [] }
         var items: [ChatDockAction] = []
         if UIPasteboard.general.hasImages || UIPasteboard.general.hasURLs {
             items.append(ChatDockAction("Paste", systemImage: "doc.on.clipboard") { pasteFiles() })
         }
-        if tasks && !startsNew {
-            items.append(ChatDockAction("New task", systemImage: "square.and.pencil") {
-                newTask = true
-                focused = true
-            })
-        }
         return items
     }
 
-    /// Above the field, inside the dock: the new-task chip and the files going out.
+    /// Above the field, inside the dock: the quoted message and the files going out.
     private var accessory: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let quote {
                 quoteChip(quote).transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-            if showsNewTaskChip {
-                newTaskChip.transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if !files.isEmpty {
                 fileChips.transition(.move(edge: .bottom).combined(with: .opacity))
@@ -225,7 +271,10 @@ struct Composer: View {
     private var stop: ChatDockStop? {
         if let onInterrupt { return ChatDockStop("Interrupt", urgent: true, action: onInterrupt) }
         // The live line above the box carries the group's Stop while its run is open.
-        if working, openConversation == nil { return ChatDockStop("Stop") { model.stop(botId, thread: place) } }
+        // A task's Stop is on its card; a turn in the chat's own lane has no card, so its Stop stays here.
+        if working, openConversation == nil, !tasks || bot?.isWorking(in: botId, thread: nil) == true {
+            return ChatDockStop("Stop") { model.stop(botId, thread: tasks ? nil : place) }
+        }
         return nil
     }
 
@@ -255,36 +304,19 @@ struct Composer: View {
         .padding(.top, 8)
     }
 
-    /// Over the box while the next message starts a new task; its x goes back to the current one.
-    private var newTaskChip: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "square.and.pencil").font(.caption).foregroundStyle(Palette.ink)
-            Text("New task").kithText(.secondary).foregroundStyle(Palette.ink)
-            Button { pickingFolder = true } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: startFolder == nil ? "folder" : "folder.fill").font(.caption2)
-                    Text(startFolderName).kithText(.secondary).lineLimit(1)
-                }
-                .foregroundStyle(startFolder == nil ? Palette.muted : Palette.ink)
+    /// Beside "New task": the folder it starts in.
+    private var folderButton: some View {
+        Button { pickingFolder = true } label: {
+            HStack(spacing: 3) {
+                Image(systemName: startFolder == nil ? "folder" : "folder.fill").font(.caption2)
+                Text(startFolderName).kithText(.secondary).lineLimit(1)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Starting folder: \(startFolderName)")
-            // No way back to the held task from here: the terminal writes it.
-            if !alwaysNewTask {
-                IconButton("Go on with the current task", systemImage: "xmark") {
-                    newTask = false
-                    model.leftThread.remove(botId)
-                    startFolder = nil
-                    // Going on means the current task, even if it was folded: open it again.
-                    if let root = Tasks.current(in: model.chat(botId)) { model.taskChoices[root.id] = true }
-                }
-            }
+            .foregroundStyle(startFolder == nil ? Palette.muted : Palette.ink)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
         }
-        .kithSheet(isPresented: $pickingFolder) {
-            PlaceFolderPicker(current: nil, offersDefault: startFolder != nil) { startFolder = $0 }
-        }
-        .padding(.leading, 14)
-        .padding(.top, 8)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Starting folder: \(startFolderName)")
     }
 
     private var startFolderName: String {
@@ -370,18 +402,61 @@ struct Composer: View {
         // Send while recording: the recording ends and what it heard goes with the message.
         dictation.stop()
         if files.isEmpty, let command = SlashCommands.builtIn(for: bot, draft: draft) { return run(command) }
-        guard canSend else { return }
-        withAnimation(Motion.reduced(Motion.conversation, reduceMotion)) {
-            guard model.sendComposerDraft(to: botId, thread: thread, files: files, newTask: startsNew,
-                                           start: startsNew ? startFolder : nil,
-                                           budget: bot?.isGroup == true ? turns : nil) else { return }
-            turns = Turns.standard
-            draft = ""
-            files = []
-            newTask = false
-            model.leftThread.remove(botId)
-            startFolder = nil
+        guard canSend, !taking else { return }
+        let destination = destination
+        let into = destination?.into
+        let newTask = startsNew
+        let send = {
+            withAnimation(Motion.reduced(Motion.conversation, reduceMotion)) {
+                guard model.sendComposerDraft(to: botId, thread: thread, into: into?.id, files: files, newTask: newTask,
+                                               start: newTask ? startFolder : nil,
+                                               budget: bot?.isGroup == true ? turns : nil) else { return }
+                turns = Turns.standard
+                draft = ""
+                files = []
+                startFolder = nil
+                // "New task" is for the next message; after it the box goes on with the task it started.
+                if newTask { model.taskTargets[botId] = nil }
+            }
         }
+        guard let into, Tasks.takesOver(into.data.thread, picked: destination?.picked == true) else { return send() }
+        // A picked task an idle terminal holds is taken over first; if that fails the text stays here, never sent as a new task.
+        taking = true
+        Task {
+            let failure = await Tasks.sendIn(into.data.thread, picked: true, takeOver: {
+                _ = try await model.ready().takeOverThread(botId: botId, threadId: into.id)
+            }, send: send)
+            taking = false
+            if let failure {
+                let why = (failure as? ThreadWriterError)?.errorDescription ?? failure.localizedDescription
+                model.lastError = "Couldn't take over from the terminal, so nothing was sent (\(why)). Your message is still in the box."
+            }
+        }
+    }
+}
+
+/// A pill over the chat's box: where the next message goes.
+private struct TaskPill: View {
+    let on: Bool
+    let systemImage: String
+    let label: Text
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage).font(.caption2.weight(.semibold))
+                label.kithText(.secondary).lineLimit(1)
+            }
+            .foregroundStyle(on ? Palette.background : Palette.ink)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(on ? Palette.ink : Color.clear, in: Capsule())
+            .overlay(Capsule().strokeBorder(on ? Color.clear : Palette.line, lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressScale())
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

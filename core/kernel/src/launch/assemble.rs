@@ -192,6 +192,49 @@ fn pyrepr(x: &str) -> String {
     }
 }
 
+/// Whether `verb` is the core's: a line in `lib/core-switched.txt`, or `KITH_CORE=rust`; `KITH_CORE=python` is the rollback
+/// (`kith_core_exec` in lib/kith-core.sh decides the same way for the shell).
+///
+/// Bash also runs `kith_cutover_refuse` under `KITH_CORE=python`, refusing the rollback of a module whose files the core
+/// owns after its cutover. It is left out here on purpose: that refusal only matters for a module that has a cutover step,
+/// and `pkg`, `project-id` and `cost` have none (the core does not own the cost ledger), so the rollback is always
+/// allowed for these verbs. Add the refusal when one of them gets a cutover.
+fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
+    match get(env, "KITH_CORE") {
+        "python" => return false,
+        "rust" => return true,
+        _ => {}
+    }
+    fs::read_to_string(kernel.join("lib/core-switched.txt")).is_ok_and(|t| {
+        t.lines()
+            .any(|l| l.split_once('\t').is_some_and(|(v, _)| v == verb))
+    })
+}
+
+/// `kith-cost ARGS` answered by the core in process (`cost` in lib/core-switched.txt): its stdout without the last newline when it
+/// exits 0, else `None`, which the callers read as `kith-cost` failing. Only the verbs the launch asks (`spent`, `limit --sh`).
+fn cost_core(
+    kernel: &Path,
+    p: &paths::Paths,
+    env: &Env,
+    home: &Path,
+    person_was: &str,
+    args: &[&str],
+) -> Option<String> {
+    let paths = crate::cost::Paths {
+        machine: p.machine.clone(),
+        home: home.to_path_buf(),
+        kernel: kernel.to_path_buf(),
+    };
+    let cenv = crate::cost::Env {
+        now: env.get("KITH_COST_NOW").cloned(),
+        person_was: person_was.to_owned(),
+    };
+    let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+    let out = crate::cost::run(&paths, &cenv, &args);
+    (out.code == 0).then(|| out.stdout.trim_end_matches('\n').to_owned())
+}
+
 // ---- programs
 
 struct Sys<'a> {
@@ -349,6 +392,24 @@ pub(crate) fn usable_kith_bin(bin: &Path) -> bool {
     .is_some_and(|o| o.to_lowercase().contains("phase"))
 }
 
+/// Whether `bin` has the `kernel readfence` verb: the running program, or one that answers `kernel readfence --help`. An older
+/// kith would read `kernel` as an agent name, so the launch keeps the Python fence for it.
+pub(crate) fn knows_readfence(bin: &Path) -> bool {
+    let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    if std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .is_ok_and(|me| me == real)
+    {
+        return true;
+    }
+    secrets::run_with_timeout(
+        bin,
+        &["kernel", "readfence", "--help"],
+        std::time::Duration::from_secs(10),
+    )
+    .is_some_and(|o| o.contains("kith kernel readfence"))
+}
+
 /// `kith_paths.guest_tmp_ready`: the guest's Claude Code temp folder, made.
 fn guest_tmp_ready(p: &paths::Paths, id: &str, uid: u32) -> Option<String> {
     use sha2::{Digest as _, Sha256};
@@ -412,6 +473,14 @@ fn claude_version(sys: &Sys<'_>) -> Option<String> {
         }
     }
     None
+}
+
+/// Digits with at most one inner dot: a finite, non-negative amount (no NaN, inf, sign or exponent).
+fn plain_number(t: &str) -> bool {
+    !t.is_empty()
+        && t.split('.').count() <= 2
+        && t.split('.')
+            .all(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// `uuid4().hex`. An unreadable random source is an error: an all-zero id would be shared by every run, and a run's
@@ -598,17 +667,41 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             .map(pystr)
             .unwrap_or_default();
         if !p_budget.is_empty() {
-            let sys = Sys { env: &env };
-            let mut c = sys.cmd(
-                kernel.join("bin/kith-cost"),
-                &["spent", &person, &p_budget_agent],
-            );
-            c.env("KITH_PERSON_WAS", &p_was).stderr(Stdio::null());
-            let spent = c.output().ok().filter(|o| o.status.success()).map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .trim_end_matches('\n')
-                    .to_owned()
-            });
+            // A limit that can't be read is not "no limit": for anyone but the owner the run stops here.
+            if !p_owner && !plain_number(&p_budget) {
+                let on = if p_budget_agent.is_empty() {
+                    agent
+                } else {
+                    &p_budget_agent
+                };
+                say(&format!(
+                    "kith: your spending limit on {on} can't be read; ask the owner to set it again"
+                ));
+                return Err(3);
+            }
+            // `cost` in lib/core-switched.txt: the core's own `spent` (kith-cost spent is the rollback, KITH_CORE=python).
+            let spent = if switched(kernel, &env, "cost") {
+                cost_core(
+                    kernel,
+                    &p,
+                    &env,
+                    &home_dir,
+                    &p_was,
+                    &["spent", &person, &p_budget_agent],
+                )
+            } else {
+                let sys = Sys { env: &env };
+                let mut c = sys.cmd(
+                    kernel.join("bin/kith-cost"),
+                    &["spent", &person, &p_budget_agent],
+                );
+                c.env("KITH_PERSON_WAS", &p_was).stderr(Stdio::null());
+                c.output().ok().filter(|o| o.status.success()).map(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .trim_end_matches('\n')
+                        .to_owned()
+                })
+            };
             let spent = match spent {
                 None if p_owner => "0".to_owned(),
                 None => {
@@ -618,11 +711,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                     return Err(3);
                 }
                 Some(t) => {
-                    let numeric = !t.is_empty()
-                        && t.split('.').count() <= 2
-                        && t.split('.')
-                            .all(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()));
-                    if !p_owner && !numeric {
+                    if !p_owner && !plain_number(&t) {
                         say(&format!(
                             "kith: can't read what {person} has spent this month (kith-cost gave '{t}'); not running without the budget check"
                         ));
@@ -705,8 +794,29 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     // ---- the pinned package
     let sys = Sys { env: &env };
     let mut pkg = src_pkg.clone();
-    match sys
-        .out(kernel.join("bin/kith-pkg"), &["resolve", agent], true)
+    // `pkg` in lib/core-switched.txt: the core's own `resolve` (kith-pkg resolve is the rollback, KITH_CORE=python).
+    let resolved = if switched(kernel, &env, "pkg") {
+        let ctx = crate::pkg::Ctx {
+            kernel: kernel.to_path_buf(),
+            agents: p.agents.clone(),
+            state: p.state.clone(),
+            store: p.store.clone(),
+            github: env
+                .get("KITH_GITHUB_GIT")
+                .map_or("https://github.com", String::as_str)
+                .trim_end_matches('/')
+                .to_owned(),
+            // The must-ask python runs in this process's environment, not in the launch's env map that the old kith-pkg
+            // subprocess had; the two differ only by what the launch edits (KITH_RUN_TOKEN, KITH_AGENT*).
+            python: "python3".to_owned(),
+        };
+        let out = crate::pkg::cli::run(&ctx, &["resolve".to_owned(), agent.to_owned()]);
+        eprint!("{}", out.stderr);
+        (out.code == 0).then(|| out.stdout.trim_end_matches('\n').to_owned())
+    } else {
+        sys.out(kernel.join("bin/kith-pkg"), &["resolve", agent], true)
+    };
+    match resolved
         .map(PathBuf::from)
         .filter(|d| d.join("prompt.md").is_file())
     {
@@ -758,15 +868,18 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
 
     // ---- the agent's monthly limit
     let sys = Sys { env: &env };
-    if p_owner
-        && let Some(lim) = sys
-            .out(
-                kernel.join("bin/kith-cost"),
-                &["limit", agent, "--sh"],
-                false,
-            )
-            .filter(|l| !l.is_empty())
-    {
+    let limit_line = if !p_owner {
+        None
+    } else if switched(kernel, &env, "cost") {
+        cost_core(kernel, &p, &env, &home_dir, "", &["limit", agent, "--sh"])
+    } else {
+        sys.out(
+            kernel.join("bin/kith-cost"),
+            &["limit", agent, "--sh"],
+            false,
+        )
+    };
+    if let Some(lim) = limit_line.filter(|l| !l.is_empty()) {
         let v = assignments(&lim);
         if v.get("l_over").map(String::as_str) == Some("1") {
             let at = v.get("l_at").map_or("ask", String::as_str);
@@ -795,9 +908,26 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     let mut no_token = env.clone();
     no_token.remove("KITH_RUN_TOKEN");
     if project.is_empty() {
-        project = Sys { env: &no_token }
-            .out(kernel.join("bin/project-id"), &[], false)
-            .unwrap_or_default();
+        // `project-id` in lib/core-switched.txt: the core answers. Never as a guest: the token is dropped above, and a guest's
+        // own calls stay with bin/project-id, which asks the host.
+        project = if switched(kernel, &env, "project-id") {
+            let ctx = crate::project::Ctx {
+                state: p.state.clone(),
+                home: home_dir.clone(),
+                cwd: std::env::current_dir().unwrap_or_default(),
+                guest: false,
+            };
+            let out = crate::project::run(&ctx, &[]);
+            if out.code == 0 {
+                out.stdout.trim_end_matches('\n').to_owned()
+            } else {
+                String::new()
+            }
+        } else {
+            Sys { env: &no_token }
+                .out(kernel.join("bin/project-id"), &[], false)
+                .unwrap_or_default()
+        };
     } else if !reg.has(&project) {
         let known: String = reg.known().iter().map(|k| format!("{k} ")).collect();
         say(&format!(
@@ -1136,6 +1266,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .filter(|b| usable_kith_bin(Path::new(b)))
         .map(str::to_owned)
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
+    let fence_bin = kith_bin.clone().filter(|b| knows_readfence(Path::new(b)));
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
@@ -1165,6 +1296,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             cwd: &cwd_logical,
             user_home: &home_dir,
             kith_bin: kith_bin.as_deref(),
+            fence_bin: fence_bin.as_deref(),
             plugins_json: &plugins_json,
             owner_terminal: false,
             api_helper: &bget(&be, "backup_api_helper"),
@@ -1410,6 +1542,23 @@ mod tests {
     }
 
     #[test]
+    fn a_limit_is_read_only_when_it_is_a_plain_amount() {
+        for ok in ["0", "10", "12.50", "0.01"] {
+            assert!(plain_number(ok), "{ok}");
+        }
+        for bad in [
+            "", "abc", "NaN", "nan", "inf", "-inf", "Infinity", "-5", "+5", "1e3", "1.", ".5",
+            "1.2.3", " 5",
+        ] {
+            assert!(!plain_number(bad), "{bad:?}");
+        }
+        // finite budgets compare as before: under runs, over stops
+        let f = |x: &str| x.trim().parse::<f64>().ok();
+        assert!(f("1.0").unwrap() < f("5").unwrap());
+        assert!(f("5").unwrap() >= f("5").unwrap());
+    }
+
+    #[test]
     fn random_hex_is_32_digits_and_never_the_same_twice() {
         let (a, b) = (random_hex().unwrap(), random_hex().unwrap());
         assert_eq!(a.len(), 32);
@@ -1486,6 +1635,38 @@ mod tests {
         assert!(!usable_kith_bin(Path::new("")));
         // The running program is taken without asking it anything (the test binary has no `memory hook`).
         assert!(usable_kith_bin(&std::env::current_exe().unwrap()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn readfence_verb_is_asked_for() {
+        let dir = std::env::temp_dir().join(format!("kith-fence-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let script = |name: &str, body: &str| {
+            let p = dir.join(name);
+            fs::write(&p, body).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        let new = script(
+            "new",
+            "#!/bin/sh\necho 'usage: kith kernel readfence --root DIR'\n",
+        );
+        let old = script("old", "#!/bin/sh\necho 'no agent named kernel'\nexit 1\n");
+        // A script just written can still be "text file busy" while another test forks: ask again.
+        let mut knows = false;
+        for _ in 0..20 {
+            knows = knows_readfence(&new);
+            if knows {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        assert!(knows);
+        assert!(!knows_readfence(&old));
+        assert!(!knows_readfence(&dir.join("missing")));
+        assert!(knows_readfence(&std::env::current_exe().unwrap()));
         let _ = fs::remove_dir_all(&dir);
     }
 

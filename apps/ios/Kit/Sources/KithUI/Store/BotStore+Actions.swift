@@ -73,7 +73,17 @@ extension BotStore {
     }
 
     /// Stops the bot in its chat, or in the thread on `thread`; its other places keep working.
-    public func stop(_ botId: String, thread: String? = nil) { perform(replay: true) { try await $0.stop(botId, thread: thread) } }
+    /// A second tap while the first call is on its way sends nothing (`stopping` disables the buttons).
+    public func stop(_ botId: String, thread: String? = nil) {
+        let key = Self.stopKey(botId, thread)
+        guard stopping.begin(key) else { return }
+        Task {
+            defer { stopping.end(key) }
+            do { try await withLink(replay: true) { try await $0.stop(botId, thread: thread) } } catch { lastError = error.localizedDescription }
+        }
+    }
+    public func isStopping(_ botId: String, thread: String? = nil) -> Bool { stopping.contains(Self.stopKey(botId, thread)) }
+    private static func stopKey(_ botId: String, _ thread: String?) -> String { "\(botId)/\(thread ?? "")" }
     /// Accepts an incoming call; false when another device or the timeout got there first (it is then gone).
     /// On success the call stays listed until `dismissCall`, so the screen can hand over to the call without a gap.
     public func acceptCall(_ call: IncomingCall) async -> Bool {

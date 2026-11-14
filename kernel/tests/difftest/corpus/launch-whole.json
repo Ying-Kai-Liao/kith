@@ -4213,6 +4213,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -4362,6 +4370,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -4511,6 +4527,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -4660,6 +4684,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -4809,6 +4841,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -4959,6 +4999,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -5108,6 +5156,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -5257,6 +5313,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -5406,6 +5470,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -5568,6 +5640,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -5721,6 +5801,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -5874,6 +5962,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -6024,6 +6120,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -6174,6 +6278,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -6323,6 +6435,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -6472,6 +6592,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -6621,6 +6749,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -6774,6 +6910,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -7047,6 +7191,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -7320,6 +7472,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -7625,6 +7785,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -7930,6 +8098,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -8235,6 +8411,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -8384,6 +8568,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -12127,6 +12319,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -12276,6 +12476,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -12431,6 +12639,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -12592,6 +12808,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -12741,6 +12965,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -12891,6 +13123,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -13041,6 +13281,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -13229,6 +13477,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,
@@ -14087,6 +14343,14 @@
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
     "<uuid>"
+   ],
+   [
+    "\\S*/python3 -I <KERNEL>/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
    ]
   ],
   "stderr": true,

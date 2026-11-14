@@ -1,0 +1,15 @@
+{
+  "fakes": "",
+  "state:home/auth.json": "{\n  \"env\": {},\n  \"grants\": {},\n  \"members\": {\n    \"video\": {\n      \"bill\": {\n        \"jobs\": {\n          \"make-videos\": {\n            \"since\": \"<MASKED>\",\n            \"snapshot\": {\n              \"domains\": [],\n              \"doors\": [\n                \"render@0a43c6cdd2e4\"\n              ],\n              \"helpers\": []\n            }\n          }\n        },\n        \"mode\": \"default\"\n      }\n    }\n  },\n  \"people\": {\n    \"bill\": {\n      \"name\": \"Bill\"\n    },\n    \"kai\": {\n      \"owner\": true\n    }\n  },\n  \"profiles\": {}\n}\n",
+  "state:home/auth.json.lock": "",
+  "state:home/serve/cloud-sync.json": "{\n  \"linked\": true,\n  \"until\": 1000\n}\n",
+  "state:kith/agents/video/files/people/bill/other/": "<empty dir>\n",
+  "state:kith/agents/video/files/people/bill/proj/file.txt": "x",
+  "state:kith/agents/video/files/people/kai/proj/": "<empty dir>\n",
+  "state:kith/agents/video/role/agent.md": "---\nname: video\ndescription: test agent\n---\nYou are video.\n",
+  "state:kith/agents/video/role/capabilities.yaml": "doors:\n  - name: render\n    label: Render\n    npm: [fake@1.0.0]\n    lockfile: render.lock.json\n    tools: [node]\n    bin: fake/door.mjs\n    args: [render]\n    writes: [renders]\n  - name: cut\n    npm: [fake@1.0.0]\n    lockfile: render.lock.json\n    tools: [node]\n    bin: fake/door.mjs\n    writes: [renders]\n  - name: ranged\n    npm: [fake@^1.0.0]\n    lockfile: render.lock.json\n    tools: [node]\n    bin: fake/door.mjs\n    writes: [renders]\njobs:\n  - name: make-videos\n    label: Make videos\n    doors: [render]\n",
+  "state:kith/agents/video/role/render.lock.json": "{\n  \"lockfileVersion\": 3\n}\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"result\": {\n    \"content\": [\n      {\n        \"text\": \"Access is being changed right now; try again in a minute.\",\n        \"type\": \"text\"\n      }\n    ]\n  }\n}\n",
+  "step0.stderr": ""
+}

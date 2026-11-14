@@ -171,6 +171,13 @@ pub(super) const ROWS: &[Method] = &[
     )
     .alias(&[&["kernel", "accounts", "ls"]])
     .formats(J),
+    plumbing(
+        "kernel.accountState",
+        "`kith account list|pick|out|clear|usage` over the accounts' state wherever it lives (the file, or the core's table once `accounts` is switched), plus `state` and `started` for the Python readers.",
+        &[KERNEL, rest("args", "The verb and its arguments.")],
+        "string",
+        &["kernel", "account-state"],
+    ),
     plumbing("kernel.delegation.limits", "How far a chain of asks may go.", &[KERNEL], "json", &["kernel", "delegation", "limits"]),
     plumbing("kernel.delegation.cap", "The chain cost cap in dollars (`none` for no cap).", &[KERNEL], "string", &["kernel", "delegation", "cap"]),
     plumbing(

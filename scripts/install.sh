@@ -171,7 +171,8 @@ for v in $(ls -1t "$CLI"); do
 done
 SWAP
 
-# The swap runs under the auth.json lock, then waits for every kith-auth / kith_settings process that started
+# The swap runs under the auth.json lock, then waits for every kith-auth / kith_settings process, and every Rust
+# `kith kernel settings` / `kith kernel secrets` run (they write settings.json / auth.json too), that started
 # before it (SIGTERM after KITH_INSTALL_DRAIN_S, default 30; auth.json stays whole, its rename is atomic), then lets
 # go. Waiting before the swap would be wrong: an old writer could start in the gap. The old code has no C2 check
 # (no grant for someone removed), so no old writer may touch auth.json or settings.json once the new code is in.
@@ -192,7 +193,7 @@ while pid > 1:
     mine.add(pid)
     out = subprocess.run(['ps', '-o', 'ppid=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
     pid = int(out) if out.isdigit() else 0
-WRITER = re.compile(os.environ.get('KITH_QUIESCE_MATCH') or r'(^|[/\s])(kith-auth|kith_settings(\.py)?)(\s|$)')   # the env is for tests
+WRITER = re.compile(os.environ.get('KITH_QUIESCE_MATCH') or r'(^|[/\s])(kith-auth|kith_settings(\.py)?|kith\s+kernel\s+(settings|secrets))(\s|$)')   # the env is for tests
 # A long-lived process that imported the old kith_settings ignores the lock and can write until it restarts, and its
 # command line need not name kith-auth or kith_settings (the bridge, the host's launcher). So also: a process with no
 # terminal whose program is a file of the installed kernel. Only the program counts (argv[0], or the script an

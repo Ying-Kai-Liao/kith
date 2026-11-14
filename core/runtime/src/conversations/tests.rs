@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use tempfile::TempDir;
 
 use super::claims::{
-    Kill, Kind, NewClaim, Redeemed, Reported, claim, different_holder, end_gone, reconcile, redeem,
-    report, revoke_person, stop,
+    Kill, Kind, NewClaim, Redeemed, Reported, claim, different_holder, end_gone, group_held,
+    live_counts, reconcile, redeem, report, revoke_person, stop,
 };
 use crate::db::{Core, MIGRATIONS, RecordedProc};
 use crate::error::Error;
@@ -382,6 +382,61 @@ fn a_claim_the_new_instance_lists_is_left_alone() {
     assert_eq!(state(&c2, id2), "claimed");
 }
 
+/// Takes `conv` as an instance's claim, redeemed on `pid` when one is given.
+fn take_as(c: &mut Core, conv: &str, instance: Option<&str>, pid: Option<u32>) -> i64 {
+    conversation(c, conv);
+    let t = turn(c, conv, "sam");
+    let mut req = new_claim(conv, Some(t));
+    req.holder_instance = instance;
+    let id = claim(c, &req, 10).expect("claim").claim_id;
+    if let Some(pid) = pid {
+        let r =
+            redeem(c, id, pid, &format!("e{pid}"), instance.unwrap_or("h1"), 20).expect("redeem");
+        assert_eq!(r, Redeemed::Running { again: false });
+    }
+    id
+}
+
+/// The serve host names its own turn claims `kith-serve-host`; it is not a holder, so a holder's hello never ends them.
+#[test]
+fn a_new_holder_instance_never_ends_the_hosts_claims() {
+    let (_t, mut c) = open();
+    let host = "kith-serve-host";
+    let old_claimed = take_as(&mut c, "a", Some("h1"), None);
+    let old_running = take_as(&mut c, "b", Some("h1"), Some(100));
+    let old_listed = take_as(&mut c, "c", Some("h1"), None);
+    let host_claimed = take_as(&mut c, "d", Some(host), None);
+    let host_running = take_as(&mut c, "e", Some(host), Some(200));
+    let unspawned_old = take_as(&mut c, "f", None, None);
+    let out = different_holder(&mut c, "h2", &[old_listed], &[], i64::MAX, 30).expect("hello");
+    assert_eq!(state(&c, old_claimed), "ended");
+    assert_eq!(state(&c, old_running), "ending");
+    assert_eq!(state(&c, old_listed), "claimed", "listed: left alone");
+    assert_eq!(
+        state(&c, unspawned_old),
+        "ended",
+        "no instance: an old holder's"
+    );
+    assert_eq!(state(&c, host_claimed), "claimed", "the host's stands");
+    assert_eq!(state(&c, host_running), "running", "the host's stands");
+    assert!(
+        out.kill.iter().all(|k| k.claim_id != Some(host_running)),
+        "the host's warm process is never killed: {out:?}"
+    );
+    assert!(
+        out.kill_procs.iter().all(|k| k.pid != Some(200)),
+        "nor as a stray process: {out:?}"
+    );
+    // A second hello of the same instance changes nothing more.
+    let again = different_holder(&mut c, "h2", &[old_listed], &[], i64::MAX, 31).expect("again");
+    assert!(again.ended.is_empty());
+    assert_eq!(state(&c, host_running), "running");
+    // An empty list does not reach the host's claims either.
+    different_holder(&mut c, "h3", &[], &[], i64::MAX, 32).expect("empty list");
+    assert_eq!(state(&c, host_claimed), "claimed");
+    assert_eq!(state(&c, host_running), "running");
+}
+
 // ---- reports
 
 #[test]
@@ -644,6 +699,123 @@ fn a_reused_pid_counts_as_gone_and_a_probe_that_cannot_tell_does_not() {
     stop(&mut c, id2, "stop", true, 32).expect("stop");
     assert!(end_gone(&mut c, &Unsure, 33).expect("probe").is_empty());
     assert_eq!(state(&c, id2), "ending");
+}
+
+/// The stub (the recorded pid) leads its process group and the engine runs in it. On macOS the engine can outlive the
+/// stub: the claim is still the writer's until no process is left in the group.
+#[test]
+fn a_dead_stub_with_its_engine_still_in_the_group_keeps_the_claim() {
+    struct Group {
+        engine: std::cell::Cell<bool>,
+    }
+    impl Liveness for Group {
+        fn start(&self, _: u32) -> Option<String> {
+            None
+        }
+        fn gone(&self, _: u32) -> bool {
+            true
+        }
+        fn orphan_group(&self, _: u32, _: &str) -> bool {
+            self.engine.get()
+        }
+    }
+    let (_t, mut c) = open();
+    let live = Group {
+        engine: std::cell::Cell::new(true),
+    };
+    let (id, _) = running(&mut c, "c1", 100);
+    stop(&mut c, id, "revoked", false, 30).expect("stop");
+    assert!(end_gone(&mut c, &live, 31).expect("probe").is_empty());
+    assert_eq!(state(&c, id), "ending");
+    assert_eq!(
+        live_counts(&c).expect("counts"),
+        [("claimed", 0), ("running", 0), ("ending", 1)]
+    );
+    assert!(
+        claim(&mut c, &new_claim("c1", None), 32).is_err(),
+        "still one writer"
+    );
+    live.engine.set(false);
+    assert_eq!(end_gone(&mut c, &live, 33).expect("probe"), vec![id]);
+    assert_eq!(state(&c, id), "ended");
+    assert_eq!(live_counts(&c).expect("counts")[2], ("ending", 0));
+    claim(&mut c, &new_claim("c1", None), 34).expect("free");
+}
+
+/// The same on the real system: a group leader that has exited and been reaped, with its child still in the group.
+#[cfg(unix)]
+#[test]
+fn on_the_real_system_a_claim_ends_only_once_its_group_is_empty() {
+    use std::os::unix::process::CommandExt as _;
+    let mut leader = std::process::Command::new("sh")
+        .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+        .stdout(std::process::Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .expect("spawn");
+    let pgid = leader.id();
+    let mut out = String::new();
+    std::io::Read::read_to_string(leader.stdout.as_mut().expect("stdout"), &mut out).expect("read");
+    leader.wait().expect("reaped");
+    let (_t, mut c) = open();
+    // The leader's own stamp is gone with it; this process started in the same boot, which is all the rule asks.
+    let this_boot = kith_kernel::procstart::start_stamp(std::process::id()).expect("own start");
+    let (id, _) = take(&mut c, "c1");
+    redeem(&mut c, id, pgid, &this_boot, "h1", 20).expect("redeem");
+    stop(&mut c, id, "revoked", false, 30).expect("stop");
+    let system = crate::gate::System;
+    assert!(
+        end_gone(&mut c, &system, 31).expect("probe").is_empty(),
+        "the child {out} runs on"
+    );
+    assert_eq!(state(&c, id), "ending");
+    let killed = std::process::Command::new("/bin/kill")
+        .args(["-s", "KILL", "--"])
+        .arg(format!("-{pgid}"))
+        .status()
+        .expect("kill");
+    assert!(killed.success());
+    let mut ended = Vec::new();
+    for at in 32..132 {
+        ended = end_gone(&mut c, &system, at).expect("probe");
+        if !ended.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(ended, vec![id]);
+}
+
+/// After a reboot a stranger's group can sit at the recorded id: a record that is not from this boot never holds an
+/// `ending` claim, whatever runs at that id now.
+#[cfg(unix)]
+#[test]
+fn a_live_group_at_a_dead_pid_with_a_record_from_another_boot_does_not_hold_the_claim() {
+    use std::os::unix::process::CommandExt as _;
+    let mut leader = std::process::Command::new("sh")
+        .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+        .stdout(std::process::Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .expect("spawn");
+    let pgid = leader.id();
+    let mut out = String::new();
+    std::io::Read::read_to_string(leader.stdout.as_mut().expect("stdout"), &mut out).expect("read");
+    leader.wait().expect("reaped");
+    let (_t, mut c) = open();
+    let (id, _) = running(&mut c, "c1", pgid); // recorded as `e<pgid>`: an epoch long before this boot
+    stop(&mut c, id, "revoked", false, 30).expect("stop");
+    assert_eq!(
+        end_gone(&mut c, &crate::gate::System, 31).expect("probe"),
+        vec![id],
+        "the group is a stranger's"
+    );
+    let killed = std::process::Command::new("/bin/kill")
+        .args(["-s", "KILL", "--"])
+        .arg(format!("-{pgid}"))
+        .status()
+        .expect("kill");
+    assert!(killed.success(), "child {out}");
 }
 
 #[test]
@@ -1140,6 +1312,34 @@ fn a_direct_claim_survives_reconcile_and_a_holder_change_and_ends_when_its_pid_i
     assert_eq!(state(&c, id), "claimed");
     let none = Procs::default();
     assert_eq!(end_gone(&mut c, &none, 24).expect("gone"), vec![id]);
+    assert_eq!(state(&c, id), "ended");
+}
+
+/// A `--direct` claimer leads its terminal job's group and its MCP children share it: with the claimer dead and a child
+/// still in the group, the claim stays live; it ends once the group is empty.
+#[test]
+fn a_direct_claim_with_a_dead_pid_and_a_live_group_stays_live() {
+    struct Group(std::cell::Cell<bool>);
+    impl Liveness for Group {
+        fn start(&self, _: u32) -> Option<String> {
+            None
+        }
+        fn gone(&self, _: u32) -> bool {
+            true
+        }
+        fn orphan_group(&self, _: u32, _: &str) -> bool {
+            self.0.get()
+        }
+    }
+    let (_t, mut c) = open();
+    let id = direct(&mut c, "c1", 700);
+    let live = Group(std::cell::Cell::new(true));
+    assert!(end_gone(&mut c, &live, 23).expect("probe").is_empty());
+    assert_eq!(state(&c, id), "claimed");
+    assert_eq!(group_held(&c, &live).expect("held"), 1, "shown in status");
+    live.0.set(false);
+    assert_eq!(group_held(&c, &live).expect("held"), 0);
+    assert_eq!(end_gone(&mut c, &live, 24).expect("probe"), vec![id]);
     assert_eq!(state(&c, id), "ended");
 }
 

@@ -43,7 +43,8 @@ public struct EntryData: Codable, Hashable, Sendable {
     /// permission: whether this account may answer it, from who the card names. Sent per viewer; nil from older hosts.
     public var canAnswer: Bool?
     /// permission, in an invited person's chat: whose run asked, and which agent.
-    public var person: String?
+    /// permission: the id of the person whose run it is. notice (`personJoined`, `personLeft`): who joined or left (an object on the wire).
+    public var person: EntryPerson?
     public var personName: String?
     public var agent: String?
     /// permission, from a run `kith ask` started: "<agent>, asked by <caller agent>" (or "a terminal").
@@ -106,11 +107,53 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var unprompted: Bool?
     /// notice: `botJoined`, `botLeft`, `botPassed` or `botTimedOut` (a bot in a group room); its words are in `text`.
     public var notice: String?
+    /// The owner's copy of a room message: the people who can't see it (ids). Shown only below their join line.
+    public var hiddenFrom: [String]?
+    /// agent: a room turn that did not answer (its text says why); the writer may send the message again.
+    public var unanswered: Bool?
+    /// permission, a room turn's card in the owner's 1:1 with the agent: the room it came from.
+    public var room: String?
 
     public init(text: String? = nil, status: String? = nil, clientNonce: String? = nil) {
         self.text = text
         self.status = status
         self.clientNonce = clientNonce
+    }
+}
+
+/// A person on an entry: a plain id on a card, `{id, name}` on a room's join and leave lines.
+public struct EntryPerson: Codable, Hashable, Sendable, ExpressibleByStringLiteral {
+    public var id: String?
+    public var name: String?
+
+    public init(id: String? = nil, name: String? = nil) {
+        self.id = id
+        self.name = name
+    }
+
+    public init(stringLiteral value: String) { self.id = value }
+
+    private enum CodingKeys: String, CodingKey { case id, name }
+
+    public init(from decoder: Decoder) throws {
+        if let plain = try? decoder.singleValueContainer().decode(String.self) {
+            id = plain
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if name == nil, let id {
+            var single = encoder.singleValueContainer()
+            try single.encode(id)
+            return
+        }
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(id, forKey: .id)
+        try c.encodeIfPresent(name, forKey: .name)
     }
 }
 

@@ -107,6 +107,15 @@ pub fn read(path: &Path) -> Option<Claim> {
 /// The live claim on `sid` (either name) that keeps the host from writing, if any. A host turn's own claim (`Kind::App`,
 /// see `agent/bot/turn.rs`) is not one: it only keeps a terminal out. A take-over's claim is.
 pub fn holder(state: &Path, sid: &str) -> Option<Claim> {
+    let files = holder_files(state, sid);
+    match super::core_claims::folders_for(state) {
+        // Flag on: the core's claim holds too (the files only name a writer from before the flag).
+        Some(f) if files.is_none() => super::core_claims::holder(&f, sid),
+        _ => files,
+    }
+}
+
+fn holder_files(state: &Path, sid: &str) -> Option<Claim> {
     [false, true]
         .into_iter()
         .filter_map(|t| read(&path(state, sid, t)))
@@ -122,6 +131,91 @@ pub fn take(state: &Path, sid: &str, kind: Kind, pid: u32, takeover: bool) -> st
 
 /// [`take`] for a run that has `person`'s profile on `agent` (`None`: the owner's).
 pub fn take_as(
+    state: &Path,
+    sid: &str,
+    kind: Kind,
+    pid: u32,
+    takeover: bool,
+    person: Option<&str>,
+    agent: Option<&str>,
+) -> std::io::Result<Result<(), Held>> {
+    take_for_turn(state, sid, kind, pid, takeover, person, agent, None)
+}
+
+/// [`take_as`] for a host turn, which knows the run's folder (`cwd`): with the core flag on, the turn's session row names it.
+#[allow(clippy::too_many_arguments, reason = "take_as's inputs and the folder")]
+pub fn take_for_turn(
+    state: &Path,
+    sid: &str,
+    kind: Kind,
+    pid: u32,
+    takeover: bool,
+    person: Option<&str>,
+    agent: Option<&str>,
+    cwd: Option<&str>,
+) -> std::io::Result<Result<(), Held>> {
+    // Flag on: the file claim is the writer (the kernel's takers only see it) and the core's claim shadows it. A proc claim
+    // names no session and a take-over claim is the host's step towards a stop (`sync::take_over` goes through the core
+    // itself), so both stay files.
+    let shadow = if takeover || sid.starts_with("proc-") { None } else { super::core_claims::folders_for(state) };
+    let taken = take_file(state, sid, kind, pid, takeover, person, agent)?;
+    let Some(f) = shadow else {
+        if matches!(taken, Ok(())) && !takeover {
+            super::intent::taken(state, sid);
+        }
+        return Ok(taken);
+    };
+    if let Err(held) = taken {
+        return Ok(Err(held));
+    }
+    match super::core_claims::take_as(&f, sid, kind, pid, person, agent, cwd) {
+        Ok(Ok(())) => {}
+        // The core has another writer (a claim only it knows): the file is given back, and so is the intent we have not touched.
+        Ok(Err(held)) => {
+            release_file(state, sid, pid, false);
+            return Ok(Err(held));
+        }
+        // The person was revoked after the caller's check: no turn.
+        Err(error) if super::core_claims::is_revoked(&error) => {
+            release_file(state, sid, pid, false);
+            return Err(error);
+        }
+        // Core down or refusing: the file claim is the writer, as with the flag off. The turn is not left without one.
+        Err(error) => tracing::warn!(%error, sid, "no core claim for a turn: it runs under its claim file"),
+    }
+    super::intent::taken(state, sid);
+    Ok(Ok(()))
+}
+
+/// What a host turn does with the result of its claim attempt: the one decision `claim_for_turn` (agent/bot/turn.rs) makes.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TurnClaim {
+    /// The turn holds the session (or a terminal that is this very process does).
+    Held,
+    /// The turn runs without a claim: a main-lane claim only keeps a terminal out, and a claim that failed to be written
+    /// (an io error) never stopped a turn.
+    Unclaimed,
+    /// Another writer holds the session: the turn is refused with this code.
+    Refused(&'static str),
+    /// The person was revoked (the core refused the claim, flag on): the turn is refused.
+    Revoked,
+}
+
+/// See [`TurnClaim`].
+pub fn judge_turn_claim(taken: &std::io::Result<Result<(), Held>>, pid: u32, main_lane: bool, bot: bool) -> TurnClaim {
+    match taken {
+        Ok(Ok(())) => TurnClaim::Held,
+        // A terminal got in between the start check and here: it keeps the session.
+        Ok(Err(held)) if held.0.pid == pid => TurnClaim::Held,
+        Ok(Err(_)) if main_lane => TurnClaim::Unclaimed,
+        Ok(Err(_)) => TurnClaim::Refused(if bot { "heldByOtherWriter" } else { "liveInTerminal" }),
+        Err(error) if super::core_claims::is_revoked(error) => TurnClaim::Revoked,
+        Err(_) => TurnClaim::Unclaimed,
+    }
+}
+
+/// The claim file of [`take_for_turn`]. `Err(Held)`: a live claim is there.
+fn take_file(
     state: &Path,
     sid: &str,
     kind: Kind,
@@ -166,10 +260,8 @@ pub fn take_as(
     })();
     let _ = std::fs::remove_file(&tmp);
     // A process that took the session ends the intent of the one before it and the decision of its idle period (F12 rules
-    // 12, 14), as the kernel's take_claim does; a take-over claim is the host's step towards a stop, not a new writer.
-    if matches!(result, Ok(Ok(()))) && !takeover {
-        super::intent::taken(state, sid);
-    }
+    // 12, 14), as the kernel's take_claim does (the caller, once the claim is whole); a take-over claim is the host's step
+    // towards a stop, not a new writer.
     result
 }
 
@@ -266,6 +358,101 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
     }
     ended
 }
+
+/// Ends the processes of core claims a revoke sent to `ending` (`people.suspend` / `people.removePerson` answer them as
+/// `kill`: pid and start stamp). Nothing in the daemon signals them: its holder link kills only what it started itself or
+/// an old instance's, and `end_gone` waits for the pid to leave. Like [`sweep`]: only a process positively the one that
+/// took the claim (a reused pid or a pid already gone is left alone, so a retried revoke kills nothing twice), its
+/// descendants first, SIGTERM then SIGKILL after `grace`. A claim with no recorded start is never signalled: the core
+/// may hand one out (an imported terminal claim carries none) and a pid alone could be a reused one. The SIGKILL goes
+/// only to what still has the start it had when found, and to the claimer's process group when it leads one (a session
+/// leader's group holds what it started, as the channels' `end_groups` does). Blocking. Returns the pids it signalled.
+pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -> Vec<u32> {
+    let me = std::process::id();
+    // (pid, start when found): the second signal is sent only to a process that still has it.
+    let mut victims: Vec<(u32, Option<String>)> = Vec::new();
+    // Groups the claimer led when it was verified (decided then: by the SIGKILL it is dead).
+    let mut groups: Vec<u32> = Vec::new();
+    for (pid, started) in held {
+        if started.as_deref().is_none_or(|s| s.trim().is_empty()) {
+            tracing::warn!(
+                pid,
+                "a claim with no recorded start was not ended: its pid alone cannot tell it from a reused one"
+            );
+            continue;
+        }
+        let claim = Claim {
+            pid: *pid,
+            proc_start: started.clone(),
+            at: String::new(),
+            kind: Kind::Other,
+            takeover: false,
+            person: None,
+            agent: None,
+        };
+        // A start that cannot be compared is not enough to signal: `is_claimer` wants a positive match.
+        if *pid == me || *pid <= 1 || !pid_runs(*pid) || !claim.is_claimer() {
+            continue;
+        }
+        for p in descendants(*pid).into_iter().chain([*pid]) {
+            if p != me && !victims.iter().any(|(v, _)| *v == p) {
+                victims.push((p, proc_start(p)));
+            }
+        }
+        if leads_group(*pid) && !groups.contains(pid) {
+            groups.push(*pid);
+        }
+    }
+    let pids: Vec<u32> = victims.iter().map(|(p, _)| *p).collect();
+    signal(&pids, libc::SIGTERM);
+    signal_groups(&groups, libc::SIGTERM);
+    let deadline = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < deadline && pids.iter().any(|p| pid_runs(*p)) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let same = |pid: u32, found: &Option<String>| {
+        pid_runs(pid)
+            && match (found, proc_start(pid)) {
+                (Some(then), Some(now)) => {
+                    kith_kernel::procstart::comparable(then, &now) && kith_kernel::procstart::same_process(then, &now)
+                }
+                _ => false,
+            }
+    };
+    let left: Vec<u32> = victims.iter().filter(|(p, s)| same(*p, s)).map(|(p, _)| *p).collect();
+    signal(&left, libc::SIGKILL);
+    // Whether or not the leader is still alive: POSIX does not reuse a pid as a process or group id while a group with
+    // that id exists, and a group that is gone answers ESRCH, which is ignored. A nohup'd or double-forked child of the
+    // claimer stays in the group and goes with it.
+    signal_groups(&groups, libc::SIGKILL);
+    pids
+}
+
+/// Whether `pid` leads its own process group (checked right after its start was verified). Never the host's own group:
+/// a host started from the claimer's shell would be in it.
+#[cfg(unix)]
+fn leads_group(pid: u32) -> bool {
+    // SAFETY: getpgid(2) and getpgrp(2) only read.
+    libc::pid_t::try_from(pid).is_ok_and(|p| unsafe { libc::getpgid(p) == p && libc::getpgrp() != p })
+}
+
+#[cfg(not(unix))]
+fn leads_group(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn signal_groups(groups: &[u32], sig: libc::c_int) {
+    for g in groups {
+        if let Ok(p) = libc::pid_t::try_from(*g) {
+            // SAFETY: killpg only sends a signal; ESRCH for a group that is gone is ignored.
+            unsafe { libc::killpg(p, sig) };
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_groups(_groups: &[u32], _sig: i32) {}
 
 #[cfg(unix)]
 fn signal(pids: &[u32], sig: libc::c_int) {
@@ -470,6 +657,14 @@ impl Lock {
 
 /// Gives the claim back; only the claimer's own file is removed.
 pub fn release(state: &Path, sid: &str, pid: u32, takeover: bool) {
+    // The core's claim first, then the file: the file is the gate, so it goes last.
+    if !takeover && let Some(f) = super::core_claims::folders_for(state) {
+        super::core_claims::release(&f, sid, pid);
+    }
+    release_file(state, sid, pid, takeover);
+}
+
+fn release_file(state: &Path, sid: &str, pid: u32, takeover: bool) {
     let p = path(state, sid, takeover);
     // Under the claim lock: a taker may have replaced our (stale) claim with its own between the read and the remove.
     let Some(parent) = p.parent() else { return };

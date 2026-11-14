@@ -48,7 +48,9 @@ PUBLIC = {
     ("lib.rs", "field:dry_run"), ("lib.rs", "field:force"), ("lib.rs", "field:changed"), ("lib.rs", "field:backup"),
     ("lib.rs", "field:lines"),
     # `kith kernel core-call` with no daemon (the revoke stopgap before M2-23): one owner `people.*` write in an embedded core.
-    ("lib.rs", "call_authority_embedded"), ("lib.rs", "EmbeddedCall"),
+    ("lib.rs", "call_authority_embedded"), ("lib.rs", "call_account_embedded"), ("lib.rs", "EmbeddedCall"),
+    # the narrowing-only list those writes are held to; the host's core_front.rs reuses it (a list of names, no table)
+    ("lib.rs", "EMBEDDED_WRITES"), ("lib.rs", "EMBEDDED_READS"), ("lib.rs", "embedded"),
     ("lib.rs", "cutover"),   # `kith kernel cutover ...` (M3-10a): argv in, lines out
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
     ("call.rs", "call"),
@@ -87,6 +89,7 @@ def public_items(root):
             m = ITEM.match(line)
             if m:
                 kind, item = m.groups()
+                item = item.rstrip(":")   # `pub const NAME: T` (the class takes `:` for `use a::b`)
                 found.add((name, "use:" + item if kind == "use" else item))
                 continue
             f = FIELD.match(line)
@@ -200,6 +203,7 @@ def selftest():
 
         violate("a pub fn", append("core/runtime/src/db.rs", "\npub fn open_database_directly() {}\n"), "open_database_directly")
         violate("a pub struct field", append("core/runtime/src/lib.rs", "\npub struct Leak {\n    pub conn: u8,\n}\n"), "Leak")
+        violate("a pub const", append("core/runtime/src/lib.rs", "\npub const LEAK_PATH: &str = \"\";\n"), "exposes LEAK_PATH in")
         violate("another crate depends on it", append("serve/host/crates/wire/Cargo.toml", "\nkith-core = { path = \"../../../../core/runtime\" }\n"),
                 "crates/wire/Cargo.toml depends on kith-core")
         violate("rust names kith_core", append("serve/host/src/api/mod.rs", "\nuse kith_core::Core;\n"), "names kith_core")

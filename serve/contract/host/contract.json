@@ -409,6 +409,49 @@
       "doc": "Every handle revoke or undo the sender knows; the answer is the receiver's own list, so both ends hold the latest of each.",
       "fields": { "handles": "[HandleRevoke]" }
     },
+    "RoomPerson": {
+      "doc": "One stay of a person in a group room: open while leftGen is null. A gen is the seq of the join or leave line in the room's main lane.",
+      "fields": { "person": "string", "joinedGen": "int", "leftGen": "int?" }
+    },
+    "RoomPeople": {
+      "doc": "The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host.",
+      "fields": { "enabled": "bool", "gen": "int", "people": "[RoomPerson]" }
+    },
+    "CreatedInvite": {
+      "doc": "What making an invite answers: its id and links, when it lapses, and the person it is for.",
+      "fields": {
+        "inviteId": "string",
+        "link": "string",
+        "appLink": "string",
+        "kithLink": "string",
+        "webLink": "string?",
+        "pageLink": "string?",
+        "expiresAt": "int",
+        "personId": "string"
+      },
+      "mayOmit": ["webLink", "pageLink"]
+    },
+    "RoomPersonChange": {
+      "doc": "What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).",
+      "fields": { "gen": "int", "changed": "bool" }
+    },
+    "MyRoomAgent": {
+      "doc": "One of a room's agents as a person is shown it: the member bot's id (a reply's author is this id) and its live name. Nothing else of the bot.",
+      "fields": { "id": "string", "name": "string" }
+    },
+    "MyRoom": {
+      "doc": "A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; agentList is the same agents with the bot id each reply is authored by (absent from a host before it, then the app has only the names); ownerName is the owner's display name (absent the same way, then the app says \"the owner\"); stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).",
+      "fields": { "id": "string", "name": "string", "agents": "[string]", "agentList": "[MyRoomAgent]?", "ownerName": "string?", "stay": "int" },
+      "mayOmit": ["agentList", "ownerName"]
+    },
+    "MyRooms": {
+      "doc": "The group rooms a person is in right now.",
+      "fields": { "rooms": "[MyRoom]" }
+    },
+    "RoomLeft": {
+      "doc": "Whether leaving a room changed anything (false: they had already left).",
+      "fields": { "left": "bool" }
+    },
     "BotProof": {
       "doc": "Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.",
       "fields": { "state": "BotGuestState", "botId": "string?", "owner": "string?", "agents": "[string]?" },
@@ -445,11 +488,12 @@
       "mayOmit": ["duplicate"]
     },
     "BotRoom": {
-      "doc": "A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next.",
+      "doc": "A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), the bot's membership generation gen (what a post or room ask names; it rises each time the bot is put back in the room), and the cursor to read from next.",
       "fields": {
         "room": "string",
         "conversation": "string?",
         "epoch": "int?",
+        "gen": "int?",
         "entries": "[BotEntry]",
         "cursor": "int",
         "secrets": "[BotRoomSecret]?"
@@ -529,7 +573,7 @@
       "result": "BotAnswer"
     },
     "send": {
-      "doc": "A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10. engine (claude or codex) and engineModel are the owner's, for a new thread of the built-in scratch agent: that quick chat's own engine and model; ignored anywhere else.",
+      "doc": "A message in their own chat, or in a group room they are in (text only there: no attachments, thread, task, project or folder; it starts no turn). attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10. engine (claude or codex) and engineModel are the owner's, for a new thread of the built-in scratch agent: that quick chat's own engine and model; ignored anywhere else.",
       "who": ["member"],
       "params": {
         "botId": "string",
@@ -543,20 +587,20 @@
         "project": "string?",
         "folder": "string?",
         "clear": "bool?",
-        "budget": "int?",
+        "budget": "int?", "stay": "int?",
         "engine": "string?",
         "engineModel": "string?"
       },
       "result": "EntryAnswer"
     },
     "thread": {
-      "doc": "A thread's replies (its newest 500); the root is in the main chat.",
+      "doc": "A thread's replies (its newest 500); the root is in the main chat. In a group room they are in: only the messages from their stay on.",
       "who": ["member"],
       "params": { "botId": "string", "rootId": "string" },
       "result": "Entries"
     },
     "history": {
-      "doc": "A page of the main chat, newest first before beforeSeq.",
+      "doc": "A page of the main chat, newest first before beforeSeq. In a group room they are in: only the messages from their stay on, with no folder or conversation.",
       "who": ["member"],
       "params": { "botId": "string", "beforeSeq": "int?", "limit": "int?" },
       "result": "Entries"
@@ -605,7 +649,7 @@
       "result": "UploadChunk"
     },
     "react": {
-      "doc": "Toggles one emoji on an entry of their own chat.",
+      "doc": "Toggles one emoji on an entry of their own chat, or on a message they are shown in a group room they are in.",
       "who": ["member"],
       "params": { "entryId": "string", "emoji": "string" },
       "result": "EntryAnswer"
@@ -773,7 +817,7 @@
       "result": "BotProof"
     },
     "botAsk": {
-      "doc": "Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room (a room this bot is a member of) turns the ask into one turn of the agent it @-mentions there: no conversation opens, the agent's reply wakes nobody, and an open conversation's budget is charged.",
+      "doc": "Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room (a room this bot is a member of) turns the ask into one turn of the agent it @-mentions there: no conversation opens, the agent's reply wakes nobody, and an open conversation's budget is charged. gen (from a room read or wake) other than the bot's current membership generation in the room is notFound.",
       "who": ["bot"],
       "params": {
         "agent": "string?",
@@ -781,6 +825,7 @@
         "conversation": "string?",
         "ref": "string?",
         "room": "string?",
+        "gen": "int?",
         "speaker": "string?",
         "clientNonce": "string",
         "noQueue": "bool?"
@@ -788,13 +833,14 @@
       "result": "BotAsked"
     },
     "botPost": {
-      "doc": "Posts into a room the bot is a member of. conversation and epoch say which turn it answers; with the turnKey of the turn the room is waiting on it is the member's reply, without one it is an unprompted post (charged one turn; wakes only the members it @-mentions, only while the conversation is open with budget left). Anything else is kept as late and wakes nobody. clientNonce makes a retry post once; the same nonce with other text is nonceReused. A post never opens or tops up a budget. A room the bot is not in is notFound.",
+      "doc": "Posts into a room the bot is a member of. conversation and epoch say which turn it answers; with the turnKey of the turn the room is waiting on it is the member's reply, without one it is an unprompted post (charged one turn; wakes only the members it @-mentions, only while the conversation is open with budget left). Anything else is kept as late and wakes nobody. clientNonce makes a retry post once; the same nonce with other text is nonceReused. A post never opens or tops up a budget. A room the bot is not in, or a gen (from a room read or wake) other than its current membership generation there, is notFound.",
       "who": ["bot"],
       "params": {
         "room": "string",
         "conversation": "string",
         "epoch": "int",
         "turnKey": "string?",
+        "gen": "int?",
         "text": "string",
         "clientNonce": "string"
       },
@@ -847,6 +893,42 @@
       "who": ["peer"],
       "params": { "handles": "[HandleRevoke]" },
       "result": "HandleRevokes"
+    },
+    "createInvite": {
+      "doc": "Makes an invite for a new person (`name`) or one kith already knows (`personId`), with the agents offered (agent -> member|guest). `rooms` (rooms with people) names group rooms the person is put in once a device of theirs has proved the invite, or at the next host start if the host stopped between; a room the person left or Kai took them out of is never joined again by the invite. The cloud's invite is the same with or without rooms. Refused with rooms while the host setting is off, for a room that takes no people, for an agent in the room the person is not granted, and for a person who has already joined here.",
+      "who": ["owner"],
+      "params": { "agents": "{string}", "name": "string?", "personId": "string?", "rooms": "[string]?" },
+      "result": "CreatedInvite"
+    },
+    "addRoomPerson": {
+      "doc": "Rooms with people: lets a person into a group room, one step with one new gen. Refused while the host setting is off, for the owner, for a room with no Kith agent or with an outside bot, and for a person not granted every agent in it (asked live).",
+      "who": ["owner"],
+      "params": { "room": "string", "person": "string" },
+      "result": "RoomPersonChange"
+    },
+    "removeRoomPerson": {
+      "doc": "Rooms with people: takes a person out of a group room, one step with one new gen. Someone who is not in the room changes nothing.",
+      "who": ["owner"],
+      "params": { "room": "string", "person": "string" },
+      "result": "RoomPersonChange"
+    },
+    "roomPeople": {
+      "doc": "Rooms with people: every stay in a group room and the room's gen.",
+      "who": ["owner"],
+      "params": { "room": "string" },
+      "result": "RoomPeople"
+    },
+    "myRooms": {
+      "doc": "Rooms with people: the group rooms they are in right now (an open stay and every agent of the room still granted). Open them with history, thread, send and react, with the room's id as botId.",
+      "who": ["member"],
+      "params": {},
+      "result": "MyRooms"
+    },
+    "leaveRoom": {
+      "doc": "Rooms with people: leaves a group room they are in. Needs only an open stay, so a person whose agent was taken away can still get out.",
+      "who": ["member"],
+      "params": { "room": "string" },
+      "result": "RoomLeft"
     }
   }
 }

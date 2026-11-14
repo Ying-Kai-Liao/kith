@@ -1236,6 +1236,62 @@
       }
     },
     {
+      "name": "kernel.accountState",
+      "summary": "`kith account list|pick|out|clear|usage` over the accounts' state wherever it lives (the file, or the core's table once `accounts` is switched), plus `state` and `started` for the Python readers.",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "args",
+          "summary": "The verb and its arguments.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "account-state"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "args": {
+            "kind": "rest"
+          }
+        }
+      }
+    },
+    {
       "name": "kernel.delegation.limits",
       "summary": "How far a chain of asks may go.",
       "params": [
@@ -4376,6 +4432,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4457,6 +4521,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -4507,6 +4574,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4545,6 +4620,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -4596,6 +4674,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4641,6 +4727,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -4649,6 +4738,14 @@
       "name": "people.listPeople",
       "summary": "Every person the owner knows, as of the last import, as `kith-auth people --json` lists them: the owner first, then everyone by id with each person's bots after them. Each has the id, name, owner flag, the person a bot belongs to (`bot_of`) and the person at the top (`root`), whether their access is removed (`revoked`, `revoked_at`), the cloud link (`kith`), the other accounts (`handles`) and the agents they have a row for (`agents`: agent, role, via). People imported before handles were kept have none until imported again.",
       "params": [
+        {
+          "name": "withWas",
+          "summary": "Also each person's former ids (`was`), which `kith-auth people --json` does not list.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
         {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
@@ -4675,6 +4772,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4697,6 +4802,12 @@
         ],
         "requires": [],
         "args": {
+          "withWas": {
+            "kind": "switch",
+            "spellings": [
+              "--with-was"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -4707,6 +4818,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -4733,6 +4847,30 @@
           }
         },
         {
+          "name": "via",
+          "summary": "The agent whose membership the call rides on (as a helper of it).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "once",
+          "summary": "Count a \"just this once\" grant on the caller's row that is not used up yet.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules (a member on a deleted preset) as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -4757,6 +4895,14 @@
             "additionalProperties": {
               "type": "string"
             }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         }
       ],
@@ -4786,6 +4932,24 @@
           "agent": {
             "kind": "positional"
           },
+          "via": {
+            "kind": "flag",
+            "spellings": [
+              "--via"
+            ]
+          },
+          "once": {
+            "kind": "switch",
+            "spellings": [
+              "--once"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -4796,6 +4960,209 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.who",
+      "summary": "Which person owns a chat handle (`kith-auth who`): the person, whether they are the owner, their old ids (`was`), the owner and whether the owner is linked on that platform, and whether the person's access is removed or held. Refused on a database imported before handles were kept.",
+      "params": [
+        {
+          "name": "platform",
+          "summary": "The chat platform (telegram, slack, discord ...).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The user id on that platform.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "by-handle"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "platform": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.granted",
+      "summary": "The profiles an agent holds for a service, as written (`kith-auth granted`). Refused on a database imported before grants were kept.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "granted"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "service": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -4838,6 +5205,14 @@
           }
         },
         {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules (a member on a deleted preset) as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -4862,6 +5237,14 @@
             "additionalProperties": {
               "type": "string"
             }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         }
       ],
@@ -4906,6 +5289,12 @@
               "--take-once"
             ]
           },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -4916,6 +5305,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -4959,6 +5351,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -4994,6 +5394,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5061,6 +5464,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5116,6 +5527,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5158,6 +5572,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5195,6 +5617,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5209,6 +5634,14 @@
           "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "json",
+          "summary": "With no amount: the cap as a number (or null) and every id the owner's bots spend under, as `kith-auth bots-cap --json`.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         },
         {
@@ -5237,6 +5670,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5262,6 +5703,12 @@
           "amount": {
             "kind": "positional"
           },
+          "json": {
+            "kind": "switch",
+            "spellings": [
+              "--json"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -5272,6 +5719,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5323,6 +5773,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5365,6 +5823,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5399,6 +5860,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5431,6 +5900,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5474,6 +5946,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5509,6 +5989,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5576,6 +6059,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5630,6 +6121,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5672,6 +6166,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5707,6 +6209,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5782,6 +6287,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5843,6 +6356,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -5893,6 +6409,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -5932,6 +6456,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -5983,6 +6510,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6026,6 +6561,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -6068,6 +6606,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6103,6 +6649,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6146,6 +6695,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6181,6 +6738,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6224,6 +6784,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6260,6 +6828,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6303,6 +6874,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6339,6 +6918,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -6372,6 +6954,14 @@
           }
         },
         {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -6396,6 +6986,14 @@
             "additionalProperties": {
               "type": "string"
             }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         }
       ],
@@ -6431,6 +7029,12 @@
               "--rm"
             ]
           },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -6441,6 +7045,2111 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.budgets",
+      "summary": "A monthly budget in dollars for each person on an agent, as `kith-auth budgets AGENT --json` has them (null for none; the `*` row is left out). A budget is set or cleared with `people.grant --budget` (an empty one clears it).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "budgets"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretsView",
+      "summary": "The tables `kith-auth mcp-config`, `exec`, `get`, `holders`, `keys` and `account-state` read, in auth.json's shape (`auth`): people, memberships and presets for who a run is for, the secret profiles (where each variable's value lives, `keychain:..`, never the value), the grants and the per-service `env`. No invite codes and no chat handles. Refused on a database imported before profiles, grants and env were kept (import again first).",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secrets-view"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.access",
+      "summary": "The always half of an escape card: the person's runs of the agent may reach a place or website beyond the box, kept on their own row (`--rm` takes it away, as it is written, with no check). Refused, in the one locked step that writes: the owner, a person with no row of their own (never the `*` row), someone who may not use the agent now, a secret or a place a boxed run never writes (rule W), a bot asking for more than its owner holds, and a `--by` that is not the person or the bot's owner, or is not a member now. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kind",
+          "summary": "`read`, `write` or `domain`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "value",
+          "summary": "An absolute path, or a plain host name.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "by",
+          "summary": "Who approved it: the person or the bot's owner (no flag: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Take the entry away.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "access-always"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "kind": {
+            "kind": "positional"
+          },
+          "value": {
+            "kind": "positional"
+          },
+          "by": {
+            "kind": "flag",
+            "spellings": [
+              "--by"
+            ]
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.helper",
+      "summary": "The always (or, with --once, the just-this-once) of a helper card: the person's runs of the agent may call the helper. `--rm` takes it away, as it is written, with no check. A bot is never given a helper its owner lacks. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "helper",
+          "summary": "The agent it may call.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "once",
+          "summary": "Only for the launch that follows.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Take the entry away.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "helper"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "helper": {
+            "kind": "positional"
+          },
+          "once": {
+            "kind": "switch",
+            "spellings": [
+              "--once"
+            ]
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.job",
+      "summary": "The tick of a job (`--tick`, the share sheet's or the Yes of a card that offers it: the pieces the owner saw, `--shown JSON`, else the job as the package declares it now, cut to what the package declares now), the No of a widening card for a ticked job (`--decline HASH`: that package update is not asked again), or with --rm the tick goes, as it is written, with no check. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "job",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "decline",
+          "summary": "The hash of the update that was declined.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Take the tick away.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "tick",
+          "summary": "Tick the job for the person.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "shown",
+          "summary": "With --tick: the pieces the owner saw, as JSON `{\"domains\": [..], \"helpers\": [..], \"doors\": [..]}`.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "job"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "job": {
+            "kind": "positional"
+          },
+          "decline": {
+            "kind": "flag",
+            "spellings": [
+              "--decline"
+            ]
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "tick": {
+            "kind": "switch",
+            "spellings": [
+              "--tick"
+            ]
+          },
+          "shown": {
+            "kind": "flag",
+            "spellings": [
+              "--shown"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretSet",
+      "summary": "Record that `kith-auth set` stored the keys of a profile in the Keychain: the profile `<service>/<account>` now reads each named variable from `keychain:kith/<profile>#VAR`, and with `--grant` the agent may use the profile. The core gets the variable NAMES only, never a value: the Keychain item is written first, so a crash leaves an orphan item and never a grant without one. A name the service does not declare, a profile that is not `<service>/<account>`, and a caller who is not the owner are refused. A new profile's owner is the owner's id for a personal service, none for a shared one; an existing profile keeps its owner, `*` and the people it is lent to. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "profile",
+          "summary": "The profile, `<service>/<account>`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "vars",
+          "summary": "The names of the variables stored.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "grant",
+          "summary": "Also let this agent use the profile for the service.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-set"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "profile": {
+            "kind": "positional"
+          },
+          "vars": {
+            "kind": "caller"
+          },
+          "grant": {
+            "kind": "flag",
+            "spellings": [
+              "--grant"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretGrant",
+      "summary": "`kith-auth grant` and `connect`: the agents (`agent`, or `agent@person` for one person's own account) may use the profiles for the service. An `agent@person` needs that person now; every profile starts with `<service>/`; a host connector's `<id>/host` profile is marked as the host's own. With `ifHave` (what `connect` saw) a grant that changed meanwhile is refused instead of overwritten. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agents",
+          "summary": "The agents (or `agent@person`).",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "profiles",
+          "summary": "The profiles, each `<service>/<account>`.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "knownOnly",
+          "summary": "Refuse an agent this Mac has no package for (`bridge` and `serve` excepted).",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "ifHave",
+          "summary": "Per agent, the profiles it held for the service when the caller looked; a different answer now is refused.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-grant"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agents": {
+            "kind": "caller"
+          },
+          "service": {
+            "kind": "positional"
+          },
+          "profiles": {
+            "kind": "caller"
+          },
+          "knownOnly": {
+            "kind": "switch",
+            "spellings": [
+              "--known-only"
+            ]
+          },
+          "ifHave": {
+            "kind": "caller"
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretRevoke",
+      "summary": "`kith-auth revoke` and `disconnect`: the agent no longer uses the service (or, with `--profile`, that one profile of it). With `--drop-host-profiles` (`disconnect`) a host connector's profile that no one else holds goes with the last grant; a keyed profile is never removed. It narrows access, so it still goes through on a damaged cutover record. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent (or `agent@person`).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "profile",
+          "summary": "Only this profile of the service.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dropHostProfiles",
+          "summary": "Drop a host profile nobody else holds.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-revoke"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "service": {
+            "kind": "positional"
+          },
+          "profile": {
+            "kind": "flag",
+            "spellings": [
+              "--profile"
+            ]
+          },
+          "dropHostProfiles": {
+            "kind": "switch",
+            "spellings": [
+              "--drop-host-profiles"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretEnv",
+      "summary": "`kith-auth env`: the plain settings (a path, a model name, never a key) a service starts with for the agent. `pairs` are `[VAR, value]` in the order given; an empty value clears the variable, a new variable goes last and a changed one keeps its place. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pairs",
+          "summary": "`[VAR, value]` pairs, in order.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-env"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "service": {
+            "kind": "positional"
+          },
+          "pairs": {
+            "kind": "caller"
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretOwner",
+      "summary": "`kith-auth owner`: whose a profile is. `-` shares it with everyone who may use the agents granted it (stored `*`), `default` stores what the service's own rule gives (the owner's id for a personal service, none for a shared one), a person's id needs that person now. A profile that does not exist is refused, and so is a caller who is not the owner. Writes no Keychain item. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "profile",
+          "summary": "The profile.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "A person's id, `-` or `default`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-owner"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "profile": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretShare",
+      "summary": "`kith-auth share`: lends a profile to people (or, with `--rm`, takes it back). Every id must be a person now. The list keeps its order and drops repeats; an empty one is none. It is a removal only with `--rm`, so a damaged cutover record still lets that through. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "profile",
+          "summary": "The profile.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "ids",
+          "summary": "The people.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Take it back.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-share"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "profile": {
+            "kind": "positional"
+          },
+          "ids": {
+            "kind": "caller"
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.secretBrowser",
+      "summary": "`kith-auth browser`: a browser profile (`browser/<name>`, made when missing with the owner's id as its owner) and, when named, the browser it was made in. Only through the daemon, and only for `kith-auth`'s router (`viaSwitch`).",
+      "params": [
+        {
+          "name": "profile",
+          "summary": "The profile, `browser/<name>` or `<name>`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "browser",
+          "summary": "The browser.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dies",
+          "summary": "Answer a refusal of the rules as `{died, why}`, the exit code and line `kith-auth` dies with, instead of an error; nothing is written then.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "secret-browser"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "profile": {
+            "kind": "positional"
+          },
+          "browser": {
+            "kind": "flag",
+            "spellings": [
+              "--browser"
+            ]
+          },
+          "dies": {
+            "kind": "switch",
+            "spellings": [
+              "--dies"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.link",
+      "summary": "Spend a `/link` code: bind the code's person to the caller's account on a chat platform, in one step. A code that is unknown, ran out, or whose person was removed or cut off since, is refused with the same words and stays; so is an account that is another person's. Answers the person. Only through the daemon, for the host (`viaSwitch`).",
+      "params": [
+        {
+          "name": "platform",
+          "summary": "`telegram`, `discord`, `slack` or `kith`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "uid",
+          "summary": "Their id on the platform.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "code",
+          "summary": "The code.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "link"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "platform": {
+            "kind": "positional"
+          },
+          "uid": {
+            "kind": "positional"
+          },
+          "code": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.revision",
+      "summary": "A digest of the authority tables (the first 16 hex characters of the SHA-256 of their snapshot), which changes with any write to them. The host's cards compare it between polls to see authority change once auth.json is a tombstone.",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "revision"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.ledger",
+      "summary": "The grants ledger: every grant that outlives one run, for anyone but the owner (always answers of escape cards, ticked jobs, listed helpers, a person's own service grants, the hosts kept for every guest of an agent), one row each with the `key` that `people.removeGrant` takes.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "Only this person.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "Only this agent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "ledger"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.removeGrant",
+      "summary": "Take one grants-ledger entry away, as it is written. An entry that is not there (removed already) is refused.",
+      "params": [
+        {
+          "name": "key",
+          "summary": "The entry's key: `<kind>:<agent>:<person>:<target>`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "ledger-remove"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "key": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.handle",
+      "summary": "Bind a person to their account on a chat platform (Telegram, Discord, Slack, or `kith` for their Kith account), or with --rm let it go. An account that is another person's is refused. What a person is bound to is in `people.listPeople` (`handles`, `kith`).",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "platform",
+          "summary": "`telegram`, `discord`, `slack` or `kith`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "uid",
+          "summary": "Their id on the platform; not with --rm.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "remove",
+          "summary": "Let the binding go.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "handle"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "platform": {
+            "kind": "positional"
+          },
+          "uid": {
+            "kind": "positional"
+          },
+          "remove": {
+            "kind": "switch",
+            "spellings": [
+              "--rm"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6492,6 +9201,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6536,6 +9253,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6643,6 +9363,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6727,6 +9455,9 @@
           },
           "env": {
             "kind": "caller"
+          },
+          "viaSwitch": {
+            "kind": "caller"
           }
         }
       }
@@ -6785,6 +9516,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6832,6 +9571,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -6891,6 +9633,14 @@
               "type": "string"
             }
           }
+        },
+        {
+          "name": "viaSwitch",
+          "summary": "Set by a host that sent this write because authority is switched; refused unless it still is.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
         }
       ],
       "result": {
@@ -6938,6 +9688,9 @@
             "kind": "caller"
           },
           "env": {
+            "kind": "caller"
+          },
+          "viaSwitch": {
             "kind": "caller"
           }
         }
@@ -8315,6 +11068,241 @@
         ],
         "requires": [],
         "args": {}
+      }
+    },
+    {
+      "name": "claim.external",
+      "summary": "A kernel taker's writer claim on a conversation (`kith-sessions claim|terminal|resolve`, a `--direct` run) once the claims are the core's: kind `external`, naming the run's process (pid and start stamp) and the person kith-auth resolved (empty: the owner). Idempotent for the same process. Ends dead externals and settles stopped idle processes first; an idle warm process holding the conversation is marked for a kill and answers `waiting` until it is gone. A person's claim needs `revokeSeen` (`claim.epoch`, read before the may check). Answers `{claimId, generation}`, or `{refused: held | takeover | waiting | revoked | agent, why}`; a session id outside a-z0-9._- is refused. Serves only once the claims are switched.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The run's process (the launcher's shell, which then execs the engine).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "That process's start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The principal revoke sweeps by (empty: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent (required for a conversation the core does not know yet; a different one than the conversation's is refused).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "engine",
+          "summary": "The engine of such a conversation (default claude).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "The person's `claim.epoch` read before the caller's may check (required for a person; the owner's default is read now).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "engine": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.epoch",
+      "summary": "How many times a principal was revoked. A person's claim carries the value read BEFORE the may check that let the run in (`revokeSeen`), so a revoke committed after it refuses the claim. Answers `{epoch}`.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The principal (empty: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.release",
+      "summary": "Gives back the owner's external claims of one process (pid and start stamp): a claim already ended, or none, answers `{ended: []}`, so a retry is harmless. Never touches a turn's, a terminal's or a person's claim (a person's ends when its process is gone, or by a revoke). Answers `{ended}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "Only this conversation's claim.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "conversation": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.sweepPerson",
+      "summary": "Revoke or removal with no host running: ends the live claims of these principals (queued ones end at once, live ones go to `ending`). The owner is refused. Answers `{kill: [{claimId, pid, started}]}` for the caller to signal; the rows end once the processes are gone.",
+      "params": [
+        {
+          "name": "persons",
+          "summary": "The principals (a person and their bots).",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "persons": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
       }
     },
     {
@@ -10150,6 +13138,342 @@
       }
     },
     {
+      "name": "account.rows",
+      "summary": "Every account as `kith account list --json` shows it (the array of rows), with the out marks and usage read from the core's database. With `--agent`, that agent's order and where `pick` would start.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "That agent's order and start.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "deep",
+          "summary": "Ask each harness whether its login is good (the list always does).",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "rows"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "deep": {
+            "kind": "switch",
+            "spellings": [
+              "--deep"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.out",
+      "summary": "Marks an account out of usage until a time (`kith account out`): written to the core's database once `accounts` is switched, refused before.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The account id, such as `claude:work`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "until",
+          "summary": "Epoch seconds the limit lifts; none: an hour from now.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "reason",
+          "summary": "A short word, up to 40 letters, digits, space . _ -; default `manual`.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "extend",
+          "summary": "An account already out for longer stays so.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, epoch seconds (tests).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "out"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "until": {
+            "kind": "flag",
+            "spellings": [
+              "--until"
+            ]
+          },
+          "reason": {
+            "kind": "flag",
+            "spellings": [
+              "--reason"
+            ]
+          },
+          "extend": {
+            "kind": "switch",
+            "spellings": [
+              "--extend"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.clear",
+      "summary": "Ready again (`kith account clear`): forgets the out mark and notes the time, so a host mark made before it is ignored.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The account id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "hostUntil",
+          "summary": "The host's own mark standing now (epoch seconds), 0 for none.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, epoch seconds (tests).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "clear"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "hostUntil": {
+            "kind": "flag",
+            "spellings": [
+              "--host-until"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.usage",
+      "summary": "Records a usage reading for an account (`kith account usage ID --json READING`), after the same checks; answers the stored reading.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The account id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "reading",
+          "summary": "`{windows: [{name, percent, resets_at?}], read_at?}`.",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "now",
+          "summary": "The clock, epoch seconds (tests).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "usage"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "reading": {
+            "kind": "flag",
+            "spellings": [
+              "--reading"
+            ]
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.started",
+      "summary": "Notes that a launch started on an account (`last_started`).",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The account id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "now",
+          "summary": "The clock, epoch seconds (tests).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "started"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "now": {
+            "kind": "flag",
+            "spellings": [
+              "--now"
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "holder.forget",
       "summary": "Drops a process from the holder record (for a `blocked` holder whose old process cannot be told from a stranger). Nothing is signalled. Answers `{forgot}`: whether the pid was in the record; asked again it is false.",
       "params": [
@@ -10186,6 +13510,1167 @@
             "kind": "positional"
           }
         }
+      }
+    },
+    {
+      "name": "hostclaim.ensure",
+      "summary": "The conversation row for a session, made when it is missing (the host's terminal and turns name sessions the core may not have imported yet). Answers `{conversation}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "engine",
+          "summary": "The engine (claude).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "room",
+          "summary": "A room conversation: the conversation of (agent, room, joinEpoch), made when missing. A second one for the same key is refused.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "joinEpoch",
+          "summary": "The room's join epoch (with `room`).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "engine": {
+            "kind": "caller"
+          },
+          "room": {
+            "kind": "caller"
+          },
+          "joinEpoch": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.epoch",
+      "summary": "The person's revoke epoch: read it before the may check and carry it into `claim`, `turn` or `enqueue`. Answers `{epoch}`.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The claim's principal.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.claim",
+      "summary": "A terminal or `external` writer claim (step 1). Refused when a writer holds the conversation. An `external` claim names its process. Answers `{claimId, generation}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kind",
+          "summary": "terminal or external.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The principal revoke sweeps by (empty: the owner).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` read before the may check.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The external run's process.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "That process's start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "holderInstance",
+          "summary": "The holder instance the spawn goes to.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "kind": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "holderInstance": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.enqueue",
+      "summary": "Queues a turn for a conversation (created when missing). Refused when the person was revoked after `revokeSeen`, or, for a room turn, when a `basis` person was revoked after their `epochs` entry (`revoked`), the turn has no basis, a bot's post opens a chain, or the conversation belongs to another join epoch (`other`), or the chain's turn budget is spent (`budget`). A room turn's basis, room, gen, level, author and budget are fixed here and never change. `key` makes a retry after a lost reply answer the same turn without spending the budget again. Answers `{turn}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "engine",
+          "summary": "The engine.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "source",
+          "summary": "Who sent it (app, ask, wake, schedule ...).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The turn's principal.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "prompt",
+          "summary": "The prompt.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` read before the may check.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "deadline",
+          "summary": "Expire a waiting turn at this time (ms).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "level",
+          "summary": "`owner` (default) or `room`: a room turn speaks for the people of its basis.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "basis",
+          "summary": "The people the turn speaks for.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "epochs",
+          "summary": "`hostclaim.epoch` of each basis person, read before the may check.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          }
+        },
+        {
+          "name": "room",
+          "summary": "The room.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "gen",
+          "summary": "The room's membership generation at the start.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "joinEpoch",
+          "summary": "The room's join epoch: which conversation it goes to.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "author",
+          "summary": "Whose post made the turn: a person, `bot:<id>` or an agent name.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "budget",
+          "summary": "A person's post: the follow-up rounds the chain may have.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "budgetFrom",
+          "summary": "A bot's or agent's turn: the turn that caused it. It spends one of that turn's rounds.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "key",
+          "summary": "The caller's id for this enqueue, so a retry is not counted twice.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "engine": {
+            "kind": "caller"
+          },
+          "source": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "prompt": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          },
+          "deadline": {
+            "kind": "caller"
+          },
+          "level": {
+            "kind": "caller"
+          },
+          "basis": {
+            "kind": "caller"
+          },
+          "epochs": {
+            "kind": "caller"
+          },
+          "room": {
+            "kind": "caller"
+          },
+          "gen": {
+            "kind": "caller"
+          },
+          "joinEpoch": {
+            "kind": "caller"
+          },
+          "author": {
+            "kind": "caller"
+          },
+          "budget": {
+            "kind": "caller"
+          },
+          "budgetFrom": {
+            "kind": "caller"
+          },
+          "key": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.proc",
+      "summary": "A host engine process, idle or not, with the session it has loaded: registers it or moves its session, so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "instance",
+          "summary": "The host instance that runs it.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Whose process it is (a guest's principal).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "The session it has loaded.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` of `person`, read before the process was started.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "instance": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "conversation": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.procGone",
+      "summary": "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. Answers `{gone}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.adopt",
+      "summary": "This host start's instance takes over: every claim and process of another host instance is ended (a claim never redeemed at once and its turn given back; one with a process goes to `ending`, its process to be killed until gone). Answers `{ended, kill}`.",
+      "params": [
+        {
+          "name": "instance",
+          "summary": "`kith-serve-host/<pid>-<start stamp>`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "instance": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.turn",
+      "summary": "The claim for a queued or parked turn, through `claim_next` (it picks the account and starts the session row). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "turn",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The turn's principal.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` read before the may check.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cwd",
+          "summary": "The run's working folder.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "sessionId",
+          "summary": "The id for a NEW engine session row.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "holderInstance",
+          "summary": "The holder instance the spawn goes to.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "turn": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          },
+          "cwd": {
+            "kind": "caller"
+          },
+          "sessionId": {
+            "kind": "caller"
+          },
+          "holderInstance": {
+            "kind": "caller"
+          },
+          "kernel": {
+            "kind": "caller"
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.redeem",
+      "summary": "The claim's process started (step 3): `claimed` to `running` on this pid. Answers `{running, again}` or `{refused: <state>}`.",
+      "params": [
+        {
+          "name": "claimId",
+          "summary": "The claim.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "holderInstance",
+          "summary": "The holder instance.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "claimId": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "holderInstance": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.report",
+      "summary": "What the process said about its claim (step 4): `done`, `exit`, `busy` or `spawned`, with the JSON `body` (`pid`, `out_of_usage`, `started`). Answers `{stored, applied}`; an unknown claim `{unknown: true}`.",
+      "params": [
+        {
+          "name": "claimId",
+          "summary": "The claim.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "kind",
+          "summary": "done, exit, busy or spawned.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "body",
+          "summary": "JSON.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "claimId": {
+            "kind": "caller"
+          },
+          "kind": {
+            "kind": "caller"
+          },
+          "body": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.stop",
+      "summary": "Stops a live claim (a take-over, a Stop): the claim goes to `ending` and stays the writer until its process is gone (`hostclaim.settle`). Answers `{kill}` (pid and start stamp to signal) or `{kill: null}`.",
+      "params": [
+        {
+          "name": "claimId",
+          "summary": "The claim.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "reason",
+          "summary": "Why.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "requeue",
+          "summary": "Queue its turn again instead of cancelling it.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "claimId": {
+            "kind": "caller"
+          },
+          "reason": {
+            "kind": "caller"
+          },
+          "requeue": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.settle",
+      "summary": "Ends the `ending` claims whose process the core confirms gone. Answers `{ended: [claimId]}`.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {},
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.show",
+      "summary": "The conversation's writer, if any: `{claim: {claimId, state, kind, person, pid, started, holderInstance} | null}`; with `claimId`, that claim in whatever state it is.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "claimId",
+          "summary": "One claim.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "claimId": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.cancel",
+      "summary": "Cancels a turn that nothing runs yet (queued, parked, or claimed with no process): what a caller does after a refused claim it will not retry. Answers `{cancelled}`.",
+      "params": [
+        {
+          "name": "turn",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "reason",
+          "summary": "Why (logged).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "turn": {
+            "kind": "caller"
+          },
+          "reason": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.park",
+      "summary": "A queued turn waits (`lock_busy` or `terminal_live`). Answers `{parked}`.",
+      "params": [
+        {
+          "name": "turn",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "reason",
+          "summary": "lock_busy or terminal_live.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "turn": {
+            "kind": "caller"
+          },
+          "reason": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.unpark",
+      "summary": "Parked turns of the conversation go back to queued once nothing holds it. Answers `{turns}`.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "lockFree",
+          "summary": "The writer lock could be taken.",
+          "required": true,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "terminalLive",
+          "summary": "A terminal session is open.",
+          "required": true,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "lockFree": {
+            "kind": "caller"
+          },
+          "terminalLive": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
       }
     }
   ],

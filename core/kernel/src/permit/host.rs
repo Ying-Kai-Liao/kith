@@ -35,9 +35,22 @@ pub fn call_host(
     let mut msg = body.clone();
     msg.insert("token".to_owned(), Value::String(token));
     msg.insert("method".to_owned(), Value::String(method.to_owned()));
-    let mut line = crate::secrets::pyjson::dumps(&Value::Object(msg)).into_bytes();
+    match exchange(
+        &path,
+        &crate::secrets::pyjson::dumps(&Value::Object(msg)),
+        timeout,
+    )? {
+        Value::Object(m) => Some(m),
+        _ => None,
+    }
+}
+
+/// One request line over a Unix socket and its one-line answer as JSON of any shape. `None` when the socket can't be reached,
+/// the answer can't be read in time or is no JSON (Python's `OSError`, `ValueError`, `UnicodeDecodeError`).
+pub fn exchange(path: &str, line: &str, timeout: Duration) -> Option<Value> {
+    let mut line = line.as_bytes().to_vec();
     line.push(b'\n');
-    let mut s = UnixStream::connect(&path).ok()?;
+    let mut s = UnixStream::connect(path).ok()?;
     s.set_read_timeout(Some(timeout)).ok()?;
     s.set_write_timeout(Some(timeout)).ok()?;
     s.write_all(&line).ok()?;
@@ -50,10 +63,7 @@ pub fn call_host(
         }
         buf.extend_from_slice(&chunk[..n]);
     }
-    match serde_json::from_slice::<Value>(&buf).ok()? {
-        Value::Object(m) => Some(m),
-        _ => None,
-    }
+    serde_json::from_slice::<Value>(&buf).ok()
 }
 
 /// `(data dir, port)` of this Mac's host: `KITH_SERVE_DIR` and `KITH_SERVE_PORT`, else what `kith-serve endpoint` says.

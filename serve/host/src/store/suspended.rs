@@ -103,10 +103,55 @@ impl Store {
     /// Removal: what a revoke kept goes for good.
     pub fn forget_suspended(&self, person: &str) -> Result<()> {
         let c = self.db.locked();
+        // The room parts of their invites go first: they name the invites by the person's rows.
+        c.execute(
+            "DELETE FROM invite_rooms WHERE invite_id IN
+             (SELECT invite_id FROM invites WHERE person_id = ?1 UNION SELECT invite_id FROM suspended_invites WHERE person_id = ?1)",
+            [person],
+        )?;
         for table in ["suspended_devices", "suspended_memberships", "suspended_invites"] {
             c.execute(&format!("DELETE FROM {table} WHERE person_id = ?1"), [person])?;
         }
         Ok(())
+    }
+
+    /// The people this host holds live access rows for (devices, memberships, open invites), the owner's NULL device
+    /// aside. What `remote::core_revokes` checks a core-only removal against.
+    pub fn held_people(&self) -> Result<Vec<String>> {
+        let c = self.db.locked();
+        let mut out: Vec<String> = Vec::new();
+        // only what `suspend_person` would move: a used, revoked or expired invite stays in its table and is no access
+        let now = now_ms();
+        for (table, open) in [
+            ("devices", ""),
+            ("memberships", ""),
+            ("invites", " AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?1"),
+        ] {
+            let sql =
+                format!("SELECT DISTINCT person_id FROM {table} WHERE person_id IS NOT NULL AND person_id != ''{open}");
+            let mut q = c.prepare(&sql)?;
+            let rows = if open.is_empty() {
+                q.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?
+            } else {
+                q.query_map([now], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            out.extend(rows);
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
+    /// Whether a revoke set `person` aside on this host (something is kept for them), in one read. A revoke leaves the
+    /// people mirror as it stands, so a reader of a live event that must stop at once asks this beside the mirror.
+    pub fn is_suspended(&self, person: &str) -> bool {
+        let c = self.db.locked();
+        ["suspended_devices", "suspended_memberships", "suspended_invites"].iter().any(|table| {
+            c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE person_id = ?1)"), [person], |r| {
+                r.get::<_, bool>(0)
+            })
+            .unwrap_or(true)
+        })
     }
 
     /// Everyone something is kept for.

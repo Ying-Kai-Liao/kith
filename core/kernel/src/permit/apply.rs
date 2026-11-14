@@ -7,6 +7,7 @@ use super::pyval::{os_error, repr_str, truthy, type_name};
 use super::{Env, Out};
 use crate::launch::guard::{
     IN_FOLDER_FILES, IN_FOLDER_TREES, both, dedup, edit_rules, rule_w, secret_paths, valid_domain,
+    whole_secret_paths,
 };
 use crate::paths::realpath;
 use crate::secrets::pyjson;
@@ -58,9 +59,35 @@ fn holds(path: &str, inner: &str) -> bool {
     inner == path || inner.starts_with(&format!("{}/", path.trim_end_matches('/')))
 }
 
+/// Why `path` is never granted as an always: a secret (or a folder that holds one), or a place rule W closes
+/// (`kith-auth access`'s check, in the step that writes the grant). `kernel` is the extra rule W tree.
+pub fn never_granted(
+    home: &str,
+    kernel: &str,
+    state: &str,
+    machine: &str,
+    secrets: &str,
+    path: &str,
+) -> Option<String> {
+    let secret_paths =
+        whole_secret_paths(&[state.to_owned(), machine.to_owned()], secrets, machine);
+    if secret_paths
+        .iter()
+        .any(|s| covers(s, path) || holds(path, s))
+    {
+        return Some(format!("{path} is a secret: it is never granted"));
+    }
+    if is_rule_w(home, path, &[kernel.to_owned()]) {
+        return Some(format!(
+            "{path} is somewhere a boxed run never writes or loads from (rule W): it is never granted"
+        ));
+    }
+    None
+}
+
 /// Whether `path` is, or is below, a place rule W closes.
-fn is_rule_w(home: &str, path: &str) -> bool {
-    let (mut t, mut f) = rule_w(home, &[], &[]);
+fn is_rule_w(home: &str, path: &str, trees: &[String]) -> bool {
+    let (mut t, mut f) = rule_w(home, &[], trees);
     t.extend(IN_FOLDER_TREES.iter().map(|n| format!("/**/{n}")));
     f.extend(IN_FOLDER_FILES.iter().map(|n| format!("/**/{n}")));
     t.iter().chain(&f).any(|x| covers(x, path))
@@ -203,7 +230,7 @@ fn apply_grants(
                 format!("Edit(/{p})")
             };
             if kind == "write" {
-                if never_write.iter().any(|d| covers(d, p)) || is_rule_w(home, p) {
+                if never_write.iter().any(|d| covers(d, p)) || is_rule_w(home, p, &[]) {
                     continue;
                 }
                 let (trees, files) = rule_w(home, &[p.to_owned()], &[]);

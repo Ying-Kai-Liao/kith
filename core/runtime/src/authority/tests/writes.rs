@@ -754,6 +754,94 @@ fn an_invite_is_made_listed_and_taken_back() {
     );
 }
 
+const UNKNOWN_CODE: &str =
+    "that code is unknown or expired; ask for a new one (kith-auth invite <id>)";
+
+fn link_params(uid: &str, code: &str) -> Value {
+    json!({"platform": "telegram", "uid": uid, "code": code})
+}
+
+#[test]
+fn a_link_binds_the_codes_person_once_and_spends_the_code() {
+    let mut rig = Rig::new(&base());
+    let code = rig
+        .call("people.invite", &json!({"person": "sam"}))
+        .unwrap()["code"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // read as `link` reads it: trimmed, any case
+    let said = rig
+        .call(
+            "people.link",
+            &link_params("42", &format!(" {} ", code.to_lowercase())),
+        )
+        .unwrap();
+    assert_eq!(said, json!({"person": "sam", "lines": ["sam"]}));
+    let t = rig.tables();
+    assert_eq!(t["people"]["sam"]["handles"]["telegram"], "42");
+    assert!(
+        t["invites"].as_object().unwrap().is_empty(),
+        "the code is spent"
+    );
+    assert_eq!(
+        rig.call("people.link", &link_params("42", &code))
+            .unwrap_err(),
+        UNKNOWN_CODE
+    );
+}
+
+#[test]
+fn a_link_refused_writes_nothing_and_keeps_the_code() {
+    let mut a = base();
+    a["people"]["amy"] = json!({"revoked": {"at": 5}});
+    a["people"]["bot-q"] = json!({"bot_of": "amy"});
+    let soon = NOW / 1000.0 + 900.0;
+    a["invites"] = json!({
+        "RRRRRR": {"person": "amy", "expires": soon},
+        "BBBBBB": {"person": "bot-q", "expires": soon},
+        "GGGGGG": {"person": "gone", "expires": soon},
+        "EEEEEE": {"person": "sam", "expires": NOW / 1000.0 - 1.0},
+        "SSSSSS": {"person": "sam", "expires": soon},
+    });
+    let mut rig = Rig::new(&a);
+    rig.call(
+        "people.handle",
+        &json!({"person": "kai", "platform": "telegram", "uid": "7"}),
+    )
+    .unwrap();
+    let before = rig.tables();
+    // a cut-off person (and their bot), a removed one, an expired code and an unknown one all read the same
+    for code in ["RRRRRR", "BBBBBB", "GGGGGG", "EEEEEE", "NNNNNN"] {
+        assert_eq!(
+            rig.call("people.link", &link_params("42", code))
+                .unwrap_err(),
+            UNKNOWN_CODE,
+            "{code}"
+        );
+    }
+    // an account that is another person's
+    assert_eq!(
+        rig.call("people.link", &link_params("7", "SSSSSS"))
+            .unwrap_err(),
+        "telegram 7 is already kai"
+    );
+    // a user id that is no id
+    assert!(
+        rig.call("people.link", &link_params("@sam", "SSSSSS"))
+            .unwrap_err()
+            .contains("user ids are numbers")
+    );
+    assert_eq!(
+        rig.tables(),
+        before,
+        "a refusal writes nothing, the code stays"
+    );
+    // and the code still works once the uid is right
+    rig.call("people.link", &link_params("42", "SSSSSS"))
+        .unwrap();
+}
+
 #[test]
 fn an_invite_is_refused_for_who_kith_auth_refuses() {
     let mut a = base();
@@ -1632,4 +1720,112 @@ fn a_newline_or_control_character_in_either_name_is_a_usage_refusal() {
             .as_object()
             .is_none_or(serde_json::Map::is_empty)
     );
+}
+
+#[test]
+fn joining_and_lineage_are_read_from_the_snapshot_the_write_runs_on() {
+    let (_t, c) = machine();
+    let mut a = json!({"people": {
+        "mia": {"name": "Mia"},
+        "mia-b": {"bot_of": "mia"},
+        "mia-b2": {"bot_of": "mia-b"},
+    }});
+    // an edit of someone already in the snapshot is not joining; a new id is
+    let said = write_op("people.addPerson", &json!({"id": "mia"}), &c, &mut a, "").unwrap();
+    assert_eq!(said["joining"], json!(false));
+    let said = write_op("people.addPerson", &json!({"id": "zed"}), &c, &mut a, "").unwrap();
+    assert_eq!(said["joining"], json!(true));
+    let said = write_op(
+        "people.addBot",
+        &json!({"id": "zed-b", "of": "zed"}),
+        &c,
+        &mut a,
+        "",
+    )
+    .unwrap();
+    assert_eq!(said["joining"], json!(true));
+    // the line of owners is read before the row goes, from the same snapshot
+    let said = write_op("people.removeBot", &json!({"id": "mia-b2"}), &c, &mut a, "").unwrap();
+    assert_eq!(said["lineage"], json!(["mia-b2", "mia-b", "mia"]));
+    assert!(a["people"].get("mia-b2").is_none());
+}
+
+#[test]
+fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched_or_rolling_back() {
+    use crate::cutover::state::{self, Phase, Switch};
+    let mut rig = Rig::new(&base());
+    // The rig has no folders of its own, so the write reads the caller's machine folder.
+    let layout = Layout::new(&crate::authority::revoke::Life::beside(&rig.c).machine);
+    let marked = json!({"person": "sam", "agent": "house", "preset": "member", "viaSwitch": true});
+    let unmarked = json!({"person": "sam", "agent": "house", "preset": "member"});
+    let phase = |p: Phase| {
+        let s = Switch {
+            phase: p,
+            snapshot: None,
+            at: 1,
+        };
+        state::write(&layout, "authority", &s).unwrap();
+    };
+    let rows = |rig: &mut Rig| {
+        rig.call("people.list", &json!({"person": "sam"})).unwrap()["rows"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    // No record (rolled back and cleared) or a stepping one: refused, no row changed.
+    for p in [None, Some(Phase::Stepping)] {
+        match p {
+            Some(p) => phase(p),
+            None => state::clear(&layout, "authority").unwrap(),
+        }
+        let e = rig.call("people.grant", &marked).unwrap_err();
+        assert!(e.contains("not switched"), "{e}");
+        assert_eq!(rows(&mut rig), 0);
+    }
+    // A damaged record refuses a grant, no row changed.
+    let damage = || std::fs::write(state::path(&layout, "authority").unwrap(), "garbage").unwrap();
+    damage();
+    assert!(rig.call("people.grant", &marked).is_err());
+    assert_eq!(rows(&mut rig), 0);
+    // An unmarked write (kith-auth's mirror, the terminal) is as it was, whatever the phase.
+    rig.call("people.grant", &unmarked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    rig.call("people.revoke", &json!({"person": "sam", "agent": "house"}))
+        .unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    // Switched: the marked write lands.
+    phase(Phase::Switched);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // A stuck rollback (RollingBack, the tombstone still in auth.json) is still the core's: a removal goes through,
+    // and the same removal sent again changes nothing.
+    phase(Phase::RollingBack);
+    let rm = json!({"person": "sam", "agent": "house", "viaSwitch": true});
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // A damaged record takes a removal (access only goes away; a retry changes nothing) and still refuses a grant.
+    damage();
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    rig.call("people.revoke", &rm).unwrap();
+    assert_eq!(rows(&mut rig), 0);
+    let e = rig.call("people.grant", &marked).unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
+    assert_eq!(rows(&mut rig), 0);
+    phase(Phase::RollingBack);
+    rig.call("people.grant", &marked).unwrap();
+    assert_eq!(rows(&mut rig), 1);
+    // Once the rollback is done (no record) the same marked write is refused again, a suspend among them.
+    state::clear(&layout, "authority").unwrap();
+    let e = rig
+        .call("people.suspend", &json!({"id": "sam", "viaSwitch": true}))
+        .unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
+    let e = rig.call("people.revoke", &rm).unwrap_err();
+    assert!(e.contains("not switched"), "{e}");
+    assert_eq!(rows(&mut rig), 1);
 }

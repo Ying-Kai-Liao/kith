@@ -319,12 +319,15 @@ fn a_crash_between_the_record_and_the_tombstone_is_repaired_by_stepping_again() 
     );
     let f = fake("fa");
     let r = reg(vec![f]);
+    // A switched record over a source that is not a tombstone is stepped again from the import, not tombstoned as it is.
     let out = step(&r, &env, "fa", opts()).expect("repair");
     assert!(
-        out.iter().any(|l| l.contains("already switched")),
+        !out.iter().any(|l| l.contains("already switched")),
         "{out:?}"
     );
+    assert!(out.iter().any(|l| l.contains("same answer")), "{out:?}");
     assert!(tombstone::is_tombstone(&env.machine.join("fa-src.json")));
+    assert_eq!(phase(&env, "fa"), Some(Phase::Switched));
 }
 
 #[test]
@@ -771,4 +774,57 @@ fn a_refused_step_leaves_no_snapshot_record_marker_or_tombstone_and_refuses_agai
     assert!(!tombstone::is_tombstone(&env.machine.join("fa-src.json")));
     assert!(!env.layout.db.exists(), "no core.db was opened or made");
     assert!(!env.machine.join("fake.lock").exists(), "no lock was taken");
+}
+
+#[test]
+fn a_damaged_record_is_recorded_again_when_the_tombstones_and_the_marker_agree() {
+    let (_t, env) = setup(&["fa"]);
+    let r = reg(vec![fake("fa")]);
+    step(&r, &env, "fa", opts()).unwrap();
+    let at = state::read(&env.layout, "fa").unwrap().unwrap().at;
+    std::fs::write(state::path(&env.layout, "fa").unwrap(), "garbage").unwrap();
+    // A dry run still reports the damage.
+    let dry = Opts {
+        dry_run: true,
+        ..opts()
+    };
+    assert!(step(&r, &env, "fa", dry).is_err());
+    let out = step(&r, &env, "fa", opts()).expect("repaired");
+    assert!(out[0].contains("recorded as switched again"), "{out:?}");
+    let s = state::read(&env.layout, "fa").unwrap().unwrap();
+    assert_eq!((s.phase, s.at), (Phase::Switched, at));
+}
+
+#[test]
+fn a_damaged_record_with_no_marker_or_a_real_source_refuses_with_the_repair_line() {
+    let (_t, env) = setup(&["fa"]);
+    let r = reg(vec![fake("fa")]);
+    step(&r, &env, "fa", opts()).unwrap();
+    std::fs::write(state::path(&env.layout, "fa").unwrap(), "garbage").unwrap();
+    // The marker is gone (a restored core.db).
+    {
+        let mut c = crate::start_with(&env.layout, MIGRATIONS).unwrap();
+        marker::clear(&mut c, "fa").unwrap();
+    }
+    let e = step(&r, &env, "fa", opts()).unwrap_err().to_string();
+    assert!(e.contains("damaged") && e.contains("Repair"), "{e}");
+    assert!(
+        e.contains("remove the record") && e.contains("restored from before the switch"),
+        "{e}"
+    );
+    // The marker is back but a source is a real file.
+    {
+        let mut c = crate::start_with(&env.layout, MIGRATIONS).unwrap();
+        marker::write(&mut c, "fa", 1, "", None).unwrap();
+    }
+    for p in fake("fa").tombstones(&env) {
+        std::fs::write(&p, "real").unwrap();
+    }
+    let e = step(&r, &env, "fa", opts()).unwrap_err().to_string();
+    assert!(e.contains("Repair"), "{e}");
+    assert_eq!(
+        std::fs::read_to_string(state::path(&env.layout, "fa").unwrap()).unwrap(),
+        "garbage",
+        "nothing was written"
+    );
 }

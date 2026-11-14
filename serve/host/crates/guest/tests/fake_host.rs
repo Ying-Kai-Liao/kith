@@ -12,7 +12,6 @@
     clippy::semicolon_if_nothing_returned
 )]
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -248,7 +247,7 @@ fn answer_unchecked(fake: &Fake, method: &str, body: &Value) -> Result<Value, (u
                 .map(|(id, _)| json!({"id": id, "from": "Kai", "label": "deploy key", "expiresAt": 4_102_444_800_000_i64}))
                 .collect();
             Ok(
-                json!({"room": "rm_1", "conversation": null, "epoch": null, "entries": [], "cursor": 7, "secrets": secrets}),
+                json!({"room": "rm_1", "conversation": null, "epoch": null, "gen": 12, "entries": [], "cursor": 7, "secrets": secrets}),
             )
         }
         "botSecretFetch" => match s.secret.take_if(|(id, _)| body["id"] == *id) {
@@ -598,7 +597,11 @@ async fn credentials_from_the_environment_stand_in_for_the_files() {
     assert!(!creds.contains(TOKEN) && !creds.is_empty());
     // The key is nowhere in what the command printed.
     assert!(!out.contains(&creds) && !err.contains(&creds), "{out}{err}");
-    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    #[cfg(unix)]
+    assert_eq!(
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&file).unwrap().permissions()) & 0o777,
+        0o600
+    );
 
     // A new VM: no files, only the secret.
     let fresh = tempfile::tempdir().unwrap();
@@ -634,18 +637,21 @@ async fn credentials_file_is_new_only_and_the_json_names_the_path_not_the_key() 
     assert_eq!(code, 2, "{err}");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), creds);
 
-    // A symlink is refused, and what it points at is not written.
-    let target = dir.path().join("target");
-    let link = dir.path().join("link");
-    std::os::unix::fs::symlink(&target, &link).unwrap();
-    let (code, _, _) = kith(
-        &server,
-        again.path(),
-        &["join", &server.link(), "--wait", "5", "--credentials-file", link.to_str().unwrap()],
-    )
-    .await;
-    assert_eq!(code, 2);
-    assert!(!target.exists());
+    #[cfg(unix)]
+    {
+        // A symlink is refused, and what it points at is not written.
+        let target = dir.path().join("target");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let (code, _, _) = kith(
+            &server,
+            again.path(),
+            &["join", &server.link(), "--wait", "5", "--credentials-file", link.to_str().unwrap()],
+        )
+        .await;
+        assert_eq!(code, 2);
+        assert!(!target.exists());
+    }
 }
 
 #[tokio::test]
@@ -711,7 +717,11 @@ async fn room_secret_goes_to_a_new_0600_file_and_only_the_path_is_printed() {
     assert_eq!(out, format!("{path}\n"));
     assert!(!err.contains(&marker));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), marker);
-    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    #[cfg(unix)]
+    assert_eq!(
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&file).unwrap().permissions()) & 0o777,
+        0o600
+    );
 
     // Once: the second fetch is the host's not-found, and it leaves no file behind.
     let again = dir.path().join("again");

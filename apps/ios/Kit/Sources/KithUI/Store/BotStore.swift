@@ -94,32 +94,37 @@ public final class BotStore {
     /// Bots whose older history has been fully paged in.
     public internal(set) var historyComplete: Set<String> = []
     var composerDrafts: [String: String] = [:]
+    /// The owner's view of each group room's people (stays, and the names behind them), read when a room opens. Never persisted.
+    public internal(set) var roomStays: [String: [RoomStay]] = [:]
+    public internal(set) var roomPeopleEnabled: [String: Bool] = [:]
+    public internal(set) var roomPeopleList: [HostPerson] = []
+    /// An invited person's rooms (`myRooms`): shown as groups, each with the stay its posts must carry. Never persisted.
+    public internal(set) var myRooms: [String: HostContract.MyRoom] = [:]
+    /// A room that went away under an open view (id to name): it shows the one neutral closed state.
+    public internal(set) var closedRooms: [String: String] = [:]
     /// What was pasted into each draft, sent along so memory never takes it as the user's own words.
     @ObservationIgnored var composerPasted: [String: [String]] = [:]
     public var routineDrafts: [String: String] = [:]
     public let fileDownloads = FileDownloads()
     public var lastError: String?
-    /// Bots whose thread the reader just left: the next message in their main chat starts a new task instead of
-    /// going on with the current one (which would put it back in that thread).
-    var leftThread: Set<String> = []
     /// The message each chat is replying to: shown over the composer; the next send starts with its first line as a quote.
     var replyQuotes: [String: Entry] = [:]
     /// What the user picked per task on this device: open or folded in the main chat; nil follows the task.
     var taskChoices: [String: Bool] = [:]
-    /// Whether a send from the composer starts a new task: asked for, or (main chat only) the reader is out of the
-    /// current task: they left its thread, or it is folded. `currentOpen` is nil when the chat has no task yet.
-    func startsNewTask(_ botId: String, thread: String?, requested: Bool, currentOpen: Bool? = nil) -> Bool {
-        if requested { return true }
-        guard thread == nil else { return false }
-        return leftThread.contains(botId) || currentOpen == false
+    /// Stop calls on their way, so a second tap sends nothing.
+    var stopping = InFlight()
+    /// Where each chat's one box sends: the task a card's (or a message's) Reply picked, or a new task. Unset, it goes
+    /// on with the task the host would (`Tasks.continuing`).
+    var taskTargets: [String: TaskTarget] = [:]
+    /// Where the chat's box sends now (nil for a chat without tasks).
+    func destination(_ botId: String, now: Date = .now) -> TaskDestination? {
+        guard let bot = bots[botId], bot.usesTasks else { return nil }
+        return Tasks.destination(target: taskTargets[botId], bot: bot, chat: chat(botId), now: Int64(now.timeIntervalSince1970 * 1000))
     }
-    /// Whether the bot's current task shows open in its main chat, by the rule TaskRow uses; nil without a task.
-    func isCurrentTaskOpen(_ botId: String, now: Date = .now) -> Bool? {
-        guard let bot = bots[botId], let root = Tasks.current(in: chat(botId)) else { return nil }
-        let replies = self.replies(botId, root: root.id)
-        let status = Tasks.status(of: root, bot: bot, replies: replies)
-        return ThreadFeed.hasQuestion(replies, held: root.data.thread?.isHeldElsewhere == true)
-            || Tasks.isOpen(status, newest: true, lastAt: Tasks.lastAt(root), now: Int64(now.timeIntervalSince1970 * 1000), choice: taskChoices[root.id])
+    /// Points the chat's box at the task an entry belongs to (a Reply); an entry outside any task changes nothing.
+    func target(taskOf entry: Entry) {
+        guard let task = Tasks.of(entry) else { return }
+        taskTargets[entry.botId] = .task(task)
     }
     /// The open conversation (navigation path).
     public var selection: String?
@@ -268,7 +273,7 @@ public final class BotStore {
     var shownBots: [Bot] {
         guard let granted = hello?.grantedAgents else { return Array(bots.values) }
         let agents = Set(granted.map(\.agent))
-        return bots.values.filter { $0.hqAgent.map(agents.contains) ?? false }
+        return bots.values.filter { myRooms[$0.id] != nil || ($0.hqAgent.map(agents.contains) ?? false) }
     }
 
     /// Cards outside this account's chats that wait for it on this computer (see `GuestPrompt`); `isOwner` is the
@@ -305,7 +310,10 @@ public final class BotStore {
     }
 
     /// Display name of an entry's author in a group chat.
-    public func authorName(_ id: String?) -> String { id.flatMap { bots[$0]?.name } ?? "A deleted bot" }
+    /// An invited person has no row for a room's agents: their name comes from `myRooms`.
+    public func authorName(_ id: String?) -> String {
+        id.flatMap { bots[$0]?.name ?? MemberRoomLogic.agentName(in: myRooms.values, id: $0) } ?? "A deleted bot"
+    }
 
     func updateComputer(_ change: (inout Computer) -> Void) {
         var c = computer

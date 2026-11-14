@@ -237,6 +237,14 @@ async fn ask_for(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, input: &Value, a
     if input.to_string().len() > MAX_INPUT {
         return deny("That request is too large to show for approval.");
     }
+    // A person whose access is set aside (revoked) gets no card: a run left alive after the revoke must not ask the owner.
+    // (under every id the host may hold them under: a renamed person's rows stay under the old one)
+    if !who.person.is_empty() && {
+        let held = crate::remote::core_revokes::held_under(&who.person).await;
+        hub.store.suspended_people().is_ok_and(|s| held.iter().any(|id| s.contains(id)))
+    } {
+        return deny("This person's access has been revoked, so no approval was asked for.");
+    }
     let (resource, shown) = match resource::classify(tool, input, &resource::roots()) {
         resource::Classified::Card { key, shown } => (key, shown),
         resource::Classified::Never => {
@@ -763,6 +771,21 @@ pub fn withdraw_person(hub: &Hub, person: &str, agent: Option<&str>) {
     }
 }
 
+/// `kith ask` runs ended (Stop, a revoke, a timeout, the end of a chain): the open cards they parked on are withdrawn, and a
+/// waiting call is told so. The ask is gone, so nobody is told of an answer (no `tell_asker`). A secret card being written
+/// is left to its own steps (see `delivered`).
+pub fn withdraw_asks(hub: &Hub, ended: &[&str]) {
+    for card in hub.store.cards_open_all() {
+        if !card.reply_to.as_deref().is_some_and(|ask| ended.contains(&ask)) || secret::claimed(&card.id) {
+            continue;
+        }
+        if hub.store.card_withdraw(&card.id).unwrap_or(false) {
+            deliver(&card.id, &Verdict::Deny("The request that asked for this was stopped.".into()));
+            close_entry(hub, &card, "cancelled");
+        }
+    }
+}
+
 /// Past their deadline, cards expire: silence is no (A1).
 pub fn sweep(hub: &Hub) {
     expire(hub, now_ms());
@@ -825,23 +848,59 @@ pub fn start(hub: &Arc<Hub>) {
     let weak = Arc::downgrade(hub);
     tokio::spawn(async move {
         // kith-auth writes its file from outside the host (a revoke, a new grant): who answers follows within seconds.
-        let mut seen = auth_stamp();
+        // Once authority is on the core the file is a tombstone that never changes, so the core's revision is watched.
+        let mut seen = authority_stamp().await;
+        // A revoke made in the core alone (a terminal `core-call people.suspend`) reaches this host here too: on a change
+        // of the revision, at start, and at least every 60 s (`remote::core_revokes`, narrowing only).
+        let mut core_revokes = crate::remote::core_revokes::Due::default();
         let mut tick = tokio::time::interval(AUTH_POLL);
         loop {
             tick.tick().await;
-            let now = auth_stamp();
-            if now == seen {
-                continue;
-            }
-            seen = now;
             let Some(hub) = weak.upgrade() else { return };
-            crate::access::rederive(&hub).await;
+            let changed = poll_authority(&hub, &mut seen).await;
+            core_revokes.tick(&hub, changed).await;
         }
     });
 }
 
-/// How often kith-auth's file is looked at for a change.
+/// How often authority is looked at for a change.
 const AUTH_POLL: Duration = Duration::from_secs(3);
+
+/// What the poll compares between ticks: kith-auth's file change times, or, once authority is on the core, the digest of
+/// its tables (`people.revision`). A change of side is a change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AuthStamp {
+    File(Vec<Option<std::time::SystemTime>>),
+    Core(String),
+}
+
+/// The stamp now. None: the host is switched and the core could not be asked, so this tick learns nothing (and, with
+/// nothing to compare, re-derives nothing: `may_use_checked` gives no answer then either). A core that refuses the read
+/// (`not switched`: a rollback just ended and the host's cached switch is stale) leaves the file as the signal.
+pub(crate) async fn authority_stamp() -> Option<AuthStamp> {
+    use crate::api::authority::{CoreRefused, is_not_switched, owner_call, switched};
+    if !switched() {
+        return Some(AuthStamp::File(auth_stamp()));
+    }
+    match owner_call("people.revision", serde_json::json!({"viaSwitch": true}), true).await {
+        Ok(v) => v["digest"].as_str().map(|d| AuthStamp::Core(d.to_owned())),
+        Err(e) if e.downcast_ref::<CoreRefused>().is_some_and(|r| is_not_switched(&r.0)) => {
+            Some(AuthStamp::File(auth_stamp()))
+        }
+        Err(_) => None,
+    }
+}
+
+/// One tick of the poll: re-derives who answers each card when authority changed since `seen`. True when it did.
+pub(crate) async fn poll_authority(hub: &Arc<Hub>, seen: &mut Option<AuthStamp>) -> bool {
+    let Some(now) = authority_stamp().await else { return false };
+    if seen.as_ref() == Some(&now) {
+        return false;
+    }
+    *seen = Some(now);
+    crate::access::rederive(hub).await;
+    true
+}
 
 /// When kith-auth's file last changed: `KITH_AUTH`, else every place `kernel/lib/kith_paths.py` may put it.
 fn auth_stamp() -> Vec<Option<std::time::SystemTime>> {

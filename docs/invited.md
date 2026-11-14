@@ -9,13 +9,13 @@ An invite comes from the owner's Mac (Settings > People, `createInvite` in `serv
 for **24 hours** and for **one account**: once someone joins with it, it can't be used again. If it has expired or was
 used, ask for a new one.
 
-The owner can share it in one of three forms:
+The link the owner shares depends on which cloud their Mac is on (`createInvite` builds it):
 
-| Link | Opens |
-|---|---|
-| `https://kith-web-dev.lykevin890919.workers.dev/join#…` | The web client, in your browser. Only invites from a Kith Dev Mac include it, because the web client runs on the development instance for now. |
-| `https://kithbot.app/i/…` | A page that opens the Kith app (`kith://invite…`). If you don't have the app, ask the person who invited you how to get it: it isn't in the App Store yet ([install.md](install.md)). |
-| `kith://invite?…` | The Kith app directly, on a Mac or an iPhone. |
+| Link | Opens | When |
+|---|---|---|
+| `https://kithbot.app/join#…` | The web client, in your browser. | Every invite from a Mac on the production cloud (the Kith app from a release). This is the usual link. |
+| `https://<cloud>/i/…` | A page that opens the Kith app (`kith://invite…`). If you don't have the app, ask the person who invited you how to get it: it isn't in the App Store yet ([install.md](install.md)). | A Mac on another cloud (Kith Dev, a self-hosted cloud) with no web client set. A Kith Dev Mac gives a web link only when `KITH_WEB_ORIGIN` names one, such as `https://kith-web-dev.lykevin890919.workers.dev`. |
+| `kith://invite?…` | The Kith app directly, on a Mac or an iPhone. | Always made alongside the others; shared only when the Mac has no cloud. |
 
 The secret part of the link comes after the `#`, so your browser never sends it to a server. Treat the link like a key
 until you've used it.
@@ -23,7 +23,7 @@ until you've used it.
 ## Joining on the web
 
 1. Open the link and confirm **Join a computer on Kith?**
-2. Sign in with Google or GitHub. Sign in with Apple works on production (Main) builds only, not on the development instance.
+2. Sign in with Google, GitHub or Apple. Sign in with Apple works only on kithbot.app, not on the development web client.
 3. Kith joins you to the owner's computer, sets up this browser as one of your devices, and connects. The steps show
    as they happen. The owner doesn't have to approve the browser: the invite already did that.
 4. You see the owner's computer, the chats you have there, and **New chat**.

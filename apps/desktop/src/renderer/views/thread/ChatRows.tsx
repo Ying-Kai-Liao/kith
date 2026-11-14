@@ -38,6 +38,7 @@ import { botGuestSender } from '@shared/bot-guest-chat'
 import { taskOf } from '@shared/tasks'
 import { queuedLine } from '@shared/thread-writer'
 import { quoteOf, quotesOf } from './reply-quote'
+import { CardOrigin, HiddenMarker, roomNoticeFor, UnansweredLine } from './RoomChatBits'
 import { targetsOf } from './task-target'
 import { richCardOf, type RichCard } from '@shared/rich-card'
 import { resultView } from '@shared/result-card'
@@ -99,9 +100,11 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
         <VStack align="flex-end" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
           <UserBubble entry={entry} botWorking={!!chat && isWorking(chat)} reply={reply} />
           <ReactionsRow entry={entry} />
+          {entry.data.hiddenFrom?.length ? <HiddenMarker entry={entry} /> : null}
         </VStack>
       )
     case 'agent': {
+      if (entry.data.unanswered) return <UnansweredLine entry={entry} />
       const card = richCardOf(entry.data)
       // A late reply always names its author: it sits outside the flow it arrived in.
       const late = lateOf(entry.data)
@@ -112,6 +115,7 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
           <VStack gap={4} className={chat && isGroup(chat) ? 'chat-row-indent' : undefined}>
             <AnsweredBy answeredBy={entry.data.answeredBy} />
             <ReactionsRow entry={entry} />
+            {entry.data.hiddenFrom?.length ? <HiddenMarker entry={entry} /> : null}
           </VStack>
         </VStack>
       )
@@ -120,6 +124,7 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
       return (
         <VStack gap={4} className="chat-row group-start">
           {chat && isGroup(chat) ? <AuthorLabel botId={entry.data.author} /> : null}
+          {entry.data.room && !(chat && isGroup(chat)) ? <CardOrigin entry={entry} /> : null}
           <LivePermission entry={entry} />
         </VStack>
       )
@@ -130,6 +135,11 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
       if (richCardOf(entry.data)?.type === 'schedule') return <div className="chat-row group-start"><div className="agent-inset"><ScheduleCard entry={entry} card={richCardOf(entry.data)!} /></div></div>
       // A run's plan is one card that changes in place; an app without it shows the notice's text twin.
       if (richCardOf(entry.data)?.type === 'plan') return <div className="chat-row group-start"><div className="agent-inset"><PlanCard entry={entry} card={richCardOf(entry.data)!} /></div></div>
+      // A person joining or leaving a room, and the waiting pointer (rooms with people).
+      {
+        const line = roomNoticeFor(entry, chat, store.isOwner)
+        if (line) return <div className="chat-row notice">{line}</div>
+      }
       // Any notice that roots a thread (a bot guest's conversation) opens it like a message does.
       return <div className="chat-row notice"><NoticeRow entry={entry} /></div>
   }

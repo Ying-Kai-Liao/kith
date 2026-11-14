@@ -105,4 +105,15 @@ import fcntl
 for n in ('auth', 'settings'):
     f = open('$T/locks/%s.json.lock' % n, 'a'); fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\""
 
+# the default regex (no KITH_QUIESCE_MATCH): the Rust settings/secrets verbs count as writers, lookalikes do not
+check "the default match covers kith-auth, kith_settings and the Rust settings/secrets verbs only" "python3 - <<'PYM'
+import re
+src = open('$T/quiesce.py').read()
+rx = re.compile(re.search(r\"or (r'.*?')\\)\", src).group(1)[2:-1] if False else eval(re.search(r\"or (r'[^\\n]*?')\\)\", src).group(1)))
+yes = ['kith-auth set x', '/p/kith-auth', 'python3 /p/kith_settings.py get', 'kith kernel settings set a b', '/p/bin/kith kernel secrets set x', 'kith kernel settings']
+no = ['kith kernel settingsfoo', 'kith kernel secretsx', 'kith kernel doctor', 'kith run settings', 'xkith kernel settings']
+assert all(rx.search(c) for c in yes), [c for c in yes if not rx.search(c)]
+assert not any(rx.search(c) for c in no), [c for c in no if rx.search(c)]
+PYM"
+
 exit $fail

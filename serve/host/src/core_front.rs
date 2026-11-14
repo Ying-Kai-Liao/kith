@@ -67,6 +67,7 @@ pub fn caller_env() -> serde_json::Map<String, Value> {
 /// One read row asked of the daemon by the host itself (the event filter's authority questions, M2-15). `Some(answer)`
 /// only when a daemon answered; no daemon, a refusal, a mismatch or a lost connection are all `None`, which the asker
 /// must read as "no" for anything that grants.
+#[cfg(test)]
 pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
     match kith_core::reach(folders, method, params, true) {
         kith_core::Reached::Answered(answer) => Some(answer),
@@ -121,7 +122,14 @@ fn answer_of(reached: kith_core::Reached) -> Answer {
 /// `None`, which the host side must read as "not in sync", never as a lease it still holds. The rest (`link`, `unlink`,
 /// `pulled`, `renew`) say a thing is so, and are never sent twice.
 fn host_row_is_repeatable(method: &str) -> bool {
-    matches!(method, "syncLease.changed" | "syncLease.drop")
+    // The claim reads, and `settle` (it only ends what the core confirms gone).
+    matches!(method, "syncLease.changed" | "syncLease.drop" | "hostclaim.epoch" | "hostclaim.show" | "hostclaim.settle")
+}
+
+/// [`call_as_host`] that keeps what the core said: a refusal's words and "no daemon" are told apart (the claim adapter,
+/// M3-10f, must not read a core that was not there as a claim that was refused, nor the other way round).
+pub fn call_host_claims(folders: &Paths, method: &str, params: &Value) -> Answer {
+    answer_of(kith_core::reach_as_host(folders, method, params, host_row_is_repeatable(method)))
 }
 
 /// One row the daemon takes from the host alone (the sync-lease writes, M2-10b), called on a connection that proves the
@@ -151,6 +159,13 @@ impl TestDaemon {
     pub fn stop(self) {
         self.0.stop();
     }
+}
+
+/// `kith migrate step authority` over `folders` (the file at `folders.secrets/auth.json`), in this process; the lines it
+/// prints. Not while a daemon holds the core.
+#[cfg(test)]
+pub fn step_authority_for_test(folders: &Paths, kernel: &std::path::Path) -> Result<Vec<String>, String> {
+    kith_core::cutover(folders, kernel, &["step".to_owned(), "authority".to_owned()]).map_err(|e| e.to_string())
 }
 
 /// Starts a daemon on `folders`, ready before it returns.
@@ -250,6 +265,60 @@ fn secrets_call_at(folders: &Paths, method: &str, params: &Value, wait: std::tim
             kith_core::Reached::Mismatch(note) => anyhow::bail!("the running core does not fit this host: {note}"),
             kith_core::Reached::Lost(why) => anyhow::bail!("the connection to the core ended: {why}"),
         }
+    }
+}
+
+/// The vault's typed client of the envelope: one function per `secrets.*` row, with the refusal text callers show.
+/// `vault.rs` keeps the rules (moving old records, ordering); the way to the core is only here.
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+pub mod secrets {
+    use super::{secrets_call, secrets_has_waiting};
+    use anyhow::{Result, anyhow};
+    use serde_json::{Value, json};
+    use std::time::Duration;
+
+    #[allow(clippy::needless_pass_by_value, reason = "used as a map_err callback")]
+    pub(super) fn refused(e: anyhow::Error) -> anyhow::Error {
+        anyhow!(
+            "Secure credential storage refused: {e:#}. Credentials are never saved as plain text, and nothing was changed."
+        )
+    }
+
+    fn call(method: &str, params: &Value, wait: Duration) -> Result<Value> {
+        secrets_call(method, params, wait).map_err(refused)
+    }
+
+    /// Loads the machine's key (making it on a first use), waiting up to `wait` for a daemon that is starting.
+    pub fn open(wait: Duration) -> Result<()> {
+        call("secrets.open", &json!({}), wait).map(drop)
+    }
+
+    /// One try: `has` runs on message paths, which must not wait for a core that is not there.
+    pub fn has(name: &str) -> Result<bool> {
+        Ok(call("secrets.has", &json!({"name": name}), Duration::ZERO)?["has"] == true)
+    }
+
+    pub fn has_waiting(name: &str, wait: Duration) -> Result<bool> {
+        secrets_has_waiting(name, wait).map_err(refused)
+    }
+
+    pub fn delete(name: &str) -> Result<bool> {
+        Ok(call("secrets.delete", &json!({"name": name}), Duration::ZERO)?["deleted"] == true)
+    }
+
+    pub fn get(name: &str) -> Result<Option<String>> {
+        let answer = call("secrets.get", &json!({"name": name}), Duration::ZERO)?;
+        if answer["found"] != true {
+            return Ok(None);
+        }
+        answer["value"]
+            .as_str()
+            .map(|s| Some(s.to_owned()))
+            .ok_or_else(|| anyhow!("The credential store answered without a value"))
+    }
+
+    pub fn put(name: &str, value: &str) -> Result<()> {
+        call("secrets.put", &json!({"name": name, "value": value}), Duration::ZERO).map(drop)
     }
 }
 
@@ -400,18 +469,82 @@ const CORE_CALL_METHODS: &[&str] = &[
     "terminal.open",
     "terminal.attach",
     "terminal.list",
+    // the kernel takers' claim rows (P5), see kernel/bin/kith-sessions and kith-wake
+    "claim.external",
+    "claim.release",
+    "claim.sweepPerson",
+    "claim.list",
+    "claim.epoch",
     "people.suspend",
     "people.undo",
     "people.removePerson",
     "people.removeBot",
     "people.revoke",
+    // the reads `kith-auth` routes here once auth.json is a tombstone (M2-23), see `ROUTED_READS`
+    "people.who",
+    "people.granted",
+    "people.may",
+    "people.resolve",
+    "people.listPeople",
+    "people.retired",
+    "people.budgets",
+    "people.ledger",
+    "people.botsCap",
+    "people.secretsView",
+    // the card writes `kith-auth` routes here (C-a, C-b), see `ROUTED_WRITES`
+    "people.access",
+    "people.helper",
+    "people.job",
+    // the secret writers and `agent-access ... domain` (S-b), see `ROUTED_WRITES`
+    "people.secretSet",
+    "people.secretGrant",
+    "people.secretRevoke",
+    "people.secretEnv",
+    "people.secretOwner",
+    "people.secretShare",
+    "people.secretBrowser",
+    "people.agentAccess",
+    // the probe before a Keychain write: only a daemon that is switched answers it, see `DAEMON_ONLY_READS`
+    "people.revision",
 ];
 
-/// The writes `core_call` runs in an embedded core when no daemon answers (the revoke stopgap before M2-23: a revoke made
-/// in kith-auth must reach the core even with `kith serve` stopped). The terminal methods need the daemon's sockets.
-#[cfg(unix)]
-const EMBEDDED_METHODS: &[&str] =
-    &["people.suspend", "people.undo", "people.removePerson", "people.removeBot", "people.revoke"];
+/// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
+/// refuses it unless authority is switched (a rollback leaves the file the truth); core-call refuses one without it, and a
+/// `people.botsCap` that sets the cap, which is a write the mirror never sends. (`people.resolve` with `takeOnce` uses up a
+/// grant, so it is a write too; the core fences it the same way.)
+const ROUTED_READS: &[&str] = &[
+    "people.who",
+    "people.granted",
+    "people.may",
+    "people.resolve",
+    "people.listPeople",
+    "people.retired",
+    "people.budgets",
+    "people.ledger",
+    "people.botsCap",
+    "people.secretsView",
+];
+
+/// The card writes `kith-auth` routes to the core on the tombstone: an escape card's always, a helper's, the No of a job.
+/// They widen access, so core-call refuses one without `viaSwitch: true` (the core refuses it unless authority is
+/// switched), and none is on `kith_core::EMBEDDED_WRITES`: a write with no daemon exits 3 and nothing runs.
+const ROUTED_WRITES: &[&str] = &[
+    "people.access",
+    "people.helper",
+    "people.job",
+    "people.secretSet",
+    "people.secretGrant",
+    "people.secretRevoke",
+    "people.secretEnv",
+    "people.secretOwner",
+    "people.secretShare",
+    "people.secretBrowser",
+    "people.agentAccess",
+];
+
+/// A read that only a switched daemon answers: `kith-auth set` asks it before it writes a Keychain item, so that no daemon,
+/// or authority back on auth.json, stops it with exit 3 before anything is stored. Not on `kith_core::EMBEDDED_READS`.
+const DAEMON_ONLY_READS: &[&str] = &["people.revision"];
 
 /// How long to look for a daemon that is just starting (its socket refuses, or it holds the lock) before giving up.
 /// Inside kith-auth's `CORE_CALL_SECS`, which it waits under auth.json.lock.
@@ -495,9 +628,25 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         eprintln!("core-call: params must be a JSON object");
         return 2;
     }
+    if ROUTED_WRITES.contains(&method) && params.get("viaSwitch").and_then(Value::as_bool) != Some(true) {
+        eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true");
+        return 2;
+    }
+    if DAEMON_ONLY_READS.contains(&method) && params.get("viaSwitch").and_then(Value::as_bool) != Some(true) {
+        eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true");
+        return 2;
+    }
+    if ROUTED_READS.contains(&method)
+        && (params.get("viaSwitch").and_then(Value::as_bool) != Some(true)
+            || params.get("amount").is_some_and(|a| !a.is_null()))
+    {
+        eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true and no amount");
+        return 2;
+    }
     let folders = kernel::folders(&kith_kernel::paths::process_home());
-    // Only a list is repeated when the connection breaks: an open or a ticket may have run.
-    match kith_core::reach(&folders, method, &params, method == "terminal.list") {
+    // Only a list (or a read) is repeated when the connection breaks: an open or a ticket may have run.
+    let repeatable = matches!(method, "terminal.list" | "claim.list" | "claim.epoch");
+    match kith_core::reach(&folders, method, &params, repeatable) {
         kith_core::Reached::Answered(answer) => {
             println!("{answer}");
             0
@@ -507,9 +656,9 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
             4
         }
         #[cfg(unix)]
-        kith_core::Reached::NoDaemon if EMBEDDED_METHODS.contains(&method) => {
-            core_call_embedded(&folders, method, &params)
-        }
+        // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
+        // The terminal methods need the daemon's sockets.
+        kith_core::Reached::NoDaemon if kith_core::embedded(method) => core_call_embedded(&folders, method, &params),
         kith_core::Reached::NoDaemon => {
             eprintln!("no core daemon answers");
             3
@@ -522,6 +671,45 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
             eprintln!("{note}");
             5
         }
+    }
+}
+
+/// How long an account call waits for a core that is starting, or that another command holds (a launch's mark takes milliseconds).
+const ACCOUNT_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// One owner `account.*` call (accounts-s1): over the owner socket, else in an embedded core. A read may be sent again when the connection breaks; a write never is, so a lost answer is an error that
+/// says the write may have happened.
+pub fn account_call(folders: &Paths, method: &str, params: &Value, read: bool) -> Result<Value, String> {
+    let started = std::time::Instant::now();
+    loop {
+        match kith_core::reach(folders, method, params, read) {
+            kith_core::Reached::Answered(v) => return Ok(v),
+            kith_core::Reached::Refused(e) => return Err(e.to_string()),
+            kith_core::Reached::Mismatch(note) => return Err(note),
+            kith_core::Reached::Lost(why) => {
+                return Err(format!(
+                    "the connection to the core ended: {why}{}",
+                    if read { "" } else { " (the change may have been made)" }
+                ));
+            }
+            kith_core::Reached::NoDaemon => {}
+        }
+        #[cfg(unix)]
+        match kith_core::call_account_embedded(folders, method, params) {
+            Ok(kith_core::EmbeddedCall::Answered(v)) => return Ok(v),
+            Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
+                return Err(format!("accounts moved to the core, but there is no core database at {}", dir.display()));
+            }
+            Ok(kith_core::EmbeddedCall::Busy) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+        if cfg!(not(unix)) {
+            return Err("the core is not available on this system".to_owned());
+        }
+        if started.elapsed() >= ACCOUNT_WAIT {
+            return Err("accounts moved to the core, but no core answers and another command holds it".to_owned());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 
@@ -582,12 +770,53 @@ pub fn print_status(json: bool) {
             status["holder"]["tied_to_starter"]
         );
     }
+    if status["claims"].is_object() {
+        let n = |k: &str| status["claims"][k].as_i64().unwrap_or(0);
+        println!(
+            "claims: {} claimed, {} running, {} ending (stopped, process group not yet gone)",
+            n("claimed"),
+            n("running"),
+            n("ending")
+        );
+        if n("held_by_group") > 0 {
+            println!(
+                "claims held only by a live process group: {} (a background job keeps the conversation)",
+                n("held_by_group")
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
+
+    /// The lists are written by hand; a routed method missing from one would only show on a switched Mac.
+    #[test]
+    fn every_routed_read_is_on_core_call_and_the_embedded_reads() {
+        for m in ROUTED_READS {
+            assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(kith_core::EMBEDDED_READS.contains(m), "{m} is not on EMBEDDED_READS");
+        }
+    }
+
+    /// A card write that no embedded core may run, and that the host's door marks: the router's writes widen access.
+    #[test]
+    fn every_routed_write_is_on_core_call_and_never_embedded() {
+        for m in ROUTED_WRITES {
+            assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
+        }
+        assert!(!ROUTED_READS.iter().any(|m| ROUTED_WRITES.contains(m)));
+        for m in DAEMON_ONLY_READS {
+            assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
+        }
+    }
 
     fn args(line: &str) -> Vec<OsString> {
         std::iter::once("kith serve").chain(line.split(' ')).map(OsString::from).collect()
@@ -762,6 +991,24 @@ mod tests {
         let bad = secrets_call_at(&folders, "secrets.has", &json!({}), wait);
         assert!(bad.is_err(), "missing params are refused: {bad:?}");
         daemon.stop();
+        let _ = std::fs::remove_dir_all(&folders.home);
+    }
+
+    /// The vault's typed client refuses with the vault's text when no daemon is up (a write goes through `core_front`
+    /// and stores nothing).
+    #[cfg(unix)]
+    #[test]
+    fn secrets_client_refuses_without_a_daemon() {
+        let folders = short_folders("sn");
+        let err =
+            secrets_call_at(&folders, "secrets.put", &json!({"name": "a", "value": "v"}), std::time::Duration::ZERO)
+                .map_err(secrets::refused)
+                .expect_err("no daemon");
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("Secure credential storage refused") && text.contains("never saved as plain text"),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(&folders.home);
     }
 

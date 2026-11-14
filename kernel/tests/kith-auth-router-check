@@ -1,0 +1,1175 @@
+#!/usr/bin/env bash
+# kith-auth-router-check — M2-23 slice 1: once auth.json is the authority tombstone, kith-auth answers its READ verbs from the
+# core (`kith kernel core-call`, always marked viaSwitch) and everything else still exits 3 with the tombstone's own text.
+#
+#   1. Golden vs switched. A fixture auth.json (an owner, a renamed person, a bot with `was`, a revoked person, a member on a
+#      deleted preset, a member with a "just this once" helper, a member with a ticked job that grants a helper, a retired id,
+#      grants, budgets, chat handles) answers every routed verb over persons x agents x `--via` as a real file. A copy of the
+#      home is imported into a core (`kith kernel core-migrate --authority`), given the switched record and the tombstone, and
+#      must answer byte for byte the same (stdout and exit code): once with no daemon (the embedded core) and once through a
+#      daemon. The copies are stepped for real (`kith migrate step authority`: import, same answer, marker, tombstone), and
+#      section 4 rolls one back after the core's own writes: the file must then answer what the core did.
+#   2. Sequences: the take-once (the first launch is allowed "(just this once)", the second refused, on both homes) and `who`
+#      with `handles_stale` set (exit 3 on a switched home, never a wrong person).
+#   2b. C-a / C-b, the card writes: `access` (the always of an escape card, with --by and its refusals), `helper`, `job
+#      --decline`/`--rm` and the removals. The same sequence runs on the file, on the daemon (the lines and refusals must be
+#      the file's, state included), and on the embedded core, where every write exits 3 and changes nothing. The reads
+#      `agent-access` and `jobs` are in the matrix above.
+#   3. Negatives: no route (the writers, the lists that need the file, `door`, bare `bots-cap`), a tombstone of another
+#      module, no core, a core that is not switched, a core held by another process, no kith program, a timeout, a lost
+#      answer, a refusal, a malformed answer, `noCore`: all exit 3 and never an answer. A take-once is sent once and never
+#      repeated, only with a caller, and every call carries viaSwitch.
+#
+#   KITH_BIN=/path/to/kith kernel/tests/kith-auth-router-check     skips without a kith program (KITH_BIN or KITH_DIFFTEST_BIN,
+#                                                                 else under $CARGO_TARGET_DIR / serve/host/target)
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+find_bin() {
+  local t k
+  for t in "${CARGO_TARGET_DIR:-}" "$KERNEL/../serve/host/target" "$KERNEL/../target"; do
+    for k in debug release; do [[ -n $t && -x $t/$k/$1 ]] && { echo "$t/$k/$1"; return 0; }; done
+  done
+  return 1
+}
+BIN=${KITH_BIN:-${KITH_DIFFTEST_BIN:-$(find_bin kith)}}
+[[ -n $BIN && -x $BIN ]] || { echo "skip: needs the kith program (KITH_BIN)"; exit 0; }
+command -v sqlite3 >/dev/null || { echo "skip: needs sqlite3"; exit 0; }
+[[ $(uname) == Darwin || $(uname) == Linux ]] || { echo "skip: Unix only"; exit 0; }
+
+# A short path: the daemon's sockets live under it and a Unix socket path is at most ~100 bytes.
+T=$(mktemp -d /tmp/krc.XXXXXX)
+T=$(cd "$T" && pwd -P)
+DPID=
+cleanup() {
+  [[ -n $DPID ]] && kill "$DPID" 2>/dev/null
+  exec 7>&- 2>/dev/null
+  sleep 0.3
+  [[ -n ${ROUTER_KEEP:-} ]] && echo "kept: $T" || rm -rf "$T"
+}
+trap cleanup EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1 TZ=UTC
+unset KITH_PERSON KITH_AGENT KITH_AUTH HQ_HOME HQ_STATE KITH_CORE KITH_DEV_BIN CARGO_TARGET_DIR KITH_MACHINE KITH_STATE KITH_AGENTS
+
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+
+# use_home DIR: the environment of one home (auth.json under DIR/home/.kith/secrets, the core under DIR/home/.kith/core).
+use_home() {
+  export HOME=$1/home KITH_HOME=$1/home/.kith KITH_BIN=${2:-$BIN}
+  export KITH_STATE=$KITH_HOME KITH_MACHINE=$KITH_HOME KITH_AGENTS=$KITH_HOME/agents KITH_SERVE_DIR=$1/serve \
+    KITH_SERVE_PORT=1 KITH_WAKE_NO_KICK=1
+  AUTHJ=$KITH_HOME/secrets/auth.json
+  CORE=$KITH_HOME/core
+}
+A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
+DBF=core."db"   # the boundary check keeps that file's name out of source outside core/runtime
+SENT=sentinel-4c1d9e7a   # a key's value: it must reach the (fake) Keychain and no row, call or answer of the core
+# A `security` that keeps items in $FAKE_KC_DIR (FAKE_KC_FAIL=1: it takes nothing), so `set` runs for real.
+mkdir -p "$T/bin"
+cat > "$T/bin/fakesec" <<'PY'
+#!/usr/bin/env python3
+import os, sys
+d = os.environ.get('FAKE_KC_DIR') or '/nonexistent'
+def path(kc, var):
+    return os.path.join(d, (kc + '#' + var).replace('/', '_'))
+if sys.argv[1:2] == ['-i']:
+    t = sys.stdin.read().split()
+    if os.environ.get('FAKE_KC_FAIL'):
+        sys.exit(0)
+    kc, var, hx = t[t.index('-s') + 1], t[t.index('-a') + 1], t[t.index('-X') + 1]
+    open(path(kc, var), 'w').write(bytes.fromhex(hx).decode())
+elif sys.argv[1:2] == ['find-generic-password']:
+    kc, var = sys.argv[sys.argv.index('-s') + 1], sys.argv[sys.argv.index('-a') + 1]
+    try:
+        print(open(path(kc, var)).read())
+    except OSError:
+        sys.exit(44)
+PY
+chmod +x "$T/bin/fakesec"
+export KITH_SECURITY_BIN=$T/bin/fakesec
+
+# --- the fixture, as a real auth.json ---------------------------------------------------------------------------------------
+G=$T/g
+mkdir -p "$G/home" "$G/serve"
+use_home "$G"
+for a in house writer helper; do
+  mkdir -p "$KITH_HOME/agents/$a/role"
+  printf -- '---\nname: %s\ndescription: test\n---\nbody\n' "$a" > "$KITH_HOME/agents/$a/role/agent.md"
+done
+# house's package: a helper, a job, and a job that holds a door (a guest's box; doors are for people an agent is shared with)
+house_caps() {   # [needs-line]
+  printf '%shelpers: [helper]\ndoors:\n  - name: render\n    npm: [hyperframes@0.4.1]\n    lockfile: render.lock.json\n    tools: [node]\n    bin: hyperframes/bin/hyperframes.mjs\n    args: [render]\n    writes: [renders]\njobs:\n  - name: edit\n    label: Edit things\n    helpers: [helper]\n  - name: draw\n    label: Draw things\n    doors: [render]\n' "${1:-}" > "$KITH_HOME/agents/house/role/capabilities.yaml"
+}
+house_caps
+echo '{"lockfileVersion":3}' > "$KITH_HOME/agents/house/role/render.lock.json"
+A person kai owner name=Kai >/dev/null
+A person sam name=Sam >/dev/null
+A person sam id=samuel >/dev/null                    # renamed: sam is an old id of samuel
+A person tim name=Tim >/dev/null
+A person amy name=Amy >/dev/null
+A person dan name=Dan >/dev/null
+A person eve name=Eve >/dev/null
+A person zed name=Zed >/dev/null
+A person zed --rm >/dev/null                         # a retired id
+A preset member mode=default >/dev/null
+A preset ghost mode=default >/dev/null
+A bot samuelbot --of samuel >/dev/null
+A person samuelbot id=botty >/dev/null               # a bot with `was`
+A bot timbot --of tim >/dev/null
+A bot kaibot --of kai >/dev/null
+A person kaibot id=kaib >/dev/null                   # one of the owner's bots, renamed (bots-cap --json lists its old id too)
+# the core keeps memberships ordered by agent and person, not as the file was written: the rows of an agent go in in that
+# order, so the verbs that list a table (budgets, ledger) read the same on both sides
+A member house '*' preset=member >/dev/null          # everyone: "member (everyone)" for a person, never for a bot
+A member house amy preset=member helpers=writer >/dev/null
+A member house botty >/dev/null
+A member house dan preset=ghost >/dev/null
+A member house eve preset=member >/dev/null
+A member house samuel preset=member budget=5 >/dev/null
+A member house timbot >/dev/null                     # a bot of the revoked tim: cut off through bot_of
+A member writer samuel preset=member >/dev/null
+A helper house amy helper --once >/dev/null          # a "just this once" on a helper
+A job house eve edit >/dev/null                      # a ticked job that grants the helper
+A job house eve draw >/dev/null                      # ... and one that grants the door: eve may start it
+A job house amy draw --shown '{"doors": []}' >/dev/null   # ticked when it showed no door: the package has one now (widened)
+A job house botty draw >/dev/null                    # a bot's own tick, its owner (samuel) has none: owner-lacks
+A person tim --revoke >/dev/null
+A agent-access house domain kept.example.com >/dev/null   # a host kept for every guest of house
+A bots-cap 50 >/dev/null
+A handle kai telegram 111 >/dev/null
+A handle samuel telegram 222 >/dev/null
+A handle tim telegram 333 >/dev/null
+A handle botty telegram 444 >/dev/null
+# what the CLI has no verb for: a preset deleted under a member, a grant, a list of grants
+python3 - "$AUTHJ" <<'PY'
+import json, sys
+p = sys.argv[1]
+a = json.load(open(p))
+a['presets'].pop('ghost', None)
+a['members']['house']['amy']['helper_once']['helper'] = 4102444800000   # year 2100: the verb's five minutes would run out in a slow CI run
+a['grants'] = {'house': {'github': 'work', 'fly': ['a', 'b'], 'echo': 'echo/work', 'login': 'login/main', 'later': 'later/main'},
+               'writer': {'github': 'other', 'echo': ['echo/kai', 'echo/work']},
+               'house@samuel': {'login': 'login/samuel', 'echo': 'echo/kai'},   # a person's own grants, looked up first
+               'house@amy': {'login': 'login/lent'},                            # the owner's login, lent to amy
+               'house@eve': {'login': 'login/main'},                            # the owner's login, NOT lent: refused
+               'oldagent': {'echo': 'echo/work'}}                               # an agent that is gone
+# S-a: the profiles (where a value lives, here `env:` references the check exports), a login that is personal (the owner's
+# unless named), one lent to amy, a shared one, and the env that mcp-config and exec read (an agent that is gone too)
+a['profiles'] = {'echo/work': {'TOKEN': 'env:RT_WORK'},
+                 'echo/kai': {'TOKEN': 'env:RT_KAI', 'person': 'kai'},
+                 'echo/team': {'TOKEN': 'env:RT_TEAM', 'person': '*'},
+                 'login/main': {'PASS': 'env:RT_OWNER_PASS'},
+                 'login/samuel': {'PASS': 'env:RT_SAM_PASS', 'person': 'samuel'},
+                 'login/lent': {'PASS': 'env:RT_LENT_PASS', 'with': ['amy']},
+                 'login/shared': {'PASS': 'env:RT_SHARED_PASS', 'person': '*'},
+                 'login/unset': {},
+                 'later/main': {'K': 'env:RT_LATER'}}   # unmarked, on a service that is not personal yet
+a['env'] = {'house': {'echo': {'Z': 'z-$KITH_AGENT', 'A': 'a', 'M': '3'}}, 'writer': {'echo': {'W': 'w'}},
+            'oldagent': {'echo': {'Q': 'q'}}}
+json.dump(a, open(p, 'w'), indent=2)
+PY
+mkdir -p "$KITH_HOME/services"
+printf '{"kind": "mcp", "secrets": ["TOKEN"], "mcp": {"command": "echo", "args": ["serve", "$KITH_AGENT"], "env": {"BASE": "b-$KITH_AGENT"}}}\n' > "$KITH_HOME/services/echo.json"
+printf '{"kind": "login", "secrets": ["PASS"]}\n' > "$KITH_HOME/services/login.json"
+printf '{"kind": "cli", "secrets": ["K"]}\n' > "$KITH_HOME/services/later.json"   # not personal, until iso turns it
+printf '{"kind": "connector", "description": "a host connector"}\n' > "$KITH_HOME/services/calendar.json"   # no secrets: its profile is the host's
+house_caps $'needs: [echo]\n'
+printf 'needs: [echo]\n' > "$KITH_HOME/agents/writer/role/capabilities.yaml"
+export RT_WORK=sec-work RT_KAI=sec-kai RT_TEAM=sec-team RT_OWNER_PASS=pass-owner RT_SAM_PASS=pass-sam RT_LENT_PASS=pass-lent RT_SHARED_PASS=pass-shared RT_LATER=sec-later
+[[ -f $AUTHJ ]] && ok "setup: the fixture auth.json is there" || bad "setup: no auth.json"
+
+DOOR=$(A jobs house --json | python3 -c 'import json,sys; print(next(d for j in json.load(sys.stdin)["jobs"] for d in j["doors"]))')
+[[ $DOOR == render@* ]] && ok "setup: the door piece is $DOOR" || bad "setup: no door piece" "$DOOR"
+
+PERSONS=(kai samuel sam tim timbot amy dan eve botty samuelbot kaib kaibot zed nobody)
+AGENTS=(house writer helper nothere)
+[[ -n ${ROUTER_QUICK:-} ]] && { PERSONS=(kai samuel); AGENTS=(house writer); }   # while writing the check
+# matrix OUTFILE: every routed verb over the fixture, "$ command", stdout, "rc=N". Stderr is left out (it names paths).
+matrix() {
+  local out=$1 p a v
+  : > "$out"; : > "$out.err"
+  # a linked Mac whose lease ran out: `held` is true for everyone but the owner (the serve folder is the caller's KITH_SERVE_DIR)
+  printf '{"linked": true, "until": 1}\n' > "$KITH_SERVE_DIR/cloud-sync.json"
+  run() { { echo "\$ $*"; "$@" 2>>"$out.err"; echo "rc=$?"; } >> "$out"; }
+  run_as() { local who=$1; shift; { echo "\$ KITH_PERSON=$who $*"; KITH_PERSON=$who "$@" 2>>"$out.err"; echo "rc=$?"; } >> "$out"; }
+  for p in "${PERSONS[@]}"; do
+    for a in "${AGENTS[@]}"; do
+      run A may "$p" "$a"
+      run A resolve "$a" --person "$p"
+      for v in house writer helper; do
+        [[ $v == "$a" ]] && continue
+        run A may "$p" "$a" --via "$v"
+        run A may "$p" "$a" --via "$v" --once
+        run A resolve "$a" --person "$p" --via "$v"
+      done
+    done
+    run A people --json
+  done
+  for p in kai samuel sam botty; do run_as "$p" A resolve house; run_as "$p" A resolve writer --via house; done
+  for h in "telegram 111" "telegram 222" "telegram 333" "telegram 444" "telegram 999" "slack U1" "discord 1"; do
+    run A who $h
+    run A whois $h
+  done
+  run A granted github
+  run A granted fly
+  run A granted --for writer github
+  run A granted --for house nothing
+  run A granted fly --json
+  run A granted --for writer github --json
+  run A granted --json nothing
+  run A bots-cap --json
+  run A people --json
+  run A retired zed
+  run A retired samuel
+  run A retired sam
+  run A retired stranger
+  run A budgets house --json
+  run A budgets writer --json
+  run A ledger --json
+  run A ledger --person samuel --json
+  run A ledger --person sam --agent house --json
+  run A ledger --agent house --json
+  run A ledger --agent nobody --json
+  # S-a, the secret reads: who sees which profile, whose env, over owner / a person with their own grant / a guest lent the
+  # owner's login / a guest refused it / a bot / nobody. keys comes first and the hand-out log starts empty, so `last_used`
+  # is the same on both sides (the log names the second, which differs from run to run).
+  rm -f "$(dirname "$AUTHJ")/auth.log"
+  run A keys --json
+  run A holders echo
+  run A holders login --json
+  for p in kai samuel amy eve botty nobody; do
+    run_as "$p" A holders echo --json
+    run_as "$p" A holders login
+    for a in house writer oldagent; do
+      run_as "$p" A mcp-config "$a"
+      run_as "$p" A account-state "$a" echo --json
+      run_as "$p" A get --for "$a" echo TOKEN
+      run_as "$p" A get --for "$a" login PASS
+    done
+    run_as "$p" A account-state house login --json
+    run_as "$p" A get --for house echo PASS
+    run_as "$p" A exec --for house echo -- sh -c 'echo "T=$TOKEN B=$BASE Z=$Z A=$A M=$M W=$W Q=$Q"'
+    run_as "$p" A exec --for writer echo -- sh -c 'echo "T=$TOKEN B=$BASE Z=$Z A=$A M=$M W=$W Q=$Q"'
+    run_as "$p" A exec --for house login -- sh -c 'echo "P=$PASS"'
+  done
+  # C-b: the edge card's listing and the jobs lists the launch reads, over kith-auth's own code
+  for a in house writer nothere; do
+    run A agent-access "$a"
+    run A agent-access "$a" --json
+    run A jobs "$a"
+    run A jobs "$a" --json
+    for p in eve samuel amy; do run A jobs "$a" --person "$p" --json; done
+  done
+  run A jobs house --domain a.example --json
+  # the routed listings: the owner's `ls`, the connectors, the servers an agent would start (kith-info lists them)
+  run A ls
+  run A ls --json
+  run A connectors
+  run A connectors --json
+  for a in house writer helper; do
+    run A connectors "$a"
+    run A connectors "$a" --json
+    for p in kai amy; do run_as "$p" A mcp-names "$a"; done
+  done
+  run A mcp-names oldagent
+  run A mcp-names nothere
+  # the door: may this person's run of the agent start it now (a guest's door, the start and the sweep of kith_door.py). On a
+  # linked Mac whose lease ran out (here) every guest is `held`; the rows after the lease is back show the real states.
+  for p in "${PERSONS[@]}"; do run A door house "$p" "$DOOR"; run A door house "$p" "$DOOR" --json; done
+  run A jobs house --helper helper --person eve
+  KITH_AUTH_PROFILE=echo/work run A get --for writer echo TOKEN
+  run A get --for writer --profile echo/kai echo TOKEN
+  run A account-state house nothere --json
+  rm -f "$KITH_SERVE_DIR/cloud-sync.json"
+  for p in kai samuel tim; do run A resolve house --person "$p"; done   # and once more with no cloud-sync file: never linked
+  # the door with the lease back: ok (eve), widened (amy), owner-lacks (botty), not-ticked (samuel), the owner, a revoked person
+  # and the bot of one (their door is closed), a person that does not exist, and the pieces the package does not hold
+  for p in "${PERSONS[@]}"; do run A door house "$p" "$DOOR"; run A door house "$p" "$DOOR" --json; done
+  run A door house eve render@000000000000 --json    # the package changed since this chat started
+  run A door house eve render@000000000000
+  run A door house eve nodoor@abc123 --json          # no job of the agent has it
+  run A door house eve render --json                 # a name is no piece
+  run A door writer eve "$DOOR" --json               # an agent that holds no such door
+  run A door nothere eve "$DOOR" --json
+}
+matrix "$T/golden.out"
+rows=$(grep -c '^\$' "$T/golden.out")
+[[ $rows -gt 300 || -n ${ROUTER_QUICK:-} ]] && ok "golden: $rows routed calls over the file" || bad "golden: too few calls ($rows)"
+grep -q 'rc=2$' "$T/golden.out" && bad "golden: a call was a usage error" "$(grep -B2 'rc=2$' "$T/golden.out" | head -6)"
+grep -q '^{"person": "samuel"' "$T/golden.out" && ok "golden: who finds the renamed person" || bad "golden: who"
+grep -q '"held": true' "$T/golden.out" && grep -q '"held": false' "$T/golden.out" && ok "golden: held is true and false in the matrix" || bad "golden: held"
+grep -qi 'just this once' "$T/golden.out" && bad "golden: matrix must not use up a once" || ok "golden: no once used by the matrix"
+
+# --- the switched copies -------------------------------------------------------------------------------------------------------
+# A copy of the home, stepped for real.
+TOMB='{"kith_tombstone": 1, "module": "authority", "message": "this data moved to the Kith core (module authority); the old reader must not use this file", "rollback": "kith rollback authority"}'
+switch_copy() {   # NAME
+  local d=$T/$1
+  mkdir -p "$d" && cp -R "$G/home" "$d/home" && cp -R "$G/serve" "$d/serve"
+  use_home "$d"
+  local mig
+  # The real step (M2-23 lift): import, same answer, the marker, the record and the tombstone, under auth.json's lock.
+  mig=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1) || { bad "setup $1: migrate step authority" "$mig"; return 1; }
+  grep -q '"kith_tombstone"' "$AUTHJ" || { bad "setup $1: auth.json is not a tombstone after the step" "$mig"; return 1; }
+}
+switch_copy sw1 && ok "setup: the embedded copy is switched" || exit 1
+switch_copy sw2 && ok "setup: the daemon copy is switched" || exit 1
+switch_copy sw3 || exit 1
+switch_copy sw4 || exit 1
+
+use_home "$T/sw1"
+matrix "$T/sw1.out"
+if cmp -s "$T/golden.out" "$T/sw1.out"; then ok "switched, embedded: all $rows routed calls answer as the file does"; else
+  bad "switched, embedded: differs from the file" "$(diff "$T/golden.out" "$T/sw1.out" | head -20; sort "$T/sw1.out.err" | uniq -c | sort -rn | head -5)"; fi
+
+use_home "$T/sw2"
+mkfifo "$T/stdin"
+"$BIN" kernel core-daemon < "$T/stdin" > "$T/daemon.out" 2>&1 &
+DPID=$!
+exec 7> "$T/stdin"
+for _ in $(seq 100); do grep -q '^ready' "$T/daemon.out" 2>/dev/null && break; sleep 0.1; done
+if grep -q '^ready' "$T/daemon.out"; then
+  matrix "$T/sw2.out"
+  if cmp -s "$T/golden.out" "$T/sw2.out"; then ok "switched, through a daemon: all $rows routed calls answer as the file does"; else
+    bad "switched, through a daemon: differs from the file" "$(diff "$T/golden.out" "$T/sw2.out" | head -20)"; fi
+else
+  bad "the core daemon did not start" "$(cat "$T/daemon.out")"
+fi
+
+# --- 2. sequences ----------------------------------------------------------------------------------------------------------------
+# The take-once: the first helper launch is allowed on the "just this once" and uses it up, the second is refused; the file does
+# it in one locked step, the core in one transaction, and the answers are the same. Run on the file, the embedded core and the daemon.
+seq_once() {   # OUT
+  local out=$1
+  : > "$out"
+  { echo "\$ first";  A resolve helper --person amy --via house --take-once 2>/dev/null; echo "rc=$?"
+    echo "\$ second"; A resolve helper --person amy --via house --take-once 2>/dev/null; echo "rc=$?"
+    echo "\$ after";  A may amy helper --via house --once 2>/dev/null; echo "rc=$?"
+    echo "\$ no caller"; A resolve helper --person amy --take-once 2>/dev/null; echo "rc=$?"; } >> "$out"
+}
+# Guest isolation: a guest run never gets a profile that is the owner's unless it was lent to them. `get` hands out the value,
+# so the answers are compared with what each person may have: the owner's login for the owner, the lent one for amy, samuel's
+# own grant for samuel (looked up before the agent's), and nothing for eve (the owner's login, not lent) or a stranger.
+iso() {   # WHERE
+  local where=$1 who want got rc
+  for row in "kai:pass-owner" "amy:pass-lent" "samuel:pass-sam" "eve:" "nobody:" "botty:"; do
+    who=${row%%:*}; want=${row#*:}
+    got=$(KITH_PERSON=$who A get --for house login PASS 2>/dev/null); rc=$?
+    if [[ -n $want ]]; then
+      [[ $got == "$want" && $rc == 0 ]] && ok "isolation, $where: $who gets $want" || bad "isolation, $where: $who" "rc=$rc got=$got"
+    else
+      [[ -z $got && $rc != 0 ]] && ok "isolation, $where: $who gets no login" || bad "isolation, $where: $who was handed something" "rc=$rc got=$got"
+    fi
+  done
+  # a profile nobody named, on a service that turns personal after the import: it is the owner's now, never a guest's
+  printf '{"kind": "cli", "personal": true, "secrets": ["K"]}\n' > "$KITH_HOME/services/later.json"
+  got=$(KITH_PERSON=eve A get --for house later K 2>/dev/null); rc=$?
+  [[ -z $got && $rc != 0 ]] && ok "isolation, $where: an unmarked profile of a service that turned personal is not eve's" || bad "isolation, $where: later, eve" "rc=$rc got=$got"
+  got=$(KITH_PERSON=kai A get --for house later K 2>/dev/null); rc=$?
+  [[ $got == sec-later && $rc == 0 ]] && ok "isolation, $where: ... and is still the owner's" || bad "isolation, $where: later, kai" "rc=$rc got=$got"
+  got=$(KITH_PERSON=eve A exec --for house login -- sh -c 'echo "P=$PASS"' 2>/dev/null); rc=$?
+  [[ -z $got && $rc != 0 ]] && ok "isolation, $where: exec for eve starts nothing with the owner's login" || bad "isolation, $where: exec for eve" "rc=$rc got=$got"
+  got=$(KITH_PERSON=samuel A exec --for writer echo -- sh -c 'echo "T=$TOKEN"' 2>/dev/null); rc=$?
+  [[ -z $got && $rc != 0 ]] && ok "isolation, $where: exec for samuel is refused the owner's key" || bad "isolation, $where: exec for samuel" "rc=$rc got=$got"
+}
+mkdir -p "$T/gs" && cp -R "$G/home" "$T/gs/home" && cp -R "$G/serve" "$T/gs/serve"
+use_home "$T/gs"; seq_once "$T/once.golden"
+if grep -q 'just this once' "$T/once.golden" && [[ $(grep -c '"allowed": true' "$T/once.golden") == 1 ]]; then
+  ok "take-once, file: the first launch is allowed on the once, the second is refused"
+else bad "take-once, file" "$(cat "$T/once.golden")"; fi
+iso "the file"
+use_home "$T/sw1"; seq_once "$T/once.sw1"
+cmp -s "$T/once.golden" "$T/once.sw1" && ok "take-once, embedded core: the same answers" || bad "take-once, embedded core" "$(diff "$T/once.golden" "$T/once.sw1")"
+iso "embedded core"
+# --- 2b. the card writes ----------------------------------------------------------------------------------------------------------
+# One sequence of writes and the reads that show their effect. Stdout, exit code and stderr (with the home's path taken out and
+# the clock's milliseconds) are what is compared: the file, then the daemon, must give the same.
+cw() {   # OUT
+  local out=$1
+  : > "$out"
+  run() {
+    local o rc
+    o=$("$@" 2>"$out.e"); rc=$?
+    { echo "\$ $*"; [[ -n $o ]] && echo "$o"; echo "rc=$rc"; sed 's/^/err: /' "$out.e"; } | sed -e "s#$HOME#<H>#g" -e "s#$KERNEL#<K>#g" >> "$out"
+  }
+  mkdir -p "$HOME/shared"
+  run A access house samuel domain docs.example.com
+  run A access house samuel domain docs.example.com                     # the same always twice: one entry
+  run A access house samuel read "$HOME/shared"
+  run A access house samuel write "$HOME/shared/out"
+  run A access house samuel read "$HOME/shared/out/x" --by samuel       # a member approves for themselves
+  run A access house samuel read "$HOME/shared/y" --by kai              # the owner's yes outlasts a person's
+  run A access house kai domain a.example.com                           # the owner: refused
+  run A access house '*' domain a.example.com                           # the everyone row: refused
+  run A access house amy domain a.example.com --by samuel               # only for themselves or their own bot
+  run A access house eve domain a.example.com --by eve
+  run A access house dan domain a.example.com --by dan                  # on a deleted preset: the rules have no answer
+  run A access house tim domain a.example.com                           # revoked, no row of their own
+  run A access house timbot domain a.example.com                        # a bot of a revoked person
+  run A access house botty domain docs.example.com                      # samuel's bot, within what samuel holds
+  run A access house botty domain other.example.com                     # above its owner: refused
+  run A access house botty read "$HOME/shared/out/z" --by samuel
+  run A access house nobody domain a.example.com
+  run A access house samuel domain '*.example.com'                      # not a plain host
+  run A access house samuel read relative/path
+  run A access house samuel read "$KITH_HOME/secrets/auth.json"         # a secret
+  run A access house samuel write "$HOME/.cargo/bin/x"                  # rule W
+  run A access house samuel read "$KERNEL/bin"                          # the kernel is rule W
+  run A access house samuel --by samuel
+  run A access house samuel domain docs.example.com --rm
+  run A access house samuel read "$HOME/shared/out/x" --rm
+  run A access house tim read /nowhere --rm                             # a removal checks nothing
+  run A helper house amy helper
+  run A helper house amy helper                                         # twice: one entry
+  run A helper house amy writer --once
+  run A helper house botty writer                                       # more than samuel holds: refused
+  run A helper house kai helper
+  run A helper house amy nothere
+  run A helper house amy house
+  run A helper house tim helper
+  run A helper house amy helper --rm
+  run A helper house tim helper --rm
+  run A helper house amy
+  run A job house eve edit --decline h1
+  run A job house eve edit --decline h1
+  run A job house eve edit --decline h2
+  run A job house eve nope --decline h1
+  run A job house amy edit --decline h1                                 # amy never ticked it
+  run A job house kai edit --decline h1
+  run A job house eve edit --rm
+  run A job house eve edit --rm
+  run A job house amy edit                                              # a tick at share: the job as the package declares it
+  run A jobs house --person amy --json
+  run A job house amy edit --shown '{"helpers": ["helper", "gone"], "domains": ["x.example"]}'   # cut to what the package holds now
+  run A jobs house --person amy --json
+  run A job house amy edit --shown 'nope'                               # not JSON
+  run A job house amy edit --shown '[1]'                                # not an object
+  run A job house amy nope                                              # no such job
+  run A job house kai edit                                              # the owner
+  run A job house tim edit                                              # revoked, no row of their own
+  run A job house nobody edit
+  run A job house '*' edit                                              # the everyone row is no row of their own
+  run A job 'bad name' amy edit
+  run A job house botty edit                                            # a bot's own tick, within its owner
+  run A job house amy edit --rm
+  run A job house botty edit --rm
+  run A agent-access house --json
+  run A jobs house --person eve --json
+  run A ledger --json
+  sed -i.bak -E 's/[0-9]{13}/<ms>/g' "$out" && rm -f "$out.bak" "$out.e"
+}
+cw_ledger() { A ledger --json 2>&1 | sed -E 's/[0-9]{13}/<ms>/g'; }
+use_home "$T/gs"; cw "$T/cw.golden"
+[[ $(grep -c '^\$' "$T/cw.golden") -gt 40 ]] && ok "card writes, file: $(grep -c '^\$' "$T/cw.golden") calls" || bad "card writes, file: too few calls"
+grep -q 'samuel may domain docs.example.com beyond the box for house' "$T/cw.golden" && grep -q "kai is the owner" "$T/cw.golden" \
+  && grep -q 'rule W' "$T/cw.golden" && grep -q 'is a secret' "$T/cw.golden" && grep -q 'more than its owner' "$T/cw.golden" \
+  && grep -q 'approves only for themselves' "$T/cw.golden" && grep -q 'stays as it was ticked' "$T/cw.golden" \
+  && ok "card writes, file: the grants and every kind of refusal are in the sequence" || bad "card writes, file: the sequence misses a case"
+# embedded: no daemon, so every write exits 3 and nothing changes (a grant must never run in an embedded core)
+use_home "$T/sw1"
+before=$(cw_ledger)
+cw "$T/cw.sw1"
+if [[ $(cw_ledger) == "$before" ]] && ! grep -q 'may domain\|may call\|stays as it was' "$T/cw.sw1" && grep -c '^rc=3$' "$T/cw.sw1" | grep -q '^[1-9]'; then
+  ok "card writes, embedded core: the writes exit 3 and change nothing"
+else bad "card writes, embedded core: a write ran" "$(grep -B1 -A2 'may domain\|may call' "$T/cw.sw1" | head; diff <(echo "$before") <(cw_ledger) | head -5)"; fi
+if [[ -n $DPID ]] && kill -0 "$DPID" 2>/dev/null; then
+  use_home "$T/sw2"; seq_once "$T/once.sw2"
+  cmp -s "$T/once.golden" "$T/once.sw2" && ok "take-once, daemon: the same answers" || bad "take-once, daemon" "$(diff "$T/once.golden" "$T/once.sw2")"
+  iso "daemon"
+  # `kith doctor` on the stepped home: iso turned the service of `later/main` personal after the import stored it with no owner, so the
+  # core reads it as shared, where the file read it as the owner's: doctor says so. The file home (iso did the same there) says nothing.
+  python3 "$KERNEL/bin/kith-doctor" > "$T/doctor.sw2" 2>&1
+  if grep -q 'profiles: later/main names no owner in the core' "$T/doctor.sw2"; then ok "doctor: a profile with no owner on a service that is personal now is flagged on the stepped home"; else
+    bad "doctor: later/main not flagged" "$(grep -i 'profile\|switched\|core' "$T/doctor.sw2" | head -5)"; fi
+  use_home "$T/gs"; python3 "$KERNEL/bin/kith-doctor" > "$T/doctor.gs" 2>&1
+  ! grep -q 'names no owner in the core' "$T/doctor.gs" && ok "doctor: the file home has no such warning" || bad "doctor: the file home was flagged"
+  use_home "$T/sw2"
+  # the core says where a value lives, never the value: no secret, no invite code, no chat handle in what it answers
+  printf '{"viaSwitch": true, "kernel": "%s", "home": "%s"}' "$KERNEL" "$HOME" | "$BIN" kernel core-call people.secretsView --params-stdin > "$T/view.out" 2>/dev/null
+  if grep -q 'env:RT_WORK' "$T/view.out" && ! grep -Eq 'sec-work|sec-kai|pass-owner|pass-sam|pass-lent|"handles"|telegram' "$T/view.out"; then
+    ok "secretsView: references and env only, no value, no handle"
+  else bad "secretsView: what the core answers" "$(head -c 600 "$T/view.out")"; fi
+  # the card writes through the daemon: after everything above, which reads the home it changes
+  use_home "$T/sw2"
+  cw "$T/cw.sw2"
+  if cmp -s "$T/cw.golden" "$T/cw.sw2"; then ok "card writes, through a daemon: every line, refusal and exit code is the file's"; else
+    bad "card writes, through a daemon: differs from the file" "$(diff "$T/cw.golden" "$T/cw.sw2" | head -30)"; fi
+  # --- 2c. S-b, the secret writers --------------------------------------------------------------------------------------------
+  # set, grant, revoke, connect, disconnect, env and `agent-access ... domain` on the file, through the daemon (must be the
+  # file's, state included) and on the embedded core (every write exits 3, nothing changes). A fake `security` keeps the
+  # Keychain's items in a folder, so `set` runs for real and the check can see what was stored and where.
+  profile_names() {   # the profiles the home holds: auth.json's, or on the tombstone the core's
+    if grep -q kith_tombstone "$AUTHJ" 2>/dev/null; then
+      printf '{"viaSwitch": true, "kernel": "%s", "home": "%s"}' "$KERNEL" "$HOME" | "$BIN" kernel core-call people.secretsView --params-stdin 2>/dev/null \
+        | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["auth"]["profiles"])))'
+    else
+      python3 -c 'import json,sys; print(" ".join(sorted(json.load(open(sys.argv[1]))["profiles"])))' "$AUTHJ"
+    fi
+  }
+  sb() {   # OUT: the writers, then the reads that show their effect
+    local out=$1
+    : > "$out"
+    export FAKE_KC_DIR=$out.kc
+    rm -rf "$FAKE_KC_DIR"; mkdir -p "$FAKE_KC_DIR"
+    run() {
+      local o rc
+      o=$("$@" 2>"$out.e"); rc=$?
+      { echo "\$ $*"; [[ -n $o ]] && echo "$o"; echo "rc=$rc"; sed 's/^/err: /' "$out.e"; } | sed -e "s#$HOME#<H>#g" -e "s#$KERNEL#<K>#g" >> "$out"
+    }
+    runi() {   # STDIN-TEXT command...: the text is never printed (it holds a value)
+      local in=$1 o rc; shift
+      o=$(printf '%s' "$in" | "$@" 2>"$out.e"); rc=$?
+      { echo "\$ <stdin> $*"; [[ -n $o ]] && echo "$o"; echo "rc=$rc"; sed 's/^/err: /' "$out.e"; } | sed -e "s#$HOME#<H>#g" -e "s#$KERNEL#<K>#g" >> "$out"
+    }
+    runi "{\"TOKEN\": \"$SENT-1\"}" A set echo/new --stdin-json
+    runi "{\"TOKEN\": \"$SENT-1\"}" A set echo/new --stdin-json                    # the same set twice: the same result
+    runi "{\"TOKEN\": \"$SENT-2\"}" A set echo/new --stdin-json --grant house
+    runi "{\"TOKEN\": \"$SENT-2\"}" A set echo/new --stdin-json --grant house      # ... and the same grant
+    runi "{\"TOKEN\": \"$SENT-3\"}" A set echo/second --stdin-json --grant writer  # a list of three after the fixture's two
+    runi "{\"PASS\": \"$SENT-4\"}" A set login/mine --stdin-json                   # a personal service: the owner's profile
+    runi "{\"PASS\": \"$SENT-4\"}" A set login/mine --stdin-json --grant helper
+    runi "{\"TOKEN\": \"$SENT-5\"}" A set echo/team --stdin-json                   # an existing profile keeps what it has
+    runi "{\"TOKEN\": \"$SENT-6\"}" A set echo --stdin-json                        # not <service>/<account>
+    runi "{\"TOKEN\": \"$SENT-6\"}" A set Echo/x --stdin-json
+    runi "{\"NOPE\": \"$SENT-6\"}" A set echo/x --stdin-json                       # a name the service does not declare
+    runi "{\"TOKEN\": \"\"}" A set echo/x --stdin-json
+    runi "{\"TOKEN\": 5}" A set echo/x --stdin-json
+    runi 'not json' A set echo/x --stdin-json
+    runi "{\"TOKEN\": \"$SENT-6\"}" A set echo/x --stdin-json --grant 'no good'
+    runi "{\"TOKEN\": \"$SENT-6\"}" A set nosuch/x --stdin-json
+    run A grant house echo echo/work,echo/kai
+    run A grant writer@samuel echo echo/kai
+    run A grant writer@nobody echo echo/kai                                        # no such person now
+    run A grant house echo login/x                                                 # not an echo profile
+    run A grant house nosuch work
+    run A grant --all echo echo/new
+    run A grant house,helper echo echo/new,echo/second --json
+    run A grant nobody echo echo/new --json                                        # an agent this Mac has no package for
+    run A grant nobody echo echo/new                                               # (the text form never refused it)
+    run A grant house calendar calendar/host
+    run A grant house echo echo/ghost --json
+    run A connect house echo
+    run A connect writer echo --profile echo/work
+    run A connect writer echo --profile echo/work --json
+    run A connect writer echo --profile bad
+    run A connect house echo --profile echo/nothing
+    run A connect house nothere
+    run A connect house login
+    run A connect helper calendar
+    run A connect helper calendar --json
+    run A connect writer@samuel echo
+    run A disconnect helper calendar
+    run A disconnect helper calendar --json
+    run A disconnect writer echo
+    run A disconnect house nothere --json
+    run A disconnect house@x echo
+    run A connect writer calendar
+    run A disconnect writer calendar
+    echo "host profiles: $(profile_names | tr ' ' '\n' | grep '/host$' | tr '\n' ' ')" >> "$out"   # calendar/host, held by house
+    run A disconnect house calendar                                                # the last holder: the host profile goes with it
+    echo "host profiles: $(profile_names | tr ' ' '\n' | grep '/host$' | tr '\n' ' ')" >> "$out"
+    run A disconnect house calendar                                                # nothing held now
+    run A revoke writer echo --profile echo/work
+    run A revoke writer echo --profile echo/work --json
+    run A revoke house echo --profile echo/new --json
+    run A revoke helper echo
+    run A revoke helper echo --json
+    run A revoke ghost echo --json                                                 # an agent that never existed
+    run A revoke oldagent echo --json                                              # a retired agent's row can still go
+    run A revoke house
+    run A env house echo
+    run A env house echo NEW=1 Z=zz A=
+    run A env house echo M= NEW=2 B=b
+    run A env house echo NEW= NEW=again
+    run A env house nothere X=1
+    run A env house echo bad
+    run A env writer echo W=
+    run A env oldagent echo Q=
+    run A agent-access house domain new.example.com
+    run A agent-access house domain new.example.com
+    run A agent-access house domain '*.example.com'
+    run A agent-access house domain new.example.com --rm
+    run A agent-access house domain never.example.com --rm
+    run A agent-access house
+    # the profile writers: whose a profile is, who it is lent to, a browser profile. The lines are the file's, and so is what
+    # the reads show after them (`keys` names each profile's owner, `holders` who holds it); a refusal writes nothing
+    run A owner echo/work samuel
+    run A owner echo/work -
+    run A owner echo/work default
+    run A owner login/main amy
+    run A owner login/main default
+    run A owner login/unset tim
+    run A owner echo/work nobody                                                   # no such person now
+    run A owner nosuch/x samuel                                                    # no such profile
+    run A owner echo/work
+    run A share echo/work samuel,amy
+    run A share echo/work amy,tim,samuel
+    run A share echo/work amy --rm
+    run A share echo/work samuel,amy --rm
+    run A share echo/work samuel,,tim
+    run A share echo/work tim --rm
+    run A share echo/work nobody
+    run A share nosuch/x samuel
+    run A share echo/work samuel --nope
+    run A browser work
+    run A browser work chrome
+    run A browser browser/work edge                                                # a note: it was made in chrome
+    run A browser browser/work edge
+    run A browser other
+    run A browser ../outside                                                       # would leave browsers/: refused
+    run A browser browser/a/b
+    run A browser ..
+    run A keys --json
+    run A holders echo
+    run A holders login --json
+    run A granted echo
+    run A granted --for writer echo
+    run A granted --for house echo --json
+    run A mcp-config house
+    run A account-state house echo --json
+    run A account-state helper login --json
+    run A ledger --json
+    run A agent-access house --json
+    echo "kc: $(ls "$FAKE_KC_DIR" | sort | tr '\n' ' ')" >> "$out"
+    sed -i.bak -E -e 's/[0-9]{13}/<ms>/g' -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}/<t>/g' "$out" && rm -f "$out.bak" "$out.e"
+  }
+  sb_state() { { A keys --json; A ledger --json; A granted echo; A holders login; A mcp-config house; A agent-access house --json; } 2>&1 | sed -E -e 's/[0-9]{13}/<ms>/g' -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}/<t>/g'; }
+
+  # the file's answers (gs is a file home), then the daemon's
+  use_home "$T/gs"
+  sb "$T/sb.golden"
+  rows=$(grep -c '^\$' "$T/sb.golden")
+  [[ $rows -gt 70 ]] && ok "secret writers, file: $rows calls" || bad "secret writers, file: too few calls ($rows)"
+  [[ $(grep -c '^host profiles: .*calendar/host' "$T/sb.golden") == 1 ]] && [[ $(grep -c '^host profiles: $' "$T/sb.golden") == 1 ]] \
+    && ok "secret writers, file: the last holder of calendar/host takes the host profile with it" \
+    || bad "secret writers, file: the host profile's drop is not in the sequence" "$(grep '^host profiles' "$T/sb.golden")"
+  grep -q '"profile": "echo/new", "service": "echo", "vars": \["TOKEN"\], "granted": "house"' "$T/sb.golden" \
+    && grep -q 'writer may use echo as echo/kai, echo/work, echo/new\|may use echo as' "$T/sb.golden" \
+    && grep -q 'helper may now use calendar as calendar/host' "$T/sb.golden" \
+    && grep -q 'helper may no longer use calendar' "$T/sb.golden" \
+    && grep -q 'declares' "$T/sb.golden" && grep -q "no person 'nobody'" "$T/sb.golden" \
+    && grep -q 'every guest of house may reach new.example.com' "$T/sb.golden" \
+    && ok "secret writers, file: the writes, the host connector and every kind of refusal are in the sequence" \
+    || bad "secret writers, file: the sequence misses a case" "$(head -c 1500 "$T/sb.golden")"
+  # the embedded core: no daemon, so every write exits 3 and changes nothing, and no Keychain item is written
+  use_home "$T/sw1"
+  before=$(sb_state)
+  sb "$T/sb.sw1"
+  if [[ $(sb_state) == "$before" ]] && [[ -z $(ls "$T/sb.sw1.kc") ]] && grep -c '^rc=3$' "$T/sb.sw1" | grep -q '^[1-9]' \
+     && ! grep -q 'may now use\|may use echo as\|may no longer use\|"vars": \["[A-Z]*"\], "granted"\|may reach new' "$T/sb.sw1"; then
+    ok "secret writers, embedded core: the writes exit 3, change nothing and store no key"
+  else bad "secret writers, embedded core: a write ran" "$(grep -B1 -A2 'may now use\|"vars": \["[A-Z]*"\], "granted"' "$T/sb.sw1" | head; diff <(echo "$before") <(sb_state) | head -5; ls "$T/sb.sw1.kc")"; fi
+  # through the daemon: every line, refusal, exit code and the state the reads show are the file's
+  use_home "$T/sw2"
+  sb "$T/sb.sw2"
+  if cmp -s "$T/sb.golden" "$T/sb.sw2"; then ok "secret writers, through a daemon: every line, refusal and exit code is the file's, state included"; else
+    bad "secret writers, through a daemon: differs from the file" "$(diff "$T/sb.golden" "$T/sb.sw2" | head -40)"; fi
+  # the core never holds a value: not in a row, not in what was sent (the Keychain has them), and the references are there
+  if ! grep -rqa --exclude='*.sock' "$SENT" "$T/sw2/home/.kith/core"; then ok "secret writers: no value is in the core's files"; else bad "secret writers: a value reached the core's files"; fi
+  [[ $(sqlite3 "$T/sw2/home/.kith/core/$DBF" "SELECT source FROM secret_vars WHERE profile = 'echo/new'") == "keychain:kith/echo/new#TOKEN" ]] \
+    && grep -q "$SENT-2" "$T/sb.sw2.kc/kith_echo_new#TOKEN" && ok "secret writers: the core holds the reference and the Keychain the value" \
+    || bad "secret writers: reference and value" "$(sqlite3 "$T/sw2/home/.kith/core/$DBF" "SELECT * FROM secret_vars" | head -5)"
+  # the core refuses a guest's run itself (the file never did; a guest's MCP server runs outside the box)
+  use_home "$T/sw2"
+  before=$(sb_state)
+  KITH_PERSON=samuel A grant house echo echo/work >"$T/o-g" 2>"$T/e-g"; rc=$?
+  KITH_PERSON=samuel A env house echo GUEST=1 >"$T/o-g2" 2>"$T/e-g2"; rc2=$?
+  KITH_PERSON=samuel A owner echo/work samuel >"$T/o-g3" 2>"$T/e-g3"; rc3=$?
+  KITH_PERSON=samuel A share echo/work samuel >"$T/o-g4" 2>"$T/e-g4"; rc4=$?
+  KITH_PERSON=samuel A browser guestwork chrome >"$T/o-g5" 2>"$T/e-g5"; rc5=$?
+  if [[ $rc == 2 && $rc2 == 2 && $rc3 == 2 && $rc4 == 2 && $rc5 == 2 && $(sb_state) == "$before" ]] \
+     && grep -q 'not available to this run' "$T/e-g" "$T/e-g2" "$T/e-g3" "$T/e-g4" "$T/e-g5"; then
+    ok "secret writers: a guest's run is refused by the core (exit 2), nothing changes"
+  else bad "secret writers: a guest's run" "rc=$rc rc2=$rc2 $(cat "$T/e-g" "$T/e-g2")"; fi
+  # the order: the Keychain item first, the core after, and what each failure leaves
+  mkwrap_set() {   # DIR MODE: the probe answers (a switched daemon); the core's set does as MODE says; the rest goes to the real program
+    mkdir -p "$1"
+    cat > "$1/kith" <<EOF
+#!/bin/sh
+if [ "\$1 \$2" = "kernel core-call" ]; then
+  params=\$(cat)
+  printf '%s %s\n' "\$3" "\$params" >> "$1/calls"
+  case "\$3" in
+    people.revision) echo '{"digest":"0123456789abcdef"}'; exit 0 ;;
+    people.secretSet)
+      case "$2" in
+        refuse) echo 'authority: not switched: authority is back on auth.json' >&2; exit 4 ;;
+        nodaemon) echo 'no core daemon answers' >&2; exit 3 ;;
+        lost) exit 5 ;;
+        applied-lost) printf '%s' "\$params" | "$BIN" "\$@" > /dev/null; exit 5 ;;
+      esac ;;
+  esac
+  printf '%s' "\$params" | "$BIN" "\$@"; exit \$?
+fi
+exec "$BIN" "\$@"
+EOF
+    chmod +x "$1/kith"
+    : > "$1/calls"
+  }
+  setone() {   # NAME PROFILE: one `set` with a fresh Keychain folder; the exit code
+    export FAKE_KC_DIR=$T/kc-$1; rm -rf "$FAKE_KC_DIR"; mkdir -p "$FAKE_KC_DIR"
+    printf '{"TOKEN": "%s-%s"}' "$SENT" "$1" | A set "$2" --stdin-json >"$T/o-$1" 2>"$T/e-$1"; echo $?
+  }
+  use_home "$T/sw2"
+  # the Keychain refuses: nothing is written in the core, and the core was never asked to write
+  mkwrap_set "$T/wo1" pass
+  use_home "$T/sw2" "$T/wo1/kith"
+  rc=$(FAKE_KC_FAIL=1 setone kcfail echo/kcfail)
+  if [[ $rc == 1 ]] && grep -q 'Keychain did not take the key' "$T/e-kcfail" && ! grep -q 'people.secretSet' "$T/wo1/calls" \
+     && [[ -z $(sqlite3 "$T/sw2/home/.kith/core/$DBF" "SELECT profile FROM secret_profiles WHERE profile = 'echo/kcfail'") ]]; then
+    ok "set, the Keychain refuses: exit 1, the core is untouched and was not asked"
+  else bad "set, the Keychain refuses" "rc=$rc $(cat "$T/e-kcfail") $(cat "$T/wo1/calls")"; fi
+  # a guest's run is refused before the Keychain
+  : > "$T/wo1/calls"
+  export FAKE_KC_DIR=$T/kc-guest; rm -rf "$FAKE_KC_DIR"; mkdir -p "$FAKE_KC_DIR"
+  printf '{"TOKEN": "%s-guest"}' "$SENT" | KITH_PERSON=samuel A set echo/guest --stdin-json >"$T/o-guest" 2>"$T/e-guest"; rc=$?
+  if [[ $rc == 2 && -z $(ls "$FAKE_KC_DIR") ]] && grep -q 'not available to this run' "$T/e-guest" && ! grep -q 'people.secretSet' "$T/wo1/calls"; then
+    ok "set, a guest's run: exit 2 before any Keychain write"
+  else bad "set, a guest's run" "rc=$rc $(cat "$T/e-guest") $(ls "$FAKE_KC_DIR")"; fi
+  # the core refuses after the Keychain took the key: an orphan item, reported, nothing in the core
+  mkwrap_set "$T/wo2" refuse
+  use_home "$T/sw2" "$T/wo2/kith"
+  rc=$(setone refuse echo/refuse)
+  if [[ $rc == 4 && -n $(ls "$T/kc-refuse") ]] && grep -q 'the key is in the Keychain' "$T/e-refuse" && [[ $(grep -c 'people.secretSet' "$T/wo2/calls") == 1 ]]; then
+    ok "set, the core refuses: the Keychain item stays, exit 4, said, and the call was sent once"
+  else bad "set, the core refuses" "rc=$rc $(cat "$T/e-refuse") $(cat "$T/wo2/calls")"; fi
+  mkwrap_set "$T/wo3" nodaemon
+  use_home "$T/sw2" "$T/wo3/kith"
+  rc=$(setone nodaemon echo/nodaemon)
+  [[ $rc == 3 && -n $(ls "$T/kc-nodaemon") ]] && grep -q 'the key is in the Keychain' "$T/e-nodaemon" \
+    && ok "set, the daemon goes away after the Keychain: exit 3, said" || bad "set, the daemon goes away" "rc=$rc $(cat "$T/e-nodaemon")"
+  # a lost answer: the call is not sent again; one look at the core's tables says whether it took it
+  mkwrap_set "$T/wo4" lost
+  use_home "$T/sw2" "$T/wo4/kith"
+  rc=$(setone lost echo/lost)
+  if [[ $rc == 5 ]] && grep -q 'did not say whether' "$T/e-lost" && [[ $(grep -c 'people.secretSet' "$T/wo4/calls") == 1 ]]; then
+    ok "set, a lost answer the core never applied: exit 5, sent once"
+  else bad "set, a lost answer (not applied)" "rc=$rc $(cat "$T/e-lost") $(cat "$T/wo4/calls")"; fi
+  mkwrap_set "$T/wo5" applied-lost
+  use_home "$T/sw2" "$T/wo5/kith"
+  rc=$(setone appliedlost echo/appliedlost)
+  if [[ $rc == 0 ]] && grep -q '"profile": "echo/appliedlost"' "$T/o-appliedlost" && [[ $(grep -c 'people.secretSet' "$T/wo5/calls") == 1 ]]; then
+    ok "set, a lost answer the core did apply: reported as done, sent once"
+  else bad "set, a lost answer (applied)" "rc=$rc $(cat "$T/o-appliedlost") $(cat "$T/e-appliedlost")"; fi
+  # no value ever crosses the socket: nothing the wrappers logged holds one
+  if ! grep -qa "$SENT" "$T"/wo*/calls; then ok "set: no call to the core carries a value"; else bad "set: a value was sent to the core" "$(grep -a "$SENT" "$T"/wo*/calls | head -2)"; fi
+  # what every write sends: viaSwitch, dies, the names and never a value
+  mkwrap_set "$T/wsb" pass
+  use_home "$T/sw2" "$T/wsb/kith"
+  export FAKE_KC_DIR=$T/kc-sent; mkdir -p "$FAKE_KC_DIR"
+  printf '{"TOKEN": "%s-sent"}' "$SENT" | A set echo/sent --stdin-json --grant house >/dev/null 2>&1
+  A grant writer echo echo/sent >/dev/null 2>&1
+  A connect writer echo --profile echo/work >/dev/null 2>&1
+  A revoke writer echo --profile echo/work >/dev/null 2>&1
+  A connect helper calendar >/dev/null 2>&1                                         # a grant that is held ...
+  A disconnect helper calendar >/dev/null 2>&1                                      # ... and taken back
+  A disconnect writer echo >/dev/null 2>&1                                          # nothing held: nothing sent
+  A env house echo K=v >/dev/null 2>&1
+  A agent-access house domain sent.example.com >/dev/null 2>&1
+  A owner echo/work samuel >/dev/null 2>&1
+  A share echo/work samuel,amy >/dev/null 2>&1
+  A share echo/work amy --rm >/dev/null 2>&1
+  A browser sent chrome >/dev/null 2>&1
+  if python3 - "$T/wsb/calls" "$SENT" <<'PY'
+import json, sys
+text = open(sys.argv[1]).read()
+assert sys.argv[2] not in text
+rows = [l.split(' ', 1) for l in text.splitlines()]
+methods = [m for m, _ in rows]
+assert methods.count('people.revision') == 1 and methods.index('people.revision') < methods.index('people.secretSet'), methods
+writes = {m: json.loads(b) for m, b in rows if m not in ('people.secretsView', 'people.revision')}
+for m, p in writes.items():
+    assert p['viaSwitch'] is True and p['dies'] is True, (m, p)
+assert methods.count('people.secretSet') == 1 and methods.count('people.secretEnv') == 1 and methods.count('people.agentAccess') == 1
+so = [json.loads(b) for m, b in rows if m == 'people.secretOwner']
+assert [(x['profile'], x['person']) for x in so] == [('echo/work', 'samuel')], so
+sh = [json.loads(b) for m, b in rows if m == 'people.secretShare']
+assert [(x['profile'], x['ids'], x['remove']) for x in sh] == [('echo/work', ['samuel', 'amy'], False), ('echo/work', ['amy'], True)], sh
+sb = [json.loads(b) for m, b in rows if m == 'people.secretBrowser']
+assert [(x['profile'], x['browser']) for x in sb] == [('browser/sent', 'chrome')], sb
+s = writes['people.secretSet']
+assert s['profile'] == 'echo/sent' and s['vars'] == ['TOKEN'] and s['grant'] == 'house', s
+assert writes['people.secretEnv']['pairs'] == [['K', 'v']], writes['people.secretEnv']
+sg = [json.loads(b) for m, b in rows if m == 'people.secretGrant']
+assert sg[0]['agents'] == ['writer'] and sg[0]['profiles'] == ['echo/sent'] and 'ifHave' not in sg[0] and not sg[0]['knownOnly'], sg[0]
+assert sg[1]['agents'] == ['writer'] and sg[1]['profiles'] == ['echo/work'] and sg[1]['ifHave'] == {'writer': ['echo/sent']}, sg[1]
+rv = [json.loads(b) for m, b in rows if m == 'people.secretRevoke']
+assert rv[0]['profile'] == 'echo/work' and 'dropHostProfiles' not in rv[0], rv[0]
+# `disconnect` sends a call only for a grant that is held: the one of helper's calendar (connected just before), with the
+# host profile to go with its last grant; the second, of a writer that holds nothing, sent none
+assert len(rv) == 2, rv
+assert rv[1] == {**rv[1], 'agent': 'helper', 'service': 'calendar', 'dropHostProfiles': True} and 'profile' not in rv[1], rv[1]
+PY
+  then ok "secret writers: the probe comes first; viaSwitch and dies on every write, names and never a value"; else bad "secret writers: what was sent" "$(cat "$T/wsb/calls" | head -c 2500)"; fi
+  # --- 2d. the door follows a revoke -------------------------------------------------------------------------------------------
+  # A revoked person's door is closed on the routed path exactly as on the file (revoke-access: door_state is in its scope).
+  # The answers of `door` before a revoke, after it, after its undo and after the person is removed, on the file (kith-auth
+  # person --revoke) and through the daemon (the host's people.suspend / undo / removePerson: kith-auth is app-only there).
+  door_rows() {   # OUT HEADING: the door of five people, text and --json
+    local out=$1 who
+    echo "== $2" >> "$out"
+    for who in eve amy botty samuel kai; do
+      { echo "\$ door $who"; A door house "$who" "$DOOR" 2>&1; echo "rc=$?"; A door house "$who" "$DOOR" --json 2>&1; echo "rc=$?"; } >> "$out"
+    done
+  }
+  door_seq() {   # OUT file|core
+    local out=$1 way=$2
+    cc() { printf '{"viaSwitch": true, "id": "eve", "kernel": "%s", "home": "%s"}' "$KERNEL" "$HOME" | "$BIN" kernel core-call "$1" --params-stdin >/dev/null 2>&1; }
+    : > "$out"
+    door_rows "$out" before
+    if [[ $way == file ]]; then A person eve --revoke >/dev/null 2>&1; else cc people.suspend; fi
+    door_rows "$out" revoked
+    if [[ $way == file ]]; then A person eve --unrevoke >/dev/null 2>&1; else cc people.undo; fi
+    door_rows "$out" restored
+    if [[ $way == file ]]; then A person eve --rm >/dev/null 2>&1; else cc people.removePerson; fi
+    door_rows "$out" removed
+  }
+  use_home "$T/gs"; door_seq "$T/door.golden" file
+  section() { sed -n "/^== $2\$/,/^== /p" "$1" | grep -A3 '^\$ door eve$'; }
+  if section "$T/door.golden" before | grep -q '"state": "ok"' && section "$T/door.golden" revoked | grep -q '"state": "revoked"' \
+     && section "$T/door.golden" restored | grep -q '"state": "ok"' && section "$T/door.golden" removed | grep -q '"state": "not-allowed"'; then
+    ok "doors, file: eve's door is ok, closed by a revoke, back after the undo, and gone with the person"
+  else bad "doors, file: the sequence does not show a revoke closing the door" "$(cat "$T/door.golden" | head -40)"; fi
+  use_home "$T/sw2"; door_seq "$T/door.sw2" core
+  if cmp -s "$T/door.golden" "$T/door.sw2"; then ok "doors, through a daemon: a revoke, its undo and a removal close and open the door as on the file"; else
+    bad "doors, through a daemon: differs from the file" "$(diff "$T/door.golden" "$T/door.sw2" | head -30)"; fi
+  exec 7>&-; wait "$DPID" 2>/dev/null; DPID=
+
+  # --- 4. the way back: rollback after the core's own writes --------------------------------------------------------------------
+  # sw2 took the card writes, the secret writers and their env through the daemon. The core's answers (embedded: the daemon is
+  # gone) are recorded, `kith rollback authority` puts auth.json back, and the file must answer every one of them the same: the
+  # export back carries what the core wrote (grants, profiles, env, helper_since), and the keys only the file kept stay.
+  post_state() {   # OUT
+    local out=$1 p a
+    : > "$out"
+    for p in kai samuel amy eve tim botty nobody; do
+      for a in house writer; do
+        { echo "\$ may $p $a"; A may "$p" "$a" 2>&1; echo "rc=$?"; echo "\$ resolve $p $a"; A resolve "$a" --person "$p" 2>&1; echo "rc=$?"; } >> "$out"
+      done
+    done
+    { A people --json; A keys --json; A ledger --json; A granted echo; A granted --for writer echo --json; A holders echo; A holders login --json
+      A mcp-config house; A mcp-config writer; A agent-access house --json; A jobs house --json; A budgets house --json; A bots-cap --json
+    } 2>&1 | sed -E -e 's/[0-9]{13}/<ms>/g' -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}/<t>/g' >> "$out"
+  }
+  use_home "$T/sw2"
+  rm -f "$(dirname "$AUTHJ")/auth.log"
+  post_state "$T/post.core"
+  [[ $(grep -c . "$T/post.core") -gt 40 ]] && ok "rollback: the core's answers after its writes are recorded" || bad "rollback: too few answers" "$(head -5 "$T/post.core")"
+  rb=$(KITH_KERNEL="$KERNEL" "$BIN" rollback authority 2>&1); rc=$?
+  if [[ $rc == 0 ]] && ! grep -q '"kith_tombstone"' "$AUTHJ"; then ok "rollback: auth.json is a file again"; else bad "rollback" "rc=$rc $rb"; fi
+  rm -f "$(dirname "$AUTHJ")/auth.log"
+  post_state "$T/post.file"
+  if cmp -s "$T/post.core" "$T/post.file"; then ok "rollback: the file answers what the core answered"; else
+    bad "rollback: the file differs from the core's last answers" "$(diff "$T/post.core" "$T/post.file" | head -30)"; fi
+  if python3 - "$AUTHJ" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1]))
+assert 'echo/new' in a['profiles'] and 'echo/second' in a['profiles'], sorted(a['profiles'])
+assert a['env']['house']['echo'], a['env']
+assert a.get('once', {}) == {}, a.get('once')
+assert a['members']['house']['amy'].get('helper_once'), a['members']['house']['amy']
+PY
+  then ok "rollback: what the core wrote (profiles, env) is in the file"; else bad "rollback: what is in the file"; fi
+  # and forward again, as the runbook says: import again (the rolled-back file names the owner of a profile the core held with none,
+  # `later/main`, so the core's rows differ from the file's and a plain step refuses), then step; the core answers what it did before
+  out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+  [[ $rc != 0 && $out == *'differ from auth.json'* ]] && ok "rollback: a plain step over a core that differs from the file refuses and says to import again" || bad "rollback: step before the re-import" "rc=$rc $out"
+  "$BIN" kernel core-migrate --authority --force >"$T/reimport" 2>&1 || bad "rollback: the re-import" "$(cat "$T/reimport")"
+  KITH_KERNEL="$KERNEL" "$BIN" migrate step authority >"$T/restep" 2>&1 && grep -q '"kith_tombstone"' "$AUTHJ" && ok "rollback: stepping again works" || bad "rollback: stepping again" "$(cat "$T/restep")"
+  rm -f "$(dirname "$AUTHJ")/auth.log"
+  post_state "$T/post.again"
+  cmp -s "$T/post.core" "$T/post.again" && ok "rollback: ... and the core answers the same again" || bad "rollback: step again differs" "$(diff "$T/post.core" "$T/post.again" | head -20)"
+fi
+
+# --- 4b. what the step refuses at run time (nothing written) -----------------------------------------------------------------------
+# One-time secrets in the file live only in auth.json and the Keychain, so the step waits for them: the file is untouched, and
+# the step goes through once they are gone.
+mkdir -p "$T/ro" && cp -R "$G/home" "$T/ro/home" && cp -R "$G/serve" "$T/ro/serve"
+use_home "$T/ro"
+python3 -c "
+import json, sys
+a = json.load(open(sys.argv[1]))
+a['once'] = {'o1': {'agent': 'house', 'created': 1, 'expires': 4102444800000}}
+json.dump(a, open(sys.argv[1], 'w'))" "$AUTHJ"
+sha_before=$(shasum "$AUTHJ" | cut -d' ' -f1)
+out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+if [[ $rc != 0 && $out == *'one-time secret'* && $out == *'wait until they are used or expire (at most an hour'* ]] \
+   && [[ $(shasum "$AUTHJ" | cut -d' ' -f1) == "$sha_before" ]] && ! grep -q kith_tombstone "$AUTHJ"; then
+  ok "step: one-time secrets in auth.json refuse it, nothing changed"
+else bad "step with a once" "rc=$rc $out"; fi
+python3 -c "
+import json, sys
+a = json.load(open(sys.argv[1]))
+a['once'] = {}
+json.dump(a, open(sys.argv[1], 'w'))" "$AUTHJ"
+out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+[[ $rc == 0 ]] && grep -q kith_tombstone "$AUTHJ" && ok "step: ... and goes through once they are used" || bad "step after the once is gone" "rc=$rc $out"
+# a core imported before the secret tables were kept is told to import again, and the file stays
+mkdir -p "$T/rs" && cp -R "$G/home" "$T/rs/home" && cp -R "$G/serve" "$T/rs/serve"
+use_home "$T/rs"
+"$BIN" kernel core-migrate --authority >/dev/null 2>&1
+sqlite3 "$T/rs/home/.kith/core/$DBF" "INSERT INTO secret_stale (reason) VALUES ('test')"
+out=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1); rc=$?
+[[ $rc != 0 && $out == *'import again'* ]] && ! grep -q kith_tombstone "$AUTHJ" && ok "step: a stale core is told to import again, the file stays" || bad "step on a stale core" "rc=$rc $out"
+
+# `who` with handles_stale: a database imported before people.handles existed matches nobody, so who and whois refuse (exit 3)
+# while the flag is set, and the verbs that do not read handles still answer.
+DBF=core."db"   # the boundary check keeps that file's name out of source outside core/runtime
+use_home "$T/sw3"
+sqlite3 "$T/sw3/home/.kith/core/$DBF" "INSERT OR REPLACE INTO authority_settings (key, value) VALUES ('handles_stale', '1')"
+out=$(A who telegram 222 2>"$T/e"); rc=$?
+if [[ $rc == 3 && -z $out ]] && grep -q 'imported before people.handles' "$T/e"; then ok "who with handles_stale: exit 3, no person"
+else bad "who with handles_stale" "rc=$rc out=$out err=$(cat "$T/e")"; fi
+out=$(A whois telegram 222 2>/dev/null); rc=$?
+[[ $rc == 3 && -z $out ]] && ok "whois with handles_stale: exit 3" || bad "whois with handles_stale" "rc=$rc out=$out"
+out=$(A may samuel house 2>/dev/null); rc=$?
+[[ $rc == 0 && $out == member ]] && ok "handles_stale does not stop may" || bad "may with handles_stale" "rc=$rc out=$out"
+sqlite3 "$T/sw3/home/.kith/core/$DBF" "INSERT INTO secret_stale (reason) VALUES ('test')"
+out=$(A granted github 2>/dev/null); rc=$?
+[[ $rc == 3 && -z $out ]] && ok "granted with secrets_stale: exit 3" || bad "granted with secrets_stale" "rc=$rc out=$out"
+# the secret reads on such a (switched) database: exit 3 and the way out, never "no grant" or an empty env (a core imported before profiles,
+# grants and env were kept says nothing)
+for v in "keys --json" "mcp-config house" "get --for house echo TOKEN" "holders echo" "account-state house echo --json" "exec --for house echo -- true"; do
+  # shellcheck disable=SC2086
+  out=$(A $v 2>"$T/e"); rc=$?
+  [[ $rc == 3 && -z $out ]] && grep -q 'roll back and step again' "$T/e" && ok "$v with secrets_stale: exit 3, roll back and step again" \
+    || bad "$v with secrets_stale" "rc=$rc out=$out err=$(cat "$T/e")"
+done
+
+# --- 3. negatives --------------------------------------------------------------------------------------------------------------------
+# A kith program that logs what it was asked to do for core-call (the params on stdin) and then does as MODE says.
+mkwrap() {   # DIR MODE
+  mkdir -p "$1"
+  cat > "$1/kith" <<EOF
+#!/bin/sh
+if [ "\$1 \$2" = "kernel core-call" ]; then
+  params=\$(cat)
+  printf '%s %s\n' "\$3" "\$params" >> "$1/calls"
+  case "$2" in
+    pass) printf '%s' "\$params" | "$BIN" "\$@"; exit \$? ;;
+    sleep) exec sleep 30 ;;
+    garbage) echo 'not json'; exit 0 ;;
+    array) echo '[1, 2]'; exit 0 ;;
+    nocore) echo '{"noCore":true}'; exit 0 ;;
+    exit3) echo 'no core daemon answers' >&2; exit 3 ;;
+    exit4) echo 'authority: not switched: authority is back on auth.json' >&2; exit 4 ;;
+    exit5) echo 'the connection ended' >&2; exit 5 ;;
+  esac
+fi
+exec "$BIN" "\$@"
+EOF
+  chmod +x "$1/kith"
+  : > "$1/calls"
+}
+# refuses NAME CMD...: exit 3, nothing on stdout, a line on stderr
+refuses() {
+  local name=$1 out rc; shift
+  out=$("$@" 2>"$T/e"); rc=$?
+  [[ $rc == 3 && -z $out && -s $T/e ]] && ok "$name: exit 3, no answer" || bad "$name" "rc=$rc out=$out err=$(cat "$T/e")"
+}
+calls() { wc -l < "$1/calls" | tr -d ' '; }
+# H AGENT ask|deny TOOL: what the PreToolUse hook of a kith:<agent> helper decides ("pass" for no output); exactly one JSON object
+helper_hook() {
+  local out
+  out=$(printf '{"tool_name": "%s", "tool_input": {}}' "$3" | A helper-mcp "$1" "$2" 2>/dev/null) || { echo "exit-$?"; return; }
+  [[ -z $out ]] && { echo pass; return; }
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])' <<< "$out" 2>/dev/null || echo "not-one-object"
+}
+
+# no route: the verbs and shapes the core is not asked about keep today's text, and no call goes out
+mkwrap "$T/w1" pass
+use_home "$T/sw4" "$T/w1/kith"
+# (the lift list in docs/plans/one-bot-model.md: each of these is exit 3 on purpose, with its callers)
+for v in "ls extra" "people" "people --matrix" "people samuel" "bots-cap" "bots-cap 60" "exec --secret rs_0123456789abcdef -- true" "ledger" \
+         "ledger --rm job:house:eve:edit" "once put"; do
+  # shellcheck disable=SC2086
+  refuses "no route: $v" A $v
+  grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "no route: $v: not today's text" "$(cat "$T/e")"
+done
+# the people-admin writes are app-only on the tombstone: exit 3 with the app's name in the line, today's text after it
+for v in "link telegram 5 ABC123" "person samuel name=X" "person samuel --revoke" "member house amy" "member house amy --rm" "invite amy" \
+         "preset p mode=default" "bot samuelbot --rm" "bot b --of samuel" "handle samuel telegram 5"; do
+  # shellcheck disable=SC2086
+  refuses "app-only: $v" A $v
+  grep -q 'is app-only now that authority moved to the core: on a switched Mac, manage people in the Kith app' "$T/e" \
+    && grep -q 'moved to the Kith core (module authority)' "$T/e" || bad "app-only: $v: not the app-only line" "$(cat "$T/e")"
+done
+# a wrong shape of a routed verb is the usage error (exit 2) the file gives, before the tombstone is looked at: no call goes out
+for v in "door house samuel" "door house samuel x@y --json extra" "mcp-names" "mcp-names house extra" "mcp-config house extra" \
+         "keys" "account-state house echo" "job house eve" "job house eve edit --shown {} --decline h"; do
+  # shellcheck disable=SC2086
+  out=$(A $v 2>"$T/e"); rc=$?
+  [[ $rc == 2 && -z $out && -s $T/e ]] && ok "usage: $v: exit 2, as on the file" || bad "usage: $v" "rc=$rc out=$out err=$(cat "$T/e")"
+done
+out=$(A ls --json extra 2>/dev/null); rc=$?   # --json puts the refusal on stdout, as it does on the file
+[[ $rc == 2 && $out == '{"ok": false, "error": "ls [--json]"}' ]] && ok "usage: ls --json extra: exit 2, the JSON error" || bad "usage: ls --json extra" "rc=$rc $out"
+# nothing above asked the core: counted here, before the helper rows below, which do ask it on the same wrapper
+pre=$(calls "$T/w1")
+[[ $pre == 0 ]] && ok "no route: the core was never asked" || bad "no route: a call went out" "$(cat "$T/w1/calls")"
+# helper-mcp on the tombstone (the PreToolUse hook; a silent pass is the failure to watch for): a granted tool passes, an ungranted one is
+# asked in the owner's session and denied in a guest's
+[[ $(helper_hook house ask mcp__echo__say) == pass ]] && ok "helper-mcp, switched: a granted tool passes" || bad "helper-mcp, switched: a granted tool" "$(helper_hook house ask mcp__echo__say)"
+[[ $(helper_hook helper ask mcp__echo__say) == ask ]] && ok "helper-mcp, switched: an ungranted tool is asked (owner)" || bad "helper-mcp, switched: ungranted, owner" "$(helper_hook helper ask mcp__echo__say)"
+[[ $(KITH_PERSON=samuel helper_hook helper deny mcp__echo__say) == deny ]] && ok "helper-mcp, switched: an ungranted tool is denied (guest)" || bad "helper-mcp, switched: ungranted, guest"
+[[ $(helper_hook house ask Bash) == pass ]] && ok "helper-mcp, switched: a tool that is no MCP tool passes" || bad "helper-mcp, switched: Bash"
+[[ $(calls "$T/w1") -gt $pre ]] && ok "helper-mcp, switched: it asked the core" || bad "helper-mcp, switched: no call went to the core"
+: > "$T/w1/calls"   # the helper rows' calls are counted above; the checks below count their own
+
+# a tombstone of another module is not authority's: no call, today's text
+mkdir -p "$T/sw5" && cp -R "$T/sw4/home" "$T/sw5/home" && cp -R "$G/serve" "$T/sw5/serve"
+printf '%s\n' "${TOMB//authority/accounts}" > "$T/sw5/home/.kith/secrets/auth.json"
+mkwrap "$T/w5" pass
+use_home "$T/sw5" "$T/w5/kith"
+refuses "another module's tombstone" A may samuel house
+grep -q 'module accounts' "$T/e" && [[ $(calls "$T/w5") == 0 ]] && ok "another module's tombstone: today's text, no call" || bad "another module's tombstone" "$(cat "$T/e")"
+
+# KITH_AUTH set: not this home's own auth.json, so not routed
+use_home "$T/sw4" "$T/w1/kith"
+cp "$T/sw4/home/.kith/secrets/auth.json" "$T/other-auth.json"
+out=$(KITH_AUTH=$T/other-auth.json A may samuel house 2>"$T/e"); rc=$?
+[[ $rc == 3 && -z $out ]] && [[ $(calls "$T/w1") == 0 ]] && ok "KITH_AUTH elsewhere: not routed" || bad "KITH_AUTH elsewhere" "rc=$rc $(cat "$T/e")"
+
+# the core cannot say yes: no core file, not switched, stepping, damaged; rolling back still answers reads
+sw_variant() {   # NAME
+  mkdir -p "$T/$1" && cp -R "$T/sw4/home" "$T/$1/home" && cp -R "$G/serve" "$T/$1/serve"
+}
+sw_variant v1; rm -f "$T/v1/home/.kith/core/$DBF"
+mkwrap "$T/wv1" pass; use_home "$T/v1" "$T/wv1/kith"; refuses "no core file (noCore)" A may samuel house
+sw_variant v2; rm -f "$T/v2/home/.kith/core/cutover/authority.switch"
+mkwrap "$T/wv2" pass; use_home "$T/v2" "$T/wv2/kith"; refuses "not switched (no record)" A may samuel house
+grep -q 'not switched' "$T/e" && ok "not switched: the core's line is on stderr" || bad "not switched: no line" "$(cat "$T/e")"
+[[ $(calls "$T/wv2") == 1 ]] && ok "not switched: asked once, the file was not read again" || bad "not switched: calls" "$(calls "$T/wv2")"
+sw_variant v3; printf 'state=stepping\nat=1\n' > "$T/v3/home/.kith/core/cutover/authority.switch"
+mkwrap "$T/wv3" pass; use_home "$T/v3" "$T/wv3/kith"; refuses "stepping" A may samuel house
+sw_variant v4; printf 'garbage\n' > "$T/v4/home/.kith/core/cutover/authority.switch"
+mkwrap "$T/wv4" pass; use_home "$T/v4" "$T/wv4/kith"; refuses "damaged record" A may samuel house
+sw_variant v5; printf 'state=rolling-back\nat=1\n' > "$T/v5/home/.kith/core/cutover/authority.switch"
+mkwrap "$T/wv5" pass; use_home "$T/v5" "$T/wv5/kith"
+out=$(A may samuel house 2>/dev/null); rc=$?
+[[ $rc == 0 && $out == member ]] && ok "rolling back: reads still answered" || bad "rolling back" "rc=$rc out=$out"
+
+# the core held by another process that is no daemon: nothing answers, exit 3 (never an answer from the file)
+sw_variant v6
+python3 - "$T/v6/home/.kith/core/core."lock <<'PY' &
+import fcntl, sys, time
+f = open(sys.argv[1], 'a')
+fcntl.flock(f, fcntl.LOCK_EX)
+time.sleep(25)
+PY
+HOLD=$!
+sleep 1
+use_home "$T/v6"; refuses "core held by another process" A may samuel house
+kill "$HOLD" 2>/dev/null; wait "$HOLD" 2>/dev/null
+
+# no kith program at all
+use_home "$T/sw4"; unset KITH_BIN
+out=$(PATH=/usr/bin:/bin CARGO_TARGET_DIR=$T/none A may samuel house 2>"$T/e"); rc=$?
+if [[ $rc == 3 && -z $out ]] && grep -q 'no kith program' "$T/e"; then ok "no kith program: exit 3"
+else bad "no kith program" "rc=$rc out=$out err=$(cat "$T/e")"; fi
+
+# what the core-call does wrong: a timeout, a lost answer, a refusal, no daemon, junk, noCore. Each is exit 3, and a take-once
+# is sent once whatever happens.
+profiles_before=$(sqlite3 "$T/sw4/home/.kith/core/$DBF" "SELECT * FROM secret_profiles")
+for mode in sleep garbage array nocore exit3 exit4 exit5; do
+  mkwrap "$T/m-$mode" "$mode"
+  use_home "$T/sw4" "$T/m-$mode/kith"
+  refuses "core-call $mode: may" A may samuel house
+  refuses "core-call $mode: who" A who telegram 222
+  refuses "core-call $mode: mcp-config" A mcp-config house
+  refuses "core-call $mode: get" A get --for house echo TOKEN
+  refuses "core-call $mode: exec (the command does not run)" A exec --for house echo -- touch "$T/ran-$mode"
+  [[ ! -e $T/ran-$mode ]] || bad "core-call $mode: exec ran its command"
+  refuses "core-call $mode: access" A access house samuel domain a.example.com --by samuel
+  refuses "core-call $mode: helper --rm" A helper house amy helper --rm
+  refuses "core-call $mode: job --decline" A job house eve edit --decline h1
+  refuses "core-call $mode: agent-access" A agent-access house
+  refuses "core-call $mode: owner" A owner echo/work samuel
+  refuses "core-call $mode: share" A share echo/work samuel
+  refuses "core-call $mode: browser" A browser work chrome
+  refuses "core-call $mode: jobs" A jobs house --json
+  refuses "core-call $mode: door" A door house eve "$DOOR" --json
+  refuses "core-call $mode: mcp-names" A mcp-names house
+  refuses "core-call $mode: ls" A ls
+  out=$(A ls --json 2>/dev/null); rc=$?   # a refusal of ls --json is JSON on stdout, as granted --json is
+  [[ $rc == 3 && $out == '{"ok": false, "error": '* ]] && ok "core-call $mode: ls --json refused: JSON error on stdout, exit 3" || bad "core-call $mode: ls --json" "rc=$rc $out"
+  # the helper hook never passes a tool it could not check: the decision, and exactly one JSON object, granted or not
+  [[ $(helper_hook house ask mcp__echo__say) == ask && $(helper_hook helper ask mcp__echo__say) == ask \
+     && $(KITH_PERSON=samuel helper_hook house deny mcp__echo__say) == deny ]] \
+    && ok "core-call $mode: helper-mcp gives the decision (ask for the owner, deny for a guest), never a pass" \
+    || bad "core-call $mode: helper-mcp" "$(helper_hook house ask mcp__echo__say) $(helper_hook helper ask mcp__echo__say) $(KITH_PERSON=samuel helper_hook house deny mcp__echo__say)"
+  refuses "core-call $mode: connectors" A connectors --json
+  refuses "core-call $mode: job tick" A job house amy edit
+  refuses "core-call $mode: take-once" A resolve helper --person amy --via house --take-once
+  [[ $(grep -c 'people.resolve' "$T/m-$mode/calls") == 1 ]] && ok "core-call $mode: the take-once was sent once" \
+    || bad "core-call $mode: the take-once was repeated" "$(cat "$T/m-$mode/calls")"
+done
+
+[[ $(sqlite3 "$T/sw4/home/.kith/core/$DBF" "SELECT * FROM secret_profiles") == "$profiles_before" ]] \
+  && ok "core-call failures: owner, share and browser wrote nothing" || bad "core-call failures: a profile writer changed a row"
+
+# --json mode: a refusal is the {"ok": false, "error"} on stdout that json_run gives, with the same exit code
+use_home "$T/sw4" "$T/m-exit3/kith"
+out=$(A granted fly --json 2>/dev/null); rc=$?
+[[ $rc == 3 && $out == '{"ok": false, "error": '* ]] && ok "granted --json refused: JSON error on stdout, exit 3" || bad "granted --json refused" "rc=$rc out=$out"
+
+# what is sent: viaSwitch on every call, takeOnce only with a caller, the person only when named
+mkwrap "$T/ws" pass
+use_home "$T/sw4" "$T/ws/kith"
+A may samuel house >/dev/null 2>&1; A who telegram 111 >/dev/null 2>&1; A granted github >/dev/null 2>&1; A bots-cap --json >/dev/null 2>&1
+A people --json >/dev/null 2>&1; A retired zed >/dev/null 2>&1; A budgets house --json >/dev/null 2>&1; A ledger --json >/dev/null 2>&1
+A resolve house --person samuel --via writer --take-once >/dev/null 2>&1
+A resolve house --person samuel --take-once >/dev/null 2>&1
+A mcp-config house >/dev/null 2>&1; A get --for house echo TOKEN >/dev/null 2>&1; A holders echo >/dev/null 2>&1
+A keys --json >/dev/null 2>&1; A account-state house echo --json >/dev/null 2>&1; A exec --for house echo -- true >/dev/null 2>&1
+# the card writes: every call is a write the core fences (viaSwitch), asked to answer a refusal as an answer (dies), never
+# repeated; a read of the view carries viaSwitch too
+mkwrap "$T/wc" pass
+use_home "$T/sw4" "$T/wc/kith"
+A access house samuel domain a.example.com --by samuel >/dev/null 2>&1
+A access house samuel read /nowhere/x --rm >/dev/null 2>&1
+A helper house amy helper --once >/dev/null 2>&1
+A job house eve edit --decline h9 >/dev/null 2>&1
+A agent-access house --json >/dev/null 2>&1; A jobs house >/dev/null 2>&1
+if python3 - "$T/wc/calls" <<'PY'
+import json, sys
+rows = [l.split(' ', 1) for l in open(sys.argv[1]).read().splitlines()]
+assert [m for m, _ in rows] == ['people.access', 'people.access', 'people.helper', 'people.job', 'people.secretsView', 'people.secretsView'], rows
+for method, body in rows:
+    p = json.loads(body)
+    assert p['viaSwitch'] is True, (method, p)
+    assert 'kernel' in p and 'home' in p, (method, p)
+    if method != 'people.secretsView':
+        assert p['dies'] is True, (method, p)
+a, rm, h, j = [json.loads(b) for m, b in rows[:4]]
+assert (a['agent'], a['person'], a['kind'], a['value'], a['by']) == ('house', 'samuel', 'domain', 'a.example.com', 'samuel') and 'remove' not in a, a
+assert rm['remove'] is True and 'by' not in rm, rm
+assert h['once'] is True and 'remove' not in h, h
+assert j['decline'] == 'h9' and j['job'] == 'edit', j
+PY
+then ok "card writes: viaSwitch and dies on every call, the removal marked remove, by and once only when given"; else bad "card writes: what was sent" "$(cat "$T/wc/calls")"; fi
+
+if python3 - "$T/ws/calls" <<'PY'
+import json, sys
+rows = [l.split(' ', 1) for l in open(sys.argv[1]).read().splitlines()]
+assert len(rows) == 16, len(rows)
+assert [m for m, _ in rows].count('people.secretsView') == 6, rows
+for method, body in rows:
+    p = json.loads(body)
+    assert p['viaSwitch'] is True, (method, p)
+    assert 'kernel' in p and 'home' in p, (method, p)
+took = [json.loads(b) for m, b in rows if m == 'people.resolve']
+assert took[0].get('takeOnce') is True and took[0]['via'] == 'writer', took[0]
+assert 'takeOnce' not in took[1] and 'via' not in took[1], took[1]
+PY
+then ok "calls: every one carries viaSwitch; takeOnce only with a caller"; else bad "calls: what was sent" "$(cat "$T/ws/calls")"; fi
+
+# a member on a deleted preset: `resolve` has no answer and dies, the router prints what kith-auth prints and exits as it does
+use_home "$T/gs"; A resolve house --person dan >"$T/o1" 2>"$T/e1"; r1=$?
+use_home "$T/sw4"; A resolve house --person dan >"$T/o2" 2>"$T/e2"; r2=$?
+if [[ $r1 == "$r2" && -s $T/e1 ]] && cmp -s "$T/o1" "$T/o2" && cmp -s "$T/e1" "$T/e2"; then ok "deleted preset: dies with the same line and exit code ($r1)"
+else bad "deleted preset" "file rc=$r1 $(cat "$T/e1"); core rc=$r2 $(cat "$T/e2")"; fi
+
+echo
+[[ $fail == 0 ]] && echo "all ok" || echo "FAILED"
+exit $fail

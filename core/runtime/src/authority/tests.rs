@@ -16,11 +16,15 @@ use serde_json::{Value, json};
 use super::{Authority, snapshot};
 use crate::authority::load::{empty, load};
 
+mod card;
 mod cards;
+mod gaps;
 mod guest;
 mod requests;
 mod revoke;
+mod router;
 mod runs;
+mod secret_writes;
 mod writes;
 
 const NOW: f64 = 1_800_000_000_000.0;

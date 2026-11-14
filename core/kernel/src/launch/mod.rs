@@ -14,6 +14,7 @@ pub mod guard;
 pub mod machine;
 pub mod mcp;
 pub mod prompt;
+pub mod room;
 pub mod settings;
 
 #[cfg(test)]

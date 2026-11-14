@@ -198,7 +198,8 @@ fn a_real_shaped_file_goes_in_with_a_backup_a_log_row_and_the_keychain_item() {
     let said = rep.lines.join("\n");
     assert!(!said.contains("left behind: profiles"), "{said}");
     assert!(!said.contains("left behind: grants"), "{said}");
-    assert!(said.contains("left behind: env"), "{said}");
+    assert!(!said.contains("left behind: env"), "{said}");
+    assert_eq!(f.count("secret_env"), 1, "env is kept since m0023");
     assert!(said.contains("person keys"), "{said}");
     assert!(
         !said.contains("tok\n") && !said.contains("plain-value"),
@@ -831,7 +832,7 @@ fn profiles_vars_and_grants_go_in_as_the_file_has_them() {
         ),
         vec![
             vec![s("chrome-agent/main"), s("kai"), None, s("chrome")],
-            vec![s("chrome-agent/team"), None, None, None],
+            vec![s("chrome-agent/team"), s("*"), None, None],
             vec![s("github/bare"), None, None, None],
             vec![s("github/work"), s("sam"), s(r#"["kai","mia"]"#), None],
             vec![s("host/svc"), None, None, None],
@@ -1084,7 +1085,7 @@ fn a_database_imported_before_the_tables_were_filled_is_stale_until_it_is_import
         .unwrap()
         .join("\n");
     assert!(
-        said.contains("imported before profiles and grants"),
+        said.contains("imported before profiles, grants and env"),
         "{said}"
     );
     let e = f.import(&mut MemSink::default()).unwrap_err();
@@ -1182,6 +1183,8 @@ fn the_cores_owners_and_grants_are_what_kith_auth_account_state_answers() {
                     |r| r.get(0),
                 )
                 .unwrap();
+            // the core keeps a shared profile as `*`; `account-state` says no owner
+            let owner = owner.filter(|o| o != "*");
             let agents = col(
                 "SELECT DISTINCT agent FROM secret_grants WHERE profile = ?1 ORDER BY agent",
                 &[&p],
@@ -1220,7 +1223,7 @@ fn the_cores_owners_and_grants_are_what_kith_auth_account_state_answers() {
         [
             "chrome-agent/kai:kai",
             "chrome-agent/sam:sam",
-            "chrome-agent/shared:-"
+            "chrome-agent/shared:*"
         ]
     );
 }
@@ -1534,4 +1537,249 @@ fn a_renamed_person_is_not_revoked_as_if_removed() {
     );
     assert_eq!(ask_state(&f, "a-sam"), "open");
     assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn an_old_id_taken_again_after_the_rename_was_imported_is_revoked_when_it_goes() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    let renamed = json!({
+        "sam": null,
+        "samuel": {"name": "Sam", "was": ["sam"]},
+        "sam-bot": {"bot_of": "samuel"},
+        "sam-bot2": {"bot_of": "samuel"}
+    });
+    f.auth(&crew(&renamed));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    // A new sam (from before kith-auth refused an old id) is imported, does work, and is then removed: core.db already
+    // holds samuel with sam in its `was`, so this sam is not the rename and its work must end.
+    let mut back = renamed.clone();
+    back["sam"] = json!({"name": "Other Sam"});
+    f.auth(&crew(&back));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    ask_of(&f, "a-new-sam", "sam");
+    f.auth(&crew(&renamed));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the removal of sam")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(ask_state(&f, "a-new-sam"), "stopped");
+}
+
+#[test]
+fn an_old_id_taken_again_is_revoked_when_its_renamed_person_is_renamed_again() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    let renamed = json!({
+        "sam": null,
+        "samuel": {"name": "Sam", "was": ["sam"]},
+        "sam-bot": {"bot_of": "samuel"},
+        "sam-bot2": {"bot_of": "samuel"}
+    });
+    f.auth(&crew(&renamed));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    let mut back = renamed.clone();
+    back["sam"] = json!({"name": "Other Sam"});
+    f.auth(&crew(&back));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    ask_of(&f, "a-new-sam", "sam");
+    // samuel is renamed again and the new sam removed: `was` carries sam forward onto sammy, whose row core.db does not
+    // have yet, but samuel's row already lists sam, so this sam is still not the rename.
+    f.auth(&crew(&json!({
+        "sam": null,
+        "samuel": null,
+        "sammy": {"name": "Sam", "was": ["sam", "samuel"]},
+        "sam-bot": {"bot_of": "sammy"},
+        "sam-bot2": {"bot_of": "sammy"}
+    })));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the removal of sam")),
+        "{:?}",
+        rep.lines
+    );
+    assert!(
+        !rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the removal of samuel")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(ask_state(&f, "a-new-sam"), "stopped");
+}
+
+#[test]
+fn a_person_the_file_has_suspended_and_core_db_has_not_gets_the_order_from_the_reimport() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-mia", "mia");
+    ask_of(&f, "a-bot", "mia-bot");
+    ask_of(&f, "a-sam", "sam");
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    let rep = f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("recorded the suspension of mia")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(ask_state(&f, "a-mia"), "stopped");
+    assert_eq!(ask_state(&f, "a-bot"), "stopped");
+    assert_eq!(ask_state(&f, "a-sam"), "open");
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_file_that_marks_the_owner_revoked_leaves_no_row_and_the_next_import_goes_through() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    f.auth(&crew(
+        &json!({"kai": {"name": "Kai", "owner": true, "revoked": {"at": 3}}}),
+    ));
+    assert!(f.run(force(), &FakeKeychain::default(), &mut sink).is_err());
+    assert_eq!(f.count("open_removals"), 0);
+    // a file that drops the owner flag still can not list the core's owner
+    let auth: Value = serde_json::from_str(&crew(
+        &json!({"kai": {"name": "Kai", "revoked": {"at": 3}}}),
+    ))
+    .unwrap();
+    let core = open_all(&f.layout);
+    let listed = super::authority::suspends(core.conn(), &auth).unwrap();
+    assert!(listed.is_empty(), "{listed:?}");
+    drop(core);
+    f.auth(&crew(&json!({"sam": {"name": "Sam S"}})));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_person_revoked_in_the_file_and_already_in_core_db_is_not_swept_again() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    f.import(&mut sink).unwrap();
+    ask_of(&f, "a-mia", "mia");
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia M", "revoked": {"at": 7}}}),
+    ));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(ask_state(&f, "a-mia"), "open", "old cores are not swept");
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn a_person_revoked_in_core_db_and_back_in_the_file_with_an_open_row_does_not_block_the_import() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    f.import(&mut sink).unwrap();
+    crate::revoke_order::record_suspend(open_all(&f.layout).conn(), "mia", 1.0).unwrap();
+    f.auth(&crew(&json!({})));
+    f.run(force(), &FakeKeychain::default(), &mut sink).unwrap();
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+#[test]
+fn the_dry_run_lists_the_suspensions_it_would_record() {
+    let f = Fixture::new();
+    let mut sink = MemSink::default();
+    f.auth(&crew(&json!({})));
+    f.import(&mut sink).unwrap();
+    f.auth(&crew(
+        &json!({"mia": {"name": "Mia", "revoked": {"at": 7}}}),
+    ));
+    let rep = f
+        .run(
+            AuthorityOptions {
+                dry_run: true,
+                force: true,
+            },
+            &FakeKeychain::default(),
+            &mut sink,
+        )
+        .unwrap();
+    assert!(
+        rep.lines
+            .iter()
+            .any(|l| l.contains("would record the suspension of mia")),
+        "{:?}",
+        rep.lines
+    );
+    assert_eq!(f.count("open_removals"), 0);
+}
+
+// --- helper_since (m0016) ----------------------------------------------------------------------------------------------
+
+#[test]
+fn a_helpers_since_goes_in_is_compared_and_a_database_from_before_is_stale() {
+    let f = Fixture::new();
+    let file = json!({
+        "people": {"kai": {"owner": true}, "sam": {"name": "Sam"}},
+        "members": {"house": {"sam": {"preset": "member", "helpers": ["garden"], "helper_since": {"garden": 1_700_000_000_000_i64}}}},
+    });
+    f.auth(&file.to_string());
+    f.import(&mut MemSink::default()).unwrap();
+    assert_eq!(
+        query(
+            &f,
+            "SELECT helper_since FROM memberships WHERE person = 'sam'"
+        ),
+        [[s(r#"{"garden":1700000000000}"#)]]
+    );
+    let diffs =
+        |f: &Fixture| super::same_answer(&f.ctx, &f.layout, open_all(&f.layout).conn()).unwrap();
+    assert_eq!(diffs(&f), Vec::<String>::new());
+    // the file moves on: a later "since"
+    let mut later = file.clone();
+    later["members"]["house"]["sam"]["helper_since"]["garden"] = json!(1_700_000_000_001_i64);
+    f.auth(&later.to_string());
+    let said = diffs(&f).join("\n");
+    assert!(said.contains("members house/sam: helper_since"), "{said}");
+    // what m0016 leaves on a database that had memberships: the mark, which a forced re-import clears
+    let core = open_all(&f.layout);
+    core.conn()
+        .execute_batch(
+            "UPDATE memberships SET helper_since = NULL; \
+             INSERT INTO authority_settings (key, value) VALUES ('helper_since_stale', '1');",
+        )
+        .unwrap();
+    drop(core);
+    f.auth(&file.to_string());
+    let said = diffs(&f).join("\n");
+    assert!(
+        said.contains("imported before a helper's `since` was kept"),
+        "{said}"
+    );
+    f.run(
+        AuthorityOptions {
+            dry_run: false,
+            force: true,
+        },
+        &FakeKeychain::default(),
+        &mut MemSink::default(),
+    )
+    .unwrap();
+    assert_eq!(diffs(&f), Vec::<String>::new());
+    assert_eq!(f.count("authority_settings"), 0);
 }

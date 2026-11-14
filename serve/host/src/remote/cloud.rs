@@ -293,7 +293,7 @@ fn mirrors(hub: &Hub) -> bool {
     #[cfg(not(test))]
     {
         let _ = hub;
-        crate::api::authority::opted_in()
+        crate::api::authority::mirrors_to_core()
     }
 }
 
@@ -2160,7 +2160,7 @@ mod tests {
 
     impl CoreRig {
         async fn new() -> Self {
-            use crate::api::authority::{CoreData, TEST_CORE};
+            use crate::api::authority::CoreData;
             let guard = crate::remote::account::ONE_AT_A_TIME.lock().await;
             let tmp = crate::api::authority_props::Tmp::new();
             let home = tmp.path().join("home");
@@ -2180,7 +2180,7 @@ mod tests {
                 p["env"] = Value::Object(core.env.clone());
                 crate::core_front::ask(&core.folders, "people.addPerson", &p).expect("a person in the core");
             }
-            *TEST_CORE.lock().unwrap() = Some(core);
+            crate::api::authority::set_test_core(Some(core));
             Self { _tmp: tmp, daemon: Some(daemon), _one_at_a_time: guard }
         }
 
@@ -2200,7 +2200,7 @@ mod tests {
 
     impl Drop for CoreRig {
         fn drop(&mut self) {
-            *crate::api::authority::TEST_CORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            crate::api::authority::set_test_core(None);
             self.stop();
         }
     }

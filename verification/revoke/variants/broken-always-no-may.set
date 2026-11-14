@@ -1,0 +1,6 @@
+\* the always is written with no may() in its step
+CoreGate = TRUE
+Switched = TRUE
+AlwaysOn = TRUE
+RouterDoor = TRUE
+AlwaysNoMay = TRUE

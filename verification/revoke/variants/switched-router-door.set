@@ -1,0 +1,7 @@
+\* L1's route: kith-auth's door_state reads the core under the core's lock, while kith_door's start holds only kith-auth's flock, which a core revoke does not take. So the start is a check, then a start (RouterDoor makes it two steps), the revoke can land between, and the guarantee is the revoke's own named sweep (CutOffSweep) plus the 60 s loop (DoorSweep). DoorD2 fails here by design.
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE
+# B's door (BotDoor) is not on this row: it multiplies the state space ~25x (0.6M -> 3.6M states, ~2 min a property). B's door goes through the same kith_door start, and cut_off sweeps the bots in the same doors::sweep call (people.rs), so the bound is the same by reading; the bot-door/core-bot-door rows model B's door table.

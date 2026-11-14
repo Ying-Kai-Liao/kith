@@ -128,7 +128,8 @@ fn live_claim_files_become_running_claim_rows_and_the_rest_are_listed() {
     );
     assert_eq!(
         live(&c, "s-stamp"),
-        vec![("terminal".into(), "running".into(), me, Some(stamp))]
+        vec![("external".into(), "running".into(), me, Some(stamp))],
+        "a terminal's claim is imported as external: no holder started it"
     );
     let person: String = c
         .conn()
@@ -141,7 +142,7 @@ fn live_claim_files_become_running_claim_rows_and_the_rest_are_listed() {
     assert_eq!(person, "sam");
     assert_eq!(
         live(&c, "s-old"),
-        vec![("terminal".into(), "running".into(), me, Some(old))],
+        vec![("external".into(), "running".into(), me, Some(old))],
         "the old lstart form is kept as written"
     );
     assert_eq!(

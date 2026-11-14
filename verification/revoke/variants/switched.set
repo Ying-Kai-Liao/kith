@@ -1,0 +1,3 @@
+\* the code with authority switched (#875): auth.json is a tombstone, the host writes people.* to the core and its guard asks the core, no gate
+CoreGate = TRUE
+Switched = TRUE
