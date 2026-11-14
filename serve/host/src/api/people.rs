@@ -358,7 +358,7 @@ fn invites(hub: &Hub) -> Result<Value> {
 }
 
 /// Why a room part of an invite is not done yet, for the invites list: the same rows `invite_rooms::reconcile` reads.
-fn invite_room_waiting(hub: &Hub, invite: &crate::store::Invite, room: &str) -> &'static str {
+fn invite_room_waiting(hub: &Hub, invite: &Invite, room: &str) -> &'static str {
     let accepted = hub
         .store
         .memberships()
