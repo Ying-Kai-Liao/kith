@@ -93,21 +93,22 @@ pub(super) fn budget() -> i64 {
 
 // MARK: the core and the mode
 
+static CORES: OnceLock<Mutex<HashMap<PathBuf, Arc<CoreWriter>>>> = OnceLock::new();
+
 /// The writer for this host's core, one per state folder (a host instance is the process's). `None` where Writer mode cannot be:
 /// no core folders for the state, or a platform with no resident stub.
 pub(crate) fn core(hub: &crate::hub::Hub) -> Option<Arc<CoreWriter>> {
     if !cfg!(unix) {
         return None;
     }
-    static CORES: OnceLock<Mutex<HashMap<PathBuf, Arc<CoreWriter>>>> = OnceLock::new();
     let state = hub.terminal.env().state;
     let mut cores = CORES.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(c) = cores.get(&state) {
         return Some(c.clone());
     }
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     let folders = tests::folders_for(&state).or_else(|| crate::terminal::core_holders::folders_of(&state))?;
-    #[cfg(not(test))]
+    #[cfg(not(all(test, unix)))]
     let folders = crate::terminal::core_holders::folders_of(&state)?;
     let made = Arc::new(CoreWriter::new(folders));
     cores.insert(state, made.clone());
@@ -237,7 +238,7 @@ impl Drop for Proc {
 
 /// The stub binary and the lock folder of Writer mode: `<machine>/core/locks`, the folder `kith --direct` locks in.
 fn stub_paths(core: &CoreWriter) -> Result<(PathBuf, PathBuf)> {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     if let Some(stub) = tests::stub_bin() {
         return Ok((stub, core.folders().machine.join("core").join("locks")));
     }
@@ -591,6 +592,6 @@ pub(super) fn now_ms() -> i64 {
     crate::store::now_ms()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "writer_tests.rs"]
 mod tests;

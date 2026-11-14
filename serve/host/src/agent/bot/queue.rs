@@ -687,11 +687,14 @@ impl Actor {
     }
 }
 
+/// A lane's messages that go out as one turn: `(entry id, text)` each, and the accept of the first.
+type Batch = (Lane, Vec<(String, String)>, super::writer::Accept);
+
 /// The messages at the front of the queue that go out together as the next turn, with their lane: the same lane, up to
 /// and including one on a different subject (which goes alone). None when the front is not a user message.
 fn take_batch(
     queue: &mut std::collections::VecDeque<Queued>,
-) -> Option<(Lane, Vec<(String, String)>, super::writer::Accept)> {
+) -> Option<Batch> {
     let Some(Queued::User { lane, acc, .. }) = queue.front() else { return None };
     // The batch is one turn: its key and epochs are the first message's.
     let (lane, acc) = (lane.clone(), acc.clone());

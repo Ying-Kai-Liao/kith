@@ -5,7 +5,14 @@
 //! process that goes, and the modes (the rig expresses "switched, core down" and "not switched, core up" separately: the TEST_CORE
 //! lesson of #973).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::assert_is_empty,
+    clippy::unnecessary_wraps,
+    clippy::explicit_iter_loop,
+    clippy::doc_markdown
+)]
 
 use super::super::Cmd;
 use crate::api::devices::Caller;
