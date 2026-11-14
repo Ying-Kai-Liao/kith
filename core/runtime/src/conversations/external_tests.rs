@@ -701,3 +701,65 @@ fn list_carries_the_agent_and_the_holder_and_a_kill_names_its_conversation() {
     );
     assert_eq!(swept["kill"][0]["conversation"], "s1", "{swept}");
 }
+
+#[test]
+fn killidle_finds_the_conversation_among_several_a_process_has_loaded_and_kills_the_process() {
+    let (_t, mut core) = world();
+    let live = Alive::of(&[(100, "e1"), (500, "w1")]);
+    conversation(&core, "s1");
+    conversation(&core, "s2");
+    // One host process has loaded both sessions (the main one and a thread); the terminal opens the second.
+    warm_proc(&mut core, 500, "w1", "s1");
+    warm_proc(&mut core, 500, "w1", "s2");
+    let first = take(&mut core, &live, "s2", 100, "e1", "");
+    assert_eq!(first["refused"], "waiting", "{first}");
+    let marked: i64 = core
+        .conn()
+        .query_row(
+            "SELECT count(*) FROM warm_procs WHERE pid = 500 AND kill_at = ?1",
+            [MS],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        marked, 2,
+        "the process dies, so every session it holds goes"
+    );
+    // Gone: both rows are forgotten and the claim is made.
+    let after = Alive::of(&[(100, "e1")]);
+    let done = take(&mut core, &after, "s2", 100, "e1", "");
+    assert!(done["claimId"].is_i64(), "{done}");
+    assert_eq!(count(&core, "warm_procs"), 0);
+}
+
+#[test]
+fn killidle_leaves_a_process_alone_while_it_runs_a_turn_of_another_session_it_holds() {
+    let (_t, mut core) = world();
+    let live = Alive::of(&[(100, "e1"), (500, "w1")]);
+    conversation(&core, "s1");
+    conversation(&core, "s2");
+    warm_proc(&mut core, 500, "w1", "s1");
+    warm_proc(&mut core, 500, "w1", "s2");
+    // A turn runs on s1 in the warm process (its stub is pid 500).
+    core.conn()
+        .execute(
+            "INSERT INTO claims (claim_id, conversation, generation, kind, state, holder_instance, pid, pid_started, created_at)
+             VALUES (9000, 's1', 1, 'turn', 'running', ?1, 500, 'w1', 1)",
+            [HOST],
+        )
+        .unwrap();
+    // The terminal opens s2: it waits, and the process, which would take the owner's running turn with it, is not marked.
+    let first = take(&mut core, &live, "s2", 100, "e1", "");
+    assert_eq!(first["refused"], "waiting", "{first}");
+    assert_eq!(kill_at(&core, 500), None, "a busy process is not killed");
+    // The turn ends: the next try finds the process idle and marks it.
+    core.conn()
+        .execute(
+            "UPDATE claims SET state = 'ended', ended_at = 2 WHERE claim_id = 9000",
+            [],
+        )
+        .unwrap();
+    let second = take(&mut core, &live, "s2", 100, "e1", "");
+    assert_eq!(second["refused"], "waiting", "{second}");
+    assert_eq!(kill_at(&core, 500), Some(MS));
+}

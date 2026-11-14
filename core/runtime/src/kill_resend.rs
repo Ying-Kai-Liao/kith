@@ -76,7 +76,7 @@ pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Ve
              WHERE state = 'ending' AND pid IS NOT NULL
                AND end_reason IS NOT NULL AND end_reason NOT IN ('done', 'exit', ?1)
              UNION ALL
-             SELECT -pid, pid, started, instance, 'warm' FROM warm_procs WHERE kill_at IS NOT NULL",
+             SELECT DISTINCT -pid, pid, started, instance, 'warm' FROM warm_procs WHERE kill_at IS NOT NULL",
         )?;
         let rows = st
             .query_map([crate::accounts::failover::OUT_OF_USAGE], |r| {

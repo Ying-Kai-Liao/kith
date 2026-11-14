@@ -387,10 +387,17 @@ impl CoreWriter {
                 // The same stub, or a claim not redeemed yet (no pid).
                 let same = c["pid"].is_null() || c["pid"].as_u64() == Some(u64::from(stub.pid()));
                 let theirs = t.id.is_some() && c["turn"].as_i64() == t.id;
-                if let (true, true, Some(id), Some("claimed" | "running")) =
-                    (theirs, same, c["claimId"].as_i64(), c["state"].as_str())
-                {
-                    claim = Some(id);
+                match (theirs, same, c["claimId"].as_i64(), c["state"].as_str()) {
+                    (true, true, Some(id), Some("claimed" | "running")) => claim = Some(id),
+                    // Our own turn's claim on a stub that is gone (the stub restarted, so this is another pid): nothing is
+                    // writing and nothing will redeem it, and left alone it reads as `held` until the next host start. It is
+                    // stopped with the turn put back, the core ends it once it sees the pid gone, and the turn claims again.
+                    (true, false, Some(id), Some("claimed" | "running")) if stub_gone(&c) => {
+                        if let Err(why) = self.end_orphan(id) {
+                            return Begin::CoreDown { turn, why };
+                        }
+                    }
+                    _ => {}
                 }
             }
             Ok(_) => {}
@@ -403,6 +410,12 @@ impl CoreWriter {
             }
         }
         Begin::Failed { turn, why: "the stub failed twice".into() }
+    }
+
+    /// Stops our own claim on a gone stub with the turn requeued, then lets the core end it (it sees the pid gone).
+    fn end_orphan(&self, claim: i64) -> Result<(), String> {
+        self.data("hostclaim.stop", &json!({"claimId": claim, "reason": "stub gone", "requeue": true}))?;
+        self.data("hostclaim.settle", &json!({})).map(drop)
     }
 
     fn attempt(
@@ -435,7 +448,7 @@ impl CoreWriter {
         let Some(turn_id) = *turn else { return Step::Go(failed("no turn")) };
         let (claim_id, account) = match *claim {
             Some(id) => (id, None),
-            None => match self.claim_turn(t, turn_id, person) {
+            None => match self.claim_turn(t, turn_id, person, stub.account().as_deref()) {
                 Ok(got) => got,
                 Err(b) => return Step::Go(b),
             },
@@ -468,11 +481,22 @@ impl CoreWriter {
         Step::Go(self.redeem(t, stub, turn_id, claim_id, account.as_ref()))
     }
 
-    /// Step 3: `hostclaim.turn`. `Ok` is the claim and the account the core picked; `Err` is what the answer comes to.
-    fn claim_turn(&self, t: &Turn<'_>, turn_id: i64, person: &str) -> Result<(i64, Option<String>), Begin> {
+    /// Step 3: `hostclaim.turn`. `Ok` is the claim and the account it runs on; `Err` is what the answer comes to. `account`
+    /// is the one the warm process runs as: until accounts are switched the core uses it as sent and records it (it does
+    /// not pick), and once switched the core's pick stands and the host follows it (step 4).
+    fn claim_turn(
+        &self,
+        t: &Turn<'_>,
+        turn_id: i64,
+        person: &str,
+        account: Option<&str>,
+    ) -> Result<(i64, Option<String>), Begin> {
         let mut ask = json!({"conversation": t.conversation, "turn": turn_id, "person": person,
                              "revokeSeen": t.revoke_seen, "cwd": t.cwd, "sessionId": t.conversation,
                              "holderInstance": self.instance});
+        if let Some(a) = account {
+            ask["account"] = json!(a);
+        }
         for (k, v) in crate::core_front::caller_env() {
             ask["env"][k] = v;
         }
@@ -696,7 +720,9 @@ impl CoreWriter {
         Ok(Adopted { ended: ids("ended", ""), kill: ids("kill", "claimId") })
     }
 
-    /// Registers a warm process before `session/load` (`warm_procs`). `revoke_seen` is read before the process starts.
+    /// Registers a warm process, or one more session it has loaded, before `session/load` (`warm_procs`: one row per process
+    /// and session; call it for the main session and again for each thread or fork the process loads). `revoke_seen` is read
+    /// before the process starts.
     pub fn register_proc(
         &self,
         pid: u32,
@@ -721,10 +747,23 @@ impl CoreWriter {
         }
     }
 
-    /// Forgets a warm process once it is gone.
+    /// Forgets a warm process once it is gone (every session it had loaded).
     pub fn proc_gone(&self, pid: u32, started: &str) -> Result<bool, String> {
         Ok(self.data("hostclaim.procGone", &json!({"pid": pid, "started": started}))?["gone"] == true)
     }
+
+    /// Forgets one session of a live warm process (`session/forget`, or a fork's old id): the process stays known with the
+    /// others. [`CoreWriter::register_proc`] adds one.
+    pub fn proc_forget(&self, pid: u32, started: &str, conversation: &str) -> Result<bool, String> {
+        let ask = json!({"pid": pid, "started": started, "conversation": conversation});
+        Ok(self.data("hostclaim.procGone", &ask)?["gone"] == true)
+    }
+}
+
+/// Whether the process a claim names is gone: not there, or another process under the same pid.
+fn stub_gone(claim: &Value) -> bool {
+    let Some(pid) = claim["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) else { return false };
+    !pid_runs(pid) || claim["started"].as_str().is_some_and(|s| proc_start(pid).is_some_and(|now| now != s))
 }
 
 /// A refusal of `hostclaim.enqueue` (no turn exists yet).
