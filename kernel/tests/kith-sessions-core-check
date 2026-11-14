@@ -1,0 +1,332 @@
+#!/usr/bin/env bash
+# kith-sessions-core-check — the kernel's writer-claim takers (kith-sessions, kith-wake, the compaction's writer_free) in their
+# two modes (M3 P5; designs/2026-11-14-m3-cutover section 1.6). A fake `kith` program stands in for the core (a JSON file is its
+# store, a `down` file makes it not answer), and the mode is the claims tombstone, a marker in live/terminal/ (kernel/lib/kith_claims.py).
+# The two switches are separate on purpose (the TEST_CORE lesson of #973): "a core answers" is one thing, "the claims are switched"
+# another, and the cases that matter are the crossed ones.
+#
+#   Files mode (no marker; the default, today's behaviour):
+#     F1 core up:   claim files are written and read, the core is never asked (no call at all)
+#     F2 core down: the same, and the sweep works from the files
+#   Writer mode (marker):
+#     W1 core up:   no claim file; claim, a second writer refused (held), release, the busy line kith-wake's HELD pattern knows
+#     W2 core down: the owner's run goes on (stub lock alone) with one line and no file; a person's run, the epoch read, proc and
+#                   the sweep fail closed; kith-wake reads the session as held
+#     W3 the app's idle agent: waiting is retried for KITH_CLAIM_WAIT, then "session is busy"
+#     W4 a session id the stub cannot lock: the owner's run goes on unclaimed with a line (KITH_REQUIRE_STUB=1 or a person: refused)
+#     W5 a person's claim needs the epoch read before the may check; a revoke after it refuses the claim
+#     W6 the sweep: a person's runs in several conversations end, the owner's does not
+#     W7 proc makes a claim of its own per process; a core that cannot take it is exit 9
+#     W8 kith-wake: a live claim is a writer, a dead one is not, one claim.list serves a tick
+#     W9 claim files left from before the switch are never read: they neither block nor crash
+#     W10 the compaction's writer_free reads no files
+#   core_front.rs lists the rows (CORE_CALL_METHODS): the fake refuses any method outside the real list.
+# Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-sessions-core-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sc.XXXXXX"); T=$(cd "$T" && pwd -P)
+SLEEPERS=()
+trap 'kill "${SLEEPERS[@]}" 2>/dev/null; [ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_MACHINE=$T/state FAKE_DIR=$T/fake KITH_CLAIM_WAIT=0
+unset KITH_PERSON KITH_AGENT HQ_STATE HQ_HOME CARGO_TARGET_DIR KITH_DEV_BIN KITH_REQUIRE_STUB KITH_REVOKE_SEEN KITH_SERVE_DIR KITH_SERVE_PORT
+mkdir -p "$HOME" "$KITH_STATE/live/terminal" "$FAKE_DIR" "$KITH_HOME/agents/house/role"
+REG=$KITH_STATE/live/terminal
+SK=$KERNEL/bin/kith-sessions
+WAKE=$KERNEL/bin/kith-wake
+
+# The methods core-call allows: the real list, read from the host source.
+export FAKE_ALLOWED=$(python3 -I - "$KERNEL/../serve/host/src/core_front.rs" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+body = re.search(r'const CORE_CALL_METHODS: &\[&str\] =\s*&\[(.*?)\];', src, re.S).group(1)
+print(' '.join(re.findall(r'"([^"]+)"', body)))
+PY
+)
+cat > "$T/fakekith" <<'PY'
+#!/usr/bin/env python3
+"""The core, as far as the claim rows go: one writer per conversation, a dead claimer is free, a person's claim needs the epoch."""
+import json, os, re, sys
+d = os.environ['FAKE_DIR']
+a = sys.argv[1:]
+if a[:2] == ['memory', 'hook']:
+    print('usage: kith memory hook --phase'); sys.exit(0)
+if a[:2] != ['kernel', 'core-call']:
+    sys.exit(2)
+method, params = a[2], json.loads(sys.stdin.read() or '{}')
+if method not in os.environ['FAKE_ALLOWED'].split():
+    print(f'core-call: {method} is not one of the allowed', file=sys.stderr); sys.exit(2)
+if os.path.exists(d + '/down'):
+    print('no core daemon answers', file=sys.stderr); sys.exit(3)
+store = json.load(open(d + '/store.json')) if os.path.exists(d + '/store.json') else {'claims': [], 'epoch': {}, 'convs': {}, 'n': 0}
+with open(d + '/calls', 'a') as f:
+    f.write(method + ' ' + json.dumps(params, sort_keys=True) + '\n')
+ALLOWED = {'claim.external': {'conversation', 'pid', 'started', 'person', 'agent', 'engine', 'revokeSeen'},
+           'claim.release': {'pid', 'started', 'conversation'}, 'claim.sweepPerson': {'persons'},
+           'claim.epoch': {'person'}, 'claim.list': set()}
+def bad(why):
+    print(why, file=sys.stderr); sys.exit(4)
+if set(params) - ALLOWED[method]:
+    bad(f'{method}: unknown param {sorted(set(params) - ALLOWED[method])}')
+def alive(c):
+    try:
+        os.kill(c['pid'], 0); return True
+    except OSError:
+        return False
+def save():
+    json.dump(store, open(d + '/store.json', 'w'))
+def live():
+    return [c for c in store['claims'] if c['state'] in ('claimed', 'ending') and alive(c)]
+def out(v):
+    print(json.dumps(v)); sys.exit(0)
+if method == 'claim.epoch':
+    out({'epoch': store['epoch'].get(params.get('person') or 'owner', 0)})
+if method == 'claim.list':
+    out({'live': [{'claimId': c['id'], 'conversation': c['conv'], 'state': c['state'], 'kind': 'external', 'person': c['person'],
+                   'pid': c['pid'], 'started': c['started']} for c in live()], 'recent': []})
+if method == 'claim.release':
+    ended = []
+    for c in store['claims']:
+        if c['state'] == 'claimed' and c['person'] == 'owner' and c['pid'] == params['pid'] and c['started'] == params['started'] \
+                and params.get('conversation', c['conv']) == c['conv']:
+            c['state'] = 'ended'; ended.append(c['id'])
+    save(); out({'ended': ended})
+if method == 'claim.sweepPerson':
+    if any(p in ('', 'owner') for p in params['persons']):
+        bad('the owner is never swept')
+    kill = []
+    for p in params['persons']:
+        store['epoch'][p] = store['epoch'].get(p, 0) + 1
+    for c in store['claims']:
+        if c['person'] in params['persons'] and c['state'] in ('claimed', 'ending'):
+            c['state'] = 'ending'; kill.append({'claimId': c['id'], 'pid': c['pid'], 'started': c['started']})
+    save(); out({'kill': kill})
+# claim.external
+conv, person = params['conversation'], params.get('person') or 'owner'
+if not re.fullmatch(r'[a-z0-9._-]{1,128}', conv) or conv in ('.', '..'):
+    bad('claim: session id cannot be locked')
+if person != 'owner' and 'revokeSeen' not in params:
+    bad('claim: revokeSeen is required')
+if params.get('revokeSeen', store['epoch'].get(person, 0)) != store['epoch'].get(person, 0):
+    out({'refused': 'revoked', 'why': 'revoked after the may check'})
+if conv not in store['convs'] and not params.get('agent'):
+    bad('claim: agent is required')
+w = d + '/waiting'
+left = int(open(w).read() or 0) if os.path.exists(w) else 0
+if left > 0:
+    open(w, 'w').write(str(left - 1)); out({'refused': 'waiting', 'why': 'idle agent stopping'})
+mine = [c for c in live() if c['conv'] == conv]
+if mine:
+    c = mine[0]
+    if c['state'] == 'claimed' and c['pid'] == params['pid'] and c['started'] == params['started']:
+        out({'claimId': c['id'], 'again': True})
+    out({'refused': 'held', 'why': 'has a writer', 'holder': {'claimId': c['id'], 'kind': 'external', 'pid': c['pid']}})
+store['convs'][conv] = {'agent': params.get('agent'), 'engine': params.get('engine', 'claude')}
+store['n'] += 1
+store['claims'].append({'id': store['n'], 'conv': conv, 'pid': params['pid'], 'started': params['started'], 'person': person, 'state': 'claimed'})
+save(); out({'claimId': store['n'], 'generation': 1})
+PY
+chmod +x "$T/fakekith"
+export KITH_BIN=$T/fakekith
+"$T/fakekith" memory hook --help >/dev/null 2>&1; echo '{}' | "$T/fakekith" kernel core-call claim.list --params-stdin >/dev/null 2>&1; rm -f "$FAKE_DIR/calls" "$FAKE_DIR/store.json"
+
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+down() { touch "$FAKE_DIR/down"; }
+up() { rm -f "$FAKE_DIR/down"; }
+calls() { cat "$FAKE_DIR/calls" 2>/dev/null; }
+ncalls() { grep -c "^$1 " "$FAKE_DIR/calls" 2>/dev/null || echo 0; }
+reset() { rm -f "$FAKE_DIR/calls" "$FAKE_DIR/store.json" "$FAKE_DIR/waiting" "$FAKE_DIR/down"; rm -f "$REG"/*.claim "$REG"/*.lock; }
+sleeper() { sleep 300 >/dev/null 2>&1 & SLEEPERS+=($!); printf -v "$1" %s "$!"; disown; }
+files_mode() { rm -f "$REG/claims.tombstone"; }
+writer_mode() { printf '{"kith_tombstone": 1, "module": "claims"}\n' > "$REG/claims.tombstone"; }
+SKR() { python3 "$SK" "$@"; }
+
+# ---- Files mode ---------------------------------------------------------------------------------------------------
+files_mode; reset
+sleeper P1; sleeper P2
+SKR claim f1 "$P1" >/dev/null 2>&1; rc=$?
+check "F1 core up, no marker: the claim is a file" "[ $rc -eq 0 ] && [ -f $REG/f1.claim ] && grep -q '\"pid\": $P1' $REG/f1.claim"
+check "F1 the core was not asked at all" "[ -z \"\$(calls)\" ]"
+out=$(SKR claim f1 "$P2" 2>&1); rc=$?
+check "F1 a second writer is refused by the file" "[ $rc -ne 0 ] && grep -q 'held by terminal\\|held by oneshot' <<<\"$out\""
+SKR proc "$P1" sam house >/dev/null 2>&1
+check "F1 proc is a proc-<pid>.claim file" "[ -f $REG/proc-$P1.claim ] && [ -z \"\$(calls)\" ]"
+down
+reset; down
+SKR claim f2 "$P1" >/dev/null 2>&1; rc=$?
+check "F2 core down, no marker: the same, the file" "[ $rc -eq 0 ] && [ -f $REG/f2.claim ]"
+SKR claim f3 "$P2" sam house >/dev/null 2>&1
+out=$(SKR sweep sam 2>&1)
+check "F2 the sweep works from the files with no core" "grep -q 'swept 1' <<<\"$out\" && ! kill -0 $P2 2>/dev/null"
+check "F2 the core was not asked" "[ -z \"\$(calls)\" ]"
+up
+
+# ---- Writer mode, core up -------------------------------------------------------------------------------------------
+writer_mode; reset
+sleeper P1; sleeper P2
+SKR claim w1 "$P1" "" house >"$T/out" 2>&1; rc=$?
+check "W1 core up, marker: the claim is a core row" "[ $rc -eq 0 ] && grep -q '^claim.external' <(calls) && [ ! -e $REG/w1.claim ]"
+check "W1 the claim names the process and the agent" "grep -q '\"agent\": \"house\"' $FAKE_DIR/calls && grep -q '\"pid\": $P1' $FAKE_DIR/calls"
+out=$(SKR claim w1 "$P2" "" house 2>&1); rc=$?
+check "W1 a second writer is refused: busy, held by external" "[ $rc -ne 0 ] && grep -q 'that session is busy: held by external (pid $P1)' <<<\"$out\""
+check "W1 kith-wake's HELD pattern knows the line" "grep -Eq 'open in another|being taken over|answering in that thread|session is busy' <<<\"$out\""
+mkdir -p "$HOME/.claude/projects/p" && echo '{"cwd": "/tmp"}' > "$HOME/.claude/projects/p/w1.jsonl"
+out=$(SKR resolve house w1 "$P2" 2>&1); rc=$?
+check "W1 resolve refuses the same way (open in another writer)" "[ $rc -ne 0 ] && grep -q 'open in another writer' <<<\"$out\""
+RELOUT=$(bash -c "python3 '$SK' claim w2 \$\$ '' house && python3 '$SK' release w2; echo rc=\$?" 2>&1)
+check "W1 release by the launcher gives the claim back (exit 0 only when one was)" "grep -q 'rc=0' <<<\"$RELOUT\""
+RELOUT=$(bash -c "python3 '$SK' release w2; echo rc=\$?" 2>&1)
+check "W1 a release of nothing exits 1 and touches nothing" "grep -q 'rc=1' <<<\"$RELOUT\""
+SKR claim w2 "$P2" "" house >/dev/null 2>&1
+check "W1 the given-back conversation is free" "[ $? -eq 0 ]"
+SKR terminal w3 "$P1" "" house >/dev/null 2>&1
+check "W1 terminal claims the same way" "[ $? -eq 0 ] && [ ! -e $REG/w3.claim ]"
+
+# ---- Writer mode, core down ----------------------------------------------------------------------------------------
+reset; down
+out=$(SKR claim w4 "$P1" "" house 2>&1); rc=$?
+check "W2 switched, core down: the owner's run goes on (stub lock alone) with one line" "[ $rc -eq 0 ] && grep -q 'not answering' <<<\"$out\" && grep -q 'conversation lock alone' <<<\"$out\""
+check "W2 and no claim file is written (no fallback to the files)" "[ ! -e $REG/w4.claim ] && ! ls $REG/*.claim 2>/dev/null | grep -q ."
+out=$(KITH_REVOKE_SEEN=sam:0 SKR claim w5 "$P1" sam house 2>&1); rc=$?
+check "W2 a person's run refuses when no core answers" "[ $rc -ne 0 ] && grep -q \"not answering, so sam's run cannot be claimed\" <<<\"$out\""
+out=$(KITH_REVOKE_SEEN=sam:0 SKR terminal w5 "$P1" sam house 2>&1); rc=$?
+check "W2 so does a person's terminal run" "[ $rc -ne 0 ]"
+out=$(SKR epoch sam 2>&1); rc=$?
+check "W2 the epoch read fails (the launcher stops there)" "[ $rc -ne 0 ] && grep -q 'not answering' <<<\"$out\""
+out=$(SKR sweep sam 2>&1); rc=$?
+check "W2 the sweep is exit 3, never the files" "[ $rc -eq 3 ] && grep -q 'moved to the core' <<<\"$out\""
+KITH_REVOKE_SEEN=sam:0 SKR proc "$P1" sam house >/dev/null 2>&1; rc=$?
+check "W2 proc for a person is exit 9" "[ $rc -eq 9 ]"
+out=$(python3 - "$WAKE" "$KITH_STATE" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys
+l = importlib.machinery.SourceFileLoader('kw', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('kw', l)); l.exec_module(m)
+c = m.writer_live('anything')
+print('LIVE' if c else 'FREE', (c or {}).get('kind'))
+PY
+)
+check "W2 kith-wake reads a session as held when no core answers (the wake waits)" "grep -q 'LIVE unknown' <<<\"$out\""
+up
+
+# the other cross: marker absent, core up, was F1. Marker gone again, switched off, files are back:
+files_mode; reset
+SKR claim w6 "$P1" >/dev/null 2>&1
+check "F1 (again) removing the marker is the rollback: files again, the core not asked" "[ -f $REG/w6.claim ] && [ -z \"\$(calls)\" ]"
+
+# ---- Writer mode: the idle agent ------------------------------------------------------------------------------------
+writer_mode; reset
+echo 2 > "$FAKE_DIR/waiting"
+out=$(KITH_CLAIM_WAIT=5 SKR claim w7 "$P1" "" house 2>&1); rc=$?
+check "W3 a waiting answer is retried within KITH_CLAIM_WAIT" "[ $rc -eq 0 ] && [ \"\$(ncalls claim.external)\" -ge 3 ]"
+reset; echo 99 > "$FAKE_DIR/waiting"
+out=$(KITH_CLAIM_WAIT=0 SKR claim w8 "$P1" "" house 2>&1); rc=$?
+check "W3 with no wait it is refused as a busy session (the wake is offered again, not failed)" "[ $rc -ne 0 ] && grep -q 'that session is busy' <<<\"$out\" && grep -Eq 'session is busy' <<<\"$out\""
+out=$(KITH_CLAIM_WAIT=1 SKR terminal w8 "$P1" "" house 2>&1); rc=$?
+check "W3 an interactive terminal waits that long too" "[ $rc -ne 0 ] && [ \"\$(ncalls claim.external)\" -ge 3 ]"
+rm -f "$FAKE_DIR/waiting"
+
+# ---- a session id the lock cannot take --------------------------------------------------------------------------------
+reset
+out=$(SKR claim 'Bad/Id' "$P1" "" house 2>&1); rc=$?
+check "W4 the owner's run on such an id goes on unclaimed with a line" "[ $rc -eq 0 ] && grep -q 'cannot be locked' <<<\"$out\" && [ -z \"\$(calls)\" ]"
+out=$(KITH_REQUIRE_STUB=1 SKR claim 'Bad/Id' "$P1" "" house 2>&1); rc=$?
+check "W4 KITH_REQUIRE_STUB=1 refuses it" "[ $rc -ne 0 ] && grep -q 'cannot be locked' <<<\"$out\""
+out=$(KITH_REVOKE_SEEN=sam:0 SKR claim 'Bad/Id' "$P1" sam house 2>&1); rc=$?
+check "W4 a person's run on such an id is refused, and no core call was made" "[ $rc -ne 0 ] && [ -z \"\$(calls)\" ]"
+out=$(echo '{"conversation":"A..","pid":'$P1',"started":"x"}' | "$T/fakekith" kernel core-call claim.external --params-stdin 2>&1); rc=$?
+check "W4 the core row refuses it too (exit 4)" "[ $rc -eq 4 ]"
+
+# ---- a person's claim and the epoch -----------------------------------------------------------------------------------
+reset
+out=$(SKR epoch sam 2>&1)
+check "W5 epoch prints PERSON:N" "[ \"$out\" = 'sam:0' ]"
+out=$(SKR claim w9 "$P1" sam house 2>&1); rc=$?
+check "W5 a person's claim without the epoch is refused by the core" "[ $rc -ne 0 ] && grep -q 'refused the claim' <<<\"$out\""
+KITH_REVOKE_SEEN=sam:0 SKR claim w9 "$P1" sam house >/dev/null 2>&1
+check "W5 with the epoch read before the may check it is taken, naming the person" "[ $? -eq 0 ] && grep -q '\"person\": \"sam\"' $FAKE_DIR/calls && grep -q '\"revokeSeen\": 0' $FAKE_DIR/calls"
+SKR sweep sam >/dev/null 2>&1
+out=$(KITH_REVOKE_SEEN=sam:0 SKR claim w10 "$P2" sam house 2>&1); rc=$?
+check "W5 a revoke after the epoch was read refuses the claim" "[ $rc -ne 0 ] && grep -q 'refused the claim (revoked)' <<<\"$out\""
+out=$(KITH_REVOKE_SEEN=ann:0 SKR claim w10 "$P2" sam house 2>&1); rc=$?
+check "W5 an epoch read for someone else is not sent" "[ $rc -ne 0 ] && ! grep -q '\"revokeSeen\": 0, \"startd' $FAKE_DIR/calls"
+
+# ---- the sweep ------------------------------------------------------------------------------------------------------------
+reset
+sleeper S1; sleeper S2; sleeper S3
+KITH_REVOKE_SEEN=sam:0 SKR claim c1 "$S1" sam house >/dev/null 2>&1
+KITH_REVOKE_SEEN=sam:0 SKR claim c2 "$S2" sam house >/dev/null 2>&1
+SKR claim c3 "$S3" "" house >/dev/null 2>&1
+out=$(SKR sweep sam 2>&1); rc=$?
+check "W6 the sweep ends a person's runs in every conversation" "[ $rc -eq 0 ] && grep -q 'swept 2' <<<\"$out\" && ! kill -0 $S1 2>/dev/null && ! kill -0 $S2 2>/dev/null"
+check "W6 the owner's run is untouched" "kill -0 $S3 2>/dev/null"
+check "W6 the sweep made no claim file" "! ls $REG/*.claim 2>/dev/null | grep -q ."
+
+# ---- proc ---------------------------------------------------------------------------------------------------------------
+reset
+sleeper Q1
+KITH_REVOKE_SEEN=sam:0 SKR proc "$Q1" sam house >/dev/null 2>&1; rc=$?
+check "W7 proc takes a claim on its own per-process key" "[ $rc -eq 0 ] && grep -Eq '\"conversation\": \"proc-$Q1-[a-z0-9.]+\"' $FAKE_DIR/calls && grep -q '\"engine\": \"proc\"' $FAKE_DIR/calls"
+check "W7 and writes no proc claim file" "[ ! -e $REG/proc-$Q1.claim ]"
+
+# ---- kith-wake ----------------------------------------------------------------------------------------------------------
+reset
+sleeper W1
+KITH_REVOKE_SEEN= SKR claim x1 "$W1" "" house >/dev/null 2>&1
+out=$(python3 - "$WAKE" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys, os, time
+l = importlib.machinery.SourceFileLoader('kw', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('kw', l)); l.exec_module(m)
+print('x1', bool(m.writer_live('x1')))
+print('free', bool(m.writer_live('nobody')))
+print('x1-again', bool(m.writer_live('x1')))
+PY
+)
+check "W8 a live claim is a writer, an unclaimed session is free" "grep -q '^x1 True' <<<\"$out\" && grep -q '^free False' <<<\"$out\""
+check "W8 one claim.list serves the lookups of a tick" "[ \"\$(ncalls claim.list)\" -eq 1 ]"
+kill "$W1" 2>/dev/null; wait "$W1" 2>/dev/null
+out=$(python3 - "$WAKE" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys
+l = importlib.machinery.SourceFileLoader('kw', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('kw', l)); l.exec_module(m)
+print('x1', bool(m.writer_live('x1')))
+PY
+)
+check "W8 a claim whose process is gone is not a writer" "grep -q '^x1 False' <<<\"$out\""
+
+# ---- old claim files ------------------------------------------------------------------------------------------------------
+reset
+sleeper O1
+OSTART=$(python3 -I -c "import sys; sys.path.insert(0, sys.argv[1]); import kith_procstart; print(kith_procstart.start_stamp(int(sys.argv[2])))" "$KERNEL/lib" "$O1")
+printf '{"pid": %s, "procStart": "%s", "kind": "terminal"}' "$O1" "$OSTART" > "$REG/old1.claim"
+printf 'not json' > "$REG/old1.takeover.claim"
+printf '{"pid": %s, "procStart": "%s", "kind": "terminal", "person": "sam"}' "$O1" "$OSTART" > "$REG/old2.claim"
+SKR claim old1 "$S3" "" house >/dev/null 2>&1; rc=$?
+check "W9 claim files from before the switch neither block nor crash" "[ $rc -eq 0 ] && grep -q old1 $FAKE_DIR/calls && [ \"\$(cat $REG/old1.takeover.claim)\" = 'not json' ]"
+out=$(SKR sweep sam 2>&1)
+check "W9 the sweep does not read them either (the old file's holder lives)" "kill -0 $O1 2>/dev/null"
+
+# ---- the compaction's check ---------------------------------------------------------------------------------------------
+out=$(python3 - "$KERNEL/bin/kith-lifecycle" "$O1" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys
+l = importlib.machinery.SourceFileLoader('klc', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('klc', l)); l.exec_module(m)
+ks = m.sessions_mod()
+e = {'sessionId': 'old1', 'pid': 0}
+print('writer_mode', ks.writer_mode())
+print('free', m.writer_free(ks, e))   # old1.claim names a live pid, but the files are not the claims any more
+PY
+)
+check "W10 the compaction's writer_free reads no claim files in Writer mode" "grep -q 'writer_mode True' <<<\"$out\" && grep -q 'free True' <<<\"$out\""
+files_mode
+out=$(python3 - "$KERNEL/bin/kith-lifecycle" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys
+l = importlib.machinery.SourceFileLoader('klc', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('klc', l)); l.exec_module(m)
+ks = m.sessions_mod()
+print('free', m.writer_free(ks, {'sessionId': 'old1', 'pid': 0}))
+PY
+)
+check "W10 and in Files mode it still does (the old file's holder lives)" "grep -q 'free False' <<<\"$out\""
+
+echo
+[ $fail -eq 0 ] && echo "all checks passed" || echo "some checks FAILED"
+exit $fail

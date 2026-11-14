@@ -359,6 +359,13 @@ caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trus
 if [[ ${KITH_PERSON:-} == room-* ]]; then
   echo "kith: ${KITH_PERSON} is a room person; it only launches through the Rust launch, not this script" >&2; exit 3
 fi
+# Once the claims are the core's (the claims tombstone, kernel/lib/kith_claims.py), a person's revoke epoch is read BEFORE
+# kith-auth decides that they may run, and travels with the run's claim (KITH_REVOKE_SEEN): a revoke that lands in between
+# refuses the claim instead of being missed by the sweep that ran before it. Files mode (no marker): nothing is read.
+claim_seen=""
+if [[ -n ${KITH_PERSON:-} && -e ${KITH_STATE:-/nonexistent}/live/terminal/claims.tombstone ]]; then
+  claim_seen=$(python3 "$KITH/bin/kith-sessions" epoch "$KITH_PERSON") || exit 1
+fi
 if [[ -n ${KITH_PERSON:-} ]]; then
   # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
   # kith-auth says held, a revoke made in the app or on another Mac may not be here yet, so ask again every 2 s for up
@@ -1335,7 +1342,9 @@ for k, v in json.load(sys.stdin).get("env", {}).items():
 fi
 # Every run with someone else's profile is findable by the revoke sweep (kith-sessions proc): its pid is the one that execs
 # claude below, so the claim lives as long as claude (or, for an interactive run, the launcher claude runs under).
-[[ $p_owner == 1 || $launch -eq 1 ]] || python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || true
+# Once the claims are the core's, exit 9 is "the core cannot record this person's run": it does not start (a revoke would miss it).
+[[ $p_owner == 1 || $launch -eq 1 ]] || KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null \
+  || [[ $? -ne 9 ]] || { echo "kith: the Kith core cannot record this run, so ${p_id} cannot start it right now (is kith serve running?)" >&2; exit 1; }
 # Another harness: the same run, handed to its adapter (prompt in a file, directories and MCP configs as lists).
 if [[ $harness != claude ]]; then
   [[ $want_held -eq 0 ]] || echo "kith: --held holds claude sessions only; $harness runs here (--direct)" >&2
@@ -1469,7 +1478,7 @@ if [[ $# -gt 0 ]]; then
   [[ $want_held -eq 0 ]] || echo "kith: --held is for an interactive session; this task runs here (--direct)" >&2
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
-  [[ -z $csid ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  [[ -z $csid ]] || KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" "$claim_person" "$agent" || exit 1
   [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
   # A permission prompt in this run asks for approval through a card (--permission-prompt-tool) instead of being refused.
   # A guest run was given KITH_RUN_TOKEN/KITH_RUN_SOCKET by the host, an owner run KITH_ASK_*, or gets them here: the
@@ -1518,7 +1527,7 @@ fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
 if [[ -n $csid && $csid != "${r_sid:-}" ]]; then
-  python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" "$claim_person" "$agent" || exit 1
 fi
 # An interactive owner run is listed in the apps (the SessionStart hook above) and may be taken over from there, which ends
 # claude: it runs as a child of kith-sessions so the note about getting it back can follow it (signals and the exit code

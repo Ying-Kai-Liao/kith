@@ -84,6 +84,8 @@ def writer_free(ks, e, me=None):
     """Nobody else writes the session: no live claim but our own (`me`: the pid we claimed it for), no live claude process."""
     sid, me = e['sessionId'], me or os.getpid()
     mine = lambda c: c and c.get('pid') == me
+    if ks.writer_mode():   # the claims are the core's: the claim we hold (take_claim) is the only writer, there are no files to look at
+        return not ks.live_pid(e)
     claims = [c for c in (ks.read_claim(ks.claim_path(sid)), ks.read_claim(ks.claim_path(sid, True))) if not mine(c)]
     return not (any(ks.claim_live(c) for c in claims) or ks.live_pid(e))
 
@@ -229,7 +231,7 @@ def compact(ks, e, since, at):
         os.close(status_w)
     reaped = False
     try:
-        if ks.take_claim(sid, pid, 'oneshot', lifecycle_owner=True):
+        if ks.take_claim(sid, pid, 'oneshot', agent=e.get('agent'), lifecycle_owner=True):
             return 'held'
         if not still(ks, e, 'compact', since, at, pid):
             return 'skipped'
@@ -276,7 +278,7 @@ def compact(ks, e, since, at):
 
 def end(ks, e, since, at):
     sid = e['sessionId']
-    if ks.take_claim(sid, os.getpid(), 'oneshot', lifecycle_owner=True):
+    if ks.take_claim(sid, os.getpid(), 'oneshot', agent=e.get('agent'), lifecycle_owner=True):
         return 'held'
     try:
         if not still(ks, e, 'end', since, at):

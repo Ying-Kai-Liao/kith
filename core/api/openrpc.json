@@ -11071,6 +11071,241 @@
       }
     },
     {
+      "name": "claim.external",
+      "summary": "A kernel taker's writer claim on a conversation (`kith-sessions claim|terminal|resolve`, a `--direct` run) once the claims are the core's: kind `external`, naming the run's process (pid and start stamp) and the person kith-auth resolved (empty: the owner). Idempotent for the same process. Ends dead externals and settles stopped idle processes first; an idle warm process holding the conversation is marked for a kill and answers `waiting` until it is gone. A person's claim needs `revokeSeen` (`claim.epoch`, read before the may check). Answers `{claimId, generation}`, or `{refused: held | takeover | waiting | revoked | agent, why}`; a session id outside a-z0-9._- is refused. Serves only once the claims are switched.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The run's process (the launcher's shell, which then execs the engine).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "That process's start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The principal revoke sweeps by (empty: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent (required for a conversation the core does not know yet; a different one than the conversation's is refused).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "engine",
+          "summary": "The engine of such a conversation (default claude).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "The person's `claim.epoch` read before the caller's may check (required for a person; the owner's default is read now).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "engine": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.epoch",
+      "summary": "How many times a principal was revoked. A person's claim carries the value read BEFORE the may check that let the run in (`revokeSeen`), so a revoke committed after it refuses the claim. Answers `{epoch}`.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The principal (empty: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.release",
+      "summary": "Gives back the owner's external claims of one process (pid and start stamp): a claim already ended, or none, answers `{ended: []}`, so a retry is harmless. Never touches a turn's, a terminal's or a person's claim (a person's ends when its process is gone, or by a revoke). Answers `{ended}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "Only this conversation's claim.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "conversation": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.sweepPerson",
+      "summary": "Revoke or removal with no host running: ends the live claims of these principals (queued ones end at once, live ones go to `ending`). The owner is refused. Answers `{kill: [{claimId, pid, started}]}` for the caller to signal; the rows end once the processes are gone.",
+      "params": [
+        {
+          "name": "persons",
+          "summary": "The principals (a person and their bots).",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "persons": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
       "name": "schedule.preview",
       "summary": "The next fires of a trigger, as `{fires: [{at, iso}]}` (`at` in ms since the epoch): `{type: cron, expr, tz}` (tz `local` or an IANA zone), `{type: interval, every}` (seconds), `{type: once, at}`; a webhook or event has none. Refuses a spec `kith-sched` refuses, with its message.",
       "params": [
