@@ -120,7 +120,7 @@ async fn kai_sees_everything_and_each_line_a_person_cannot_see_says_so() {
 async fn a_post_is_stamped_with_the_gen_at_its_append_and_a_repeat_writes_one_line() {
     let (r, room, phone) = rig().await;
     let joined = add(&r, &room).await;
-    let body = json!({"botId": room, "text": "hello", "clientNonce": "n1"});
+    let body = json!({"botId": room, "text": "hello", "clientNonce": "n1", "stay": joined});
     let first = call(&r, &phone, "send", body.clone()).await.unwrap();
     let again = call(&r, &phone, "send", body).await.unwrap();
     assert_eq!(first["entry"]["id"], again["entry"]["id"], "a repeat of the nonce is the same line");
@@ -138,7 +138,7 @@ async fn a_post_is_stamped_with_the_gen_at_its_append_and_a_repeat_writes_one_li
 #[tokio::test]
 async fn a_post_that_asks_for_more_than_text_is_refused_and_writes_nothing() {
     let (r, room, phone) = rig().await;
-    add(&r, &room).await;
+    let joined = add(&r, &room).await;
     for extra in [
         json!({"attachments": ["u1"]}),
         json!({"threadId": "x"}),
@@ -148,7 +148,7 @@ async fn a_post_that_asks_for_more_than_text_is_refused_and_writes_nothing() {
         json!({"clear": true}),
         json!({"via": "call"}),
     ] {
-        let mut b = json!({"botId": room, "text": "hi"});
+        let mut b = json!({"botId": room, "text": "hi", "stay": joined});
         b.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         assert!(call(&r, &phone, "send", b).await.is_err(), "{extra}");
     }
@@ -169,12 +169,13 @@ async fn nobody_outside_the_stay_reads_posts_or_reacts_and_a_leave_cuts_the_next
     }
     assert_eq!(call(&r, &phone, "myRooms", json!({})).await.unwrap(), json!({"rooms": []}));
 
-    add(&r, &room).await;
+    let joined = add(&r, &room).await;
+    let body = json!({"botId": room, "text": "hi", "stay": joined});
     let sent = call(&r, &phone, "send", body.clone()).await.unwrap();
     let id = sent["entry"]["id"].as_str().unwrap();
     assert_eq!(
         call(&r, &phone, "myRooms", json!({})).await.unwrap(),
-        json!({"rooms": [{"id": room, "name": "Crew", "agents": ["house"]}]})
+        json!({"rooms": [{"id": room, "name": "Crew", "agents": ["house"], "stay": joined}]})
     );
     let reacted = call(&r, &phone, "react", json!({"entryId": id, "emoji": "👍"})).await.unwrap();
     assert_eq!(reacted["entry"]["data"]["reactions"], json!(["👍"]));
@@ -208,7 +209,7 @@ async fn a_room_is_that_room_alone_another_room_with_the_same_agent_is_not_their
 async fn a_removed_person_who_is_added_again_sees_only_what_came_after_the_re_add() {
     let (r, room, phone) = rig().await;
     let first = add(&r, &room).await;
-    call(&r, &phone, "send", json!({"botId": room, "text": "first stay"})).await.unwrap();
+    call(&r, &phone, "send", json!({"botId": room, "text": "first stay", "stay": first})).await.unwrap();
     stamped(&r, &room, EntryKind::Agent, "reply in the first stay", first);
     let left = remove(&r, &room).await;
     stamped(&r, &room, EntryKind::User, "while out", left);
@@ -333,4 +334,45 @@ async fn the_owner_calls_a_person_only_method_and_gets_nothing() {
     let (r, room, _phone) = rig().await;
     assert!(call(&r, &Caller::Local, "myRooms", json!({})).await.is_err());
     assert!(call(&r, &Caller::Local, "leaveRoom", json!({"room": room})).await.is_err());
+}
+
+#[tokio::test]
+async fn a_post_from_an_earlier_stay_is_refused_after_a_re_add() {
+    let (r, room, phone) = rig().await;
+    let first = add(&r, &room).await;
+    remove(&r, &room).await;
+    let second = add(&r, &room).await;
+    let body = |stay: i64| json!({"botId": room, "text": "queued", "stay": stay});
+    assert!(denied(&call(&r, &phone, "send", body(first)).await.unwrap_err()), "the first stay's post");
+    assert!(call(&r, &phone, "send", json!({"botId": room, "text": "no stay"})).await.is_err());
+    assert!(call(&r, &phone, "send", body(second)).await.is_ok());
+    let rooms = call(&r, &phone, "myRooms", json!({})).await.unwrap();
+    assert_eq!(rooms["rooms"][0]["stay"], second);
+}
+
+#[tokio::test]
+async fn a_revoke_recorded_between_the_check_and_the_append_refuses_the_post() {
+    let (r, room, _phone) = rig().await;
+    add(&r, &room).await;
+    let seat = crate::chat::room_people::live_seat(&r.hub.store, "sam", &room).await.unwrap();
+    call(&r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
+    let data = json!({"text": "late", "sender": {"person": "sam", "name": "Sam"}});
+    let e = r.hub.commit_room_post(&room, "sam", &seat, "", &data).unwrap_err();
+    assert_eq!(e.downcast_ref::<crate::hub::PostRefused>(), Some(&crate::hub::PostRefused::NotInRoom));
+}
+
+#[tokio::test]
+async fn a_message_id_is_shown_only_to_its_sender() {
+    let (r, room, phone) = rig().await;
+    let joined = add(&r, &room).await;
+    let body = json!({"botId": room, "text": "a", "clientNonce": "n", "stay": joined});
+    let sent = call(&r, &phone, "send", body).await.unwrap();
+    assert_eq!(sent["entry"]["data"]["clientNonce"], "n");
+    let other = stamped(&r, &room, EntryKind::User, "from kai", joined);
+    let mut data = other.data.clone();
+    data["clientNonce"] = "k".into();
+    r.hub.set_entry(&other.id, &data).unwrap();
+    let v = call(&r, &phone, "history", json!({"botId": room})).await.unwrap();
+    let kai = v["entries"].as_array().unwrap().iter().find(|e| e["data"]["text"] == "from kai").unwrap();
+    assert!(kai["data"]["clientNonce"].is_null(), "{kai}");
 }

@@ -101,6 +101,7 @@ impl Store {
     /// [`Self::insert_entry_at`] naming the room gen the entry comes from (`origin_gen`): a person's post takes the gen
     /// at its append, a turn's output the gen its turn started in. Written with the row and never changed after, so
     /// nothing re-stamps it; a row without one is unstamped, which a person in a room never sees.
+    #[cfg(test)]
     pub fn insert_entry_from_gen(
         &self,
         lane: &Lane,
@@ -195,6 +196,21 @@ impl Store {
         let c = self.db.locked();
         let row = c.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?1"), [id], row_entry);
         logged("entry", row.optional()).flatten()
+    }
+
+    /// [`Self::find_by_nonce`] among the lines `person` posted in a room: another sender's line with the same nonce is
+    /// never theirs to be handed back.
+    pub fn find_person_nonce(&self, room: &str, person: &str, nonce: &str) -> Option<Entry> {
+        let c = self.db.locked();
+        let row = c.query_row(
+            &format!(
+                "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND kind = 'user'
+                   AND json_extract(data, '$.clientNonce') = ?2 AND json_extract(data, '$.sender.person') = ?3"
+            ),
+            params![room, nonce, person],
+            row_entry,
+        );
+        logged("entry by person nonce", row.optional()).flatten()
     }
 
     pub fn find_by_nonce(&self, bot_id: &str, nonce: &str) -> Option<Entry> {

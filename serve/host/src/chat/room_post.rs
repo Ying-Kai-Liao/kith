@@ -62,9 +62,13 @@ pub fn seat_now(access: &dyn Authority, store: &Store, person: &str, room: &str)
 }
 
 /// An entry's `data` cut to what a person is shown.
-fn shown_data(data: &Value) -> Value {
+fn shown_data(data: &Value, viewer: &str) -> Value {
     let mut out = Map::new();
     for key in SEEN_DATA {
+        // A message id the sender chose is the sender's alone to see.
+        if key == "clientNonce" && data["sender"]["person"] != viewer {
+            continue;
+        }
         if let Some(v) = data.get(key) {
             out.insert(key.to_owned(), v.clone());
         }
@@ -74,22 +78,22 @@ fn shown_data(data: &Value) -> Value {
 
 /// The entry `e` (as JSON) as a person is shown it, or `None` when they are not shown it at all: not a message, or
 /// not from a gen they were in the room for.
-pub fn shown_entry(store: &Store, seat: i64, e: &Value) -> Option<Value> {
+pub fn shown_entry(store: &Store, viewer: &str, seat: i64, e: &Value) -> Option<Value> {
     if !e["kind"].as_str().is_some_and(|k| SEEN_KINDS.contains(&k)) || !sees(seat, store.origin_gen(e["id"].as_str()?))
     {
         return None;
     }
     let mut out = e.clone();
-    out["data"] = shown_data(&e["data"]);
+    out["data"] = shown_data(&e["data"], viewer);
     Some(out)
 }
 
-fn shown_entries(entries: &[Entry]) -> Vec<Value> {
+fn shown_entries(viewer: &str, entries: &[Entry]) -> Vec<Value> {
     entries
         .iter()
         .map(|e| {
             let mut v = serde_json::to_value(e).unwrap_or(Value::Null);
-            v["data"] = shown_data(&e.data);
+            v["data"] = shown_data(&e.data, viewer);
             v
         })
         .collect()
@@ -145,7 +149,7 @@ pub async fn history(hub: &Hub, person: &str, b: &Value) -> Result<Value> {
     let before = b["beforeSeq"].as_i64().unwrap_or(i64::MAX);
     let limit = b["limit"].as_i64().unwrap_or(100).clamp(1, 500);
     let entries = hub.store.history_seen(room, before, limit, seat.joined)?;
-    Ok(json!({"entries": shown_entries(&entries)}))
+    Ok(json!({"entries": shown_entries(person, &entries)}))
 }
 
 /// A thread of the room as `person` is shown it.
@@ -153,7 +157,7 @@ pub async fn thread(hub: &Hub, person: &str, b: &Value) -> Result<Value> {
     let room = b["botId"].as_str().unwrap_or_default();
     let seat = seat_of(hub, person, room).await?;
     let entries = hub.store.thread_seen(room, b["rootId"].as_str().unwrap_or_default(), 500, seat.joined)?;
-    Ok(json!({"entries": shown_entries(&entries)}))
+    Ok(json!({"entries": shown_entries(person, &entries)}))
 }
 
 /// `person` says something in the room: checked live, then written in one step with that check ([`Hub::commit_room_post`]).
@@ -182,12 +186,17 @@ pub async fn send(hub: &Arc<Hub>, person: &str, b: &Value) -> Result<Value> {
         bail!("In a room you can send text only for now.");
     }
     let seat = seat_of(hub, person, room).await?;
+    // The stay this message was written in (what `myRooms` said): a post a device queued in an earlier stay never lands
+    // in a later one (R4), however the stays came about.
+    if b["stay"].as_i64() != Some(seat.joined) {
+        return Err(NotAllowed("You're not in that room as you were: open it again.".to_owned()).into());
+    }
     let name = hub.store.person(person).map_or_else(|| person.to_owned(), |p| p.name);
     let data = json!({
         "text": text, "clientNonce": nonce, "status": "sent", "sender": {"person": person, "name": name},
     });
     let entry = hub.commit_room_post(room, person, &seat, nonce, &data)?;
-    Ok(json!({"entry": shown_entries(&[entry]).remove(0)}))
+    Ok(json!({"entry": shown_entries(person, &[entry]).remove(0)}))
 }
 
 /// `person` reacts to a message they are shown. The check and the reaction are one step under the membership lock,
@@ -198,13 +207,14 @@ pub async fn react(hub: &Hub, person: &str, b: &Value) -> Result<Value> {
     let seat = seat_of(hub, person, &entry.bot_id).await?;
     let _members = super::group::membership_lock();
     let shown = hub.store.room_open_seat(&entry.bot_id, person) == Some(seat.joined)
+        && !hub.store.is_suspended(person)
         && SEEN_KINDS.contains(&entry.kind.as_str())
         && sees(seat.joined, hub.store.origin_gen(id));
     if !shown {
         return Err(not_in_room());
     }
     let e = hub.react(id, b["emoji"].as_str().unwrap_or_default())?;
-    Ok(json!({"entry": shown_entries(&[e]).remove(0)}))
+    Ok(json!({"entry": shown_entries(person, &[e]).remove(0)}))
 }
 
 /// The rooms `person` is in right now (an open stay and every agent still granted), for `myRooms`.
@@ -220,7 +230,8 @@ pub async fn my_rooms(hub: &Hub, person: &str) -> Vec<Value> {
             .iter()
             .filter_map(|m| hub.store.bot(m).ok().flatten().filter(|b| !b.deleted).map(|b| b.config.name))
             .collect();
-        out.push(json!({"id": row.config.id, "name": row.config.name, "agents": agents}));
+        let stay = hub.store.room_open_seat(&row.config.id, person);
+        out.push(json!({"id": row.config.id, "name": row.config.name, "agents": agents, "stay": stay}));
     }
     out
 }
@@ -250,6 +261,6 @@ mod tests {
     fn only_the_listed_fields_of_a_message_are_shown() {
         let data = json!({"text": "hi", "attachments": [{"path": "/x"}], "thread": {"summary": "s"}, "hiddenFrom": ["a"],
             "author": "bot1", "final": true, "status": "sent"});
-        assert_eq!(shown_data(&data), json!({"text": "hi", "author": "bot1", "final": true, "status": "sent"}));
+        assert_eq!(shown_data(&data, "sam"), json!({"text": "hi", "author": "bot1", "final": true, "status": "sent"}));
     }
 }

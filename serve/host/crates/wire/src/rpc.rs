@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "1db1a34afe285a3efec0f8b40c37972ae6dfc328aa5ed56dfdea5fe1b4b7ef6a";
+pub const CONTRACT_SHA256: &str = "f876a8953708c58526a1d5120ee36b33337bacc827331d7e70f6f7d2c536395d";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1079,13 +1079,14 @@ pub struct RoomPersonChange {
     pub changed: bool,
 }
 
-/// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents.
+/// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MyRoom {
     pub id: String,
     pub name: String,
     pub agents: Vec<String>,
+    pub stay: i64,
 }
 
 /// The group rooms a person is in right now.
@@ -1303,6 +1304,8 @@ pub struct SendParams {
     pub clear: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stay: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1935,7 +1938,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "RoomPerson", fields: &[("person", "string"), ("joinedGen", "int"), ("leftGen", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPeople", fields: &[("enabled", "bool"), ("gen", "int"), ("people", "[RoomPerson]")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPersonChange", fields: &[("gen", "int"), ("changed", "bool")], may_omit: &[] },
-        crate::check::TypeSchema { name: "MyRoom", fields: &[("id", "string"), ("name", "string"), ("agents", "[string]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "MyRoom", fields: &[("id", "string"), ("name", "string"), ("agents", "[string]"), ("stay", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "MyRooms", fields: &[("rooms", "[MyRoom]")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomLeft", fields: &[("left", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
@@ -1952,7 +1955,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "HelloParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "KithInfoParams", fields: &[("botId", "string"), ("refresh", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "StartChatParams", fields: &[("agent", "string")], may_omit: &[] },
-        crate::check::TypeSchema { name: "SendParams", fields: &[("botId", "string"), ("text", "string"), ("clientNonce", "string?"), ("threadId", "string?"), ("attachments", "[string]?"), ("pasted", "[string]?"), ("newTask", "bool?"), ("via", "MessageVia?"), ("project", "string?"), ("folder", "string?"), ("clear", "bool?"), ("budget", "int?"), ("engine", "string?"), ("engineModel", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "SendParams", fields: &[("botId", "string"), ("text", "string"), ("clientNonce", "string?"), ("threadId", "string?"), ("attachments", "[string]?"), ("pasted", "[string]?"), ("newTask", "bool?"), ("via", "MessageVia?"), ("project", "string?"), ("folder", "string?"), ("clear", "bool?"), ("budget", "int?"), ("stay", "int?"), ("engine", "string?"), ("engineModel", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "ThreadParams", fields: &[("botId", "string"), ("rootId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "HistoryParams", fields: &[("botId", "string"), ("beforeSeq", "int?"), ("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "NewSessionParams", fields: &[("botId", "string")], may_omit: &[] },

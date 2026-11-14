@@ -450,7 +450,7 @@ fn room_visible(access: &dyn Authority, store: &Store, me: &str, room: &str, kin
         return None;
     }
     let seat = crate::chat::room_post::seat_now(access, store, me, room)?;
-    let entry = crate::chat::room_post::shown_entry(store, seat, &v["entry"])?;
+    let entry = crate::chat::room_post::shown_entry(store, me, seat, &v["entry"])?;
     Some(json!({"type": "entry", "rev": v["rev"], "entry": entry}))
 }
 

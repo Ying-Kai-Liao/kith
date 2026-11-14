@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "1db1a34afe285a3efec0f8b40c37972ae6dfc328aa5ed56dfdea5fe1b4b7ef6a"
+    public static let sha256 = "f876a8953708c58526a1d5120ee36b33337bacc827331d7e70f6f7d2c536395d"
 }
 
 extension HostContract {
@@ -1063,16 +1063,18 @@ extension HostContract {
         }
     }
 
-    /// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents.
+    /// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).
     public struct MyRoom: Codable, Hashable, Sendable {
         public var id: String
         public var name: String
         public var agents: [String]
+        public var stay: Int64
 
-        public init(id: String, name: String, agents: [String]) {
+        public init(id: String, name: String, agents: [String], stay: Int64) {
             self.id = id
             self.name = name
             self.agents = agents
+            self.stay = stay
         }
     }
 
@@ -1343,10 +1345,11 @@ extension HostContract {
         public var folder: String?
         public var clear: Bool?
         public var budget: Int64?
+        public var stay: Int64?
         public var engine: String?
         public var engineModel: String?
 
-        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
+        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, stay: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
             self.botId = botId
             self.text = text
             self.clientNonce = clientNonce
@@ -1359,6 +1362,7 @@ extension HostContract {
             self.folder = folder
             self.clear = clear
             self.budget = budget
+            self.stay = stay
             self.engine = engine
             self.engineModel = engineModel
         }

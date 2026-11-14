@@ -43,6 +43,8 @@ enum Op {
     GrantOff(usize),
     GrantOn(usize),
     Post(usize),
+    /// A post a device wrote in some earlier stay (it names a gen seen so far), sent now.
+    Stale(usize, usize),
     /// A line from a turn that started at one of the gens seen so far (an agent's or a person's), landing now.
     Turn(usize, bool),
     /// A line nobody stamped (Kai's own, or a writer that names no gen), as the room has them today.
@@ -66,11 +68,12 @@ fn op() -> impl Strategy<Value = Op> {
         1 => p().prop_map(Op::GrantOff),
         1 => p().prop_map(Op::GrantOn),
         4 => p().prop_map(Op::Post),
+        2 => (p(), 0..16usize).prop_map(|(i, k)| Op::Stale(i, k)),
         4 => (0..16usize, any::<bool>()).prop_map(|(k, user)| Op::Turn(k, user)),
         2 => any::<bool>().prop_map(Op::Unstamped),
         3 => p().prop_map(Op::Queue),
         3 => p().prop_map(Op::Land),
-        4 => (p(), 0..4u8).prop_map(|(i, how)| Op::Race(i, how)),
+        4 => (p(), 0..5u8).prop_map(|(i, how)| Op::Race(i, how)),
     ]
 }
 
@@ -250,10 +253,15 @@ impl<'a> World<'a> {
                     self.model[i].granted = on;
                 }
             }
-            Op::Post(i) => {
+            Op::Post(i) | Op::Stale(i, _) => {
                 let text = self.text();
-                let got = self.person(i, "send", json!({"botId": room, "text": text})).await;
-                let expect = self.model[i].seat().is_some();
+                // A post names the stay it was written in: the open one, or (stale) one from the past.
+                let stay = match *o {
+                    Op::Stale(_, k) => self.gens[k % self.gens.len()],
+                    _ => self.model[i].open.unwrap_or(0),
+                };
+                let got = self.person(i, "send", json!({"botId": room, "text": text, "stay": stay})).await;
+                let expect = self.model[i].seat() == Some(stay);
                 if got.is_ok() != expect {
                     return Err(fail(format!("post by {}: expected ok={expect}, got {got:?}", PEOPLE[i])));
                 }
@@ -299,8 +307,9 @@ impl<'a> World<'a> {
                 let text = self.text();
                 let data = json!({"text": text, "status": "sent", "sender": {"person": PEOPLE[i], "name": PEOPLE[i]}});
                 let got = self.r.hub.commit_room_post(&room, PEOPLE[i], &q.seat, "", &data);
-                // Lands only into the stay it was checked against: not after a removal, nor after a re-add (R4).
-                let expect = self.model[i].open == Some(q.stay);
+                // Lands only into the stay it was checked against: not after a removal, nor after a re-add (R4), nor
+                // once a revoke was recorded.
+                let expect = self.model[i].open == Some(q.stay) && !self.model[i].revoked;
                 if got.is_ok() != expect {
                     return Err(fail(format!("landing for {}: expected ok={expect}, got {got:?}", PEOPLE[i])));
                 }
@@ -383,6 +392,7 @@ fn flatten(ops: &[Op]) -> Vec<Op> {
                     0 => vec![Op::Remove(i)],
                     1 => vec![Op::Leave(i)],
                     2 => vec![Op::Remove(i), Op::Join(i)],
+                    4 => vec![Op::Revoke(i)],
                     _ => vec![],
                 };
                 [vec![Op::Queue(i)], between, vec![Op::Land(i)]].concat()

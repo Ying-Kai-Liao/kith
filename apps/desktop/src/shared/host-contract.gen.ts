@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '1db1a34afe285a3efec0f8b40c37972ae6dfc328aa5ed56dfdea5fe1b4b7ef6a'
+export const CONTRACT_SHA256 = 'f876a8953708c58526a1d5120ee36b33337bacc827331d7e70f6f7d2c536395d'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -519,11 +519,12 @@ export interface RoomPersonChange {
   changed: boolean
 }
 
-/** A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents. */
+/** A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused). */
 export interface MyRoom {
   id: string
   name: string
   agents: string[]
+  stay: number
 }
 
 /** The group rooms a person is in right now. */
@@ -674,6 +675,7 @@ export interface SendParams {
   folder?: string | null
   clear?: boolean | null
   budget?: number | null
+  stay?: number | null
   engine?: string | null
   engineModel?: string | null
 }
@@ -1386,7 +1388,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     RoomPerson: { fields: { person: 'string', joinedGen: 'int', leftGen: 'int?' } },
     RoomPeople: { fields: { enabled: 'bool', gen: 'int', people: '[RoomPerson]' } },
     RoomPersonChange: { fields: { gen: 'int', changed: 'bool' } },
-    MyRoom: { fields: { id: 'string', name: 'string', agents: '[string]' } },
+    MyRoom: { fields: { id: 'string', name: 'string', agents: '[string]', stay: 'int' } },
     MyRooms: { fields: { rooms: '[MyRoom]' } },
     RoomLeft: { fields: { left: 'bool' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
@@ -1403,7 +1405,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HelloParams: { fields: {} },
     KithInfoParams: { fields: { botId: 'string', refresh: 'bool?' } },
     StartChatParams: { fields: { agent: 'string' } },
-    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?', budget: 'int?', engine: 'string?', engineModel: 'string?' } },
+    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?', budget: 'int?', stay: 'int?', engine: 'string?', engineModel: 'string?' } },
     ThreadParams: { fields: { botId: 'string', rootId: 'string' } },
     HistoryParams: { fields: { botId: 'string', beforeSeq: 'int?', limit: 'int?' } },
     NewSessionParams: { fields: { botId: 'string' } },

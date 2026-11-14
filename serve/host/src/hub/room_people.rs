@@ -4,7 +4,7 @@ use super::Hub;
 use crate::LockExt;
 use crate::chat::group::membership_lock;
 use crate::chat::room_people::{Seat, room_agents};
-use crate::store::{Entry, EntryKind, Lane, now_ms};
+use crate::store::Entry;
 use anyhow::Result;
 use serde_json::{Value, json};
 
@@ -50,16 +50,16 @@ impl Hub {
     ) -> Result<Entry> {
         let _members = membership_lock();
         let _g = self.emit_lock.locked();
+        if !nonce.is_empty()
+            && let Some(e) = self.store.find_person_nonce(room, person, nonce)
+        {
+            return Ok(e);
+        }
         if self.store.room_open_seat(room, person) != Some(seat.joined) {
             return Err(PostRefused::NotInRoom.into());
         }
         if room_agents(&self.store, room).ok().as_ref() != Some(&seat.agents) {
             return Err(PostRefused::RoomChanged.into());
-        }
-        if !nonce.is_empty()
-            && let Some(e) = self.store.find_by_nonce(room, nonce).filter(|e| e.data["sender"]["person"] == person)
-        {
-            return Ok(e);
         }
         // Held entries go first (they keep their order), and a store that still won't write takes no post at all: a
         // line written ahead of them would be out of order.
@@ -67,9 +67,11 @@ impl Hub {
         if !self.unsaved.locked().queue.is_empty() {
             return Err(PostRefused::NotWriting.into());
         }
-        let turn = self.store.max_turn(room) + 1;
-        let origin = self.store.room_gen(room);
-        let e = self.store.insert_entry_from_gen(&Lane::main(room), EntryKind::User, turn, data, now_ms(), origin)?;
+        // The stay and the revoke are checked again in the store's own transaction with the append, so a revoke
+        // recorded between the live check and here refuses the post too.
+        let Some(e) = self.store.insert_room_post(room, person, seat.joined, data)? else {
+            return Err(PostRefused::NotInRoom.into());
+        };
         let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));
         Ok(e)
     }

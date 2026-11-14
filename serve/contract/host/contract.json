@@ -422,8 +422,8 @@
       "fields": { "gen": "int", "changed": "bool" }
     },
     "MyRoom": {
-      "doc": "A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents.",
-      "fields": { "id": "string", "name": "string", "agents": "[string]" }
+      "doc": "A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).",
+      "fields": { "id": "string", "name": "string", "agents": "[string]", "stay": "int" }
     },
     "MyRooms": {
       "doc": "The group rooms a person is in right now.",
@@ -568,7 +568,7 @@
         "project": "string?",
         "folder": "string?",
         "clear": "bool?",
-        "budget": "int?",
+        "budget": "int?", "stay": "int?",
         "engine": "string?",
         "engineModel": "string?"
       },
