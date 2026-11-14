@@ -71,7 +71,13 @@ impl Actor {
             });
         })
         .await?;
-        if let Err(error) = self.claim_for_turn(&sid, &lane).await {
+        // Writer mode: the engine is already writing, so a begin that does not give it the session stops its process.
+        let claimed = match self.writer_claim(&sid, &lane, true).await {
+            Ok(true) => Ok(()),
+            Ok(false) => self.claim_for_turn(&sid, &lane).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = claimed {
             self.hub.set_runtime(&self.rt, |r| {
                 r.status = BotStatus::Idle;
                 r.lane = None;

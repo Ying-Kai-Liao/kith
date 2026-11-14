@@ -67,6 +67,15 @@ impl Actor {
             Pick::Primary | Pick::Backup(_) => {}
         }
         tracing::info!(bot = %self.cfg.id, entry = %failed, "turn ran out of usage; moving to the next account");
+        // Writer mode: the end says `exit {out_of_usage}`, so the core puts the turn back, and the claim again (below, through
+        // `begin_prompt`: the account's process, then `begin` with the same turn id) is the retry. This is the only end that
+        // requeues: every case above that does not move the turn ends `Done`. The lock is back before the process of the next
+        // account starts (the old one stops with its lock).
+        if self.writer.run.is_some() {
+            self.writer.end = Some(super::writer::Rel::OutOfUsage);
+            self.release_turn_claim();
+            self.writer_settle_end().await;
+        }
         self.drop_attempt();
         self.reuse_prompt = true;
         self.limit_seen = None;

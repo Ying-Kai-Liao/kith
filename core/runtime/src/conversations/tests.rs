@@ -300,6 +300,44 @@ fn redeem_moves_claimed_to_running_and_records_the_process() {
     );
 }
 
+/// P7b: the idle-kill before a terminal claim marks the process (`warm_procs.kill_at`); a turn claimed meanwhile must not be
+/// redeemed onto it, or the engine is killed under a running turn. A retry of a redeem that already ran stands.
+#[test]
+fn a_process_marked_for_a_kill_takes_no_new_redeem() {
+    let (_t, mut c) = open();
+    let (id, t) = take(&mut c, "c1");
+    c.conn()
+        .execute(
+            "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation, kill_at)
+             VALUES (321, 'e321', 'kith-serve-host/1-x', '', 'echo', 'c1', 5)",
+            [],
+        )
+        .expect("a marked process");
+    assert_eq!(
+        redeem(&mut c, id, 321, "e321", "h1", 20).expect("refused"),
+        Redeemed::Refused("killing".into())
+    );
+    assert_eq!(state(&c, id), "claimed", "nothing moved: the caller stops it with the turn put back");
+    assert_eq!(turn_state(&c, t), "claimed");
+    // Another process is not the marked one.
+    assert_eq!(
+        redeem(&mut c, id, 322, "e322", "h1", 21).expect("other process"),
+        Redeemed::Running { again: false }
+    );
+    // A retried redeem of the claim that ran is not a new one, whatever the mark says now.
+    c.conn()
+        .execute(
+            "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation, kill_at)
+             VALUES (322, 'e322', 'kith-serve-host/1-x', '', 'echo', 'c1', 6)",
+            [],
+        )
+        .expect("marked after");
+    assert_eq!(
+        redeem(&mut c, id, 322, "e322", "h1", 22).expect("again"),
+        Redeemed::Running { again: true }
+    );
+}
+
 #[test]
 fn a_retried_redeem_is_idempotent_and_another_process_is_refused() {
     let (_t, mut c) = open();

@@ -15,10 +15,6 @@
 //! Writer mode is refused there (S2). Blocking calls (`take`, `release`, `restart`) are for a blocking thread, as
 //! `core_writer` says; `restart` and `spawn` need a tokio runtime (the child is a tokio process).
 //!
-//! Nothing calls this until the wiring package (P7b).
-
-#![allow(dead_code, reason = "machinery with no caller yet")]
-
 use super::core_writer::WarmStub;
 use super::registry::pid_runs;
 use kith_acp::{Acp, Ctl, Incoming, Release, Take, spawn_resident};
@@ -88,6 +84,7 @@ impl ResidentStub {
     }
 
     /// Whether the control channel still answers (it breaks on the first call that got no answer).
+    #[cfg(test)]
     pub fn ctl_open(&self) -> bool {
         self.ctl.is_open()
     }

@@ -12,47 +12,53 @@ use std::sync::{Arc, Mutex};
 const LIVE: [&str; 3] = ["claimed", "running", "ending"];
 
 #[derive(Clone, Debug)]
-struct C {
-    id: i64,
-    conv: String,
-    state: String,
-    kind: String,
-    pid: Option<u64>,
-    started: Option<String>,
-    instance: Option<String>,
-    turn: Option<i64>,
+pub(crate) struct C {
+    pub id: i64,
+    pub conv: String,
+    pub state: String,
+    pub kind: String,
+    pub pid: Option<u64>,
+    pub started: Option<String>,
+    pub instance: Option<String>,
+    pub turn: Option<i64>,
 }
 
 #[derive(Default)]
 #[allow(clippy::struct_excessive_bools, reason = "one switch per scripted answer")]
-struct World {
-    claims: Vec<C>,
+pub(crate) struct World {
+    pub claims: Vec<C>,
     /// (id, state, parked reason)
-    turns: Vec<(i64, String, Option<String>)>,
-    log: Vec<String>,
-    procs: Vec<u64>,
-    reports: Vec<(String, Value)>,
-    account: String,
-    down: bool,
-    revoke_enqueue: bool,
+    pub turns: Vec<(i64, String, Option<String>)>,
+    pub log: Vec<String>,
+    /// Every call with its params, in order.
+    pub asked: Vec<(String, Value)>,
+    pub procs: Vec<u64>,
+    pub reports: Vec<(String, Value)>,
+    pub account: String,
+    pub down: bool,
+    pub revoke_enqueue: bool,
     /// `hostclaim.turn` answers this refusal as data.
-    turn_refusal: Option<&'static str>,
-    exhausted: bool,
+    pub turn_refusal: Option<&'static str>,
+    pub exhausted: bool,
     /// The redeem is applied but its reply is lost, this many times.
-    redeem_lost: u32,
+    pub redeem_lost: u32,
     /// The redeem is refused as ended.
-    redeem_refused: bool,
+    pub redeem_refused: bool,
+    /// The redeem kills the stub it names and is refused as ended (the lock cannot be given back: `LockStuck`).
+    pub kill_on_redeem: bool,
+    /// The redeem is refused as `killing` (the process is marked for a kill), this many times.
+    pub redeem_killing: u32,
     /// What `cutover.mayServe` answers for the claims module.
-    switched: Option<bool>,
+    pub switched: Option<bool>,
     /// The gate answers `ok: false` with a warning (stepping, rolling back, a marker mismatch), or refuses the call.
-    gate_warning: bool,
-    gate_refused: bool,
+    pub gate_warning: bool,
+    pub gate_refused: bool,
     /// (conversation, key, turn): an enqueue with a key already seen answers the same turn.
-    keys: Vec<(String, String, i64)>,
+    pub keys: Vec<(String, String, i64)>,
     /// The enqueue is applied but its reply is lost, this many times.
-    enqueue_lost: u32,
+    pub enqueue_lost: u32,
     /// The `account` each `hostclaim.turn` was sent with (the account the host's process runs as).
-    sent_accounts: Vec<Option<String>>,
+    pub sent_accounts: Vec<Option<String>>,
 }
 
 fn data(v: Value) -> Answer {
@@ -72,8 +78,9 @@ impl World {
         self.turns.iter_mut().find(|t| t.0 == id)
     }
 
-    fn answer(&mut self, method: &str, p: &Value) -> Answer {
+    pub(crate) fn answer(&mut self, method: &str, p: &Value) -> Answer {
         self.log.push(method.to_owned());
+        self.asked.push((method.to_owned(), p.clone()));
         if self.down {
             return Answer::Down { why: "the core is down".into(), lost: false };
         }
@@ -139,6 +146,17 @@ impl World {
                 )
             }
             "hostclaim.redeem" => {
+                if self.kill_on_redeem {
+                    if let Some(pid) = p["pid"].as_i64().and_then(|p| i32::try_from(p).ok()) {
+                        // SAFETY: a signal to the stub's process group, which the test started.
+                        unsafe { libc::killpg(pid, libc::SIGKILL) };
+                    }
+                    return data(json!({"refused": "ended"}));
+                }
+                if self.redeem_killing > 0 {
+                    self.redeem_killing -= 1;
+                    return data(json!({"refused": "killing"}));
+                }
                 if self.redeem_refused {
                     return data(json!({"refused": "ended"}));
                 }
@@ -455,7 +473,7 @@ impl Drop for Direct {
     }
 }
 
-fn stub_bin() -> PathBuf {
+pub(crate) fn stub_bin() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
         .get_or_init(|| {

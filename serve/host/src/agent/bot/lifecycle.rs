@@ -167,6 +167,8 @@ impl Actor {
             && self.active_routine.is_none()
             && self.routine_completion.is_none()
             && self.cancel_deadline.is_none()
+            // Writer mode: a parked start, a claim, or an end still going keeps the process (and its lock) where it is.
+            && self.writer.idle()
     }
 
     /// A routine run's session is spent once the run is. When it was the only session open and nothing waits, the
