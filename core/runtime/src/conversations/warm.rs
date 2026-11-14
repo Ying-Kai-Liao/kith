@@ -1,8 +1,8 @@
 //! The host's warm engine processes in the core (B4) and the host's own instance (B5), designs/2026-11-14-m3-cutover
 //! sections 1.3 and 1.5.
 //!
-//! - **`warm_procs`** (migration 82): one row per engine process the host keeps, idle or not, with the conversation it has
-//!   loaded now. An idle guest's process has no claim, so without a row a revoke could not find it. [`register`] upserts a
+//! - **`warm_procs`** (migrations 82, 83): one row per engine process the host keeps and conversation it has loaded (a
+//!   process with none has one row with `''`), idle or not. An idle guest's process has no claim, so without a row a revoke could not find it. [`register`] upserts a
 //!   row, [`gone`] deletes it, [`revoke_in`] (called by `claims::revoke_person`) marks the rows a revoke reaches `kill_at`
 //!   and answers their kills, [`settle`] deletes a marked row once its process is confirmed gone. The daemon's kill
 //!   re-send signals the marked rows until then.
@@ -10,7 +10,7 @@
 //!   at its start. It ends the claims and marks the processes of every other host instance, so a claim of a host that is
 //!   gone is not read as "ours" and a process that outlived it is killed rather than forgotten.
 
-use rusqlite::{Transaction, params};
+use rusqlite::{OptionalExtension as _, Transaction, params};
 
 use super::claims::{self, Kill, is_host_instance};
 use crate::db::Core;
@@ -41,7 +41,8 @@ fn kill(pid: i64, started: String) -> Kill {
     }
 }
 
-/// Registers a process, or moves the session it has loaded. A row already marked for a kill stays marked.
+/// Registers a process, or adds a session it has loaded (one row per conversation; [`gone`] with a conversation takes one
+/// away). A process already marked for a kill marks its new row too.
 pub(crate) fn register(core: &mut Core, w: &WarmProc<'_>) -> Result<()> {
     if !is_host_instance(w.instance) {
         return Err(Error::BadParams(format!(
@@ -68,28 +69,91 @@ pub(crate) fn register(core: &mut Core, w: &WarmProc<'_>) -> Result<()> {
             w.person
         )));
     }
-    tx.execute(
-        "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT (pid, started) DO UPDATE SET
-            instance = excluded.instance, person = excluded.person, agent = excluded.agent,
-            conversation = excluded.conversation",
-        params![w.pid, w.started, w.instance, w.person, w.agent, w.conversation],
-    )?;
+    let conversation = w.conversation.unwrap_or("");
+    if conversation.is_empty() {
+        // No session to name: the process keeps the rows it has, and gets one placeholder row only when it has none.
+        let n = tx.execute(
+            "UPDATE warm_procs SET instance = ?3, person = ?4, agent = ?5 WHERE pid = ?1 AND started = ?2",
+            params![w.pid, w.started, w.instance, w.person, w.agent],
+        )?;
+        if n == 0 {
+            insert_row(&tx, w, "")?;
+        }
+    } else {
+        insert_row(&tx, w, conversation)?;
+        tx.execute(
+            "DELETE FROM warm_procs WHERE pid = ?1 AND started = ?2 AND conversation = ''",
+            params![w.pid, w.started],
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
 
-/// The process is gone (the host saw it exit): forgets the row, unless a kill is owed for it. The engine in the stub's
-/// group can outlive the stub the host saw exit, so a marked row leaves only through [`settle`], which looks at the
-/// group. True when a row was forgotten.
-pub(crate) fn gone(core: &mut Core, pid: u32, started: &str) -> Result<bool> {
-    let tx = core.claim_tx()?;
-    let n = tx.execute(
-        "DELETE FROM warm_procs WHERE pid = ?1 AND started = ?2 AND kill_at IS NULL",
-        params![pid, started],
+fn insert_row(tx: &Transaction<'_>, w: &WarmProc<'_>, conversation: &str) -> Result<()> {
+    // The placeholder row may carry the kill mark; so may the siblings. The new row takes it.
+    tx.execute(
+        "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation, kill_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT MAX(kill_at) FROM warm_procs WHERE pid = ?1 AND started = ?2))
+         ON CONFLICT (pid, started, conversation) DO UPDATE SET
+            instance = excluded.instance, person = excluded.person, agent = excluded.agent",
+        params![w.pid, w.started, w.instance, w.person, w.agent, conversation],
     )?;
+    // One process, one owner: the rows of its other sessions say the same.
+    tx.execute(
+        "UPDATE warm_procs SET instance = ?3, person = ?4, agent = ?5 WHERE pid = ?1 AND started = ?2",
+        params![w.pid, w.started, w.instance, w.person, w.agent],
+    )?;
+    Ok(())
+}
+
+/// The process is gone (the host saw it exit), or with `conversation` it no longer has that session loaded: forgets the
+/// row(s), unless a kill is owed for the process. The engine in the stub's group can outlive the stub the host saw exit,
+/// so a marked process leaves only through [`settle`], which looks at the group. Forgetting the last session leaves the
+/// process known with none. True when something was forgotten.
+pub(crate) fn gone(
+    core: &mut Core,
+    pid: u32,
+    started: &str,
+    conversation: Option<&str>,
+) -> Result<bool> {
+    let tx = core.claim_tx()?;
+    let Some(conversation) = conversation else {
+        let n = tx.execute(
+            "DELETE FROM warm_procs WHERE pid = ?1 AND started = ?2 AND kill_at IS NULL",
+            params![pid, started],
+        )?;
+        tx.commit()?;
+        return Ok(n > 0);
+    };
+    let row: Option<(String, String, String)> = tx
+        .query_row(
+            "SELECT instance, person, agent FROM warm_procs
+             WHERE pid = ?1 AND started = ?2 AND conversation = ?3 AND kill_at IS NULL",
+            params![pid, started, conversation],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((instance, person, agent)) = row else {
+        return Ok(false);
+    };
+    tx.execute(
+        "DELETE FROM warm_procs WHERE pid = ?1 AND started = ?2 AND conversation = ?3",
+        params![pid, started, conversation],
+    )?;
+    let left: i64 = tx.query_row(
+        "SELECT count(*) FROM warm_procs WHERE pid = ?1 AND started = ?2",
+        params![pid, started],
+        |r| r.get(0),
+    )?;
+    if left == 0 {
+        tx.execute(
+            "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation) VALUES (?1, ?2, ?3, ?4, ?5, '')",
+            params![pid, started, instance, person, agent],
+        )?;
+    }
     tx.commit()?;
-    Ok(n == 1)
+    Ok(true)
 }
 
 /// R-c: the processes a revoke of `person` reaches, marked for a kill and answered. A process is the person's own
@@ -99,7 +163,7 @@ pub(crate) fn gone(core: &mut Core, pid: u32, started: &str) -> Result<bool> {
 pub(super) fn revoke_in(tx: &Transaction<'_>, person: &str, now: i64) -> Result<Vec<Kill>> {
     let hit: Vec<(i64, String)> = {
         let mut st = tx.prepare(
-            "SELECT pid, started FROM warm_procs
+            "SELECT DISTINCT pid, started FROM warm_procs
              WHERE person = ?1
                 OR (conversation IN (
                         SELECT t.conversation FROM turns t
@@ -140,7 +204,7 @@ pub(crate) fn settle(core: &mut Core, live: &dyn Liveness) -> Result<usize> {
     let marked: Vec<(i64, String)> = {
         let mut st = core
             .conn()
-            .prepare("SELECT pid, started FROM warm_procs WHERE kill_at IS NOT NULL")?;
+            .prepare("SELECT DISTINCT pid, started FROM warm_procs WHERE kill_at IS NOT NULL")?;
         st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<std::result::Result<_, _>>()?
     };
@@ -245,8 +309,9 @@ pub(crate) fn adopt(core: &mut Core, instance: &str, now: i64) -> Result<Adopted
         out.kill.push(claims::kill_of(id, pid, started));
     }
     let old: Vec<(i64, String, String)> = {
-        let mut st =
-            tx.prepare("SELECT pid, started, instance FROM warm_procs WHERE instance <> ?1")?;
+        let mut st = tx.prepare(
+            "SELECT DISTINCT pid, started, instance FROM warm_procs WHERE instance <> ?1",
+        )?;
         st.query_map([instance], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<std::result::Result<_, _>>()?
     };
@@ -264,17 +329,19 @@ pub(crate) fn adopt(core: &mut Core, instance: &str, now: i64) -> Result<Adopted
     Ok(out)
 }
 
-/// The conversation a warm process has loaded, if the core knows the process.
+/// The conversations a warm process has loaded, if the core knows the process (sorted; none for a process with none).
+#[cfg(test)]
+pub(crate) fn loaded_all(core: &Core, pid: u32, started: &str) -> Result<Vec<String>> {
+    let mut st = core.conn().prepare(
+        "SELECT conversation FROM warm_procs WHERE pid = ?1 AND started = ?2 AND conversation <> '' ORDER BY conversation",
+    )?;
+    Ok(st
+        .query_map(params![pid, started], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?)
+}
+
+/// The first conversation a warm process has loaded.
 #[cfg(test)]
 pub(crate) fn loaded(core: &Core, pid: u32, started: &str) -> Result<Option<String>> {
-    use rusqlite::OptionalExtension as _;
-    Ok(core
-        .conn()
-        .query_row(
-            "SELECT conversation FROM warm_procs WHERE pid = ?1 AND started = ?2",
-            params![pid, started],
-            |r| r.get(0),
-        )
-        .optional()?
-        .flatten())
+    Ok(loaded_all(core, pid, started)?.into_iter().next())
 }

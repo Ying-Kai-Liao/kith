@@ -2579,3 +2579,57 @@ fn a_second_pass_after_the_process_is_gone_does_nothing() {
     assert_eq!(resend(&d), Vec::<u32>::new());
     d.stop();
 }
+
+/// M3 P8: the host reads the claims the revoke sweep needs (`claim.list`, `claim.sweepPerson`) on a real daemon. Not switched, the
+/// core refuses them as "not switched" (the module's own gate): the host is NOT refused as a principal, which is what an owner-only
+/// `claim.list` would have answered it. (The table test pins the principals: owner and host only.)
+#[test]
+fn the_host_may_ask_the_claim_rows_of_a_revoke_sweep_and_is_refused_by_the_switch_not_the_principal()
+ {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, hosted());
+    for (name, params) in [
+        ("claim.list", json!({})),
+        ("claim.sweepPerson", json!({"persons": ["sam"]})),
+    ] {
+        for (who, reached) in [
+            ("host", host(&p, name, &params)),
+            ("owner", read(&p, name, &params)),
+        ] {
+            match reached {
+                Reached::Refused(Error::NotAllowed(note)) => {
+                    panic!("{name}: the {who} was refused as a principal: {note}")
+                }
+                Reached::Refused(_) => {}
+                other => panic!("{name}: the {who} got {other:?}"),
+            }
+        }
+    }
+    drop(d);
+}
+
+/// One host process that has loaded two conversations (two `warm_procs` rows) is one kill, signalled once.
+#[cfg(unix)]
+#[test]
+fn a_marked_warm_process_with_two_conversations_is_signalled_once() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    d.shared
+        .with_core(|c| {
+            for conv in ["main", "thread"] {
+                c.conn().execute(
+                    "INSERT INTO warm_procs (pid, started, instance, conversation, kill_at)
+                     VALUES (?1, ?2, ?3, ?4, 1)",
+                    rusqlite::params![pid, start, crate::holder_link::HOST_INSTANCE, conv],
+                )?;
+            }
+            Ok(())
+        })
+        .expect("rows");
+    let got = crate::kill_resend::pass(&d.shared, None, Duration::from_secs(60));
+    assert_eq!(got, vec![pid], "{got:?}");
+    until("the process to be gone", || !alive(pid));
+    d.stop();
+}

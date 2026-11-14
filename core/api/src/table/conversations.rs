@@ -21,10 +21,11 @@ pub(super) const ROWS: &[Method] = &[
     ),
     conversation(
         "claim.list",
-        "The writer claims: the live ones (queued, claimed, running) and the recent ended ones, as `{live, recent}`.",
+        "The writer claims: the live ones (queued, claimed, running, ending) and the recent ended ones, as `{live, recent}`; each row carries the conversation's `agent` and the `holderInstance` the claim went to. The owner reads it (`kith-wake`) and so does the host (a revoke's narrowed sweep).",
         &[],
         &["claims", "list"],
-    ),
+    )
+    .principals(OWNER_HOST),
     external(
         "claim.external",
         "A kernel taker's writer claim on a conversation (`kith-sessions claim|terminal|resolve`, a `--direct` run) once the claims are the core's: kind `external`, naming the run's process (pid and start stamp) and the person kith-auth resolved (empty: the owner). Idempotent for the same process. Ends dead externals and settles stopped idle processes first; an idle warm process holding the conversation is marked for a kill and answers `waiting` until it is gone. A person's claim needs `revokeSeen` (`claim.epoch`, read before the may check). Answers `{claimId, generation}`, or `{refused: held | takeover | waiting | revoked | agent, why}`; a session id outside a-z0-9._- is refused. Serves only once the claims are switched.",
@@ -78,7 +79,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     external(
         "claim.sweepPerson",
-        "Revoke or removal with no host running: ends the live claims of these principals (queued ones end at once, live ones go to `ending`). The owner is refused. Answers `{kill: [{claimId, pid, started}]}` for the caller to signal; the rows end once the processes are gone.",
+        "Revoke or removal with no host running: ends the live claims of these principals (queued ones end at once, live ones go to `ending`). The owner is refused. Answers `{kill: [{claimId, pid, started, conversation}]}` for the caller to signal; the rows end once the processes are gone.",
         &[caller(
             "persons",
             "[string]",

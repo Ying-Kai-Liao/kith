@@ -192,6 +192,10 @@ fn answer(w: &mut World, method: &str, p: &Value) -> Answer {
             json!({"turn": n})
         }
         "hostclaim.turn" => {
+            // The core refuses an unswitched claim that names no account (`claim_next`).
+            if !p["account"].is_string() {
+                return Answer::Refused("hostclaim.turn names no account".into());
+            }
             if w.revoked {
                 return refused("revoked");
             }

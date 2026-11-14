@@ -506,8 +506,8 @@ fn a_process_is_not_registered_past_its_persons_revoke() {
     assert!(e.to_string().contains("was revoked"), "{e}");
     w.revoke_seen = Some(1);
     warm::register(&mut c, &w).expect("current");
-    assert!(warm::gone(&mut c, 300, "e300").expect("gone"));
-    assert!(!warm::gone(&mut c, 300, "e300").expect("twice"));
+    assert!(warm::gone(&mut c, 300, "e300", None).expect("gone"));
+    assert!(!warm::gone(&mut c, 300, "e300", None).expect("twice"));
 }
 
 /// A process that is gone, whose process group may still hold the engine.
@@ -649,7 +649,7 @@ fn a_guests_process_registers_with_its_epoch_and_a_marked_row_leaves_only_throug
     revoke_person(&mut c, "ann", 20).expect("revoke");
     // The host saw the stub exit; the engine in its group may not have.
     assert!(
-        !warm::gone(&mut c, 300, "e300").expect("gone"),
+        !warm::gone(&mut c, 300, "e300", None).expect("gone"),
         "kept: a kill is owed"
     );
     let orphan = Orphan(std::cell::Cell::new(true));
@@ -729,4 +729,32 @@ fn an_idle_process_is_spared_while_another_basis_runs_on_its_conversation() {
     let r = revoke_person(&mut c, "ann", 20).expect("revoke");
     let pids: Vec<_> = r.kill.iter().filter_map(|k| k.pid).collect();
     assert!(!pids.contains(&200) && !pids.contains(&300), "{pids:?}");
+}
+
+#[test]
+fn a_plain_owner_turn_enqueued_twice_with_one_key_is_one_turn() {
+    // The orphan-turn gap: the host's enqueue whose reply was lost is repeated with the key it made at accept, and an
+    // owner turn with no basis lands on the same row.
+    let (_t, mut c) = open();
+    let b = Basis {
+        people: Vec::new(),
+        room: None,
+        room_gen: None,
+        level: Level::Owner,
+        join_epoch: None,
+        author: None,
+        chain: Chain::None,
+        key: Some("accept-1".into()),
+    };
+    let t = new_turn("c1", OWNER);
+    let first = basis::enqueue(&mut c, &t, &b, 10).expect("first");
+    let again = basis::enqueue(&mut c, &t, &b, 11).expect("again");
+    assert_eq!(first, again);
+    assert_eq!(count(&c, "SELECT count(*) FROM turns"), 1);
+    // Another key is another turn.
+    let mut other = b.clone();
+    other.key = Some("accept-2".into());
+    let second = basis::enqueue(&mut c, &t, &other, 12).expect("second");
+    assert_ne!(first, second);
+    assert_eq!(count(&c, "SELECT count(*) FROM turns"), 2);
 }

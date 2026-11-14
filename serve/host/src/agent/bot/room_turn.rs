@@ -28,6 +28,12 @@ impl Actor {
         self.cfg.person.as_deref().is_some_and(is_room_person)
     }
 
+    /// Whether a revoke or an access change ended this room turn (`Hub::end_room_turns_of` takes it out of the registry
+    /// before it stops the actor, a normal end leaves it until `end_room_turn`): its open cards are withdrawn, not parked.
+    pub(super) fn ended_by_access(&self) -> bool {
+        self.is_room_actor() && !self.hub.room_turn_registered(&self.rt)
+    }
+
     /// The gen a line written now by this turn is stamped with: the gen the turn started in. `None` outside a group turn.
     pub(super) fn turn_stamp(&self) -> Option<i64> {
         self.turn_basis.as_ref().map(|b| b.room_gen)

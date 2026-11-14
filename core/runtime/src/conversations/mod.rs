@@ -11,3 +11,5 @@ mod props;
 #[cfg(test)]
 mod tests;
 pub(crate) mod warm;
+#[cfg(test)]
+mod warm_tests;

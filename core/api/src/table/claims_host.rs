@@ -164,7 +164,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.proc",
-        "A host engine process, idle or not, with the session it has loaded: registers it or moves its session, so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
+        "A host engine process, idle or not, with a session it has loaded: registers it or adds one more session to it (one core row per process and session; a process loads its agent's main session and its chat's threads), so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
         &[
             need("pid", "int", "The process."),
             need("started", "string", "Its start stamp."),
@@ -175,7 +175,11 @@ pub(super) const ROWS: &[Method] = &[
                 "Whose process it is (a guest's principal).",
             ),
             opt("agent", "string", "The agent."),
-            opt("conversation", "string", "The session it has loaded."),
+            opt(
+                "conversation",
+                "string",
+                "A session it has loaded. Leave out for a process with none yet.",
+            ),
             opt(
                 "revokeSeen",
                 "int",
@@ -185,10 +189,15 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.procGone",
-        "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. Answers `{gone}`.",
+        "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. With `conversation`, only that session is forgotten (the process stays known, with its other sessions). Answers `{gone}`.",
         &[
             need("pid", "int", "The process."),
             need("started", "string", "Its start stamp."),
+            opt(
+                "conversation",
+                "string",
+                "Forget only this session of the process (it unloaded or forked it away).",
+            ),
         ],
     ),
     host(
@@ -202,7 +211,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.turn",
-        "The claim for a queued or parked turn, through `claim_next` (it picks the account and starts the session row). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
+        "The claim for a queued or parked turn, through `claim_next` (it starts the session row on the account: the core picks it once accounts are switched; until then it is the `account` the host sends). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
         &[
             need("conversation", "string", "The session id."),
             need("turn", "int", "The turn."),
@@ -222,6 +231,11 @@ pub(super) const ROWS: &[Method] = &[
                 "holderInstance",
                 "string",
                 "The holder instance the spawn goes to.",
+            ),
+            opt(
+                "account",
+                "string",
+                "The account the host's warm process runs as. Used and recorded while accounts are not switched (the core does not pick then); ignored once the core owns account state.",
             ),
             opt("kernel", "string", "The kernel folder."),
             HOME,

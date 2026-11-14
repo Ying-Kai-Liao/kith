@@ -223,11 +223,25 @@ fn blocked_in(tx: &Transaction<'_>, conversation: &str, now: i64) -> Result<Opti
             "why": format!("kith-core: conversation {conversation} is being taken over in the app"),
         })));
     }
-    let idle = tx.execute(
-        "UPDATE warm_procs SET kill_at = COALESCE(kill_at, ?2) WHERE conversation = ?1",
+    // A process holds several sessions, and killing it ends them all: one that is running a turn of another of its sessions
+    // is left alone (the terminal waits, as for a running claim) and is marked once it is idle. Only an idle process dies.
+    let has = tx.execute(
+        "UPDATE warm_procs SET kill_at = COALESCE(kill_at, ?2)
+         WHERE (pid, started) IN (SELECT pid, started FROM warm_procs WHERE conversation = ?1)
+           AND NOT EXISTS (
+                SELECT 1 FROM claims c
+                WHERE c.state IN ('claimed', 'running', 'ending') AND c.conversation <> ?1
+                  AND (c.pid = warm_procs.pid
+                       OR c.conversation IN (SELECT w.conversation FROM warm_procs w
+                                             WHERE w.pid = warm_procs.pid AND w.started = warm_procs.started)))",
         params![conversation, now],
     )?;
-    if idle > 0 {
+    let loaded: i64 = tx.query_row(
+        "SELECT count(*) FROM warm_procs WHERE conversation = ?1",
+        [conversation],
+        |r| r.get(0),
+    )?;
+    if has > 0 || loaded > 0 {
         return Ok(Some(waiting(&format!(
             "kith-core: waiting for the app's idle agent on {conversation} to stop"
         ))));
@@ -430,8 +444,20 @@ fn sweep_person(core: &mut Core, p: &Value, now: i64) -> Result<Value> {
     }
     let mut seen = std::collections::HashSet::new();
     kill.retain(|k| seen.insert((k.claim_id, k.pid)));
+    // The conversation of each kill, so the caller can write its "access revoked" intent before it signals.
+    let conversation_of = |id: Option<i64>| -> Option<String> {
+        core.conn()
+            .query_row(
+                "SELECT conversation FROM claims WHERE claim_id = ?1",
+                [id?],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    };
     Ok(json!({ "kill": kill.iter().map(|k| json!({
-        "claimId": k.claim_id, "pid": k.pid, "started": k.started,
+        "claimId": k.claim_id, "pid": k.pid, "started": k.started, "conversation": conversation_of(k.claim_id),
     })).collect::<Vec<_>>() }))
 }
 
@@ -449,18 +475,23 @@ fn list(core: &Core) -> Result<Value> {
                     "person": r.get::<_, String>(4)?,
                     "pid": r.get::<_, Option<i64>>(5)?,
                     "started": r.get::<_, Option<String>>(6)?,
+                    // The conversation's agent (fixed for its life) and the holder instance the claim went to: the host judges a
+                    // narrowed sweep by the agent, and tells its own turn from an earlier start's by the instance.
+                    "agent": r.get::<_, Option<String>>(7)?,
+                    "holderInstance": r.get::<_, Option<String>>(8)?,
                 }))
             })?
             .collect::<std::result::Result<_, _>>()?;
         Ok(out)
     };
-    let cols = "SELECT claim_id, conversation, state, kind, person, pid, pid_started FROM claims";
+    let cols = "SELECT c.claim_id, c.conversation, c.state, c.kind, c.person, c.pid, c.pid_started, v.agent, c.holder_instance
+                FROM claims c LEFT JOIN conversations v ON v.id = c.conversation";
     Ok(json!({
         "live": rows(&format!(
-            "{cols} WHERE state IN ('queued', 'claimed', 'running', 'ending') ORDER BY claim_id"
+            "{cols} WHERE c.state IN ('queued', 'claimed', 'running', 'ending') ORDER BY c.claim_id"
         ))?,
         "recent": rows(&format!(
-            "{cols} WHERE state = 'ended' ORDER BY claim_id DESC LIMIT 20"
+            "{cols} WHERE c.state = 'ended' ORDER BY c.claim_id DESC LIMIT 20"
         ))?,
     }))
 }

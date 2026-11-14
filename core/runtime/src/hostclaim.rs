@@ -212,7 +212,9 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
         }
         "hostclaim.procGone" => {
             let pid = u32::try_from(int(p, "pid")?).map_err(|_| bad("pid"))?;
-            Ok(json!({ "gone": warm::gone(core, pid, need(p, "started")?)? }))
+            Ok(
+                json!({ "gone": warm::gone(core, pid, need(p, "started")?, word(p, "conversation"))? }),
+            )
         }
         "hostclaim.adopt" => {
             let a = warm::adopt(core, need(p, "instance")?, now)?;
@@ -403,7 +405,7 @@ fn turn(core: &mut Core, p: &Value, now: i64) -> Result<Value> {
         person: person(p)?,
         turn: Some(int(p, "turn")?),
         holder_instance: word(p, "holderInstance"),
-        account: None,
+        account: word(p, "account"),
         process: None,
         revoke_seen: int(p, "revokeSeen")?,
     };

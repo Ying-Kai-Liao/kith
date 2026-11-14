@@ -22,6 +22,7 @@ pub fn start(hub: &Arc<Hub>) {
     tokio::spawn(crate::chat::invite_rooms::run(hub.clone()));
     tokio::spawn(relay::run(hub.clone()));
     tokio::spawn(crate::doors::sweep_loop());
+    tokio::spawn(crate::terminal::core_holders::owed_loop(hub.clone()));
     tokio::spawn(crate::delegation::sweep_loop(hub.clone()));
     channels::start(hub);
     #[cfg(target_os = "linux")]

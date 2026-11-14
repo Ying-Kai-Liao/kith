@@ -433,19 +433,19 @@ fn thread_value(reg: &Registry, origin: &str, live: bool, busy: bool) -> Value {
 pub(super) fn import(hub: &Hub, t: &Thread, reg: &Registry) -> Result<()> {
     let lock = hub.terminal.thread_lock(&t.key());
     let _one = lock.locked();
-    import_locked(hub, t, reg)
+    import_locked(hub, t, reg).map(drop)
 }
 
-/// `import` for a caller that holds the thread's lock already.
-fn import_locked(hub: &Hub, t: &Thread, reg: &Registry) -> Result<()> {
-    let Some(size) = transcript_size(reg) else { return Ok(()) };
+/// `import` for a caller that holds the thread's lock already. True when lines were imported.
+fn import_locked(hub: &Hub, t: &Thread, reg: &Registry) -> Result<bool> {
+    let Some(size) = transcript_size(reg) else { return Ok(false) };
     let live = registry::liveness(reg, hub.terminal.env().sessions.as_deref()).is_live();
     let (dev, ino) = file_id(reg.transcript());
     let (from, since, keep) = match load_cursor(hub, t) {
         Some(c) if (c.dev != 0 && (c.dev, c.ino) != (dev, ino)) || c.offset > size => {
             (0, newest_at(hub, t), FIRST_IMPORT)
         }
-        Some(c) if c.offset == size => return Ok(()),
+        Some(c) if c.offset == size => return Ok(false),
         Some(c) => (c.offset, 0, LATER_IMPORT),
         None => (0, newest_at(hub, t), FIRST_IMPORT),
     };
@@ -460,7 +460,7 @@ fn import_locked(hub: &Hub, t: &Thread, reg: &Registry) -> Result<()> {
     if !read.items.is_empty() {
         forget_loaded(hub, t);
     }
-    Ok(())
+    Ok(!read.items.is_empty())
 }
 
 /// When the thread last changed (ms).
@@ -730,7 +730,8 @@ fn send_gate_blocking(hub: &Hub, t: &Thread, may_wait: bool) -> Result<SendGate>
     let lock = hub.terminal.thread_lock(&t.key());
     let _one = lock.locked();
     match writer(hub, t) {
-        Some(Writer::Terminal) if may_wait => return Ok(SendGate::Waits),
+        // An unreadable core holds the owner's message too (begin holds in the same case); a bot is refused below.
+        Some(Writer::Terminal | Writer::Unreadable) if may_wait => return Ok(SendGate::Waits),
         Some(w) => return Err(HeldByWriter { code: w.code() }.into()),
         None => {}
     }
@@ -741,6 +742,58 @@ fn send_gate_blocking(hub: &Hub, t: &Thread, may_wait: bool) -> Result<SendGate>
     Ok(SendGate::Free)
 }
 
+/// What [`sync_for_turn`] found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
+pub enum Synced {
+    /// The transcript has nothing the thread lacked (or the lane is no terminal thread): the loaded session is current.
+    Unchanged,
+    /// Lines a terminal wrote were imported since the session was loaded (or the sync could not tell): the caller reloads the
+    /// session (`session/load`) before `session/prompt`, or the engine answers from a transcript that lacks them. A reload is
+    /// cheap and the engine reads its own transcript file, so doubt reads as `Moved`.
+    Moved,
+    /// The lane's session is not the one the turn claimed: a terminal forked it and the thread follows the fork (the scan or
+    /// this sync adopted it, either before or after the claim). The turn holds its claim on the old session, so it must not
+    /// be prompted on the fork: the caller stops the claim with the turn requeued and begins again on `session`, where the
+    /// core says `held` while the terminal still has it.
+    Forked { session: String },
+}
+
+/// Writer mode, step 7 (design 1.3): after `Begin::Running` (the turn holds the claim, on session `claimed`, and the lock) and before the prompt is
+/// composed, brings the lane's thread in step with the transcript. The accept-time catch-up of [`send_gate`] can be minutes old
+/// by now (the turn may have waited behind another), and a terminal that wrote since left lines the loaded session lacks.
+/// Under the thread's lock, as `send_gate` is. The caller acts on `Moved` itself: the actor's `ForgetLoaded` (which an import
+/// sends) does nothing for a lane that has a turn running. The thread's stale mark is cleared, as `send_gate` does, so a mark
+/// left set would not reload once more for nothing.
+#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
+pub async fn sync_for_turn(hub: &Arc<Hub>, lane: &Lane, claimed: &str) -> Result<Synced> {
+    let (hub, lane, claimed) = (hub.clone(), lane.clone(), claimed.to_owned());
+    // File reads and the store: off the runtime.
+    Ok(tokio::task::spawn_blocking(move || sync_for_turn_blocking(&hub, &lane, &claimed)).await?)
+}
+
+#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
+pub(crate) fn sync_for_turn_blocking(hub: &Hub, lane: &Lane, claimed: &str) -> Synced {
+    let Some(root) = &lane.thread else { return Synced::Unchanged };
+    let t = Thread { bot: lane.chat.clone(), root: root.clone() };
+    let lock = hub.terminal.thread_lock(&t.key());
+    let _one = lock.locked();
+    let imported = sync_one(hub, &t);
+    // `mapped` adopts a fork, here or in a scan between the claim and now (a scan takes no thread lock): the lane is on a
+    // session the turn did not claim.
+    if let Some(now) = hub.store.kv_get(&lane_key("session", &t.bot, &t.lane())).filter(|now| now != claimed) {
+        return Synced::Forked { session: now };
+    }
+    // A terminal seen live, or a fork adopted earlier, marks the thread stale: the loaded session no longer matches the file.
+    let stale = hub.store.kv_get(&stale_key(&t)).is_some();
+    if stale {
+        let _ = hub.store.kv_delete(&stale_key(&t));
+        // Other lanes' actors that cached the session learn of it too (this lane's own does nothing while it runs a turn).
+        forget_loaded(hub, &t);
+    }
+    if imported || stale { Synced::Moved } else { Synced::Unchanged }
+}
+
 /// Who holds a thread, as far as a send into it is concerned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Writer {
@@ -748,13 +801,15 @@ enum Writer {
     Terminal,
     /// A bot guest's turn (`Kind::Bot` claim, taken by `agent/bot/turn.rs` with the agent process's pid).
     Bot,
+    /// Writer mode and the core cannot say who holds the thread: refused like a held one, never read as free.
+    Unreadable,
 }
 
 impl Writer {
     fn code(self) -> &'static str {
         match self {
             Self::Terminal => "liveInTerminal",
-            Self::Bot => "heldByOtherWriter",
+            Self::Bot | Self::Unreadable => "heldByOtherWriter",
         }
     }
 }
@@ -769,12 +824,18 @@ fn writer(hub: &Hub, t: &Thread) -> Option<Writer> {
     let lane_sid = hub.store.kv_get(&lane_key("session", &t.bot, &t.lane())).filter(|s| !s.is_empty());
     let known = info(hub, t);
     let sids = lane_sid.into_iter().chain(known.iter().map(|r| r.session_id.clone()));
+    // One mode decision for the whole call (the thread's lock is held): Files and Shadow read the claim files, Writer the core.
+    let reader = super::core_holders::Reader::new(&env.state);
     for sid in sids {
         if !registry::safe_id(&sid) {
             continue;
         }
-        if let Some(c) = claim::holder(&env.state, &sid) {
-            return Some(if c.kind == claim::Kind::Bot { Writer::Bot } else { Writer::Terminal });
+        match reader.read(&sid) {
+            super::core_holders::Reading::By(c, _) => {
+                return Some(if c.kind == claim::Kind::Bot { Writer::Bot } else { Writer::Terminal });
+            }
+            super::core_holders::Reading::Unreadable(_) => return Some(Writer::Unreadable),
+            super::core_holders::Reading::Free => {}
         }
         if let Some(reg) = registry::read_one(&env.state, &sid)
             && registry::liveness(&reg, env.sessions.as_deref()).is_live()
@@ -794,7 +855,7 @@ pub async fn bot_gate(hub: &Arc<Hub>, chat: &str, root: &str) -> Result<(), Held
         let lock = hub.terminal.thread_lock(&t.key());
         let _one = lock.locked();
         match writer(&hub, &t) {
-            Some(Writer::Terminal) => Err(HeldByWriter { code: "heldByOtherWriter" }),
+            Some(Writer::Terminal | Writer::Unreadable) => Err(HeldByWriter { code: "heldByOtherWriter" }),
             Some(Writer::Bot) | None => Ok(()),
         }
     })
@@ -803,8 +864,10 @@ pub async fn bot_gate(hub: &Arc<Hub>, chat: &str, root: &str) -> Result<(), Held
 }
 
 /// Brings this one thread in step with the registry now, with its lock held: a fork becomes the lane's session
-/// (`mapped` adopts it), the file's last lines are imported, and the cache is forgotten when any were.
-fn sync_one(hub: &Hub, t: &Thread) {
+/// (`mapped` adopts it), the file's last lines are imported, and the cache is forgotten when any were. True when lines
+/// were imported, or an import failed (what the thread holds is then not known to match the file).
+fn sync_one(hub: &Hub, t: &Thread) -> bool {
+    let mut imported = false;
     let env = hub.terminal.env();
     for reg in registry::read_all(&env.state) {
         // `mapped` adopts a fork (the lane's session becomes the fork); only the lane's current session is imported.
@@ -820,10 +883,15 @@ fn sync_one(hub: &Hub, t: &Thread) {
         {
             let _ = hub.store.kv_set(&info_key(t), &stored);
         }
-        if let Err(error) = import_locked(hub, t, &reg) {
-            tracing::warn!(error = format!("{error:#}"), "couldn't catch up a terminal thread before a send");
+        match import_locked(hub, t, &reg) {
+            Ok(more) => imported |= more,
+            Err(error) => {
+                tracing::warn!(error = format!("{error:#}"), "couldn't catch up a terminal thread before a send");
+                imported = true;
+            }
         }
     }
+    imported
 }
 
 /// A turn of the host is about to start in `lane`: refused while a terminal holds the thread. `begin` marks the turn
@@ -844,7 +912,7 @@ pub async fn start_gate(
         let lock = hub.terminal.thread_lock(&t.key());
         let _one = lock.locked();
         // A bot's claim is a turn of the host's own, which the thread's lane queue already orders; only others refuse.
-        if writer(&hub, &t) == Some(Writer::Terminal) {
+        if matches!(writer(&hub, &t), Some(Writer::Terminal | Writer::Unreadable)) {
             let bot = hub.store.bot_conversation_of_thread(&lane.chat, root).is_some();
             return Err(HeldByWriter { code: if bot { "heldByOtherWriter" } else { "liveInTerminal" } });
         }
@@ -968,6 +1036,25 @@ async fn take_over_inner(hub: &Arc<Hub>, t: &Thread) -> Result<Value> {
     // Held from here to the end: nobody resumes or sends into the session while it is being ended and imported. The
     // terminal's own claim stays its own; this one is the host's, named for the take-over.
     let sid = reg.session_id.clone();
+    // Writer mode: the core's claim is the writer, and no claim file is taken or read. The `taking` set (held by the caller)
+    // already keeps a second take-over out, and `writer()` reads it, so the window between the core's `ended` and the host's
+    // `set_writer` is held without a file. A core that cannot be asked, or that shows no claim of the terminal, refuses: the
+    // files are never the fallback.
+    let st = env.state.clone();
+    if let Some(f) = tokio::task::spawn_blocking(move || super::core_holders::writer_folders(&st))
+        .await?
+        .map_err(|why| anyhow!("the claims core cannot be asked ({why}): nothing was changed"))?
+    {
+        let (f2, s2) = (f.clone(), sid.clone());
+        let id = tokio::task::spawn_blocking(move || super::core_holders::terminal_claim(&f2, &s2)).await?;
+        return match id.map_err(|why| anyhow!("the claims core cannot be asked ({why}): nothing was changed"))? {
+            Some(id) => take_over_core(hub, t, reg, &env, f, id).await,
+            None => {
+                Err(TerminalBusy("terminalBusy: The core doesn't show this terminal's claim. Close it yourself.")
+                    .into())
+            }
+        };
+    }
     // Taken before the core is asked, so the window between the terminal's `ended` and the host's `set_writer` is held on
     // both paths (the `holder()` checks of `cards/resume.rs` and a second take-over see it).
     if claim::take(&env.state, &sid, claim::Kind::App, std::process::id(), true)?.is_err() {
