@@ -90,7 +90,6 @@ const map: Record<string, IconNode> = {
   'exclamationmark.triangle': L.TriangleAlert,
   'exclamationmark.triangle.fill': L.TriangleAlert,
   eye: L.Eye,
-  'eye': L.Eye,
   'eye.slash': L.EyeOff,
   film: L.Film,
   folder: L.Folder,

@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { isGroup } from '@shared/models'
 import { openStay } from '@shared/room-people'
 import type { Bot } from '@shared/models'
-import { needsKai, roomBlock, roomParts, wontAnswer, type RoomAgent } from '@shared/room-people'
+import { dimmedAgents, needsKai, roomBlock, roomParts, wontAnswer, type RoomAgent } from '@shared/room-people'
 import { useModel, useModels } from '../../lib/observable'
 import type { BotStore } from '../../store/bot-store'
 import { useStore } from '../../store/context'
@@ -53,4 +53,17 @@ export function usePersonRooms(store: BotStore | null, personId: string): { room
     if (!openStay(models[i]!.stays, personId)) return []
     return [{ room: g.id, name: g.name, agents: roomParts(g.members, (id) => store!.bots.get(id), () => 'Bot').agents }]
   })
+}
+
+/** The agent ids a room's @ picker dims ("won't answer here"): empty for a 1:1, a member and a room with nothing wrong. */
+export function useDimmedAgents(botId: string): Set<string> {
+  const store = useStore()
+  const model = roomPeopleFor(store, botId)
+  const people = peopleFor(store)
+  useModel(model)
+  useModel(people)
+  const bot = store.bots.get(botId)
+  if (!bot || !store.isOwner || !isGroup(bot) || model.enabled !== true) return new Set()
+  const parts = roomParts(bot.members, (id) => store.bots.get(id), () => 'Bot')
+  return dimmedAgents(wontAnswer(needsKai(model.stays, people.people, parts.agents), parts.agents))
 }

@@ -233,3 +233,82 @@ public enum RoomPeopleLogic {
         return entries[..<at].last { $0.kind == "user" && $0.data.sender == nil && ($0.data.hiddenFrom ?? []).isEmpty && $0.data.status != "cancelled" }
     }
 }
+
+/// An invited person's side (SPEC §8-§10): their rooms read as groups in the roster, with the two opening lines, an
+/// "Asked <agent>" line and one neutral closed state.
+public enum MemberRoomLogic {
+    /// A group-shaped bot for a room in `myRooms` (the app has no member bots for it; its agents are `MyRoom.agents`).
+    public static func bot(for room: HostContract.MyRoom, lastAt: Int64? = nil, lastMessage: String? = nil) -> Bot? {
+        struct Seed: Encodable { var id: String; var kind = "group"; var name: String; var members: [String] = []; var lastAt: Int64?; var lastMessage: String? }
+        guard let data = try? JSONEncoder().encode(Seed(id: room.id, name: room.name, lastAt: lastAt, lastMessage: lastMessage)) else { return nil }
+        return try? JSONDecoder().decode(Bot.self, from: data)
+    }
+
+    /// The rooms that went away between two lists: closed for the person, their cache dropped.
+    public static func closed(before: Set<String>, after: [HostContract.MyRoom]) -> Set<String> {
+        before.subtracting(after.map(\.id))
+    }
+
+    /// The host refused the call because the stay is over (403/404), as opposed to a link that dropped.
+    public static func isClosedRefusal(_ error: Error) -> Bool {
+        guard case let HostError.http(status, _) = error else { return false }
+        return status == 403 || status == 404
+    }
+
+    public static func startLines(room: String) -> [String] { ["You see \(room) from when Kai added you.", "Kai sees everything said here."] }
+
+    public static func closedLine(room: String) -> String { "You're no longer in \(room)." }
+
+    /// "Asked planner" under the person's newest message that @'d an agent, until an agent reply lands after it.
+    public static func askedLine(entries: [Entry], agents: [String]) -> String? {
+        for e in entries.reversed() {
+            if e.kind == "agent" { return nil }
+            guard e.kind == "user" else { continue }
+            let text = (e.data.text ?? "").lowercased()
+            let asked = agents.filter { agent in
+                let tag = "@" + agent.lowercased()
+                var from = text.startIndex
+                while let r = text.range(of: tag, range: from..<text.endIndex) {
+                    let before = r.lowerBound == text.startIndex || text[text.index(before: r.lowerBound)].isWhitespace
+                    let after = r.upperBound == text.endIndex || !(text[r.upperBound].isLetter || text[r.upperBound].isNumber || text[r.upperBound] == "-")
+                    if before && after { return true }
+                    from = r.upperBound
+                }
+                return false
+            }
+            return asked.isEmpty ? nil : "Asked \(RoomPeopleLogic.joined(asked))"
+        }
+        return nil
+    }
+
+    /// Room info for a person: one muted line, never a people list.
+    public static func ownerLine(room: String) -> String { "\(room) is Kai's room, on Kai's Mac. Kai sees everything said here." }
+}
+
+public extension RoomPeopleLogic {
+    /// The invite sheet's room options (Kai's side): only groups that take people, i.e. only Kith agents in them.
+    static func inviteRooms(groups: [Bot], find: (String) -> Bot?) -> [(id: String, name: String, agents: [RoomAgent])] {
+        groups.filter(\.isGroup).compactMap { g in
+            let p = parts(members: g.members, find: find, outsideName: { _ in "Bot" })
+            return p.outside.isEmpty && !p.agents.isEmpty ? (g.id, g.name, p.agents) : nil
+        }
+    }
+
+    /// A new invite from a room's Add: its agents on as guest and the room ticked.
+    static func roomInviteStart(agents: [RoomAgent], room: String) -> (roles: [String: InviteRole], rooms: [String]) {
+        (Dictionary(uniqueKeysWithValues: agents.map { ($0.id, InviteRole.guest) }), [room])
+    }
+
+    /// The warning under an agent switch in the edit sheet, one per room that would close for this person.
+    static func closingLines(person: String, closing: [(room: String, name: String, lost: [RoomAgent])]) -> [String] {
+        closing.map { c in
+            let who = joined(c.lost.map(\.name))
+            return "\(person) is in \(c.name). Without \(who), \(c.name) closes for \(person) and \(who) \(c.lost.count == 1 ? "stops" : "stop") answering there."
+        }
+    }
+
+    /// The revoke confirm's extra line when the person is in rooms.
+    static func revokeLine(person: String, rooms: [String]) -> String? {
+        rooms.isEmpty ? nil : "\(joined(rooms)) closes for \(person), and no agent answers there until you remove \(person) from it."
+    }
+}

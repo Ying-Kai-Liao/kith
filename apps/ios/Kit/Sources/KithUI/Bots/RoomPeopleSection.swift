@@ -6,7 +6,9 @@ struct PersonPreset: Identifiable, Hashable {
     var personId: String?
     /// Give the missing agents only; the person is in the room already.
     var giveOnly = false
-    var id: String { "\(personId ?? "new")-\(giveOnly)" }
+    /// Open "Invite someone" with the person picked (their invite ran out).
+    var invite = false
+    var id: String { "\(personId ?? "new")-\(giveOnly)-\(invite)" }
 }
 
 /// Room info > People (SPEC §1): needs-you rows first, then the owner, people in the room, invited, and a collapsed
@@ -143,7 +145,7 @@ struct RoomPeopleSection: View {
 
     private func invitedAction(_ item: InvitedRow) -> AnyView {
         switch item.state {
-        case .ranOut: AnyView(action("Invite again", color: Palette.accent) { openAdd(PersonPreset(personId: item.invite.personId)) })
+        case .ranOut: AnyView(action("Invite again", color: Palette.accent) { openAdd(PersonPreset(personId: item.invite.personId, invite: true)) })
         case .accepted where !item.missing.isEmpty: AnyView(action("Give \(RoomPeopleLogic.joined(item.missing.map(\.name)))", color: Palette.accent) { openAdd(PersonPreset(personId: item.invite.personId, giveOnly: true)) })
         case .waiting: AnyView(action("Cancel", color: Palette.danger) { cancelling = item })
         default: AnyView(EmptyView())
@@ -181,13 +183,17 @@ struct AddPersonSheet: View {
     let preset: PersonPreset?
     @State private var pick: String?
     @State private var roles: [String: InviteRole] = [:]
+    @State private var inviting: String?
+    @State private var invitingNew = false
 
     init(group: Bot, store: RoomPeopleStore, preset: PersonPreset?) {
         self.group = group
         self.store = store
         self.preset = preset
-        _pick = State(initialValue: preset?.personId)
+        _pick = State(initialValue: preset?.invite == true ? nil : preset?.personId)
+        _invitingAgain = State(initialValue: preset?.invite == true ? preset?.personId : nil)
     }
+    @State private var invitingAgain: String?
 
     private var parts: (agents: [RoomAgent], outside: [String]) {
         RoomPeopleLogic.parts(members: group.members, find: { model.bots[$0] }, outsideName: { _ in "Bot" })
@@ -211,6 +217,18 @@ struct AddPersonSheet: View {
                         if !groups.canJoin.isEmpty { list("Can join") { ForEach(groups.canJoin) { choice($0, agents: agents) } } }
                         if !groups.needsAccess.isEmpty { list("Needs access") { ForEach(groups.needsAccess) { choice($0, agents: agents) } } }
                     }
+                    if block == nil {
+                        Button { invitingNew = true } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "person.badge.plus").foregroundStyle(Palette.muted).frame(width: 40, height: 40)
+                                Text("Invite someone new…").kithText(.topBar).foregroundStyle(Palette.ink)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 14).frame(minHeight: 56).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .overlay(RoundedRectangle(cornerRadius: KithRadius.card, style: .continuous).strokeBorder(Palette.border, lineWidth: 1))
+                    }
                     if let picked, block == nil { card(picked, agents: agents) }
                     if let error = store.error { Text(error).kithText(.secondary).foregroundStyle(Palette.danger) }
                 }
@@ -219,8 +237,12 @@ struct AddPersonSheet: View {
         }
         .background(Palette.background)
         .animation(Motion.layout, value: pick)
-        .task { await store.load() }
+        .task { await store.load(); await model.refreshAllRoomPeople() }
         .onChange(of: pick) { roles = [:] }
+        .kithSheet(item: Binding(get: { invitingAgain.map { IdBox(id: $0) } }, set: { invitingAgain = $0?.id })) { box in
+            RoomInviteSheet(group: group, agents: parts.agents, people: store.people, personId: box.id)
+        }
+        .kithSheet(isPresented: $invitingNew) { RoomInviteSheet(group: group, agents: parts.agents, people: store.people, personId: nil) }
     }
 
     private func list(_ title: String, @ViewBuilder content: () -> some View) -> some View {
@@ -303,3 +325,5 @@ struct AddPersonSheet: View {
         if ok { dismiss() }
     }
 }
+
+private struct IdBox: Identifiable { var id: String }

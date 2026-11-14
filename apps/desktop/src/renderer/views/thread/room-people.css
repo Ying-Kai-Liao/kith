@@ -119,3 +119,6 @@
   justify-content: center;
   gap: 12px;
 }
+.mention.dimmed {
+  opacity: 0.55;
+}

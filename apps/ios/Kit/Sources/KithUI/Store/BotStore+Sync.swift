@@ -91,6 +91,7 @@ extension BotStore {
         hello = h
         // Pending bots come back from the host on every connect, so a card survives a restart.
         Task { [weak self] in await self?.botGuests.refresh() }
+        Task { [weak self] in await self?.refreshMyRooms() }
         noteHostVersion(HostVersion(version: h.version, protocolLevel: h.protocolLevel, minProtocol: h.minProtocol))
     }
 

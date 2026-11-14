@@ -4,6 +4,7 @@ import type { BotStore } from '../../store/bot-store'
 import { defaultFolderOf } from '@shared/place-folders'
 import { currentTask, sendInTask, takesOver, taskTitle } from '@shared/tasks'
 import { threadWriterMessage } from '@shared/thread-writer'
+import { useDimmedAgents } from './room-facts'
 import { BotAvatar } from '../../components/Avatar'
 import { Icon } from '../../components/Icon'
 import { usePresence } from '../../components/Overlay'
@@ -146,6 +147,7 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
     const query = draft.slice(at + 1)
     return /\n/.test(query) || query.length > 24 ? null : query
   })()
+  const dimmed = useDimmedAgents(botId)
   const suggestions: Bot[] =
     mentionQuery !== null && bot ? roomMembers(store, bot).filter((m) => !mentionQuery || m.name.toLowerCase().includes(mentionQuery.toLowerCase())) : []
 
@@ -236,9 +238,10 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
       <ComposerReveal open={suggestions.length > 0}>
         <div className="mentions">
           {suggestions.map((m) => (
-            <button key={m.id} className="press mention" onClick={() => mention(m)}>
+            <button key={m.id} className={`press mention ${m.hqAgent && dimmed.has(m.hqAgent) ? 'dimmed' : ''}`} onClick={() => mention(m)}>
               <BotAvatar bot={m} size={18} animated={false} />
               <Text size="subheadline" tone="text">{m.name}</Text>
+              {m.hqAgent && dimmed.has(m.hqAgent) ? <Text size="footnote" tone="secondary">won't answer here</Text> : null}
             </button>
           ))}
         </div>

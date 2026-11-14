@@ -135,3 +135,10 @@ test('"Asked planner" until an agent reply lands', () => {
   assert.equal(askedLine([u('hi @planner'), { kind: 'agent', seq: 2, data: {} }], ['planner']), null)
   assert.equal(askedLine([u('no mention')], ['planner']), null)
 })
+
+test('the @ picker dims the agents that will not answer', async () => {
+  const { dimmedAgents } = await import('./room-people.ts')
+  const w = wontAnswer(needsKai([{ person: 'ann', joinedGen: 1 }], [ann], agents), agents)
+  assert.deepEqual([...dimmedAgents(w)], ['coder'])
+  assert.equal(dimmedAgents(null).size, 0)
+})

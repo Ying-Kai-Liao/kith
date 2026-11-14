@@ -66,6 +66,17 @@ export function UnansweredLine({ entry }: { entry: Entry }) {
   )
 }
 
+/** The 1:1 mounts a moment after the selection changes: look for the card's row for about a second, then bring it into view. */
+function scrollToCard(id: string) {
+  let tries = 0
+  const look = () => {
+    const row = document.querySelector(`[data-item="${CSS.escape(id)}"]`)
+    if (row) row.scrollIntoView({ block: 'center' })
+    else if (++tries < 20) setTimeout(look, 50)
+  }
+  look()
+}
+
 /** PR C's waiting notice, as a pointer into Kai's 1:1 with the agent (the card counts there, once). Kai only. */
 export function WaitingPointer({ entry, agent }: { entry: Entry; agent: string }) {
   const store = useStore()
@@ -79,7 +90,7 @@ export function WaitingPointer({ entry, agent }: { entry: Entry; agent: string }
       {open ? (
         <>
           <Text size="footnote" tone="text">{agent} is waiting for you</Text>
-          <button className="press" onClick={() => bot && store.setSelection(bot.id)}>Open <Icon name="chevron.right" size={10} color="var(--secondary)" /></button>
+          <button className="press" onClick={() => { if (!bot) return; store.setSelection(bot.id); if (card) scrollToCard(card.id) }}>Open <Icon name="chevron.right" size={10} color="var(--secondary)" /></button>
         </>
       ) : (
         <Text size="footnote" tone="secondary">{agent} · you answered</Text>
