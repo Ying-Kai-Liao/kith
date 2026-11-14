@@ -1037,10 +1037,13 @@ async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_
     // Someone is in the room: a process for it is never reused, though the members are the same as last turn.
     stay(&s, &group, "ann", 1_000_002, None);
     s.host.reply(&group, "fifth").await;
-    assert_eq!(initialized(&s, 3).await, 3);
+    // A person's activation may ask the kernel for a launch twice (see the guest test below), so a turn with a person in the
+    // room starts one process or two: these counts are lower bounds. A reply returns only once its process answered.
+    assert!(initialized(&s, 3).await >= 3);
     assert_eq!(last_room_env(&s), (Some("ann".to_owned()), None), "the room's person is in the room's members");
     s.host.reply(&group, "sixth").await;
-    assert_eq!(initialized(&s, 4).await, 4, "with a person in the room no process is warm");
+    let after = initialized(&s, 4).await;
+    assert!(after >= 4, "with a person in the room no process is warm: {after} initializes");
 }
 
 #[tokio::test]
