@@ -328,7 +328,7 @@ fn kills(v: &Value) -> Vec<Killed> {
             Some((
                 u32::try_from(k["pid"].as_u64()?).ok()?,
                 k["started"].as_str().map(str::to_owned),
-                k["conversation"].as_str().map(str::to_owned),
+                k["conversation"].as_str().filter(|c| !c.is_empty()).map(str::to_owned),
             ))
         })
         .collect()
@@ -437,7 +437,7 @@ fn owe(hub: &Hub, persons: &[String], only_denied: bool, why: String) -> Swept {
         tell_owner(
             hub,
             &format!(
-                "The core could not end the runs of {} after their access was removed. It will try again every 30 seconds.",
+                "The core could not end the runs of {} after their access changed. It will try again every 30 seconds.",
                 persons.join(", ")
             ),
         );

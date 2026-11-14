@@ -2582,7 +2582,7 @@ fn a_second_pass_after_the_process_is_gone_does_nothing() {
 
 /// M3 P8: the host reads the claims the revoke sweep needs (`claim.list`, `claim.sweepPerson`) on a real daemon. Not switched, the
 /// core refuses them as "not switched" (the module's own gate): the host is NOT refused as a principal, which is what an owner-only
-/// `claim.list` would have answered it. Every other principal is still refused.
+/// `claim.list` would have answered it. (The table test pins the principals: owner and host only.)
 #[test]
 fn the_host_may_ask_the_claim_rows_of_a_revoke_sweep_and_is_refused_by_the_switch_not_the_principal()
  {

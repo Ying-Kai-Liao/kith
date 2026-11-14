@@ -665,6 +665,11 @@ SweepOwed(m) ==
     /\ \E w \in Who : turn[m][w] \in Live
     /\ owed' = [owed EXCEPT ![m] = TRUE]
     /\ UNCHANGED <<auth, turn, door, gdoor, ext4, cutDone, bdoor, ptick, alw, link>>
+\* MODEL VS CODE (stated, not hidden): this model drops the row when P is not revoked now. The code (core_holders.rs retry_owed) is more
+\* careful and less exact: it drops a whole sweep only if the row was owed while P was SUSPENDED in the host store and P has no suspend rows
+\* now. A revoke that left nothing to suspend (a person known only by a chat handle) or whose suspend_person failed is never dropped, so
+\* a retry after an undo then ends the restored person's runs once (RetryReRevokes' effect, one time). It fails safe; closing it needs the
+\* authority's revoked state (a SHOULD of the P8 review).
 \* RetrySweep (OwedSweeps): the slow tick tries an owed sweep again, judged from now. Still revoked: it ends P's and B's live turns as the
 \* sweep does. Undone meanwhile: the row is dropped and nothing is signalled (a retry that revoked again would end the turns the undo restored,
 \* RetryReRevokes, and bump the person's revoke count, `claim.sweepPerson` being a full `revoke_person`).
