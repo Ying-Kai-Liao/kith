@@ -957,6 +957,21 @@ async fn initialized(s: &Setup, n: usize) -> usize {
     s.requests("initialize").len()
 }
 
+/// The agent's initialize count once it has not changed for 1.5 s (a person's activation can start a second process a moment
+/// after its reply), at most 30 s.
+async fn settled(s: &Setup) -> usize {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let (mut n, mut since) = (s.requests("initialize").len(), Instant::now());
+    while since.elapsed() < Duration::from_millis(1500) && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let now = s.requests("initialize").len();
+        if now != n {
+            (n, since) = (now, Instant::now());
+        }
+    }
+    n
+}
+
 #[tokio::test]
 async fn a_warm_owner_process_in_a_room_starts_again_when_the_rooms_members_change() {
     let mut s = start().await;
@@ -1044,21 +1059,17 @@ async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_
     // (With a person in the room only an @-mentioned agent answers.)
     stay(&s, &group, "ann", 1_000_002, None);
     s.host.reply(&group, &format!("@{name} fifth")).await;
-    assert_eq!(initialized(&s, 3).await, 3);
+    // The scripted agent never passes, so a message's conversation runs every round its budget allows (10), and each round
+    // is a turn of the room person that starts its own process (no process is warm for one): the "about nine initializes a
+    // turn" is those rounds, not a restart within a turn. The count is read once it stops moving.
+    let n5 = settled(&s).await;
+    assert!(n5 >= 3, "the person's turn started a process: {n5} initializes");
     assert_eq!(last_room_env(&s), (Some("ann".to_owned()), None), "the room's person is in the room's members");
     s.host.reply(&group, &format!("@{name} sixth")).await;
-    assert_eq!(initialized(&s, 4).await, 4, "with a person in the room no process is warm");
-    // The scripted agent never passes, so a message's conversation runs every round its budget allows (10) and each
-    // round is a turn that starts its own process: one initialize and one prompt per turn, never more. Counted once the
-    // late ones have landed (the count is read after it stops moving).
-    let (mut last, mut quiet) = (0, 0);
-    while quiet < 30 {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let now = inits();
-        (quiet, last) = if now == last { (quiet + 1, now) } else { (0, now) };
-    }
-    assert_eq!(s.launches().len(), last, "one launch for each process");
-    assert!(last <= 2 + 2 * 10, "no more turns than the two messages' budgets allow: {last}");
+    let n6 = settled(&s).await;
+    assert!(n6 > n5, "with a person in the room no process is warm: {n5} initializes after turn five, {n6} after six");
+    assert_eq!(s.launches().len(), n6, "one launch for each process");
+    assert!(n6 <= 2 + 2 * 10, "no more turns than the two messages' budgets allow: {n6}");
 }
 
 #[tokio::test]
