@@ -234,6 +234,8 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         conn_serving: None,
         conn_account: None,
         conn_room: String::new(),
+        conn_members: crate::agent::hq::Members::Unknown,
+        conn_gen: 0,
         backup_sessions: HashMap::new(),
         preface: None,
         attempt_prompt: None,
@@ -476,6 +478,13 @@ struct Actor {
     conn_account: Option<String>,
     /// The room the agent process was started for (`KITH_ROOM`): another room starts it again.
     conn_room: String,
+    /// The room's members the process was started with (`KITH_ROOM_MEMBERS` / `KITH_ROOM_OWNER_ONLY`): any change
+    /// starts it again, so a guest added to a room is never read by a process that thinks the room is the owner's.
+    conn_members: crate::agent::hq::Members,
+    /// The room's gen when the process was started (the newest join or leave of a person in it): a process is reused
+    /// only while it is still the room's gen, so a join then a leave, which leaves the members as they were, still
+    /// starts it again.
+    conn_gen: i64,
     /// The sessions a backup entry holds for this actor, by (entry, thread root or empty). Kept in memory only: the
     /// stored sessions are the agent's own, which come back when its limit lifts.
     backup_sessions: HashMap<(String, String), String>,

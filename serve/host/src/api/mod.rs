@@ -54,6 +54,9 @@ pub mod roles;
 mod roles_props;
 #[cfg(test)]
 mod roles_tests;
+mod room_people;
+#[cfg(test)]
+mod room_people_tests;
 #[cfg(test)]
 mod room_points_props;
 #[cfg(test)]
@@ -261,6 +264,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match cards::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match room_people::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

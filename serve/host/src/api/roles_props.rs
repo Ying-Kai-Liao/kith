@@ -530,6 +530,7 @@ pub(super) fn router_methods() -> Vec<String> {
         include_str!("bots.rs"),
         include_str!("calls.rs"),
         include_str!("cards.rs"),
+        include_str!("room_people.rs"),
         include_str!("host.rs"),
         include_str!("folders.rs"),
         include_str!("backups.rs"),
@@ -1544,6 +1545,9 @@ fn a_bot_guest_may_call_only_its_short_list() {
         "allowedRules",
         "removeAllowedRule",
         "removeSessionGrant",
+        "addRoomPerson",
+        "removeRoomPerson",
+        "roomPeople",
         "createBot",
         "newKithAgent",
         "kernelStatus",
@@ -1659,6 +1663,9 @@ fn the_key_methods_are_on_no_guest_list() {
         "allowedRules",
         "removeAllowedRule",
         "removeSessionGrant",
+        "addRoomPerson",
+        "removeRoomPerson",
+        "roomPeople",
     ] {
         assert!(routed.iter().any(|r| r == m), "{m} is not found by the router walk");
         assert!(!MEMBER_METHODS.contains(&m), "{m} on MEMBER_METHODS");

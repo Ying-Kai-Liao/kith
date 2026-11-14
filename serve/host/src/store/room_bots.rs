@@ -61,10 +61,12 @@ impl Store {
         st.query_map([bot_id], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
-    /// The room is gone: its points go with it.
+    /// The room is gone: its points go with it, and its people's stays, so a room made again under the same id starts
+    /// with nobody in it.
     pub fn drop_room(&self, room: &str) -> Result<()> {
         let c = self.db.locked();
         c.execute("DELETE FROM room_bots WHERE room = ?1", [room])?;
+        c.execute("DELETE FROM room_people WHERE room = ?1", [room])?;
         Ok(())
     }
 
@@ -141,7 +143,7 @@ mod tests {
             .execute_batch("DROP TABLE room_bots; UPDATE kv SET v = '13' WHERE k = 'schema';")
             .unwrap();
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("19"));
         assert_eq!(s.room_bot_point(&room, "bg1"), Some(RoomPoint { seq: last.seq, rev: s.current_rev() }));
         assert!(s.room_bot_point(&room, "a").is_none(), "an agent has no point");
     }
