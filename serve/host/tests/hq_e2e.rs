@@ -957,6 +957,21 @@ async fn initialized(s: &Setup, n: usize) -> usize {
     s.requests("initialize").len()
 }
 
+/// The agent's initialize count once it has not changed for 1.5 s (a person's activation can start a second process a moment
+/// after its reply), at most 30 s.
+async fn settled(s: &Setup) -> usize {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let (mut n, mut since) = (s.requests("initialize").len(), Instant::now());
+    while since.elapsed() < Duration::from_millis(1500) && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let now = s.requests("initialize").len();
+        if now != n {
+            (n, since) = (now, Instant::now());
+        }
+    }
+    n
+}
+
 #[tokio::test]
 async fn a_warm_owner_process_in_a_room_starts_again_when_the_rooms_members_change() {
     let mut s = start().await;
@@ -1037,13 +1052,14 @@ async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_
     // Someone is in the room: a process for it is never reused, though the members are the same as last turn.
     stay(&s, &group, "ann", 1_000_002, None);
     s.host.reply(&group, "fifth").await;
-    // A person's activation may ask the kernel for a launch twice (see the guest test below), so a turn with a person in the
-    // room starts one process or two: these counts are lower bounds. A reply returns only once its process answered.
-    assert!(initialized(&s, 3).await >= 3);
+    // A person's activation may ask the kernel for a launch twice (see the guest test below), so the turn's count is read once
+    // it has stopped changing, and the next turn is measured against it.
+    let n5 = settled(&s).await;
+    assert!(n5 >= 3, "the person's turn started a process: {n5} initializes");
     assert_eq!(last_room_env(&s), (Some("ann".to_owned()), None), "the room's person is in the room's members");
     s.host.reply(&group, "sixth").await;
-    let after = initialized(&s, 4).await;
-    assert!(after >= 4, "with a person in the room no process is warm: {after} initializes");
+    let n6 = settled(&s).await;
+    assert_eq!(n6, n5 + 1, "with a person in the room no process is warm: each turn starts its own");
 }
 
 #[tokio::test]
