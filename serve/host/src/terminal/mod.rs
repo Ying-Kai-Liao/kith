@@ -16,6 +16,7 @@
 
 pub mod claim;
 pub mod core_claims;
+pub mod core_writer;
 pub mod intent;
 mod jsonl;
 mod registry;

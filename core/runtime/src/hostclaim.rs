@@ -150,10 +150,12 @@ fn claim_json(c: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "started": c.get::<_, Option<String>>(6)?,
         // Which holder the claim went to: the host tells its own claims from another instance's by it, not by memory.
         "holderInstance": c.get::<_, Option<String>>(7)?,
+        // The turn the claim runs (null for a terminal or external claim): the host resumes only a claim of the turn it names.
+        "turn": c.get::<_, Option<i64>>(8)?,
     }))
 }
 
-const SHOW: &str = "SELECT claim_id, conversation, state, kind, person, pid, pid_started, holder_instance FROM claims";
+const SHOW: &str = "SELECT claim_id, conversation, state, kind, person, pid, pid_started, holder_instance, turn FROM claims";
 
 pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     call_at(core, method, params, now_ms())

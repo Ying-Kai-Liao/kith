@@ -145,16 +145,18 @@ fn failed(what: impl std::fmt::Display) -> std::io::Error {
     std::io::Error::other(format!("core claims: {what}"))
 }
 
+/// One host row, as the core answered it (or did not). The tests' scripted core stands in here.
+pub(super) fn row_answer(f: &Paths, method: &str, params: &Value) -> Answer {
+    #[cfg(test)]
+    if let Some(fake) = tests::fake_for(f) {
+        return fake(method, params);
+    }
+    call_host_claims(f, method, params)
+}
+
 /// One host row. A refusal and a core that is not there are both errors here; the rows that refuse as data answer `Ok`.
 fn row(f: &Paths, method: &str, params: &Value) -> std::io::Result<Value> {
-    #[cfg(test)]
-    let answer = match tests::fake_for(f) {
-        Some(fake) => fake(method, params),
-        None => call_host_claims(f, method, params),
-    };
-    #[cfg(not(test))]
-    let answer = call_host_claims(f, method, params);
-    match answer {
+    match row_answer(f, method, params) {
         Answer::Done(v) => Ok(v),
         Answer::Refused(said) => Err(failed(said)),
         Answer::Down { why, .. } => Err(failed(why)),

@@ -249,7 +249,16 @@ impl Acp {
         cwd: &str,
         env: &[(String, String)],
     ) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Incoming>)> {
-        let mut process = shell_command(command);
+        Self::start(shell_command(command), command, cwd, env)
+    }
+
+    /// [`Self::spawn`] for a command the caller built (the resident stub's, `resident::spawn_resident`). `what` names it in errors.
+    pub(crate) fn start(
+        mut process: Command,
+        what: &str,
+        cwd: &str,
+        env: &[(String, String)],
+    ) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Incoming>)> {
         // A run token or socket the host itself was started with is never an agent's; a guest's own comes in `env`.
         process
             .env_remove(RUN_TOKEN_ENV)
@@ -265,7 +274,7 @@ impl Acp {
         process.process_group(0);
         let mut child = process
             .spawn()
-            .with_context(|| format!("starting `{command}`"))?;
+            .with_context(|| format!("starting `{what}`"))?;
         let stdin = child.stdin.take().expect("stdin is piped");
         let stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
