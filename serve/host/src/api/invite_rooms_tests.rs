@@ -201,7 +201,7 @@ async fn a_revoked_person_does_not_join_and_an_undo_lets_the_waiting_part_go_on(
     let r = Rig::new().await;
     flag_on(&r);
     let room = room_of(&r, &["house"]);
-    let (invite, token) = accepted(&r, json!({"house": "member"}), std::slice::from_ref(&room)).await;
+    let _ = accepted(&r, json!({"house": "member"}), std::slice::from_ref(&room)).await;
     r.hub.store.put_device(&sam_device("sam-phone")).unwrap();
     owner(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap();
     reconcile(r.hub.clone()).await;
@@ -209,7 +209,6 @@ async fn a_revoked_person_does_not_join_and_an_undo_lets_the_waiting_part_go_on(
     assert_eq!(r.hub.store.room_stays(&room), vec![], "a revoke writes and keeps no room row");
     owner(&r, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
     r.hub.store.set_device_proven("sam-phone").unwrap();
-    let _ = (&invite, &token);
     reconcile(r.hub.clone()).await;
     assert_eq!(people(&r, &room), vec!["sam".to_owned()], "the part was not done, so it goes on");
 }
@@ -257,4 +256,19 @@ async fn the_setting_off_at_the_join_leaves_the_part_waiting() {
     flag_on(&r);
     reconcile(r.hub.clone()).await;
     assert_eq!(people(&r, &room), vec!["sam".to_owned()]);
+}
+
+/// Kai adds the person by hand before they accept, then takes them out: the invite's waiting part is done by the
+/// removal, so the proof later joins no one (the architect's `InviteJoin2` trace).
+#[tokio::test]
+async fn a_removal_before_the_proof_marks_the_waiting_part_done() {
+    let r = Rig::new().await;
+    flag_on(&r);
+    let room = room_of(&r, &["house"]);
+    let (invite, token) = accepted(&r, json!({"house": "member"}), std::slice::from_ref(&room)).await;
+    owner(&r, "addRoomPerson", json!({"room": room, "person": "sam"})).await.unwrap();
+    owner(&r, "removeRoomPerson", json!({"room": room, "person": "sam"})).await.unwrap();
+    assert!(r.hub.store.invite_room_done(&invite, &room));
+    prove(&r, "sam-phone", &invite, &token).await;
+    assert_eq!(people(&r, &room), Vec::<String>::new());
 }

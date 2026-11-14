@@ -145,6 +145,14 @@ impl Store {
             params![room, joined, entry.seq],
         )?;
         ensure!(ended == 1, "the stay ended meanwhile");
+        // Kai's removal sticks against every way back in: an invite's part for this room that is still waiting is done,
+        // so the person's proof later can't join them again (also across a revoke and its undo: suspended invites).
+        tx.execute(
+            "UPDATE invite_rooms SET done_at = ?3 WHERE room = ?1 AND done_at IS NULL AND invite_id IN
+             (SELECT invite_id FROM invites WHERE person_id = ?2
+              UNION SELECT invite_id FROM suspended_invites WHERE person_id = ?2)",
+            params![room, person, now_ms()],
+        )?;
         tx.commit()?;
         Ok(Some(entry))
     }
