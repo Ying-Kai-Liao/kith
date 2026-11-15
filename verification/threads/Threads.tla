@@ -373,7 +373,7 @@ HostClaimNext ==
 \* held by anyone (a terminal's stub, an older host's) answers `busy`: the claim ends `busy` (hostclaim.report) and the
 \* turn parks `lock_busy`. HostTakesLock = FALSE (broken): the host does not take the lock.
 HostTake ==
-    /\ CoreWriter /\ hp = "claimed"
+    /\ CoreWriter /\ hp = "claimed" /\ Loaded(hcl)   \* the current process is still registered (else HostGiveUp)
     /\ IF HostTakesLock /\ lk[hcl] /= "none"
        THEN /\ cl' = RelOwn(cl) /\ hr' = "none" /\ hp' = "none" /\ hcl' = 0 /\ ev' = ev \cup {"busy"} /\ UNCHANGED lk
        ELSE /\ hp' = "locked" /\ lk' = (IF HostTakesLock THEN [lk EXCEPT ![hcl] = "host"] ELSE lk)
@@ -384,7 +384,7 @@ HostTake ==
 \* W redeem (hostclaim.redeem on the stub's pid), then the transcript sync under the lock and session/prompt: the engine
 \* writes. The turn it was waiting for is the off-turn wake's, if there was one (ot): it is Running now.
 HostRedeem ==
-    /\ CoreWriter /\ hp = "locked" /\ (HostTakesLock => lk[hcl] = "host")   \* the stub is still there (else HostGiveUp)
+    /\ CoreWriter /\ hp = "locked" /\ Loaded(hcl) /\ (HostTakesLock => lk[hcl] = "host")   \* the stub is still there (else HostGiveUp)
     /\ hp' = "running" /\ eng' = hcl /\ ot' = FALSE
     /\ UNCHANGED <<TS, sidOf, cl, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, hr, hcl, taking, to,
                    lw, sig, n, C, lk, na, gate, again, pend, ev, ld>>
@@ -498,21 +498,21 @@ WarmKilled ==
 \* The stub of a process that never got to write exits (an older host's, killed by adopt's mark): its lock goes.
 StubExit ==
     /\ CoreWriter /\ \E s \in Sids : lk[s] = "host" /\ eng /= s /\ hp \notin {"locked", "running"}
-    /\ lk' = LkHost /\ ld' = 0
+    /\ lk' = LkHost   \* (a stub of a process that never wrote: its registration stays until the process is killed)
     /\ UNCHANGED <<TS, sidOf, cl, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw,
-                   sig, n, C, eng, ot, na, gate, again, pend, ev>>
+                   sig, n, C, eng, ot, na, gate, again, pend, ev, ld>>
 
 \* Q offturn.rs: an agent that woke itself (a finished background task) writes before the gate and the begin run: no
 \* claim, no lock (released at the end of the last turn), only the warm-process check keeps a terminal out. Anything
 \* short of Running kills its group (OffTurnKilled).
 OffTurnWrite ==
-    /\ CoreWriter /\ OffTurnWakes /\ ld \in {3, 4} /\ eng = 0 /\ hp = "none" /\ hr = "none" /\ ~pend   \* it has run a turn
+    /\ CoreWriter /\ OffTurnWakes /\ ld \in {3, 4} /\ eng = 0 /\ hp \in {"none", "gated", "begun"} /\ ~pend   \* it has run a turn
     /\ eng' = ld - 2 /\ ot' = TRUE /\ ev' = ev \cup {"offturn"}
     /\ UNCHANGED <<TS, sidOf, cl, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw,
                    sig, n, C, lk, na, gate, again, pend, ld>>
 
 OffTurnKilled ==
-    /\ CoreWriter /\ ot /\ hp /= "running"
+    /\ CoreWriter /\ ot /\ hp = "none"   \* offturn.rs: the kill follows a begin that did not return Running
     /\ eng' = 0 /\ ot' = FALSE /\ ld' = 0
     /\ UNCHANGED <<TS, sidOf, cl, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw,
                    sig, n, C, lk, na, gate, again, pend, ev>>
@@ -535,8 +535,9 @@ HostAdopt ==
     /\ CoreWriter /\ pend
     /\ pend' = FALSE
     /\ cl' = [s \in Sids |-> IF HostKind(cl[s]) /\ eng /= s THEN "none" ELSE cl[s]]
+    /\ ld' = (IF eng = 0 THEN 0 ELSE ld)   \* an idle process of the old instance is marked and goes; a new host never reuses it
     /\ UNCHANGED <<TS, sidOf, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw, sig,
-                   n, C, lk, eng, ot, na, gate, again, ev, ld>>
+                   n, C, lk, eng, ot, na, gate, again, ev>>
 
 \* The marked engine is killed (kill_resend), its stub exits and the lock goes. The claim stays, `ending`, until the
 \* host (a begin's settle, or its tick) lets the core end it.
@@ -601,11 +602,14 @@ TermResolve(t) ==
 \* A fresh id or a fork at launch is a new session no thread names yet: it joins one only through the hook (TermHook).
 TermLaunch(t) ==
     /\ TS[t] = "fresh"
-    /\ FreshClaims => (Free(cur) /\ to = "none" /\ WarmOK(cur))
+    /\ \/ /\ FreshClaims => (Free(cur) /\ to = "none" /\ WarmOK(cur))
+          /\ cl' = IF FreshClaims /\ TermRegistersClaim THEN [cl EXCEPT ![cur] = t] ELSE cl
+          /\ UNCHANGED <<na, ev>>
+       \/ /\ CoreWriter /\ OwnerNoAnswer /\ TermTakesLock /\ gate = "held"   \* kith-sessions claim / terminal, core_take NoAnswer
+          /\ na' = na \cup {t} /\ ev' = ev \cup {"lockalone"} /\ UNCHANGED cl
     /\ sidOf' = [sidOf EXCEPT ![t] = cur]
-    /\ cl' = IF FreshClaims /\ TermRegistersClaim THEN [cl EXCEPT ![cur] = t] ELSE cl
     /\ TS' = [TS EXCEPT ![t] = Up]
-    /\ UNCHANGED <<N, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw, sig, n, C>>
+    /\ UNCHANGED <<lk, eng, ot, gate, again, pend, ld, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw, sig, n, C>>
 
 \* bin/kith -> kith-sessions run (or exec) -> kith-stub -> claude starts and writes ~/.claude/sessions/<pid>.json: the
 \* session is open. CoreWriter: the stub takes the writer lock first (U take(): non-blocking on the same file every stub

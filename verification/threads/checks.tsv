@@ -84,6 +84,7 @@ core-atomic-handover	PROPERTY	HandoverNeverRefused	pass
 # that the terminal's claim and lock cover
 core-forks	INVARIANT	OneWriter	pass
 core-forks	INVARIANT	TerminalCovered	fail
+core-forks-two	INVARIANT	OneWriter	fail
 # neither layer can go: the lock covers a terminal whose wrapper died (its claim ended while claude runs) and an owner run with
 # the core down, the claim covers an abandoned turn that gave its lock back and a terminal with no stub program
 core-host-no-lock	INVARIANT	OneWriter	fail
@@ -112,7 +113,6 @@ core-failover-no-reclaim	INVARIANT	EngineCovered	fail
 core-host-no-lock	INVARIANT	LockCoversRunning	fail
 core-term-no-claim-no-lock	INVARIANT	TerminalCovered	fail
 core-term-no-claim-no-lock	INVARIANT	OneWriter	fail
-core-abandon-settles-early	INVARIANT	OneWriter	fail
 core-abandon-settles-early	INVARIANT	ClaimOutlivesEngine	fail
 core-external-ignores-warm	INVARIANT	OneWriter	fail
 core-claim-next-ignores-held	PROPERTY	ClaimsExclusive	fail

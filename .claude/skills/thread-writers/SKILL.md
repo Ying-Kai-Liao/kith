@@ -21,7 +21,7 @@ verification/threads/run.sh --show VARIANT PROP   # TLC's full output (the count
 verification/threads/drift.sh                     # which covered files changed since the sync commit
 ```
 
-Run time: 101 rows, about 5.5 minutes on a laptop at 4 parallel jobs (P10, 2026-11-15): the nine passing `core` rows are 5.2M
+Run time: 101 rows, about 6 minutes on a laptop at 4 parallel jobs (P10, 2026-11-15): the nine passing `core` rows are 4.7M
 states each (about 90 s), the slim scopes and the failing rows are under 200k. The job's timeout is 40 minutes.
 
 CI runs `run.sh` (job `thread-writers`) on pull requests and pushes that touch `verification/threads/`, this skill, or the covered code (the files `drift.sh` lists).
@@ -63,7 +63,9 @@ test; the Rust twin (`core/kernel/src/threads*`) is now in `drift.sh`'s file lis
 **`--held` (M1-7) is modelled** (`HeldLaunch`: `TermHandBack` then `TermOpen`, rows `core-handover`, `core-atomic-handover`). The
 launcher gives its claim back, then `terminal.open` takes it for the stub. In that gap a third writer can take the claim:
 `OneWriter` still holds (open answers busy, 75, nothing starts), but `HandoverNeverRefused` FAILS on the code: the run the user
-asked for can be lost. That is still open (a known gap, not a bug in the model). The fix is the what-if `HandoverAtomic`
+asked for can be lost. That is still open (a known gap, not a bug in the model). The shortest trace takes no claim: a warm process
+the app loaded during the gap makes `terminal.open` answer busy on `blocked_in`'s `waiting` (`terminal.rs`); retrying `waiting` in
+open, as `claim_waiting` does, is a smaller fix than the atomic hand-over but covers only that case. The fix is the what-if `HandoverAtomic`
 (`terminal.open` takes over the launcher's claim by pid + start time in one step instead of release-then-take), whose row
 passes. When `terminal.open` answers direct or is refused, `kith-sessions terminal` takes the claim again (kith_held_launch):
 the same take as open's, so it adds no behaviour to the model.
@@ -96,6 +98,12 @@ the same take as open's, so it adds no behaviour to the model.
 | `NoBeginWhileHeld` | No begin goes on past the gate when its own gate read was not ok:true (Held). The read and the claim are two steps: a flip between them is not covered, and the core does not check the switch (`hostclaim.*` is unswitched). | A turn claims while the core is unclear. |
 | `NoLeakedClaim`, `NeverRefusedByDeadOwnClaim` | A turn's end (reported, settled or died) leaves none of its own claim rows; a begin settles a claim of its own with no process left instead of queueing behind it. After a restart some are left on purpose (settled by adopt, a begin or the core), so `NoLeakedClaim` stops at a restart. | A conversation stuck behind a dead claim. |
 | `HandoverNeverRefused` | `--held`: the run the user asked for is not lost to a writer that took the claim in the hand-over gap. | FAILS on the code (see above). |
+
+Process identity is coarse: `ld` is "a warm process of this conversation" (a host restart's idle process is dropped at `adopt`, as it is
+marked for a kill; the model does not name old and new processes). A gate rollback between the gate read and `claim_next` is not
+modelled: the host would be on a core row while the kernel takers are back on the files, and only the lock covers it. `End::Killed`
+goes through `acp.kill` (stdin closed, a grace, `killpg`), not `kill_group`; the routine-deadline kill works the same and ends `done`;
+the model treats both as "dying, not writing".
 
 Not claimed, because they are liveness rules (they need the end report, the settle or the retry tick to be delivered, and the model
 has no fairness): a lost end report is eventually retried (`retry_end`), a claim `ending` on a gone stub is eventually settled, a
@@ -155,7 +163,7 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | step 5, the stub's `take` (busy: `report busy`, park `lock_busy`) | `HostTake` (`HostTakesLock`) |
 | step 6 `redeem`, then the transcript sync under the lock and the prompt | `HostRedeem` |
 | `finish` Done / OutOfUsage / Left: `release`, then the report; a move to the next account cancels the requeued core turn and begins a NEW one | `HostFinish`, `HostReport` (`FailoverReclaims`) |
-| `finish` Killed (the 15 s kill): `exit` reported at once, the claim ends, the group is SIGKILLed: dying, not writing, the lock until the stub exits | `HostKilled`, `StubExit` |
+| `finish` Killed (the 15 s kill): `exit` reported at once, the claim ends, the process group is killed (`acp.kill`: stdin closed, a grace, `killpg`; the routine-deadline kill is the same and ends `done`): dying, not writing, the lock until the stub exits | `HostKilled`, `StubExit` |
 | `writer_turn.rs` abandon: `core.abandon` (`release` first, then `stop`), `kill_group`, `settle_gone`: the claim stays `ending` until the group is gone | `HostAbandon`, `HostKill`, `HostSettle` (`AbandonSettlesEarly`) |
 | a begun turn given up before the prompt; a redeem the core refused | `HostGiveUp` |
 | the process ends under its turn; `End::Died` reports `exit`, the item is rerun or cancelled | `EngineDied`, `HostDied` (`DiedReports`) |
@@ -241,11 +249,15 @@ All come from the code as it is; none was "fixed" in the model. `run.sh --show <
    the conversation lock alone when the core gives no answer (`core_take` `NoAnswer`). A host engine that has already given its lock
    back is held only by its claim row, which the core can no longer be asked about: an abandoned turn not yet killed
    (`core.abandon` releases, then stops), or an agent that woke itself (an off-turn wake takes neither). Steps: abandon a running
-   turn, the host restarts, the gate turns Held, an owner run starts on the lock alone: two writers until `kill_group` /
-   `settle_gone` or the next begin ends the old one. Window: the abandon-to-kill gap, with the core down. Not fixed here.
+   turn (the lock is given back, the claim is `ending`), the core stops answering (gate Held), an owner run starts on the lock
+   alone (`kith-sessions claim` / `terminal` / `--resume` all reach `core_take`'s no-answer branch, and none asks the host): two
+   writers until `kill_group` / `settle_gone` ends the old one. Window: the abandon-to-kill gap, with the core down. Follow-up for the
+   code (architect): in the abandon branch kill the group before giving the lock back (`writer_turn.rs`, `core_writer.rs` abandon);
+   the stub's exit frees the lock anyway. Not fixed here.
    (`core` and `core-gate` pass `OneWriter` and friends: with the core answering, both layers hold.)
-6. **A terminal that moves to a new session id writes it under neither claim nor lock (`core-forks` `TerminalCovered`).** Finding 1 for
-   the core writer: both layers are keyed by the id bin/kith claimed. `OneWriter` holds at this scope.
+6. **A terminal that moves to a new session id writes it under neither claim nor lock (`core-forks` `TerminalCovered`, `core-forks-two`
+   `OneWriter`).** Finding 1 for the core writer: both layers are keyed by the id bin/kith claimed. With one terminal `OneWriter`
+   holds at this scope; with two, the second takes the forked id and two terminals write.
 
 Fixed since the last sync (rows turned from `fail` to `pass`, evidence in the commits):
 - Old finding 1 (check, then act, with no claim) and 2 (the send gate trusting a copy from the next scan), on
@@ -288,8 +300,8 @@ counterexample with `run.sh --show <variant> <property>`). The new ones keep cla
 | `core-failover-no-reclaim` | the new core turn of a move to the next account (the host's own retry runs on) | `EngineCovered` |
 | `core-host-no-lock` | the host's stub `take` | `LockCoversRunning`, and `OneWriter` (a terminal whose wrapper died holds only the lock) |
 | `core-term-no-claim-no-lock` | both layers for a terminal | `TerminalCovered`, `OneWriter` |
-| `core-term-no-claim`, `core-term-no-lock`, `core-unlocked-owner` | one layer for a terminal (no claim row; no lock; no stub program) | `OneWriter`: neither layer is redundant. The claim covers an abandoned turn that gave its lock back; the lock covers a terminal whose wrapper died and an owner with the core down |
-| `core-abandon-settles-early` | the claim staying `ending` until the group is gone (the lock was given back at the stop) | `OneWriter`, `ClaimOutlivesEngine` |
+| `core-term-no-claim`, `core-term-no-lock`, `core-unlocked-owner` | one layer for a terminal (no claim row; no lock; no stub program) | `OneWriter`: neither layer is redundant. The lock covers a terminal whose wrapper died (its claim ended while claude runs) and an owner with the core down; a terminal with no claim row is not kept out of an abandoned turn that gave its lock back, except by the warm-process check |
+| `core-abandon-settles-early` | the claim staying `ending` until the group is gone (the lock was given back at the stop) | `ClaimOutlivesEngine`. `OneWriter` still passes: the warm-process check in `claim.external` (the abandoned process is still registered) also keeps a terminal out |
 | `core-external-ignores-warm` | the warm-process check in `claim.external` | `OneWriter` (a terminal next to an off-turn wake) |
 | `core-claim-next-ignores-held` | the `held` answer of `claim_next` (with the warm check also off, which otherwise keeps the terminal out of the window) | `ClaimsExclusive` |
 | `core-died-no-report` | the `exit` report of `End::Died` | `NoLeakedClaim` |
