@@ -55,6 +55,10 @@ enum Op {
     /// The race itself in one op: a post is checked, the person is taken out (0), leaves (1), or is taken out and put
     /// back (2), or nothing happens (3), and then the post is appended.
     Race(usize, u8),
+    /// A room turn that started at one of the gens seen so far asks the owner for a card (package G: its "waiting"
+    /// pointer lands in the room), and a card, any one, closing by whatever road.
+    Ask(usize),
+    Close(usize),
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -74,6 +78,8 @@ fn op() -> impl Strategy<Value = Op> {
         3 => p().prop_map(Op::Queue),
         3 => p().prop_map(Op::Land),
         4 => (p(), 0..5u8).prop_map(|(i, how)| Op::Race(i, how)),
+        3 => (0..16usize).prop_map(Op::Ask),
+        2 => (0..16usize).prop_map(Op::Close),
     ]
 }
 
@@ -102,6 +108,14 @@ struct Line {
     origin: Option<i64>,
 }
 
+/// A room turn's card and the pointer it left in the room.
+struct Ask {
+    pointer: Entry,
+    card: crate::store::Card,
+    origin: i64,
+    closed: bool,
+}
+
 struct Queued {
     stay: i64,
     seat: Seat,
@@ -116,6 +130,7 @@ struct World<'a> {
     gens: Vec<i64>,
     lines: Vec<Line>,
     queued: Vec<Option<Queued>>,
+    asks: Vec<Ask>,
     n: usize,
 }
 
@@ -166,6 +181,7 @@ impl<'a> World<'a> {
             gens: vec![0],
             lines: vec![],
             queued: (0..n).map(|_| None).collect(),
+            asks: vec![],
             n: 0,
         }
     }
@@ -302,6 +318,27 @@ impl<'a> World<'a> {
                 self.queued[i] = seat.map(|seat| Queued { stay: seat.joined, seat });
             }
             Op::Race(..) => unreachable!("flattened before it runs"),
+            Op::Ask(k) => {
+                let origin = self.gens[k % self.gens.len()];
+                // The rig outlives the cases, and an open card's session and resource are unique.
+                let who = format!("room-person-{}", uuid::Uuid::new_v4());
+                let (card, pointer) = super::super::room_pointer_tests::open(self.r, &room, &who, origin, i64::MAX);
+                self.asks.push(Ask { pointer, card, origin, closed: false });
+            }
+            Op::Close(k) => {
+                if self.asks.is_empty() {
+                    return Ok(());
+                }
+                let at = k % self.asks.len();
+                let ask = &mut self.asks[at];
+                // As every closer does it: the row, then the card's entry.
+                let _ = self.r.hub.store.card_withdraw(&ask.card.id);
+                if let Some(mut e) = self.r.hub.store.entry(ask.card.entry_id.as_ref().unwrap()) {
+                    e.data["status"] = "cancelled".into();
+                    self.r.hub.set_entry(&e.id, &e.data);
+                }
+                ask.closed = true;
+            }
             Op::Land(i) => {
                 let Some(q) = self.queued[i].take() else { return Ok(()) };
                 let text = self.text();
@@ -333,6 +370,44 @@ impl<'a> World<'a> {
         )
     }
 
+    /// (G) The "waiting" pointers: a read shows a person the ones of a still-open card from their stay on, an event
+    /// shows them in any state, always cut to `{notice, author, agent, state}`; the owner's copy says how it went.
+    fn check_pointers(&self, i: usize, notices: Option<&Vec<String>>) -> Result<(), TestCaseError> {
+        let who = PEOPLE[i];
+        let seat = self.model[i].seat();
+        let want: Option<Vec<String>> = seat.map(|s| {
+            let mut ids: Vec<(i64, String)> = self
+                .asks
+                .iter()
+                .filter(|a| !a.closed && s <= a.origin)
+                .map(|a| (a.pointer.seq, a.pointer.id.clone()))
+                .collect();
+            ids.sort();
+            ids.into_iter().map(|(_, id)| id).collect()
+        });
+        if notices != want.as_ref() {
+            return Err(fail(format!("{who} history shows pointers {notices:?}, the model says {want:?}")));
+        }
+        for a in &self.asks {
+            let stored = self.r.hub.store.entry(&a.pointer.id).unwrap();
+            let ev = json!({"type": "entry", "rev": stored.rev, "entry": stored});
+            let got = crate::api::roles::event_for(&self.r.hub.store, Some(who), ev);
+            if got.is_some() != seat.is_some_and(|s| s <= a.origin) {
+                return Err(fail(format!("pointer event to {who}: shown {}, model disagrees", got.is_some())));
+            }
+            if let Some(g) = got {
+                let mut keys: Vec<&String> =
+                    g["entry"]["data"].as_object().unwrap().keys().filter(|k| *k != "thread").collect();
+                keys.sort();
+                let state = if a.closed { "closed" } else { "waiting" };
+                if keys != ["agent", "author", "notice", "state"] || g["entry"]["data"]["state"] != state {
+                    return Err(fail(format!("pointer shown to {who} as {}", g["entry"]["data"])));
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn check(&self) -> Result<(), TestCaseError> {
         let store = &self.r.hub.store;
         for (i, who) in PEOPLE.iter().enumerate() {
@@ -345,6 +420,7 @@ impl<'a> World<'a> {
                         .as_array()
                         .unwrap()
                         .iter()
+                        .filter(|e| e["kind"] != "notice")
                         .map(|e| (e["seq"].as_i64().unwrap(), e["data"]["text"].as_str().unwrap().to_owned()))
                         .collect();
                     have.sort();
@@ -356,6 +432,8 @@ impl<'a> World<'a> {
                 (None, Err(_)) => {}
                 (want, got) => return Err(fail(format!("{who}: history expected {want:?}, got {got:?}"))),
             }
+            let notices = v_history_notices(&self.person(i, "history", json!({"botId": self.room})).await);
+            self.check_pointers(i, notices.as_ref())?;
             // Every line as a live event, and as a thread reply's lane is the same table, the same rule.
             for l in &self.lines {
                 let ev = json!({"type": "entry", "rev": l.entry.rev, "entry": l.entry});
@@ -367,6 +445,13 @@ impl<'a> World<'a> {
                         l.entry.data["text"]
                     )));
                 }
+            }
+        }
+        // Kai sees every pointer, whole, and how its card ended.
+        for a in &self.asks {
+            let stored = self.r.hub.store.entry(&a.pointer.id).unwrap();
+            if (stored.data["state"] == "closed") != a.closed || stored.data["card"].is_null() {
+                return Err(fail(format!("the owner's pointer is {}", stored.data)));
             }
         }
         // Kai sees every line, and the ones a current person is not shown say so.
@@ -381,6 +466,19 @@ impl<'a> World<'a> {
         }
         Ok(())
     }
+}
+
+/// The ids of the notices (the pointers) in a person's history, oldest first; `None` when it was refused.
+fn v_history_notices(got: &anyhow::Result<Value>) -> Option<Vec<String>> {
+    let v = got.as_ref().ok()?;
+    let mut rows: Vec<(i64, String)> = v["entries"]
+        .as_array()?
+        .iter()
+        .filter(|e| e["kind"] == "notice")
+        .map(|e| (e["seq"].as_i64().unwrap(), e["id"].as_str().unwrap().to_owned()))
+        .collect();
+    rows.sort();
+    Some(rows.into_iter().map(|(_, id)| id).collect())
 }
 
 /// The ops as they run: a `Race` is its steps.
