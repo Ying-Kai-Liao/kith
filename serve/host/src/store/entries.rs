@@ -3,6 +3,7 @@
 use super::model::{Entry, EntryKind, Lane, ReadScope};
 use super::{Store, logged, next_rev, now_ms};
 use crate::LockExt;
+use crate::chat::room_pointer::SEEN_ROWS_SQL;
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
@@ -326,7 +327,7 @@ impl Store {
         let c = self.db.locked();
         let mut st = c.prepare(&format!(
             "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND thread_id IS NULL AND seq < ?2
-               AND kind IN ('user', 'agent') AND origin_gen >= ?4
+               AND {SEEN_ROWS_SQL} AND origin_gen >= ?4
              ORDER BY seq DESC LIMIT ?3"
         ))?;
         let mut rows: Vec<Entry> =
@@ -340,13 +341,24 @@ impl Store {
         let c = self.db.locked();
         let mut st = c.prepare(&format!(
             "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND thread_id = ?2
-               AND kind IN ('user', 'agent') AND origin_gen >= ?4
+               AND {SEEN_ROWS_SQL} AND origin_gen >= ?4
              ORDER BY seq DESC LIMIT ?3"
         ))?;
         let mut rows: Vec<Entry> =
             st.query_map(params![bot_id, root, limit, seat], row_entry)?.collect::<rusqlite::Result<_>>()?;
         rows.reverse();
         Ok(rows)
+    }
+
+    /// The "waiting" pointers (any lane of the room) of the card entry `card_entry`, open or closed.
+    pub fn room_pointers_of(&self, card_entry: &str) -> Vec<Entry> {
+        let c = self.db.locked();
+        let rows = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE kind = 'notice'
+               AND json_extract(data, '$.notice') = 'roomCardWaiting' AND json_extract(data, '$.card') = ?1"
+        ));
+        let found = rows.and_then(|mut st| st.query_map([card_entry], row_entry)?.collect::<rusqlite::Result<_>>());
+        logged("room_pointers_of", found).unwrap_or_default()
     }
 
     /// Cards still waiting for the user to sign in to agent `backend`, oldest first.

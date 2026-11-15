@@ -63,6 +63,8 @@ mod room_people;
 #[cfg(test)]
 mod room_people_tests;
 #[cfg(test)]
+mod room_pointer_tests;
+#[cfg(test)]
 mod room_points_props;
 #[cfg(test)]
 mod room_secrets_props;

@@ -779,6 +779,8 @@ impl Hub {
         };
         if let Some(e) = &updated {
             self.update_thread_summary(e);
+            // Every way a room turn's card closes lands here, so its "waiting" pointer in the room closes with it.
+            crate::chat::room_pointer::after_set(self, e);
         }
         updated
     }
