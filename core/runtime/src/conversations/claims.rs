@@ -256,6 +256,18 @@ fn reconciled(tx: &Transaction<'_>) -> Result<Option<i64>> {
     Ok(text.and_then(|t| t.parse().ok()))
 }
 
+/// True when this core's generation has already been marked reconciled (a holder reconnecting in one generation must not
+/// reconcile again: [`reconcile`] refuses a second).
+pub(crate) fn is_reconciled(core: &Core) -> Result<bool> {
+    let text: Option<String> = core
+        .conn()
+        .query_row("SELECT value FROM meta WHERE key = ?1", [RECONCILED], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    Ok(text.and_then(|t| t.parse::<i64>().ok()) == Some(core.generation()))
+}
+
 pub(super) fn kill_of(claim_id: i64, pid: Option<i64>, started: Option<String>) -> Kill {
     Kill {
         claim_id: Some(claim_id),
