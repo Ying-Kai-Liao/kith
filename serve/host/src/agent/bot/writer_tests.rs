@@ -372,7 +372,7 @@ actor_test! {
         rig.send("a", "park me").await;
         rig.until("the park", |r| r.turn_state(1) == "parked").await;
         assert_eq!(rig.w().turns[0].2.as_deref(), Some("terminal_live"));
-        assert!(rig.hub.runtime("a").activity.contains("waiting for your terminal session"));
+        rig.until("the activity", |r| r.hub.runtime("a").activity.contains("waiting for your terminal session")).await;
         assert!(rig.texts("a", "agent").is_empty(), "nothing runs under a terminal's claim");
         rig.end_seeded();
         rig.until("the reply", |r| r.replied("a", "park me")).await;
@@ -568,7 +568,8 @@ actor_test! {
         assert_eq!(rig.calls("hostclaim.turn"), 1, "the second turn does not begin while the first holds the conversation");
         rig.until("both replies", |r| r.replied("a", "one") && r.replied("a", "two")).await;
         assert_eq!(rig.calls("hostclaim.turn"), 2);
-        assert_eq!(rig.w().turns.iter().filter(|t| t.1 == "done").count(), 2);
+        // The reply lands before the end report: wait for it.
+        rig.until("both ends", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 2).await;
     }
 }
 
@@ -591,7 +592,8 @@ actor_test! {
     /// A user's Stop is `session/cancel` and the normal end: `done`, never `exit` (only the 15 s kill reports it).
     async fn a_stop_ends_with_done_not_exit(rig) {
         rig.send("a", "HANG").await;
-        rig.until("running", |r| r.running_pid("sess-a").is_some()).await;
+        // Stopped once the prompt is under way: a stop before it abandons the turn (no end report), it does not end it.
+        rig.until("prompted", |r| r.prompted("a")).await;
         rig.hub.send_to_actor("a", Cmd::Stop).unwrap();
         rig.until("the end report", |r| !r.w().reports.is_empty()).await;
         let w = rig.w();
@@ -663,7 +665,7 @@ actor_test! {
     /// it puts back is cancelled, not left queued.
     async fn the_fifteen_second_kill_reports_exit_and_cancels_the_turn(rig) {
         rig.send("a", "STUBBORN").await;
-        rig.until("running", |r| r.running_pid("sess-a").is_some()).await;
+        rig.until("prompted", |r| r.prompted("a")).await;
         rig.hub.send_to_actor("a", Cmd::Stop).unwrap();
         rig.until("the end report", |r| !r.w().reports.is_empty()).await;
         let w = rig.w();
@@ -827,6 +829,7 @@ actor_test! {
         rig.send_thread("a", &root, "after the fork").await;
         rig.until("the reply", |r| r.replied_in("a", &root, "after the fork")).await;
         assert!(rig.loads("a").contains(&"sess-fork".to_owned()), "the new session loaded: {:?}", rig.loads("a"));
+        rig.until("its end", |r| r.turn_state(4) == "done").await;
         let w = rig.w();
         assert_eq!(w.turns[2].1, "cancelled", "the turn on the old session is cancelled: {:?}", w.turns);
         assert_eq!(w.turns[3].1, "done", "a new turn on the new session");

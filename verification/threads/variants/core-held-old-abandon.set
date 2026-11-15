@@ -1,0 +1,7 @@
+CoreWriter = TRUE
+ClaudeForks = FALSE
+Terminals = {"t1"}
+MaxSends = 1
+GateFlips = TRUE
+OffTurnWakes = FALSE
+AbandonKeepsLock = FALSE

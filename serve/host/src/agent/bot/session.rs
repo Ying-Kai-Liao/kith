@@ -279,9 +279,6 @@ impl Actor {
                 && let Some(conn) = self.conn.as_mut()
             {
                 conn.loaded.insert(sid.clone(), Instant::now());
-                if let Some(proc) = conn.writer.as_mut() {
-                    proc.loaded_now(&sid);
-                }
                 self.set_session(slot, Some(&sid));
                 self.note_options(&sid, &res, Listing::Session);
                 self.set_bot_mode(&sid, &res).await;
@@ -354,9 +351,6 @@ impl Actor {
                     };
                     let Some(conn) = self.conn.as_mut() else { bail!("agent not running") };
                     conn.loaded.insert(sid.clone(), Instant::now());
-                    if let Some(proc) = conn.writer.as_mut() {
-                        proc.loaded_now(&sid);
-                    }
                     self.note_options(&sid, &res, Listing::Session);
                     self.set_bot_mode(&sid, &loaded).await;
                     if let Some(s) = snapshot {
@@ -392,9 +386,6 @@ impl Actor {
         let Some(conn) = self.conn.as_mut() else { bail!("agent not running") };
         let sid = res["sessionId"].as_str().ok_or_else(|| anyhow!("agent returned no sessionId"))?.to_owned();
         conn.loaded.insert(sid.clone(), Instant::now());
-        if let Some(proc) = conn.writer.as_mut() {
-            proc.loaded_now(&sid);
-        }
         let acp = conn.acp.clone();
         let selected = select_model(&acp, &res, &sid, &self.cfg).await;
         let options = self.drop_if_silent(selected)?;
