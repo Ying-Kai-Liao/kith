@@ -14594,6 +14594,28 @@
       }
     },
     {
+      "name": "hostclaim.strays",
+      "summary": "The turns a host enqueued (they carry its `key`) that are still queued or parked: `{turns: [{turn, conversation, key}]}`. The host cancels those it has no item for (a turn requeued after a restart, whose item is gone). A turn the core made itself carries no key and is never listed.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {},
+        "hidden": true
+      }
+    },
+    {
       "name": "hostclaim.park",
       "summary": "A queued turn waits (`lock_busy` or `terminal_live`). Answers `{parked}`.",
       "params": [

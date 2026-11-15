@@ -176,7 +176,29 @@ async fn adopt_once(hub: &crate::hub::Hub, core: &Arc<CoreWriter>) {
         Ok(Err(error)) => tracing::warn!(error, "writer mode: couldn't adopt an earlier host instance's claims"),
         Err(_) => {}
     }
+    sweep_strays_for_ever(core.clone());
 }
+
+/// Once now and then every [`STRAY_SWEEP_EVERY`]: the host turns the core holds that no item of this host runs are cancelled
+/// (`terminal/core_strays.rs`: a requeue after a core or host restart, or a late `exit`). Not under test: the scripted cores know
+/// no such row, and the sweep has its own tests.
+#[cfg(not(test))]
+fn sweep_strays_for_ever(core: Arc<CoreWriter>) {
+    tokio::spawn(async move {
+        loop {
+            let c = core.clone();
+            if let Ok(n) = tokio::task::spawn_blocking(move || c.sweep_strays()).await
+                && n > 0
+            {
+                tracing::info!(cancelled = n, "writer mode: cancelled host turns nothing runs");
+            }
+            tokio::time::sleep(crate::terminal::core_writer::STRAY_SWEEP_EVERY).await;
+        }
+    });
+}
+
+#[cfg(test)]
+fn sweep_strays_for_ever(_: Arc<CoreWriter>) {}
 
 // MARK: accept
 
