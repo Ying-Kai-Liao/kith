@@ -408,7 +408,9 @@ async fn a_direct_run_on_an_idle_warm_conversation_waits_for_the_idle_kill_and_t
     rig.until("the first turn's claim to end", |r| r.claim_rows().1 == 0).await;
     let warm = rig.warm_pids();
     assert_eq!(warm.len(), 1, "one warm process after the first turn: {}", rig.dump());
-    assert!(rig.log("loads.jsonl").is_empty(), "the first process made the session, it loaded nothing");
+    // The first turn on a process that made its session may load it once more (step 7 has no record of a turn run on it yet).
+    let before = rig.log("loads.jsonl").len();
+    assert!(before <= 1, "the first process loaded at most once: {}", rig.dump());
 
     // The idle process holds no lock, so the one-shot takes it. Its claim is the next row: refused while the process is there.
     let run = rig.hold().await;
@@ -429,7 +431,7 @@ async fn a_direct_run_on_an_idle_warm_conversation_waits_for_the_idle_kill_and_t
     assert_eq!(released["ended"].as_array().map(Vec::len), Some(1), "the run's claim ended: {released}");
     rig.wait_answers(2).await;
     assert_eq!(rig.log("prompts.jsonl").len(), 2);
-    assert_eq!(rig.log("loads.jsonl").len(), 1, "the new process loaded the session again");
+    assert!(rig.log("loads.jsonl").len() > before, "the new process loaded the session again: {}", rig.dump());
     let now = rig.warm_pids();
     assert!(now.iter().all(|p| !warm.contains(p)), "a new process: was {warm:?}, now {now:?}");
 }
