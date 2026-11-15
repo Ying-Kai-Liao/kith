@@ -493,8 +493,12 @@ actor_test! {
     async fn a_lock_that_cannot_be_given_back_kills_the_process(rig) {
         rig.w().kill_on_redeem = true;
         rig.send("a", "stuck").await;
-        rig.until("the failure", |r| r.noticed("a", "session lock could not be released")).await;
-        assert!(rig.calls("hostclaim.stop") >= 1, "the claim is stopped");
+        // The kill lands on the stub before or after the host's release: after, the lock is stuck (the claim is stopped, the start
+        // fails); before, the stub is simply gone with its lock (the turn is cancelled, no stop is needed).
+        rig.until("the failure", |r| r.noticed("a", "session lock could not be released") || r.turn_state(1) == "cancelled").await;
+        if rig.noticed("a", "session lock could not be released") {
+            assert!(rig.calls("hostclaim.stop") >= 1, "the claim is stopped");
+        }
         assert!(rig.texts("a", "agent").is_empty());
     }
 }
@@ -727,6 +731,7 @@ actor_test! {
         rig.w().session_register_refused = false;
         rig.send("a", "after").await;
         rig.until("the reply", |r| r.replied("a", "after")).await;
+        rig.until("its end", |r| r.turn_state(3) == "done").await;
         let w = rig.w();
         assert_eq!(w.turns.len(), 3, "the next message is a turn of its own: {:?}", w.turns);
         assert_eq!(w.turns[2].1, "done");
@@ -778,6 +783,7 @@ actor_test! {
         rig.send_thread("a", &root, "after the terminal").await;
         rig.until("the reply", |r| r.replied_in("a", &root, "after the terminal")).await;
         assert_eq!(rig.loads("a").len(), before + 1, "the session was loaded again before the prompt: {:?}", rig.loads("a"));
+        rig.until("its end", |r| r.turn_state(3) == "done").await;
         let w = rig.w();
         assert_eq!(w.turns.len(), 3, "the same turn, no new one");
         assert_eq!(w.turns[2].1, "done");
