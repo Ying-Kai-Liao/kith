@@ -273,7 +273,7 @@ guest's bot) is never handed the owner's login unless it was lent to them; a ref
 the core by `core/runtime/src/authority/tests/secret_writes.rs`, and `kernel/tests/kith-auth-router-check` runs the writers on the
 file and through a daemon with equal lines, refusals, exit codes and state.
 
-## Room turns (2026-11-14, rooms with people, PR C)
+## Room turns (2026-11-14, rooms with people, PR C) - held by the rooms models and `room_turn_tests.rs`, no row in the property list above
 Covered too: `chat/room_turn.rs`, `chat/room_input.rs`, `agent/bot/room_turn.rs`, `hub/room_turns.rs`, `runauth/room.rs`, and
 `access::approver` for a `room-` person (the owner alone answers, whoever wrote). The rules (turn input, stamps, level, reuse)
 are model-checked in `verification/rooms/` (`design-r2`, `design-flow`, `steer`, `warmreuse` fail on purpose) and held in
