@@ -378,7 +378,7 @@ actor_test! {
         rig.until("the reply", |r| r.replied("a", "park me")).await;
         assert_eq!(rig.calls("hostclaim.enqueue"), 1, "the retried begin is the same turn");
         assert!(rig.calls("hostclaim.unpark") >= 1);
-        assert_eq!(rig.turn_state(1), "done");
+        rig.until("its end", |r| r.turn_state(1) == "done").await;
     }
 }
 
@@ -530,7 +530,7 @@ actor_test! {
         assert_eq!(rig.texts("a", "notice").iter().filter(|t| t.contains("core not answering")).count(), 1, "said once");
         rig.w().down = false;
         rig.until("the reply", |r| r.replied("a", "hold")).await;
-        assert_eq!(rig.turn_state(1), "done");
+        rig.until("its end", |r| r.turn_state(1) == "done").await;
     }
 }
 
