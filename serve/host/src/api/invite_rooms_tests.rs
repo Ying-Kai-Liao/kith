@@ -78,7 +78,11 @@ async fn naming_a_room_needs_the_setting_a_room_that_takes_people_and_every_agen
     let invite = made["inviteId"].as_str().unwrap();
     assert_eq!(r.hub.store.invite_rooms(invite), vec![room.clone()]);
     let listed = owner(&r, "invites", json!({})).await.unwrap();
-    assert_eq!(listed["invites"][0]["rooms"], json!([{"room": room, "done": false}]), "Kai sees the part waiting");
+    assert_eq!(
+        listed["invites"][0]["rooms"],
+        json!([{"room": room, "done": false, "waiting": "not yet joined: the invite isn't accepted"}]),
+        "Kai sees the part waiting and why"
+    );
 }
 
 #[tokio::test]
@@ -272,4 +276,81 @@ async fn a_removal_before_the_proof_marks_the_waiting_part_done() {
     assert!(r.hub.store.invite_room_done(&invite, &room));
     prove(&r, "sam-phone", &invite, &token).await;
     assert_eq!(people(&r, &room), Vec::<String>::new());
+}
+
+/// Two invites for the same person, only the first accepted: the second, naming a room, is made before the first is accepted. Proving the first joins
+/// no one into the second's room, and the list says the second isn't accepted.
+#[tokio::test]
+async fn an_unaccepted_invite_beside_an_accepted_one_waits_and_says_why() {
+    let r = Rig::new().await;
+    flag_on(&r);
+    let room = room_of(&r, &["house"]);
+    let first = owner(&r, "createInvite", json!({"name": "Sam", "agents": {"house": "member"}})).await.unwrap();
+    let second = owner(&r, "createInvite", json!({"name": "Sam", "agents": {"house": "member"}, "rooms": [room]}))
+        .await
+        .unwrap();
+    let (first_id, second_id) =
+        (first["inviteId"].as_str().unwrap().to_owned(), second["inviteId"].as_str().unwrap().to_owned());
+    let token = first["link"].as_str().unwrap().rsplit("t=").next().unwrap().to_owned();
+    let listed = [Listed {
+        membership_id: "mem_sam".into(),
+        user_id: "user_sam".into(),
+        invite_id: first_id.clone(),
+        ..Default::default()
+    }];
+    members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
+    prove(&r, "sam-phone", &first_id, &token).await;
+    reconcile(r.hub.clone()).await;
+    assert_eq!(people(&r, &room), Vec::<String>::new());
+    assert!(!r.hub.store.invite_room_done(&second_id, &room));
+    let listed = owner(&r, "invites", json!({})).await.unwrap();
+    let row = listed["invites"].as_array().unwrap().iter().find(|i| i["inviteId"] == second_id.as_str()).unwrap();
+    assert_eq!(row["rooms"][0]["waiting"], "not yet joined: the invite isn't accepted", "{row}");
+}
+
+async fn waiting_of(r: &Rig, invite: &str) -> String {
+    let listed = owner(r, "invites", json!({})).await.unwrap();
+    let row = listed["invites"].as_array().unwrap().iter().find(|i| i["inviteId"] == invite).unwrap().clone();
+    row["rooms"][0]["waiting"].as_str().unwrap_or_default().to_owned()
+}
+
+/// A revoked person's accepted invite said "isn't accepted" (their membership is set aside); it says the access was revoked.
+#[tokio::test]
+async fn a_revoked_persons_accepted_invite_says_the_access_was_revoked() {
+    let r = Rig::new().await;
+    flag_on(&r);
+    let room = room_of(&r, &["house"]);
+    let (invite, _) = accepted(&r, json!({"house": "member"}), std::slice::from_ref(&room)).await;
+    owner(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap();
+    let said = waiting_of(&r, &invite).await;
+    assert!(said.contains("revoked"), "{said}");
+}
+
+/// A room that took Kith agents when the invite was made and now holds a plain bot takes no people: that is the reason,
+/// not "the person isn't granted every agent".
+#[tokio::test]
+async fn a_room_that_no_longer_takes_people_says_so_not_that_the_grant_is_short() {
+    let r = Rig::new().await;
+    flag_on(&r);
+    let room = room_of(&r, &["house"]);
+    let (invite, token) = accepted(&r, json!({"house": "member"}), std::slice::from_ref(&room)).await;
+    let plain = r
+        .hub
+        .create_bot(
+            serde_json::from_value(
+                json!({"id": "", "name": "Plain", "backend": "claude", "cwd": r.dir.to_string_lossy()}),
+            )
+            .unwrap(),
+        )
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let members = vec![r.owner_bot("house"), plain];
+    r.hub.update_bot(&json!({"id": room, "members": members})).unwrap();
+    prove(&r, "sam-phone", &invite, &token).await;
+    reconcile(r.hub.clone()).await;
+    let said = waiting_of(&r, &invite).await;
+    assert!(said.contains("only Kith agents"), "{said}");
+    assert!(!said.contains("isn't granted"), "{said}");
 }
