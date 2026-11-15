@@ -969,8 +969,9 @@ fn reconcile_ends_unlisted_claimed_claims_and_holds_unlisted_running_ones_as_end
 }
 
 /// Step 5 passes no instance to spare: a restart also takes the host's turn claims of the old generation (`ending`,
-/// `holder_changed`, the turn queued again) and an imported claim with no instance. Both stay the writer until `end_gone`;
-/// the signal for them comes from the daemon's tick, never from the holder link.
+/// `holder_changed`, the turn queued again) and an imported claim with no instance. Both stay the writer until `end_gone`.
+/// The tick signals the host's; the instance-less one is never signalled (`kill_resend::pass` skips a `holder_changed` claim
+/// that no holder started, which `end_reason` alone says).
 #[test]
 fn reconcile_takes_a_hosts_running_turn_and_an_instanceless_one_into_ending() {
     let (_t, mut c) = open();
@@ -990,6 +991,11 @@ fn reconcile_takes_a_hosts_running_turn_and_an_instanceless_one_into_ending() {
             .expect("reason")
     };
     assert_eq!(reason(host), "holder_changed");
+    assert_eq!(
+        reason(imported),
+        "holder_changed",
+        "the field `kill_resend::pass` reads to never signal it"
+    );
     let turn = |conv: &str| -> String {
         c.conn()
             .query_row(
