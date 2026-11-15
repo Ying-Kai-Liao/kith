@@ -14,9 +14,9 @@
 //!
 //! Every wait has a deadline and says what it was waiting for; a failure prints the core's claims, turns and warm processes.
 //!
-//! Three gaps this found, none fixed here: the claims' reconcile mark nothing writes (a stand-in in `Rig::start`), the reaping of a
-//! killed run's claim (the second ignored test), and a lock-only run on a warm main-lane conversation that the next turn does not
-//! reload after (the first ignored test, P5 on the main lane: step 7's sync decides by thread). What it does not show: the revoked
+//! Gaps this found: the claims' reconcile mark (the holder's hello writes it now; nothing here marks it) and the reaping of a
+//! killed run's claim (the daemon's tick settles it now) are fixed; a lock-only run on a warm main-lane conversation that the next
+//! turn does not reload after is still open (the ignored test, P5 on the main lane: step 7's sync decides by thread). What it does not show: the revoked
 //! person's idle process. The owner's `sweep_claims` is reached only through `revokePerson`, which needs kith-auth and a person
 //! record this temp host has none of.
 
@@ -155,24 +155,14 @@ impl Rig {
             Host::start_env(&[("KITH_STATE", &given), ("KITH_STUB_BIN", &stub), ("KITH_HOLDER_BIN", &holder)]).await;
         // The claims wait for the core's reconcile, which the holder's hello makes.
         let end = Instant::now() + WAIT;
-        let (pid, generation) = loop {
+        let pid = loop {
             let said = kith_core::status(&paths);
             if said["holder"]["state"] == "connected" {
-                break (said["holder"]["pid"].as_u64().unwrap(), said["daemon"]["generation"].as_i64().unwrap());
+                break said["holder"]["pid"].as_u64().unwrap();
             }
             assert!(Instant::now() < end, "the holder never connected: {said}");
             tokio::time::sleep(Duration::from_millis(100)).await;
         };
-        // STAND-IN. Nothing in the core's production code marks a generation's claims reconciled (`claims::reconcile`, design 1.1
-        // step 5: only the core's own tests call it), so with no mark every claim answers "wait for the reconcile" for ever. The
-        // mark is written here, as the hello's reconcile will write it. Delete this when the core does it itself.
-        rusqlite::Connection::open(paths.machine.join("core/core.db"))
-            .unwrap()
-            .execute(
-                "INSERT OR REPLACE INTO meta (key, value) VALUES ('claims_reconciled_generation', ?1)",
-                [generation.to_string()],
-            )
-            .unwrap();
         let bot = host.fixture_bot("direct-park", "writer_agent.py", "").await;
         Self {
             host,
@@ -469,10 +459,8 @@ async fn a_lock_only_direct_run_on_an_idle_warm_conversation_means_the_next_turn
 /// A `--direct` run that is killed (nothing releases its claim) must not hold the conversation for ever: its process is seen gone and
 /// the parked app send runs.
 ///
-/// IGNORED, and it fails today (gap 2): the core ends a dead external claim only inside a later `claim.*` row or `hostclaim.settle`,
-/// and the host's parked turn (waiting for the terminal) calls neither, so the claim stays `claimed` and the send waits for ever.
-/// Un-ignore it when the daemon's kill-resend tick settles dead claims.
-#[ignore = "a killed --direct run's external claim is never reaped for a parked app send: core gap, see the PR"]
+/// The daemon's kill-resend tick settles dead claims (the core ended a dead external claim only inside a later `claim.*` row or
+/// `hostclaim.settle`, which a parked turn calls neither of).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_direct_run_that_is_killed_frees_the_conversation_for_the_parked_send() {
     let mut rig = Rig::start().await;

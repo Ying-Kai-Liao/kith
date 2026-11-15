@@ -639,7 +639,9 @@ echo $$ > "$lock/$key.pid"
                     "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('sess-c', 'a', 'claude', 1, 1)",
                     [],
                 )?;
-                crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+                if !crate::conversations::claims::is_reconciled(c)? {
+                    crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+                }
                 Ok(())
             })
             .unwrap();
@@ -693,7 +695,9 @@ echo $$ > "$lock/$key.pid"
                     "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('sess-x', 'a', 'claude', 1, 1)",
                     [],
                 )?;
-                crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+                if !crate::conversations::claims::is_reconciled(c)? {
+                    crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+                }
                 // The daemon's own connection refuses the exit report, as a full disk or a locked file would.
                 c.conn().execute_batch(
                     "CREATE TEMP TRIGGER refuse_exit BEFORE INSERT ON reports WHEN NEW.kind = 'exit'
