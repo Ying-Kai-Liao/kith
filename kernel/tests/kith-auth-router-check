@@ -292,6 +292,14 @@ matrix() {
   run A door house eve render --json                 # a name is no piece
   run A door writer eve "$DOOR" --json               # an agent that holds no such door
   run A door nothere eve "$DOOR" --json
+  # a room person's door over its basis (rooms with people): one read of the tables, every person ANDed, the owner and another
+  # room person refused, no basis refused, and a basis on one person's own door refused
+  for basis in eve eve,amy amy,eve samuel,eve eve,botty botty kai,eve eve,room-g2 eve,zed eve,eve; do
+    run A door house room-g1 "$DOOR" --basis "$basis" --json
+    run A door house room-g1 "$DOOR" --basis "$basis"
+  done
+  run A door house room-g1 "$DOOR" --json    # a room person with no basis
+  run A door house eve "$DOOR" --basis amy --json
 }
 matrix "$T/golden.out"
 rows=$(grep -c '^\$' "$T/golden.out")
@@ -811,6 +819,10 @@ PY
     echo "== $2" >> "$out"
     for who in eve amy botty samuel kai; do
       { echo "\$ door $who"; A door house "$who" "$DOOR" 2>&1; echo "rc=$?"; A door house "$who" "$DOOR" --json 2>&1; echo "rc=$?"; } >> "$out"
+    done
+    # a room's door over a basis follows the same revoke: closed when any person of it is revoked, on the file and the core
+    for who in eve eve,amy eve,botty; do
+      { echo "\$ room door $who"; A door house room-g1 "$DOOR" --basis "$who" --json 2>&1; echo "rc=$?"; } >> "$out"
     done
   }
   door_seq() {   # OUT file|core

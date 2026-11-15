@@ -47,8 +47,32 @@ fn two_guests_meet() {
     assert_eq!(g.helpers, ["h2"]);
     assert_eq!(g.domains, ["b.com"]);
     assert_eq!(g.read, ["/p/w", "/p/x"]);
-    assert!(g.write.is_empty() && g.jobs.is_empty() && g.doors.is_empty() && g.env.is_empty());
+    assert!(g.write.is_empty() && g.env.is_empty());
+    assert_eq!(
+        (g.jobs, g.doors),
+        (vec!["j".to_owned()], vec!["d@1".to_owned()])
+    );
     assert!(g.model.is_empty() && !g.trusted);
+}
+
+#[test]
+fn jobs_and_doors_are_the_ones_every_person_has() {
+    let mut a = guest("a", "default", &[], &[], &[], &[], &[]);
+    let mut b = guest("b", "default", &[], &[], &[], &[], &[]);
+    a["jobs"] = json!(["video", "mail"]);
+    a["doors"] = json!(["render@1", "send@1"]);
+    b["jobs"] = json!(["video"]);
+    b["doors"] = json!(["render@1"]);
+    let g = room_grant("scout", &[a.clone(), b.clone()]).unwrap();
+    assert_eq!(
+        (g.jobs, g.doors),
+        (vec!["video".to_owned()], vec!["render@1".to_owned()])
+    );
+    // a person with no tick takes every door away
+    b["jobs"] = json!([]);
+    b["doors"] = json!([]);
+    let g = room_grant("scout", &[a, b]).unwrap();
+    assert!(g.jobs.is_empty() && g.doors.is_empty());
 }
 
 #[test]
@@ -124,7 +148,9 @@ fn held_must_be_exactly_false() {
 fn a_missing_or_mistyped_field_refuses() {
     let ok = || guest("a", "default", &["D"], &["h"], &["/p"], &["/w"], &["a.com"]);
     assert!(room_grant("s", &[ok()]).is_ok());
-    for k in ["mode", "deny", "helpers", "access", "trusted"] {
+    for k in [
+        "mode", "deny", "helpers", "access", "trusted", "jobs", "doors",
+    ] {
         let mut a = ok();
         a.as_object_mut().unwrap().remove(k);
         assert!(room_grant("s", &[a]).is_err(), "missing {k}");
@@ -141,6 +167,8 @@ fn a_missing_or_mistyped_field_refuses() {
         ("deny", json!(null)),
         ("helpers", json!({})),
         ("access", json!([])),
+        ("jobs", json!("j")),
+        ("doors", json!(null)),
         ("trusted", json!("true")),
         ("trusted", json!(null)),
     ];
@@ -197,6 +225,7 @@ fn random_answer(r: &mut Rng, i: usize) -> Value {
     let v = json!({"person": format!("p{i}"), "owner": false, "allowed": true, "held": false,
         "mode": modes[r.next(4)], "trusted": r.next(2) == 0,
         "deny": r.pick(&["d1", "d2", "d3"], 3), "helpers": r.pick(&["h1", "h2", "h3"], 3),
+        "jobs": r.pick(&["j1", "j2", "j3"], 3), "doors": r.pick(&["d1@1", "d2@1", "d3@1"], 3),
         "access": {"read": r.pick(&PATHS, 3), "write": r.pick(&PATHS, 2), "domains": r.pick(&["a.com", "b.com", "c.com"], 3)}});
     v
 }
@@ -229,6 +258,9 @@ fn never_wider_than_any_person_and_order_free() {
             let access = p.get("access").cloned().unwrap_or(json!({}));
             let domains = list(&access, "domains");
             assert!(g.domains.iter().all(|d| domains.contains(d)));
+            // a job or a door only when every person has it (rule 10)
+            assert!(g.jobs.iter().all(|j| list(p, "jobs").contains(j)));
+            assert!(g.doors.iter().all(|d| list(p, "doors").contains(d)));
             let (pw, pr) = (list(&access, "write"), list(&access, "read"));
             for path in &g.write {
                 assert!(held(&pw, &[], path), "write {path} of {basis:?}");

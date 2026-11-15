@@ -71,6 +71,36 @@ async fn a_lines_stamp_is_its_turns_start_gen_and_a_person_who_joined_meanwhile_
     assert!(shown("ben", ben_joined).is_none(), "ben was not");
 }
 
+/// Rule 13 for a door: its result reaches the room through the turn's own lines, stamped with the turn's start gen however
+/// late they land (after a join, after the turn ended, after a restart: the stamp is the turn's basis, never taken at
+/// landing). The tool line itself is no person's to see; the reply that tells what the door made is, and a person who joined
+/// after the turn started is not shown it. Stamped when it lands (model doors-stampland) it would be sent to Ben.
+#[tokio::test]
+async fn a_doors_result_carries_its_turns_start_gen_and_is_hidden_from_a_later_joiner() {
+    let (r, room) = rig().await;
+    join(&r, &room, "ann");
+    let (started, _) = basis_of(&r, &room);
+    let ben_joined = join(&r, &room, "ben");
+    let tool = json!({"text": "render ended", "tool": "run_door", "author": "agentbot"});
+    let line = r.hub.add_entry_from(&Lane::main(&room), EntryKind::Tool, 1, &tool, Some(started.room_gen)).unwrap();
+    let shown =
+        |e: &Entry, who: &str, seat: i64| shown_entry(&r.hub.store, who, seat, &serde_json::to_value(e).unwrap());
+    assert!(
+        shown(&line, "ann", started.room_gen).is_none() && shown(&line, "ben", ben_joined).is_none(),
+        "a tool line is nobody's"
+    );
+    let reply = say(&r, &room, EntryKind::Agent, "the video is made", Some(started.room_gen));
+    assert_eq!(r.hub.store.origin_gen(&reply.id), Some(started.room_gen));
+    assert!(shown(&reply, "ann", started.room_gen).is_some());
+    assert!(
+        shown(&reply, "ben", ben_joined).is_none(),
+        "a door's late result is hidden from who joined after its turn started"
+    );
+    // stamped at landing instead: the break the model finds
+    let landed = say(&r, &room, EntryKind::Agent, "the video is made", Some(ben_joined));
+    assert!(shown(&landed, "ben", ben_joined).is_some());
+}
+
 /// A writer that names no gen is hidden from every person (NULL = unstamped), the owner still reads it.
 #[tokio::test]
 async fn an_unstamped_line_is_hidden_from_people_and_a_turn_at_room_level() {

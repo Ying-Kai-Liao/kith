@@ -2036,13 +2036,41 @@ def door_state(auth, agent, person, piece):
             'why': f"{name} changed since {job['label']} was given" + (', and the owner kept it as it was' if view['declined'] else '')}
 
 
+def door_basis(auth, agent, person, piece, basis):
+    """A room person's door (rooms with people, rule 11): the door's state for every person of the basis, ANDed. The first
+    that says no is the answer, named; a held one (the Mac is out of sync: no start now, a running door kept, as for one
+    person) is the answer only when every no is held. A room person (`room-<id>`) needs a basis of real people, never the owner or another
+    room person; any other person takes none."""
+    people = list(dict.fromkeys(basis))
+    bad = {'ok': False, 'state': 'not-allowed', 'job': None, 'label': None}
+    if not person.startswith('room-'):
+        return door_state(auth, agent, person, piece) if not people else {**bad, 'why': 'only a room person has a basis'}
+    if not people:
+        return {**bad, 'why': 'a room door needs the people it runs for'}
+    states = []
+    for p in people:
+        if p.startswith('room-') or is_owner(auth, canonical(auth, p)):
+            return {**bad, 'why': f'{p} can not be the basis of a room door'}
+        states.append((p, door_state(auth, agent, p, piece)))
+    no = [(p, v) for p, v in states if not v['ok']]
+    if not no:
+        return {**states[0][1], 'why': f"part of {states[0][1]['label']}, given to everyone in the room"}
+    # a definite no is the answer (the sweep's recheck ends the door on it): held, "not in sync right now", only when
+    # every refusal is held
+    p, v = next((x for x in no if x[1]['state'] != 'held'), no[0])
+    return {**v, 'why': f"{p}: {v['why']}"}
+
+
 def cmd_door(args):
-    """Read-only: may the person's runs of agent start the door piece now (door_state)."""
-    if len(args) not in (3, 4) or args[3:] not in ([], ['--json']) or not AGENT_RE.match(args[0]):
-        die('door <agent> <id> <door@digest> [--json]', 2)
-    v = door_state(load_auth(), *args[:3])
-    print(json.dumps(v) if args[3:] else f"{v['state']}: {v['why']}")
-    if not v['ok'] and not args[3:]:
+    """Read-only: may the person's runs of agent start the door piece now (door_state; a room person's, over --basis a,b)."""
+    as_json = '--json' in args
+    opts, args = take_opts([a for a in args if a != '--json'], {'--basis'})
+    basis = [b for b in opts.get('--basis', '').split(',') if b]
+    if len(args) != 3 or not AGENT_RE.match(args[0]) or ('--basis' in opts and not basis):
+        die('door <agent> <id> <door@digest> [--basis <id>[,<id>]...] [--json]', 2)
+    v = door_basis(load_auth(), *args, basis)
+    print(json.dumps(v) if as_json else f"{v['state']}: {v['why']}")
+    if not v['ok'] and not as_json:
         sys.exit(1)
 
 
@@ -3464,7 +3492,7 @@ ROUTES = {'who': route_who, 'whois': route_whois, 'may': route_may_resolve('may'
           'mcp-names': route_secret_read('mcp-names', lambda args: len(args) == 1),
           'ls': route_secret_read('ls', lambda args: args in ([], ['--json'])),
           'connectors': route_secret_read('connectors', lambda args: True),
-          'door': route_secret_read('door', lambda args: len(args) in (3, 4)),
+          'door': route_secret_read('door', lambda args: 3 <= len(args) <= 6),   # [--basis a,b] [--json]
           # the card writes: one call of the core, which checks and writes in a single locked step
           'access': route_access, 'helper': route_helper, 'job': route_job}
 
