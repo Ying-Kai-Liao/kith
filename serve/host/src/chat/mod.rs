@@ -15,6 +15,7 @@ pub mod profile;
 pub mod prompt;
 pub mod room_input;
 pub mod room_people;
+pub mod room_pointer;
 pub mod room_post;
 pub mod room_turn;
 pub mod router;
