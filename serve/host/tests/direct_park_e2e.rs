@@ -14,11 +14,11 @@
 //!
 //! Every wait has a deadline and says what it was waiting for; a failure prints the core's claims, turns and warm processes.
 //!
-//! Two stand-ins, both found by this file and both the core's to fix: the claims' reconcile mark (see `Rig::start`), and the reaping
-//! of a killed run's claim (the ignored last test). What it does not show: the P5 transcript hash. That needs a thread lane with
-//! Claude's transcript files, and is proved in `terminal/tests.rs` (`sync_for_turn`); here the reload is the new process after the
-//! idle kill. The revoked person's idle process is not here either: the owner's `sweep_claims` is reached only through `revokePerson`,
-//! which needs kith-auth and a person record this temp host has none of.
+//! Three gaps this found, none fixed here: the claims' reconcile mark nothing writes (a stand-in in `Rig::start`), the reaping of a
+//! killed run's claim (the second ignored test), and a lock-only run on a warm main-lane conversation that the next turn does not
+//! reload after (the first ignored test, P5 on the main lane: step 7's sync decides by thread). What it does not show: the revoked
+//! person's idle process. The owner's `sweep_claims` is reached only through `revokePerson`, which needs kith-auth and a person
+//! record this temp host has none of.
 
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -75,22 +75,61 @@ impl Drop for Holder {
     }
 }
 
+/// The state folder of a rig, removed when it goes (the field after the host, so the host is stopped first).
+struct StateDir(PathBuf);
+
+impl Drop for StateDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A host in Writer mode and what a `--direct` run needs beside it.
 struct Rig {
     host: Host,
     _holder: Holder,
     paths: Paths,
-    state: PathBuf,
     bot: String,
     /// The one-shot stubs standing in for `--direct` runs.
     direct: Vec<Child>,
+    _state: StateDir,
 }
 
 impl Drop for Rig {
     fn drop(&mut self) {
-        self.end_direct();
-        // The host's warm processes are its children's group: gone with the host. The state folder is ours.
-        let _ = std::fs::remove_dir_all(&self.state);
+        // The one-shots first, then the fields: the host (its warm processes are its children), the holder, the folder.
+        self.kill_direct();
+    }
+}
+
+/// Marks the `claims` module switched in the core of `paths`: the switch file and the marker row in core.db that must match it
+/// (`cutover::may_serve`; the step itself refuses until P9). Only ever in a throwaway folder.
+fn mark_switched(paths: &Paths) {
+    assert!(
+        paths.machine.to_string_lossy().starts_with("/tmp/kdp-"),
+        "never mark a real Mac's modules: {}",
+        paths.machine.display()
+    );
+    let at = 1_800_000_000_i64;
+    let core = paths.machine.join("core");
+    std::fs::create_dir_all(core.join("cutover")).unwrap();
+    std::fs::write(core.join("cutover/claims.switch"), format!("state=switched\nat={at}\n")).unwrap();
+    rusqlite::Connection::open(core.join("core.db"))
+        .unwrap()
+        .execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('cutover:claims', ?1)", [format!("at={at};digest=")])
+        .unwrap();
+}
+
+/// Ends `child` within a few seconds (it was asked to stop already), or kills it.
+fn reap(mut child: Child) {
+    let end = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= end {
+            let _ = child.kill();
+            let _ = child.wait();
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -107,19 +146,9 @@ impl Rig {
         let given = state.display().to_string();
         let env = |k: &str| (k == "KITH_STATE").then(|| given.clone());
         let paths = kith_kernel::paths::paths(&state, &state.join("kernel"), &env);
-        // The core's database, with the `claims` module switched: the switch file and the marker row that must match it.
+        // The core's database, with the `claims` module switched.
         drop(kith_core::start(&paths).expect("the core starts"));
-        let at = 1_800_000_000_i64;
-        let core = paths.machine.join("core");
-        std::fs::create_dir_all(core.join("cutover")).unwrap();
-        std::fs::write(core.join("cutover/claims.switch"), format!("state=switched\nat={at}\n")).unwrap();
-        rusqlite::Connection::open(core.join("core.db"))
-            .unwrap()
-            .execute(
-                "INSERT OR REPLACE INTO meta (key, value) VALUES ('cutover:claims', ?1)",
-                [format!("at={at};digest=")],
-            )
-            .unwrap();
+        mark_switched(&paths);
         let stub = stub_bin().display().to_string();
         let holder = holder_bin().display().to_string();
         let host =
@@ -145,7 +174,14 @@ impl Rig {
             )
             .unwrap();
         let bot = host.fixture_bot("direct-park", "writer_agent.py", "").await;
-        Self { host, _holder: Holder(u32::try_from(pid).unwrap()), paths, state, bot, direct: Vec::new() }
+        Self {
+            host,
+            _holder: Holder(u32::try_from(pid).unwrap()),
+            paths,
+            bot,
+            direct: Vec::new(),
+            _state: StateDir(state),
+        }
     }
 
     fn workspace(&self) -> PathBuf {
@@ -196,7 +232,7 @@ impl Rig {
     fn end_direct(&mut self) {
         for mut c in self.direct.drain(..) {
             drop(c.stdin.take());
-            let _ = c.wait();
+            reap(c);
         }
     }
 
@@ -204,7 +240,7 @@ impl Rig {
     fn kill_direct(&mut self) {
         for mut c in self.direct.drain(..) {
             let _ = c.kill();
-            let _ = c.wait();
+            reap(c);
         }
     }
 
@@ -277,7 +313,7 @@ impl Rig {
         let mut out = String::new();
         for (table, cols) in [
             ("claims", "claim_id, kind, state, pid, conversation"),
-            ("turns", "id, state, conversation"),
+            ("turns", "id, state, conversation, parked_reason"),
             ("warm_procs", "pid, conversation, kill_at"),
             ("meta", "key, value"),
         ] {
@@ -306,6 +342,33 @@ impl Rig {
         out
     }
 
+    /// The core's turns, as `(state, parked_reason)`, oldest first.
+    fn turns(&self) -> Vec<(String, Option<String>)> {
+        let db = rusqlite::Connection::open(self.paths.machine.join("core/core.db")).unwrap();
+        let mut q = db.prepare("SELECT state, parked_reason FROM turns ORDER BY id").unwrap();
+        q.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().flatten().collect()
+    }
+
+    /// How many claim rows the conversation has, and how many of them are live.
+    fn claim_rows(&self) -> (usize, usize) {
+        let db = rusqlite::Connection::open(self.paths.machine.join("core/core.db")).unwrap();
+        let count =
+            |sql: &str| db.query_row(sql, [], |r| r.get::<_, i64>(0)).map(|n| usize::try_from(n).unwrap()).unwrap();
+        (
+            count("SELECT count(*) FROM claims"),
+            count("SELECT count(*) FROM claims WHERE state IN ('claimed', 'running', 'ending')"),
+        )
+    }
+
+    /// Waits for `what` to hold, polling `f` (sync: it reads the core's database), with the deadline and the core's state in the message.
+    async fn until(&self, what: &str, f: impl Fn(&Self) -> bool) {
+        let end = Instant::now() + WAIT;
+        while !f(self) {
+            assert!(Instant::now() < end, "timed out after {WAIT:?} waiting for {what}; {}", self.dump());
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     /// The pids of the processes the core lists as warm.
     fn warm_pids(&self) -> Vec<u32> {
         let db = rusqlite::Connection::open(self.paths.machine.join("core/core.db")).unwrap();
@@ -322,17 +385,25 @@ impl Rig {
     }
 }
 
-/// An app send behind a `--direct` run that holds the lock: the turn parks with the waiting notice and does not run; it runs after
-/// the run is gone.
+/// An app send behind a `--direct` run that holds the lock: the turn parks on the lock (`lock_busy`, with the waiting notice) and does
+/// not run, however often it asks again; it runs after the run is gone.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_app_send_parks_behind_a_direct_run_and_runs_after_it() {
     let mut rig = Rig::start().await;
     rig.hold().await;
     rig.send("behind direct").await;
     rig.wait_activity("waiting for the agent's session").await;
-    assert!(rig.log("prompts.jsonl").is_empty(), "nothing is prompted behind the lock");
+    // The notice alone also reads for a reconcile wait: the core's own row says why the turn waits.
+    rig.until("the turn parked on the lock", |r| {
+        r.turns().first().is_some_and(|t| t.0 == "parked" && t.1.as_deref() == Some("lock_busy"))
+    })
+    .await;
+    // After at least one more try (each try is a claim row that ended busy), still nothing prompted.
+    rig.until("a second try behind the lock", |r| r.claim_rows().0 >= 2).await;
+    assert!(rig.log("prompts.jsonl").is_empty(), "nothing is prompted behind the lock: {}", rig.dump());
     rig.end_direct();
     rig.wait_answers(1).await;
+    assert_eq!(rig.log("prompts.jsonl").len(), 1, "the one send ran once");
 }
 
 /// `kith <agent> --direct` on a conversation whose warm process is idle, with a core answering (P7, design 1.6): the run's external
@@ -343,6 +414,8 @@ async fn a_direct_run_on_an_idle_warm_conversation_waits_for_the_idle_kill_and_t
     let mut rig = Rig::start().await;
     rig.send("warm up").await;
     rig.wait_answers(1).await;
+    // The host releases the lock before it reports the turn done: the run starts once nothing of the turn is live.
+    rig.until("the first turn's claim to end", |r| r.claim_rows().1 == 0).await;
     let warm = rig.warm_pids();
     assert_eq!(warm.len(), 1, "one warm process after the first turn: {}", rig.dump());
     assert!(rig.log("loads.jsonl").is_empty(), "the first process made the session, it loaded nothing");
@@ -371,18 +444,41 @@ async fn a_direct_run_on_an_idle_warm_conversation_waits_for_the_idle_kill_and_t
     assert!(now.iter().all(|p| !warm.contains(p)), "a new process: was {warm:?}, now {now:?}");
 }
 
+/// A `--direct` run that holds only the lock (an owner run no core answered for, so no external claim) on an idle warm conversation:
+/// the run wrote the session, so the next turn must load it again before it prompts (P5, design 1.3 step 7).
+///
+/// IGNORED, and it fails today (gap 3): step 7's sync decides by thread, `sync_for_turn_blocking` is `Unchanged` for a lane without
+/// one (the bot's main lane), and nothing else tells the warm process that someone else wrote its session. Un-ignore it when the
+/// stub or the host records the last writer of a key.
+#[ignore = "a lock-only --direct run on a warm main-lane conversation does not make the next turn reload: host gap, see the PR"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_lock_only_direct_run_on_an_idle_warm_conversation_means_the_next_turn_reloads() {
+    let mut rig = Rig::start().await;
+    rig.send("warm up").await;
+    rig.wait_answers(1).await;
+    rig.until("the first turn's claim to end", |r| r.claim_rows().1 == 0).await;
+    let warm = rig.warm_pids();
+    rig.hold().await;
+    rig.end_direct();
+    rig.send("after direct").await;
+    rig.wait_answers(2).await;
+    let reloaded = rig.log("loads.jsonl").len() == 1 || rig.warm_pids().iter().all(|p| !warm.contains(p));
+    assert!(reloaded, "the second turn prompted the process that never saw the run's writes: {}", rig.dump());
+}
+
 /// A `--direct` run that is killed (nothing releases its claim) must not hold the conversation for ever: its process is seen gone and
 /// the parked app send runs.
 ///
-/// IGNORED, and it fails today: the core ends a dead external claim only inside a later `claim.*` row or `hostclaim.settle`, and
-/// the host's parked turn (waiting for the terminal) calls neither, so the claim stays `claimed` and the send waits for ever. Run it
-/// with `--run-ignored only` when that is fixed, and delete the attribute.
+/// IGNORED, and it fails today (gap 2): the core ends a dead external claim only inside a later `claim.*` row or `hostclaim.settle`,
+/// and the host's parked turn (waiting for the terminal) calls neither, so the claim stays `claimed` and the send waits for ever.
+/// Un-ignore it when the daemon's kill-resend tick settles dead claims.
 #[ignore = "a killed --direct run's external claim is never reaped for a parked app send: core gap, see the PR"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_direct_run_that_is_killed_frees_the_conversation_for_the_parked_send() {
     let mut rig = Rig::start().await;
     rig.send("warm up").await;
     rig.wait_answers(1).await;
+    rig.until("the first turn's claim to end", |r| r.claim_rows().1 == 0).await;
     let run = rig.hold().await;
     let started = kith_kernel::procstart::start_stamp(run).expect("the one-shot's start stamp");
     rig.claim_when_free(&json!({"conversation": SESSION, "pid": run, "started": started})).await;
