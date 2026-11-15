@@ -9,13 +9,14 @@
 //! what came after it.
 //!
 //! A person is shown messages only (the user's and the agents'), with a short list of fields, never a tool call, a
-//! thought, a card or a notice. The owner sees everything, and each message a current person can't see carries
+//! thought, a card or a notice, bar one: the "waiting for the owner" pointer of a card (`room_pointer`). The owner sees everything, and each message a current person can't see carries
 //! `hiddenFrom` on the copy that is sent (never stored).
 //!
 //! Posting is one step with the check (`Hub::commit_room_post`). A new post opens a conversation (`group::start`), which
 //! runs the room-person turns of the agents it @-mentions (`room_turn`).
 
 use super::room_people::{self, Seat, live_seat};
+use super::room_pointer;
 use crate::api::authority::Authority;
 use crate::api::devices::NotAllowed;
 use crate::hub::Hub;
@@ -86,11 +87,14 @@ fn shown_data(data: &Value, viewer: &str) -> Value {
 /// not from a gen they were in the room for.
 pub fn shown_entry(store: &Store, viewer: &str, seat: i64, e: &Value) -> Option<Value> {
     let kind = e["kind"].as_str()?;
-    if !seen_by(seat, kind, store.origin_gen(e["id"].as_str()?)) {
+    let origin = store.origin_gen(e["id"].as_str()?);
+    // The "waiting for the owner" pointer is the one notice a person is shown (any state, so the app hears it close).
+    let pointer = room_pointer::is_pointer(kind, &e["data"]) && sees(seat, origin);
+    if !pointer && !seen_by(seat, kind, origin) {
         return None;
     }
     let mut out = e.clone();
-    out["data"] = shown_data(&e["data"], viewer);
+    out["data"] = if pointer { room_pointer::person_copy(&e["data"]) } else { shown_data(&e["data"], viewer) };
     Some(out)
 }
 
@@ -99,7 +103,11 @@ fn shown_entries(viewer: &str, entries: &[Entry]) -> Vec<Value> {
         .iter()
         .map(|e| {
             let mut v = serde_json::to_value(e).unwrap_or(Value::Null);
-            v["data"] = shown_data(&e.data, viewer);
+            v["data"] = if room_pointer::is_pointer(&e.kind, &e.data) {
+                room_pointer::person_copy(&e.data)
+            } else {
+                shown_data(&e.data, viewer)
+            };
             v
         })
         .collect()

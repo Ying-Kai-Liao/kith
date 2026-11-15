@@ -437,6 +437,9 @@ impl Actor {
             if let Ok(Opened::New(c) | Opened::Joined(c)) = &opened {
                 let _ = self.hub.store.card_live(&c.id, Some(&e.id), None);
             }
+            if self.is_room_actor() {
+                self.add_room_pointer(&e);
+            }
             // The owner may be a while: the slot goes back to the gate so other people's turns aren't stuck behind it.
             if waiting_for.is_some() && in_turn {
                 self.parked_prompts.insert(e.id.clone(), self.hub.gate.park(&self.rt));

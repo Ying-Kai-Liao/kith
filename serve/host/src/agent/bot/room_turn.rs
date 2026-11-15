@@ -7,8 +7,9 @@
 //! joins meanwhile changes nothing of it. A turn at room level runs on the actor of the room person
 //! (`hub::actors`), which holds no session, process or workspace of the owner's.
 
-use super::{Actor, NoticeStyle};
+use super::Actor;
 use crate::chat::group::GroupTurn;
+use crate::chat::room_pointer;
 use crate::chat::room_turn::{Level, RoomBasis, is_room_person};
 use crate::store::{BotConfig, Entry, EntryKind, Lane};
 use serde_json::Value;
@@ -82,8 +83,8 @@ impl Actor {
     }
 
     /// A card of this room turn (rule 7): it opens in the owner's own chat with the agent, where only they answer it, with
-    /// the actor that waits on it named so the answer finds it (`Hub::send_cmd`); the room shows a line that it waits
-    /// (a notice, which no person is shown). `data` is the card as the person's own chat would show it.
+    /// the actor that waits on it named so the answer finds it (`Hub::send_cmd`); the room's "waiting" pointer follows it
+    /// (`add_room_pointer`). `data` is the card as the person's own chat would show it.
     pub(super) fn add_room_card(&self, mut data: Value) -> Option<Entry> {
         let agent = self.cfg.hq_agent.clone()?;
         let chat = crate::cards::chat_for(&self.hub, "", &agent);
@@ -94,9 +95,20 @@ impl Actor {
         data["personName"] = format!("everyone in {room_name}").into();
         let own = Lane::main(&chat.id);
         let turn = self.hub.store.max_turn(&chat.id);
-        let entry = self.hub.add_entry_from(&own, EntryKind::Permission, turn, &data, None)?;
-        self.notice(&format!("{} is waiting for the owner to answer a card.", self.cfg.name), NoticeStyle::Info);
-        Some(entry)
+        self.hub.add_entry_from(&own, EntryKind::Permission, turn, &data, None)
+    }
+
+    /// The room's "waiting" pointer for the card `card` (`chat::room_pointer`): written once the card's row is linked to
+    /// its entry, since a person is shown it only while that row is open. If the card closed before this landed (nothing
+    /// was there to close), the pointer closes at once.
+    pub(super) fn add_room_pointer(&self, card: &Entry) {
+        let turn = self.turn.unwrap_or_else(|| self.hub.store.max_turn(&self.home.chat));
+        if self.add(EntryKind::Notice, turn, room_pointer::data_for(&card.id, &self.cfg.name)).is_none() {
+            return;
+        }
+        if let Some(now) = self.hub.store.entry(&card.id).filter(|c| c.data["status"] != "pending") {
+            room_pointer::card_closed(&self.hub, &card.id, now.data["status"].as_str().unwrap_or("cancelled"));
+        }
     }
 
     /// The group turn is over (it answered, failed, was stopped or the bot shut down): its snapshot and its place in the
