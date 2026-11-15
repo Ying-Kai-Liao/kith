@@ -7,6 +7,7 @@ use crate::store::BotConfig;
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// ACP's `systemPrompt`: the bot's instructions added to the agent's own.
@@ -120,6 +121,16 @@ fn split_variant<'a>(res: &Value, model: &'a str) -> (&'a str, Vec<(&'a str, &'a
 /// Spawns an ACP agent and completes the `initialize` handshake.
 pub(crate) async fn start_agent(command: &str, cwd: &str, env: &[(String, String)], budget: Duration) -> Result<Conn> {
     let (acp, rx) = Acp::spawn(command, cwd, env)?;
+    handshake(acp, rx, budget).await
+}
+
+/// The `initialize` handshake of an agent already spawned (by [`start_agent`], or under a resident stub: Writer mode). A failed
+/// one stops the process.
+pub(crate) async fn handshake(
+    acp: Arc<Acp>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<acp::Incoming>,
+    budget: Duration,
+) -> Result<Conn> {
     let init = tokio::time::timeout(
         budget,
         acp.request(
@@ -174,6 +185,7 @@ pub(crate) async fn start_agent(command: &str, cwd: &str, env: &[(String, String
         call_refused: HashSet::new(),
         profiles: HashMap::new(),
         run_grant: None,
+        writer: None,
     })
 }
 

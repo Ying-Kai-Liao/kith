@@ -114,7 +114,7 @@ impl Reader {
 
 /// The core folders for `state`: a registered one (Shadow, and the tests' scripted core), else this process's own when `state`
 /// is its state folder. Anything else has no core to ask.
-fn folders_of(state: &Path) -> Option<Paths> {
+pub(crate) fn folders_of(state: &Path) -> Option<Paths> {
     super::core_claims::folders_for(state).or_else(|| {
         let own = crate::core_front::process_folders();
         (own.state == state).then_some(own)

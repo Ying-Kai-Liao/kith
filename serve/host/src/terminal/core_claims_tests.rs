@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-pub(in crate::terminal) type Fake = Arc<dyn Fn(&str, &Value) -> Answer + Send + Sync>;
+pub(crate) type Fake = Arc<dyn Fn(&str, &Value) -> Answer + Send + Sync>;
 
 fn fakes() -> &'static Mutex<HashMap<PathBuf, Fake>> {
     static F: OnceLock<Mutex<HashMap<PathBuf, Fake>>> = OnceLock::new();
@@ -18,7 +18,7 @@ fn fakes() -> &'static Mutex<HashMap<PathBuf, Fake>> {
 }
 
 /// Registers a scripted core of another module's tests (`core_writer_tests`) for a state folder.
-pub(in crate::terminal) fn register(state: &std::path::Path, fake: Fake) {
+pub(crate) fn register(state: &std::path::Path, fake: Fake) {
     fakes().lock().unwrap().insert(state.to_path_buf(), fake);
 }
 

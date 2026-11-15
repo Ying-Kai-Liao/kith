@@ -42,3 +42,7 @@ src/api/room_secrets_props.rs	api::room_secrets_props::
 src/chat/team/tests.rs	chat::team::tests::
 src/cards/session_tests.rs	cards::session_tests::
 src/routines/schedule_golden.rs	routines::schedule_golden::
+# Drive the writer lock the kernel's `kith --direct` shares (a real kith-stub on <machine>/core/locks): a kernel change to the lock or its
+# claim protocol must still pass the host's Writer-mode turns (P7b).
+src/agent/bot/writer_tests.rs	agent::bot::writer::tests::
+src/terminal/core_writer_tests.rs	terminal::core_writer::tests::

@@ -744,7 +744,6 @@ fn send_gate_blocking(hub: &Hub, t: &Thread, may_wait: bool) -> Result<SendGate>
 
 /// What [`sync_for_turn`] found.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
 pub enum Synced {
     /// The transcript has nothing the thread lacked (or the lane is no terminal thread): the loaded session is current.
     Unchanged,
@@ -753,7 +752,7 @@ pub enum Synced {
     /// cheap and the engine reads its own transcript file, so doubt reads as `Moved`.
     Moved,
     /// The lane's session is not the one the turn claimed: a terminal forked it and the thread follows the fork (the scan or
-    /// this sync adopted it, either before or after the claim). The turn holds its claim on the old session, so it must not
+    /// this sync adopted it, either before or after the claim), or the lane has none now (`session` is empty). The turn holds its claim on the old session, so it must not
     /// be prompted on the fork: the caller stops the claim with the turn requeued and begins again on `session`, where the
     /// core says `held` while the terminal still has it.
     Forked { session: String },
@@ -765,14 +764,12 @@ pub enum Synced {
 /// Under the thread's lock, as `send_gate` is. The caller acts on `Moved` itself: the actor's `ForgetLoaded` (which an import
 /// sends) does nothing for a lane that has a turn running. The thread's stale mark is cleared, as `send_gate` does, so a mark
 /// left set would not reload once more for nothing.
-#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
 pub async fn sync_for_turn(hub: &Arc<Hub>, lane: &Lane, claimed: &str) -> Result<Synced> {
     let (hub, lane, claimed) = (hub.clone(), lane.clone(), claimed.to_owned());
     // File reads and the store: off the runtime.
     Ok(tokio::task::spawn_blocking(move || sync_for_turn_blocking(&hub, &lane, &claimed)).await?)
 }
 
-#[allow(dead_code, reason = "no caller until the wiring package (P7b)")]
 pub(crate) fn sync_for_turn_blocking(hub: &Hub, lane: &Lane, claimed: &str) -> Synced {
     let Some(root) = &lane.thread else { return Synced::Unchanged };
     let t = Thread { bot: lane.chat.clone(), root: root.clone() };
@@ -781,7 +778,10 @@ pub(crate) fn sync_for_turn_blocking(hub: &Hub, lane: &Lane, claimed: &str) -> S
     let imported = sync_one(hub, &t);
     // `mapped` adopts a fork, here or in a scan between the claim and now (a scan takes no thread lock): the lane is on a
     // session the turn did not claim.
-    if let Some(now) = hub.store.kv_get(&lane_key("session", &t.bot, &t.lane())).filter(|now| now != claimed) {
+    // A thread lane with no session key is not on the turn's session either (it was reset after the claim): `Forked` with no
+    // session, so the turn is put back and starts a new one.
+    let now = hub.store.kv_get(&lane_key("session", &t.bot, &t.lane())).unwrap_or_default();
+    if now != claimed {
         return Synced::Forked { session: now };
     }
     // A terminal seen live, or a fork adopted earlier, marks the thread stale: the loaded session no longer matches the file.
@@ -902,6 +902,17 @@ pub async fn start_gate(
     lane: &Lane,
     begin: impl FnOnce(&Hub) + Send + 'static,
 ) -> Result<(), HeldByWriter> {
+    start_gate_in(hub, lane, false, begin).await
+}
+
+/// [`start_gate`] for Writer mode (`parks`): a thread a terminal holds is not refused here, the turn goes on to its claim, where
+/// the core says `held` and the turn parks until the terminal lets go (design 1.3). Everything else the gate decides is the same.
+pub async fn start_gate_in(
+    hub: &Arc<Hub>,
+    lane: &Lane,
+    parks: bool,
+    begin: impl FnOnce(&Hub) + Send + 'static,
+) -> Result<(), HeldByWriter> {
     let (hub, lane) = (hub.clone(), lane.clone());
     tokio::task::spawn_blocking(move || {
         let Some(root) = &lane.thread else {
@@ -912,7 +923,7 @@ pub async fn start_gate(
         let lock = hub.terminal.thread_lock(&t.key());
         let _one = lock.locked();
         // A bot's claim is a turn of the host's own, which the thread's lane queue already orders; only others refuse.
-        if matches!(writer(&hub, &t), Some(Writer::Terminal | Writer::Unreadable)) {
+        if !parks && matches!(writer(&hub, &t), Some(Writer::Terminal | Writer::Unreadable)) {
             let bot = hub.store.bot_conversation_of_thread(&lane.chat, root).is_some();
             return Err(HeldByWriter { code: if bot { "heldByOtherWriter" } else { "liveInTerminal" } });
         }
