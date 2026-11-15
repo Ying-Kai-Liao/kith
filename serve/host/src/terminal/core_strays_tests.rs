@@ -98,16 +98,14 @@ fn register_never_unbinds_a_key_that_has_its_turn() {
 
 #[test]
 fn registering_again_before_the_enqueue_restarts_the_clock_of_a_key_with_no_turn() {
-    let k = key();
-    // Accepted long ago and still waiting behind a long turn: the entry is stale.
-    live().insert(
-        k.clone(),
-        Entry { turn: None, at: Instant::now().checked_sub(UNBOUND_FOR * 2).unwrap_or_else(Instant::now) },
-    );
-    register(&k);
-    assert!(live_keys().contains(&k), "the register just before the enqueue keeps it");
-    let (w, cancelled, dir) = core(vec![(51, k)], true);
-    assert_eq!(w.sweep_strays(), 0);
-    assert!(cancelled.lock().unwrap().is_empty());
-    std::fs::remove_dir_all(dir).ok();
+    let (stale, again) = (key(), key());
+    let t0 = Instant::now();
+    // Both were accepted long ago and are still waiting behind a long turn; one registers again just before its enqueue.
+    register_at(&stale, t0);
+    register_at(&again, t0);
+    let later = t0 + UNBOUND_FOR * 2;
+    register_at(&again, later);
+    let keys = live_keys_at(later + Duration::from_secs(60));
+    assert!(keys.contains(&again), "the register just before the enqueue keeps it");
+    assert!(!keys.contains(&stale), "a key that never reached an enqueue expires");
 }

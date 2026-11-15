@@ -39,16 +39,20 @@ fn live() -> std::sync::MutexGuard<'static, HashMap<String, Entry>> {
 
 /// A key an item holds, before any enqueue of it. Repeating it changes nothing for a key that has its turn.
 pub(super) fn register(key: &str) {
+    register_at(key, Instant::now());
+}
+
+fn register_at(key: &str, now: Instant) {
     let mut map = live();
     if let Some(e) = map.get_mut(key) {
         // Not yet enqueued: the time restarts, so an item that waited in the actor's queue for long is not dropped just as it
         // enqueues, and a sweep that lands between the core's insert and `bind` finds the key.
         if e.turn.is_none() {
-            e.at = Instant::now();
+            e.at = now;
         }
         return;
     }
-    map.insert(key.to_owned(), Entry { turn: None, at: Instant::now() });
+    map.insert(key.to_owned(), Entry { turn: None, at: now });
 }
 
 /// The core answered the enqueue of `key` with `turn`.
@@ -62,9 +66,18 @@ pub(super) fn forget_turn(turn: i64) {
 }
 
 fn live_keys() -> HashSet<String> {
-    let mut map = live();
-    map.retain(|_, e| e.turn.is_some() || e.at.elapsed() < UNBOUND_FOR);
-    map.keys().cloned().collect()
+    let now = Instant::now();
+    live().retain(|_, e| e.turn.is_some() || now.saturating_duration_since(e.at) < UNBOUND_FOR);
+    live_keys_at(now)
+}
+
+/// The keys an item holds at `now`: one with a turn, or one made less than [`UNBOUND_FOR`] ago. Reads only.
+fn live_keys_at(now: Instant) -> HashSet<String> {
+    live()
+        .iter()
+        .filter(|(_, e)| e.turn.is_some() || now.saturating_duration_since(e.at) < UNBOUND_FOR)
+        .map(|(k, _)| k.clone())
+        .collect()
 }
 
 impl CoreWriter {
