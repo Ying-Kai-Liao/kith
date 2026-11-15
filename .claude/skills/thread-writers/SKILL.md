@@ -16,10 +16,13 @@ The model is `verification/threads/Threads.tla`. This skill is the only document
 ## Run it
 
 ```
-verification/threads/run.sh                       # all rows of checks.tsv, about 25 s once the tools are cached
+verification/threads/run.sh                       # all rows of checks.tsv, see the run time below
 verification/threads/run.sh --show VARIANT PROP   # TLC's full output (the counterexample) for one row
 verification/threads/drift.sh                     # which covered files changed since the sync commit
 ```
+
+Run time: 101 rows, about 6 minutes on a laptop at 4 parallel jobs (P10, 2026-11-15): the nine passing `core` rows are 4.7M
+states each (about 90 s), the slim scopes and the failing rows are under 200k. The job's timeout is 40 minutes.
 
 CI runs `run.sh` (job `thread-writers`) on pull requests and pushes that touch `verification/threads/`, this skill, or the covered code (the files `drift.sh` lists).
 
@@ -32,26 +35,40 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `6fc1ae0d527a4960227609f7413fa76f3ecade9e`** (origin/main, every change to the covered
-files since the writer claims re-read: the wakes and `kernel/bin/kith-wake`, compaction, guest rooms, `set harness`, the must-ask settings, the one-host collapse. Every Claude start
-through `kernel/bin/kith` still claims its session before claude starts, and a host turn takes the claim or is refused). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
+**Last confirmed to describe the code: `1978d087e671866f209a2c366d69023555579375`** (origin/rust-rebuild after P7b, M3 P10).
+The claim-file half of the model (`CoreWriter = FALSE`) was confirmed earlier at `6fc1ae0d` and its rows are unchanged; the
+~1,500 lines since then in the covered files were read for what the model needs: the kernel takers' route to the core
+(`kith-sessions` `core_take`, `kith_claims.py`), `--held`, the host writer (`core_writer.rs`, `writer*.rs`, `warm_stub.rs`),
+the stub's lock (`resident.rs`) and the core's claim rows (`claims.rs`, `external.rs`, `warm.rs`). The Rust twin's
+internals (`core/kernel/src/threads*`) were not re-read line by line: it is the same `take_claim` and is raced against the
+Python by `kernel/tests/kith-threads-race`. The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
 confirmed that the model describes the code at the new commit (steps below), and change both places.
+
+**The core writer (`CoreWriter = TRUE`, M3, P10).** With the claims module switched there is no claim file. The claim is a
+core row (`hostclaim.*` for the host, `claim.external` / `claim_terminal` for kernel takers; `cl` stands for that table) and the
+stub's flock (`lk`, `core/stub/src/resident.rs`) is a second, independent layer. Every taker claims first and locks second:
+the host `claim_next`, then the stub's `take`, then `redeem`; a terminal `claim.external`, then the stub takes the lock when
+claude starts (busy: exit 75, claim given back). Switch-by-switch: `HostTakesLock`, `TermTakesLock`, `TermRegistersClaim`,
+`ClaimNextChecksHeld`, `GateRead`, `SettlesOwnEnding`, `DiedReports`, `FailoverReclaims`, `AbandonSettlesEarly`,
+`RestartKeepsClaim`, `ExternalChecksWarm`, `RequireStub`, `OwnerNoAnswer` (all TRUE / FALSE as the code is in
+`base.consts`). The core rows run with one terminal and `MaxSends = 1` (`variants/core*.set`), about 5M states and 90 s
+each for the full `core` scope; the smaller scopes (`core-gate`, `core-handover`, `core-forks`: no off-turn wakes, no
+wrapper death, no owner-without-core) are tens of thousands. Every core row runs with `ClaudeForks = FALSE` except `core-forks`.
 
 **Re-run for F7 (rust-rebuild, after #680):** `run.sh` at the F7 commit: 52 rows, every row as expected. Read: the F7 change to
 `serve/host/src/terminal/claim.rs` (an unknown claim `kind` is `Kind::Other`: a live holder judged by pid + start only, and
 `take_as` never removes it, as `kith-sessions` and the crate already do, so the "three actors" line below is true) and its
-test; the Rust twin (`core/kernel/src/threads*`) is now in `drift.sh`'s file list. **SYNC is not moved:** `drift.sh` still lists
-about 1500 changed lines in the covered files since `6fc1ae0d` (the twin itself, the off-turn sends, `kernel/bin/kith`,
-the wakes) that this re-run did not read against the model, so the pin stays until someone does.
+test; the Rust twin (`core/kernel/src/threads*`) is now in `drift.sh`'s file list. (SYNC moved by P10, see above.)
 
-**`--held` (M1-7) and the model.** The model does not have a core-daemon claimer: `terminal.open`'s take (`starting`, then `retarget` to
-the stub's pid) is the same exclusive-link `take_claim` as `TermClaim`, so a second writer is refused by the same file, but the hand-over
-steps themselves (release by the launcher shell, open's take) are not model actions and TLC was not re-run for them. What the
-code and `kernel/tests/kith-held-check` rely on: every taker goes through one claim file and flock, so there is no window with two
-writers. The one gap is between the launcher's give-back and open's take: a third writer taking the claim there makes open answer busy
-(never a second engine; `kith-held-check` 7c), but the `--resume` the user asked for is then lost to that writer. The fix is an
-atomic hand-over inside `terminal.open` (take over the launcher's claim by pid + start time instead of release-then-take); listed as
-later work. `SYNC` is not moved.
+**`--held` (M1-7) is modelled** (`HeldLaunch`: `TermHandBack` then `TermOpen`, rows `core-handover`, `core-atomic-handover`). The
+launcher gives its claim back, then `terminal.open` takes it for the stub. In that gap a third writer can take the claim:
+`OneWriter` still holds (open answers busy, 75, nothing starts), but `HandoverNeverRefused` FAILS on the code: the run the user
+asked for can be lost. That is still open (a known gap, not a bug in the model). The shortest trace takes no claim: a warm process
+the app loaded during the gap makes `terminal.open` answer busy on `blocked_in`'s `waiting` (`terminal.rs`); retrying `waiting` in
+open, as `claim_waiting` does, is a smaller fix than the atomic hand-over but covers only that case. The fix is the what-if `HandoverAtomic`
+(`terminal.open` takes over the launcher's claim by pid + start time in one step instead of release-then-take), whose row
+passes. When `terminal.open` answers direct or is refused, `kith-sessions terminal` takes the claim again (kith_held_launch):
+the same take as open's, so it adds no behaviour to the model.
 
 ## What is promised, and the harm if not
 
@@ -67,6 +84,34 @@ later work. `SYNC` is not moved.
 | `CacheNeverStale` | A host turn never starts on a cached session the terminal has written to since (`forget_loaded`). Stated on the state after the start, so a sync inside the start counts. | The agent answers without seeing what the terminal did. |
 | `ResumeNeverWhileSendPending`, `ResumeNeverWhileOtherTerminal`, `SendNeverWhileTerminalClaims` | The strict forms: refusals judged on what is true, not on what the checks can see. `ResumeNeverWhileOtherTerminal` covers every Claude start (resolve or a claim-only launch). | See the findings below. |
 | `BotRefusedWhileHeld` | A bot's ask is refused while a terminal holds the thread or a take-over runs. | Bot and terminal write at once. |
+
+**Core writer properties** (rows for `CoreWriter = TRUE`; safety rules about the modelled steps, each with a broken variant below):
+
+| Property | Plain sentence | Harm |
+|---|---|---|
+| `OneWriter` (core) | Also counts any engine process writing: a turn, an abandoned one not gone yet, one a host restart left, an off-turn wake. | Two writers. |
+| `ClaimOutlivesEngine` | A host engine that writes always has its claim row: the claim ends after the process is gone, never before ("gone means empty"). | A terminal or another turn claims under a live engine. |
+| `EngineCovered` | ... or at least its lock. | |
+| `LockCoversRunning` | A running turn's engine holds the stub's lock (not while abandoned, not an off-turn wake). | The second layer is missing. |
+| `TerminalCovered` | A live terminal has its claim row or the lock (the owner on the lock alone when the core is not answering; an interactive run whose wrapper died). | |
+| `ClaimsExclusive` | A live claim is never replaced by another claimant (`claims_one_writer`). Also true of the claim files. | Two claims on one conversation. |
+| `NoBeginWhileHeld` | No begin goes on past the gate when its own gate read was not ok:true (Held). The read and the claim are two steps: a flip between them is not covered, and the core does not check the switch (`hostclaim.*` is unswitched). | A turn claims while the core is unclear. |
+| `NoLeakedClaim`, `NeverRefusedByDeadOwnClaim` | A turn's end (reported, settled or died) leaves none of its own claim rows; a begin settles a claim of its own with no process left instead of queueing behind it. After a restart some are left on purpose (settled by adopt, a begin or the core), so `NoLeakedClaim` stops at a restart. | A conversation stuck behind a dead claim. |
+| `HandoverNeverRefused` | `--held`: the run the user asked for is not lost to a writer that took the claim in the hand-over gap. | FAILS on the code (see above). |
+
+Process identity is coarse: `ld` is "a warm process of this conversation" (a host restart's idle process is dropped at `adopt`, as it is
+marked for a kill; the model does not name old and new processes). A gate rollback between the gate read and `claim_next` is not
+modelled: the host would be on a core row while the kernel takers are back on the files, and only the lock covers it. `End::Killed`
+goes through `acp.kill` (stdin closed, a grace, `killpg`), not `kill_group`; the routine-deadline kill works the same and ends `done`;
+the model treats both as "dying, not writing".
+
+Not claimed, because they are liveness rules (they need the end report, the settle or the retry tick to be delivered, and the model
+has no fairness): a lost end report is eventually retried (`retry_end`), a claim `ending` on a gone stub is eventually settled, a
+refused hand-over is eventually retried. The model also does not have: a stub crash between `take` and `redeem` (the code stops the
+claim with the turn requeued and claims again; the claims model, Claims4, has it), the host's account pick (S1 not stepped), the
+registration window of a fresh warm process (it has nothing to wake itself with), `End::Room` (the abandon is the same with the lock
+kept), or the lock holder's identity beyond "a host stub" (an older host's stub is `lk = "host"` after a restart: the new host's
+`take` sees busy until the old one is gone).
 
 "Holds" = a terminal whose claude process is live (idle, busy or being ended). A host turn holds once it has its
 claim and sends the prompt (`hp = "running"`). The `Never*` rows in `checks.tsv` are reachability probes: they must
@@ -106,6 +151,29 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | `cards/resume.rs` `handle()` (the host's wake doors): an `acp:` session -> `bot_door` (`Cmd::WakeBatch` onto the bot's queue, then `HostStart` / `HostClaim` as any queued turn; a refused start goes back to the wake queue held); a channel session -> `channel_door`; any other -> `run_door`: `claim::holder` held -> back to the queue, else it runs `kith AGENT --resume SESSION` (or `kith ask --reply ID AGENT --resume SESSION`), which claims through `resolve()` as in the row above. A card-only wake (no waiting message) is pushed with no gate, and `resolve()`'s `send_queued` does not count it while it waits; it is not modelled as its own step because no writer comes of it but through `HostStart` and the `HostClaim` CAS. Checked on a scratch copy (2026-11-01): a gate-free `WakeEnqueue` with `HostBusyCountsQueued = FALSE` leaves `TypeOK`, the three `code` rows and the four `code-no-fork` pass rows passing | `Enqueue` without `AppGate` (scratch only), then `HostStart`, `HostClaim`; `run_door` as `TermClaim` |
 | `agent/bot/queue.rs` `Queued::Group` (group rooms, `botguests.rs` `ask_room` -> `chat::group::ask_agent`) and `agent/bot/hq.rs` (an hq lane loads its session after `claim_for_turn`): both start through `start_turn` / `claim_for_turn`; not thread lanes | none (outside the thread, claimed like any turn) |
 | `kith-lifecycle` `end()`: `take_claim` for the sweep's own pid, `still`, writes the decision `ended`, `release_claims`. Starts no Claude and writes nothing to the session | none (not a writer) |
+
+**Core writer (`CoreWriter = TRUE`)**
+
+| Code | Model action |
+|---|---|
+| `agent/bot/hq.rs` / `offturn.rs` start + `ensure_hq_session`: the warm process spawned and registered (`warm_procs`) after `start_gate` | `HostStart`, `HostWake` (`ld`) |
+| `core_writer.rs` `begin`: the gate read first (`Mode::select`; not ok:true is `Held`, the core asked nothing) | `HostGateRead` (`GateRead`, `GateFlips`) |
+| `begin`: a stopped (`ending`) turn claim whose stub is gone is settled (`hostclaim.settle`, `proc_gone`), then the begin claims | `HostSettleOwn` (`SettlesOwnEnding`) |
+| `attempt` step 3, `hostclaim.turn` = `claim_next` (held by any live claim: stays queued or parks) | `HostClaimNext` (`ClaimNextChecksHeld`) |
+| step 5, the stub's `take` (busy: `report busy`, park `lock_busy`) | `HostTake` (`HostTakesLock`) |
+| step 6 `redeem`, then the transcript sync under the lock and the prompt | `HostRedeem` |
+| `finish` Done / OutOfUsage / Left: `release`, then the report; a move to the next account cancels the requeued core turn and begins a NEW one | `HostFinish`, `HostReport` (`FailoverReclaims`) |
+| `finish` Killed (the 15 s kill): `exit` reported at once, the claim ends, the process group is killed (`acp.kill`: stdin closed, a grace, `killpg`; the routine-deadline kill is the same and ends `done`): dying, not writing, the lock until the stub exits | `HostKilled`, `StubExit` |
+| `writer_turn.rs` abandon: `core.abandon` (`release` first, then `stop`), `kill_group`, `settle_gone`: the claim stays `ending` until the group is gone | `HostAbandon`, `HostKill`, `HostSettle` (`AbandonSettlesEarly`) |
+| a begun turn given up before the prompt; a redeem the core refused | `HostGiveUp` |
+| the process ends under its turn; `End::Died` reports `exit`, the item is rerun or cancelled | `EngineDied`, `HostDied` (`DiedReports`) |
+| `offturn.rs`: an agent that woke itself writes before the gate and the begin, no claim, no lock; anything short of Running kills its group | `OffTurnWrite`, `OffTurnKilled` |
+| `external.rs` `blocked_in`: `claim.external` answers `waiting` and marks the idle warm process for a kill | `WarmOK` (`ExternalChecksWarm`), `WarmKilled` |
+| host restart: the stub keeps the engine and the lock, the claim row stays; `adopt` ends claims never redeemed and marks processes | `HostRestartCore` (`RestartKeepsClaim`), `HostAdopt`, `OrphanGone` |
+| `kith-sessions` `core_take` (`claim.external`, `claim_terminal`), the core not answering: the owner's run goes on under the lock alone | `TermClaim` (`OwnerNoAnswer`, gate held) |
+| `bin/kith` `exec kith-stub`: the lock taken when claude starts, busy = exit 75 and the claim given back; no stub program = unlocked unless `KITH_REQUIRE_STUB` | `TermUp` (`TermTakesLock`, `RequireStub`) |
+| an interactive run's claim is on the `kith-sessions run` wrapper, which may die first (inferred, not run) | `TermWrapperDies` |
+| `--held`: `kith_held_launch` gives the claim back, `terminal.open` takes it (`starting`, `retarget`), the stub locks | `TermHandBack`, `TermOpen` (`HeldLaunch`, `HandoverAtomic`) |
 
 One step in the code is one action here. A check followed later by the act it guards is two actions
 (`AppGate` then `Enqueue` then `HostStart` then `HostClaim`; `TermClaim` then `TermResolve` then `TermUp`;
@@ -177,6 +245,20 @@ All come from the code as it is; none was "fixed" in the model. `run.sh --show <
    the terminal's lines or forgotten the actor's cached session (`start_gate` does not `sync_one`). Window: one scan
    interval; the run must start and end while the send waits.
 
+5. **With no core answering, only the lock holds, and some engines have none (`core-held` `OneWriter`).** The owner's run goes on under
+   the conversation lock alone when the core gives no answer (`core_take` `NoAnswer`). A host engine that has already given its lock
+   back is held only by its claim row, which the core can no longer be asked about: an abandoned turn not yet killed
+   (`core.abandon` releases, then stops), or an agent that woke itself (an off-turn wake takes neither). Steps: abandon a running
+   turn (the lock is given back, the claim is `ending`), the core stops answering (gate Held), an owner run starts on the lock
+   alone (`kith-sessions claim` / `terminal` / `--resume` all reach `core_take`'s no-answer branch, and none asks the host): two
+   writers until `kill_group` / `settle_gone` ends the old one. Window: the abandon-to-kill gap, with the core down. Follow-up for the
+   code (architect): in the abandon branch kill the group before giving the lock back (`writer_turn.rs`, `core_writer.rs` abandon);
+   the stub's exit frees the lock anyway. Not fixed here.
+   (`core` and `core-gate` pass `OneWriter` and friends: with the core answering, both layers hold.)
+6. **A terminal that moves to a new session id writes it under neither claim nor lock (`core-forks` `TerminalCovered`, `core-forks-two`
+   `OneWriter`).** Finding 1 for the core writer: both layers are keyed by the id bin/kith claimed. With one terminal `OneWriter`
+   holds at this scope; with two, the second takes the forked id and two terminals write.
+
 Fixed since the last sync (rows turned from `fail` to `pass`, evidence in the commits):
 - Old finding 1 (check, then act, with no claim) and 2 (the send gate trusting a copy from the next scan), on
   `code-no-fork`: every Claude start claims before claude starts (3cdd9a88, c2477a8b), `resolve` claims before it asks
@@ -214,6 +296,17 @@ counterexample with `run.sh --show <variant> <property>`). The new ones keep cla
 | `broken-no-procstart` | procStart check in `started_as` (with atomic signal) | `NoForeignSignal` |
 | `broken-no-import-forget` | `forget_loaded` in `import_locked` (with the fixes) | `CacheNeverStale` |
 | `broken-no-forget` | `forget_loaded` (with the fixes) | `CacheNeverStale` |
+| `core-restart-reports-done` | the old host instance's claim stays until its process is gone (HOST_INSTANCE as one constant read it as "ours": done) | `ClaimOutlivesEngine` |
+| `core-failover-no-reclaim` | the new core turn of a move to the next account (the host's own retry runs on) | `EngineCovered` |
+| `core-host-no-lock` | the host's stub `take` | `LockCoversRunning`, and `OneWriter` (a terminal whose wrapper died holds only the lock) |
+| `core-term-no-claim-no-lock` | both layers for a terminal | `TerminalCovered`, `OneWriter` |
+| `core-term-no-claim`, `core-term-no-lock`, `core-unlocked-owner` | one layer for a terminal (no claim row; no lock; no stub program) | `OneWriter`: neither layer is redundant. The lock covers a terminal whose wrapper died (its claim ended while claude runs) and an owner with the core down; a terminal with no claim row is not kept out of an abandoned turn that gave its lock back, except by the warm-process check |
+| `core-abandon-settles-early` | the claim staying `ending` until the group is gone (the lock was given back at the stop) | `ClaimOutlivesEngine`. `OneWriter` still passes: the warm-process check in `claim.external` (the abandoned process is still registered) also keeps a terminal out |
+| `core-external-ignores-warm` | the warm-process check in `claim.external` | `OneWriter` (a terminal next to an off-turn wake) |
+| `core-claim-next-ignores-held` | the `held` answer of `claim_next` (with the warm check also off, which otherwise keeps the terminal out of the window) | `ClaimsExclusive` |
+| `core-died-no-report` | the `exit` report of `End::Died` | `NoLeakedClaim` |
+| `core-no-gate-read` | the gate read at the top of `begin` | `NoBeginWhileHeld` |
+| `core-no-settle-own` | the settle of our own `ending` claim on a gone stub | `NeverRefusedByDeadOwnClaim` |
 | `code` (as is) | nothing: the findings above | `OneWriter` and the strict rows |
 
 `start_gate` has no row of its own: with the claim CAS in `claim_for_turn`, removing it (`StartGateChecks = FALSE`)

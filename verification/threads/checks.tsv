@@ -58,3 +58,64 @@ broken-no-import-forget	PROPERTY	CacheNeverStale	fail
 broken-no-forget	PROPERTY	CacheNeverStale	fail
 broken-takeover-busy	PROPERTY	TakeoverOnlyWhenIdle	fail
 broken-no-procstart	INVARIANT	NoForeignSignal	fail
+# --- the core writer (M3, CoreWriter = TRUE): no claim file; the claim is a core row and the stub's lock is a second layer
+# the Files rows are unchanged; these also hold for them (the claim is never replaced; a turn's end leaves no claim)
+code-no-fork	PROPERTY	ClaimsExclusive	pass
+code-no-fork	INVARIANT	NoLeakedClaim	pass
+core	INVARIANT	TypeOK	pass
+core	INVARIANT	OneWriter	pass
+core	INVARIANT	ClaimOutlivesEngine	pass
+core	INVARIANT	EngineCovered	pass
+core	INVARIANT	LockCoversRunning	pass
+core	INVARIANT	TerminalCovered	pass
+core	PROPERTY	ClaimsExclusive	pass
+core	INVARIANT	NoLeakedClaim	pass
+core	INVARIANT	NeverRefusedByDeadOwnClaim	pass
+# a gate that is not ok:true is Held. An owner run on the lock alone while the core is not answering, next to an off-turn
+# wake that writes with no lock and no claim, is a finding (see the skill): the warm process is not marked while no core answers
+core-gate	PROPERTY	NoBeginWhileHeld	pass
+core-held	INVARIANT	OneWriter	fail
+# --held: the hand-over gap never gives two writers, but it can lose the run the user asked for (open's busy, 75)
+core-handover	INVARIANT	OneWriter	pass
+core-handover	PROPERTY	HandoverNeverRefused	fail
+core-atomic-handover	PROPERTY	HandoverNeverRefused	pass
+# forks (small scope: no off-turn wakes, no wrapper death): a terminal that moves to a new session id writes it with no claim and
+# no lock of its own, as with the files (finding 1); OneWriter still holds here because the host's lane is judged on the old id
+# that the terminal's claim and lock cover
+core-forks	INVARIANT	OneWriter	pass
+core-forks	INVARIANT	TerminalCovered	fail
+core-forks-two	INVARIANT	OneWriter	fail
+# neither layer can go: the lock covers a terminal whose wrapper died (its claim ended while claude runs) and an owner run with
+# the core down, the claim covers an abandoned turn that gave its lock back and a terminal with no stub program
+core-host-no-lock	INVARIANT	OneWriter	fail
+core-term-no-claim	INVARIANT	OneWriter	fail
+core-term-no-lock	INVARIANT	OneWriter	fail
+core-unlocked-owner	INVARIANT	OneWriter	fail
+# the core runs are not vacuous: every path the model adds happens
+core	INVARIANT	NeverHostRuns	fail
+core	INVARIANT	NeverTerminalBusy	fail
+core	INVARIANT	NeverLockBusy	fail
+core	INVARIANT	NeverAbandonEnding	fail
+core	INVARIANT	NeverDied	fail
+core	INVARIANT	NeverKilled	fail
+core	INVARIANT	NeverFailover	fail
+core	INVARIANT	NeverOrphan	fail
+core	INVARIANT	NeverSettledOwn	fail
+core	INVARIANT	NeverOffTurnWrite	fail
+core	INVARIANT	NeverLockedOut	fail
+core	INVARIANT	NeverRestartLocked	fail
+core-gate	INVARIANT	NeverHeldGate	fail
+core-held	INVARIANT	NeverLockAlone	fail
+core-handover	INVARIANT	NeverHandoverLost	fail
+# --- broken variants: each core property must fail when its check is removed ------
+core-restart-reports-done	INVARIANT	ClaimOutlivesEngine	fail
+core-failover-no-reclaim	INVARIANT	EngineCovered	fail
+core-host-no-lock	INVARIANT	LockCoversRunning	fail
+core-term-no-claim-no-lock	INVARIANT	TerminalCovered	fail
+core-term-no-claim-no-lock	INVARIANT	OneWriter	fail
+core-abandon-settles-early	INVARIANT	ClaimOutlivesEngine	fail
+core-external-ignores-warm	INVARIANT	OneWriter	fail
+core-claim-next-ignores-held	PROPERTY	ClaimsExclusive	fail
+core-died-no-report	INVARIANT	NoLeakedClaim	fail
+core-no-gate-read	PROPERTY	NoBeginWhileHeld	fail
+core-no-settle-own	INVARIANT	NeverRefusedByDeadOwnClaim	fail

@@ -8,10 +8,10 @@
 # set SYNC below to the commit you checked (and in .claude/skills/thread-writers/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below. It is one commit of origin/main:
-# every change to the files below up to it re-read (the wakes, kith-wake, compaction, guest rooms, set harness, must-ask settings, one-host collapse): no writer step the
-# model lacks; every Claude start still claims its session (#324) and a host turn takes the claim or is refused.
-SYNC=6fc1ae0d527a4960227609f7413fa76f3ecade9e
+# The commit at which the model was confirmed to describe the files below. It is one commit of origin/rust-rebuild (M3, P10):
+# every change to the files below up to it re-read, the claim files as before (#324) and the core writer (CoreWriter in
+# Threads.tla: the claim is a core row, the stub's lock the second layer). What that read did not cover is in the skill.
+SYNC=1978d087e671866f209a2c366d69023555579375
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
@@ -34,6 +34,17 @@ FILES=(
   core/kernel/src/threads/os.rs       # pid_runs / start time the twin judges a claim by
   core/kernel/src/threads/registry.rs # the twin's registry reads and writes
   serve/host/src/hub/actors.rs        # working_lanes, Cmd::ForgetLoaded fan-out
+  serve/host/src/terminal/core_writer.rs  # CoreWriter: begin (gate, settle, claim_next, take, redeem), finish, abandon, adopt
+  serve/host/src/terminal/warm_stub.rs    # the host's resident stub: take / release / kill_group
+  serve/host/src/agent/bot/writer.rs      # the actor's use of CoreWriter: orphaned begins, the mode
+  serve/host/src/agent/bot/writer_turn.rs # End choice (Done / Died / Killed / OutOfUsage / Left), abandon + settle_gone, failover
+  core/stub/src/resident.rs           # the stub's lock: take / release, nothing released on close
+  core/runtime/src/conversations/claims.rs   # claim_next, end_gone, the one live row per conversation
+  core/runtime/src/conversations/external.rs # claim.external / claim_terminal: blocked_in (warm process), takeover
+  core/runtime/src/conversations/warm.rs     # warm_procs: kill_at, adopt
+  core/runtime/src/terminal.rs        # terminal.open: the --held claim and the stub's lock
+  kernel/lib/kith_claims.py           # the kernel takers' route to the core claims
+  kernel/lib/kith-core.sh             # kith_held_launch
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done
