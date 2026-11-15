@@ -562,6 +562,17 @@ pub(crate) fn redeem(
     now: i64,
 ) -> Result<Redeemed> {
     let tx = core.claim_tx()?;
+    // A process a terminal's idle-kill (or a revoke) has marked is on its way out: a claim redeemed on it would run a turn
+    // on an engine that is about to be killed under it. The claim stays `claimed` for the caller to stop and put back (the
+    // marked process is gone before the turn claims again). A retried redeem of a claim already running there is not new.
+    let marked: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM warm_procs WHERE pid = ?1 AND started = ?2 AND kill_at IS NOT NULL)",
+        params![pid, started],
+        |r| r.get(0),
+    )?;
+    if marked && row(&tx, claim_id)?.is_none_or(|r| r.state == "claimed") {
+        return Ok(Redeemed::Refused("killing".into()));
+    }
     // An `external` claim has its own process and no stub: a stray redeem must not overwrite the run's pid.
     let n = tx.execute(
         "UPDATE claims SET state = 'running', running_at = ?2, pid = ?3, pid_started = ?4, holder_instance = ?5

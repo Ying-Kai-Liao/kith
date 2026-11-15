@@ -440,4 +440,4 @@ pub(super) fn take_over(f: &Paths, id: i64, wait: std::time::Duration) -> std::i
 
 #[cfg(test)]
 #[path = "core_claims_tests.rs"]
-pub(super) mod tests;
+pub(crate) mod tests;

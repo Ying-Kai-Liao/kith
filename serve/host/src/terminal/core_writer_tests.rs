@@ -12,47 +12,58 @@ use std::sync::{Arc, Mutex};
 const LIVE: [&str; 3] = ["claimed", "running", "ending"];
 
 #[derive(Clone, Debug)]
-struct C {
-    id: i64,
-    conv: String,
-    state: String,
-    kind: String,
-    pid: Option<u64>,
-    started: Option<String>,
-    instance: Option<String>,
-    turn: Option<i64>,
+pub(crate) struct C {
+    pub id: i64,
+    pub conv: String,
+    pub state: String,
+    pub kind: String,
+    pub pid: Option<u64>,
+    pub started: Option<String>,
+    pub instance: Option<String>,
+    pub turn: Option<i64>,
 }
 
 #[derive(Default)]
 #[allow(clippy::struct_excessive_bools, reason = "one switch per scripted answer")]
-struct World {
-    claims: Vec<C>,
+pub(crate) struct World {
+    pub claims: Vec<C>,
     /// (id, state, parked reason)
-    turns: Vec<(i64, String, Option<String>)>,
-    log: Vec<String>,
-    procs: Vec<u64>,
-    reports: Vec<(String, Value)>,
-    account: String,
-    down: bool,
-    revoke_enqueue: bool,
+    pub turns: Vec<(i64, String, Option<String>)>,
+    pub log: Vec<String>,
+    /// Every call with its params, in order.
+    pub asked: Vec<(String, Value)>,
+    pub procs: Vec<u64>,
+    pub reports: Vec<(String, Value)>,
+    pub account: String,
+    pub down: bool,
+    pub revoke_enqueue: bool,
     /// `hostclaim.turn` answers this refusal as data.
-    turn_refusal: Option<&'static str>,
-    exhausted: bool,
+    pub turn_refusal: Option<&'static str>,
+    pub exhausted: bool,
     /// The redeem is applied but its reply is lost, this many times.
-    redeem_lost: u32,
+    pub redeem_lost: u32,
     /// The redeem is refused as ended.
-    redeem_refused: bool,
+    pub redeem_refused: bool,
+    /// The redeem kills the stub it names and is refused as ended (the lock cannot be given back: `LockStuck`).
+    pub kill_on_redeem: bool,
+    /// The redeem is refused as `killing` (the process is marked for a kill), this many times.
+    pub redeem_killing: u32,
+    /// `hostclaim.turn` kills every process registered with `hostclaim.proc` first (the stub dies between the claim and its take),
+    /// this many times.
+    pub kill_procs_on_turn: u32,
     /// What `cutover.mayServe` answers for the claims module.
-    switched: Option<bool>,
+    pub switched: Option<bool>,
     /// The gate answers `ok: false` with a warning (stepping, rolling back, a marker mismatch), or refuses the call.
-    gate_warning: bool,
-    gate_refused: bool,
+    pub gate_warning: bool,
+    pub gate_refused: bool,
     /// (conversation, key, turn): an enqueue with a key already seen answers the same turn.
-    keys: Vec<(String, String, i64)>,
+    pub keys: Vec<(String, String, i64)>,
     /// The enqueue is applied but its reply is lost, this many times.
-    enqueue_lost: u32,
+    pub enqueue_lost: u32,
     /// The `account` each `hostclaim.turn` was sent with (the account the host's process runs as).
-    sent_accounts: Vec<Option<String>>,
+    pub sent_accounts: Vec<Option<String>>,
+    /// `hostclaim.proc` refuses the row of a session (not the process's own), as data and not as a revoke.
+    pub session_register_refused: bool,
 }
 
 fn data(v: Value) -> Answer {
@@ -72,8 +83,9 @@ impl World {
         self.turns.iter_mut().find(|t| t.0 == id)
     }
 
-    fn answer(&mut self, method: &str, p: &Value) -> Answer {
+    pub(crate) fn answer(&mut self, method: &str, p: &Value) -> Answer {
         self.log.push(method.to_owned());
+        self.asked.push((method.to_owned(), p.clone()));
         if self.down {
             return Answer::Down { why: "the core is down".into(), lost: false };
         }
@@ -111,6 +123,11 @@ impl World {
             "hostclaim.turn" => {
                 let turn = p["turn"].as_i64().unwrap();
                 self.sent_accounts.push(p["account"].as_str().map(str::to_owned));
+                // The real core claims a turn on its own conversation only (`failover.rs` "no conversation", and the turn update of
+                // `claim_checked_in` matches on it): a turn id sent with another conversation is refused.
+                if self.keys.iter().any(|k| k.2 == turn && k.0 != conv) {
+                    return data(json!({"refused": "other", "why": "no conversation"}));
+                }
                 if let Some(kind) = self.turn_refusal {
                     return refused(kind);
                 }
@@ -119,6 +136,14 @@ impl World {
                 }
                 if self.live(&conv).is_some() {
                     return refused("held");
+                }
+                if self.kill_procs_on_turn > 0 {
+                    self.kill_procs_on_turn -= 1;
+                    for pid in self.procs.iter().filter_map(|p| i32::try_from(*p).ok()) {
+                        // SAFETY: a signal to a stub group the test's actor started.
+                        unsafe { libc::killpg(pid, libc::SIGKILL) };
+                    }
+                    std::thread::sleep(Duration::from_millis(300));
                 }
                 let n = i64::try_from(self.claims.len()).unwrap() + 1;
                 self.claims.push(C {
@@ -139,6 +164,17 @@ impl World {
                 )
             }
             "hostclaim.redeem" => {
+                if self.kill_on_redeem {
+                    if let Some(pid) = p["pid"].as_i64().and_then(|p| i32::try_from(p).ok()) {
+                        // SAFETY: a signal to the stub's process group, which the test started.
+                        unsafe { libc::killpg(pid, libc::SIGKILL) };
+                    }
+                    return data(json!({"refused": "ended"}));
+                }
+                if self.redeem_killing > 0 {
+                    self.redeem_killing -= 1;
+                    return data(json!({"refused": "killing"}));
+                }
                 if self.redeem_refused {
                     return data(json!({"refused": "ended"}));
                 }
@@ -199,6 +235,13 @@ impl World {
                     }
                 } else {
                     c.state = "ending".into();
+                    // As the core's `stop`: the claim's turn is put back, or cancelled.
+                    let turn = c.turn;
+                    if let Some(t) =
+                        turn.and_then(|t| self.turn(t)).filter(|t| ["claimed", "running"].contains(&t.1.as_str()))
+                    {
+                        t.1 = if requeue { "queued".into() } else { "cancelled".into() };
+                    }
                 }
                 data(json!({"kill": null}))
             }
@@ -265,6 +308,9 @@ impl World {
                 data(json!({"turns": woken}))
             }
             "hostclaim.proc" => {
+                if self.session_register_refused && p["conversation"].is_string() {
+                    return refused("other");
+                }
                 self.procs.push(p["pid"].as_u64().unwrap());
                 data(json!({"registered": true}))
             }
@@ -272,6 +318,7 @@ impl World {
                 let pid = p["pid"].as_u64().unwrap();
                 let had = self.procs.contains(&pid);
                 self.procs.retain(|x| *x != pid);
+                // Only the warm_procs rows go: a stopped claim is ended by `settle`, never here (as in the real core).
                 data(json!({"gone": had}))
             }
             "hostclaim.adopt" => {
@@ -455,7 +502,7 @@ impl Drop for Direct {
     }
 }
 
-fn stub_bin() -> PathBuf {
+pub(crate) fn stub_bin() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
         .get_or_init(|| {
@@ -950,6 +997,41 @@ async fn running_out_of_usage_reports_exit_with_the_flag_and_the_core_requeues()
     assert!(r.lock_free("s1"));
 }
 
+/// A turn that leaves its claim because the thread was forked (`End::Left`): the lock back, a plain `exit` (no usage flag, no stop: a
+/// stop would have the core kill the process the next turn runs on), and the claim ended.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn leaving_a_claim_releases_and_reports_a_plain_exit_without_stopping_the_process() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    assert_eq!(r.writer.finish(&run, "s1", &mut stub, End::Left), Finished::Reported);
+    assert!(r.lock_free("s1"));
+    assert_eq!(r.w().reports[0].0, "exit");
+    assert_ne!(r.w().reports[0].1["out_of_usage"], true, "the account is not out of usage: {:?}", r.w().reports);
+    assert!(!r.log().contains(&"hostclaim.stop".to_owned()), "{:?}", r.log());
+    assert_eq!(r.claim_state(1), "ended");
+}
+
+/// A usage limit moves the turn to a backup account, whose process runs another session (S'): the old claim ends `exit`, the old turn
+/// is cancelled and the turn begins as a NEW turn on S' (no turn id, a new key). The old turn's id on S' is refused, as the core does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_usage_limit_move_is_a_new_turn_on_the_backups_session() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    assert_eq!(r.writer.finish(&run, "s1", &mut stub, End::OutOfUsage), Finished::Reported);
+    // The old turn on S' is what the first version of the move sent: refused.
+    let mut backup = r.stub("backup");
+    let b = r.writer.begin(&r.turn("s1-backup", Some(run.turn)), &mut backup);
+    assert!(matches!(b, Begin::Failed { turn: Some(_), .. }), "{b:?}");
+    // The move as the host does it: the old turn cancelled, a new one made on S'.
+    r.writer.cancel_turn(run.turn, "moved to the next account");
+    assert_eq!(r.turn_state(run.turn).0, "cancelled", "not left queued with nobody to run it");
+    let next = running(r.writer.begin(&r.turn("s1-backup", None), &mut backup));
+    assert_ne!(next.turn, run.turn, "a new turn");
+    assert_eq!(r.turn_state(next.turn).0, "running");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_room_level_turn_ends_with_a_stop_a_kill_and_the_process_forgotten() {
     let r = Rig::new();
@@ -981,6 +1063,39 @@ async fn abandoning_a_begun_turn_frees_the_lock_and_cancels_the_claim() {
     r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
     assert!(r.lock_free("s1"));
     assert_eq!(r.claim_state(1), "ending", "stopped; the process is the stub's, still there");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_abandon_whose_process_is_killed_is_settled_and_the_conversation_claims_again() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
+    assert_eq!(r.claim_state(run.claim), "ending", "stopped, the process still there: the core keeps it");
+    stub.kill_group();
+    stub.wait_dead();
+    assert!(r.writer.settle_gone(run.pid, &run.started));
+    assert_eq!(r.claim_state(run.claim), "ended", "settled once the process is gone");
+    assert_eq!(r.w().procs.len(), 0, "and forgotten");
+    assert!(r.writer.settle_gone(run.pid, &run.started), "settling again is harmless");
+    let mut next = r.stub("main");
+    running(r.writer.begin(&r.turn("s1", None), &mut next));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_begin_settles_our_own_ending_claim_whose_process_is_gone() {
+    // The abandon's settle was lost (the core was down): the claim stays `ending` with a dead pid and read as `held`.
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
+    stub.kill_group();
+    stub.wait_dead();
+    assert_eq!(r.claim_state(run.claim), "ending");
+    let mut next = r.stub("main");
+    let again = running(r.writer.begin(&r.turn("s1", None), &mut next));
+    assert_eq!(r.claim_state(run.claim), "ended");
+    assert_eq!(r.claim_state(again.claim), "running");
 }
 
 // --- the host restart --------------------------------------------------------------------------------------------------
