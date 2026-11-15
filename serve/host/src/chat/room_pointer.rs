@@ -15,7 +15,7 @@
 //! Every way a card leaves `pending` writes its entry through `Hub::set_entry`, which calls [`after_set`] here.
 
 use crate::hub::Hub;
-use crate::store::{Entry, EntryKind};
+use crate::store::{CardState, Entry, EntryKind};
 use serde_json::{Value, json};
 
 /// `data.notice` of the pointer.
@@ -63,5 +63,21 @@ pub fn card_closed(hub: &Hub, card_entry: &str, status: &str) {
 pub fn after_set(hub: &Hub, e: &Entry) {
     if e.kind == EntryKind::Permission.as_str() && e.data["room"].is_string() && e.data["status"] != "pending" {
         card_closed(hub, &e.id, e.data["status"].as_str().unwrap_or("cancelled"));
+    }
+}
+
+/// At start: the restart sweep (`Store::expire_pending`) closes the card entries of a previous run without `set_entry`, so
+/// the pointers left `waiting` for a card that is no longer open close here, with the status its entry was given.
+pub fn sweep(hub: &Hub) {
+    for p in hub.store.waiting_room_pointers() {
+        let Some(card) = p.data["card"].as_str() else { continue };
+        let open = hub
+            .store
+            .card_by_entry(card)
+            .is_some_and(|c| matches!(c.state, CardState::Pending | CardState::Live | CardState::Parked));
+        if !open {
+            let status = hub.store.entry(card).and_then(|e| e.data["status"].as_str().map(str::to_owned));
+            card_closed(hub, card, status.as_deref().filter(|s| *s != "pending").unwrap_or("expired"));
+        }
     }
 }

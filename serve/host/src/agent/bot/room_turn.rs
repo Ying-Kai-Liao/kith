@@ -83,8 +83,8 @@ impl Actor {
     }
 
     /// A card of this room turn (rule 7): it opens in the owner's own chat with the agent, where only they answer it, with
-    /// the actor that waits on it named so the answer finds it (`Hub::send_cmd`); the room shows a line that it waits
-    /// (a notice, which no person is shown). `data` is the card as the person's own chat would show it.
+    /// the actor that waits on it named so the answer finds it (`Hub::send_cmd`); the room's "waiting" pointer follows it
+    /// (`add_room_pointer`). `data` is the card as the person's own chat would show it.
     pub(super) fn add_room_card(&self, mut data: Value) -> Option<Entry> {
         let agent = self.cfg.hq_agent.clone()?;
         let chat = crate::cards::chat_for(&self.hub, "", &agent);

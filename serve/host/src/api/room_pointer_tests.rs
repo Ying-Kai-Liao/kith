@@ -199,3 +199,22 @@ async fn the_pointer_is_not_shown_from_before_a_stay_nor_to_another_room_nor_aft
     let seen = event_for(&r.hub.store, None, ev).unwrap();
     assert_eq!(seen["entry"]["data"]["card"], card.entry_id.clone().unwrap());
 }
+
+/// A restart closes the cards of the run before it without `set_entry` (`expire_pending`): the start-up sweep closes
+/// their pointers, with how their entries ended.
+#[tokio::test]
+async fn a_restart_closes_the_pointers_of_cards_the_old_run_left() {
+    let (r, room, seat) = rig().await;
+    let (card, pointer) = open(&r, &room, &room_person_id(&room, seat), seat, now_ms() + 60_000);
+    r.hub.store.card_withdraw(&card.id).unwrap();
+    r.hub.store.expire_pending().unwrap();
+    assert_eq!(stored(&r, &pointer)["state"], "waiting", "the sweep wrote the card's entry, not through the hub");
+    crate::chat::room_pointer::sweep(&r.hub);
+    assert_eq!(stored(&r, &pointer)["state"], "closed");
+    let ended = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().data["status"].clone();
+    assert_eq!(stored(&r, &pointer)["ended"], ended);
+    // A card still open keeps its pointer.
+    let (_, live) = open(&r, &room, "another-turn", seat, now_ms() + 60_000);
+    crate::chat::room_pointer::sweep(&r.hub);
+    assert_eq!(stored(&r, &live)["state"], "waiting");
+}

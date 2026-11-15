@@ -350,6 +350,17 @@ impl Store {
         Ok(rows)
     }
 
+    /// Every "waiting" pointer still marked `waiting`, whatever became of its card (for the start-up sweep).
+    pub fn waiting_room_pointers(&self) -> Vec<Entry> {
+        let c = self.db.locked();
+        let rows = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE kind = 'notice'
+               AND json_extract(data, '$.notice') = 'roomCardWaiting' AND json_extract(data, '$.state') = 'waiting'"
+        ));
+        let found = rows.and_then(|mut st| st.query_map([], row_entry)?.collect::<rusqlite::Result<_>>());
+        logged("waiting_room_pointers", found).unwrap_or_default()
+    }
+
     /// The "waiting" pointers (any lane of the room) of the card entry `card_entry`, open or closed.
     pub fn room_pointers_of(&self, card_entry: &str) -> Vec<Entry> {
         let c = self.db.locked();
