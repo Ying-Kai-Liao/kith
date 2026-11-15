@@ -708,6 +708,7 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
                 }
                 let holder = crate::kill_resend::connected_instance(&for_resend);
                 crate::kill_resend::pass(&for_resend, holder.as_deref(), crate::kill_resend::GRACE);
+                crate::kill_resend::settle(&for_resend);
             }
         })
     {
