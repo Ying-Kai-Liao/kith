@@ -154,7 +154,9 @@ NoWidenMidTurn == ~widened
 \* J2 re-keyed: nothing starts above what the turn's people allow now (an untick or revoke is seen at the next start).
 NarrowedForBasis == ~stale
 \* J4: no running door leans on a person whose job was unticked or who was revoked.
-\* Switched: the person's sweep is still owed (it runs under the lock, seconds after the commit).
+\* Switched: the person's sweep is still owed (a revoke runs it under the lock seconds after the commit; after an untick only
+\* the 60 s loop's recheck ends the door). The unswitched modes' Untick sweeps in the same step, which stands for that loop:
+\* in the code a door can run up to 60 s after an untick.
 SweepReachesRoomDoors == \A k \in Doors : door[k].st = "run" =>
                            \A p \in door[k].basis : (ticked[p] /\ may[p]) \/ p \in owed
 \* Revoke ends the room turn that leaned on that person.

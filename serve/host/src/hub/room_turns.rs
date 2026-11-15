@@ -48,7 +48,9 @@ impl Hub {
 
     /// Every id a room person has run as in a room `person` has had a stay in, whatever the epoch: what the sweep of claims,
     /// helpers and doors after a revoke or a removal must name too (a run a restarted host no longer knows has no entry
-    /// above, only its claim).
+    /// above, only its claim). A door claim names its basis people, so a sweep of the person ends it; a room id alone in a door
+    /// sweep ends no room door, on purpose (this over-names every epoch: matching on the room id would also end a door of an
+    /// epoch the person was never part of).
     pub fn room_person_ids_of(&self, person: &str) -> Vec<String> {
         let mut ids = Vec::new();
         for room in self.store.rooms_with_person(person) {

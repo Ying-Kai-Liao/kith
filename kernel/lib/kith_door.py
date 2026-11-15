@@ -21,7 +21,8 @@ deny-default sandbox-exec profile of the door's own, on one folder of the person
   - a room door (rooms with people): a room person (`room-<id>`) runs the door for the people the turn started with. The claim
     keeps them (`basis`, with the room's `gen` and the level), the start checks every one of them (`kith-auth door --basis`,
     ANDed) in the same locked step, and a sweep of any of them, or its recheck over all of them, ends it. A claim with no usable
-    basis is ended by any sweep. Its result is the turn's own line, stamped by the turn's start (model: verification/rooms).
+    basis is ended by any sweep, and a room id alone in `--person` ends no room door (on purpose: matching on the room person would
+    also end a door of a join epoch the person was never in). After an untick only the 60 s recheck ends it. Its result is the turn's own line, stamped by the turn's start (model: verification/rooms).
   - stop (D1): `sweep` kills every door of the listed people, every door whose supervisor is gone (a host or kith-permit
     killed with -9), and every door its person may no longer run. A door process is one in this door's sandbox (it may
     read <claim>.in and not <claim>.out: sandbox_check), or one whose environment holds KITH_DOOR=<claim>, or a

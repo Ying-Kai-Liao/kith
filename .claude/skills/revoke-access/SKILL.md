@@ -369,7 +369,7 @@ row, so the undo gives the room back as it was. The models are in `verification/
 A room person's door (`room-<id>`) is a claim over its basis: `kith-auth door --basis a,b` ANDs `door_state` over the people
 (a definite no beats `held`), `kith_door.run` writes the claim with `basis`, `gen` and `level` in the same locked step, and
 `sweep --person p` (and its recheck) reaches every claim whose basis holds p; a room claim with no usable basis is ended by any
-sweep. No card: a room's door that a basis person lacks is refused, naming them. Rows in `verification/rooms/checks.tsv`:
+sweep (a room id alone in `--person` ends none, on purpose; after an untick the 60 s recheck ends it). No card: a room's door that a basis person lacks is refused, naming them. Rows in `verification/rooms/checks.tsv`:
 `jobs-switched` passes (the switched start/sweep order of #975, the sweep owed until it runs), `jobs-switchednolock` and
 `jobs-switchedsweepperson` fail on purpose, `jobs-switchedwindow` fails on purpose (the window Kai accepted: a commit between a
 switched start's check and its claim), and `jobs-liveonly`, `jobs-snaponly`, `jobs-split`, `jobs-joinnarrows`,
