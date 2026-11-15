@@ -480,3 +480,70 @@ fn transcripts_waits_for_claims_and_still_refuses_after_them() {
     let e = err(step(&registry(), &r.env, "transcripts", opts()));
     assert!(e.contains("kith-sessions record"), "{e}");
 }
+
+/// A host turn claim a stopped or killed host left behind.
+fn host_claim(r: &Rig, id: i64, conv: &str, state: &str, pid: Option<(i64, String)>) {
+    let db = r.db();
+    db.execute(
+        "INSERT OR IGNORE INTO conversations (id, agent, engine, created_at, updated_at) VALUES (?1, 'a', 'claude', 1, 1)",
+        [conv],
+    )
+    .unwrap();
+    let (p, st) = pid.map_or((None, None), |(p, s)| (Some(p), Some(s)));
+    db.execute(
+        "INSERT INTO claims (claim_id, conversation, generation, kind, state, pid, pid_started, holder_instance, created_at)
+         VALUES (?1, ?2, 1, 'turn', ?3, ?4, ?5, 'kith-serve-host/1-e1', 1)",
+        rusqlite::params![id, conv, state, p, st],
+    )
+    .unwrap();
+}
+
+fn claim_state(r: &Rig, id: i64) -> String {
+    r.db()
+        .query_row("SELECT state FROM claims WHERE claim_id = ?1", [id], |x| {
+            x.get(0)
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_host_turn_claim_a_dead_host_left_running_or_claimed_does_not_block_a_rollback() {
+    let r = rig();
+    r.step(opts()).unwrap();
+    let mut gone = Proc::new();
+    let (pid, stamp) = (gone.pid(), gone.stamp());
+    gone.kill();
+    host_claim(&r, 910, "s-run", "running", Some((pid, stamp)));
+    host_claim(&r, 911, "s-claimed", "claimed", None);
+    let out = r.rollback(opts()).unwrap();
+    assert!(out.iter().any(|l| l.contains("rolled back")), "{out:?}");
+    assert_eq!(
+        (claim_state(&r, 910), claim_state(&r, 911)),
+        ("ended".into(), "ended".into())
+    );
+}
+
+#[test]
+fn a_host_turn_claim_whose_stub_still_runs_keeps_refusing_the_rollback() {
+    let r = rig();
+    r.step(opts()).unwrap();
+    let live = Proc::new();
+    host_claim(
+        &r,
+        920,
+        "s-live",
+        "running",
+        Some((live.pid(), live.stamp())),
+    );
+    let e = err(r.rollback(opts()));
+    assert!(
+        e.contains("1 conversation claim(s) or take(s) are live"),
+        "{e}"
+    );
+    let e = err(r.rollback(force()));
+    assert!(
+        e.contains("s-live") && e.contains("--force does not override"),
+        "{e}"
+    );
+    assert_eq!(r.phase(), Some(Phase::Switched));
+}

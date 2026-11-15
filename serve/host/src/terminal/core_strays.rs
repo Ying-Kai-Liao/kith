@@ -39,7 +39,16 @@ fn live() -> std::sync::MutexGuard<'static, HashMap<String, Entry>> {
 
 /// A key an item holds, before any enqueue of it. Repeating it changes nothing for a key that has its turn.
 pub(super) fn register(key: &str) {
-    live().entry(key.to_owned()).or_insert(Entry { turn: None, at: Instant::now() });
+    let mut map = live();
+    if let Some(e) = map.get_mut(key) {
+        // Not yet enqueued: the time restarts, so an item that waited in the actor's queue for long is not dropped just as it
+        // enqueues, and a sweep that lands between the core's insert and `bind` finds the key.
+        if e.turn.is_none() {
+            e.at = Instant::now();
+        }
+        return;
+    }
+    map.insert(key.to_owned(), Entry { turn: None, at: Instant::now() });
 }
 
 /// The core answered the enqueue of `key` with `turn`.

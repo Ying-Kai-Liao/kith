@@ -694,6 +694,7 @@ impl CoreWriter {
     pub fn finish(&self, run: &Running, conversation: &str, stub: &mut dyn WarmStub, end: End) -> Finished {
         match end {
             End::Room => {
+                strays::forget_turn(run.turn);
                 let _ = self.call("hostclaim.stop", &json!({"claimId": run.claim, "reason": "room-turn-end"}));
                 stub.kill_group();
                 // Forgotten once confirmed gone: `end_gone` then ends the claim; until then the core keeps the row to kill.
@@ -706,6 +707,7 @@ impl CoreWriter {
                     let Begin::LockStuck { why } = self.lock_stuck(stub, run.claim, "release failed") else {
                         unreachable!()
                     };
+                    strays::forget_turn(run.turn);
                     return Finished::LockStuck(why);
                 }
                 self.retry_end(run, end)

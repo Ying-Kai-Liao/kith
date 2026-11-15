@@ -1,10 +1,10 @@
 //! The `claims` module (S2, the claims-and-turns lane): the live writer claim files `$KITH_STATE/live/terminal/<sid>.claim`
-//! (and a person's session-less `proc-<pid>.claim`) move into the `claims` and `warm_procs` tables, and the claims become the
+//! (and a person's session-less `proc-<pid>.claim`) move into the `claims` table, and the claims become the
 //! core's: `kith-sessions`, `kith` and `kith-wake` stop writing files and ask the core (`claim.*`), and the host runs its
 //! turns in Writer mode. Stepped by `kith migrate step claims` on a Mac with the host stopped.
 //!
 //! - `preflight`: plain refusals, none of which touches anything (a refused step leaves no snapshot, record, marker or file):
-//!   the stub is installed (a run without it takes no writer lock), the host is stopped (it reads the mode at its start), not
+//!   the stub is installed (a run without it takes no writer lock), the host is stopped (a Files-mode turn running during the step would be imported as an outside writer), not
 //!   Windows, every live claim file is one the import makes a row of, and no host turn sits queued in the core with nothing
 //!   to run it. A connected holder cannot be checked here: the step holds the core's lifetime lock, so no daemon is up. The
 //!   host in Writer mode waits ("core not answering") until its holder has connected and the generation's claims were
@@ -12,7 +12,7 @@
 //! - `import`: `import::claims::run_in` under the framework's lock. Read-only on the files, idempotent (a conversation that
 //!   already has a live claim row on the file's pid is left alone; a live row on another pid is listed, never replaced).
 //! - `same_answer`: every live claim file of a conversation the core knows has a claim row on its pid, every live proc claim a
-//!   process row.
+//!   claim row (on `proc-<pid>-<start>`).
 //! - The tombstone is `live/terminal/claims.tombstone`, the marker the kernel takers read by existence
 //!   (`kernel/lib/kith_claims.py`). It is put in `before_tombstone`, i.e. BEFORE the marker and the switched record: from then
 //!   on a taker asks the core, and the core refuses `claim.*` until the module reads switched, so the only thing that can
@@ -184,13 +184,21 @@ impl Module for Claims {
     }
 
     fn before_rollback(&self, _env: &Env, core: &mut Core) -> Result<()> {
-        // With no daemon nothing ends a claim whose process is gone, so a stopped host's dead turn would block the rollback
-        // for ever. Only a process confirmed gone is ended.
-        crate::conversations::claims::end_gone(
+        // The host is stopped and we hold the lifetime lock, so nothing can redeem or report: what a stopped or killed host left
+        // is settled here, as the next host start's `adopt` would. A turn claim it left `running` or `claimed` goes to `ending`
+        // (never redeemed: `ended`, its turn requeued), then every claim whose process is confirmed gone is ended. A live stub
+        // keeps its claim, so the rollback still refuses for it. Without this the only way out would be to start a Writer-mode
+        // host, which is what a rollback cannot rely on.
+        let now = crate::holder_link::now_ms();
+        crate::conversations::warm::adopt(
             core,
-            &crate::gate::System,
-            crate::holder_link::now_ms(),
+            &format!(
+                "{}/rollback-{now}",
+                crate::conversations::claims::HOST_INSTANCE
+            ),
+            now,
         )?;
+        crate::conversations::claims::end_gone(core, &crate::gate::System, now)?;
         Ok(())
     }
 
@@ -252,7 +260,12 @@ impl Module for Claims {
             )
         })?;
         let mut left = blockers(state, Some(&db))?;
-        left.extend(differences(state, &db)?);
+        // `differences` repeats the claims `blockers` cannot hold; a line once.
+        for line in differences(state, &db)? {
+            if !left.contains(&line) {
+                left.push(line);
+            }
+        }
         if left.is_empty() {
             return Ok(());
         }
