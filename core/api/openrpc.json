@@ -11046,8 +11046,25 @@
     },
     {
       "name": "claim.list",
-      "summary": "The writer claims: the live ones (queued, claimed, running, ending) and the recent ended ones, as `{live, recent}`; each row carries the conversation's `agent` and the `holderInstance` the claim went to. The owner reads it (`kith-wake`) and so does the host (a revoke's narrowed sweep).",
-      "params": [],
+      "summary": "The writer claims: the live ones (queued, claimed, running, ending) and the recent ended ones, as `{live, recent}`; each row carries the conversation's `agent` and the `holderInstance` the claim went to. The owner reads it (`kith-wake`) and so does the host (a revoke's narrowed sweep; a warm process's step 7, which asks whether anyone claimed its conversation since). With `conversation` (and `after`, a claim id) only that conversation's claims above `after`, in both lists.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "Only this conversation's claims.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "after",
+          "summary": "Only claims with an id above this (default 0).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
       "result": {
         "name": "result",
         "schema": {}
@@ -11068,7 +11085,14 @@
           "--json"
         ],
         "requires": [],
-        "args": {}
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "after": {
+            "kind": "caller"
+          }
+        }
       }
     },
     {

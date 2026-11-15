@@ -32,7 +32,7 @@ pub(super) struct State {
     pub end: Option<Rel>,
     pub ending: Option<InFlight>,
     /// An end the core did not take: sent again on the slow tick.
-    pub lost: Option<(Running, End)>,
+    pub lost: Vec<(Running, End)>,
     pub parked: Option<super::writer_wait::Parked>,
     /// The wait a resumed start came from (why, tries, since), while that start runs: a park that follows continues it.
     pub waited: Option<(Why, u32, std::time::Instant)>,
@@ -46,7 +46,7 @@ pub(super) struct State {
 impl State {
     /// Nothing of Writer mode is pending: the actor may rest (stop its agent, retire).
     pub(super) fn idle(&self) -> bool {
-        self.parked.is_none() && self.ending.is_none() && self.lost.is_none() && self.run.is_none()
+        self.parked.is_none() && self.ending.is_none() && self.lost.is_empty() && self.run.is_none()
     }
 }
 
@@ -544,7 +544,7 @@ impl Actor {
             Finished::Reported => {}
             Finished::ReportLost(why) => {
                 tracing::warn!(bot = %self.cfg.id, why, "the core did not take the end of a turn; sending it again");
-                self.writer.lost = Some((run, end));
+                self.writer.lost.push((run, end));
             }
             // The process is stopped (a room turn, or a lock that could not be given back): its connection goes.
             Finished::RoomEnded { .. } | Finished::LockStuck(_) => self.conn = None,

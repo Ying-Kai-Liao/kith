@@ -768,8 +768,8 @@ impl CoreWriter {
     /// take-over) held it since a warm process last ran a turn under claim `after`, so what that process loaded may be stale (step 7:
     /// the next turn reloads on any lane, a lock-only run leaves no transcript line for the thread's sync to see). The core's own
     /// `claim.list`, asked for this conversation's claims above `after`. Doubt reads `true`, for a reload is cheap: the core cannot
-    /// be asked. A claim with no lock and no registry file (an owner terminal after `OwnerNoAnswer`, a raw `claude --resume`) is
-    /// not seen.
+    /// be asked. Not seen: a run with no claim in the core (on the lock alone: an owner terminal after `OwnerNoAnswer`, a `--direct`
+    /// run while the core was unreachable) and one with no lock at all (a raw `claude --resume`).
     pub fn claim_since(&self, conversation: &str, after: i64, except: i64) -> bool {
         let Ok(v) = self.data("claim.list", &json!({"conversation": conversation, "after": after})) else {
             return true;
