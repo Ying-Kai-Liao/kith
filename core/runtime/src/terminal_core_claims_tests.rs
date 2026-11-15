@@ -27,7 +27,9 @@ fn switch(rig: &Rig) {
         .with_core(|c| {
             crate::cutover::marker::write(c, "claims", 7, "d", None)?;
             // The claims open once the holder's hello has been reconciled; the rig's holder lists nothing.
-            crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+            if !crate::conversations::claims::is_reconciled(c)? {
+                crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+            }
             Ok(())
         })
         .unwrap();
