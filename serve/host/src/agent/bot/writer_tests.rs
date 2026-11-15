@@ -19,7 +19,7 @@ use crate::api::devices::Caller;
 use crate::hub::Hub;
 use crate::store::{BotConfig, Lane, Store};
 use crate::terminal::core_claims::tests::{Fake, register};
-use crate::terminal::core_writer::tests::{C, World};
+use crate::terminal::core_writer::tests::{C, World, ended};
 use kith_kernel::paths::Paths;
 use serde_json::json;
 use std::path::PathBuf;
@@ -777,6 +777,34 @@ actor_test! {
 }
 
 actor_test! {
+    /// M3 gap 3: a lock-only `--direct` run on an idle warm conversation leaves no transcript line, only a claim of the core above the
+    /// last this process ran under. The next turn loads the session again, on the main lane (no thread), and only that one.
+    async fn a_claim_of_someone_else_since_the_last_turn_reloads_the_session_on_the_main_lane(rig) {
+        rig.send("a", "first").await;
+        rig.until("the first reply", |r| r.replied("a", "first")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 1).await;
+        let conversation = rig.w().claims[0].conv.clone();
+        // Nobody else claimed: the loaded session is current.
+        let before = rig.loads("a").len();
+        rig.send("a", "second").await;
+        rig.until("the second reply", |r| r.replied("a", "second")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 2).await;
+        assert_eq!(rig.loads("a").len(), before, "no reload without a claim of someone else: {:?}", rig.loads("a"));
+        // A run of someone else on it, over by now.
+        let direct = i64::try_from(rig.w().claims.len()).unwrap() + 1;
+        rig.w().claims.push(ended(direct, &conversation, "external"));
+        rig.send("a", "third").await;
+        rig.until("the third reply", |r| r.replied("a", "third")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 3).await;
+        assert_eq!(rig.loads("a").len(), before + 1, "the session was loaded again: {:?}", rig.loads("a"));
+        // Told once: the process ran under a claim above it since.
+        rig.send("a", "fourth").await;
+        rig.until("the fourth reply", |r| r.replied("a", "fourth")).await;
+        assert_eq!(rig.loads("a").len(), before + 1, "and not again: {:?}", rig.loads("a"));
+    }
+}
+
+actor_test! {
     /// A terminal forked the thread's session between the claim and the sync: the claim on the old session is given up (the turn
     /// cancelled), and the turn begins again, as a new turn, on the session the lane follows now.
     async fn a_thread_that_forked_abandons_the_claim_and_begins_on_the_new_session(rig) {
@@ -892,7 +920,11 @@ mod units {
     fn the_end_is_out_of_usage_only_for_a_move_and_every_other_ending_is_done() {
         assert_eq!(end_for(Some(Rel::OutOfUsage), false, false), End::OutOfUsage);
         assert_eq!(end_for(None, false, false), End::Done, "no failover: done");
-        assert_eq!(end_for(Some(Rel::Abandon), false, false), End::Done);
+        assert_eq!(
+            end_for(Some(Rel::Abandon), false, false),
+            End::Abandoned,
+            "only the stop is sent again, never an exit"
+        );
         assert_eq!(
             end_for(Some(Rel::Died), false, false),
             End::Done,
