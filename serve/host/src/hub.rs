@@ -213,6 +213,7 @@ impl Hub {
     pub fn start(self: &Arc<Self>) -> Result<()> {
         // Approval cards and queued sends from a previous run can't be honored anymore.
         self.store.expire_pending()?;
+        crate::chat::room_pointer::sweep(self);
         crate::chat::memory::import_old_memory(self);
         self.routines.restore(&self.store)?;
         crate::market::turn_on_installed_once(&self.store)?;
@@ -779,6 +780,8 @@ impl Hub {
         };
         if let Some(e) = &updated {
             self.update_thread_summary(e);
+            // Every way a room turn's card closes lands here, so its "waiting" pointer in the room closes with it.
+            crate::chat::room_pointer::after_set(self, e);
         }
         updated
     }
