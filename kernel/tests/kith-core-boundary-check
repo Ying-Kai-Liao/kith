@@ -63,9 +63,12 @@ PUBLIC = {
 DEPENDENTS = {"serve/host/Cargo.toml"}
 # Rust files outside core/runtime that may name kith_core.
 RUST_USERS = {"serve/host/src/main.rs", "serve/host/src/core_front.rs", "serve/host/tests/core_embedded_e2e.rs",
-              "serve/host/tests/core_daemon_e2e.rs"}
+              "serve/host/tests/core_daemon_e2e.rs",
+              # P11's --direct park e2e drives a temp core directly (marks claims switched, reads turns); Kai 2026-11-15.
+              "serve/host/tests/direct_park_e2e.rs"}
 # Files that may say "core.db": docs, this check, and the protected-paths list (runtime-design 9b rules 1 and 2).
-EXEMPT_NAME = ("kernel/tests/kith-core-boundary-check", "kernel/lib/kith_guard.py")
+EXEMPT_NAME = ("kernel/tests/kith-core-boundary-check", "kernel/lib/kith_guard.py",
+               "serve/host/tests/direct_park_e2e.rs")   # opens its own temp core's db (P11; Kai 2026-11-15)
 NAMES = re.compile(r"core\.db|core\.lock|core\.marker")
 SKIP_DIRS = {".git", "target", "node_modules", ".target-core", "worktrees", "build", ".build", "DerivedData"}
 
