@@ -341,7 +341,7 @@ impl Actor {
     /// reads as moved, once per session per process. A restart records its own load first.
     async fn newer_claim(&mut self, sid: &str, claim: i64) -> bool {
         let Some(proc) = self.conn.as_ref().and_then(|c| c.writer.as_ref()) else { return false };
-        let Some(after) = proc.ran.get(sid).copied() else { return true };
+        let Some(after) = proc.ran.get(sid).copied() else { return !proc.just_loaded(sid) };
         let (core, sid) = (proc.core.clone(), sid.to_owned());
         tokio::task::spawn_blocking(move || core.claim_since(&sid, after, claim)).await.unwrap_or(true)
     }

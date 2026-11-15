@@ -178,6 +178,11 @@ impl Rig {
             .collect()
     }
 
+    /// Whether the fixture agent of `bot` has been prompted (its process is past the session load).
+    fn prompted(&self, bot: &str) -> bool {
+        std::fs::read_to_string(self.dir.join(bot).join("prompts.jsonl")).is_ok_and(|s| !s.is_empty())
+    }
+
     fn texts(&self, bot: &str, kind: &str) -> Vec<String> {
         self.hub
             .store
@@ -602,7 +607,9 @@ actor_test! {
     /// runs a requeued core turn, so it must not be left queued.
     async fn a_process_killed_under_a_turn_ends_exit_and_the_turn_is_cancelled_not_left_queued(rig) {
         rig.send("a", "HANG").await;
-        rig.until("running", |r| r.running_pid("sess-a").is_some()).await;
+        // Killed only once the prompt is under way: a kill between the redeem and the session load is a failed start (an abandon,
+        // which reports no exit), not the process dying under its turn.
+        rig.until("prompted", |r| r.prompted("a")).await;
         kill_group(rig.running_pid("sess-a").unwrap());
         rig.until("the end report", |r| !r.w().reports.is_empty()).await;
         {

@@ -437,10 +437,11 @@ async fn a_direct_run_on_an_idle_warm_conversation_waits_for_the_idle_kill_and_t
 /// A `--direct` run that holds only the lock (an owner run no core answered for, so no external claim) on an idle warm conversation:
 /// the run wrote the session, so the next turn must load it again before it prompts (P5, design 1.3 step 7).
 ///
-/// IGNORED, and it fails today (gap 3): step 7's sync decides by thread, `sync_for_turn_blocking` is `Unchanged` for a lane without
-/// one (the bot's main lane), and nothing else tells the warm process that someone else wrote its session. Un-ignore it when the
-/// stub or the host records the last writer of a key.
-#[ignore = "a lock-only --direct run on a warm main-lane conversation does not make the next turn reload: host gap, see the PR"]
+/// IGNORED: a run on the lock alone leaves nothing in the core (no claim), so nothing tells the warm process that someone else wrote its
+/// session. The host's step 7 reloads after a claim of someone else above the last it ran under (`claim_since`, any lane); a claim
+/// also kills the idle process (the test above). This case needs the core to be unreachable during an owner run; the exact signal
+/// would be a lock generation in the stub's `take` answer (architect's option C, not built). Un-ignore it only with that.
+#[ignore = "a run on the lock alone leaves nothing in the core to tell the warm process: needs a lock generation from the stub"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_lock_only_direct_run_on_an_idle_warm_conversation_means_the_next_turn_reloads() {
     let mut rig = Rig::start().await;

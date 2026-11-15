@@ -248,9 +248,26 @@ pub(crate) struct Proc {
     /// Per session, the claim this process last ran a turn under (step 7): a claim of someone else above it means the session was
     /// written beside this process, and the next turn loads it again (see `CoreWriter::claim_since`).
     pub(super) ran: HashMap<String, i64>,
+    /// When each session was last created, forked or loaded by this process: a session with no `ran` entry that was loaded for this
+    /// very turn is current (its load is what step 7 would repeat).
+    loaded_at: HashMap<String, std::time::Instant>,
 }
 
+/// A load at most this old, with no turn run on it yet, is the load of the turn that is starting (`ensure_session` runs just before
+/// the begin); an older one may have missed a writer.
+const JUST_LOADED: Duration = Duration::from_secs(20);
+
 impl Proc {
+    /// `sid` was just created, forked or loaded by this process.
+    pub(super) fn loaded_now(&mut self, sid: &str) {
+        self.loaded_at.insert(sid.to_owned(), std::time::Instant::now());
+    }
+
+    /// Whether `sid` was loaded for the turn that is starting, so that no turn has run on it and nothing needs to be loaded again.
+    pub(super) fn just_loaded(&self, sid: &str) -> bool {
+        self.loaded_at.get(sid).is_some_and(|t| t.elapsed() < JUST_LOADED)
+    }
+
     pub(super) fn new(
         core: Arc<CoreWriter>,
         stub: Stub,
@@ -260,7 +277,18 @@ impl Proc {
         agent: String,
         seen: i64,
     ) -> Self {
-        Self { core, stub: Some(stub), pid, started, person, agent, seen, rows: HashSet::new(), ran: HashMap::new() }
+        Self {
+            core,
+            stub: Some(stub),
+            pid,
+            started,
+            person,
+            agent,
+            seen,
+            rows: HashSet::new(),
+            ran: HashMap::new(),
+            loaded_at: HashMap::new(),
+        }
     }
 }
 
