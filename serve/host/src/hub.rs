@@ -792,9 +792,10 @@ impl Hub {
         self.react_as(id, emoji, None)
     }
 
-    /// [`Self::react`] for a person in a room: `person` is `(who, the stay's joined_gen)`, and the stay and the "no revoke
-    /// has set them aside" check are made in the same transaction as the write (as a post's are).
-    pub fn react_as(&self, id: &str, emoji: &str, person: Option<(&str, i64)>) -> Result<Entry> {
+    /// [`Self::react`] for a person in a room: `person` is `(the id their stay is under, every id of theirs, the stay's
+    /// joined_gen)`, and the stay and the "no revoke has set them aside" check are made in the same transaction as the
+    /// write (as a post's are).
+    pub fn react_as(&self, id: &str, emoji: &str, person: Option<(&str, &[String], i64)>) -> Result<Entry> {
         let emoji = emoji.trim();
         if emoji.is_empty() || emoji.len() > 32 || emoji.chars().any(|c| c.is_alphanumeric() || c.is_whitespace()) {
             bail!("`emoji` must be one emoji");
@@ -814,12 +815,12 @@ impl Hub {
             reactions.push(emoji.to_owned());
         }
         e.data["reactions"] = json!(reactions);
-        let Some((who, seat)) = person else {
+        let Some(seat) = person else {
             return self.set_entry(id, &e.data).ok_or_else(|| anyhow!("couldn't save the reaction"));
         };
         let updated = {
             let _g = self.emit_lock.locked();
-            let updated = self.store.update_entry_for_person(&e.bot_id, who, seat, id, &e.data)?;
+            let updated = self.store.update_entry_for_person(&e.bot_id, seat, id, &e.data)?;
             if let Some(e) = &updated {
                 let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));
             }

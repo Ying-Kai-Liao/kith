@@ -574,14 +574,17 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         }
     }
     if changed_agents {
-        // A bot never has more than its owner: a turn on an agent the owner just lost stops now.
-        super::botguests::enforce(hub, id).await;
-        // So does any other turn of theirs on an agent they may no longer use.
-        stop_runs(hub, id, true).await;
-        // A room turn they are part of runs on the meet of everyone's grant: one of them losing an agent ends it too, and
-        // its cards go. Adding an agent ends nothing.
-        if lost_agent {
-            hub.end_room_turns_and_cards_of(id);
+        // Under every id the host may hold them under: a rename leaves their turns, bots and room stays under the old one.
+        for held in crate::remote::core_revokes::held_under(id).await {
+            // A bot never has more than its owner: a turn on an agent the owner just lost stops now.
+            super::botguests::enforce(hub, &held).await;
+            // So does any other turn of theirs on an agent they may no longer use.
+            stop_runs(hub, &held, true).await;
+            // A room turn they are part of runs on the meet of everyone's grant: one of them losing an agent ends it too,
+            // and its cards go. Adding an agent ends nothing.
+            if lost_agent {
+                hub.end_room_turns_and_cards_of(&held);
+            }
         }
     }
     for w in &warnings {
@@ -675,7 +678,7 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
                 // revoke that was not taken must still stop what runs (the host's half is fail-closed), and the owner
                 // is told to run it again.
                 if revoke {
-                    cut_off(hub, id).await;
+                    cut_off_held(hub, id).await;
                 }
                 return Err(e);
             }
@@ -685,7 +688,7 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
         (!account::core_missed(&said), pending)
     };
     if revoke {
-        cut_off(hub, id).await;
+        cut_off_held(hub, id).await;
     } else {
         // an undo gives back what the host set aside under every id it may hold them under
         for held in crate::remote::core_revokes::held_under(id).await {
@@ -706,6 +709,15 @@ pub(crate) fn restored(hub: &Hub, person: &str) {
         ),
     }
     hub.auth_changed();
+}
+
+/// [`cut_off`] under every id the host may hold `person` under (`held_under`: a renamed person's rows, room stays and
+/// room turns stay under the old id), as the undo gives back under every one. Just `person` when the core can't say: on
+/// that branch (a failed core write) the old ids go uncut here until the core's poll (`core_revokes`) cuts them.
+pub(crate) async fn cut_off_held(hub: &Hub, person: &str) {
+    for held in crate::remote::core_revokes::held_under(person).await {
+        cut_off(hub, &held).await;
+    }
 }
 
 /// After `person` was revoked here (by the owner or from the cloud): every turn of theirs and of their bots stops, and
