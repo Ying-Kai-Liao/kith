@@ -1069,6 +1069,24 @@ actor_test! {
 }
 
 actor_test! {
+    /// The end of a pulled run that moves to the next account (`keep`) is not followed by a cancel: `exit` requeued the same turn and
+    /// the actor begins it again by its id. Any other usage move cancels the old turn.
+    async fn a_kept_turn_is_not_cancelled_after_its_usage_move(rig) {
+        use crate::agent::bot::writer_turn::cancelled;
+        use crate::terminal::core_writer::{End, Finished, Running};
+        fire(&rig, 401, "daily", false);
+        let core = crate::agent::bot::writer_core(&rig.hub).expect("the writer");
+        let run = |keep| Running { turn: 401, claim: 1, pid: 1, started: "e1".into(), account: None, again: false, keep };
+        let c = core.clone();
+        let kept = tokio::task::spawn_blocking(move || cancelled(&c, &run(true), End::OutOfUsage, Finished::Reported)).await.unwrap();
+        assert_eq!(kept, Finished::Reported);
+        assert_eq!(rig.calls("hostclaim.cancel"), 0, "a kept turn goes on");
+        tokio::task::spawn_blocking(move || cancelled(&core, &run(false), End::OutOfUsage, Finished::Reported)).await.unwrap();
+        assert_eq!(rig.calls("hostclaim.cancel"), 1, "a move of any other turn cancels it");
+    }
+}
+
+actor_test! {
     /// Outside Writer mode nothing is pulled: the core's turns run on its claims and nowhere else.
     async fn nothing_is_pulled_outside_writer_mode(rig) {
         rig.w().switched = Some(false);

@@ -478,7 +478,8 @@ impl Actor {
         // The item's last end drops what it carried. A move to the next account, or to another session (a fork), keeps the epochs and
         // starts a new turn: the old turn's row (on the old session) is cancelled below, so the next begin makes its own. A scheduled
         // run the core queued is on the core's conversation, not the session: the move begins the same turn again by its id (`exit`
-        // requeued it), and nothing cancels it.
+        // requeued it), and nothing cancels it. A fork (`Left`) of a pulled run still drops the id: its next begin fails, and the
+        // turn is cancelled as any forked turn is; the run reports it could not finish.
         let pulled = self.writer.acc.as_ref().is_some_and(|a| a.pulled.is_some());
         if how == Some(Rel::OutOfUsage) && pulled {
             run.run.keep = true;
