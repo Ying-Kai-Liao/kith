@@ -13,7 +13,9 @@ and carry on as if the data were empty, which is the failure this closes: call o
   kith_tombstone.py PATH...                    # exit 0 when none is a tombstone, 3 (one line on stderr) when one is
 
 Tombstoned is an OSError, so a reader's existing "cannot read this file" handling fails closed too. A missing file is not a
-tombstone (the caller's own rule for a missing file stays). Wired into no reader yet; each module's switch wires its own.
+tombstone (the caller's own rule for a missing file stays). Each module's switch wires its own readers. The claims module's
+tombstone is `$KITH_STATE/live/terminal/claims.tombstone`, a note in this format that the takers read by existence
+(kith_claims.py): `kith_tombstone.py` on it exits 3 as on any other.
 """
 import json
 import sys

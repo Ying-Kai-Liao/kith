@@ -419,6 +419,11 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_own
                 os.link(tmp, dest)   # exclusive: fails when a claim is there
                 os.close(lock)
                 lock = None
+                if writer_mode():
+                    # The step put its marker down after the mode was read above: this file would be a writer nobody reads. Take
+                    # it back (it is ours: we just linked it) and ask the core, which refuses until the switch has finished.
+                    dest.unlink(missing_ok=True)
+                    return core_take(sid, pid, person, agent, lifecycle_owner, held_when_down=lifecycle_owner)
                 prune_stale(dest)
                 if not lifecycle_owner:   # a taker ends the intent and the 54-minute decision of the period before it (rules 12, 14)
                     try:
@@ -539,6 +544,10 @@ def proc_claim(pid, person, agent):
     tmp.write_text(json.dumps(mine))
     os.chmod(tmp, 0o600)
     os.replace(tmp, d / f'proc-{pid}.claim')
+    if writer_mode():
+        # The marker went down after the mode was read above: the file is a run nobody reads. Take it back and claim in the core.
+        (d / f'proc-{pid}.claim').unlink(missing_ok=True)
+        proc_claim(pid, person, agent)
 
 
 def sweep_persons(persons, grace=2.0):

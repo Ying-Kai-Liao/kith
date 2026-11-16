@@ -58,6 +58,7 @@ fn the_rows_are_the_hosts_alone() {
         "hostclaim.show",
         "hostclaim.cancel",
         "hostclaim.park",
+        "hostclaim.strays",
         "hostclaim.unpark",
         "hostclaim.proc",
         "hostclaim.procGone",
@@ -574,5 +575,50 @@ fn a_keyed_owner_turn_retried_is_one_row_and_show_names_the_claims_turn() {
     assert!(
         shown["claim"]["turn"].is_null(),
         "a terminal claim runs no turn: {shown}"
+    );
+}
+
+#[test]
+fn strays_lists_the_turns_with_a_host_key_that_still_wait_and_nothing_else() {
+    let (_t, mut core, _m) = world();
+    let enqueue = |core: &mut Core, conv: &str, key: Option<&str>| {
+        let mut p = json!({"conversation": conv, "agent": "echo", "engine": "claude", "source": "app", "person": "",
+                           "prompt": "", "revokeSeen": 0});
+        if let Some(k) = key {
+            p["key"] = json!(k);
+        }
+        row(core, "hostclaim.enqueue", &p)["turn"].as_i64().unwrap()
+    };
+    let keyed = enqueue(&mut core, "s1", Some("k-1"));
+    let _core_made = enqueue(&mut core, "s2", None);
+    let parked = enqueue(&mut core, "s3", Some("k-3"));
+    row(
+        &mut core,
+        "hostclaim.park",
+        &json!({"turn": parked, "reason": "lock_busy"}),
+    );
+    let gone = enqueue(&mut core, "s4", Some("k-4"));
+    row(
+        &mut core,
+        "hostclaim.cancel",
+        &json!({"turn": gone, "reason": "test"}),
+    );
+    let listed = row(&mut core, "hostclaim.strays", &json!({}));
+    let mut got: Vec<(i64, String)> = listed["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| {
+            (
+                t["turn"].as_i64().unwrap(),
+                t["key"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![(keyed, "k-1".to_owned()), (parked, "k-3".to_owned())],
+        "{listed}"
     );
 }
