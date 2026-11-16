@@ -67,6 +67,20 @@ pub(crate) fn connected_instance(shared: &Shared) -> Option<String> {
         .flatten()
 }
 
+/// Ends the claims whose process is gone and removes the warm processes that are gone, on the same tick. A killed
+/// `--direct` run's external claim stays `claimed` otherwise: `end_gone` ran only inside a later `claim.*` row or
+/// `hostclaim.settle`, and a parked app send calls neither, so it would wait for ever.
+pub(crate) fn settle(shared: &Shared) {
+    let now = crate::holder_link::now_ms();
+    if let Err(e) = shared.with_core(|c| {
+        crate::conversations::claims::end_gone(c, &crate::gate::System, now)?;
+        crate::conversations::warm::settle(c, &crate::gate::System)?;
+        Ok(())
+    }) {
+        log::note(&shared.logs, &format!("daemon: settle: {e}"));
+    }
+}
+
 /// One tick. `holder` is [`connected_instance`]. Returns the claimer pids signalled on this pass.
 pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Vec<u32> {
     type Row = (i64, i64, Option<String>, Option<String>, String);

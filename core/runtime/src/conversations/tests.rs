@@ -968,6 +968,50 @@ fn reconcile_ends_unlisted_claimed_claims_and_holds_unlisted_running_ones_as_end
     assert_eq!(state(&c, kept), "running", "re-adopted");
 }
 
+/// Step 5 passes no instance to spare: a restart also takes the host's turn claims of the old generation (`ending`,
+/// `holder_changed`, the turn queued again) and an imported claim with no instance. Both stay the writer until `end_gone`.
+/// The tick signals the host's; the instance-less one is never signalled (`kill_resend::pass` skips a `holder_changed` claim
+/// that no holder started, which `end_reason` alone says).
+#[test]
+fn reconcile_takes_a_hosts_running_turn_and_an_instanceless_one_into_ending() {
+    let (_t, mut c) = open();
+    let host = take_as(&mut c, "a", Some("kith-serve-host"), Some(200));
+    let imported = take_as(&mut c, "b", None, Some(300));
+    unreconcile(&c);
+    let out = reconcile(&mut c, &[], &[], i64::MAX, 50).expect("reconcile");
+    assert_eq!(state(&c, host), "ending", "never straight to ended");
+    assert_eq!(state(&c, imported), "ending");
+    let reason = |id: i64| -> String {
+        c.conn()
+            .query_row(
+                "SELECT end_reason FROM claims WHERE claim_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .expect("reason")
+    };
+    assert_eq!(reason(host), "holder_changed");
+    assert_eq!(
+        reason(imported),
+        "holder_changed",
+        "the field `kill_resend::pass` reads to never signal it"
+    );
+    let turn = |conv: &str| -> String {
+        c.conn()
+            .query_row(
+                "SELECT state FROM turns WHERE conversation = ?1",
+                [conv],
+                |r| r.get(0),
+            )
+            .expect("turn")
+    };
+    assert_eq!(turn("a"), "queued", "the turn runs again, once");
+    assert_eq!(out.kill.len(), 2);
+    // Still the writer: no new claim on either conversation until the process is seen gone.
+    assert!(claim(&mut c, &new_claim("a", None), 51).is_err());
+    assert!(claim(&mut c, &new_claim("b", None), 51).is_err());
+}
+
 #[test]
 fn reconcile_lists_a_holder_entry_whose_claim_is_ended() {
     let (_t, mut c) = open();

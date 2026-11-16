@@ -6,9 +6,10 @@ Two modes, picked by one marker, never by an env var:
   Writer  (the marker exists)     the claims are rows in the core (claim.external / claim.release / claim.sweepPerson /
                                   claim.list, core/runtime/src/conversations/external.rs). No claim file is read or written.
 
-The marker is `$KITH_STATE/live/terminal/claims.tombstone`. `kith migrate step claims` (P9) writes it and the rollback
-clears it; this module only reads it. Its mere existence is the switch: a damaged or unreadable marker still means Writer
-(fail closed: a taker never goes back to the files by accident).
+The marker is `$KITH_STATE/live/terminal/claims.tombstone`. `kith migrate step claims` (P9) writes it before the module reads
+switched and the rollback clears it; this module only reads it. Its mere existence is the switch: a damaged or unreadable marker
+still means Writer (fail closed: a taker never goes back to the files by accident). The module's own record,
+`<machine>/core/cutover/claims.switch`, counts too once it says more than `stepping`: Writer mode is either source.
 
 A call to the core is `kith kernel core-call METHOD --params-stdin` (the daemon over the owner socket; with no daemon, only
 claim.sweepPerson runs in an embedded core, as every revoke must reach a person's runs). Its exit code says what happened, and the callers tell these apart on purpose:
@@ -51,13 +52,35 @@ def marker_path(state):
     return Path(state) / 'live' / 'terminal' / MARKER if state else None
 
 
+def switch_file():
+    """`<machine>/core/cutover/claims.switch`, the claims module's own record (core/runtime/src/cutover/state.rs), or None."""
+    try:
+        machine = os.environ.get('KITH_MACHINE')
+        if not machine:
+            from kith_paths import paths
+            machine = str(paths()['KITH_MACHINE'])
+        return Path(machine) / 'core' / 'cutover' / 'claims.switch'
+    except Exception:  # noqa: BLE001 — no way to look is no second source; the marker still decides
+        return None
+
+
 def switched(state):
-    """Whether the claims are the core's on this Mac. Existence only: the content is P9's business."""
+    """Whether the claims are the core's on this Mac: either source says so. The marker (existence only: the content is P9's
+    business), or the module's switch file once it says more than `stepping` (switched, rolling-back, or unreadable), which
+    covers a marker lost while the core still serves. A marker or file we cannot even look for is no reason to fall back."""
     m = marker_path(state)
     try:
-        return bool(m) and os.path.lexists(m)
+        if m and os.path.lexists(m):
+            return True
     except OSError:
-        return True   # a marker we cannot even look for is no reason to fall back to the files
+        return True
+    f = switch_file()
+    try:
+        if f and os.path.lexists(f):
+            return 'state=stepping' not in f.read_text().splitlines()
+    except OSError:
+        return True
+    return False
 
 
 def lockable(sid):

@@ -146,7 +146,7 @@ pub(crate) fn call_at(
         "claim.release" => release(core, p, now),
         "claim.sweepPerson" => sweep_person(core, p, now),
         "claim.epoch" => Ok(json!({ "epoch": claims::revoke_epoch(core, principal(p))? })),
-        "claim.list" => list(core),
+        "claim.list" => list(core, p),
         _ => Err(Error::NoSuchMethod(format!(
             "kith-core: no method {method}"
         ))),
@@ -461,12 +461,16 @@ fn sweep_person(core: &mut Core, p: &Value, now: i64) -> Result<Value> {
     })).collect::<Vec<_>>() }))
 }
 
-/// `{live, recent}`: the live claims (queued, claimed, running, ending) and the last twenty ended ones.
-fn list(core: &Core) -> Result<Value> {
+/// `{live, recent}`: the live claims (queued, claimed, running, ending) and the last twenty ended ones. With `conversation` (and
+/// `after`, a claim id) only that conversation's claims with an id above `after`: the host asks whether anyone claimed a session
+/// since its warm process last ran on it, and the twenty cannot have pushed the answer out. Still a read.
+fn list(core: &Core, p: &Value) -> Result<Value> {
+    let conversation = p.get("conversation").and_then(Value::as_str);
+    let after = p.get("after").and_then(Value::as_i64).unwrap_or(0);
     let rows = |sql: &str| -> Result<Vec<Value>> {
         let mut st = core.conn().prepare(sql)?;
         let out = st
-            .query_map([], |r| {
+            .query_map(params![conversation, after], |r| {
                 Ok(json!({
                     "claimId": r.get::<_, i64>(0)?,
                     "conversation": r.get::<_, String>(1)?,
@@ -486,12 +490,13 @@ fn list(core: &Core) -> Result<Value> {
     };
     let cols = "SELECT c.claim_id, c.conversation, c.state, c.kind, c.person, c.pid, c.pid_started, v.agent, c.holder_instance
                 FROM claims c LEFT JOIN conversations v ON v.id = c.conversation";
+    let only = " AND (?1 IS NULL OR c.conversation = ?1) AND c.claim_id > ?2";
     Ok(json!({
         "live": rows(&format!(
-            "{cols} WHERE c.state IN ('queued', 'claimed', 'running', 'ending') ORDER BY c.claim_id"
+            "{cols} WHERE c.state IN ('queued', 'claimed', 'running', 'ending'){only} ORDER BY c.claim_id"
         ))?,
         "recent": rows(&format!(
-            "{cols} WHERE c.state = 'ended' ORDER BY c.claim_id DESC LIMIT 20"
+            "{cols} WHERE c.state = 'ended'{only} ORDER BY c.claim_id DESC LIMIT 20"
         ))?,
     }))
 }

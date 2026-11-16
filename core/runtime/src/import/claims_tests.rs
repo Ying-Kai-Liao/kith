@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use super::{read_files, run_in};
+use super::{blockers, differences, proc_key, read_files, run_in};
 use crate::db::{Core, MIGRATIONS};
 use crate::layout::Layout;
 use crate::start_with;
@@ -123,7 +123,7 @@ fn live_claim_files_become_running_claim_rows_and_the_rest_are_listed() {
             && text.contains("s-start.claim: a start in flight")
             && text.contains("s-one.takeover.claim: a take-over claim")
             && text.contains("junk.claim: not a claim")
-            && text.contains("nowhere: no such conversation"),
+            && text.contains("nowhere.claim: core.db has no conversation nowhere and neither"),
         "{text}"
     );
     assert_eq!(
@@ -218,4 +218,158 @@ fn no_claim_folder_is_nothing_to_import() {
     let (t, _c) = core();
     let (wanted, skipped) = read_files(&t.path().join("none")).unwrap();
     assert!(wanted.is_empty() && skipped.is_empty());
+}
+
+fn stamp_of_me() -> String {
+    match kith_kernel::procstart::probe(std::process::id()) {
+        kith_kernel::procstart::Probe::Alive(Some(s)) => s,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn an_unknown_conversation_gets_its_row_from_the_registry_record_or_the_file_and_else_is_refused() {
+    let (t, mut c) = core();
+    let state = t.path().join("state");
+    let me = i64::from(std::process::id());
+    let stamp = stamp_of_me();
+    file(
+        &state,
+        "s-rec.claim",
+        &json!({"pid": me, "procStart": stamp, "at": "t", "kind": "terminal"}),
+    );
+    file(
+        &state,
+        "s-rec.json",
+        &json!({"agent": "scout", "engine": "claude"}),
+    );
+    file(
+        &state,
+        "s-file.claim",
+        &json!({"pid": me, "procStart": stamp, "at": "t", "kind": "terminal", "person": "sam", "agent": "pilot"}),
+    );
+    file(
+        &state,
+        "s-none.claim",
+        &json!({"pid": me, "procStart": stamp, "at": "t", "kind": "terminal"}),
+    );
+    let (conn, state2) = (c.conn(), state.clone());
+    let b = blockers(&state2, Some(conn)).unwrap();
+    assert_eq!(b.len(), 1, "{b:?}");
+    assert!(
+        b[0].contains("s-none.claim") && b[0].contains("names its agent"),
+        "{b:?}"
+    );
+    assert_eq!(
+        differences(&state, c.conn()).unwrap().len(),
+        3,
+        "two to add, one that cannot be held"
+    );
+    run_in(&mut c, &state, false).unwrap();
+    let agent = |id: &str| -> Option<String> {
+        c.conn()
+            .query_row("SELECT agent FROM conversations WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .ok()
+    };
+    assert_eq!(agent("s-rec").as_deref(), Some("scout"));
+    assert_eq!(agent("s-file").as_deref(), Some("pilot"));
+    assert_eq!(agent("s-none"), None, "no agent, no conversation, no claim");
+    assert_eq!(live(&c, "s-rec").len(), 1);
+    assert_eq!(live(&c, "s-none"), vec![]);
+}
+
+#[test]
+fn a_live_row_on_another_pid_is_a_difference_and_a_blocker() {
+    let (t, c) = core();
+    let state = t.path().join("state");
+    let me = i64::from(std::process::id());
+    conversation(&c, "s2");
+    file(
+        &state,
+        "s2.claim",
+        &json!({"pid": me, "procStart": null, "at": "t", "kind": "terminal"}),
+    );
+    c.conn()
+        .execute(
+            "INSERT INTO claims (claim_id, conversation, generation, kind, state, pid, pid_started, created_at)
+             VALUES (900, 's2', 1, 'terminal', 'running', 77, 'e1', 1)",
+            [],
+        )
+        .unwrap();
+    for lines in [
+        differences(&state, c.conn()).unwrap(),
+        blockers(&state, Some(c.conn())).unwrap(),
+    ] {
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("s2: core.db already has live claim 900")),
+            "{lines:?}"
+        );
+    }
+}
+
+#[test]
+fn a_proc_claim_becomes_an_external_claim_on_the_key_kith_sessions_makes() {
+    let (t, mut c) = core();
+    let state = t.path().join("state");
+    let me = i64::from(std::process::id());
+    let stamp = stamp_of_me();
+    file(
+        &state,
+        &format!("proc-{me}.claim"),
+        &json!({"pid": me, "procStart": stamp, "at": "t", "kind": "app", "person": "sam", "agent": "pilot"}),
+    );
+    run_in(&mut c, &state, false).unwrap();
+    // `kith-sessions proc` in Writer mode: f'proc-{pid}-{started}'.lower().replace(':', '.')
+    let key = proc_key(me, &stamp);
+    assert_eq!(
+        key,
+        format!("proc-{me}-{stamp}")
+            .to_lowercase()
+            .replace(':', ".")
+    );
+    assert_eq!(
+        proc_key(5, "Mon 15 Nov 10:00:00 2026"),
+        "proc-5-mon 15 nov 10.00.00 2026",
+        "the rule is Python's, whatever the text"
+    );
+    let row: (String, String, String) = c
+        .conn()
+        .query_row(
+            "SELECT c.engine, c.agent, x.person FROM claims x JOIN conversations c ON c.id = x.conversation
+             WHERE x.conversation = ?1 AND x.kind = 'external' AND x.state = 'running'",
+            [&key],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(row, ("proc".into(), "pilot".into(), "sam".into()));
+    assert_eq!(differences(&state, c.conn()).unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn a_proc_claim_with_no_stamp_or_a_takeover_in_flight_blocks() {
+    let (t, c) = core();
+    let state = t.path().join("state");
+    let me = i64::from(std::process::id());
+    file(
+        &state,
+        &format!("proc-{me}.claim"),
+        &json!({"pid": me, "procStart": null, "at": "t", "kind": "app", "person": "sam", "agent": "pilot"}),
+    );
+    file(
+        &state,
+        "s9.takeover.claim",
+        &json!({"pid": me, "procStart": null, "at": "t", "kind": "terminal", "takeover": true}),
+    );
+    let b = blockers(&state, Some(c.conn())).unwrap().join("\n");
+    assert!(
+        b.contains("recorded no start stamp")
+            && b.contains("s9.takeover.claim: a take-over is in flight"),
+        "{b}"
+    );
+    let none = blockers(&state, None).unwrap().join("\n");
+    assert!(none.contains("core.db does not exist yet"), "{none}");
 }

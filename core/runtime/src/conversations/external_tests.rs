@@ -599,6 +599,69 @@ fn the_owner_is_never_swept() {
     }
 }
 
+/// M3 gap 3: the host asks for one conversation's claims above the last it ran under, so the twenty ended rows of every other
+/// conversation cannot push the answer out.
+#[test]
+fn list_of_one_conversation_names_only_its_claims_above_after() {
+    let (_t, mut core) = world();
+    let live = Alive::of(&[(100, "e1"), (200, "e2"), (300, "e3")]);
+    let a = take(&mut core, &live, "s1", 100, "e1", "")["claimId"]
+        .as_i64()
+        .unwrap();
+    take(&mut core, &live, "s2", 200, "e2", "");
+    ask(
+        &mut core,
+        &live,
+        "claim.release",
+        &json!({"pid": 100, "started": "e1"}),
+    );
+    let b = take(&mut core, &live, "s1", 300, "e3", "")["claimId"]
+        .as_i64()
+        .unwrap();
+    let ids = |l: &Value| -> Vec<i64> {
+        ["live", "recent"]
+            .iter()
+            .flat_map(|k| {
+                l[k].as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| c["claimId"].as_i64().unwrap())
+            })
+            .collect()
+    };
+    let all = ask(
+        &mut core,
+        &live,
+        "claim.list",
+        &json!({"conversation": "s1"}),
+    );
+    assert_eq!(ids(&all), [b, a], "s2's claim is not named: {all}");
+    let since = ask(
+        &mut core,
+        &live,
+        "claim.list",
+        &json!({"conversation": "s1", "after": a}),
+    );
+    assert_eq!(ids(&since), [b], "{since}");
+    let none = ask(
+        &mut core,
+        &live,
+        "claim.list",
+        &json!({"conversation": "s1", "after": b}),
+    );
+    assert!(ids(&none).is_empty(), "{none}");
+    let quote = ask(
+        &mut core,
+        &live,
+        "claim.list",
+        &json!({"conversation": "x' OR '1'='1"}),
+    );
+    assert!(
+        ids(&quote).is_empty(),
+        "a name is a value, not SQL: {quote}"
+    );
+}
+
 #[test]
 fn list_shows_the_live_and_the_recent() {
     let (_t, mut core) = world();

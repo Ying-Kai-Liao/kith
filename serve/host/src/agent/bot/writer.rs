@@ -176,7 +176,29 @@ async fn adopt_once(hub: &crate::hub::Hub, core: &Arc<CoreWriter>) {
         Ok(Err(error)) => tracing::warn!(error, "writer mode: couldn't adopt an earlier host instance's claims"),
         Err(_) => {}
     }
+    sweep_strays_for_ever(core.clone());
 }
+
+/// Once now and then every [`STRAY_SWEEP_EVERY`]: the host turns the core holds that no item of this host runs are cancelled
+/// (`terminal/core_strays.rs`: a requeue after a core or host restart, or a late `exit`). Not under test: the scripted cores know
+/// no such row, and the sweep has its own tests.
+#[cfg(not(test))]
+fn sweep_strays_for_ever(core: Arc<CoreWriter>) {
+    tokio::spawn(async move {
+        loop {
+            let c = core.clone();
+            if let Ok(n) = tokio::task::spawn_blocking(move || c.sweep_strays()).await
+                && n > 0
+            {
+                tracing::info!(cancelled = n, "writer mode: cancelled host turns nothing runs");
+            }
+            tokio::time::sleep(crate::terminal::core_writer::STRAY_SWEEP_EVERY).await;
+        }
+    });
+}
+
+#[cfg(test)]
+fn sweep_strays_for_ever(_: Arc<CoreWriter>) {}
 
 // MARK: accept
 
@@ -245,6 +267,9 @@ pub(crate) struct Proc {
     pub(super) seen: i64,
     /// The conversations that have a row.
     rows: HashSet<String>,
+    /// Per session, the claim this process last ran a turn under (step 7): a claim of someone else above it means the session was
+    /// written beside this process, and the next turn loads it again (see `CoreWriter::claim_since`).
+    pub(super) ran: HashMap<String, i64>,
 }
 
 impl Proc {
@@ -257,7 +282,7 @@ impl Proc {
         agent: String,
         seen: i64,
     ) -> Self {
-        Self { core, stub: Some(stub), pid, started, person, agent, seen, rows: HashSet::new() }
+        Self { core, stub: Some(stub), pid, started, person, agent, seen, rows: HashSet::new(), ran: HashMap::new() }
     }
 }
 
@@ -609,12 +634,10 @@ impl Drop for Watch {
 }
 
 /// What a begin leaves behind when nobody waits for it any more: a claim running is given up, a turn queued is cancelled.
-pub(super) fn orphaned(core: &CoreWriter, conversation: &str, begin: &Begin, stub: &mut dyn WarmStub) {
+pub(super) fn orphaned(core: &CoreWriter, begin: &Begin, stub: &mut dyn WarmStub) {
     match begin {
         Begin::Running(r) => {
-            core.abandon(r.turn, r.claim, conversation, stub);
-            stub.kill_group();
-            core.settle_gone(r.pid, &r.started);
+            let _ = core.abandon(r, stub);
         }
         Begin::Queued { turn }
         | Begin::Retry { turn, .. }
