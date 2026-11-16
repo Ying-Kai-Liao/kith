@@ -142,8 +142,11 @@ pub fn handle(msg: &Map<String, Value>, env: &Env, kernel: &Path) -> Result<Opti
             if credentials(env).is_some() {
                 tools.push(secret_def());
             }
-            if env.get("KITH_PERSON").is_some() {
-                tools.extend([helper_def(), door_def()]);
+            if let Some(person) = env.get("KITH_PERSON") {
+                if !crate::launch::room::is_room_person(person) {
+                    tools.push(helper_def());
+                }
+                tools.push(door_def());
             }
             json!({"tools": tools})
         }

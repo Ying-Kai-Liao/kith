@@ -44,7 +44,7 @@ impl Actor {
     pub(super) fn room_members(&self) -> Option<crate::agent::hq::Members> {
         let basis = self.turn_basis.as_ref().filter(|b| b.level() == Level::Room)?;
         let author = self.active_group.as_ref().map_or_else(|| "owner".to_owned(), |g| g.author.clone());
-        Some(crate::agent::hq::Members::Room { people: basis.people.clone(), author })
+        Some(crate::agent::hq::Members::Room { people: basis.people.clone(), author, room_gen: basis.room_gen })
     }
 
     /// Starts `turn` under the room as it is now, or says why not. Checked in this order:

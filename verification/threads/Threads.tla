@@ -73,6 +73,9 @@ CONSTANTS
                            \* has the conversation loaded
     RequireStub,           \* bin/kith: no stub program = refuse (KITH_REQUIRE_STUB); FALSE: an owner run goes unlocked
     OwnerNoAnswer,         \* K core_take NoAnswer: the core gives no answer, an owner's run goes on under the lock alone
+    LockAloneClearsWarm,   \* kith-stub --lock-alone (L-clear): holding the lock and before claude, a run on the lock alone
+                           \* kills every host warm process that has the conversation loaded (TermUp)
+    ClearBeforeLock,       \* WHAT-IF, the wrong order: that clear at the launch, before the lock is taken (FALSE in the code)
     WrapperDies,           \* an interactive run's claim is on the `kith-sessions run` wrapper: it may die first
     \* --- scope switches
     GateFlips,             \* the gate (cutover.mayServe) may change between begins: Held
@@ -208,7 +211,7 @@ TypeOK ==
     /\ lk \in [Sids -> Terminals \cup {"none", "host"}] /\ eng \in {0} \cup Sids /\ ld \in {0, 1, 2, 3, 4}
     /\ ot \in BOOLEAN /\ na \subseteq Terminals /\ gate \in {"ok", "held"} /\ again \in BOOLEAN /\ pend \in BOOLEAN
     /\ ev \subseteq {"held", "busy", "settled", "deadrefused", "died", "killed", "failover", "restart", "restartlocked",
-                     "offturn", "lockout", "lockalone", "lost", "abandoned"}
+                     "offturn", "lockout", "lockalone", "lost", "abandoned", "cleared"}
 
 -----------------------------------------------------------------------------
 Init ==
@@ -567,6 +570,24 @@ Up == IF LaunchIsInstant THEN "idle" ELSE "launching"
 \* conversation loaded (the core marks it for a kill and answers `waiting`; the run retries). Files: no warm check.
 WarmOK(s) == ~(CoreWriter /\ ExternalChecksWarm /\ Loaded(s))
 
+\* L-clear (design 2026-11-16, core/stub/src/clear.rs): a resident stub marks every conversation its engine has loaded
+\* (`<locks>/<key>.loaded/<stubpid>-<start>`; the host's ctl `loaded` goes where it registers the warm_procs row, before the
+\* load, and `forgot` where the row goes). A run on the lock alone (`kith-stub --lock-alone`) clears the marked processes:
+\* a stale marker is removed; a stub that holds another key's lock (a host turn runs in that process) refuses the run, exit
+\* 75; any other is SIGKILLed with its group and waited for. The model has one warm process: `ld` is its marker, and an
+\* engine a host restart left behind (`eng`: its stub still lives, so its marker too) is one more.
+WarmOn(s) == Loaded(s) \/ eng = s
+StubLocksOther(s) == \E o \in Sids \ {s} : lk[o] = "host"
+ClearWarm(s) ==
+    /\ ld' = (IF Loaded(s) THEN 0 ELSE ld)
+    /\ IF eng = s THEN eng' = 0 /\ ot' = FALSE ELSE UNCHANGED <<eng, ot>>
+\* ClearBeforeLock (what-if, the wrong order): the same clear at the launch, before the stub takes the lock; a process whose
+\* stub holds a lock is left alone (its host turn is running), and the run goes on.
+EarlyClear(s) ==
+    IF ClearBeforeLock /\ WarmOn(s) /\ ~(\E o \in Sids : lk[o] = "host")
+    THEN ClearWarm(s) /\ ev' = ev \cup {"lockalone", "cleared"}
+    ELSE UNCHANGED <<ld, eng, ot>> /\ ev' = ev \cup {"lockalone"}
+
 \* K kith-sessions resolve() (`kith <agent> --resume|-r|-c`, also a one-shot with a task): the host names the session
 \* (the lane's), then claim(): take_claim (exclusive; a live claim of anyone refuses, a one-shot waits a little), and
 \* a live take-over claim refuses. ResumeClaims = FALSE: no claim (a broken variant). CoreWriter: claim.external, and the
@@ -576,11 +597,11 @@ TermClaim(t) ==
     /\ \/ /\ ResumeClaims => (Free(lane) /\ WarmOK(lane))
           /\ TS' = [TS EXCEPT ![t] = "claimed"] /\ sidOf' = [sidOf EXCEPT ![t] = lane]
           /\ cl' = IF ResumeClaims /\ TermRegistersClaim THEN [cl EXCEPT ![lane] = t] ELSE cl
-          /\ UNCHANGED <<na, ev>>
+          /\ UNCHANGED <<na, ev, ld, eng, ot>>
        \/ /\ CoreWriter /\ OwnerNoAnswer /\ TermTakesLock /\ gate = "held"   \* the core is not answering
           /\ TS' = [TS EXCEPT ![t] = "claimed"] /\ sidOf' = [sidOf EXCEPT ![t] = lane]
-          /\ na' = na \cup {t} /\ ev' = ev \cup {"lockalone"} /\ UNCHANGED cl
-    /\ UNCHANGED <<lk, eng, ot, gate, again, pend, ld, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq,
+          /\ na' = na \cup {t} /\ EarlyClear(lane) /\ UNCHANGED cl
+    /\ UNCHANGED <<lk, gate, again, pend, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq,
                    H, taking, to, lw, sig, n, C>>
 
 \* K resolve(), with the claim held: resolveThread again (S resolve: hostBusy, read under the thread lock, = a turn in
@@ -607,12 +628,12 @@ TermLaunch(t) ==
     /\ TS[t] = "fresh"
     /\ \/ /\ FreshClaims => (Free(cur) /\ to = "none" /\ WarmOK(cur))
           /\ cl' = IF FreshClaims /\ TermRegistersClaim THEN [cl EXCEPT ![cur] = t] ELSE cl
-          /\ UNCHANGED <<na, ev>>
+          /\ UNCHANGED <<na, ev, ld, eng, ot>>
        \/ /\ CoreWriter /\ OwnerNoAnswer /\ TermTakesLock /\ gate = "held"   \* kith-sessions claim / terminal, core_take NoAnswer
-          /\ na' = na \cup {t} /\ ev' = ev \cup {"lockalone"} /\ UNCHANGED cl
+          /\ na' = na \cup {t} /\ EarlyClear(cur) /\ UNCHANGED cl
     /\ sidOf' = [sidOf EXCEPT ![t] = cur]
     /\ TS' = [TS EXCEPT ![t] = Up]
-    /\ UNCHANGED <<lk, eng, ot, gate, again, pend, ld, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw, sig, n, C>>
+    /\ UNCHANGED <<lk, gate, again, pend, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw, sig, n, C>>
 
 \* bin/kith -> kith-sessions run (or exec) -> kith-stub -> claude starts and writes ~/.claude/sessions/<pid>.json: the
 \* session is open. CoreWriter: the stub takes the writer lock first (U take(): non-blocking on the same file every stub
@@ -625,15 +646,25 @@ TermUp(t) ==
           /\ LockWanted /\ (RequireStub \/ t \in na) /\ lk[sidOf[t]] /= "none"
           /\ TS' = [TS EXCEPT ![t] = "gone"]
           /\ cl' = [s \in Sids |-> IF cl[s] = t THEN "none" ELSE cl[s]]
-          /\ ev' = ev \cup {"lockout"} /\ na' = na \ {t} /\ UNCHANGED lk
-       \/ \* locked
+          /\ ev' = ev \cup {"lockout"} /\ na' = na \ {t} /\ UNCHANGED <<lk, ld, eng, ot>>
+       \/ \* locked. LockAloneClearsWarm: a run on the lock alone clears in the same step (the stub holds the lock through the
+          \* clear and starts claude only after it, core/stub/src/main.rs): a marked process whose stub holds another key's
+          \* lock refuses the run (exit 75, nothing killed; the lock goes with the stub); else it is killed and gone first
           /\ LockWanted /\ lk[sidOf[t]] = "none"
-          /\ TS' = [TS EXCEPT ![t] = "idle"] /\ lk' = [lk EXCEPT ![sidOf[t]] = t] /\ UNCHANGED <<cl, ev, na>>
+          /\ IF LockAloneClearsWarm /\ t \in na /\ WarmOn(sidOf[t])
+             THEN IF StubLocksOther(sidOf[t])
+                  THEN /\ TS' = [TS EXCEPT ![t] = "gone"]
+                       /\ cl' = [s \in Sids |-> IF cl[s] = t THEN "none" ELSE cl[s]]
+                       /\ ev' = ev \cup {"lockout"} /\ na' = na \ {t} /\ UNCHANGED <<lk, ld, eng, ot>>
+                  ELSE /\ TS' = [TS EXCEPT ![t] = "idle"] /\ lk' = [lk EXCEPT ![sidOf[t]] = t]
+                       /\ ClearWarm(sidOf[t]) /\ ev' = ev \cup {"cleared"} /\ UNCHANGED <<cl, na>>
+             ELSE /\ TS' = [TS EXCEPT ![t] = "idle"] /\ lk' = [lk EXCEPT ![sidOf[t]] = t]
+                  /\ UNCHANGED <<cl, ev, na, ld, eng, ot>>
        \/ \* no lock: the claim files, or no stub program on this Mac (RequireStub = FALSE; never an owner on the lock alone)
           /\ ~LockWanted \/ (~RequireStub /\ t \notin na)
-          /\ TS' = [TS EXCEPT ![t] = "idle"] /\ UNCHANGED <<cl, ev, na, lk>>
+          /\ TS' = [TS EXCEPT ![t] = "idle"] /\ UNCHANGED <<cl, ev, na, lk, ld, eng, ot>>
     /\ UNCHANGED <<sidOf, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw, sig, n, C,
-                   eng, ot, gate, again, pend, ld>>
+                   gate, again, pend>>
 
 \* K record(): the SessionStart hook writes the registry file (write_atomic, one file per session id: a later
 \* terminal replaces the pid in it). The session id is the one bin/kith claimed (--session-id, or the --resume id), or
@@ -887,6 +918,7 @@ NeverSettledOwn == "settled" \notin ev
 NeverOffTurnWrite == "offturn" \notin ev
 NeverLockedOut == "lockout" \notin ev
 NeverLockAlone == "lockalone" \notin ev
+NeverClearedWarm == "cleared" \notin ev
 NeverRestartLocked == "restartlocked" \notin ev
 NeverHeldGate == "held" \notin ev
 NeverHandoverLost == "lost" \notin ev

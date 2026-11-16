@@ -36,7 +36,7 @@ use crate::terminal::{
 use crate::{log, perms};
 
 pub(crate) struct HolderConfig {
-    /// The holder program. `None`: look for `$KITH_HOLDER_BIN`, then `kith-holder` beside this program.
+    /// The holder program. `None`: look for `$KITH_HOLDER_BIN`, then `kith-holder` beside this program ([`beside_this`]).
     pub exe: Option<PathBuf>,
     /// How long a holder with no connection and no process lives before it exits by itself.
     pub idle: Duration,
@@ -70,14 +70,19 @@ impl HolderConfig {
             let e = PathBuf::from(e);
             return e.is_file().then_some(e);
         }
-        let name = if cfg!(windows) {
+        beside_this(if cfg!(windows) {
             "kith-stub.exe"
         } else {
             "kith-stub"
-        };
-        let beside = std::env::current_exe().ok()?.parent()?.join(name);
-        beside.is_file().then_some(beside)
+        })
     }
+}
+
+/// A helper program where an installed kith keeps it (`kith_kernel::helpers::beside`: beside this program, symlinks
+/// resolved, or in the Mac app's CLI folder). The host's service names the holder for its launchd job through the same
+/// function, so the job's holder is the one this core connects to.
+fn beside_this(name: &str) -> Option<PathBuf> {
+    kith_kernel::helpers::beside_this(name)
 }
 
 impl Default for HolderConfig {
@@ -124,13 +129,11 @@ fn find_exe(cfg: &HolderConfig) -> Option<PathBuf> {
         let e = PathBuf::from(e);
         return e.is_file().then_some(e);
     }
-    let name = if cfg!(windows) {
+    beside_this(if cfg!(windows) {
         "kith-holder.exe"
     } else {
         "kith-holder"
-    };
-    let beside = std::env::current_exe().ok()?.parent()?.join(name);
-    beside.is_file().then_some(beside)
+    })
 }
 
 /// The holder secret: made once, owner-only, in the core folder.

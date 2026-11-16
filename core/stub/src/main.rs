@@ -1,7 +1,7 @@
 //! `kith-stub`: takes a conversation's writer lock, runs the engine as its child and holds the lock to the
 //! engine's exit (docs/plans/runtime-design.md section 4).
 //!
-//!     kith-stub --lock-dir <folder> --key <key> [--status-fd N] -- <engine argv...>
+//!     kith-stub --lock-dir <folder> --key <key> [--status-fd N] [--lock-alone] -- <engine argv...>
 //!     kith-stub --resident --lock-dir <folder> (--ctl-fd N | --ctl-pipe <path>) -- <engine argv...>
 //!
 //! The second form is for a warm engine: no lock at start; the holder takes and releases conversation locks per
@@ -16,6 +16,12 @@
 //! `--status-fd N` (Unix, N >= 3): before the engine starts the stub writes `locked\n` or `busy\n` to that inherited
 //! fd and closes it, so the engine never sees it. It makes "busy" unambiguous (the engine can itself exit 75);
 //! exit 75 stays as the fallback.
+//!
+//! `--lock-alone` (Unix): the run goes on under the lock alone, because no core answered its claim (bin/kith passes it when
+//! `kith-sessions` says so). After the lock is taken and before the engine starts, every host warm engine marked as having the
+//! conversation loaded is killed and waited for (`kith_stub::clear`); one running a host turn, or one not confirmed gone within
+//! about 5 s, makes the run busy (75, the status fd says `busy`) and the lock is let go. A resident stub records those markers
+//! (`loaded` / `forgot` on its control channel) and removes its own when its engine has exited.
 //!
 //! The lock folder is a required flag because this binary links no kith crate and so cannot know where a machine's
 //! data lives. The caller passes `<machine>/core/locks`, which the guest guard lists already deny (`core/**`).
@@ -56,6 +62,9 @@ use run_windows as run;
 const USAGE: u8 = 64;
 const LOCK_ERROR: u8 = 70;
 const BUSY: u8 = 75;
+/// How long a lock-alone run waits for a killed warm engine to be gone.
+#[cfg(unix)]
+const CLEAR_WITHIN: std::time::Duration = std::time::Duration::from_secs(5);
 
 enum Ctl {
     #[cfg_attr(windows, allow(dead_code))] // Unix only; parse refuses it on Windows
@@ -70,6 +79,9 @@ struct Args {
     key: String,
     status_fd: Option<i32>,
     ctl: Option<Ctl>,
+    /// Clear the conversation's marked warm engines after the take (one-shot only).
+    #[cfg_attr(windows, allow(dead_code))] // Unix only; parse refuses it on Windows
+    lock_alone: bool,
     engine: Vec<OsString>,
 }
 
@@ -78,6 +90,7 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
     let mut key = None;
     let mut status_fd = None;
     let mut resident = false;
+    let mut lock_alone = false;
     let mut ctl = None;
     while let Some(a) = args.next() {
         match a.to_str() {
@@ -91,6 +104,12 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
                 )
             }
             Some("--resident") => resident = true,
+            Some("--lock-alone") => {
+                if cfg!(windows) {
+                    return Err("--lock-alone is Unix only".into());
+                }
+                lock_alone = true;
+            }
             Some("--ctl-fd") => {
                 let fd: i32 = args
                     .next()
@@ -123,8 +142,8 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
                     return Err("no engine command after --".into());
                 }
                 if resident {
-                    if key.is_some() || status_fd.is_some() {
-                        return Err("--resident takes no --key or --status-fd".into());
+                    if key.is_some() || status_fd.is_some() || lock_alone {
+                        return Err("--resident takes no --key, --status-fd or --lock-alone".into());
                     }
                     if ctl.is_none() {
                         return Err(
@@ -143,6 +162,7 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
                     },
                     status_fd,
                     ctl,
+                    lock_alone,
                     engine,
                 });
             }
@@ -321,17 +341,52 @@ fn resident_main(args: Args) -> ExitCode {
         Err(code) => std::process::exit(code),
     };
     let dir = std::path::PathBuf::from(&args.lock_dir);
+    let marks = std::sync::Arc::new(resident::Marks::new());
+    let (served, serving) = (dir.clone(), marks.clone());
     std::thread::spawn(move || {
-        resident::serve(&dir, std::io::BufReader::new(r), w, |lock| {
-            if let Err(e) = write_holder(lock) {
-                eprintln!("kith-stub: warning: holder record not written: {e}");
-            }
-            // Per take, before `locked` is answered (runtime-design section 4, step 3): the lock is ours, the turn
-            // is not yet running.
-            redeem_run_token()
-        })
+        resident::serve_marking(
+            &served,
+            std::io::BufReader::new(r),
+            w,
+            |lock| {
+                if let Err(e) = write_holder(lock) {
+                    eprintln!("kith-stub: warning: holder record not written: {e}");
+                }
+                // Per take, before `locked` is answered (runtime-design section 4, step 3): the lock is ours, the turn
+                // is not yet running.
+                redeem_run_token()
+            },
+            &serving,
+        )
     });
-    std::process::exit(run::wait(engine))
+    let code = run::wait(engine);
+    // The engine is gone: nothing of ours has a conversation loaded any more.
+    marks.remove_all(&dir);
+    std::process::exit(code)
+}
+
+/// `--lock-alone`, with the lock held: clears the conversation's marked warm engines (`kith_stub::clear`). `Err` is the stub's
+/// exit code, after the status fd and the one line said why.
+#[cfg(unix)]
+fn clear_alone(args: &Args) -> Result<(), u8> {
+    use kith_stub::clear::{Cleared, clear};
+    let why = match clear(Path::new(&args.lock_dir), &args.key, CLEAR_WITHIN) {
+        Ok(Cleared::Clear) => return Ok(()),
+        Ok(Cleared::HostTurn(pid)) => {
+            format!("busy: a host turn is running in that agent's process (stub {pid}); try again")
+        }
+        Ok(Cleared::NotGone(pid)) => format!(
+            "busy: the agent's warm process (stub {pid}) has this conversation loaded and could not be stopped; try again"
+        ),
+        // No status word, as for any lock error: the reader takes exit 70 as it is.
+        Err(e) => {
+            eprintln!("kith-stub: the conversation's warm processes could not be checked: {e}");
+            return Err(LOCK_ERROR);
+        }
+    };
+    report(args.status_fd, "busy");
+    eprintln!("kith-stub: {why}");
+    Err(BUSY)
 }
 
 fn main() -> ExitCode {
@@ -339,7 +394,7 @@ fn main() -> ExitCode {
         Ok(a) => a,
         Err(why) => {
             eprintln!(
-                "kith-stub: {why}\nusage: kith-stub [--resident --ctl-fd N] --lock-dir <folder> [--key <key>] -- <engine argv...>"
+                "kith-stub: {why}\nusage: kith-stub [--resident --ctl-fd N] --lock-dir <folder> [--key <key>] [--lock-alone] -- <engine argv...>"
             );
             return ExitCode::from(USAGE);
         }
@@ -372,6 +427,15 @@ fn main() -> ExitCode {
             return ExitCode::from(LOCK_ERROR);
         }
     };
+    // Holding the lock and before the engine: the order is the rule (a clear before the lock could miss a host turn that wakes
+    // itself in between).
+    #[cfg(unix)]
+    if args.lock_alone
+        && let Err(code) = clear_alone(&args)
+    {
+        drop(lock);
+        return ExitCode::from(code);
+    }
     report(args.status_fd, "locked");
     if let Err(e) = write_holder(&lock) {
         // The record is a hint; the lock is the truth. Do not refuse to run over it.

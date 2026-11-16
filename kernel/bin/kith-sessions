@@ -13,6 +13,8 @@
   kith-sessions terminal SID PID [PERSON [AGENT]]  for an interactive run that resolve did not claim (a fresh one, on the
                                            --session-id bin/kith chose; KITH_RESUME): the claim, kind terminal, for PID (the
                                            launcher's shell, which then execs `run`, which gives it back); refused at once when held
+                                           (claim and terminal print `lock-alone` on stdout, resolve adds r_alone=1, when the owner's run
+                                           goes on under the conversation lock alone: bin/kith then starts the stub with --lock-alone)
   kith-sessions release SID                gives back SID's claim when its holder is the caller's parent (the launcher's shell, same start time),
                                            else exits 1 and touches nothing (`kith AGENT --held` after a resume: terminal.open takes the claim itself)
   kith-sessions proc PID PERSON AGENT     every non-owner run: a session-less `proc-PID.claim` naming the person, so the revoke sweep
@@ -109,6 +111,10 @@ def run_kind(env=os.environ):
 
 
 ONE_SHOTS = ('ask', 'schedule', 'helper')
+# Set when the core gave no answer and the owner's run goes on under the conversation lock alone (core_take). `claim` and
+# `terminal` then print `lock-alone`, `resolve` adds r_alone=1: bin/kith passes --lock-alone to the stub, which kills a host
+# warm process that has the conversation loaded before claude starts (designs/2026-11-16-offturn-lock-alone, rule L-clear).
+LOCK_ALONE = False
 
 
 def run_label(kind, env=os.environ):
@@ -338,6 +344,8 @@ def core_take(sid, pid, person=None, agent=None, lifecycle_owner=False, engine=N
         if person:
             sys.exit(f"kith: the session is busy until the Kith core answers: the Kith core is not answering, so {person}'s run cannot be claimed ({e.why}); try again when kith serve is running")
         print(f'kith: the Kith core is not answering ({e.why}); this run is held by the conversation lock alone', file=sys.stderr)
+        global LOCK_ALONE
+        LOCK_ALONE = True
         return None
     why = ans.get('refused')
     if why == 'held':
@@ -513,6 +521,8 @@ def claim_start(sid, pid, kind, wait, person=None, agent=None):
     if claim_live(taking):
         release_claims(pid)
         sys.exit('kith: that session is being taken over in the app right now; try again in a moment')
+    if LOCK_ALONE:
+        print('lock-alone')
 
 
 def proc_claim(pid, person, agent):
@@ -839,7 +849,7 @@ def resolve(agent, thread, claimer=None, wait=0):
     if cwd and not os.path.isdir(cwd):
         die(f'the session\'s folder {cwd} is gone')
     q = lambda s: "'" + s.replace("'", "'\\''") + "'"
-    print(f'r_sid={q(sid)} r_cwd={q(cwd)} r_from={q(sid)}')
+    print(f'r_sid={q(sid)} r_cwd={q(cwd)} r_from={q(sid)}' + (' r_alone=1' if LOCK_ALONE else ''))
 
 
 def idle_poll():

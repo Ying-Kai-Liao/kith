@@ -10,6 +10,8 @@
 //! holder -> stub                    stub -> holder
 //! take <conv-key> <claim-id>        locked <claim-id> | busy <claim-id> | error <claim-id> <reason>
 //! release <conv-key> <claim-id>     released <claim-id> | not-held <claim-id> | error <claim-id> <reason>
+//! loaded <conv-key>                 marked <conv-key> | error <conv-key> <reason>
+//! forgot <conv-key>                 unmarked <conv-key> | error <conv-key> <reason>
 //! anything else                     error - <reason>
 //! ```
 //!
@@ -28,6 +30,10 @@
 //! - The channel must be owner-only, and the stub checks it: on Unix `--ctl-fd` is a socket whose peer is our uid; on
 //!   Windows `--ctl-pipe` is `\\.\pipe\...` and its server process is the stub's parent.
 //! - A garbled, unknown or over-long line is answered `error` and serving goes on. Lock files are never deleted.
+//! - `loaded` records that the engine has the conversation loaded (`crate::loaded`: a marker named by this stub's pid and
+//!   start); the holder sends it before the engine loads the session, `forgot` when it lets the session go, and the stub's
+//!   exit removes what is left ([`Marks::remove_all`]). A one-shot stub on the lock alone kills a marked engine before its
+//!   own starts (`crate::clear`). Both are idempotent and take no lock.
 
 //!
 //! What the holder (M3-4) must do, because this design relies on it:
@@ -43,10 +49,12 @@
 //!
 //! In `WriterLock4.tla`, `StubTake` / `StubRelease` are the take and release arms of `handle()` below.
 
+use std::collections::BTreeSet;
 use std::io::{BufRead, Read, Write};
 use std::path::Path;
+use std::sync::Mutex;
 
-use crate::{Lock, Taken, take};
+use crate::{Lock, Taken, loaded, take};
 
 const MAX_LINE: usize = 1024;
 
@@ -56,6 +64,58 @@ struct Held {
     claim: String,
     // Dropping it closes the file and so releases the lock.
     _lock: Lock,
+}
+
+/// The conversations this stub marked loaded, removed at its exit.
+pub struct Marks {
+    /// This stub's marker name; `None` when its own start could not be read (then `loaded` answers `error`).
+    me: Option<String>,
+    keys: Mutex<BTreeSet<String>>,
+}
+
+impl Marks {
+    /// The marks of this process.
+    pub fn new() -> Self {
+        Self {
+            me: loaded::own_name(),
+            keys: Mutex::new(BTreeSet::new()),
+        }
+    }
+
+    /// Removes every marker this stub made. Called after the engine has exited, never before.
+    pub fn remove_all(&self, folder: &Path) {
+        let Some(me) = &self.me else { return };
+        for key in self
+            .keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+        {
+            let _ = loaded::unmark(folder, key, me);
+        }
+    }
+
+    fn set(&self, folder: &Path, key: &str, on: bool) -> Result<(), String> {
+        let me = self.me.as_deref().ok_or("own-start-unreadable")?;
+        let mut keys = self
+            .keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if on {
+            loaded::mark(folder, key, me).map_err(|e| e.to_string())?;
+            keys.insert(key.to_owned());
+        } else {
+            loaded::unmark(folder, key, me).map_err(|e| e.to_string())?;
+            keys.remove(key);
+        }
+        Ok(())
+    }
+}
+
+impl Default for Marks {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn claim_ok(claim: &str) -> bool {
@@ -73,9 +133,20 @@ fn claim_ok(claim: &str) -> bool {
 /// (the caller exits only after the engine does), never dropped here.
 pub fn serve(
     folder: &Path,
+    reader: impl BufRead,
+    writer: impl Write,
+    on_taken: impl Fn(&Lock) -> Result<(), String>,
+) {
+    serve_marking(folder, reader, writer, on_taken, &Marks::new());
+}
+
+/// [`serve`], with `loaded` / `forgot` recorded in `marks` (the stub removes them when its engine has exited).
+pub fn serve_marking(
+    folder: &Path,
     mut reader: impl BufRead,
     mut writer: impl Write,
     on_taken: impl Fn(&Lock) -> Result<(), String>,
+    marks: &Marks,
 ) {
     let mut held: Option<Held> = None;
     let mut buf = Vec::new();
@@ -89,7 +160,7 @@ pub fn serve(
             Ok(n) => n,
         };
         let reply = if buf.last() == Some(&b'\n') {
-            handle(folder, &buf[..n - 1], &mut held, &on_taken)
+            handle(folder, &buf[..n - 1], &mut held, &on_taken, marks)
         } else if buf.len() > MAX_LINE {
             // Drop the rest of the line so its tail is not read as a command.
             if !skip_line(&mut reader) {
@@ -136,12 +207,23 @@ fn handle(
     line: &[u8],
     held: &mut Option<Held>,
     on_taken: &impl Fn(&Lock) -> Result<(), String>,
+    marks: &Marks,
 ) -> String {
     let Ok(line) = std::str::from_utf8(line) else {
         return "error - not-utf8".into();
     };
     let line = line.strip_suffix('\r').unwrap_or(line);
     let parts: Vec<&str> = line.split(' ').collect();
+    if let [verb @ ("loaded" | "forgot"), key] = parts[..] {
+        if let Err(e) = crate::file_name(key) {
+            return format!("error - {}", one_line(&e.to_string()));
+        }
+        return match marks.set(folder, key, verb == "loaded") {
+            Ok(()) if verb == "loaded" => format!("marked {key}"),
+            Ok(()) => format!("unmarked {key}"),
+            Err(why) => format!("error {key} {}", one_line(&why)),
+        };
+    }
     let [verb, key, claim] = parts[..] else {
         return "error - expected: <take|release> <conv-key> <claim-id>".into();
     };

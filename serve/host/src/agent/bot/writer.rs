@@ -63,6 +63,24 @@ impl WarmStub for Stub {
     }
 }
 
+/// The stub's control channel, for the `loaded` / `forgot` marks.
+#[cfg(unix)]
+fn ctl_of(stub: &Stub) -> Arc<kith_acp::Ctl> {
+    stub.ctl()
+}
+#[cfg(not(unix))]
+fn ctl_of(stub: &Stub) -> Arc<kith_acp::Ctl> {
+    match *stub {}
+}
+
+/// The rows whose `loaded` marker goes with them: dropped (in `rows`, not in `want`) AND closed by the engine since its last load.
+/// A session loaded again (in `want`) is no longer closed, whether or not a sync saw it go: `close_reloadable` closes a session
+/// and the next turn loads the same one, with no sync in between.
+fn unmarks(closed: &mut HashSet<String>, rows: &HashSet<String>, want: &HashSet<String>) -> Vec<String> {
+    closed.retain(|sid| !want.contains(sid));
+    rows.iter().filter(|sid| !want.contains(*sid) && closed.contains(*sid)).cloned().collect()
+}
+
 /// How long a begin refused by a process that is being stopped waits before it tries again.
 pub(super) const RETRY_AFTER: Duration = Duration::from_secs(1);
 
@@ -299,8 +317,15 @@ pub(crate) struct Proc {
     pub(super) agent: String,
     /// `hostclaim.epoch` of `person`, read before the process started.
     pub(super) seen: i64,
-    /// The conversations that have a row.
+    /// The conversations that have a row, and a `loaded` marker of the stub (design 2026-11-16-offturn-lock-alone: with no core
+    /// answering, an owner run on the lock alone kills a process marked on its conversation before it starts).
     rows: HashSet<String>,
+    /// The stub's control channel: the marks go with the rows, also while a turn has the stub away.
+    ctl: Arc<kith_acp::Ctl>,
+    /// Sessions the engine itself closed (`session/close` answered): only these lose their `loaded` marker when the row goes. A
+    /// session the host merely stops serving (a new chat, `forget_loaded`, a fork) stays loaded in the engine, which can still
+    /// wake itself on it, so its marker stays until the stub exits.
+    pub(super) closed: HashSet<String>,
     /// Per session, the claim this process last ran a turn under (step 7): a claim of someone else above it means the session was
     /// written beside this process, and the next turn loads it again (see `CoreWriter::claim_since`).
     pub(super) ran: HashMap<String, i64>,
@@ -316,7 +341,20 @@ impl Proc {
         agent: String,
         seen: i64,
     ) -> Self {
-        Self { core, stub: Some(stub), pid, started, person, agent, seen, rows: HashSet::new(), ran: HashMap::new() }
+        let ctl = ctl_of(&stub);
+        Self {
+            core,
+            stub: Some(stub),
+            pid,
+            started,
+            person,
+            agent,
+            seen,
+            rows: HashSet::new(),
+            ctl,
+            closed: HashSet::new(),
+            ran: HashMap::new(),
+        }
     }
 }
 
@@ -440,25 +478,46 @@ impl Actor {
     }
 
     /// Brings `warm_procs` in step with the sessions this process has loaded: a row for each (registered before its load, see
-    /// [`Self::warm_session`]), none for a session it dropped. A registration the core refuses as revoked ends the process.
+    /// [`Self::warm_session`]), none for a session it dropped. A registration the core refuses as revoked ends the process. The
+    /// stub's `loaded` marker goes with each row, before the load too: a marker that cannot be made fails the load, because without
+    /// it a run on the lock alone would start beside this process. The marker is removed (`forgot`) only for a session the engine
+    /// closed ([`Proc::closed`]); a `forgot` that fails leaves a marker, which at worst stops an idle process.
     pub(super) async fn sync_warm(&mut self) -> Result<()> {
         let Some(conn) = self.conn.as_mut() else { return Ok(()) };
         let Some(proc) = conn.writer.as_mut() else { return Ok(()) };
         let want: HashSet<String> = conn.loaded.keys().cloned().collect();
+        let unmark = unmarks(&mut proc.closed, &proc.rows, &want);
         let (add, drop): (Vec<String>, Vec<String>) =
             (want.difference(&proc.rows).cloned().collect(), proc.rows.difference(&want).cloned().collect());
         if add.is_empty() && drop.is_empty() {
             return Ok(());
         }
-        let (core, pid, started, person, agent, seen) =
-            (proc.core.clone(), proc.pid, proc.started.clone(), proc.person.clone(), proc.agent.clone(), proc.seen);
+        let (core, pid, started, person, agent, seen, ctl) = (
+            proc.core.clone(),
+            proc.pid,
+            proc.started.clone(),
+            proc.person.clone(),
+            proc.agent.clone(),
+            proc.seen,
+            proc.ctl.clone(),
+        );
         let (a, d) = (add.clone(), drop.clone());
         let done = tokio::task::spawn_blocking(move || -> Result<(), String> {
             for sid in &a {
                 core.register_proc(pid, &started, &person, &agent, Some(sid), (!person.is_empty()).then_some(seen))?;
+                match ctl.loaded(sid) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(why)) => return Err(format!("the stub did not mark the session loaded: {why}")),
+                    Err(e) => return Err(format!("the stub did not mark the session loaded: {e}")),
+                }
             }
             for sid in &d {
                 core.proc_forget(pid, &started, sid)?;
+            }
+            for sid in &unmark {
+                if let Err(e) = ctl.forgot(sid).map_err(|e| e.to_string()).and_then(|r| r) {
+                    tracing::warn!(error = e, "the stub kept a loaded marker of a session the process let go");
+                }
             }
             Ok(())
         })
@@ -466,8 +525,12 @@ impl Actor {
         match done {
             Ok(()) => {
                 if let Some(proc) = self.conn.as_mut().and_then(|c| c.writer.as_mut()) {
+                    for sid in &add {
+                        proc.closed.remove(sid);
+                    }
                     proc.rows.extend(add);
                     for sid in drop {
+                        proc.closed.remove(&sid);
                         proc.rows.remove(&sid);
                     }
                 }

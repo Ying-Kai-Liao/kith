@@ -12,7 +12,10 @@
 //!   `acceptEdits` and is never the result; any other mode is not understood, so the launch is refused.
 //! - deny: the union. helpers: the intersection. trusted: AND. access (read, write, domains): the intersection, where a
 //!   folder survives as the narrower of two nested ones (the cover `held` in kith-auth gives: write covers read).
-//! - model: the agent's own (empty here). jobs, doors, env: empty in C0 (PR D fills them).
+//! - jobs, doors: the intersection of each person's own (`resolve` already cuts a person's to the package as it is now, and a
+//!   bot's to its owner's): the door a start would pass for every person (`kith-auth door --basis` asks every person), so the grant
+//!   lists no door a start would refuse. A person's untick later is seen by that start, not here.
+//! - model: the agent's own (empty here). env: empty (a service profile lent to every basis person waits for S-a).
 //! - the owner is not a room person: an answer with `owner: true`, or an empty id (which `is_owner` counts as the
 //!   owner and `resolve` answers as `acting()`), is a refusal.
 //! - a non-owner answer must carry `held: false`, `mode`, `deny`, `helpers`, `access` (read, write, domains) and
@@ -58,7 +61,7 @@ pub struct RoomGrant {
     pub domains: Vec<String>,
     /// The agent's own model: left empty so the launch picks the agent's.
     pub model: String,
-    /// Empty in C0.
+    /// The jobs ticked for every basis person, and those people's doors in common (see the module's rules).
     pub jobs: Vec<String>,
     pub doors: Vec<String>,
     pub env: Map<String, Value>,
@@ -129,6 +132,8 @@ struct Basis {
     read: BTreeSet<String>,
     write: BTreeSet<String>,
     domains: BTreeSet<String>,
+    jobs: BTreeSet<String>,
+    doors: BTreeSet<String>,
 }
 
 fn read_basis(r: &Value) -> Result<Basis, Refusal> {
@@ -187,6 +192,8 @@ fn read_basis(r: &Value) -> Result<Basis, Refusal> {
         read,
         write,
         domains: access_list("domains")?,
+        jobs: list(r.get("jobs"), "jobs")?,
+        doors: list(r.get("doors"), "doors")?,
     })
 }
 
@@ -218,11 +225,14 @@ pub fn room_grant(agent: &str, basis: &[Value]) -> Result<RoomGrant, Refusal> {
     let mut deny = BTreeSet::new();
     let mut trusted = true;
     let (mut helpers, mut domains, mut read, mut write) = (None, None, None, None);
+    let (mut jobs, mut doors) = (None, None);
     for b in &rows {
         deny.extend(b.deny.iter().cloned());
         trusted &= b.trusted;
         helpers = Some(meet(helpers, &b.helpers, same));
         domains = Some(meet(domains, &b.domains, same));
+        jobs = Some(meet(jobs, &b.jobs, same));
+        doors = Some(meet(doors, &b.doors, same));
         read = Some(meet(read, &b.read, narrow));
         write = Some(meet(write, &b.write, narrow));
     }
@@ -237,8 +247,8 @@ pub fn room_grant(agent: &str, basis: &[Value]) -> Result<RoomGrant, Refusal> {
         write: list(write),
         domains: list(domains),
         model: String::new(),
-        jobs: vec![],
-        doors: vec![],
+        jobs: list(jobs),
+        doors: list(doors),
         env: Map::new(),
     })
 }
@@ -302,7 +312,7 @@ pub fn launch_answer(
         "person": id, "name": "", "lang": "", "tz": "", "model": grant.model,
         "mode": grant.mode, "deny": grant.deny, "trusted": grant.trusted, "helpers": grant.helpers,
         "access": {"read": grant.read, "write": grant.write, "domains": grant.domains},
-        "was": [], "rooms": [], "env": {},
+        "jobs": grant.jobs, "doors": grant.doors, "was": [], "rooms": [], "env": {},
     });
     // Absent when there is no cap (a present null would read as the text "None").
     for (key, value) in [("budget", budget), ("budget_agent", budget_agent)] {
