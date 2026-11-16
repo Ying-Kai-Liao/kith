@@ -613,8 +613,12 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
         // owner is told it is not done everywhere, and nothing of it reaches the cloud or the core until they try again.
         Err(e) if revoke && hub.store.person(id).is_some() && hub.store.bot_guest_of_person(id).is_none() => {
             tracing::warn!(error = format!("{e:#}"), person = id, "a revoke without the core: cut off here only");
-            // Under the given id now; a former one is owed and cut once the core answers.
-            cut_off_held(hub, id).await;
+            // Under the given id now; a former one is owed and cut once the core answers. Under the lock the undo takes,
+            // as `local_revoke`'s failure branch: an undo between the cut and the owed row would leave the row behind it.
+            {
+                let _w = AUTH_WRITES.lock().await;
+                cut_off_held(hub, id).await;
+            }
             bail!(
                 "{id} was cut off on this computer: their turns were stopped and their devices set aside. The Kith core \
                  isn't running, so the revoke is not complete yet; start it and revoke again to finish."

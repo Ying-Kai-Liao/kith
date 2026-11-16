@@ -245,3 +245,18 @@ async fn an_undo_before_the_owed_cut_is_paid_restores_and_clears_it() {
     Due::default().tick(&r.hub, true).await;
     assert!(held(&r, "sam") && !set_aside(&r, "sam"), "undone, and kept so");
 }
+
+/// The cloud's undo (`apply_revoked`'s `--unrevoke`, from `pull`) clears an owed cut in its own locked section too, under
+/// every id: a row kept under the old id is dropped by an undo of the new one.
+#[tokio::test]
+async fn the_clouds_undo_clears_an_owed_cut_too() {
+    let (r, core) = switched_with_sam().await;
+    core.ask("people.renamePerson", json!({"id": "sam", "to": "samuel"})).expect("rename");
+    members::locked_run(&r.bin, &["handle", "samuel", "kith", "user_sam"]).await.unwrap();
+    let cut = members::apply_revoked(&r.hub, Some(&r.bin), Some(&["user_sam".to_owned()])).await.unwrap();
+    assert_eq!(cut.cut, ["samuel"], "the cloud's revoke applied");
+    crate::remote::core_revokes::owe_cut(&r.hub, "sam");
+    let undone = members::apply_revoked(&r.hub, Some(&r.bin), Some(&[])).await.unwrap();
+    assert_eq!(undone.restored, ["samuel"]);
+    assert!(owed(&r.hub).is_empty(), "the cloud's undo cleared the row kept under the old id");
+}

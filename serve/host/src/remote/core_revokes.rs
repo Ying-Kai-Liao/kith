@@ -48,7 +48,8 @@ impl Due {
     /// One tick of the poll. `changed`: the core's revision moved since the last tick. Pays the owed cuts, then does
     /// nothing more unless switched.
     pub(crate) async fn tick(&mut self, hub: &Arc<Hub>, changed: bool) {
-        // Before the switch test: a row kept while switched is still owed after a rollback (the id then reads alone).
+        // Before the switch test, so a row kept while switched is settled after a rollback too: the id then reads alone,
+        // so it is cut again by that id and the row dropped; its former ids are given up (kith-auth knows no rename).
         pay_owed(hub).await;
         if !switched_now() {
             self.last = None;
