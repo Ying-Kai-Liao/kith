@@ -8,10 +8,11 @@
 # set SYNC below to the commit you checked (and in .claude/skills/thread-writers/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below. It is the L-clear commit (design 2026-11-16-offturn-lock-alone) on origin/rust-rebuild after M3 P9:
+# The commit at which the model was confirmed to describe the files below: origin/rust-rebuild after #1015 (rule K, the host
+# runner of the core's queued turns) and #1016 (L-clear), re-read before the claims step runs on a Mac:
 # every change to the files below up to it re-read, the claim files as before (#324) and the core writer (CoreWriter in
 # Threads.tla: the claim is a core row, the stub's lock the second layer). What that read did not cover is in the skill.
-SYNC=b3f38db7668dbe192907daa204b8b0c8578713ff
+SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
@@ -45,6 +46,11 @@ FILES=(
   core/runtime/src/conversations/claims.rs   # claim_next, end_gone, the one live row per conversation
   core/runtime/src/conversations/external.rs # claim.external / claim_terminal: blocked_in (warm process), takeover
   core/runtime/src/conversations/warm.rs     # warm_procs: kill_at, adopt
+  core/runtime/src/conversations/reconcile.rs # steps 5 and 7: rule K (a core restart keeps the host's live claims), not modelled here (Claims4)
+  core/runtime/src/cutover/modules/claims.rs # the claims step: the takers' tombstone, then the files re-read, then the marker and Switched (the switch moment)
+  serve/host/src/terminal/core_holders.rs # Writer mode readers: writer_folders, terminal_claim (the take-over's claim), Stop by claim id
+  serve/host/src/terminal/core_claims.rs  # take_over / live_settled: the Writer-mode take-over through the core row
+  serve/host/src/routines/core_runs.rs # the host runner: the core's queued turns begun by id on a fresh session (outside the thread)
   core/runtime/src/terminal.rs        # terminal.open: the --held claim and the stub's lock
   kernel/lib/kith_claims.py           # the kernel takers' route to the core claims
   kernel/lib/kith-core.sh             # kith_held_launch
