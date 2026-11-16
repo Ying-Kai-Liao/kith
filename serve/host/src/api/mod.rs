@@ -67,6 +67,8 @@ mod room_pointer_tests;
 #[cfg(test)]
 mod room_points_props;
 #[cfg(test)]
+mod room_rename_tests;
+#[cfg(test)]
 mod room_secrets_props;
 #[cfg(test)]
 mod room_turn_tests;
