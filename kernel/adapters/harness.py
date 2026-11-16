@@ -68,7 +68,9 @@ class Run:
         self.harness, self.task, self.output, self.mode = harness, task, output, permission_mode or ''
         self.prompt_file = os.environ['KITH_RUN_PROMPT']
         self.prompt = Path(self.prompt_file).read_text()
-        self.dirs = [d for d in os.environ.get('KITH_RUN_DIRS', '').split('\n') if d]
+        # Real paths, once each: codex refuses to start any command when a writable root has a symlink in it
+        # (~/.kith/cli/current, ~/kith -> the SSD), which leaves the run with no shell at all.
+        self.dirs = list(dict.fromkeys(os.path.realpath(d) for d in os.environ.get('KITH_RUN_DIRS', '').split('\n') if d))
         self.model, self.effort = os.environ.get('KITH_MODEL', ''), os.environ.get('KITH_EFFORT', '')
         self.global_skills = os.environ.get('KITH_RUN_GLOBAL_SKILLS') == '1'
         self.mcp = mcp_servers()
