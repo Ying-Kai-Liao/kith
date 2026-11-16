@@ -30,7 +30,7 @@ FILES=(
   core/runtime/src/holder_link_tests.rs # (M3-12) the holder link's tests (the link itself is holder_link.rs)
   core/kernel/src/procstart.rs        # (M3-12, K2) orphan_group, same_process, comparable, claim_victims: what "the process is gone" means
   core/procstart                      # (M3-12) the stamp crate behind it (Linux b<boot_id>:<ticks>, unknown cross-form)
-  core/runtime/src/cutover/modules/claims.rs # (#1010) the claims step: files imported as external rows, tombstone then marker then re-read, rollback refuses live claims
+  core/runtime/src/cutover/modules/claims.rs # (#1010) the claims step: files imported as external rows, tombstone then files re-read then marker and Switched, rollback refuses live claims
   serve/host/src/terminal             # (M3-12, M3-10f, P6-P9) core_writer.rs, warm_stub.rs, core_holders.rs, core_claims.rs, core_strays.rs: in Writer mode the core row and the stub's lock are the writer (no claim file); claim.rs, sync.rs, registry.rs the Files mode
 )
 paths=()

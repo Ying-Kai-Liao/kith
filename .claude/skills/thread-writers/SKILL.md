@@ -74,7 +74,8 @@ write the thread, so `Threads.tla` and `base.consts` are unchanged:
   is taken back by its taker. A refused re-read leaves the tombstone down and the step `stepping`: every taker fails closed
   (asks a core that refuses) until the step is run again or rolled back (`kith rollback claims` removes the tombstone).
   The safety rests on the import and that re-read, not on the stub's lock: a `-c` run starts under the stub only when it has a
-  session id (bin/kith), otherwise it holds only its proc claim, which the import makes a row of.
+  session id (bin/kith); otherwise an owner's run holds no claim at all, and a person's run holds its proc claim, which the import
+  makes a row of.
   The other file takers, and why they are safe today without that re-check:
   - the core's `terminal.open` Files path (`core/runtime/src/terminal.rs`, `claim::take` after one `switched` read, no re-check
     after the link) runs inside the daemon, which holds the core's lifetime lock; the step needs that lock, so the two never
