@@ -242,6 +242,10 @@ jobs:
               - 'serve/host/src/agent/bot/room_turn.rs'
               - 'serve/host/src/runauth/room.rs'
               - 'core/kernel/src/launch/room.rs'
+              # RoomsRename.tla: a join, a removal and a leave over every id held_under returns (R-rename)
+              - 'serve/host/src/chat/room_people.rs'
+              - 'serve/host/src/store/room_people.rs'
+              - 'serve/host/src/remote/core_revokes.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ model of the holder lease and the code it covers (the list in the holder-lease skill).
             lease:
