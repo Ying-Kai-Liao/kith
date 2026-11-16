@@ -742,10 +742,11 @@ actor_test! {
         rig.w().kill_procs_on_turn = 1;
         rig.send("a", "after the restart").await;
         rig.until("the reply", |r| r.replied("a", "after the restart")).await;
+        // The reply lands before the end report: wait for it (a slow runner reads `running` here otherwise).
+        rig.until("its end", |r| r.w().turns.get(1).is_some_and(|t| t.1 == "done")).await;
         let w = rig.w();
         assert!(w.reports.iter().any(|(k, _)| k == "exit"), "the first claim was reported: {:?}", w.reports);
         assert_eq!(w.turns.len(), 2, "no turn made twice");
-        assert_eq!(w.turns[1].1, "done");
     }
 }
 
