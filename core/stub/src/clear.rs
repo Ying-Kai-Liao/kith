@@ -117,9 +117,7 @@ fn group_runs(group: libc::pid_t) -> Option<bool> {
             continue;
         };
         // After the command's closing parenthesis: state, ppid, pgrp.
-        let Some(rest) = stat.rfind(')').map(|i| &stat[i + 1..]) else {
-            return None;
-        };
+        let rest = stat.rfind(')').map(|i| &stat[i + 1..])?;
         let mut fields = rest.split_whitespace();
         let (Some(state), Some(_), Some(pgrp)) = (fields.next(), fields.next(), fields.next())
         else {
