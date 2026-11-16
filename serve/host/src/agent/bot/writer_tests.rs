@@ -1003,3 +1003,22 @@ mod units {
         assert_eq!(chain_root(Path::new("kw-other"), "conv-1"), None, "another host's state");
     }
 }
+
+/// A loaded marker goes only with a session the engine closed since it last loaded it (architect MUST 1 of #1016): close, load the
+/// same session again (no sync in between, as `close_reloadable` then the next turn), then a new chat drops it: the marker stays.
+#[test]
+fn a_marker_goes_only_with_a_session_closed_since_its_last_load() {
+    use std::collections::HashSet;
+    let set = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<HashSet<String>>();
+    let rows = set(&["s"]);
+    let mut closed = HashSet::new();
+    // Closed, and the sync sees it go: unmarked.
+    closed.insert("s".to_owned());
+    assert_eq!(super::unmarks(&mut closed.clone(), &rows, &set(&[])), ["s"]);
+    // Closed, then loaded again before any sync: no longer closed, and a later drop (a new chat) keeps the marker.
+    assert!(super::unmarks(&mut closed, &rows, &set(&["s"])).is_empty());
+    assert!(closed.is_empty());
+    assert!(super::unmarks(&mut closed, &rows, &set(&[])).is_empty(), "the engine still has it loaded");
+    // Never closed (a fork, forget_loaded): kept.
+    assert!(super::unmarks(&mut HashSet::new(), &set(&["s", "t"]), &set(&["t"])).is_empty());
+}

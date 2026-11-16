@@ -73,6 +73,14 @@ fn ctl_of(stub: &Stub) -> Arc<kith_acp::Ctl> {
     match *stub {}
 }
 
+/// The rows whose `loaded` marker goes with them: dropped (in `rows`, not in `want`) AND closed by the engine since its last load.
+/// A session loaded again (in `want`) is no longer closed, whether or not a sync saw it go: `close_reloadable` closes a session
+/// and the next turn loads the same one, with no sync in between.
+fn unmarks(closed: &mut HashSet<String>, rows: &HashSet<String>, want: &HashSet<String>) -> Vec<String> {
+    closed.retain(|sid| !want.contains(sid));
+    rows.iter().filter(|sid| !want.contains(*sid) && closed.contains(*sid)).cloned().collect()
+}
+
 /// How long a begin refused by a process that is being stopped waits before it tries again.
 pub(super) const RETRY_AFTER: Duration = Duration::from_secs(1);
 
@@ -444,6 +452,7 @@ impl Actor {
         let Some(conn) = self.conn.as_mut() else { return Ok(()) };
         let Some(proc) = conn.writer.as_mut() else { return Ok(()) };
         let want: HashSet<String> = conn.loaded.keys().cloned().collect();
+        let unmark = unmarks(&mut proc.closed, &proc.rows, &want);
         let (add, drop): (Vec<String>, Vec<String>) =
             (want.difference(&proc.rows).cloned().collect(), proc.rows.difference(&want).cloned().collect());
         if add.is_empty() && drop.is_empty() {
@@ -459,7 +468,6 @@ impl Actor {
             proc.ctl.clone(),
         );
         let (a, d) = (add.clone(), drop.clone());
-        let unmark: Vec<String> = drop.iter().filter(|sid| proc.closed.contains(*sid)).cloned().collect();
         let done = tokio::task::spawn_blocking(move || -> Result<(), String> {
             for sid in &a {
                 core.register_proc(pid, &started, &person, &agent, Some(sid), (!person.is_empty()).then_some(seen))?;
