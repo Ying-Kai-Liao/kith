@@ -32,9 +32,24 @@ static BINARY_IDENTITY: OnceLock<(String, String)> = OnceLock::new();
 /// Snapshot before serving: reading the path again after an update would identify
 /// the replacement on disk rather than this running process.
 pub fn capture_binary_identity() -> Result<()> {
+    use std::io::Read as _;
     let exe = current_exe()?;
+    // In chunks: a debug build is over 500 MB, and the e2e tests start several hosts at once.
+    let mut file = std::fs::File::open(&exe)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = match file.read(&mut buf) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            read => read?,
+        };
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     let mut hash = String::with_capacity(64);
-    for byte in Sha256::digest(std::fs::read(&exe)?) {
+    for byte in hasher.finalize() {
         write!(hash, "{byte:02x}")?;
     }
     let _ = BINARY_IDENTITY.set((exe.to_string_lossy().into_owned(), hash));
