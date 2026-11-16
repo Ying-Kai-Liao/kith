@@ -536,7 +536,7 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     // the pull, so this host stays out of sync instead of serving on access it couldn't apply.
     let changed = super::members::apply_revoked(bin.as_deref(), state.revoked.as_deref()).await?;
     for person in changed.cut {
-        crate::api::people::cut_off(hub, &person).await;
+        crate::api::people::cut_off_held(hub, &person).await;
     }
     for person in changed.restored {
         crate::api::people::restored(hub, &person);

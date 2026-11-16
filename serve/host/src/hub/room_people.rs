@@ -4,24 +4,26 @@ use super::Hub;
 use crate::LockExt;
 use crate::chat::group::membership_lock;
 use crate::chat::room_people::{Seat, room_agents};
+use crate::remote::core_revokes::Held;
 use crate::store::Entry;
 use anyhow::Result;
 use serde_json::{Value, json};
 
 impl Hub {
-    /// `person` joins (`join`) or leaves `room`: the `personJoined` / `personLeft` line and the stay's row land in one
-    /// store transaction, then the line is sent like any entry. `None` when nothing changed (already in, or not in).
+    /// The person `held` joins (`join`) or leaves `room`: the `personJoined` / `personLeft` line and the stay's row land
+    /// in one store transaction, then the line is sent like any entry. `None` when nothing changed (already in under any
+    /// of their ids, or not in under any). A join writes the stay under their first id; a leave ends it under every id.
     ///
     /// The caller holds `chat::group::membership_lock`, so this is the lock order every room edit uses (membership,
     /// then emit).
     pub(crate) fn commit_room_person(
         &self,
         room: &str,
-        person: &str,
+        held: &Held,
         join: bool,
         notice: &Value,
     ) -> Result<Option<Entry>> {
-        self.commit_room_person_for(room, person, join, notice, None)
+        self.commit_room_person_for(room, held, join, notice, None)
     }
 
     /// [`Self::commit_room_person`] for an invite's room part: `part` is the invite whose done mark for `room` lands in
@@ -29,16 +31,16 @@ impl Hub {
     pub(crate) fn commit_room_person_for(
         &self,
         room: &str,
-        person: &str,
+        held: &Held,
         join: bool,
         notice: &Value,
         part: Option<&str>,
     ) -> Result<Option<Entry>> {
         let _g = self.emit_lock.locked();
         let written = if join {
-            self.store.join_room_person_for(room, person, notice, part)?
+            self.store.join_room_person_for(room, (&held.first, &held.ids), notice, part)?
         } else {
-            self.store.leave_room_person(room, person, notice)?
+            self.store.leave_room_held(room, &held.ids, notice)?
         };
         if let Some(e) = &written {
             let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));
@@ -48,7 +50,7 @@ impl Hub {
 
     /// A person's post in `room`, written with the check that lets it in as ONE step (rule 4): under the membership
     /// lock (the one every join, leave and room edit holds) and the emit lock, `person` still has the open stay `seat`
-    /// the live check found and the room still has the agents it asked about, and only then is the line appended,
+    /// (under `seat.under`, whichever of their ids that is) the live check found and the room still has the agents it asked about, and only then is the line appended,
     /// stamped with the room's gen as it is in that same step. So a post can't land after its author was taken out,
     /// nor after a re-add (a new stay has a new `joined_gen`: R4).
     ///
@@ -82,7 +84,7 @@ impl Hub {
         {
             return Ok((e, false));
         }
-        if self.store.room_open_seat(room, person) != Some(seat.joined) {
+        if self.store.room_open_seat(room, &seat.under) != Some(seat.joined) {
             return Err(PostRefused::NotInRoom.into());
         }
         if room_agents(&self.store, room).ok().as_ref() != Some(&seat.agents) {
@@ -96,7 +98,7 @@ impl Hub {
         }
         // The stay and the revoke are checked again in the store's own transaction with the append, so a revoke
         // recorded between the live check and here refuses the post too.
-        let Some(e) = self.store.insert_room_post(room, person, seat.joined, data)? else {
+        let Some(e) = self.store.insert_room_post(room, (&seat.under, &seat.ids, seat.joined), data)? else {
             return Err(PostRefused::NotInRoom.into());
         };
         let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));

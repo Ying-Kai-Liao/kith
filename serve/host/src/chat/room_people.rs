@@ -10,12 +10,19 @@
 //!
 //! The room's people are Kai's to set (owner-only methods in `api/room_people.rs`), and the whole feature is behind the
 //! host setting [`FLAG`], on unless Kai sets it off.
+//!
+//! A person is one identity across every id the core lists for them (R-rename, design 2026-11-16-rooms-rename): on a
+//! switched Mac a rename leaves the host's rows under the old id. So every step here first reads the person's ids
+//! ([`held`], an async core call, before the membership lock): a join writes the stay under their FIRST id and checks
+//! "already in" over all of them, and a removal or a leave ends every stay and marks every waiting invite room part
+//! under any of them. Two joins that read the ids on either side of a rename still write one stay (`RoomsRename.tla`).
 
 use super::group::membership_lock;
 use crate::api::roles::may_use;
 use crate::hub::Hub;
+use crate::remote::core_revokes::{Held, held};
 use crate::store::{Stay, Store};
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -25,10 +32,7 @@ use std::sync::Arc;
 pub const FLAG: &str = "rooms.people";
 
 pub fn enabled(store: &Store) -> bool {
-    // Not on a switched Mac yet: after a rename the core's rows stay under the old id, so B's stays and E's invite marks
-    // could key on different ids (the architect's E review; `held_under` is the fix, owed before this opens there).
     !matches!(store.kv_get(FLAG).as_deref().map(str::trim), Some("off" | "false" | "0"))
-        && !crate::api::authority::switched()
 }
 
 /// What a join or a leave did: the room's gen after it, and whether it changed anything (a repeat does not).
@@ -73,24 +77,33 @@ pub fn people_and_gen(store: &Store, room: &str) -> (Vec<String>, i64) {
 }
 
 /// What a live check found: the open stay's `joined_gen` (the gen an entry must have come from for the person to see
-/// it) and the room's agents the check asked about.
+/// it), the room's agents the check asked about, the id the stay is under, and every id of the person.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Seat {
     pub joined: i64,
     pub agents: Vec<String>,
+    /// The id the open stay is under (the person's first id): what a synchronous re-check under the lock looks at.
+    pub under: String,
+    /// Every id of the person: a revoke that set any of them aside refuses a write.
+    pub ids: Vec<String>,
 }
 
-/// [`room_member_may`] with what it found. `None` when `person` has no open stay, the room takes no people, or any
-/// agent in it is a no (or could not be asked). Never stored.
+/// [`room_member_may`] with what it found. `None` when `person` has no open stay under any of their ids, the room
+/// takes no people, any agent in it is a no (or could not be asked), or their ids could not be read. Never stored.
 pub async fn live_seat(store: &Store, person: &str, room: &str) -> Option<Seat> {
-    let joined = store.room_open_seat(room, person)?;
+    live_seat_held(store, person, &held(person).await.ok()?, room).await
+}
+
+/// [`live_seat`] with the person's ids already read (one read for many rooms: `myRooms`).
+pub async fn live_seat_held(store: &Store, person: &str, held: &Held, room: &str) -> Option<Seat> {
+    let (under, joined) = store.room_open_stay(room, &held.ids)?;
     let agents = room_agents(store, room).ok()?;
     for agent in &agents {
         if !may_use(person, agent).await {
             return None;
         }
     }
-    Some(Seat { joined, agents })
+    Some(Seat { joined, agents, under, ids: held.ids.clone() })
 }
 
 /// Whether `person` may be in `room` right now: an open stay AND the live may(person, agent) for every agent in it,
@@ -100,8 +113,9 @@ pub async fn room_member_may(store: &Store, person: &str, room: &str) -> bool {
     live_seat(store, person, room).await.is_some()
 }
 
-fn notice(store: &Store, person: &str, joined: bool) -> Value {
-    let name = store.person(person).map_or_else(|| person.to_owned(), |p| p.name);
+fn notice(store: &Store, held: &Held, joined: bool) -> Value {
+    let person = held.first.as_str();
+    let name = held.ids.iter().find_map(|id| store.person(id)).map_or_else(|| person.to_owned(), |p| p.name);
     let (kind, text) = if joined {
         ("personJoined", format!("{name} joined · sees this room from now on"))
     } else {
@@ -134,6 +148,8 @@ pub async fn add_person_for(hub: &Arc<Hub>, room: &str, person: &str, part: Opti
         bail!("People in rooms aren't turned on.");
     }
     let person = check_person(person)?;
+    // Every id of theirs, read before the lock: the stay goes under the first, and "already in" looks under all.
+    let held = held(person).await.context("couldn't read who they are from the Kith core; try again")?;
     // The live checks are async and the lock is not held across them: the room's agents are read again under it, and a
     // room that changed meanwhile is checked again.
     for _ in 0..3 {
@@ -143,20 +159,28 @@ pub async fn add_person_for(hub: &Arc<Hub>, room: &str, person: &str, part: Opti
                 bail!("{person} isn't granted {agent}; a room's people need every agent in it.");
             }
         }
-        if let Some(change) = commit(hub, room, person, true, Some(&agents), part)? {
+        if let Some(change) = commit(hub, room, &held, true, Some(&agents), part)? {
             return Ok(change);
         }
     }
     bail!("The room changed while it was checked; try again.");
 }
 
-/// Takes `person` out of `room`: one step, one new gen. Always allowed (also while the setting is off); someone who is
-/// not in the room changes nothing and bumps no gen.
-pub fn remove_person(hub: &Hub, room: &str, person: &str) -> Result<Change> {
+/// Takes `person` out of `room`: one step, one new gen, ending their stay under whichever of their ids it is (and any
+/// waiting invite room part under any of them). Always allowed (also while the setting is off); someone who is not in
+/// the room changes nothing and bumps no gen. Refused when their ids can't be read: a removal that missed an id would
+/// leave them in while it said they were out.
+pub async fn remove_person(hub: &Hub, room: &str, person: &str) -> Result<Change> {
+    let held = held(person.trim()).await.context("couldn't read who they are from the Kith core; try again")?;
+    remove_held(hub, room, &held)
+}
+
+/// [`remove_person`] with the person's ids already read.
+pub fn remove_held(hub: &Hub, room: &str, held: &Held) -> Result<Change> {
     if hub.store.bot(room)?.is_none_or(|r| r.deleted || !r.config.is_group()) {
         bail!("That isn't a group room.");
     }
-    Ok(commit(hub, room, person.trim(), false, None, None)?
+    Ok(commit(hub, room, held, false, None, None)?
         .unwrap_or(Change { room_gen: hub.store.room_gen(room), changed: false }))
 }
 
@@ -165,7 +189,7 @@ pub fn remove_person(hub: &Hub, room: &str, person: &str) -> Result<Change> {
 fn commit(
     hub: &Hub,
     room: &str,
-    person: &str,
+    held: &Held,
     join: bool,
     agents: Option<&[String]>,
     part: Option<&str>,
@@ -176,10 +200,10 @@ fn commit(
     {
         return Ok(None);
     }
-    let line = notice(&hub.store, person, join);
+    let line = notice(&hub.store, held, join);
     let written = match part {
-        None => hub.commit_room_person(room, person, join, &line)?,
-        Some(_) => hub.commit_room_person_for(room, person, join, &line, part)?,
+        None => hub.commit_room_person(room, held, join, &line)?,
+        Some(_) => hub.commit_room_person_for(room, held, join, &line, part)?,
     };
     Ok(Some(match written {
         Some(e) => Change { room_gen: e.seq, changed: true },
