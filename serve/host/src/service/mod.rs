@@ -112,16 +112,20 @@ fn holder_wanted() -> bool {
 }
 
 /// The words in front of the host in a job that runs it under the holder: `kith-holder supervise ... --`. The holder
-/// program is `$KITH_HOLDER_BIN` or `kith-holder` beside this program (where the daemon looks too); the folder and the
-/// secret file are the core's own, so the holder this starts is the one the daemon says hello to. `None`: not opted in.
+/// program is `$KITH_HOLDER_BIN`, else `kith-holder` where the host finds kith-stub (`kernel::find_holder`: beside this
+/// program, in the Mac app's CLI folder, beside the `kith` on PATH); the folder and the secret file are the core's own,
+/// so the holder this starts is the one the daemon says hello to. `None`: not opted in.
 fn holder_words() -> Result<Option<Vec<String>>> {
     if !holder_wanted() {
         return Ok(None);
     }
     let name = if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" };
-    let exe = match std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
-        Some(e) => PathBuf::from(e),
-        None => current_exe().context("locating the kith-serve binary")?.with_file_name(name),
+    let exe = if let Some(e) = std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
+        PathBuf::from(e)
+    } else {
+        let host = current_exe().context("locating the kith-serve binary")?;
+        crate::kernel::find_holder(Some(&host), crate::agent::backends::which("kith").as_deref())
+            .unwrap_or_else(|| host.with_file_name(name))
     };
     if !exe.is_file() {
         bail!(

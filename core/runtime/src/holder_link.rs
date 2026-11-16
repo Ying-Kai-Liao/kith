@@ -36,7 +36,7 @@ use crate::terminal::{
 use crate::{log, perms};
 
 pub(crate) struct HolderConfig {
-    /// The holder program. `None`: look for `$KITH_HOLDER_BIN`, then `kith-holder` beside this program.
+    /// The holder program. `None`: look for `$KITH_HOLDER_BIN`, then `kith-holder` beside this program ([`beside_this`]).
     pub exe: Option<PathBuf>,
     /// How long a holder with no connection and no process lives before it exits by itself.
     pub idle: Duration,
@@ -70,14 +70,27 @@ impl HolderConfig {
             let e = PathBuf::from(e);
             return e.is_file().then_some(e);
         }
-        let name = if cfg!(windows) {
+        beside_this(if cfg!(windows) {
             "kith-stub.exe"
         } else {
             "kith-stub"
-        };
-        let beside = std::env::current_exe().ok()?.parent()?.join(name);
-        beside.is_file().then_some(beside)
+        })
     }
+}
+
+/// The helper program `name` where an installed kith keeps it: beside this program, symlinks resolved (a release's
+/// `bin/` holds kith, kith-stub and kith-holder together), or in the Mac app's CLI folder beside it (the app runs
+/// `Resources/kith-serve`; its helpers are in `Resources/kith/bin/`). The host looks for kith-stub the same way.
+fn beside_this(name: &str) -> Option<PathBuf> {
+    beside(&std::env::current_exe().ok()?, name)
+}
+
+fn beside(exe: &Path, name: &str) -> Option<PathBuf> {
+    let exe = exe.canonicalize().unwrap_or_else(|_| exe.to_path_buf());
+    let dir = exe.parent()?;
+    [dir.join(name), dir.join("kith/bin").join(name)]
+        .into_iter()
+        .find(|p| p.is_file())
 }
 
 impl Default for HolderConfig {
@@ -124,13 +137,11 @@ fn find_exe(cfg: &HolderConfig) -> Option<PathBuf> {
         let e = PathBuf::from(e);
         return e.is_file().then_some(e);
     }
-    let name = if cfg!(windows) {
+    beside_this(if cfg!(windows) {
         "kith-holder.exe"
     } else {
         "kith-holder"
-    };
-    let beside = std::env::current_exe().ok()?.parent()?.join(name);
-    beside.is_file().then_some(beside)
+    })
 }
 
 /// The holder secret: made once, owner-only, in the core folder.

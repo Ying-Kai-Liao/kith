@@ -817,3 +817,32 @@ fn a_lock_stuck_turn_ends_its_claim_once() {
     assert_eq!(again.started.as_deref(), Some("e1"));
     rig.finish(&[]);
 }
+
+/// The holder and the stub are found where an install keeps them: beside the program through its symlink (install.sh
+/// links only `kith` into ~/.local/bin), and in the Mac app's CLI folder beside the host (Resources/kith/bin).
+#[cfg(unix)]
+#[test]
+fn helpers_are_found_beside_the_real_program_and_in_the_app_bundle() {
+    let t = std::env::temp_dir().join(format!("kith-beside-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&t);
+    let (cli, local) = (t.join("cli/0.1.0/bin"), t.join(".local/bin"));
+    std::fs::create_dir_all(&cli).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+    std::fs::write(cli.join("kith"), "").unwrap();
+    std::os::unix::fs::symlink(cli.join("kith"), local.join("kith")).unwrap();
+    assert_eq!(super::beside(&local.join("kith"), "kith-holder"), None);
+    std::fs::write(cli.join("kith-holder"), "").unwrap();
+    assert_eq!(
+        super::beside(&local.join("kith"), "kith-holder"),
+        Some(cli.canonicalize().unwrap().join("kith-holder"))
+    );
+    let res = t.join("Kith.app/Contents/Resources");
+    std::fs::create_dir_all(res.join("kith/bin")).unwrap();
+    std::fs::write(res.join("kith-serve"), "").unwrap();
+    std::fs::write(res.join("kith/bin/kith-holder"), "").unwrap();
+    assert_eq!(
+        super::beside(&res.join("kith-serve"), "kith-holder"),
+        Some(res.canonicalize().unwrap().join("kith/bin/kith-holder"))
+    );
+    let _ = std::fs::remove_dir_all(&t);
+}

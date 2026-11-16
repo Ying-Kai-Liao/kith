@@ -249,13 +249,22 @@ fn executable(p: &Path) -> bool {
 
 /// [`STUB_ENV`]'s program for a host at `exe` with `kith` first on PATH, symlinks resolved before looking beside either.
 pub fn find_stub(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
-    let name = if cfg!(windows) { "kith-stub.exe" } else { "kith-stub" };
+    find_helper(if cfg!(windows) { "kith-stub.exe" } else { "kith-stub" }, exe, kith)
+}
+
+/// `kith-holder` (the process holder Writer mode connects to), looked for as [`find_stub`] looks for the stub: every
+/// package ships it beside kith and kith-stub.
+pub fn find_holder(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
+    find_helper(if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" }, exe, kith)
+}
+
+fn find_helper(name: &str, exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
     let beside = exe.and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(Path::to_path_buf));
     let from_kith = kith.and_then(|k| k.canonicalize().ok()).and_then(|k| k.parent().map(Path::to_path_buf));
     let mut places: Vec<PathBuf> = Vec::new();
     if let Some(dir) = beside {
         places.push(dir.join(name));
-        places.push(dir.join("kith/bin").join(name)); // the Mac app: Resources/kith-serve, Resources/kith/bin/kith-stub
+        places.push(dir.join("kith/bin").join(name)); // the Mac app: Resources/kith-serve, Resources/kith/bin/<name>
     }
     places.extend(from_kith.map(|d| d.join(name)));
     places.into_iter().find(|p| executable(p))
@@ -329,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn the_stub_is_found_beside_the_host_in_the_app_bundle_and_through_the_kith_link() {
+    fn the_stub_and_holder_are_found_beside_the_host_in_the_app_bundle_and_through_the_kith_link() {
         let t = std::env::temp_dir().join(format!("kith-stub-find-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&t);
         // The app: Resources/kith-serve (the service runs it), Resources/kith/bin/{kith,kith-stub}.
@@ -340,6 +349,12 @@ mod tests {
         assert_eq!(
             find_stub(Some(&res.join("kith-serve")), None),
             Some(res.join("kith/bin/kith-stub").canonicalize().unwrap())
+        );
+        assert_eq!(find_holder(Some(&res.join("kith-serve")), None), None, "no holder in this bundle yet");
+        stub_at(&res.join("kith/bin/kith-holder"));
+        assert_eq!(
+            find_holder(Some(&res.join("kith-serve")), None),
+            Some(res.join("kith/bin/kith-holder").canonicalize().unwrap())
         );
         // A service copy with the stub beside it wins over the bundle layout.
         let svc = t.join("serve/bin");
@@ -360,6 +375,11 @@ mod tests {
             assert_eq!(
                 find_stub(Some(&t.join("lone-serve")), Some(&local.join("kith"))),
                 Some(cli.join("kith-stub").canonicalize().unwrap())
+            );
+            stub_at(&cli.join("kith-holder"));
+            assert_eq!(
+                find_holder(Some(&t.join("lone-serve")), Some(&local.join("kith"))),
+                Some(cli.join("kith-holder").canonicalize().unwrap())
             );
             // A stub that is not executable is not a stub.
             std::fs::set_permissions(
