@@ -48,6 +48,8 @@ FILES=(
   core/runtime/src/conversations/warm.rs     # warm_procs: kill_at, adopt
   core/runtime/src/conversations/reconcile.rs # steps 5 and 7: rule K (a core restart keeps the host's live claims), not modelled here (Claims4)
   core/runtime/src/cutover/modules/claims.rs # the claims step: the takers' tombstone, then the marker, then the files re-read (the switch moment)
+  serve/host/src/terminal/core_holders.rs # Writer mode readers: writer_folders, terminal_claim (the take-over's claim), Stop by claim id
+  serve/host/src/terminal/core_claims.rs  # take_over / live_settled: the Writer-mode take-over through the core row
   serve/host/src/routines/core_runs.rs # the host runner: the core's queued turns begun by id on a fresh session (outside the thread)
   core/runtime/src/terminal.rs        # terminal.open: the --held claim and the stub's lock
   kernel/lib/kith_claims.py           # the kernel takers' route to the core claims

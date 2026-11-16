@@ -184,6 +184,8 @@ jobs:
               - 'core/runtime/src/import/claims.rs'
               - 'core/runtime/src/kill_resend.rs'
               - 'core/runtime/src/hostclaim.rs'
+              - 'core/runtime/src/hostclaim_tests.rs'
+              - 'core/runtime/src/holder_link_tests.rs'
               - 'core/kernel/src/procstart.rs'
               - 'core/procstart/**'
               - 'core/runtime/src/cutover/modules/claims.rs'

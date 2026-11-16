@@ -64,12 +64,24 @@ write the thread, so `Threads.tla` and `base.consts` are unchanged:
   schedule-fire skill's `HostRuns.tla`.
 - `KITH_ROOM_GEN` in bin/kith's env names (rooms D): no writer effect.
 - Not modelled, and checked by reading: the **claims step's switch moment** (#1010, `cutover/modules/claims.rs`,
-  `kith-sessions` `take_claim`). `CoreWriter` is a constant here, never a transition. The code closes the gap from both sides:
-  the step puts the takers' tombstone (`live/terminal/claims.tombstone`) down, then the core's marker and switched record, then
-  re-reads the claim files (a live file that is not a row stops the step), and a file taker links its claim and then reads the
-  tombstone again (switched: it unlinks its own file and asks the
-  core). Each side writes, then reads the other's write, so at least one of them sees the other. The host is stopped for the
-  step (preflight) and the stub is required, so a run caught in it is still under the lock.
+  `kith-sessions` `take_claim`). `CoreWriter` is a constant here, never a transition. The order in the code: `before_tombstone`
+  (`cutover/modules/claims.rs`) writes the takers' tombstone (`live/terminal/claims.tombstone`) and then re-reads the claim files
+  (`blockers` + `differences`: a live file that is not, or cannot be, a row refuses the step); only after it does the framework
+  write the core's marker (`marker::write`) and the `Switched` record (`cutover/mod.rs`). A file taker in `kith-sessions` links
+  its claim and then reads the tombstone again (`take_claim`, and the same re-check in the terminal take): switched, it unlinks
+  its own file and asks the core, which refuses `claim.*` until the module reads switched. Each side writes, then reads the
+  other's write, so at least one of them sees the other: a file linked before the re-read is found by it, one linked after it
+  is taken back by its taker. A refused re-read leaves the tombstone down and the step `stepping`: every taker fails closed
+  (asks a core that refuses) until the step is run again or rolled back (`kith rollback claims` removes the tombstone).
+  The safety rests on the import and that re-read, not on the stub's lock: a `-c` run starts under the stub only when it has a
+  session id (bin/kith), otherwise it holds only its proc claim, which the import makes a row of.
+  The other file takers, and why they are safe today without that re-check:
+  - the core's `terminal.open` Files path (`core/runtime/src/terminal.rs`, `claim::take` after one `switched` read, no re-check
+    after the link) runs inside the daemon, which holds the core's lifetime lock; the step needs that lock, so the two never
+    overlap;
+  - the Rust twin `kith kernel threads` (`core/kernel/src/threads.rs`) has no tombstone check at all, and nothing calls it
+    (`serve/host/src/threads_cmd.rs`: not routed from `kith`). **Before `kith` is routed to it**, it needs the same "link, then
+    read the tombstone again, take the file back if switched" step as `kith-sessions` `take_claim`.
 
 The changes from `1978d087` to `b3f38db7` were re-read at that sync: the core's claim list and reconcile check (`claims.rs`), the writer
 mode re-checks, the abandon order (`stop`, `killpg`, `settle_gone`, already `AbandonKeepsLock`), the stray sweep and

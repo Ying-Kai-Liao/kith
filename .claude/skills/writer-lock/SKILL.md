@@ -28,8 +28,10 @@ step: the core writer of M3, the claims step, rule K, L-clear; `results4.md`, "A
 Since that re-read (2026-11-17) the core writer is code, not only design: the host's per-start instance and `hostclaim.adopt`
 (B5) are what `c4-hostholder` checks, the idle-warm kill in `external.rs` `blocked_in` is `r4-killidle`, and step 5 runs at the
 first connected hello of a core generation (`holder_link.rs` `open_claims`). The claims step itself (`cutover/modules/claims.rs`,
-#1010: the claim files imported as `external` rows, the takers' tombstone before the core's marker, the files re-read after
-it) is **not modelled**; the modules start with the claims already in core.db. Why that is safe by reading is in `results4.md`.
+#1010: the claim files imported as `external` rows; `before_tombstone` writes the takers' tombstone and then re-reads the claim
+files, and only then are the core's marker and `Switched` record written) is **not modelled**; the modules start with the
+claims already in core.db. Why that is safe by reading, and the two file takers it does not re-check, are in `results4.md`
+and the thread-writers skill (Sync commit).
 
 The one-shot stub's take (a direct run, `DLock`) now has a step after it when the run goes on under the lock alone
 (`--lock-alone`, design 2026-11-16-offturn-lock-alone, `core/stub/src/clear.rs`): holding the lock and before the engine starts,
