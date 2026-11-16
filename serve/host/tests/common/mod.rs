@@ -93,7 +93,10 @@ impl Drop for Reaper {
 /// [`serve`] with extra environment variables for the host.
 pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
     let deadline = Instant::now() + Duration::from_secs(30);
+    // The host's log, appended across restarts: a start that is too slow shows where it spent its time.
+    let log_path = host_log(home);
     loop {
+        let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).expect("the host's log file");
         let port = std::net::TcpListener::bind("127.0.0.1:0").expect("free port").local_addr().expect("port").port();
         let base = format!("http://127.0.0.1:{port}");
         let mut child = Reaper(Some(
@@ -115,8 +118,9 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 .env("KITH_SERVE_MIN_FREE_MEMORY_PERCENT", "0")
                 .env("KITH_SERVE_MAX_SWAP_USED_GB", "0")
                 .envs(env.iter().map(|(k, v)| (*k, if *k == "KITH_STATE" { short_link(v) } else { (*v).to_owned() })))
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                // The log goes to stdout (tracing's default), a panic to stderr: both to the file.
+                .stdout(log.try_clone().expect("the host's log file"))
+                .stderr(log)
                 .spawn()
                 .expect("start the host"),
         ));
@@ -126,14 +130,76 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 if !env.iter().any(|(k, _)| *k == "KITH_SERVE_CHANNELS") {
                     assert_channels_off(&base).await;
                 }
+                assert_quick_start(&log_path, env);
                 let child = child.0.take().unwrap();
                 return (child, base);
             }
-            assert!(Instant::now() < deadline, "host didn't start");
+            assert!(Instant::now() < deadline, "host didn't start{}", log_tail(&log_path));
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        assert!(Instant::now() < deadline, "host didn't start");
+        assert!(Instant::now() < deadline, "host didn't start{}", log_tail(&log_path));
     }
+}
+
+/// Where a test host's output goes: beside its machine state (short; in /tmp on Unix, in the home's `machine-state`
+/// folder elsewhere), not among the files a test reads.
+fn host_log(home: &Path) -> std::path::PathBuf {
+    let dir = machine_state(home);
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("host-output.log")
+}
+
+/// The end of the host's log, for a failure message.
+fn log_tail(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    format!("; the host's log ({}):\n{}", path.display(), lines[lines.len().saturating_sub(40)..].join("\n"))
+}
+
+/// How long a test host may spend in its own start-up (from `serve` to listening, less the wait for the host lock). A
+/// healthy one takes about a second even on a busy CI runner; a start that does more (a hash of the whole debug binary, a
+/// wait on the core) is a bug, and it fails here with the phases instead of as a flaky "host didn't start" under load.
+const QUICK_START: Duration = Duration::from_secs(10);
+
+/// The host's own start-up time, from its last `start-up` and `kith-serve listening` lines, is under [`QUICK_START`]. A
+/// host that logged no such line fails too (the guard must not turn itself off), unless `RUST_LOG` chose what it logs.
+fn assert_quick_start(path: &Path, env: &[(&str, &str)]) {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let field = |marker: &str, name: &str| -> Option<u64> {
+        let line = strip_ansi(text.lines().rev().find(|l| l.contains(marker))?);
+        line.split_whitespace().find_map(|w| w.strip_prefix(name)?.strip_prefix('=')?.parse().ok())
+    };
+    let (Some(total), Some(lock)) =
+        (field("kith-serve listening", "start_up_ms"), field("start-up: the host lock", "lock_ms"))
+    else {
+        let filtered = std::env::var_os("RUST_LOG").is_some() || env.iter().any(|(k, _)| *k == "RUST_LOG");
+        assert!(filtered, "the host logged no start-up time{}", log_tail(path));
+        return;
+    };
+    let ms = total.saturating_sub(lock);
+    assert!(
+        Duration::from_millis(ms) < QUICK_START,
+        "the host took {ms} ms to start, not counting {lock} ms for the host lock (at most {} s){}",
+        QUICK_START.as_secs(),
+        log_tail(path)
+    );
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Whether the host answering at `base` is the one for `home`. `/health` alone is not proof: another
