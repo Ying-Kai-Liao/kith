@@ -8,10 +8,10 @@
 # set SYNC below to the commit you checked (and in .claude/skills/thread-writers/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below. It is one commit of origin/rust-rebuild (M3, P10):
+# The commit at which the model was confirmed to describe the files below. It is the L-clear commit (design 2026-11-16-offturn-lock-alone) on origin/rust-rebuild after M3 P9:
 # every change to the files below up to it re-read, the claim files as before (#324) and the core writer (CoreWriter in
 # Threads.tla: the claim is a core row, the stub's lock the second layer). What that read did not cover is in the skill.
-SYNC=1978d087e671866f209a2c366d69023555579375
+SYNC=2fbb95d2efb14d33240d76f1182b6b7abbc8c693
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run

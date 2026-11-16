@@ -42,7 +42,12 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `1978d087e671866f209a2c366d69023555579375`** (origin/rust-rebuild after P7b, M3 P10).
+**Last confirmed to describe the code: `2fbb95d2efb14d33240d76f1182b6b7abbc8c693`** (L-clear, design 2026-11-16-offturn-lock-alone, on origin/rust-rebuild
+4192f0da1). The changes since `1978d087` were re-read: the core's claim list and reconcile check (`claims.rs`), the writer
+mode re-checks, the abandon order (`stop`, `killpg`, `settle_gone`, already `AbandonKeepsLock`), the stray sweep and
+`claim_since` (a reload after another claim) in `core_writer.rs` / `writer*.rs`: none changes who may write, so the model
+is unchanged by them; the L-clear code (`kith-sessions` `LOCK_ALONE`, bin/kith `--lock-alone`, `core/stub/src/{clear,loaded,main}.rs`,
+`writer.rs` `sync_warm`) is `LockAloneClearsWarm`.
 The claim-file half of the model (`CoreWriter = FALSE`) was confirmed earlier at `6fc1ae0d` and its rows are unchanged; the
 ~1,500 lines since then in the covered files were read for what the model needs: the kernel takers' route to the core
 (`kith-sessions` `core_take`, `kith_claims.py`), `--held`, the host writer (`core_writer.rs`, `writer*.rs`, `warm_stub.rs`),
