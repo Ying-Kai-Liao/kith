@@ -1,6 +1,8 @@
 //! The real [`WarmStub`] (design 1.1, 1.3): a warm engine under `kith-stub --resident`, spawned with
 //! [`kith_acp::spawn_resident`], whose writer lock the host drives through the stub's control channel ([`kith_acp::Ctl`]).
-//! The stub's protocol is `core/stub/src/resident.rs`: `take <key> <claim>` and `release <key> <claim>`, one answer each.
+//! The stub's protocol is `core/stub/src/resident.rs`: `take <key> <claim>` and `release <key> <claim>`, one answer each, and
+//! `loaded <key>` / `forgot <key>`: the markers a run on the lock alone reads to stop a warm engine that has its conversation
+//! loaded (design 2026-11-16-offturn-lock-alone). The actor sends those through [`ResidentStub::ctl`] (`agent/bot/writer.rs`).
 //!
 //! The ACP wire is the engine's, over the stub's stdio, so [`kith_acp::Acp::pid`] is the stub's pid and the stub leads the
 //! process group: [`ResidentStub::kill_group`] signals the group, engine and children with it, and the lock goes with the
@@ -50,7 +52,7 @@ pub struct ResidentStub {
     account: String,
     acp: Arc<Acp>,
     incoming: Option<UnboundedReceiver<Incoming>>,
-    ctl: Ctl,
+    ctl: Arc<Ctl>,
     handle: tokio::runtime::Handle,
 }
 
@@ -67,7 +69,7 @@ impl ResidentStub {
             account,
             acp,
             incoming: Some(incoming),
-            ctl,
+            ctl: Arc::new(ctl),
             handle,
         })
     }
@@ -81,6 +83,12 @@ impl ResidentStub {
     /// channel).
     pub fn take_incoming(&mut self) -> Option<UnboundedReceiver<Incoming>> {
         self.incoming.take()
+    }
+
+    /// The control channel, for the `loaded` / `forgot` marks, which go while a turn has the stub away on a blocking thread.
+    /// A new one after every [`WarmStub::restart`], as with [`Self::acp`].
+    pub fn ctl(&self) -> Arc<Ctl> {
+        self.ctl.clone()
     }
 
     /// Whether the control channel still answers (it breaks on the first call that got no answer).
@@ -152,7 +160,7 @@ impl WarmStub for ResidentStub {
             .map_err(|e| std::io::Error::other(format!("{e:#}")))?;
         self.acp = acp;
         self.incoming = Some(incoming);
-        self.ctl = ctl;
+        self.ctl = Arc::new(ctl);
         self.account = account;
         Ok(())
     }

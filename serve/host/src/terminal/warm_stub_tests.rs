@@ -114,3 +114,39 @@ async fn kill_group_ends_the_stub_and_the_channel_answers_nothing_after() {
     assert!(s.take("sess-1", 2).is_err(), "a dead stub gives no answer");
     assert!(!s.ctl_open(), "and the channel is broken for good");
 }
+
+/// L-clear (design 2026-11-16-offturn-lock-alone): the host's `loaded` / `forgot` reach the stub as markers, and an owner run on the
+/// lock alone (`kith-stub --lock-alone`) stops this warm process before its own engine starts; while the process holds another
+/// session's lock (a host turn) the run is busy instead and nothing is killed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lock_alone_run_stops_the_warm_process_that_has_its_session_loaded() {
+    let dir = locks("alone");
+    let (s, _) = warm(&dir, None);
+    let pid = s.pid();
+    let start = super::registry::proc_start(pid).expect("the stub's start");
+    let marker = |key: &str| dir.join(format!("{key}.loaded")).join(format!("{pid}-{start}"));
+    assert_eq!(s.ctl().loaded("sess-1").unwrap(), Ok(()));
+    assert_eq!(s.ctl().loaded("sess-2").unwrap(), Ok(()));
+    assert!(marker("sess-1").is_file() && marker("sess-2").is_file());
+    assert_eq!(s.ctl().forgot("sess-2").unwrap(), Ok(()));
+    assert!(!marker("sess-2").exists());
+    let run = |key: &str| {
+        Command::new(stub_bin())
+            .arg("--lock-dir")
+            .arg(&dir)
+            .args(["--key", key, "--lock-alone", "--", "true"])
+            .status()
+            .unwrap()
+            .code()
+    };
+    // A host turn on another session of this process: busy, nothing killed.
+    assert_eq!(s.ctl().loaded("sess-2").unwrap(), Ok(()));
+    assert_eq!(s.take("sess-2", 3).unwrap(), Take::Locked);
+    assert_eq!(run("sess-1"), Some(75));
+    assert!(s.ctl_open() && marker("sess-1").is_file(), "the process was left alone");
+    assert_eq!(s.release("sess-2", 3).unwrap(), Release::Released);
+    // Idle: the run stops it (and has waited until it is gone: exit 0), then starts.
+    assert_eq!(run("sess-1"), Some(0));
+    assert!(!marker("sess-1").exists());
+    assert!(s.take("sess-1", 4).is_err(), "the warm process is gone");
+}

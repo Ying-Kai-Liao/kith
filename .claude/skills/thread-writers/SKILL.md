@@ -17,12 +17,19 @@ The model is `verification/threads/Threads.tla`. This skill is the only document
 
 ```
 verification/threads/run.sh                       # all rows of checks.tsv, see the run time below
+verification/threads/run.sh --slow                # the large rows of checks-slow.tsv, one at a time on every core
 verification/threads/run.sh --show VARIANT PROP   # TLC's full output (the counterexample) for one row
 verification/threads/drift.sh                     # which covered files changed since the sync commit
 ```
 
 Run time: 101 rows, about 6 minutes on a laptop at 4 parallel jobs (P10, 2026-11-15): the nine passing `core` rows are 4.7M
 states each (about 90 s), the slim scopes and the failing rows are under 200k. The job's timeout is 40 minutes.
+
+`checks-slow.tsv` holds the large passing rows, same format: `run.sh --slow` runs them one at a time with TLC `-workers auto`
+and a heap of `KITH_TLC_HEAP` (default 6g). Today one row, `core-held-cleared` `OneWriter` (L-clear, design 2026-11-16):
+61,550,608 distinct states, depth 74, 13 min on 8 cores of an M-series laptop; one worker with 512 MB did not finish in 2 h. In CI (4 cores, 10g) the row takes about 8 min (495 s, run 43816830839).
+CI job `thread-writers-slow` (4 cores, 10g heap, timeout 150 min) runs it under the same filter as `thread-writers`; a green
+`ci` needs it to end `success`, a cancel or a timeout fails `ci`.
 
 CI runs `run.sh` (job `thread-writers`) on pull requests and pushes that touch `verification/threads/`, this skill, or the covered code (the files `drift.sh` lists).
 
@@ -35,7 +42,12 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `1978d087e671866f209a2c366d69023555579375`** (origin/rust-rebuild after P7b, M3 P10).
+**Last confirmed to describe the code: `b3f38db7668dbe192907daa204b8b0c8578713ff`** (L-clear, design 2026-11-16-offturn-lock-alone, on origin/rust-rebuild
+4192f0da1). The changes since `1978d087` were re-read: the core's claim list and reconcile check (`claims.rs`), the writer
+mode re-checks, the abandon order (`stop`, `killpg`, `settle_gone`, already `AbandonKeepsLock`), the stray sweep and
+`claim_since` (a reload after another claim) in `core_writer.rs` / `writer*.rs`: none changes who may write, so the model
+is unchanged by them; the L-clear code (`kith-sessions` `LOCK_ALONE`, bin/kith `--lock-alone`, `core/stub/src/{clear,loaded,main}.rs`,
+`writer.rs` `sync_warm`) is `LockAloneClearsWarm`.
 The claim-file half of the model (`CoreWriter = FALSE`) was confirmed earlier at `6fc1ae0d` and its rows are unchanged; the
 ~1,500 lines since then in the covered files were read for what the model needs: the kernel takers' route to the core
 (`kith-sessions` `core_take`, `kith_claims.py`), `--held`, the host writer (`core_writer.rs`, `writer*.rs`, `warm_stub.rs`),
@@ -50,8 +62,8 @@ stub's flock (`lk`, `core/stub/src/resident.rs`) is a second, independent layer.
 the host `claim_next`, then the stub's `take`, then `redeem`; a terminal `claim.external`, then the stub takes the lock when
 claude starts (busy: exit 75, claim given back). Switch-by-switch: `HostTakesLock`, `TermTakesLock`, `TermRegistersClaim`,
 `ClaimNextChecksHeld`, `GateRead`, `SettlesOwnEnding`, `DiedReports`, `FailoverReclaims`, `AbandonKeepsLock`, `AbandonSettlesEarly`,
-`RestartKeepsClaim`, `ExternalChecksWarm`, `RequireStub`, `OwnerNoAnswer` (all TRUE / FALSE as the code is in
-`base.consts`). The core rows run with one terminal and `MaxSends = 1` (`variants/core*.set`), about 5M states and 90 s
+`RestartKeepsClaim`, `ExternalChecksWarm`, `RequireStub`, `OwnerNoAnswer`, `LockAloneClearsWarm` (all TRUE / FALSE as the code is in
+`base.consts`), and the what-if `ClearBeforeLock` (FALSE). The core rows run with one terminal and `MaxSends = 1` (`variants/core*.set`), about 5M states and 90 s
 each for the full `core` scope; the smaller scopes (`core-gate`, `core-handover`, `core-forks`: no off-turn wakes, no
 wrapper death, no owner-without-core) are tens of thousands. Every core row runs with `ClaudeForks = FALSE` except `core-forks`.
 
@@ -170,7 +182,9 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | `offturn.rs`: an agent that woke itself writes before the gate and the begin, no claim, no lock; anything short of Running kills its group | `OffTurnWrite`, `OffTurnKilled` |
 | `external.rs` `blocked_in`: `claim.external` answers `waiting` and marks the idle warm process for a kill | `WarmOK` (`ExternalChecksWarm`), `WarmKilled` |
 | host restart: the stub keeps the engine and the lock, the claim row stays; `adopt` ends claims never redeemed and marks processes | `HostRestartCore` (`RestartKeepsClaim`), `HostAdopt`, `OrphanGone` |
-| `kith-sessions` `core_take` (`claim.external`, `claim_terminal`), the core not answering: the owner's run goes on under the lock alone | `TermClaim` (`OwnerNoAnswer`, gate held) |
+| `kith-sessions` `core_take` (`claim.external`, `claim_terminal`), the core not answering: the owner's run goes on under the lock alone, marked so (`LOCK_ALONE`: `claim` / `terminal` print `lock-alone`, `resolve` adds `r_alone=1`; `kith_held_launch` sets `held_alone`) | `TermClaim`, `TermLaunch` (`OwnerNoAnswer`, gate held) |
+| `writer.rs` `sync_warm` (from `warm_session`, before every `session/load`, and before each begin): with each `warm_procs` row the stub's ctl `loaded <key>` (`core/stub/src/resident.rs`, `loaded.rs`: `<locks>/<key>.loaded/<stubpid>-<start>`; a marker that cannot be made fails the load); with a row forgotten, `forgot`; the stub removes the rest when its engine has exited | `ld` (the one warm process's marker), `WarmOn` |
+| `bin/kith` passes `--lock-alone` to `kith-stub`; `core/stub/src/main.rs` after the take, before the engine: `clear.rs` `clear` (stale marker removed; a marked stub holding another key's lock: exit 75; else `killpg` SIGKILL, wait gone, at most 5 s, else 75). No process is spawned under the lock (`the_clear_forks_nothing`) | `TermUp`'s locked branch (`LockAloneClearsWarm`, `StubLocksOther`, `ClearWarm`); `ClearBeforeLock` is the what-if at `TermClaim` / `TermLaunch` |
 | `bin/kith` `exec kith-stub`: the lock taken when claude starts, busy = exit 75 and the claim given back; no stub program = unlocked unless `KITH_REQUIRE_STUB` | `TermUp` (`TermTakesLock`, `RequireStub`) |
 | an interactive run's claim is on the `kith-sessions run` wrapper, which may die first (inferred, not run) | `TermWrapperDies` |
 | `--held`: `kith_held_launch` gives the claim back, `terminal.open` takes it (`starting`, `retarget`), the stub locks | `TermHandBack`, `TermOpen` (`HeldLaunch`, `HandoverAtomic`) |
@@ -245,20 +259,39 @@ All come from the code as it is; none was "fixed" in the model. `run.sh --show <
    the terminal's lines or forgotten the actor's cached session (`start_gate` does not `sync_one`). Window: one scan
    interval; the run must start and end while the send waits.
 
-5. **With no core answering, only the lock holds, and an engine that woke itself has none (`core-held` `OneWriter`).** The owner's run goes on
-   under the conversation lock alone when the core gives no answer (`core_take` `NoAnswer`). An agent that woke itself (an off-turn
-   wake) takes neither a claim nor the lock, and the core, no longer answering, cannot be asked about it: the owner run starts on the
-   lock alone and two writers follow until the off-turn engine is killed. Open line. The architect logged two ways to close it, neither
-   built: kill a self-woken engine whenever the gate is not Writer, or have the host mark its own warm row while the core is down.
-   The abandon half is closed: an abandon is `stop`, `killpg` SIGKILL, `settle_gone`, with no lock release (the lock goes when the stub
-   dies, `core_writer.rs` abandon, `warm_stub.rs`), so both layers hold until the engine is gone. `core-held-no-offturn` (no off-turn
-   wakes) passes `OneWriter`; `core-held-old-abandon` (the lock given back first, `AbandonKeepsLock = FALSE`) fails it, with the core down.
-   (`core` and `core-gate` pass `OneWriter` and friends: with the core answering, both layers hold.)
+5. Closed (both halves), see "Fixed since the last sync" below: a run on the lock alone beside an off-turn wake (`core-held-cleared`).
 6. **A terminal that moves to a new session id writes it under neither claim nor lock (`core-forks` `TerminalCovered`, `core-forks-two`
    `OneWriter`).** Finding 1 for the core writer: both layers are keyed by the id bin/kith claimed. With one terminal `OneWriter`
    holds at this scope; with two, the second takes the forked id and two terminals write.
 
 Fixed since the last sync (rows turned from `fail` to `pass`, evidence in the commits):
+- Finding 5, **with no core answering only the lock holds, and an engine that woke itself has none**. The owner's run goes on under the
+  conversation lock alone when the core gives no answer (`core_take` `NoAnswer`); an agent that woke itself (an off-turn wake) writes
+  with neither a claim nor the lock, before the host sees it, so a host-side rule (offturn.rs kills the group on any begin short of
+  Running: `OffTurnKilled`) comes too late. Closed in the layer that holds without the core, the lock (L-clear, design
+  `files/kith/designs/2026-11-16-offturn-lock-alone` of the architect): a resident stub marks every conversation its engine has loaded
+  (ctl `loaded` / `forgot`, `<locks>/<key>.loaded/<stubpid>-<start>`, sent by the host's `sync_warm` with the `warm_procs` row, before
+  `session/load`); `kith-sessions` marks the run lock-alone and bin/kith passes `--lock-alone`; the one-shot stub takes the lock and,
+  holding it and before claude starts, clears each marker (`core/stub/src/clear.rs`): stale, removed; its stub holds another key's lock
+  (a host turn runs there), exit 75; else SIGKILL its group and wait until it is gone (5 s, else 75). `core-held-cleared` `OneWriter`
+  passes (checks-slow.tsv); `core-held` (`LockAloneClearsWarm = FALSE`, the code before) still fails, 9 steps as the architect's
+  OffLock.tla: a turn, its end, an off-turn wake, the gate held, the owner's run on the lock alone. The order is the rule:
+  `core-held-clear-before-lock` (`ClearBeforeLock`, the clear at the launch, before the lock) fails, because a host turn holding the
+  lock at the launch is not cleared, ends, wakes itself, and the stub then takes the free lock. The model's clear is one step with the
+  take (`TermUp`'s locked branch); in the code the stub holds the lock across it. The abandon half was closed before: an abandon is
+  `stop`, `killpg` SIGKILL, `settle_gone`, with no lock release (`core-held-no-offturn` passes `OneWriter`; `core-held-old-abandon`,
+  the lock given back first, fails it with the clear off, which would otherwise kill the abandoned engine too).
+  The stub keeps the other keys' probe locks until its kill is done, so the marked stub cannot begin a host turn in between. The
+  marker goes (`forgot`) only for a session the engine closed (`session/close` answered, `Proc::closed`): a session the host
+  merely stops serving (a new chat, `forget_loaded`, a fork) stays loaded in the engine and keeps its marker until the stub exits.
+  Not covered by the clear: a run that goes on unclaimed because its id cannot be locked or its start read (`core_take`'s
+  `unclaimable`: no lock either); a warm process started before this change (no markers); a key the stub took before the host
+  marked it (a restart at begin step 4, the take at step 5 before the mark at step 7: the probe sees only marked keys, so that
+  turn's key is not probed and the turn may be killed: a lost turn, never a second writer); `warm_procs` rows still go when the
+  host stops serving a session, so with the core up `blocked_in` can miss an engine that still has it loaded (open, logged by
+  the architect); Windows (the stub refuses `--lock-alone` there, so an owner run with no core answer fails instead of
+  running; accepted until M5). In the model a clear that kills the process while the host is mid-begin on another key
+  dead-ends (the host's take needs the process loaded): harmless for `OneWriter`, but those traces stop there.
 - Old finding 1 (check, then act, with no claim) and 2 (the send gate trusting a copy from the next scan), on
   `code-no-fork`: every Claude start claims before claude starts (3cdd9a88, c2477a8b), `resolve` claims before it asks
   the host and the host reads `hostBusy` under the thread lock with queued sends and `taking` (3cdd9a88, 423df258),
@@ -301,7 +334,9 @@ counterexample with `run.sh --show <variant> <property>`). The new ones keep cla
 | `core-term-no-claim-no-lock` | both layers for a terminal | `TerminalCovered`, `OneWriter` |
 | `core-term-no-claim`, `core-term-no-lock`, `core-unlocked-owner` | one layer for a terminal (no claim row; no lock; no stub program) | `OneWriter`: neither layer is redundant. The lock covers a terminal whose wrapper died (its claim ended while claude runs) and an owner with the core down; a terminal with no claim row is kept out of an abandoned turn by the lock it still holds, and by the warm-process check |
 | `core-abandon-settles-early` | the claim staying `ending` until the group is gone | `ClaimOutlivesEngine`. `OneWriter` still passes: the warm-process check in `claim.external` (the abandoned process is still registered) also keeps a terminal out |
-| `core-held-old-abandon` | the abandon keeping the lock until the stub dies (the old order gave it back first) | `OneWriter`, with the core not answering (no off-turn wakes, so only the abandon window is left) |
+| `core-held-old-abandon` | the abandon keeping the lock until the stub dies (the old order gave it back first) | `OneWriter`, with the core not answering (no off-turn wakes, and the lock-alone clear off, so only the abandon window is left) |
+| `core-held` | the lock-alone clear (`LockAloneClearsWarm`: the code before L-clear) | `OneWriter` (an owner run on the lock alone next to an off-turn wake) |
+| `core-held-clear-before-lock` | the clear's order: at the launch, before the lock (`ClearBeforeLock`) | `OneWriter` (a host turn that holds the lock at the launch is not cleared, then wakes itself) |
 | `core-external-ignores-warm` | the warm-process check in `claim.external` | `OneWriter` (a terminal next to an off-turn wake) |
 | `core-claim-next-ignores-held` | the `held` answer of `claim_next` (with the warm check also off, which otherwise keeps the terminal out of the window) | `ClaimsExclusive` |
 | `core-died-no-report` | the `exit` report of `End::Died` | `NoLeakedClaim` |

@@ -8,10 +8,10 @@
 # set SYNC below to the commit you checked (and in .claude/skills/thread-writers/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below. It is one commit of origin/rust-rebuild (M3, P10):
+# The commit at which the model was confirmed to describe the files below. It is the L-clear commit (design 2026-11-16-offturn-lock-alone) on origin/rust-rebuild after M3 P9:
 # every change to the files below up to it re-read, the claim files as before (#324) and the core writer (CoreWriter in
 # Threads.tla: the claim is a core row, the stub's lock the second layer). What that read did not cover is in the skill.
-SYNC=1978d087e671866f209a2c366d69023555579375
+SYNC=b3f38db7668dbe192907daa204b8b0c8578713ff
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
@@ -38,7 +38,10 @@ FILES=(
   serve/host/src/terminal/warm_stub.rs    # the host's resident stub: take / release / kill_group
   serve/host/src/agent/bot/writer.rs      # the actor's use of CoreWriter: orphaned begins, the mode
   serve/host/src/agent/bot/writer_turn.rs # End choice (Done / Died / Killed / OutOfUsage / Left), abandon + settle_gone, failover
-  core/stub/src/resident.rs           # the stub's lock: take / release, nothing released on close
+  core/stub/src/resident.rs           # the stub's lock: take / release, nothing released on close; loaded / forgot markers
+  core/stub/src/main.rs               # the one-shot take, then --lock-alone's clear before the engine
+  core/stub/src/clear.rs              # L-clear: stale markers, a stub holding another key's lock (75), killpg + wait gone
+  core/stub/src/loaded.rs             # the <key>.loaded/<stubpid>-<start> markers
   core/runtime/src/conversations/claims.rs   # claim_next, end_gone, the one live row per conversation
   core/runtime/src/conversations/external.rs # claim.external / claim_terminal: blocked_in (warm process), takeover
   core/runtime/src/conversations/warm.rs     # warm_procs: kill_at, adopt

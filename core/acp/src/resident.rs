@@ -1,6 +1,6 @@
 //! A warm engine under `kith-stub --resident`, and the control channel the host drives its writer lock with (M3 cutover,
 //! designs/2026-11-14-m3-cutover section 1.1). The protocol is `kith_stub::resident`'s: one `take <key> <claim>` /
-//! `release <key> <claim>` line, one answer line.
+//! `release <key> <claim>` / `loaded <key>` / `forgot <key>` line, one answer line.
 //!
 //! The ACP wire does not change: the engine inherits the stub's stdin and stdout, so [`crate::Acp::pid`] is the stub's pid and
 //! the stub leads the process group. The control channel is one end of a socketpair; the stub's end goes to the child as an
@@ -93,17 +93,44 @@ mod unix {
             })
         }
 
+        /// `loaded <key>`: the engine is about to load the conversation, so a run on the lock alone must stop it first
+        /// (design 2026-11-16-offturn-lock-alone). `Ok(Err(reason))`: the stub answered but did not record it.
+        pub fn loaded(&self, key: &str) -> std::io::Result<Result<(), String>> {
+            self.mark("loaded", "marked", key)
+        }
+
+        /// `forgot <key>`: the engine no longer has the conversation for the host (its `warm_procs` row is gone too).
+        pub fn forgot(&self, key: &str) -> std::io::Result<Result<(), String>> {
+            self.mark("forgot", "unmarked", key)
+        }
+
+        fn mark(&self, verb: &str, ok: &str, key: &str) -> std::io::Result<Result<(), String>> {
+            if key.is_empty() || key.contains([' ', '\n', '\r']) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "not a key",
+                ));
+            }
+            let (said, why) = self.ask_line(&format!("{verb} {key}"), key)?;
+            Ok(if said == ok { Ok(()) } else { Err(why) })
+        }
+
         /// One line out, one line back: (the answer's first word, the reason that follows an `error`). An answer for another
         /// claim, or one that is not a line, is a broken channel.
         fn ask(&self, verb: &str, key: &str, claim: i64) -> std::io::Result<(String, String)> {
-            let broken =
-                |why: &str| std::io::Error::new(std::io::ErrorKind::BrokenPipe, why.to_owned());
             if claim < 0 || key.is_empty() || key.contains([' ', '\n', '\r']) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "not a key and claim id",
                 ));
             }
+            self.ask_line(&format!("{verb} {key} {claim}"), &claim.to_string())
+        }
+
+        /// `line` out, its answer back; every answer but `error - ...` names `tag` (the claim, or the key of a mark).
+        fn ask_line(&self, line: &str, tag: &str) -> std::io::Result<(String, String)> {
+            let broken =
+                |why: &str| std::io::Error::new(std::io::ErrorKind::BrokenPipe, why.to_owned());
             let mut guard = self
                 .io
                 .lock()
@@ -112,7 +139,7 @@ mod unix {
                 .as_mut()
                 .ok_or_else(|| broken("the control channel is closed"))?;
             let mut got = String::new();
-            let sent = writeln!(stream, "{verb} {key} {claim}")
+            let sent = writeln!(stream, "{line}")
                 .and_then(|()| stream.flush())
                 .and_then(|()| reader.read_line(&mut got));
             let answer = match sent {
@@ -132,7 +159,7 @@ mod unix {
                 words.next().unwrap_or(""),
             );
             // `error - <reason>` (a line the stub could not read) names no claim; every other answer names ours.
-            if said.is_empty() || (for_claim != Some(&claim.to_string()) && said != "error") {
+            if said.is_empty() || (for_claim != Some(tag) && said != "error") {
                 *guard = None;
                 return Err(broken("the stub's answer was not for this claim"));
             }
@@ -220,6 +247,12 @@ mod other {
             Err(std::io::Error::other("the resident stub needs Unix"))
         }
         pub fn release(&self, _key: &str, _claim: i64) -> std::io::Result<Release> {
+            Err(std::io::Error::other("the resident stub needs Unix"))
+        }
+        pub fn loaded(&self, _key: &str) -> std::io::Result<Result<(), String>> {
+            Err(std::io::Error::other("the resident stub needs Unix"))
+        }
+        pub fn forgot(&self, _key: &str) -> std::io::Result<Result<(), String>> {
             Err(std::io::Error::other("the resident stub needs Unix"))
         }
         pub fn is_open(&self) -> bool {

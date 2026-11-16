@@ -10,7 +10,7 @@
 #     F2 core down: the same, and the sweep works from the files
 #   Writer mode (marker):
 #     W1 core up:   no claim file; claim, a second writer refused (held), release, the busy line kith-wake's HELD pattern knows
-#     W2 core down: the owner's run goes on (stub lock alone) with one line and no file; a person's run, the epoch read, proc and
+#     W2 core down: the owner's run goes on (stub lock alone) with one line and no file, marked lock-alone for the stub's clear; a person's run, the epoch read, proc and
 #                   the sweep fail closed; kith-wake reads the session as held
 #     W3 the app's idle agent: waiting is retried for KITH_CLAIM_WAIT, then "session is busy"
 #     W4 a session id the stub cannot lock: the owner's run goes on unclaimed with a line (KITH_REQUIRE_STUB=1 or a person: refused)
@@ -194,6 +194,16 @@ reset; down
 out=$(SKR claim w4 "$P1" "" house 2>&1); rc=$?
 check "W2 switched, core down: the owner's run goes on (stub lock alone) with one line" "[ $rc -eq 0 ] && grep -q 'not answering' <<<\"$out\" && grep -q 'conversation lock alone' <<<\"$out\""
 check "W2 and no claim file is written (no fallback to the files)" "[ ! -e $REG/w4.claim ] && ! ls $REG/*.claim 2>/dev/null | grep -q ."
+# L-clear (designs/2026-11-16-offturn-lock-alone): the run on the lock alone is marked for bin/kith, which passes --lock-alone to the stub
+said=$(SKR claim w4a "$P1" "" house 2>/dev/null); said_t=$(SKR terminal w4b "$P1" "" house 2>/dev/null)
+check "W2 claim and terminal print lock-alone on stdout (bin/kith: kith-stub --lock-alone)" "[ \"$said\" = lock-alone ] && [ \"$said_t\" = lock-alone ]"
+echo '{"cwd": "/tmp"}' > "$HOME/.claude/projects/p/w4c.jsonl"
+said=$(SKR resolve house w4c "$P2" 2>/dev/null)
+check "W2 resolve adds r_alone=1" "grep -q \"r_sid='w4c'.* r_alone=1\" <<<\"$said\""
+up; reset
+said=$(SKR claim w4d "$P1" "" house 2>/dev/null); said_t=$(SKR resolve house w4c "$P2" 2>/dev/null)
+check "W1 a run the core answered is not marked: nothing is cleared" "[ -z \"$said\" ] && grep -q \"r_sid='w4c'\" <<<\"$said_t\" && ! grep -q r_alone <<<\"$said_t\""
+reset; down
 out=$(KITH_REVOKE_SEEN=sam:0 SKR claim w5 "$P1" sam house 2>&1); rc=$?
 check "W2 a person's run refuses when no core answers" "[ $rc -ne 0 ] && grep -q \"not answering, so sam's run cannot be claimed\" <<<\"$out\""
 check "W2 a person's line matches kith-wake's HELD pattern" "grep -Eq 'open in another|being taken over|answering in that thread|session is busy' <<<\"$out\""
