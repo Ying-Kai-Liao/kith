@@ -268,9 +268,10 @@ def run_helper(argv, env):
     return subprocess.CompletedProcess(argv, p.returncode, out, err)
 
 
-# What a room person's run (room-<id>, the turns of a group room with people) is told for a helper or a door: refused here,
-# not left to kith-auth, which knows no such person. Helpers and doors over a room's people come with the room's jobs.
-ROOM_NO = "A room's turns can't ask helpers or run doors yet."
+# What a room person's run (room-<id>, the turns of a group room with people) is told for a helper: refused here, not left
+# to kith-auth, which knows no such person. A door it may run: kith-auth checks every person of the room (rule 11).
+ROOM_NO = "A room's turns can't ask helpers yet."
+ROOM_NO_CARD = "%s A room's door is turned on for each person in People, not on a card here."
 
 
 def ask_helper(a, env=os.environ):
@@ -348,11 +349,10 @@ def run_door(a, env=os.environ):
     person, agent = env.get('KITH_PERSON'), env.get('KITH_AGENT')
     if not (person and agent and env.get('KITH_AGENT_DIR')):
         return "Doors are run from a guest's run only."
-    if person.startswith('room-'):
-        return ROOM_NO
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
     import kith_door
     from kith_paths import guest_scrub
+    basis, gen = kith_door.room_basis(env, person)   # before the scrub: the turn's people and gen, from the host
     # nothing of the guest's folders goes to kith-auth, npm or the door's supervisor
     env = guest_scrub(dict(env), person)
     try:
@@ -360,9 +360,12 @@ def run_door(a, env=os.environ):
         real = os.path.realpath(path)
         if not (kith_door.in_slice(real, agent, person) and os.path.isdir(real)):
             return "The folder must be one of %s's folders under files/people/%s." % (person, person)
-        v = kith_door.check(agent, person, kith_door.piece(decl), env)
+        v = kith_door.check(agent, person, kith_door.piece(decl), env, basis)
         if v.get('state') == 'held':
             return 'Access is being changed right now; try again in a minute.'
+        if person.startswith('room-') and v.get('state') in ('not-ticked', 'widened'):
+            # a card's yes would tick the job for "room-<id>", who has no row: Kai ticks it for the person who lacks it
+            return ROOM_NO_CARD % (v.get('why') or 'This door is not on for everyone in the room.')
         if v.get('state') in ('not-ticked', 'widened'):
             d = decide('mcp__kithpermit__run_door', {'door': name, 'path': real}, env)
             if d['behavior'] != 'allow':
@@ -374,7 +377,7 @@ def run_door(a, env=os.environ):
             if d['behavior'] != 'allow':
                 return d['message']
             kith_door.prepare(agent, decl, env=env)
-        code, tail = kith_door.run(agent, person, decl, real, env)
+        code, tail = kith_door.run(agent, person, decl, real, env, basis=basis, gen=gen)
     except kith_door.DoorError as e:
         return 'The door did not run: %s' % e
     if code == 0:
@@ -624,8 +627,8 @@ def handle(msg, env=os.environ):
     elif method == 'tools/list':
         # a key card needs a host to ask, so request_secret is only offered to a run that has a token
         result = {'tools': [tool_def(), access_def(), bug_def()] + ([secret_def()] if credentials(env)[0] else [])
-                           + ([helper_def(), door_def()] if env.get('KITH_PERSON') and not
-                              env['KITH_PERSON'].startswith('room-') else [])}
+                           + ([helper_def()] if env.get('KITH_PERSON') and not env['KITH_PERSON'].startswith('room-') else [])
+                           + ([door_def()] if env.get('KITH_PERSON') else [])}
     elif method == 'ping':
         result = {}
     elif method == 'tools/call':

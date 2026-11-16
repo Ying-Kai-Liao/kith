@@ -13,3 +13,14 @@ notag	Rooms2	fail	a viewer filter of "member now" shows a pre-join post (202)
 revokedeletes	Rooms2	fail	a revoke that closes the person's rows: the undo does not restore the room (61)
 jobs-revokekeepsturn	RoomJobs	fail	a revoke does not end the room turn whose basis holds the person (78)
 jobs-sweepperson	RoomJobs	fail	the sweep names the person, not the room persons: their room door keeps running (311)
+# --- PR D: room jobs and doors. The room door is a claim over its basis (RoomJobs); the same rows run on a switched Mac, where an untick or revoke commits in the core without the door lock and the sweep (under the lock, by basis) catches the claim -----
+jobs-switched	RoomJobs	pass	switched Mac (#975's order): a start checks then claims under the lock; an untick or revoke lands between; the sweep by basis stays owed until it runs
+jobs-switchedwindow	RoomJobs	fail	the window Kai accepted (Accept current): a commit between a switched start's check and its claim; the sweep ends the door after
+jobs-liveonly	RoomJobs	fail	narrow by the room now, no turn cap: an owner-level door starts in Bill's turn after Bill left (168)
+jobs-snaponly	RoomJobs	fail	narrow by the start snapshot only: Kai unticks Bill, the door still starts (415)
+jobs-split	RoomJobs	fail	a door checked in one step starts later, above its people's grant (2,074)
+jobs-joinnarrows	RoomJobs	fail	the Oct J2 rule, narrow by the room now: Bill leaves, Kai unticks his job, the door starts at owner level (1,012)
+jobs-switchednolock	RoomJobs	fail	switched, the sweep does not take the door lock: a claim that lands after it is never swept
+jobs-switchedsweepperson	RoomJobs	fail	switched, the sweep matches the claim's room person, not its basis: Bill's room door keeps running
+doors-fixed	Rooms3	pass	a door's result stamped with its turn's start gen and level lands hidden from a later joiner (4,972,112 states)
+doors-stampland	Rooms3	fail	a door's result stamped with the gen when it lands is sent to Ben, who joined after (9,818)

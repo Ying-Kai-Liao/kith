@@ -5,6 +5,7 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import itertools
 import json
 import os
 import shutil
@@ -34,8 +35,10 @@ for a in AGENTS:
     (d / 'agent.md').write_text(f'---\nname: {a}\ndescription: test\n---\nbody\n')
 # house's one job holds a host beyond the box, garden as a helper and a door: what a tick may grant
 (T / 'kith' / 'agents' / 'house' / 'role' / 'capabilities.yaml').write_text(
-    'helpers: [garden]\ndoors:\n  - name: render\n    argv: [echo, hi]\n'
+    'helpers: [garden]\ndoors:\n  - name: render\n    npm: [fake@1.0.0]\n    lockfile: render.lock.json\n    tools: [node]\n'
+    '    bin: fake/door.mjs\n    writes: [renders]\n'
     'jobs:\n  - name: work\n    domains: [a.example]\n    helpers: [garden]\n    doors: [render]\n')
+(T / 'kith' / 'agents' / 'house' / 'role' / 'render.lock.json').write_text('{"lockfileVersion":3}\n')
 
 KERNEL = Path(__file__).resolve().parent.parent
 loader = importlib.machinery.SourceFileLoader('kith_auth', str(KERNEL / 'bin' / 'kith-auth'))
@@ -378,6 +381,25 @@ def state_properties():
         # a bot belongs to a person who still exists.
         assert ka.canonical(a, a['people'][b]['bot_of']) in a['people'], f'bot {b} outlived its owner'
     assert OWNER in a['people'] and ka.resolve(a, AGENTS[0], OWNER)['owner'] is True
+    room_door_properties(a)
+
+
+def room_door_properties(a):
+    """(rooms rule 11) a room door starts only when every person of its basis may start it on their own, in any order; a
+    person cut off, an owner or a room person in the basis is a refusal, and a basis is for a room person alone."""
+    piece = ka.jobs_of('house')['work']['doors'][0]
+    names = PEOPLE + BOTS
+    for n in (1, 2, 3):
+        for basis in itertools.combinations(names, n):
+            v = ka.door_basis(a, 'house', 'room-g1', piece, list(basis))
+            alone = [ka.door_state(a, 'house', who, piece) for who in basis]
+            assert v['ok'] is all(x['ok'] for x in alone), f'room door over {basis}: {v}, each {alone}'
+            assert ka.door_basis(a, 'house', 'room-g1', piece, list(reversed(basis)))['ok'] is v['ok'], f'order matters over {basis}'
+            if any(ka.cut_off(a, who) for who in basis):
+                assert v['ok'] is False, f'room door over {basis} starts with a cut-off person in it'
+    for bad in ([], [OWNER], [OWNER, PEOPLE[0]], ['room-g2']):
+        assert ka.door_basis(a, 'house', 'room-g1', piece, bad)['ok'] is False, f'room door over {bad} starts'
+    assert ka.door_basis(a, 'house', PEOPLE[0], piece, [PEOPLE[1]])['ok'] is False, 'a person\'s own door took a basis'
 
 
 @settings(max_examples=int(os.environ.get('PROPS_EXAMPLES', 600)), deadline=None, database=None,
@@ -636,6 +658,9 @@ def answers(env):
             # the guest door's check (the revoke path: a revoked person, or the bot of one, reads `revoked`); the package declares no valid
             # door here, so a person who may run the agent reads `no-job`. The tick is a write that needs the daemon, which these runs do not start
             cmds += [['door', agent, who, 'render@0123456789ab', '--json']]
+    # a room person's door over a basis, one read of the tables (the stepped home routes it through the core)
+    for basis in (PEOPLE, PEOPLE[:1], BOTS, [OWNER, PEOPLE[0]]):
+        cmds += [['door', agent, 'room-g1', 'render@0123456789ab', '--basis', ','.join(basis), '--json'] for agent in AGENTS]
     for cmd in cmds:
         r = subprocess.run([sys.executable, str(KERNEL / 'bin' / 'kith-auth'), *cmd], env=env, capture_output=True, text=True, timeout=120)
         out.append((cmd, r.returncode, r.stdout))

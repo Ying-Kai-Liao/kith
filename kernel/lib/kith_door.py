@@ -18,6 +18,11 @@ deny-default sandbox-exec profile of the door's own, on one folder of the person
     under the core's own lock, which a revoke holds instead of this one: a revoke can land between the check and the claim. The
     guarantee is then the revoke's own sweep (cut_off -> sweep, which waits for this lock and so finds the claim), seconds after
     the commit, with the 60 s sweep loop as the backstop.
+  - a room door (rooms with people): a room person (`room-<id>`) runs the door for the people the turn started with. The claim
+    keeps them (`basis`, with the room's `gen` and the level), the start checks every one of them (`kith-auth door --basis`,
+    ANDed) in the same locked step, and a sweep of any of them, or its recheck over all of them, ends it. A claim with no usable
+    basis is ended by any sweep, and a room id alone in `--person` ends no room door (on purpose: matching on the room person would
+    also end a door of a join epoch the person was never in). After an untick only the 60 s recheck ends it. Its result is the turn's own line, stamped by the turn's start (model: verification/rooms).
   - stop (D1): `sweep` kills every door of the listed people, every door whose supervisor is gone (a host or kith-permit
     killed with -9), and every door its person may no longer run. A door process is one in this door's sandbox (it may
     read <claim>.in and not <claim>.out: sandbox_check), or one whose environment holds KITH_DOOR=<claim>, or a
@@ -406,10 +411,12 @@ def auth_lock():
     return open(f.with_name(f.name + '.lock'), 'a')
 
 
-def check(agent, person, door, env=os.environ):
-    """kith-auth door: {ok, state, why}. Read-only; the caller holds the lock when it is the start."""
+def check(agent, person, door, env=os.environ, basis=()):
+    """kith-auth door: {ok, state, why}. Read-only; the caller holds the lock when it is the start. A room person's door
+    (`room-<id>`) is checked over its basis, every person of it ANDed (rooms with people, rule 11)."""
     try:
-        r = subprocess.run([str(LIB.parent / 'bin' / 'kith-auth'), 'door', agent, person, door, '--json'], env=env,
+        extra = ['--basis', ','.join(basis)] if basis else []
+        r = subprocess.run([str(LIB.parent / 'bin' / 'kith-auth'), 'door', agent, person, door, *extra, '--json'], env=env,
                            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
         v = json.loads(r.stdout)
         return v if isinstance(v, dict) else {'ok': False, 'state': 'error', 'why': 'no answer'}
@@ -427,6 +434,26 @@ def _claims():
         if isinstance(c, dict) and CLAIM.match(str(c.get('claim', ''))) and f.stem == c['claim']:
             out.append(c)
     return out
+
+
+def room_basis(env, person):
+    """([people], gen) a room person's door runs for: what the host set for the turn (KITH_ROOM_MEMBERS, KITH_ROOM_GEN, from
+    the turn's own snapshot), and only for a room person: any other person's door is checked as that one person (a bot guest's
+    group turn has KITH_ROOM_MEMBERS too)."""
+    if not person.startswith('room-'):
+        return [], None
+    people = [m.strip().lower() for m in (env.get('KITH_ROOM_MEMBERS') or '').split(',') if m.strip()]
+    gen = env.get('KITH_ROOM_GEN') or ''
+    return people, int(gen) if gen.isdigit() else None
+
+
+def basis_of(c):
+    """The people a claim's door leans on: its basis (a room door), else its one person. None for a room claim whose basis is
+    missing or malformed: the sweep ends it, never reads it as the room person alone."""
+    b = c.get('basis')
+    if isinstance(b, list) and b and all(isinstance(x, str) and x for x in b):
+        return b
+    return None if str(c.get('person')).startswith('room-') else [str(c.get('person'))]
 
 
 def _alive(c):
@@ -450,8 +477,10 @@ def in_slice(path, agent, person):
     return real.startswith(root + '/')
 
 
-def run(agent, person, decl, folder, env=os.environ, on_line=None):
-    """Runs the door on `folder` and waits for it: (exit code, the output's tail). DoorError when it can't start."""
+def run(agent, person, decl, folder, env=os.environ, on_line=None, basis=(), gen=None):
+    """Runs the door on `folder` and waits for it: (exit code, the output's tail). DoorError when it can't start. For a room
+    person, `basis` is the people of the room the turn started with and `gen` the room's gen then: the claim keeps both, so a
+    sweep of any of them ends the door, and its result is the turn's own, stamped by the turn's start, never when it lands."""
     if not os.path.exists(SANDBOX_EXEC):
         raise DoorError('doors need macOS sandbox-exec')
     if not person or person == '-':
@@ -507,10 +536,11 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None):
     try:
         with auth_lock() as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            v = check(agent, person, piece(decl), env)
+            v = check(agent, person, piece(decl), env, basis)
             if not v.get('ok'):
                 raise DoorError(v.get('why') or 'not allowed')
             record = {'claim': claim, 'pid': os.getpid(), 'procStart': me[1] if me else 0, 'person': person,
+                      'basis': list(basis) or [person], 'gen': gen, 'level': 'room' if basis else 'person',
                       'agent': agent, 'door': piece(decl), 'since': since,
                       'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
             (d / f'{claim}.json').write_text(json.dumps(record))
@@ -582,10 +612,12 @@ def sweep(persons=(), recheck=True):
         fcntl.flock(lock, fcntl.LOCK_EX)    # no start is half done while the claims are read
         doomed = []
         for c in _claims():
-            if c.get('person') in persons or not _alive(c) or c.get('left'):
+            basis = basis_of(c)
+            if basis is None or set(basis) & set(persons) or not _alive(c) or c.get('left'):
                 doomed.append(c)
             elif recheck:
-                v = check(str(c.get('agent')), str(c.get('person')), str(c.get('door')))
+                v = check(str(c.get('agent')), str(c.get('person')), str(c.get('door')),
+                          basis=basis if str(c.get('person')).startswith('room-') else ())
                 if not v.get('ok') and v.get('state') != 'held':
                     doomed.append(c)
     for c in doomed:
