@@ -57,6 +57,9 @@ impl Module for Lifted {
     fn guards_claims(&self) -> bool {
         self.0.guards_claims()
     }
+    fn depends_on(&self) -> &'static [&'static str] {
+        self.0.depends_on()
+    }
     fn step_refusal(&self, env: &Env) -> Option<String> {
         self.0.step_refusal(env)
     }
@@ -206,6 +209,18 @@ fn world(extra: bool) -> World {
     drop(c);
     let mut env = Env::with_paths(&p);
     env.serve_db = Some(serve.clone());
+    // `schedules` depends on `claims` (the wrapper forwards it), so these tests start with claims switched.
+    crate::perms::ensure_dir(&env.layout.dir).unwrap();
+    state::write(
+        &env.layout,
+        "claims",
+        &state::Switch {
+            phase: state::Phase::Switched,
+            snapshot: None,
+            at: 0,
+        },
+    )
+    .unwrap();
     World {
         _t: t,
         env,
@@ -251,7 +266,7 @@ fn the_step_refuses_while_the_host_runs_but_the_dry_run_and_check_work() {
     let before = std::fs::read(w.mel_jobs()).unwrap();
     let host = host_runs(&w);
     // A real step: refused, one line, and nothing was made.
-    let e = step(&registry(), &w.env, "schedules", opts())
+    let e = step(&w.reg(), &w.env, "schedules", opts())
         .unwrap_err()
         .to_string();
     assert!(
@@ -263,7 +278,7 @@ fn the_step_refuses_while_the_host_runs_but_the_dry_run_and_check_work() {
     assert!(!w.env.layout.db.exists(), "no core.db was opened or made");
     // The dry run goes through, says what it would do, and writes nothing at all.
     let out = step(
-        &registry(),
+        &w.reg(),
         &w.env,
         "schedules",
         Opts {
@@ -284,7 +299,7 @@ fn the_step_refuses_while_the_host_runs_but_the_dry_run_and_check_work() {
     assert!(!w.env.layout.db.exists());
     // `check` says the core does not answer the same yet, and (with a core) still writes nothing.
     crate::tests::open_all(&w.env.layout);
-    let out = check(&registry(), &w.env, "schedules").unwrap();
+    let out = check(&w.reg(), &w.env, "schedules").unwrap();
     assert!(out[0].contains("difference"), "{out:?}");
     assert!(
         out.iter().any(|l| l.contains("a routine, not a job yet")),
@@ -357,7 +372,7 @@ fn a_lock_file_that_cannot_be_opened_refuses_without_saying_stop_the_host() {
     if std::fs::File::open(&lock).is_ok() {
         return;
     }
-    let e = step(&registry(), &w.env, "schedules", opts())
+    let e = step(&w.reg(), &w.env, "schedules", opts())
         .unwrap_err()
         .to_string();
     assert!(
@@ -953,7 +968,7 @@ fn the_dry_run_leaves_serve_db_and_the_sched_state_exactly_as_they_were() {
         std::fs::read(w.state_file()).unwrap(),
     );
     step(
-        &registry(),
+        &w.reg(),
         &w.env,
         "schedules",
         Opts {
@@ -964,4 +979,45 @@ fn the_dry_run_leaves_serve_db_and_the_sched_state_exactly_as_they_were() {
     .unwrap();
     assert_eq!(std::fs::read(&w.serve).unwrap(), db);
     assert_eq!(std::fs::read(w.state_file()).unwrap(), st);
+}
+
+// --- the build gate ---------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_build_that_cannot_run_fired_turns_refuses_the_step_and_says_so_in_the_dry_run_and_check() {
+    const WORDS: &str = "not stepped: this build can't run the turns its schedules fire; kith-sched keeps running your jobs.";
+    let w = world(false);
+    let store = w.store.clone();
+    let reg: Vec<Box<dyn Module>> = vec![Box::new(Lifted(
+        Schedules::with_keys(std::sync::Arc::new(move || -> Box<dyn KeyStore> {
+            Box::new(store.clone())
+        }))
+        .gated(),
+    ))];
+    let e = step(&reg, &w.env, "schedules", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains(WORDS), "{e}");
+    assert!(!tombstone::is_tombstone(&w.state_file()));
+    crate::tests::open_all(&w.env.layout);
+    let dry = step(
+        &reg,
+        &w.env,
+        "schedules",
+        Opts {
+            dry_run: true,
+            force: false,
+        },
+    )
+    .unwrap();
+    assert!(
+        dry.iter()
+            .any(|l| l.starts_with(WORDS) && l.contains("Failed: 1:")),
+        "{dry:?}"
+    );
+    let c = check(&reg, &w.env, "schedules").unwrap();
+    assert!(
+        c.iter().any(|l| l.starts_with(WORDS) && l.contains("4:")),
+        "{c:?}"
+    );
 }

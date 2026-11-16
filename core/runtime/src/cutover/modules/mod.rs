@@ -19,6 +19,9 @@ pub(crate) mod claims;
 #[cfg(test)]
 mod claims_tests;
 pub(crate) mod schedules;
+mod schedules_gate;
+#[cfg(test)]
+mod schedules_gate_tests;
 #[cfg(test)]
 mod schedules_tests;
 #[cfg(test)]
