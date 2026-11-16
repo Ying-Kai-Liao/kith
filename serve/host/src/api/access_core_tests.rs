@@ -457,7 +457,7 @@ async fn a_switched_host_reads_the_people_from_the_core_and_revokes_there() {
     super::people::local_revoke(&r.hub, &r.bin, "sam", false).await.unwrap();
     let said = core.ask("people.may", json!({"person": "sam", "agent": "house"})).unwrap();
     assert_eq!(said["allowed"], true);
-    let none = members::apply_revoked(Some(&r.bin), Some(&[])).await.unwrap();
+    let none = members::apply_revoked(&r.hub, Some(&r.bin), Some(&[])).await.unwrap();
     assert_eq!(none.cut.len() + none.restored.len(), 0);
     // The chat handle is the core's (`people.handle`): bound and let go there, never run on the tombstone.
     members::locked_run(&r.bin, &["handle", "sam", "kith", "user_x"]).await.unwrap();

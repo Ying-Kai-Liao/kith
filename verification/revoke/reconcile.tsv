@@ -7,4 +7,4 @@ broken-restore-too	fail	FailCutHolds: a tick that also gives back undoes a fail-
 rename	pass	TypeOK, NoLostUndo, Narrows: the reconcile reads every id (host_ids) in its locked step, so a cut the app's fallback missed is caught (FailCutHolds is left out: it fails with a rename, row rename-failcut)
 broken-rename-current	fail	Narrows: a reconcile that cuts by the current id alone never reaches the rows under the old one
 rename-undo-miss	fail	NoLostUndoStrict (finding, accepted): an undo whose read of the ids fell back to the current one leaves the old id set aside; fail closed, the owner undoes again
-rename-failcut	fail	FailCutHolds (finding): a revoke whose core write failed and whose read of the ids fell back cuts only the current id; the core shows no revoke, so the reconcile never cuts the old one
+rename-failcut	fail	FailCutHolds (finding): a revoke whose core write failed and whose read of the ids fell back cuts only the current id; the core shows no revoke, so the reconcile never cuts the old one (closed by the owed cut: ReconcileOwed.tla, reconcile-owed.tsv fix)
