@@ -116,6 +116,12 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# Every host start hashes its own executable (`service::capture_binary_identity`, the `binaryHash` the desktop app and the
+# updater check). A debug kith-serve is about 530 MB on Linux, and an unoptimized SHA-256 took many seconds of CPU per start
+# on a CI runner running four e2e hosts at once, enough to miss the e2e start deadline. Only the hash crate is optimized.
+[profile.dev.package.sha2]
+opt-level = 3
+
 # The host the Kith desktop app bundles (apps/desktop/tools/native-host.mjs): optimized like a release, but
 # a host change rebuilds in about 25 s instead of 80 s per architecture.
 [profile.dev-app]
