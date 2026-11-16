@@ -177,24 +177,95 @@ pub(super) async fn mode_of(hub: &Arc<crate::hub::Hub>) -> (Mode, Option<Arc<Cor
     (mode, Some(core))
 }
 
-/// The first Writer-mode begin of this host start ends what an earlier host instance left (design 1.3, "Host restart").
+/// The first Writer-mode begin of this host start ends what an earlier host instance left (design 1.3, "Host restart"). Done once it
+/// went through: a failed adopt (the core not answering yet) is tried again by a later begin or slow tick, after a wait that grows
+/// ([`adopt_backoff`]), because until it goes through the old instance's claims hold their conversations.
 async fn adopt_once(hub: &crate::hub::Hub, core: &Arc<CoreWriter>) {
-    static DONE: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
     let state = hub.terminal.env().state;
-    let first =
-        DONE.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(state);
-    if !first {
-        return;
-    }
-    let c = core.clone();
-    match tokio::task::spawn_blocking(move || c.adopt()).await {
-        Ok(Ok(adopted)) => {
-            tracing::info!(ended = adopted.ended.len(), kill = adopted.kill.len(), "writer mode: adopted");
+    let first = {
+        let mut all = adoptions().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let a = all.entry(state.clone()).or_default();
+        if !a.take(std::time::Instant::now()) {
+            return;
         }
-        Ok(Err(error)) => tracing::warn!(error, "writer mode: couldn't adopt an earlier host instance's claims"),
-        Err(_) => {}
+        !std::mem::replace(&mut a.swept, true)
+    };
+    let c = core.clone();
+    // On a task of its own: a begin that is dropped while it waits still records how the adopt went.
+    let task = tokio::spawn(async move {
+        let ok = match tokio::task::spawn_blocking(move || c.adopt()).await {
+            Ok(Ok(adopted)) => {
+                tracing::info!(ended = adopted.ended.len(), kill = adopted.kill.len(), "writer mode: adopted");
+                true
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    error,
+                    "writer mode: couldn't adopt an earlier host instance's claims; trying again later"
+                );
+                false
+            }
+            Err(_) => false,
+        };
+        let mut all = adoptions().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        all.entry(state).or_default().settle(ok, std::time::Instant::now());
+    });
+    let _ = task.await;
+    if first {
+        sweep_strays_for_ever(core.clone());
     }
-    sweep_strays_for_ever(core.clone());
+}
+
+fn adoptions() -> &'static Mutex<HashMap<PathBuf, Adoption>> {
+    static ADOPTIONS: OnceLock<Mutex<HashMap<PathBuf, Adoption>>> = OnceLock::new();
+    ADOPTIONS.get_or_init(Mutex::default)
+}
+
+/// How this host start's adopt stands, per state folder.
+#[derive(Debug, Default)]
+pub(super) struct Adoption {
+    /// It went through: never asked again.
+    done: bool,
+    /// One is being asked now: no other begin asks beside it.
+    running: bool,
+    /// Failed adopts in a row.
+    fails: u32,
+    /// A failed adopt is not tried again before this.
+    not_before: Option<std::time::Instant>,
+    /// The stray sweep was started (once, at the first try, whatever it came to).
+    swept: bool,
+}
+
+impl Adoption {
+    /// Whether an adopt is asked now; if so it is marked running until [`Self::settle`].
+    pub(super) fn take(&mut self, now: std::time::Instant) -> bool {
+        if self.done || self.running || self.not_before.is_some_and(|t| now < t) {
+            return false;
+        }
+        self.running = true;
+        true
+    }
+
+    /// Records how the adopt went: done for good, or a wait before the next try.
+    pub(super) fn settle(&mut self, ok: bool, now: std::time::Instant) {
+        self.running = false;
+        if ok {
+            self.done = true;
+            self.not_before = None;
+        } else {
+            self.not_before = Some(now + adopt_backoff(self.fails));
+            self.fails = self.fails.saturating_add(1);
+        }
+    }
+}
+
+/// The longest a failed adopt waits before it is tried again.
+const ADOPT_BACKOFF_MAX: Duration = Duration::from_secs(60);
+
+/// How long the `fails`-th failed adopt in a row waits before the next try: from a second, doubling, up to [`ADOPT_BACKOFF_MAX`]
+/// (a core that is down is not asked at every begin).
+pub(super) fn adopt_backoff(fails: u32) -> Duration {
+    Duration::from_secs(1).saturating_mul(1u32.checked_shl(fails).unwrap_or(u32::MAX)).min(ADOPT_BACKOFF_MAX)
 }
 
 /// Once now and then every [`STRAY_SWEEP_EVERY`]: the host turns the core holds that no item of this host runs are cancelled

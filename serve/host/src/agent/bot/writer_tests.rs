@@ -538,6 +538,50 @@ actor_test! {
     }
 }
 
+// MARK: the host restart's adopt
+
+actor_test! {
+    /// A host start whose first adopt finds the core not answering: the earlier instance's claim (never redeemed) holds the
+    /// conversation, so the turn waits behind it. A later begin asks the adopt again, which ends that claim, and the turn runs.
+    /// Once through, the adopt is never asked again.
+    async fn a_failed_adopt_is_tried_again_and_frees_the_earlier_instances_claims(rig) {
+        rig.w().adopt_down = 2;
+        rig.w().claims.push(C {
+            id: 950,
+            conv: "sess-a".into(),
+            state: "claimed".into(),
+            kind: "turn".into(),
+            pid: None,
+            started: None,
+            instance: Some("kith-serve-host/42-old".into()),
+            turn: None,
+        });
+        let old = |r: &Rig| r.w().claims.iter().find(|c| c.id == 950).map(|c| c.state.clone()).unwrap_or_default();
+        rig.send("a", "after a restart").await;
+        rig.until("the first adopt", |r| r.calls("hostclaim.adopt") >= 1).await;
+        assert_eq!(old(&rig), "claimed", "the failed adopt ended nothing");
+        // `until` also checks that no claim of this host is ever live beside the old one: nothing runs under it.
+        rig.until("the reply", |r| r.replied("a", "after a restart")).await;
+        assert_eq!(old(&rig), "ended", "the retried adopt ended the old claim");
+        assert_eq!(rig.calls("hostclaim.adopt"), 3, "two failed, the third went through");
+        rig.until("its end", |r| r.turn_state(1) == "done").await;
+        rig.send("a", "and again").await;
+        rig.until("the second reply", |r| r.replied("a", "and again")).await;
+        assert_eq!(rig.calls("hostclaim.adopt"), 3, "a successful adopt is never asked again");
+    }
+}
+
+actor_test! {
+    /// An adopt that went through the first time is the only one, however many turns follow.
+    async fn a_successful_adopt_is_never_repeated(rig) {
+        for text in ["one", "two", "three"] {
+            rig.send("a", text).await;
+            rig.until("the reply", |r| r.replied("a", text)).await;
+        }
+        assert_eq!(rig.calls("hostclaim.adopt"), 1);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_gate_that_cannot_be_read_holds_too() {
     let rig = Rig::new(&["a"], SWITCHED);
@@ -933,12 +977,12 @@ async fn a_turn_parked_behind_a_direct_run_asks_less_and_less_often() {
 // MARK: the end choice, the backoff and the chain (units)
 
 mod units {
-    use crate::agent::bot::writer::{Rel, budget, chain, chain_opened, chain_root};
+    use crate::agent::bot::writer::{Adoption, Rel, adopt_backoff, budget, chain, chain_opened, chain_root};
     use crate::agent::bot::writer_turn::{cancel_reason, end_for};
     use crate::agent::bot::writer_wait::lock_backoff;
     use crate::terminal::core_writer::End;
     use std::path::Path;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     /// What a release reports. `OutOfUsage` only for a move to the next account, which `failover` sets after its refusals (the turn
     /// acted, was sent, is hidden, is at MAX_MOVES or AllOut: each returns before it); everything else ends `Done`.
@@ -972,6 +1016,26 @@ mod units {
         assert!(cancel_reason(End::Left).is_some());
         assert!(cancel_reason(End::Done).is_none());
         assert!(cancel_reason(End::Room).is_none());
+    }
+
+    /// The adopt's own record: one at a time, a failure waits a growing time before the next try, a success is final.
+    #[test]
+    fn an_adopt_is_retried_after_a_failure_with_a_growing_wait_and_never_after_a_success() {
+        let t0 = Instant::now();
+        let mut a = Adoption::default();
+        assert!(a.take(t0), "the first begin asks");
+        assert!(!a.take(t0), "not beside one already asked");
+        a.settle(false, t0);
+        assert!(!a.take(t0 + Duration::from_millis(500)), "a failure waits before the next try");
+        assert!(a.take(t0 + Duration::from_secs(1)), "and is tried again after it");
+        a.settle(false, t0 + Duration::from_secs(1));
+        assert!(!a.take(t0 + Duration::from_millis(2500)), "the second wait is longer");
+        assert!(a.take(t0 + Duration::from_secs(3)));
+        a.settle(true, t0 + Duration::from_secs(3));
+        assert!(!a.take(t0 + Duration::from_secs(3600)), "a success is never asked again");
+        let waits: Vec<_> = (0..9).map(|n| adopt_backoff(n).as_secs()).collect();
+        assert_eq!(waits, [1, 2, 4, 8, 16, 32, 60, 60, 60]);
+        assert_eq!(adopt_backoff(u32::MAX), Duration::from_secs(60), "no overflow");
     }
 
     #[test]
