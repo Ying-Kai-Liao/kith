@@ -193,7 +193,7 @@ pub(super) fn advance_in(
 }
 
 /// The owner's id in the authority tables, the person a job with none runs as.
-fn owner_in(auth: &Value) -> Option<String> {
+pub(crate) fn owner_in(auth: &Value) -> Option<String> {
     auth.get("people")?
         .as_object()?
         .iter()

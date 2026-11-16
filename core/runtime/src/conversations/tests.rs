@@ -968,8 +968,9 @@ fn reconcile_ends_unlisted_claimed_claims_and_holds_unlisted_running_ones_as_end
     assert_eq!(state(&c, kept), "running", "re-adopted");
 }
 
-/// Step 5 passes no instance to spare: a restart also takes the host's turn claims of the old generation (`ending`,
-/// `holder_changed`, the turn queued again) and an imported claim with no instance. Both stay the writer until `end_gone`.
+/// Step 5 takes a host's running turn claim whose recorded process is gone (rule K keeps only a live one, `reconcile_tests.rs`;
+/// pid 200 here has no process started `e200`) into `ending` (`holder_changed`, the turn queued again), and an imported claim
+/// with no instance. Both stay the writer until `end_gone`.
 /// The tick signals the host's; the instance-less one is never signalled (`kill_resend::pass` skips a `holder_changed` claim
 /// that no holder started, which `end_reason` alone says).
 #[test]

@@ -14,6 +14,8 @@ mod call;
 // The fire decides with the authority tables, which are Unix only for now.
 #[cfg(unix)]
 mod fire;
+#[cfg(unix)]
+pub(crate) use fire::owner_in;
 #[cfg(all(test, unix))]
 mod fire_tests;
 #[cfg(unix)]
