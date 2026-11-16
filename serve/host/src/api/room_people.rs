@@ -17,7 +17,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             json!({"gen": change.room_gen, "changed": change.changed})
         }
         "removeRoomPerson" => {
-            let change = room_people::remove_person(hub, str_arg(&b, "room")?, str_arg(&b, "person")?)?;
+            let change = room_people::remove_person(hub, str_arg(&b, "room")?, str_arg(&b, "person")?).await?;
             json!({"gen": change.room_gen, "changed": change.changed})
         }
         "roomPeople" => {

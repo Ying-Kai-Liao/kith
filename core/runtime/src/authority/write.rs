@@ -760,6 +760,7 @@ pub(crate) fn invite_create(
 ) -> R<Vec<String>> {
     tables(auth);
     need_person(auth, person)?;
+    super::revoke::check_not_room(person)?;
     if secrets::cut_off(auth, &secrets::canonical(auth, person)) {
         return die(format!(
             "{person}'s access was removed: kith-auth person {person} --unrevoke first"

@@ -19,7 +19,7 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
     };
     Ok(ControlFlow::Break(match method {
         "myRooms" => json!({"rooms": room_post::my_rooms(hub, &member()?).await}),
-        "leaveRoom" => json!({"left": room_post::leave(hub, &member()?, str_arg(&b, "room")?)?}),
+        "leaveRoom" => json!({"left": room_post::leave(hub, &member()?, str_arg(&b, "room")?).await?}),
         _ => return Ok(ControlFlow::Continue(b)),
     }))
 }
