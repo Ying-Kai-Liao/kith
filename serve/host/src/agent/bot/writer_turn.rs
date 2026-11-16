@@ -82,7 +82,7 @@ pub(super) fn cancel_reason(end: End) -> Option<&'static str> {
 /// The turn `exit` put back is not wanted again ([`cancel_reason`]): a cancel the core did not answer turns a taken end into a lost one,
 /// so the slow tick sends both again (the report on an ended claim changes nothing).
 pub(super) fn cancelled(core: &CoreWriter, run: &Running, end: End, finished: Finished) -> Finished {
-    match (finished, cancel_reason(end)) {
+    match (finished, cancel_reason(end).filter(|_| !run.keep)) {
         (Finished::Reported, Some(why)) if !core.cancel_turn(run.turn, why) => {
             Finished::ReportLost("the cancel of the turn did not reach the core".into())
         }
@@ -185,10 +185,16 @@ impl Actor {
             .map(|b| b.people.clone())
             .unwrap_or_default();
         let mut acc = self.writer.acc.take().unwrap_or_else(Accept::unread);
+        // A pulled turn runs as its own person (the core's turn names it), on the core's conversation.
+        let principal =
+            acc.pulled.as_ref().map_or_else(|| self.cfg.person.clone().unwrap_or_default(), |p| p.person.clone());
+        if acc.pulled.is_some() && acc.turn.is_none() {
+            self.writer.acc = Some(acc);
+            bail!("a scheduled run the core queued has lost its turn id; it is not enqueued again");
+        }
         let covers = |s: &Seen| basis.iter().all(|p| s.basis.iter().any(|(q, _)| q == p));
         if !acc.seen.as_ref().is_some_and(covers) {
-            let principal = self.cfg.person.clone().unwrap_or_default();
-            acc.seen = read_epochs(core.clone(), principal, basis).await;
+            acc.seen = read_epochs(core.clone(), principal.clone(), basis).await;
         }
         let Some(seen) = acc.seen.clone() else {
             self.writer.acc = Some(acc);
@@ -198,13 +204,18 @@ impl Actor {
         let deadline = self.routine_deadline.map(|d| {
             now_ms() + i64::try_from(d.saturating_duration_since(std::time::Instant::now()).as_millis()).unwrap_or(0)
         });
+        let (conversation, session) = match &acc.pulled {
+            Some(p) => (p.conversation.clone(), Some(sid.to_owned())),
+            None => (sid.to_owned(), None),
+        };
         let turn = OwnedTurn {
             id: acc.turn,
-            conversation: sid.to_owned(),
+            conversation,
+            session,
             agent: self.writer_agent(),
             engine: if self.cfg.backend == "codex" { "codex" } else { "claude" }.into(),
             source: self.turn_source(off),
-            person: self.cfg.person.clone().unwrap_or_default(),
+            person: principal,
             cwd: self.conn_started_as.as_ref().map_or_else(|| self.cfg.cwd.clone(), |s| s.1.clone()),
             revoke_seen: seen.principal,
             deadline,
@@ -461,12 +472,18 @@ impl Actor {
     /// through `release_turn_claim`. The end runs on a blocking thread; the next begin, and the slow tick, collect it
     /// ([`Self::writer_settle_end`]).
     pub(super) fn writer_release(&mut self) {
-        let Some(run) = self.writer.run.take() else { return };
+        let Some(mut run) = self.writer.run.take() else { return };
         let how = self.writer.end.take();
         let end = end_for(how, !pid_runs(run.run.pid), self.is_room_actor());
         // The item's last end drops what it carried. A move to the next account, or to another session (a fork), keeps the epochs and
-        // starts a new turn: the old turn's row (on the old session) is cancelled below, so the next begin makes its own.
-        if matches!(how, Some(Rel::OutOfUsage | Rel::Left)) {
+        // starts a new turn: the old turn's row (on the old session) is cancelled below, so the next begin makes its own. A scheduled
+        // run the core queued is on the core's conversation, not the session: the move begins the same turn again by its id (`exit`
+        // requeued it), and nothing cancels it. A fork (`Left`) of a pulled run still drops the id: its next begin fails, and the
+        // turn is cancelled as any forked turn is; the run reports it could not finish.
+        let pulled = self.writer.acc.as_ref().is_some_and(|a| a.pulled.is_some());
+        if how == Some(Rel::OutOfUsage) && pulled {
+            run.run.keep = true;
+        } else if matches!(how, Some(Rel::OutOfUsage | Rel::Left)) {
             if let Some(acc) = self.writer.acc.as_mut() {
                 acc.turn = None;
                 acc.key = new_turn_key();

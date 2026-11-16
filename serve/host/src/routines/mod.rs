@@ -3,6 +3,9 @@ mod editor;
 pub use editor::preview as schedule_preview;
 pub mod hooks;
 use hooks::Refused;
+mod core_runs;
+#[cfg(test)]
+mod core_runs_tests;
 mod runner;
 mod schedule;
 #[cfg(test)]
@@ -110,6 +113,10 @@ pub struct Routines {
     link: Mutex<Arc<dyn switch::Link>>,
     last_core_tick: Mutex<i64>,
     core_ticking: std::sync::atomic::AtomicBool,
+    /// The turns the core queued that this host run pulled (`core_runs.rs`), by item id. In memory only.
+    pulled: Mutex<std::collections::HashMap<String, core_runs::Item>>,
+    last_pull: Mutex<i64>,
+    pulling: std::sync::atomic::AtomicBool,
 }
 
 impl Default for Routines {
@@ -119,6 +126,9 @@ impl Default for Routines {
             link: Mutex::new(Arc::new(switch::CoreLink)),
             last_core_tick: Mutex::default(),
             core_ticking: std::sync::atomic::AtomicBool::default(),
+            pulled: Mutex::default(),
+            last_pull: Mutex::default(),
+            pulling: std::sync::atomic::AtomicBool::default(),
             state: Mutex::default(),
             active: Mutex::default(),
             scheduler: Mutex::default(),

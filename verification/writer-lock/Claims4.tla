@@ -100,6 +100,22 @@
 (*                 HOST_INSTANCE today) while the old engine still writes   *)
 (*                 under the old stub's lock: fails WriterHasClaim          *)
 (*                                                                          *)
+(* Rule K (design 2026-11-16-core-queued-runner, conversations/reconcile.rs *)
+(* reconcile_with): a core restart's step 5 leaves the host's own claims    *)
+(* alone while they can still be the host's: `claimed` (the host's redeem   *)
+(* or stop decides it) and `running` on a process that is alive. A running  *)
+(* one whose process is gone is reconciled as Meet does. In the HostHolder  *)
+(* reading every claim here is the host's. One CoreRestart (`cr`), bounded *)
+(* apart from HCrash's MaxHC, so a core restart and a host crash can both   *)
+(* happen in one behaviour.                                                 *)
+(*   corekeep      the code: K with the alive probe                         *)
+(*   corekeepdead  K without the probe: a running claim stays running on a  *)
+(*                 process that is gone. Passes: Meet (different_holder)    *)
+(*                 still ends it; the probe makes the end prompt, it is not *)
+(*                 what P3 rests on                                         *)
+(*   corenokeep    the old step 5: every live host claim is reconciled      *)
+(*                 (fails CoreKeepsLive, the rule K property)               *)
+(*                                                                          *)
 (* Variant (default "fix" = the code at origin/rust-rebuild cf308ebc):      *)
 (*   nofence       claim does not refuse an ask/wake turn of a stopped ask  *)
 (*   fencecancel   the caller cancels a turn claim_in refused (stopped ask  *)
@@ -126,12 +142,12 @@ VARIABLES
   nextC, nTO,              \* claim counter, take-overs asked
   ts, ms,                  \* turn rows: state; the revoke epoch its may check read (-1 = not checked)
   rev, aSt,                \* revoke epoch of P; the ask's state
-  hUp, hc, synced          \* holder up, crashes, the core has met this instance
+  hUp, hc, synced, cr      \* holder up, crashes, the core has met this instance; core restarts
 
 claimV == <<cs, ct, ck, cp, nextC>>
 procV  == <<pr, ex, sp, kp, km>>
 turnV  == <<ts, ms>>
-hV     == <<hUp, hc, synced>>
+hV     == <<hUp, hc, synced, cr>>
 vars   == <<claimV, procV, turnV, rev, aSt, nTO, hV>>
 
 Live(c)   == cs[c] \in {"claimed", "running", "ending"}
@@ -152,7 +168,7 @@ Init ==
   /\ kp = [c \in Claims |-> FALSE] /\ km = [c \in Claims |-> FALSE]
   /\ ts = [t \in Turns |-> "new"] /\ ms = [t \in Turns |-> -1]
   /\ rev = 0 /\ aSt = "open" /\ nTO = 0
-  /\ hUp = TRUE /\ hc = 0 /\ synced = TRUE
+  /\ hUp = TRUE /\ hc = 0 /\ synced = TRUE /\ cr = 0
 
 ---------------------------------------------------------------------------
 (* Turns *)
@@ -345,11 +361,11 @@ HCrash ==
   /\ hUp /\ hc < MaxHC /\ hUp' = FALSE /\ hc' = hc + 1 /\ synced' = FALSE
   /\ sp' = [c \in Claims |-> FALSE] /\ km' = [c \in Claims |-> FALSE] /\ ex' = [c \in Claims |-> "none"]
   /\ pr' = IF HMode = "die" THEN [c \in Claims |-> IF Alive(c) THEN "dead" ELSE pr[c]] ELSE pr
-  /\ UNCHANGED <<claimV, kp, turnV, rev, aSt, nTO>>
+  /\ UNCHANGED <<claimV, kp, turnV, rev, aSt, nTO, cr>>
 
 HUp ==
   /\ ~hUp /\ hUp' = TRUE
-  /\ UNCHANGED <<claimV, procV, turnV, rev, aSt, nTO, hc, synced>>
+  /\ UNCHANGED <<claimV, procV, turnV, rev, aSt, nTO, hc, synced, cr>>
 
 Meet ==   \* different_holder: the new instance lists nothing, so every live non-external claim is released
   /\ hUp /\ ~synced /\ synced' = TRUE
@@ -362,14 +378,27 @@ Meet ==   \* different_holder: the new instance lists nothing, so every live non
   /\ ts' = [t \in Turns |-> IF ts[t] \in {"claimed", "running"} THEN "queued" ELSE ts[t]]
   /\ kp' = [c \in Claims |-> IF Variant # "nokillresend" /\ cs[c] \in {"running", "ending"} /\ cp[c] THEN TRUE ELSE kp[c]]
   /\ km' = [c \in Claims |-> IF Warm /\ pr[c] \in {"locked", "stuck", "stuckx"} THEN TRUE ELSE km[c]]   \* step 7 ends the old instance's groups
-  /\ UNCHANGED <<ct, ck, cp, nextC, pr, ex, sp, ms, rev, aSt, nTO, hUp, hc>>
+  /\ UNCHANGED <<ct, ck, cp, nextC, pr, ex, sp, ms, rev, aSt, nTO, hUp, hc, cr>>
+
+CoreRestart ==   \* step 5 after a core restart (reconcile_with): rule K for the host's claims
+  /\ Variant \in {"corekeep", "corekeepdead", "corenokeep"} /\ cr = 0 /\ cr' = 1
+  /\ LET keep(c) == Variant # "corenokeep"
+                    /\ (cs[c] = "claimed" \/ (cs[c] = "running" /\ (Alive(c) \/ Variant = "corekeepdead")))
+         go(c)   == Live(c) /\ ~keep(c)
+     IN /\ cs' = [c \in Claims |->
+               IF ~go(c) THEN cs[c]
+               ELSE IF cs[c] = "running" THEN "ending"
+               ELSE IF cp[c] THEN "ending" ELSE "ended"]
+        /\ ts' = [t \in Turns |-> IF \E c \in Claims : go(c) /\ cs[c] = "running" /\ ct[c] = t THEN "queued" ELSE ts[t]]
+        /\ kp' = [c \in Claims |-> IF go(c) /\ cp[c] THEN TRUE ELSE kp[c]]
+  /\ UNCHANGED <<ct, ck, cp, nextC, pr, ex, sp, km, ms, rev, aSt, nTO, hUp, hc, synced>>
 
 ---------------------------------------------------------------------------
 Next ==
   \/ \E t \in Turns : MayCheck(t) \/ TurnArrive(t) \/ Park(t) \/ Unpark(t) \/ Claim(t) \/ FenceCancel(t)
   \/ \E c \in Claims : Spawn(c) \/ SpawnedRep(c) \/ Redeem(c) \/ StubLock(c) \/ RedeemOK(c) \/ GiveBack(c) \/ Stuck(c) \/ Busy(c) \/ EngineExit(c) \/ StubDies(c) \/ OrphanExit(c) \/ Report(c)
                        \/ PromoteTW(c) \/ SendKill(c) \/ HKill(c) \/ EndGone(c)
-  \/ AskStop \/ Revoke \/ TakeOver \/ HCrash \/ HUp \/ Meet
+  \/ AskStop \/ Revoke \/ TakeOver \/ HCrash \/ HUp \/ Meet \/ CoreRestart
 
 Fairness ==
   /\ \A t \in Turns : WF_vars(Unpark(t)) /\ WF_vars(Claim(t)) /\ WF_vars(FenceCancel(t))
@@ -416,6 +445,9 @@ StuckEnds == \A c \in Claims : (pr[c] \in {"stuck", "stuckx"}) ~> (pr[c] = "dead
 \* stopped ask (both are refused for ever; P3Strict says that is a leak). The `nextC = MaxClaims` escape is only the bound
 \* of the model (a turn that waits when the claim numbers ran out); it hides no stuck state: P3Strict has it too, and
 \* c4-epochcancel / c4-fencecancel pass with it, so a fix is shown by cancelling, not by the escape.
+CoreKeepsLive ==   \* rule K: a core restart never takes a running claim on a live process
+  [][cr' = cr + 1 => \A c \in Claims : (cs[c] = "running" /\ Alive(c)) => cs'[c] = "running"]_vars
+
 P3 == \A t \in Turns :
         (ts[t] = "queued" /\ ms[t] = rev /\ ~Fenced(t)) ~> (ts[t] \in {"done", "cancelled"} \/ nextC = MaxClaims)
 P3Strict == \A t \in Turns :

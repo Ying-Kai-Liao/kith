@@ -59,6 +59,7 @@ fn the_rows_are_the_hosts_alone() {
         "hostclaim.cancel",
         "hostclaim.park",
         "hostclaim.strays",
+        "hostclaim.queued",
         "hostclaim.unpark",
         "hostclaim.proc",
         "hostclaim.procGone",
@@ -621,4 +622,67 @@ fn strays_lists_the_turns_with_a_host_key_that_still_wait_and_nothing_else() {
         vec![(keyed, "k-1".to_owned()), (parked, "k-3".to_owned())],
         "{listed}"
     );
+}
+
+#[test]
+fn queued_lists_the_schedule_turns_no_host_began_and_says_which_ran_before() {
+    use crate::conversations::claims::{self, Kind, NewClaim};
+    let (_t, mut core, _m) = world();
+    let enqueue = |core: &mut Core, conv: &str, source: &str, key: Option<&str>| {
+        let mut p = json!({"conversation": conv, "agent": "echo", "engine": "claude", "source": source,
+                           "person": "sam", "prompt": "do it", "revokeSeen": 0, "deadline": MS + 60_000});
+        if let Some(k) = key {
+            p["key"] = json!(k);
+        }
+        row(core, "hostclaim.enqueue", &p)["turn"].as_i64().unwrap()
+    };
+    let fired = enqueue(&mut core, "schedule:echo:daily:claude", "schedule", None);
+    core.conn()
+        .execute(
+            "INSERT INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES ('echo', 'daily', 's1', 'fired', ?1, 1)",
+            [fired.to_string()],
+        )
+        .unwrap();
+    let _hosts = enqueue(&mut core, "s1", "schedule", Some("k-1"));
+    let _app = enqueue(&mut core, "s2", "app", None);
+    // A fired turn whose claim was redeemed and then put back (a restart): listed, and said to have run before.
+    let ran = enqueue(&mut core, "schedule:echo:hourly:claude", "schedule", None);
+    let req = NewClaim {
+        conversation: "schedule:echo:hourly:claude",
+        kind: Kind::Turn,
+        person: "sam",
+        turn: Some(ran),
+        holder_instance: Some("kith-serve-host/1-a"),
+        account: None,
+        process: None,
+        revoke_seen: 0,
+    };
+    let id = claims::claim(&mut core, &req, MS).unwrap().claim_id;
+    claims::redeem(&mut core, id, 900, "e900", "kith-serve-host/1-a", MS).unwrap();
+    row(
+        &mut core,
+        "hostclaim.stop",
+        &json!({"claimId": id, "reason": "test", "requeue": true}),
+    );
+    let listed = row(&mut core, "hostclaim.queued", &json!({}));
+    let turns = listed["turns"].as_array().unwrap();
+    assert_eq!(turns.len(), 2, "{listed}");
+    let one = &turns[0];
+    assert_eq!(one["turn"], fired);
+    assert_eq!(one["conversation"], "schedule:echo:daily:claude");
+    assert_eq!(one["agent"], "echo");
+    assert_eq!(one["engine"], "claude");
+    assert_eq!(one["job"], "daily");
+    assert_eq!(one["person"], "sam");
+    assert_eq!(
+        one["owner"],
+        Value::Null,
+        "no owner in these tables: unknown, not false"
+    );
+    assert_eq!(one["prompt"], "do it");
+    assert_eq!(one["deadline"], MS + 60_000);
+    assert_eq!(one["redeemedBefore"], false);
+    assert_eq!(turns[1]["turn"], ran);
+    assert_eq!(turns[1]["redeemedBefore"], true, "{listed}");
+    assert!(turns[1]["job"].is_null(), "no fire row names it");
 }

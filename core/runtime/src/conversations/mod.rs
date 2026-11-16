@@ -8,6 +8,9 @@ pub(crate) mod claims;
 pub(crate) mod external;
 #[cfg(test)]
 mod props;
+pub(crate) mod reconcile;
+#[cfg(test)]
+mod reconcile_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod warm;

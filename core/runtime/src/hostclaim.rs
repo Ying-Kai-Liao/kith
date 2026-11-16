@@ -367,6 +367,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(json!({ "turns": turns }))
         }
+        "hostclaim.queued" => queued(core),
         "hostclaim.park" => match claims::park(core, int(p, "turn")?, need(p, "reason")?, now) {
             Ok(parked) => Ok(json!({ "parked": parked })),
             Err(e) => refusal(e),
@@ -386,6 +387,56 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             "kith-core: no method {method}"
         ))),
     }
+}
+
+/// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire), for the host's runner (design
+/// 2026-11-16-core-queued-runner, `HostRuns.tla` `MayPull`). Only unkeyed turns: a keyed one belongs to the host run that
+/// enqueued it, and the strays sweep cancels it when that run is gone. `redeemedBefore` is any claim of the turn having
+/// been redeemed (`running_at`): its prompt may have reached an engine, so the host cancels it instead of running it again
+/// (`SkipRedeemed`). Every schedule turn in this core.db was fired on this Mac, for an agent the index lists here.
+fn queued(core: &Core) -> Result<Value> {
+    let owner = owner_id(core);
+    let mut st = core.conn().prepare(
+        "SELECT t.id, t.conversation, c.agent, c.engine, t.person, t.prompt, t.deadline, t.parked_reason,
+                EXISTS (SELECT 1 FROM claims k WHERE k.turn = t.id AND k.running_at IS NOT NULL),
+                (SELECT f.job FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1)
+         FROM turns t JOIN conversations c ON c.id = t.conversation
+         WHERE t.enq_key IS NULL AND t.source = 'schedule' AND t.state IN ('queued', 'parked')
+         ORDER BY t.id",
+    )?;
+    let turns = st
+        .query_map([], |r| {
+            let person: String = r.get(4)?;
+            Ok(json!({
+                "turn": r.get::<_, i64>(0)?,
+                "conversation": r.get::<_, String>(1)?,
+                "agent": r.get::<_, String>(2)?,
+                "engine": r.get::<_, String>(3)?,
+                "job": r.get::<_, Option<String>>(9)?,
+                // null when the owner can't be read: the host says so instead of letting every run expire quietly.
+                "owner": owner.as_deref().map(|o| o == person),
+                "person": person,
+                "prompt": r.get::<_, String>(5)?,
+                "deadline": r.get::<_, Option<i64>>(6)?,
+                "parkedReason": r.get::<_, Option<String>>(7)?,
+                "redeemedBefore": r.get::<_, bool>(8)?,
+            }))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(json!({ "turns": turns }))
+}
+
+/// The owner's id in the authority tables (the person a job with none runs as); `None` when they cannot be read.
+#[cfg(unix)]
+fn owner_id(core: &Core) -> Option<String> {
+    crate::authority::tables_within(core.conn())
+        .ok()
+        .and_then(|auth| crate::schedules::owner_in(&auth))
+}
+
+#[cfg(not(unix))]
+fn owner_id(_core: &Core) -> Option<String> {
+    None
 }
 
 #[cfg(unix)]

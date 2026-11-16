@@ -153,8 +153,9 @@ M4-3 is `core/runtime/src/schedules/fire.rs` (with `sync.rs`, the index). The ta
 | `Claim` (may check) | `claim` (`:246`), `revoke_epoch` (`:182`), `NewClaim::revoke_seen` (`:91`, checked `:273`), the deadline check in the claim's UPDATE (`:350`) |
 | `Hold`, `Release`, park | `park_in` (called by `fire_in` when the conversation is held), `unpark_ready` |
 | `Expire` | `expire_turns_in` (the sweep in `fire_in`, step 3), `expire_parked` (q218) |
-| `Start`, `Finish`, `Crash`, `Restart` | `redeem` (`:373`), `report` (`:415`), `reconcile` (`:887`) |
+| `Start`, `Finish`, `Crash`, `Restart` | `redeem` (`:373`), `report` (`:415`), `reconcile` (`conversations/reconcile.rs`: a core restart keeps the host's live claims, rule K of design 2026-11-16-core-queued-runner) |
 | the turn row | `enqueue_turn_in` (`fire_in`, step 5), source `schedule` |
+| who runs the turn (not in `Fire.tla`; `HostRuns.tla` in the architect's design folder) | the host's runner: `hostclaim.queued` (`hostclaim.rs`, unkeyed `schedule` turns, `redeemedBefore`), `serve/host/src/routines/core_runs.rs` (pull after each `schedule.tick` and every 2 s in Writer mode; a turn redeemed before is cancelled "interrupted", any other begins by its id through the bot's actor, never enqueued). `RUNS_FIRED_TURNS` is on since it landed |
 
 ## Broken variants
 

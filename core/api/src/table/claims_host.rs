@@ -301,6 +301,11 @@ pub(super) const ROWS: &[Method] = &[
         &[],
     ),
     host(
+        "hostclaim.queued",
+        "The turns the core queued that no host began (a schedule's fire: `enq_key` NULL, source `schedule`) and that wait (queued or parked): `{turns: [{turn, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed.",
+        &[],
+    ),
+    host(
         "hostclaim.park",
         "A queued turn waits (`lock_busy` or `terminal_live`). Answers `{parked}`.",
         &[

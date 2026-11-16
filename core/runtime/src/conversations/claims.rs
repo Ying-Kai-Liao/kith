@@ -7,9 +7,9 @@
 //! | 1 claim | [`claim`] |
 //! | 3 redeem, busy, revoke or stop | [`redeem`], `busy` through [`report`], [`stop`] |
 //! | 4 exit report and its ack | [`report`] |
-//! | 5 reconcile after a generation bump | [`reconcile`] |
+//! | 5 reconcile after a generation bump (the host's live claims stay, rule K) | [`reconcile`] (`reconcile.rs`) |
 //! | 6 revoke a person | [`revoke_person`] |
-//! | 7 a different holder instance | [`different_holder`] |
+//! | 7 a different holder instance | [`different_holder`] (`reconcile.rs`) |
 //! | `ending` -> `ended` once the pid and its process group are gone | [`end_gone`] |
 //! | an exit on a usage limit: mark out, requeue | [`report`] -> `accounts::failover` (M3-9b) |
 //!
@@ -42,11 +42,9 @@
 //! decides. Times are milliseconds, passed in so tests set the clock. Not here: promoting a queued take-over claim
 //! (`queued -> claimed`) when the writer is gone; it comes with the terminal entrance (M3-11).
 
-use std::collections::HashSet;
-
 use rusqlite::{OptionalExtension as _, Transaction, params};
 
-use crate::db::{Core, RecordedProc};
+use crate::db::Core;
 use crate::error::{Error, Result};
 use crate::gate::{Liveness, same_process};
 
@@ -150,14 +148,14 @@ pub(crate) struct Revoked {
     pub kill: Vec<Kill>,
 }
 
-struct Row {
-    conversation: String,
-    state: String,
-    pid: Option<i64>,
-    pid_started: Option<String>,
+pub(super) struct Row {
+    pub(super) conversation: String,
+    pub(super) state: String,
+    pub(super) pid: Option<i64>,
+    pub(super) pid_started: Option<String>,
 }
 
-fn row(tx: &Transaction<'_>, claim_id: i64) -> Result<Option<Row>> {
+pub(super) fn row(tx: &Transaction<'_>, claim_id: i64) -> Result<Option<Row>> {
     Ok(tx
         .query_row(
             "SELECT conversation, state, pid, pid_started FROM claims WHERE claim_id = ?1",
@@ -247,7 +245,7 @@ pub(crate) fn group_held(core: &Core, live: &dyn Liveness) -> Result<i64> {
     Ok(n)
 }
 
-fn reconciled(tx: &Transaction<'_>) -> Result<Option<i64>> {
+pub(super) fn reconciled(tx: &Transaction<'_>) -> Result<Option<i64>> {
     let text: Option<String> = tx
         .query_row("SELECT value FROM meta WHERE key = ?1", [RECONCILED], |r| {
             r.get(0)
@@ -1019,187 +1017,8 @@ pub(crate) fn is_host_instance(instance: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
-/// The claims the holder's listing does not cover, ended or moved to `ending` (steps 5 and 7). `foreign_to` limits it
-/// to claims of another holder instance (step 7), never the host's ([`HOST_INSTANCE`]); `None` takes every live claim
-/// (step 5). Step 5 keeps the host's claims in: it runs once per core generation, and a claim of the previous
-/// generation is not the host's to keep (its reports fail as stale), so it must be reconciled like any other.
-fn release_unlisted(
-    tx: &Transaction<'_>,
-    listed: &HashSet<i64>,
-    foreign_to: Option<&str>,
-    procs: &[RecordedProc],
-    high_water: i64,
-    now: i64,
-) -> Result<Released> {
-    let mut out = Released::default();
-    #[allow(
-        clippy::type_complexity,
-        reason = "one row of the query below, used once"
-    )]
-    let mut live: Vec<(
-        i64,
-        String,
-        bool,
-        Option<i64>,
-        Option<String>,
-        Option<String>,
-    )> = Vec::new();
-    {
-        // Only claims at or below the high-water mark read before the holder's list: a newer one may simply be missing
-        // from a list that was read before it was taken.
-        let mut st = tx.prepare(
-            "SELECT claim_id, state, kind = 'external', pid, pid_started, holder_instance FROM claims
-             WHERE state IN ('claimed', 'running', 'ending') AND claim_id <= ?2
-               AND (?1 IS NULL OR holder_instance IS NULL
-                    OR (holder_instance <> ?1
-                        AND NOT (holder_instance = ?3 OR substr(holder_instance, 1, length(?3) + 1) = ?3 || '/')))",
-        )?;
-        for r in st.query_map(params![foreign_to, high_water, HOST_INSTANCE], |r| {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get(5)?,
-            ))
-        })? {
-            live.push(r?);
-        }
-    }
-    for (id, state, external, pid, started, holder) in live {
-        if listed.contains(&id) {
-            continue;
-        }
-        // A `--direct` run has no stub or holder entry: the holder not listing it says nothing. `end_gone` ends it
-        // when its recorded pid is gone; a stop's kill is still re-sent.
-        if external {
-            if state == "ending" {
-                out.kill.push(kill_of(id, pid, started));
-            }
-            continue;
-        }
-        match state.as_str() {
-            // Never redeemed: end it by CAS so a late redeem fails, and give the turn back.
-            "claimed" => {
-                let n = tx.execute(
-                    "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = 'holder_changed'
-                     WHERE claim_id = ?1 AND state = 'claimed'",
-                    params![id, now],
-                )?;
-                if n == 1 {
-                    requeue_turn(tx, id)?;
-                    out.ended.push(id);
-                }
-            }
-            // Redeemed: the process may still write. It stays the writer, as `ending`, until its pid is gone.
-            "running" => {
-                let n = tx.execute(
-                    "UPDATE claims SET state = 'ending', end_reason = 'holder_changed'
-                     WHERE claim_id = ?1 AND state = 'running'",
-                    [id],
-                )?;
-                if n == 1 {
-                    requeue_turn(tx, id)?;
-                }
-                let k = kill_of(id, pid, started);
-                out.holder_kill.push((k.clone(), holder));
-                out.kill.push(k);
-            }
-            // Already ending: with a process, wait for it; without one it was never redeemed and now cannot be.
-            _ => {
-                if pid.is_some() {
-                    let k = kill_of(id, pid, started);
-                    out.holder_kill.push((k.clone(), holder));
-                    out.kill.push(k);
-                } else {
-                    let n = tx.execute(
-                        "UPDATE claims SET state = 'ended', ended_at = ?2
-                         WHERE claim_id = ?1 AND state = 'ending'",
-                        params![id, now],
-                    )?;
-                    if n == 1 {
-                        out.ended.push(id);
-                    }
-                }
-            }
-        }
-    }
-    let mut known: HashSet<(i64, String)> = HashSet::new();
-    {
-        // Only live claims count: an old-instance process whose claim ended must still be killed (step 7).
-        let mut st = tx.prepare(
-            "SELECT pid, pid_started FROM claims
-             WHERE state IN ('claimed', 'running', 'ending') AND pid IS NOT NULL AND pid_started IS NOT NULL",
-        )?;
-        for r in st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))? {
-            known.insert(r?);
-        }
-    }
-    for p in procs {
-        if !known.contains(&(i64::from(p.pid), p.started.clone())) {
-            out.kill_procs.push(Kill {
-                claim_id: None,
-                pid: Some(p.pid),
-                started: Some(p.started.clone()),
-            });
-        }
-    }
-    Ok(out)
-}
-
-/// Step 5: after the generation bump and hello, one transaction releases the claims the holder does not list, lists the
-/// holder entries to kill (their claim is ended or unknown), and marks this generation reconciled, so claims open.
-/// `listed` is the holder's claim ids; `procs` the old instance's recorded processes with no redeem (step 7), if any;
-/// `high_water` is [`claim_high_water`] read before the holder was asked. A second reconcile in one generation is refused.
-pub(crate) fn reconcile(
-    core: &mut Core,
-    listed: &[i64],
-    procs: &[RecordedProc],
-    high_water: i64,
-    now: i64,
-) -> Result<Released> {
-    let generation = core.generation();
-    let tx = core.claim_tx()?;
-    if reconciled(&tx)? == Some(generation) {
-        return Err(Error::Refused(format!(
-            "kith-core: generation {generation} is already reconciled"
-        )));
-    }
-    let set: HashSet<i64> = listed.iter().copied().collect();
-    let mut out = release_unlisted(&tx, &set, None, procs, high_water, now)?;
-    for id in listed {
-        let state = row(&tx, *id)?.map(|r| r.state);
-        if !matches!(state.as_deref(), Some("claimed" | "running" | "ending")) {
-            out.kill_listed.push(*id);
-        }
-    }
-    tx.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
-        params![RECONCILED, generation.to_string()],
-    )?;
-    tx.commit()?;
-    Ok(out)
-}
-
-/// Step 7: the core's hello met a holder instance other than the one it recorded. Claims of any other instance that the
-/// new one does not list: `claimed` ones are ended by CAS (a late redeem fails), `running` ones go to `ending` and are
-/// killed by their recorded pid until confirmed gone ([`end_gone`]), never straight to `ended`. `procs` are the old
-/// instance's recorded processes with no redeem. Does not open claims; [`reconcile`] does.
-pub(crate) fn different_holder(
-    core: &mut Core,
-    new_instance: &str,
-    listed: &[i64],
-    procs: &[RecordedProc],
-    high_water: i64,
-    now: i64,
-) -> Result<Released> {
-    let tx = core.claim_tx()?;
-    let set: HashSet<i64> = listed.iter().copied().collect();
-    let out = release_unlisted(&tx, &set, Some(new_instance), procs, high_water, now)?;
-    tx.commit()?;
-    Ok(out)
-}
+// Steps 5 and 7 (`reconcile`, `different_holder`) are in `reconcile.rs`.
+pub(crate) use super::reconcile::{different_holder, reconcile};
 
 // ---- turns: the queue other lanes (wake, asks, accounts, transcripts) call; none of them writes these tables
 

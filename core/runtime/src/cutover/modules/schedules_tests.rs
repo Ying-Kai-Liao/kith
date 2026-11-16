@@ -1012,7 +1012,8 @@ fn a_build_that_cannot_run_fired_turns_refuses_the_step_and_says_so_in_the_dry_r
     .unwrap();
     assert!(
         dry.iter()
-            .any(|l| l.starts_with(WORDS) && l.contains("Failed: 1:")),
+            // The runner is in (condition 1 holds); a build launchd does not run still refuses.
+            .any(|l| l.starts_with(WORDS) && l.contains("Failed: 4:") && !l.contains("1:")),
         "{dry:?}"
     );
     let c = check(&reg, &w.env, "schedules").unwrap();

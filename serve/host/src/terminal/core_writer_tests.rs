@@ -64,6 +64,8 @@ pub(crate) struct World {
     pub sent_accounts: Vec<Option<String>>,
     /// `hostclaim.proc` refuses the row of a session (not the process's own), as data and not as a revoke.
     pub session_register_refused: bool,
+    /// The turns the core queued itself (a schedule's fire), as `hostclaim.queued` lists them while their turn waits.
+    pub fired: Vec<Value>,
 }
 
 /// An ended claim of `conv` as the core would list it.
@@ -116,6 +118,13 @@ impl World {
                 data(json!({"ok": self.switched.unwrap_or(false)}))
             }
             "hostclaim.epoch" => data(json!({"epoch": 0})),
+            "hostclaim.queued" => {
+                let waits =
+                    |id: i64| self.turns.iter().any(|t| t.0 == id && ["queued", "parked"].contains(&t.1.as_str()));
+                let turns: Vec<Value> =
+                    self.fired.iter().filter(|f| f["turn"].as_i64().is_some_and(waits)).cloned().collect();
+                data(json!({"turns": turns}))
+            }
             "hostclaim.enqueue" => {
                 if self.revoke_enqueue {
                     return refused("revoked");
@@ -443,6 +452,7 @@ impl Rig {
             key: Box::leak(new_turn_key().into_boxed_str()),
             id,
             conversation: conv,
+            session: None,
             agent: "builder",
             engine: "claude",
             source: "app",
@@ -1053,6 +1063,25 @@ async fn a_usage_limit_move_is_a_new_turn_on_the_backups_session() {
     let next = running(r.writer.begin(&r.turn("s1-backup", None), &mut backup));
     assert_ne!(next.turn, run.turn, "a new turn");
     assert_eq!(r.turn_state(next.turn).0, "running");
+}
+
+/// A scheduled run the core queued claims on the core's conversation with the session as the lock key: a usage move ends it `exit`
+/// and begins the same turn again on the backup's session, by its id. Nothing cancels it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_usage_limit_move_of_a_pulled_run_begins_the_same_turn_on_the_backups_session() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let conv = "schedule:bot:a:daily:claude";
+    let first = Turn { session: Some("s1"), ..r.turn(conv, None) };
+    let run = running(r.writer.begin(&first, &mut stub));
+    assert_eq!(r.writer.finish(&run, "s1", &mut stub, End::OutOfUsage), Finished::Reported);
+    assert_eq!(r.turn_state(run.turn).0, "queued", "exit requeued it");
+    let mut backup = r.stub("backup");
+    let again = Turn { session: Some("s1-backup"), ..r.turn(conv, Some(run.turn)) };
+    let next = running(r.writer.begin(&again, &mut backup));
+    assert_eq!(next.turn, run.turn, "the same turn");
+    assert_eq!(r.turn_state(run.turn).0, "running");
+    assert!(r.w().log.iter().all(|m| m != "hostclaim.cancel"), "never cancelled: {:?}", r.w().log);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
