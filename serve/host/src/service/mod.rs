@@ -44,11 +44,15 @@ pub fn capture_binary_identity() -> Result<()> {
 /// This binary's resolved path, in the form other programs print it: Windows'
 /// `canonicalize` adds a `\\?\` prefix that the apps' paths and shells don't have.
 pub fn current_exe() -> std::io::Result<PathBuf> {
-    let exe = std::env::current_exe()?.canonicalize()?;
-    Ok(match exe.to_str().and_then(|p| p.strip_prefix(r"\\?\")) {
+    Ok(plain(std::env::current_exe()?.canonicalize()?))
+}
+
+/// A canonical path without Windows' `\\?\` prefix (see [`current_exe`]).
+fn plain(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|p| p.strip_prefix(r"\\?\")) {
         Some(plain) if cfg!(windows) => PathBuf::from(plain),
-        _ => exe,
-    })
+        _ => path,
+    }
 }
 
 pub fn binary_identity() -> Option<&'static (String, String)> {
@@ -121,14 +125,14 @@ fn holder_words() -> Result<Option<Vec<String>>> {
     }
     let name = if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" };
     let host = current_exe().context("locating the kith-serve binary")?;
-    let Some(exe) = crate::kernel::find_holder(&host) else {
+    let Some(exe) = crate::kernel::find_holder(&host).map(plain) else {
         bail!("the holder is switched on but there is no {name} beside {} (install it beside kith)", host.display());
     };
     // The job's environment does not carry KITH_HOLDER_BIN, so its core would look beside the host and never connect
-    // to a holder named only here.
+    // to a holder named only here. Both sides resolved: the holder beside the host may itself be a link.
     if let Some(given) = std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
         let given = PathBuf::from(given);
-        if given.canonicalize().ok().as_deref() != Some(exe.as_path()) {
+        if given.canonicalize().ok().map(plain) != exe.canonicalize().ok().map(plain) {
             bail!(
                 "KITH_HOLDER_BIN names {} but the service's core will use {}: unset it, or put that holder beside the host",
                 given.display(),
