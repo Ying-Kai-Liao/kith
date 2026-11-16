@@ -544,7 +544,7 @@ done
 # resolve takes the session's writer claim for this shell ($$): it execs into `kith-sessions run` below, so the pid is the
 # same until claude has exited, and run gives the claim back.
 # -r alone picks the session from the agent's recent ones, -c takes the latest begun in this folder; then the same.
-r_sid="" r_cwd="" r_from=""
+r_sid="" r_cwd="" r_from="" r_alone=""
 if [[ -n $resume_thread || -n $resume_pick ]]; then
   [[ $launch -eq 0 && $print -eq 0 ]] || { echo "kith: --resume is for a run in this terminal, not --launch-json or --print" >&2; exit 1; }
   [[ $p_owner == 1 ]] || { echo "kith: --resume is for the owner's own sessions" >&2; exit 1; }
@@ -1485,13 +1485,21 @@ if [[ -n $csid ]]; then
     echo "kith: no kith-stub program beside kith; this run is not locked against another run of the same conversation" >&2
   fi
 fi
+# A run the core gave no answer for goes on under the lock alone (kith-sessions prints `lock-alone`, resolve sets r_alone): the
+# stub then kills a host warm process that has the conversation loaded, after it takes the lock and before claude starts
+# (designs/2026-11-16-offturn-lock-alone). With a core that answered, the core's warm check did that and nothing is cleared.
+lock_alone() { [[ ${#stub[@]} -eq 0 ]] || stub=("${stub[0]}" --lock-alone "${stub[@]:1}"); }
+[[ -z $r_alone ]] || lock_alone
 # The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.
 claim_person=""; [[ $p_owner == 1 ]] || claim_person=$p_id
 if [[ $# -gt 0 ]]; then
   [[ $want_held -eq 0 ]] || echo "kith: --held is for an interactive session; this task runs here (--direct)" >&2
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
-  [[ -z $csid ]] || KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" "$claim_person" "$agent" || exit 1
+  if [[ -n $csid ]]; then
+    claimed=$(KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" "$claim_person" "$agent") || exit 1
+    [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
+  fi
   [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
   # A permission prompt in this run asks for approval through a card (--permission-prompt-tool) instead of being refused.
   # A guest run was given KITH_RUN_TOKEN/KITH_RUN_SOCKET by the host, an owner run KITH_ASK_*, or gets them here: the
@@ -1523,7 +1531,9 @@ if [[ $want_held -eq 1 ]]; then
     . "$KITH/lib/kith-core.sh"
     export KITH_TERMINAL_SESSION=1
     [[ -z $r_sid ]] || export KITH_RESUMED_FROM=$r_from
+    held_alone=""
     kith_held_launch "$agent" "$csid" "${r_sid:-}" "${args[@]}" || true
+    [[ -z $held_alone || -n $r_alone ]] || lock_alone
   else
     echo "kith: --held is for the owner's own terminal; running here (--direct)" >&2
   fi
@@ -1540,7 +1550,8 @@ fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
 if [[ -n $csid && $csid != "${r_sid:-}" ]]; then
-  KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" "$claim_person" "$agent" || exit 1
+  claimed=$(KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" "$claim_person" "$agent") || exit 1
+  [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
 fi
 # An interactive owner run is listed in the apps (the SessionStart hook above) and may be taken over from there, which ends
 # claude: it runs as a child of kith-sessions so the note about getting it back can follow it (signals and the exit code

@@ -282,6 +282,11 @@ print(json.dumps(p))' "$agent" "$sid" "$@")
   fi
   if [[ -t 0 && -t 1 ]]; then echo "kith: ${why}; running here (--direct)" >&2
   else echo "kith: ${why}; an interactive session needs a terminal to run here" >&2; fi
-  [[ $released -eq 0 ]] || python3 "$KITH/bin/kith-sessions" terminal "$rsid" "$$" || exit 1
+  if [[ $released -eq 1 ]]; then
+    # The claim again; a core that gave no answer marks the run lock-alone (bin/kith passes --lock-alone to the stub).
+    local claimed
+    claimed=$(python3 "$KITH/bin/kith-sessions" terminal "$rsid" "$$") || exit 1
+    [[ $claimed != lock-alone ]] || held_alone=1
+  fi
   return 1
 }

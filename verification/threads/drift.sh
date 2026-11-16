@@ -38,7 +38,10 @@ FILES=(
   serve/host/src/terminal/warm_stub.rs    # the host's resident stub: take / release / kill_group
   serve/host/src/agent/bot/writer.rs      # the actor's use of CoreWriter: orphaned begins, the mode
   serve/host/src/agent/bot/writer_turn.rs # End choice (Done / Died / Killed / OutOfUsage / Left), abandon + settle_gone, failover
-  core/stub/src/resident.rs           # the stub's lock: take / release, nothing released on close
+  core/stub/src/resident.rs           # the stub's lock: take / release, nothing released on close; loaded / forgot markers
+  core/stub/src/main.rs               # the one-shot take, then --lock-alone's clear before the engine
+  core/stub/src/clear.rs              # L-clear: stale markers, a stub holding another key's lock (75), killpg + wait gone
+  core/stub/src/loaded.rs             # the <key>.loaded/<stubpid>-<start> markers
   core/runtime/src/conversations/claims.rs   # claim_next, end_gone, the one live row per conversation
   core/runtime/src/conversations/external.rs # claim.external / claim_terminal: blocked_in (warm process), takeover
   core/runtime/src/conversations/warm.rs     # warm_procs: kill_at, adopt

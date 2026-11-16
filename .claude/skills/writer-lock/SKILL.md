@@ -22,6 +22,13 @@ safety properties and are not in `Holder.tla`. A green run says the design holds
 for the core's claim record (switch `RedeemWrite`), from `claims.rs` (M3-2); `WriterLock4.tla` models the design only;
 `Claims4.tla` is derived from the claim code and was re-read at 1720d27e.
 
+The one-shot stub's take (a direct run, `DLock`) now has a step after it when the run goes on under the lock alone
+(`--lock-alone`, design 2026-11-16-offturn-lock-alone, `core/stub/src/clear.rs`): holding the lock and before the engine starts,
+every warm engine marked as having the conversation loaded is killed and waited for (or the run is busy, 75). Still no spawn
+under the lock: kill(2), readdir, non-blocking lock probes and process-table reads only (`the_clear_forks_nothing`, as
+`the_redeem_forks_nothing`). It only removes an engine before the direct run's starts, so `DLock` and the rows here are
+unchanged; the clear is modelled in `verification/threads` (`LockAloneClearsWarm`, the thread-writers skill).
+
 ## Run it
 
 ```

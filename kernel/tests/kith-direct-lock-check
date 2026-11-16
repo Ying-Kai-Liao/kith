@@ -9,6 +9,7 @@
 #   - an app turn (the host's claim, kith-sessions take_claim) on a session a direct run holds is still blocked by the claim file;
 #   - the claim file names the shell pid, and claude descends from the stub which is that same pid (exec kept it);
 #   - an interactive run on a busy lock: exit 75, claude never started, its claim released, no resume note;
+#   - Writer mode with the core not answering: the run goes on under the lock alone and the stub gets --lock-alone;
 #   - no session id (-c) or no kith-stub: unlocked, as before (the missing stub says so on stderr; KITH_REQUIRE_STUB=1 refuses; the default flips in M3);
 #
 #   kernel/tests/kith-direct-lock-check    a few seconds; prints each check, exits 1 when one fails
@@ -179,6 +180,25 @@ is "interactive busy: the run exits 75" "$rc" 75
 unheld $SID5 && ok "interactive busy: the claim was released" || bad "interactive busy: claim still held"
 grep -qE 'Resume it as|continued in Kith' "$T/r5.out" && bad "interactive busy: a resume note was printed" "$(cat "$T/r5.out")" || ok "interactive busy: no resume note"
 touch "$T/go"; wait $HELD5
+
+# Writer mode (the claims marker) with the core not answering: the owner's run goes on under the lock alone, and the stub is
+# told so (--lock-alone: it clears a host warm process that has the conversation loaded before claude starts; the clear itself
+# is core/stub/tests/lock_alone.rs). With the core answering it never is (kith-sessions-core-check W1).
+SID6=66666666-6666-4666-8666-666666666666
+# A kith program whose core does not answer (it knows `memory hook`, so kith_paths takes it and no installed kith is asked).
+printf '#!/bin/sh\n[ "$1 $2" = "memory hook" ] && { echo "usage: kith memory hook --phase"; exit 0; }\necho "no core daemon answers" >&2\nexit 3\n' > "$T/bin/kith-down"
+chmod +x "$T/bin/kith-down"
+printf '{"kith_tombstone": 1, "module": "claims"}\n' > "$REG/claims.tombstone"
+rm -f "$T/go" "$T/started"
+( cd "$T/work" && KITH_BIN=$T/bin/kith-down KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $SID6" exec "$KERNEL/bin/kith" designer "task" ) > "$T/r6.out" 2>&1 &
+R6=$!
+waitfor '[[ -s $T/started ]]' && ok "lock alone: claude started" || bad "lock alone: claude never started" "$(cat "$T/r6.out")"
+[[ $(ps -o args= -p "$R6") == *"--lock-alone"* ]] && ok "lock alone: the stub was started with --lock-alone" \
+  || bad "lock alone: no --lock-alone" "$(ps -o args= -p "$R6")"
+grep -q 'conversation lock alone' "$T/r6.out" && ok "lock alone: one line says so" || bad "lock alone: no line" "$(cat "$T/r6.out")"
+grep -qx 'lock-alone' "$T/r6.out" && bad "lock alone: kith-sessions' mark reached the terminal" || ok "lock alone: the mark stays between kith-sessions and bin/kith"
+touch "$T/go"; wait $R6
+rm -f "$REG/claims.tombstone"
 
 [[ $fail == 0 ]] && echo "all checks passed"
 exit $fail

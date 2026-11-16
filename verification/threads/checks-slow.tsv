@@ -1,0 +1,7 @@
+# variant	kind	property	expected
+# The large passing rows: run.sh --slow runs them one at a time on every core (TLC -workers auto, a 6g heap), CI job
+# thread-writers-slow. Same format as checks.tsv.
+# L-clear (design 2026-11-16-offturn-lock-alone): the code with the core not answering, off-turn wakes, a run on the lock alone.
+# 61,550,608 distinct states, depth 74: 13 min on 8 workers (M-series laptop, 2026-11-16); it did not finish in 2 h on one
+# worker with 512 MB.
+core-held-cleared	INVARIANT	OneWriter	pass

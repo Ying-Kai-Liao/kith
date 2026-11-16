@@ -5,3 +5,4 @@ MaxSends = 1
 GateFlips = TRUE
 OffTurnWakes = FALSE
 AbandonKeepsLock = FALSE
+LockAloneClearsWarm = FALSE

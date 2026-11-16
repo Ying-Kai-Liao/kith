@@ -63,6 +63,16 @@ impl WarmStub for Stub {
     }
 }
 
+/// The stub's control channel, for the `loaded` / `forgot` marks.
+#[cfg(unix)]
+fn ctl_of(stub: &Stub) -> Arc<kith_acp::Ctl> {
+    stub.ctl()
+}
+#[cfg(not(unix))]
+fn ctl_of(stub: &Stub) -> Arc<kith_acp::Ctl> {
+    match *stub {}
+}
+
 /// How long a begin refused by a process that is being stopped waits before it tries again.
 pub(super) const RETRY_AFTER: Duration = Duration::from_secs(1);
 
@@ -265,8 +275,11 @@ pub(crate) struct Proc {
     pub(super) agent: String,
     /// `hostclaim.epoch` of `person`, read before the process started.
     pub(super) seen: i64,
-    /// The conversations that have a row.
+    /// The conversations that have a row, and a `loaded` marker of the stub (design 2026-11-16-offturn-lock-alone: with no core
+    /// answering, an owner run on the lock alone kills a process marked on its conversation before it starts).
     rows: HashSet<String>,
+    /// The stub's control channel: the marks go with the rows, also while a turn has the stub away.
+    ctl: Arc<kith_acp::Ctl>,
     /// Per session, the claim this process last ran a turn under (step 7): a claim of someone else above it means the session was
     /// written beside this process, and the next turn loads it again (see `CoreWriter::claim_since`).
     pub(super) ran: HashMap<String, i64>,
@@ -282,7 +295,19 @@ impl Proc {
         agent: String,
         seen: i64,
     ) -> Self {
-        Self { core, stub: Some(stub), pid, started, person, agent, seen, rows: HashSet::new(), ran: HashMap::new() }
+        let ctl = ctl_of(&stub);
+        Self {
+            core,
+            stub: Some(stub),
+            pid,
+            started,
+            person,
+            agent,
+            seen,
+            rows: HashSet::new(),
+            ctl,
+            ran: HashMap::new(),
+        }
     }
 }
 
@@ -406,7 +431,10 @@ impl Actor {
     }
 
     /// Brings `warm_procs` in step with the sessions this process has loaded: a row for each (registered before its load, see
-    /// [`Self::warm_session`]), none for a session it dropped. A registration the core refuses as revoked ends the process.
+    /// [`Self::warm_session`]), none for a session it dropped. A registration the core refuses as revoked ends the process. The
+    /// stub's `loaded` marker goes with each row, before the load too: a marker that cannot be made fails the load, because without
+    /// it a run on the lock alone would start beside this process. A `forgot` that fails leaves a marker, which at worst stops an
+    /// idle process.
     pub(super) async fn sync_warm(&mut self) -> Result<()> {
         let Some(conn) = self.conn.as_mut() else { return Ok(()) };
         let Some(proc) = conn.writer.as_mut() else { return Ok(()) };
@@ -416,15 +444,30 @@ impl Actor {
         if add.is_empty() && drop.is_empty() {
             return Ok(());
         }
-        let (core, pid, started, person, agent, seen) =
-            (proc.core.clone(), proc.pid, proc.started.clone(), proc.person.clone(), proc.agent.clone(), proc.seen);
+        let (core, pid, started, person, agent, seen, ctl) = (
+            proc.core.clone(),
+            proc.pid,
+            proc.started.clone(),
+            proc.person.clone(),
+            proc.agent.clone(),
+            proc.seen,
+            proc.ctl.clone(),
+        );
         let (a, d) = (add.clone(), drop.clone());
         let done = tokio::task::spawn_blocking(move || -> Result<(), String> {
             for sid in &a {
                 core.register_proc(pid, &started, &person, &agent, Some(sid), (!person.is_empty()).then_some(seen))?;
+                match ctl.loaded(sid) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(why)) => return Err(format!("the stub did not mark the session loaded: {why}")),
+                    Err(e) => return Err(format!("the stub did not mark the session loaded: {e}")),
+                }
             }
             for sid in &d {
                 core.proc_forget(pid, &started, sid)?;
+                if let Err(e) = ctl.forgot(sid).map_err(|e| e.to_string()).and_then(|r| r) {
+                    tracing::warn!(error = e, "the stub kept a loaded marker of a session the process let go");
+                }
             }
             Ok(())
         })
