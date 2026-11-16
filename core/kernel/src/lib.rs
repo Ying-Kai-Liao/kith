@@ -8,6 +8,7 @@ pub mod accounts;
 pub mod cost;
 pub mod delegation;
 pub mod engines;
+pub mod helpers;
 // Unix only: these write modes with mode(2), sync directories, send signals and read `ps`. The Windows build of this crate
 // (the `windows` CI job) is accounts, delegation, engines and paths; the core runtime needs paths.
 #[cfg(unix)]

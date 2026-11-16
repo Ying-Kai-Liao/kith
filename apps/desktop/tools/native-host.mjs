@@ -59,6 +59,8 @@ if (process.platform === 'win32') {
   // The process holder Writer mode connects to: the host's core finds it in this folder too (Resources/kith/bin).
   for (const target of targets) build(target, '-p', 'kith-holder')
   run('lipo', ['-create', '-output', join(kith, 'bin/kith-holder'), ...targets.map((t) => built(t, 'kith-holder'))])
+  // Fails here, before signing and notarizing, if the CLI folder lacks a helper.
+  run('sh', [join(root, '../../scripts/check-bin-dir.sh'), join(kith, 'bin')])
   // The kernel's VERSION is the app's version: the app installs this copy as its CLI (Resources/kith-install.sh).
   // A release build names it in KITH_APP_VERSION (the tag; electron-builder gets the same through extraMetadata).
   const version = process.env.KITH_APP_VERSION || JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version

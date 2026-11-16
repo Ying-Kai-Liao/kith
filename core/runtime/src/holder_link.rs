@@ -78,19 +78,11 @@ impl HolderConfig {
     }
 }
 
-/// The helper program `name` where an installed kith keeps it: beside this program, symlinks resolved (a release's
-/// `bin/` holds kith, kith-stub and kith-holder together), or in the Mac app's CLI folder beside it (the app runs
-/// `Resources/kith-serve`; its helpers are in `Resources/kith/bin/`). The host looks for kith-stub the same way.
+/// A helper program where an installed kith keeps it (`kith_kernel::helpers::beside`: beside this program, symlinks
+/// resolved, or in the Mac app's CLI folder). The host's service names the holder for its launchd job through the same
+/// function, so the job's holder is the one this core connects to.
 fn beside_this(name: &str) -> Option<PathBuf> {
-    beside(&std::env::current_exe().ok()?, name)
-}
-
-fn beside(exe: &Path, name: &str) -> Option<PathBuf> {
-    let exe = exe.canonicalize().unwrap_or_else(|_| exe.to_path_buf());
-    let dir = exe.parent()?;
-    [dir.join(name), dir.join("kith/bin").join(name)]
-        .into_iter()
-        .find(|p| p.is_file())
+    kith_kernel::helpers::beside_this(name)
 }
 
 impl Default for HolderConfig {

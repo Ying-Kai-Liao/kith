@@ -112,26 +112,29 @@ fn holder_wanted() -> bool {
 }
 
 /// The words in front of the host in a job that runs it under the holder: `kith-holder supervise ... --`. The holder
-/// program is `$KITH_HOLDER_BIN`, else `kith-holder` where the host finds kith-stub (`kernel::find_holder`: beside this
-/// program, in the Mac app's CLI folder, beside the `kith` on PATH); the folder and the secret file are the core's own,
-/// so the holder this starts is the one the daemon says hello to. `None`: not opted in.
+/// program is the one the job's core will look for (`kernel::find_holder`: beside this program, or in the Mac app's CLI
+/// folder), and the folder and the secret file are the core's own, so the holder this starts is the one the daemon says
+/// hello to. `None`: not opted in.
 fn holder_words() -> Result<Option<Vec<String>>> {
     if !holder_wanted() {
         return Ok(None);
     }
     let name = if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" };
-    let exe = if let Some(e) = std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
-        PathBuf::from(e)
-    } else {
-        let host = current_exe().context("locating the kith-serve binary")?;
-        crate::kernel::find_holder(Some(&host), crate::agent::backends::which("kith").as_deref())
-            .unwrap_or_else(|| host.with_file_name(name))
+    let host = current_exe().context("locating the kith-serve binary")?;
+    let Some(exe) = crate::kernel::find_holder(&host) else {
+        bail!("the holder is switched on but there is no {name} beside {} (install it beside kith)", host.display());
     };
-    if !exe.is_file() {
-        bail!(
-            "the holder is switched on but {} is missing (set KITH_HOLDER_BIN, or install it beside kith)",
-            exe.display()
-        );
+    // The job's environment does not carry KITH_HOLDER_BIN, so its core would look beside the host and never connect
+    // to a holder named only here.
+    if let Some(given) = std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
+        let given = PathBuf::from(given);
+        if given.canonicalize().ok().as_deref() != Some(exe.as_path()) {
+            bail!(
+                "KITH_HOLDER_BIN names {} but the service's core will use {}: unset it, or put that holder beside the host",
+                given.display(),
+                exe.display()
+            );
+        }
     }
     let folders = crate::kernel::folders(&kith_kernel::paths::process_home());
     let (dir, secret) = crate::core_front::holder_files(&folders).context("preparing the holder's folder")?;
