@@ -613,7 +613,8 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
         // owner is told it is not done everywhere, and nothing of it reaches the cloud or the core until they try again.
         Err(e) if revoke && hub.store.person(id).is_some() && hub.store.bot_guest_of_person(id).is_none() => {
             tracing::warn!(error = format!("{e:#}"), person = id, "a revoke without the core: cut off here only");
-            cut_off(hub, id).await;
+            // Under the given id now; a former one is owed and cut once the core answers.
+            cut_off_held(hub, id).await;
             bail!(
                 "{id} was cut off on this computer: their turns were stopped and their devices set aside. The Kith core \
                  isn't running, so the revoke is not complete yet; start it and revoke again to finish."
@@ -684,6 +685,10 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
             }
         };
         account::note_stderr(id, &said);
+        if !revoke {
+            // In the undo's own locked section: a cut still owed from a revoke without the core must not land after it.
+            crate::remote::core_revokes::clear_owed(hub, id).await;
+        }
         let pending = said.lines().find(|l| l.contains("part of the revoke is pending")).map(str::to_owned);
         (!account::core_missed(&said), pending)
     };
@@ -712,10 +717,24 @@ pub(crate) fn restored(hub: &Hub, person: &str) {
 }
 
 /// [`cut_off`] under every id the host may hold `person` under (`held_under`: a renamed person's rows, room stays and
-/// room turns stay under the old id), as the undo gives back under every one. Just `person` when the core can't say: on
-/// that branch (a failed core write) the old ids go uncut here until the core's poll (`core_revokes`) cuts them.
+/// room turns stay under the old id), as the undo gives back under every one. Just `person` when the core can't say
+/// (it is down): the core shows no revoke then, so its poll's reconcile would never cut a former id. The cut is owed
+/// instead (`core_revokes::owe_cut`), and the poll pays it under every id once the core answers, unless an undo clears
+/// it first.
 pub(crate) async fn cut_off_held(hub: &Hub, person: &str) {
-    for held in crate::remote::core_revokes::held_under(person).await {
+    let ids = match crate::remote::core_revokes::held(person).await {
+        Ok(held) => held.ids,
+        Err(e) => {
+            tracing::warn!(
+                error = format!("{e:#}"),
+                person,
+                "a revoke whose ids can't be read: cut by this id, the rest owed"
+            );
+            crate::remote::core_revokes::owe_cut(hub, person);
+            vec![person.to_owned()]
+        }
+    };
+    for held in ids {
         cut_off(hub, &held).await;
     }
 }
