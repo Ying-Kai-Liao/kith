@@ -152,7 +152,7 @@ fn serve_db_of(env: &Env) -> PathBuf {
 /// advisory lock the OS drops with the process, so a stale file or a reused pid never reads as running. Read-only: the
 /// file is never created. No file, or a free lock, is stopped. A held lock says "running"; any other open or lock error
 /// says the lock cannot be checked (still a refusal, but never worded as "stop the host").
-fn host_blocker(env: &Env) -> Option<HostBlock> {
+pub(super) fn host_blocker(env: &Env) -> Option<HostBlock> {
     let dir = serve_db_of(env).parent().map(Path::to_path_buf)?;
     let file = match std::fs::File::open(dir.join("host.lock")) {
         Ok(f) => f,
@@ -173,7 +173,7 @@ fn host_blocker(env: &Env) -> Option<HostBlock> {
     }
 }
 
-enum HostBlock {
+pub(super) enum HostBlock {
     Running,
     Unknown(String),
 }

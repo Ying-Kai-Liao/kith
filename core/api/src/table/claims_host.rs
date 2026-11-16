@@ -296,6 +296,11 @@ pub(super) const ROWS: &[Method] = &[
         ],
     ),
     host(
+        "hostclaim.strays",
+        "The turns a host enqueued (they carry its `key`) that are still queued or parked: `{turns: [{turn, conversation, key}]}`. The host cancels those it has no item for (a turn requeued after a restart, whose item is gone). A turn the core made itself carries no key and is never listed.",
+        &[],
+    ),
+    host(
         "hostclaim.park",
         "A queued turn waits (`lock_busy` or `terminal_live`). Answers `{parked}`.",
         &[

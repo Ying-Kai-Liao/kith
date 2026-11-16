@@ -43,6 +43,11 @@ use kith_kernel::paths::Paths;
 use serde_json::{Value, json};
 use std::time::Duration;
 
+#[path = "core_strays.rs"]
+mod strays;
+#[cfg(not(test))]
+pub(crate) use strays::EVERY as STRAY_SWEEP_EVERY;
+
 /// The core module whose switch turns Writer mode on.
 pub const MODULE: &str = "claims";
 
@@ -153,7 +158,9 @@ pub struct Turn<'a> {
 
 /// A fresh turn key, for [`Turn::key`]: made when the item is accepted, never again for the same item.
 pub fn new_turn_key() -> String {
-    uuid::Uuid::new_v4().to_string()
+    let key = uuid::Uuid::new_v4().to_string();
+    strays::register(&key);
+    key
 }
 
 /// A turn that holds its claim and the lock: the caller syncs the transcript and prompts.
@@ -362,7 +369,11 @@ impl CoreWriter {
 
     /// Whether the core answered the cancel (a turn that could not be cancelled, because it already ended, is an answer too).
     fn cancel(&self, turn: i64, why: &str) -> bool {
-        matches!(self.call("hostclaim.cancel", &json!({"turn": turn, "reason": why})), Answer::Done(_))
+        let done = matches!(self.call("hostclaim.cancel", &json!({"turn": turn, "reason": why})), Answer::Done(_));
+        if done {
+            strays::forget_turn(turn);
+        }
+        done
     }
 
     /// Cancels a turn the host gave up before it ran (the item was stopped while it waited): a turn row left queued would be
@@ -466,9 +477,13 @@ impl CoreWriter {
             if let (Some(a), Some(Value::Object(room))) = (ask.as_object_mut(), t.room) {
                 a.extend(room.clone());
             }
+            strays::register(t.key);
             match self.call("hostclaim.enqueue", &ask) {
                 Answer::Done(v) => match v["turn"].as_i64() {
-                    Some(id) => *turn = Some(id),
+                    Some(id) => {
+                        strays::bind(t.key, id);
+                        *turn = Some(id);
+                    }
                     None => return Step::Go(refusal(None, &v)),
                 },
                 Answer::Refused(said) => return Step::Go(failed(said)),
@@ -682,6 +697,7 @@ impl CoreWriter {
     pub fn finish(&self, run: &Running, conversation: &str, stub: &mut dyn WarmStub, end: End) -> Finished {
         match end {
             End::Room => {
+                strays::forget_turn(run.turn);
                 let _ = self.call("hostclaim.stop", &json!({"claimId": run.claim, "reason": "room-turn-end"}));
                 stub.kill_group();
                 // Forgotten once confirmed gone: `end_gone` then ends the claim; until then the core keeps the row to kill.
@@ -694,6 +710,7 @@ impl CoreWriter {
                     let Begin::LockStuck { why } = self.lock_stuck(stub, run.claim, "release failed") else {
                         unreachable!()
                     };
+                    strays::forget_turn(run.turn);
                     return Finished::LockStuck(why);
                 }
                 self.retry_end(run, end)
@@ -738,7 +755,10 @@ impl CoreWriter {
             }
         };
         match sent {
-            Ok(()) => Finished::Reported,
+            Ok(()) => {
+                strays::forget_turn(run.turn);
+                Finished::Reported
+            }
             Err(why) => Finished::ReportLost(why),
         }
     }

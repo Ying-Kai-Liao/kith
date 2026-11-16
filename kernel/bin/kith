@@ -363,7 +363,14 @@ fi
 # kith-auth decides that they may run, and travels with the run's claim (KITH_REVOKE_SEEN): a revoke that lands in between
 # refuses the claim instead of being missed by the sweep that ran before it. Files mode (no marker): nothing is read.
 claim_seen=""
-if [[ -n ${KITH_PERSON:-} && -e ${KITH_STATE:-/nonexistent}/live/terminal/claims.tombstone ]]; then
+# Writer mode is either source (kernel/lib/kith_claims.py switched): the marker, or the module's switch file once it says more than
+# `stepping`, so a marker lost while the core serves does not send a taker back to the files.
+claims_core() {
+  [[ -e ${KITH_STATE:-/nonexistent}/live/terminal/claims.tombstone ]] && return 0
+  local f=${KITH_MACHINE:-/nonexistent}/core/cutover/claims.switch
+  [[ -e $f ]] && ! grep -qx 'state=stepping' "$f" 2>/dev/null
+}
+if [[ -n ${KITH_PERSON:-} ]] && claims_core; then
   claim_seen=$(python3 "$KITH/bin/kith-sessions" epoch "$KITH_PERSON") || exit 1
 fi
 if [[ -n ${KITH_PERSON:-} ]]; then
@@ -1347,7 +1354,7 @@ fi
 if [[ $p_owner != 1 && $launch -ne 1 ]]; then
   proc_rc=0
   KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || proc_rc=$?
-  if [[ $proc_rc -eq 9 || ( $proc_rc -ne 0 && -e ${KITH_STATE:-/nonexistent}/live/terminal/claims.tombstone ) ]]; then
+  if [[ $proc_rc -eq 9 ]] || { [[ $proc_rc -ne 0 ]] && claims_core; }; then
     echo "kith: the Kith core cannot record this run, so ${p_id} cannot start it right now (is kith serve running?)" >&2; exit 1
   fi
 fi

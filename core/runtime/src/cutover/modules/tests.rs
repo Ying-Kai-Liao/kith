@@ -531,7 +531,7 @@ fn accounts_a_step_through_the_real_registry_is_no_longer_refused_and_account_wr
 }
 
 #[test]
-fn refused_transcripts_step_waits_for_the_claims_module_and_leaves_nothing_behind() {
+fn refused_transcripts_step_waits_for_the_session_recorder_and_leaves_nothing_behind() {
     let (_t, env) = setup();
     register(&env, "s-one", "/work");
     for dry_run in [false, true, false] {
@@ -545,7 +545,7 @@ fn refused_transcripts_step_waits_for_the_claims_module_and_leaves_nothing_behin
             },
         )
         .unwrap_err();
-        assert!(e.to_string().contains("claims module"), "{e}");
+        assert!(e.to_string().contains("kith-sessions record"), "{e}");
     }
     assert!(state::read(&env.layout, "transcripts").unwrap().is_none());
     assert!(!env.layout.db.exists(), "no core.db was opened or made");
@@ -624,53 +624,4 @@ fn transcripts_an_import_before_the_switch_replaces_a_row_that_differs() {
         !m.guards_claims(),
         "nothing to export, so a live claim does not block the rollback"
     );
-}
-
-// --- claims --------------------------------------------------------------------------------------------------------------
-
-fn claim_file(env: &Env, sid: &str) {
-    let dir = env.state.as_ref().unwrap().join("live").join("terminal");
-    std::fs::create_dir_all(&dir).unwrap();
-    let body = json!({"pid": std::process::id(), "procStart": null, "at": "t", "kind": "terminal", "person": "sam"});
-    std::fs::write(dir.join(format!("{sid}.claim")), body.to_string()).unwrap();
-}
-
-#[test]
-fn claims_a_step_is_refused_but_its_dry_run_and_import_run_the_claims_import() {
-    let (_t, env) = setup();
-    claim_file(&env, "s-live");
-    // A real step refuses and leaves nothing behind; the dry run reads the files and writes nothing.
-    let e = step(&registry(), &env, "claims", opts()).unwrap_err();
-    assert!(e.to_string().contains("not stepped"), "{e}");
-    assert!(!env.layout.db.exists(), "no core.db was opened or made");
-    let dry = Opts {
-        dry_run: true,
-        ..Opts::default()
-    };
-    let out = step(&registry(), &env, "claims", dry).unwrap();
-    assert!(out.iter().any(|l| l.contains("dry run")), "{out:?}");
-    assert!(!env.layout.db.exists());
-
-    // The import through the module: the conversation is known, so the live file becomes a running claim, once.
-    let mut core = crate::tests::open_all(&env.layout);
-    core.conn()
-        .execute(
-            "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('s-live', 'a', 'claude', 1, 1)",
-            [],
-        )
-        .unwrap();
-    let m = super::claims::Claims;
-    assert_eq!(m.same_answer(&env, core.conn()).unwrap().len(), 1);
-    m.import(&env, Some(&mut core), opts()).unwrap();
-    assert_eq!(m.same_answer(&env, core.conn()).unwrap().len(), 0);
-    m.import(&env, Some(&mut core), opts()).unwrap();
-    let rows: i64 = core
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM claims WHERE conversation = 's-live'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(rows, 1, "a second import adds nothing");
 }
