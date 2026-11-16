@@ -211,6 +211,13 @@ jobs:
               - 'serve/host/src/api/people.rs'
               - 'serve/host/src/api/botguests.rs'
               - 'serve/host/src/remote/**'
+              # the rest of drift.sh's list
+              - 'serve/host/src/terminal/core_holders.rs'
+              - 'serve/host/src/cards/mod.rs'
+              - 'serve/host/src/api/authority.rs'
+              - 'serve/host/src/run_outbox.rs'
+              - 'core/runtime/src/revoke_order.rs'
+              - 'core/runtime/src/import/authority.rs'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).

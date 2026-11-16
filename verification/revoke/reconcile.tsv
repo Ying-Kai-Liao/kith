@@ -4,7 +4,7 @@ design	pass	read and set-aside in ONE step under AUTH_WRITES, narrowing only
 broken-split-read	fail	NoLostUndo: the read taken outside the lock, an app undo lands before the set-aside
 broken-restore-too	fail	FailCutHolds: a tick that also gives back undoes a fail-closed cut whose core write failed
 # A rename in the core (R-rename, #1013): the host keeps its rows under the old id; every narrowing acts on every id held_under returns.
-rename	pass	TypeOK, NoLostUndo, Narrows: the reconcile reads every id (host_ids) in its locked step, so a cut the app's fallback missed is caught
+rename	pass	TypeOK, NoLostUndo, Narrows: the reconcile reads every id (host_ids) in its locked step, so a cut the app's fallback missed is caught (FailCutHolds is left out: it fails with a rename, row rename-failcut)
 broken-rename-current	fail	Narrows: a reconcile that cuts by the current id alone never reaches the rows under the old one
 rename-undo-miss	fail	NoLostUndoStrict (finding, accepted): an undo whose read of the ids fell back to the current one leaves the old id set aside; fail closed, the owner undoes again
 rename-failcut	fail	FailCutHolds (finding): a revoke whose core write failed and whose read of the ids fell back cuts only the current id; the core shows no revoke, so the reconcile never cuts the old one

@@ -441,10 +441,13 @@ lock-alone stub flag (thread-writers).
    `held_under` falls back to the id given) set aside and stop only what the host holds under the CURRENT id. A renamed
    person's devices, memberships, invites, claims and room stays are under the old id, so their runs there keep running and
    their devices stay live. The core shows no revoke (the write failed), so the reconcile never cuts the old id either.
-   Bounded: with the core down the switched guard refuses everything, and the owner is told the revoke is not complete;
-   but a running turn under the old id is not stopped, against the comment's "the host's half is fail-closed". Fix idea:
-   the host keeps the last `listPeople` ids it read (or the store's own record of a person's former ids) and falls back to
-   them instead of the bare id.
+   While the core is down the switched guard refuses new starts, but a running turn under the old id is not stopped,
+   against the comment's "the host's half is fail-closed"; and once the core is back it shows no revoke and the host
+   set aside only the current id, so the old id's devices work again until the owner revokes a second time (they are
+   told the revoke is not complete). `cut_off_held`'s doc (`people.rs` ~:714) says the core's poll cuts the old ids: it
+   does not (no revoke to see). Proposed fix (architect, `designs/2026-11-17-rename-failcut/`, model-checked, not yet
+   agreed): a durable "owed cut" row when the ids cannot be read, paid by the 3 s poll under `AUTH_WRITES` once they can,
+   cleared by every undo route; the core-down branch of `revoke_person` uses `cut_off_held` too.
 2. **An undo after a rename can leave the old id set aside** (`reconcile/rename-undo-miss`, NoLostUndoStrict fails;
    NoLostUndo with `missed` passes): the undo's `held_under` runs after the core commit; if that read fails the host
    restores only the current id. Fail closed (narrower); the owner undoes again (idempotent in the core). Accepted.
