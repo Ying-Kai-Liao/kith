@@ -26,8 +26,10 @@ for the core's claim record (switch `RedeemWrite`), from `claims.rs` (M3-2); `Wr
 step: the core writer of M3, the claims step, rule K, L-clear; `results4.md`, "Added by the re-sync before the claims step").
 
 Since that re-read (2026-11-17) the core writer is code, not only design: the host's per-start instance and `hostclaim.adopt`
-(B5) are what `c4-hostholder` checks, the idle-warm kill in `external.rs` `blocked_in` is `r4-killidle`, and step 5 runs at the
-first connected hello of a core generation (`holder_link.rs` `open_claims`). The claims step itself (`cutover/modules/claims.rs`,
+(B5) are what `c4-hostholder` checks (the host's `adopt_once` in `agent/bot/writer.rs` is done only once an adopt went through; a
+failed one is tried again by a later begin or slow tick with a growing wait. So `Meet` happens as long as the core answers again
+and an item reaches the host, which is weaker than the model's fairness (`Meet` needs only the host up): `results4.md`), the idle-warm kill in
+`external.rs` `blocked_in` is `r4-killidle`, and step 5 runs at the first connected hello of a core generation (`holder_link.rs` `open_claims`). The claims step itself (`cutover/modules/claims.rs`,
 #1010: the claim files imported as `external` rows; `before_tombstone` writes the takers' tombstone and then re-reads the claim
 files, and only then are the core's marker and `Switched` record written) is **not modelled**; the modules start with the
 claims already in core.db. Why that is safe by reading, and the two file takers it does not re-check, are in `results4.md`

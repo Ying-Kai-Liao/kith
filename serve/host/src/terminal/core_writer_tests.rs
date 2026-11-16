@@ -66,6 +66,8 @@ pub(crate) struct World {
     pub session_register_refused: bool,
     /// The turns the core queued itself (a schedule's fire), as `hostclaim.queued` lists them while their turn waits.
     pub fired: Vec<Value>,
+    /// `hostclaim.adopt` answers as a core that is down, this many times (the gate and every other call still answer).
+    pub adopt_down: u32,
 }
 
 /// An ended claim of `conv` as the core would list it.
@@ -354,6 +356,10 @@ impl World {
                 data(json!({"gone": had}))
             }
             "hostclaim.adopt" => {
+                if self.adopt_down > 0 {
+                    self.adopt_down -= 1;
+                    return Answer::Down { why: "the core is down".into(), lost: false };
+                }
                 let me = p["instance"].as_str().unwrap().to_owned();
                 let (mut ended, mut kill) = (Vec::new(), Vec::new());
                 for c in &mut self.claims {
