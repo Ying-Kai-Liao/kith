@@ -3,6 +3,7 @@
 //! every warm engine marked as having the conversation loaded (`loaded`):
 //! - a marker whose pid is gone, or runs with another start, is stale: removed;
 //! - a marked stub that holds another key's lock is running a host turn: the run is refused ([`Cleared::HostTurn`], exit 75);
+//!   the other keys' locks this probe takes are held through the kill, so no host turn begins on one of them in between;
 //! - any other is SIGKILLed with its process group (a resident stub leads its group, engine and children in it) and waited
 //!   for, at most `within`; one that is not confirmed gone refuses the run ([`Cleared::NotGone`], exit 75).
 //!
@@ -47,12 +48,20 @@ pub fn clear(folder: &Path, key: &str, within: Duration) -> Result<Cleared, Erro
             None => return Ok(Cleared::NotGone(pid)),
             Some(true) => {}
         }
+        // The probe locks are held through the kill: the stub cannot begin a host turn on one of them in between.
+        let mut probed = Vec::new();
         for other in loaded::keys_of(folder, &name)? {
-            if other != key && !matches!(take(folder, &other)?, Taken::Held(_)) {
-                return Ok(Cleared::HostTurn(pid));
+            if other == key {
+                continue;
+            }
+            match take(folder, &other)? {
+                Taken::Held(lock) => probed.push(lock),
+                Taken::Busy => return Ok(Cleared::HostTurn(pid)),
             }
         }
-        if !kill_group(pid, &start, within) {
+        let gone = kill_group(pid, &start, within);
+        drop(probed);
+        if !gone {
             return Ok(Cleared::NotGone(pid));
         }
         // Its stub is gone, so nothing else removes its markers; ours goes now.

@@ -204,6 +204,10 @@ impl Actor {
             Ok(_) => {
                 tracing::info!(bot = %self.cfg.id, session = sid, "closed a session");
                 conn.loaded.remove(sid);
+                // The engine let it go: its `loaded` marker may go with the row (writer.rs `sync_warm`).
+                if let Some(proc) = conn.writer.as_mut() {
+                    proc.closed.insert(sid.to_owned());
+                }
                 conn.fast_options.remove(sid);
                 conn.usage.remove(sid);
                 conn.profiles.remove(sid);

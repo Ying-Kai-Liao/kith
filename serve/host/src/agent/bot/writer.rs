@@ -280,6 +280,10 @@ pub(crate) struct Proc {
     rows: HashSet<String>,
     /// The stub's control channel: the marks go with the rows, also while a turn has the stub away.
     ctl: Arc<kith_acp::Ctl>,
+    /// Sessions the engine itself closed (`session/close` answered): only these lose their `loaded` marker when the row goes. A
+    /// session the host merely stops serving (a new chat, `forget_loaded`, a fork) stays loaded in the engine, which can still
+    /// wake itself on it, so its marker stays until the stub exits.
+    pub(super) closed: HashSet<String>,
     /// Per session, the claim this process last ran a turn under (step 7): a claim of someone else above it means the session was
     /// written beside this process, and the next turn loads it again (see `CoreWriter::claim_since`).
     pub(super) ran: HashMap<String, i64>,
@@ -306,6 +310,7 @@ impl Proc {
             seen,
             rows: HashSet::new(),
             ctl,
+            closed: HashSet::new(),
             ran: HashMap::new(),
         }
     }
@@ -433,8 +438,8 @@ impl Actor {
     /// Brings `warm_procs` in step with the sessions this process has loaded: a row for each (registered before its load, see
     /// [`Self::warm_session`]), none for a session it dropped. A registration the core refuses as revoked ends the process. The
     /// stub's `loaded` marker goes with each row, before the load too: a marker that cannot be made fails the load, because without
-    /// it a run on the lock alone would start beside this process. A `forgot` that fails leaves a marker, which at worst stops an
-    /// idle process.
+    /// it a run on the lock alone would start beside this process. The marker is removed (`forgot`) only for a session the engine
+    /// closed ([`Proc::closed`]); a `forgot` that fails leaves a marker, which at worst stops an idle process.
     pub(super) async fn sync_warm(&mut self) -> Result<()> {
         let Some(conn) = self.conn.as_mut() else { return Ok(()) };
         let Some(proc) = conn.writer.as_mut() else { return Ok(()) };
@@ -454,6 +459,7 @@ impl Actor {
             proc.ctl.clone(),
         );
         let (a, d) = (add.clone(), drop.clone());
+        let unmark: Vec<String> = drop.iter().filter(|sid| proc.closed.contains(*sid)).cloned().collect();
         let done = tokio::task::spawn_blocking(move || -> Result<(), String> {
             for sid in &a {
                 core.register_proc(pid, &started, &person, &agent, Some(sid), (!person.is_empty()).then_some(seen))?;
@@ -465,6 +471,8 @@ impl Actor {
             }
             for sid in &d {
                 core.proc_forget(pid, &started, sid)?;
+            }
+            for sid in &unmark {
                 if let Err(e) = ctl.forgot(sid).map_err(|e| e.to_string()).and_then(|r| r) {
                     tracing::warn!(error = e, "the stub kept a loaded marker of a session the process let go");
                 }
@@ -475,8 +483,12 @@ impl Actor {
         match done {
             Ok(()) => {
                 if let Some(proc) = self.conn.as_mut().and_then(|c| c.writer.as_mut()) {
+                    for sid in &add {
+                        proc.closed.remove(sid);
+                    }
                     proc.rows.extend(add);
                     for sid in drop {
+                        proc.closed.remove(&sid);
                         proc.rows.remove(&sid);
                     }
                 }

@@ -3,5 +3,5 @@
 # thread-writers-slow. Same format as checks.tsv.
 # L-clear (design 2026-11-16-offturn-lock-alone): the code with the core not answering, off-turn wakes, a run on the lock alone.
 # 61,550,608 distinct states, depth 74: 13 min on 8 workers (M-series laptop, 2026-11-16); it did not finish in 2 h on one
-# worker with 512 MB.
+# worker with 512 MB. CI (ubuntu-latest, 4 cores, 10g heap): 495 s for the row, job 8 min 25 s (run 43816830839).
 core-held-cleared	INVARIANT	OneWriter	pass

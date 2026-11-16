@@ -829,6 +829,12 @@ actor_test! {
         rig.send_thread("a", &root, "in thread").await;
         rig.until("the thread's reply", |r| r.replied_in("a", &root, "in thread")).await;
         rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 2).await;
+        // The markers of `sid` (one per process that has it loaded: the main lane's and the thread's).
+        let marked = |rig: &Rig, sid: &str| {
+            std::fs::read_dir(rig.locks.join(format!("{sid}.loaded"))).map_or(0, Iterator::count)
+        };
+        let before = marked(&rig, "sess-a");
+        assert!(before >= 1, "the thread's process has the session marked");
         let hub = rig.hub.clone();
         let key = crate::store::lane_key("session", "a", &Lane::in_thread("a", &root));
         rig.after("hostclaim.redeem", move || hub.store.kv_set(&key, "sess-fork").unwrap());
@@ -844,6 +850,10 @@ actor_test! {
         assert_ne!(keys[0].1, keys[1].1, "a new key");
         assert_eq!(keys[0].0, "sess-a");
         assert_eq!(keys[1].0, "sess-fork", "on the session the lane follows now");
+        // The old session left the host's list, not the engine (no `session/close`): its `loaded` marker stays, so a run on the
+        // lock alone still stops this process (design 2026-11-16-offturn-lock-alone, architect MUST 1).
+        assert_eq!(marked(&rig, "sess-a"), before, "a forgotten session keeps its marker");
+        assert_eq!(marked(&rig, "sess-fork"), 1, "the new session is marked too");
     }
 }
 

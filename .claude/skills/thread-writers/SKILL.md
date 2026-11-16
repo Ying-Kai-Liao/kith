@@ -27,7 +27,7 @@ states each (about 90 s), the slim scopes and the failing rows are under 200k. T
 
 `checks-slow.tsv` holds the large passing rows, same format: `run.sh --slow` runs them one at a time with TLC `-workers auto`
 and a heap of `KITH_TLC_HEAP` (default 6g). Today one row, `core-held-cleared` `OneWriter` (L-clear, design 2026-11-16):
-61,550,608 distinct states, depth 74, 13 min on 8 cores of an M-series laptop; one worker with 512 MB did not finish in 2 h.
+61,550,608 distinct states, depth 74, 13 min on 8 cores of an M-series laptop; one worker with 512 MB did not finish in 2 h. In CI (4 cores, 10g) the row takes about 8 min (495 s, run 43816830839).
 CI job `thread-writers-slow` (4 cores, 10g heap, timeout 150 min) runs it under the same filter as `thread-writers`; a green
 `ci` needs it to end `success`, a cancel or a timeout fails `ci`.
 
@@ -281,9 +281,17 @@ Fixed since the last sync (rows turned from `fail` to `pass`, evidence in the co
   take (`TermUp`'s locked branch); in the code the stub holds the lock across it. The abandon half was closed before: an abandon is
   `stop`, `killpg` SIGKILL, `settle_gone`, with no lock release (`core-held-no-offturn` passes `OneWriter`; `core-held-old-abandon`,
   the lock given back first, fails it with the clear off, which would otherwise kill the abandoned engine too).
+  The stub keeps the other keys' probe locks until its kill is done, so the marked stub cannot begin a host turn in between. The
+  marker goes (`forgot`) only for a session the engine closed (`session/close` answered, `Proc::closed`): a session the host
+  merely stops serving (a new chat, `forget_loaded`, a fork) stays loaded in the engine and keeps its marker until the stub exits.
   Not covered by the clear: a run that goes on unclaimed because its id cannot be locked or its start read (`core_take`'s
-  `unclaimable`: no lock either), a warm process started before this change (no markers), and a marked stub that takes another key's
-  lock between the probe and the kill (that turn is killed: a lost turn, never a second writer).
+  `unclaimable`: no lock either); a warm process started before this change (no markers); a key the stub took before the host
+  marked it (a restart at begin step 4, the take at step 5 before the mark at step 7: the probe sees only marked keys, so that
+  turn's key is not probed and the turn may be killed: a lost turn, never a second writer); `warm_procs` rows still go when the
+  host stops serving a session, so with the core up `blocked_in` can miss an engine that still has it loaded (open, logged by
+  the architect); Windows (the stub refuses `--lock-alone` there, so an owner run with no core answer fails instead of
+  running; accepted until M5). In the model a clear that kills the process while the host is mid-begin on another key
+  dead-ends (the host's take needs the process loaded): harmless for `OneWriter`, but those traces stop there.
 - Old finding 1 (check, then act, with no claim) and 2 (the send gate trusting a copy from the next scan), on
   `code-no-fork`: every Claude start claims before claude starts (3cdd9a88, c2477a8b), `resolve` claims before it asks
   the host and the host reads `hostBusy` under the thread lock with queued sends and `taking` (3cdd9a88, 423df258),

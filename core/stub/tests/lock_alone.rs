@@ -206,8 +206,15 @@ fn a_stale_marker_is_removed_and_nobody_is_signalled() {
     // A pid that is gone, and a live pid (this test) with another start: both stale.
     let mut gone = Command::new("true").spawn().unwrap();
     gone.wait().unwrap();
-    let dead = folder.join(format!("{}-e1", gone.id()));
-    let reused = folder.join(format!("{}-e1", std::process::id()));
+    // Another start in this system's own stamp form (`e<secs>` on macOS, `b<boot>:<ticks>` on Linux): a stamp of another form
+    // cannot be told apart and refuses the run instead.
+    let own = kith_procstart::start_stamp(std::process::id()).expect("this test's start");
+    let other = match own.rsplit_once(':') {
+        Some((boot, _)) => format!("{boot}:1"),
+        None => "e1".to_owned(),
+    };
+    let dead = folder.join(format!("{}-{other}", gone.id()));
+    let reused = folder.join(format!("{}-{other}", std::process::id()));
     for f in [&dead, &reused] {
         std::fs::write(f, b"").unwrap();
     }

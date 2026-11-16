@@ -378,8 +378,8 @@ fn clear_alone(args: &Args) -> Result<(), u8> {
         Ok(Cleared::NotGone(pid)) => format!(
             "busy: the agent's warm process (stub {pid}) has this conversation loaded and could not be stopped; try again"
         ),
+        // No status word, as for any lock error: the reader takes exit 70 as it is.
         Err(e) => {
-            report(args.status_fd, "busy");
             eprintln!("kith-stub: the conversation's warm processes could not be checked: {e}");
             return Err(LOCK_ERROR);
         }
