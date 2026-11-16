@@ -14,23 +14,33 @@ const ROWS: [&str; 3] = ["schedule.tick", "schedule.runNow", "schedule.fire"];
 /// Said by `step`, `step --dry-run` and `check`, exactly.
 pub(super) const MESSAGE: &str = "not stepped: this build can't run the turns its schedules fire; kith-sched keeps running your jobs.";
 
-/// What the gate looked at. Each field refuses alone.
-#[derive(Clone, Copy)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "four independent yes/no facts, each tested alone"
-)]
+/// What the gate looked at. Each field refuses alone; `launchd` is `Err` with what launchd runs next to this binary.
 pub(super) struct Facts {
     pub runs_fired_turns: bool,
     pub depends_on_claims: bool,
     pub serves_rows: bool,
-    pub launchd_runs_this_build: bool,
+    pub launchd: Result<(), String>,
 }
 
-pub(super) fn refusal(f: Facts) -> Option<String> {
-    let ok =
-        f.runs_fired_turns && f.depends_on_claims && f.serves_rows && f.launchd_runs_this_build;
-    (!ok).then(|| MESSAGE.to_owned())
+/// `MESSAGE`, then which conditions failed.
+pub(super) fn refusal(f: &Facts) -> Option<String> {
+    let mut failed = Vec::new();
+    if !f.runs_fired_turns {
+        failed.push("1: the core does not run fired turns yet".to_owned());
+    }
+    if !f.depends_on_claims {
+        failed.push("2: the module does not depend on claims".to_owned());
+    }
+    if !f.serves_rows {
+        failed.push(format!(
+            "3: the core does not serve {} and answer them in the daemon",
+            ROWS.join(", ")
+        ));
+    }
+    if let Err(why) = &f.launchd {
+        failed.push(format!("4: {why}"));
+    }
+    (!failed.is_empty()).then(|| format!("{MESSAGE} Failed: {}.", failed.join("; ")))
 }
 
 /// Condition 3: the method table has all three rows as core-served, and the daemon's own router answers them.
@@ -43,34 +53,42 @@ pub(super) fn serves_rows() -> bool {
 
 /// Condition 4: the program launchd's `dev.kith.serve` starts is this binary, or has the same build id (the hash of its
 /// bytes, as the host reports as `binaryHash`). An unreadable or missing plist, or a program that cannot be read, is no.
-pub(super) fn launchd_runs_this_build(home: &Path) -> bool {
-    let Ok(this) = std::env::current_exe() else {
-        return false;
-    };
+pub(super) fn launchd_runs_this_build(home: &Path) -> Result<(), String> {
+    let this = std::env::current_exe().map_err(|e| format!("this binary is unknown ({e})"))?;
     launchd_runs(home, &this)
 }
 
-pub(super) fn launchd_runs(home: &Path, this: &Path) -> bool {
+pub(super) fn launchd_runs(home: &Path, this: &Path) -> Result<(), String> {
     let plist = home.join("Library/LaunchAgents/dev.kith.serve.plist");
-    let Some(program) = std::fs::read_to_string(plist)
+    let Some(program) = std::fs::read_to_string(&plist)
         .ok()
         .and_then(|t| program_of(&t))
     else {
-        return false;
+        return Err(format!(
+            "no program found in {}; this binary is {}",
+            plist.display(),
+            this.display()
+        ));
     };
-    let (Ok(theirs), Ok(mine)) = (PathBuf::from(program).canonicalize(), this.canonicalize())
+    let differs = || format!("launchd runs {program}, this binary is {}", this.display());
+    let (Ok(theirs), Ok(mine)) = (PathBuf::from(&program).canonicalize(), this.canonicalize())
     else {
-        return false;
+        return Err(differs());
     };
-    theirs == mine || build_id(&theirs).is_some_and(|t| build_id(&mine) == Some(t))
+    if theirs == mine || build_id(&theirs).is_some_and(|t| build_id(&mine) == Some(t)) {
+        Ok(())
+    } else {
+        Err(differs())
+    }
 }
 
 fn build_id(exe: &Path) -> Option<[u8; 32]> {
     std::fs::read(exe).ok().map(|b| Sha256::digest(b).into())
 }
 
-/// The program of an XML plist's `ProgramArguments`: its first word, or the word after `--` when the job runs the host
-/// under the holder (`kith-holder supervise ... -- <host>`), as the host's installer writes it.
+/// The program of an XML plist's `ProgramArguments`: the word just before the last `serve` that is followed by `--port`.
+/// The installer writes `[launcher.. , holder.. --, <kith bin>, serve, --port, N]`, so this finds the host whichever
+/// launcher or holder is in front of it.
 fn program_of(xml: &str) -> Option<String> {
     let rest = xml.split_once("<key>ProgramArguments</key>")?.1;
     let array = rest.split_once("<array>")?.1.split_once("</array>")?.0;
@@ -85,8 +103,8 @@ fn program_of(xml: &str) -> Option<String> {
                 .replace("&amp;", "&")
         })
         .collect();
-    match words.iter().position(|w| w == "--") {
-        Some(i) => words.get(i + 1).cloned(),
-        None => words.first().cloned(),
-    }
+    let i = (1..words.len().saturating_sub(1))
+        .rev()
+        .find(|&i| words[i] == "serve" && words[i + 1] == "--port")?;
+    words.get(i - 1).cloned()
 }

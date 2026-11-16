@@ -111,11 +111,11 @@ impl Schedules {
         if self.gate_open {
             return None;
         }
-        gate::refusal(gate::Facts {
+        gate::refusal(&gate::Facts {
             runs_fired_turns: RUNS_FIRED_TURNS,
             depends_on_claims: self.depends_on().contains(&"claims"),
             serves_rows: gate::serves_rows(),
-            launchd_runs_this_build: gate::launchd_runs_this_build(&env.home),
+            launchd: gate::launchd_runs_this_build(&env.home),
         })
     }
 

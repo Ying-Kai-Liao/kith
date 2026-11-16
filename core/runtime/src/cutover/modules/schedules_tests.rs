@@ -57,6 +57,9 @@ impl Module for Lifted {
     fn guards_claims(&self) -> bool {
         self.0.guards_claims()
     }
+    fn depends_on(&self) -> &'static [&'static str] {
+        self.0.depends_on()
+    }
     fn step_refusal(&self, env: &Env) -> Option<String> {
         self.0.step_refusal(env)
     }
@@ -206,6 +209,18 @@ fn world(extra: bool) -> World {
     drop(c);
     let mut env = Env::with_paths(&p);
     env.serve_db = Some(serve.clone());
+    // `schedules` depends on `claims` (the wrapper forwards it), so these tests start with claims switched.
+    crate::perms::ensure_dir(&env.layout.dir).unwrap();
+    state::write(
+        &env.layout,
+        "claims",
+        &state::Switch {
+            phase: state::Phase::Switched,
+            snapshot: None,
+            at: 0,
+        },
+    )
+    .unwrap();
     World {
         _t: t,
         env,
@@ -995,7 +1010,14 @@ fn a_build_that_cannot_run_fired_turns_refuses_the_step_and_says_so_in_the_dry_r
         },
     )
     .unwrap();
-    assert!(dry.iter().any(|l| l == WORDS), "{dry:?}");
+    assert!(
+        dry.iter()
+            .any(|l| l.starts_with(WORDS) && l.contains("Failed: 1:")),
+        "{dry:?}"
+    );
     let c = check(&reg, &w.env, "schedules").unwrap();
-    assert!(c.iter().any(|l| l == WORDS), "{c:?}");
+    assert!(
+        c.iter().any(|l| l.starts_with(WORDS) && l.contains("4:")),
+        "{c:?}"
+    );
 }
