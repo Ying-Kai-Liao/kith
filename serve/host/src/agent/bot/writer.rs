@@ -179,7 +179,8 @@ pub(super) async fn mode_of(hub: &Arc<crate::hub::Hub>) -> (Mode, Option<Arc<Cor
 
 /// The first Writer-mode begin of this host start ends what an earlier host instance left (design 1.3, "Host restart"). Done once it
 /// went through: a failed adopt (the core not answering yet) is tried again by a later begin or slow tick, after a wait that grows
-/// ([`adopt_backoff`]), because until it goes through the old instance's claims hold their conversations.
+/// ([`adopt_backoff`]), because until it goes through the old instance's claims hold their conversations. Only an item that reaches
+/// the host asks it (`accept`, `writer_align`): a conversation nobody uses waits for its next turn, which is the one that needs it.
 async fn adopt_once(hub: &crate::hub::Hub, core: &Arc<CoreWriter>) {
     let state = hub.terminal.env().state;
     let first = {
@@ -190,8 +191,9 @@ async fn adopt_once(hub: &crate::hub::Hub, core: &Arc<CoreWriter>) {
         }
         !std::mem::replace(&mut a.swept, true)
     };
-    let c = core.clone();
-    // On a task of its own: a begin that is dropped while it waits still records how the adopt went.
+    let (c, sweep) = (core.clone(), core.clone());
+    // On a task of its own: a begin that is dropped while it waits (a Stop during the start) still records how the adopt went
+    // and still starts the stray sweep.
     let task = tokio::spawn(async move {
         let ok = match tokio::task::spawn_blocking(move || c.adopt()).await {
             Ok(Ok(adopted)) => {
@@ -207,13 +209,17 @@ async fn adopt_once(hub: &crate::hub::Hub, core: &Arc<CoreWriter>) {
             }
             Err(_) => false,
         };
-        let mut all = adoptions().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        all.entry(state).or_default().settle(ok, std::time::Instant::now());
+        adoptions()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(state)
+            .or_default()
+            .settle(ok, std::time::Instant::now());
+        if first {
+            sweep_strays_for_ever(sweep);
+        }
     });
     let _ = task.await;
-    if first {
-        sweep_strays_for_ever(core.clone());
-    }
 }
 
 fn adoptions() -> &'static Mutex<HashMap<PathBuf, Adoption>> {

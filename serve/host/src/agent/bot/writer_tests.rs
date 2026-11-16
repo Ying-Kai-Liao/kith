@@ -582,6 +582,17 @@ actor_test! {
     }
 }
 
+/// Two bots begin while the first adopt is still being answered: the second does not ask beside it, and nothing asks again after.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_bots_beginning_during_an_adopt_ask_it_once() {
+    let rig = Rig::new(&["a", "b"], SWITCHED);
+    rig.after("hostclaim.adopt", || std::thread::sleep(Duration::from_millis(1500)));
+    rig.send("a", "from a").await;
+    rig.send("b", "from b").await;
+    rig.until("both replies", |r| r.replied("a", "from a") && r.replied("b", "from b")).await;
+    assert_eq!(rig.calls("hostclaim.adopt"), 1);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_gate_that_cannot_be_read_holds_too() {
     let rig = Rig::new(&["a"], SWITCHED);
