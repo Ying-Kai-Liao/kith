@@ -292,7 +292,7 @@ fn a_suspended_person_cannot_be_given_a_link_code_and_keeps_the_one_they_had() {
 }
 
 #[test]
-fn a_room_id_is_never_a_new_person_a_rename_or_an_invite_and_an_old_one_keeps_working() {
+fn a_room_id_is_never_a_new_person_or_bot_a_rename_or_an_invite_and_an_old_one_keeps_working() {
     let mut a = world();
     a["people"]["room-old"] = json!({"name": "From before"});
     let mut rig = Rig::new(&a);
@@ -310,6 +310,14 @@ fn a_room_id_is_never_a_new_person_a_rename_or_an_invite_and_an_old_one_keeps_wo
     assert_eq!(
         refused(&mut rig, "people.invite", &json!({"person": "room-old"})),
         room
+    );
+    assert_eq!(
+        refused(
+            &mut rig,
+            "people.addBot",
+            &json!({"id": "room-bot", "of": "sam"})
+        ),
+        "a bot id can not start with room-: that is reserved for a room's own grant"
     );
     assert_eq!(rig.tables(), before, "a refusal writes nothing");
     // an id that is already there is changed like any other

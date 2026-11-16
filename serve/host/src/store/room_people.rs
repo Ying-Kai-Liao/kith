@@ -360,6 +360,27 @@ mod tests {
     }
 
     #[test]
+    fn a_leave_by_the_new_id_marks_done_the_room_part_of_a_suspended_invite_under_the_old_one() {
+        let s = store();
+        let ids = ["samuel".to_owned(), "sam".to_owned()];
+        s.join_room_person_for("r", ("sam", &ids), &line("personJoined"), None).unwrap().unwrap();
+        {
+            let c = s.db.locked();
+            // a revoke set Sam's invite aside under the old id; its part for the room still waits
+            c.execute(
+                "INSERT INTO suspended_invites(invite_id, person_id, token_hash, agents, created_at, expires_at)
+                 VALUES('i1', 'sam', '', '{}', 0, 0)",
+                [],
+            )
+            .unwrap();
+            c.execute("INSERT INTO invite_rooms(invite_id, room) VALUES('i1', 'r'), ('i1', 'other')", []).unwrap();
+        }
+        s.leave_room_held("r", &ids, &line("personLeft")).unwrap().unwrap();
+        assert!(s.invite_room_done("i1", "r"), "an undo then a prove can't join them again");
+        assert!(!s.invite_room_done("i1", "other"), "another room's part is not this leave's");
+    }
+
+    #[test]
     fn a_post_needs_the_stay_under_its_id_and_no_set_aside_under_any_id() {
         let s = store();
         let ids = ["samuel".to_owned(), "sam".to_owned()];

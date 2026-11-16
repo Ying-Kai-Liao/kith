@@ -112,6 +112,37 @@ async fn a_device_under_the_new_id_sees_and_leaves_the_stay_under_the_old_one() 
     assert!(call(&r, &mac, "leaveRoom", json!({"room": room})).await.is_err(), "nothing left to leave");
 }
 
+/// The text of every room entry `stream` sends within a moment.
+async fn shown(stream: &mut (impl futures::Stream<Item = Value> + Unpin)) -> Vec<String> {
+    use futures::StreamExt as _;
+    let mut out = vec![];
+    while let Ok(Some(v)) = tokio::time::timeout(std::time::Duration::from_millis(300), stream.next()).await {
+        if v["type"] == "entry" {
+            out.push(v["entry"]["data"]["text"].as_str().unwrap_or_default().to_owned());
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn the_event_stream_of_a_device_under_the_new_id_finds_the_stay_under_the_old_one() {
+    let r = Rig::new().await;
+    let (room, _) = room_of(&r);
+    let (_core, _, _) = renamed_after_the_step(&r, &room).await;
+    let joined =
+        owner(&r, "addRoomPerson", json!({"room": room, "person": "samuel"})).await.unwrap()["gen"].as_i64().unwrap();
+    let say = |text: &str| {
+        let data = json!({"text": text, "author": "agentbot", "final": true});
+        r.hub.add_entry_from(&Lane::main(&room), crate::store::EntryKind::Agent, 1, &data, Some(joined)).unwrap();
+    };
+    say("before the stream");
+    let mac = r.device("samuel-mac", Some("samuel"));
+    let mut stream = Box::pin(super::events::events_stream(&r.hub, 0, None, &mac).unwrap());
+    assert_eq!(shown(&mut stream).await, ["before the stream"], "the catch-up reads the ids once");
+    say("live");
+    assert_eq!(shown(&mut stream).await, ["live"], "and so does a live event");
+}
+
 #[tokio::test]
 async fn a_revoke_by_the_new_id_stops_the_room_turn_whose_basis_names_the_old_one() {
     let r = Rig::new().await;

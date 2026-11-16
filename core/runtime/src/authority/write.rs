@@ -602,6 +602,10 @@ pub(crate) fn bot_add(
         return usage("a bot id is lowercase letters, digits and -, e.g. bot-3f9a1c2e");
     }
     tables(auth);
+    // `room-<id>` is the grant of a room's people, as for a person id; a bot that already has one keeps working.
+    if bid.starts_with("room-") && !people(auth).contains_key(bid) {
+        return usage("a bot id can not start with room-: that is reserved for a room's own grant");
+    }
     let Some(of) = of.filter(|o| !o.is_empty()) else {
         return usage(
             "bot <id> --of <person>: whose bot it is (the owner, or a person kith knows)",
