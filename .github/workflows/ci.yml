@@ -159,6 +159,11 @@ jobs:
               - 'kernel/tests/kith-threads-race'
               - 'core/stub/**'
               - 'kernel/lib/kith-core.sh'
+              - 'kernel/lib/kith_claims.py'
+              - 'core/runtime/src/conversations/**'
+              - 'core/runtime/src/terminal.rs'
+              - 'core/runtime/src/cutover/modules/claims.rs'
+              - 'serve/host/src/routines/core_runs.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill),
             # plus the thread-writers code (the writer lock is what makes one thread have one writer). Not ci.yml: a workflow edit runs
@@ -180,6 +185,11 @@ jobs:
               - 'core/runtime/src/kill_resend.rs'
               - 'core/runtime/src/hostclaim.rs'
               - 'core/kernel/src/procstart.rs'
+              - 'core/procstart/**'
+              - 'core/runtime/src/cutover/modules/claims.rs'
+              - 'kernel/lib/kith_claims.py'
+              - 'kernel/lib/kith-core.sh'
+              - 'serve/host/src/routines/core_runs.rs'
               - 'kernel/bin/kith-sessions'
               - 'kernel/bin/kith-lifecycle'
               - 'kernel/bin/kith-wake'

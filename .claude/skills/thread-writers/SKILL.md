@@ -22,12 +22,12 @@ verification/threads/run.sh --show VARIANT PROP   # TLC's full output (the count
 verification/threads/drift.sh                     # which covered files changed since the sync commit
 ```
 
-Run time: 101 rows, about 6 minutes on a laptop at 4 parallel jobs (P10, 2026-11-15): the nine passing `core` rows are 4.7M
+Run time: 107 rows, about 6 minutes on a laptop at 4 parallel jobs (329 s at the 2026-11-17 re-sync; 101 rows at P10, 2026-11-15): the nine passing `core` rows are 4.7M
 states each (about 90 s), the slim scopes and the failing rows are under 200k. The job's timeout is 40 minutes.
 
 `checks-slow.tsv` holds the large passing rows, same format: `run.sh --slow` runs them one at a time with TLC `-workers auto`
 and a heap of `KITH_TLC_HEAP` (default 6g). Today one row, `core-held-cleared` `OneWriter` (L-clear, design 2026-11-16):
-61,550,608 distinct states, depth 74, 13 min on 8 cores of an M-series laptop; one worker with 512 MB did not finish in 2 h. In CI (4 cores, 10g) the row takes about 8 min (495 s, run 43816830839).
+61,550,608 distinct states, depth 74, 13 min on 8 cores of an M-series laptop (438 s on 10 cores at `nice` at the 2026-11-17 re-sync); one worker with 512 MB did not finish in 2 h. In CI (4 cores, 10g) the row takes about 8 min (495 s, run 43816830839).
 CI job `thread-writers-slow` (4 cores, 10g heap, timeout 150 min) runs it under the same filter as `thread-writers`; a green
 `ci` needs it to end `success`, a cancel or a timeout fails `ci`.
 
@@ -42,8 +42,36 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `b3f38db7668dbe192907daa204b8b0c8578713ff`** (L-clear, design 2026-11-16-offturn-lock-alone, on origin/rust-rebuild
-4192f0da1). The changes since `1978d087` were re-read: the core's claim list and reconcile check (`claims.rs`), the writer
+**Last confirmed to describe the code: `f9b5e509f476bb88f6203a125ae863369ba03aa9`** (origin/rust-rebuild after #1015, #1016, #1017,
+2026-11-17, the re-sync before the claims step runs on a Mac). The changes since `b3f38db7` were re-read and none changes who may
+write the thread, so `Threads.tla` and `base.consts` are unchanged:
+- **Rule K** (#1015, `conversations/reconcile.rs`, moved out of `claims.rs`): step 5 after a core restart keeps the host's `claimed`
+  claims and its `running` ones whose recorded process is alive; a running one whose process is gone is reconciled. This model
+  has no core restart action (the core's rows only move by the host's, the takers' and the settle's steps), so there is nothing
+  to change: the rule is the writer-lock skill's `Claims4` `CoreRestart` (`c4-corekeep` passes, `c4-corenokeep` fails
+  `CoreKeepsLive`). What it means here: across a core restart a host claim still ends only once its process is gone, the
+  assumption `ClaimOutlivesEngine` already makes of the core; before K a restart could end it under a live engine, which this
+  model did not show either. Not covered here, on purpose.
+- **Pulled runs** (#1015, `routines/core_runs.rs`, `writer.rs` `Accept::pulled`, `core_writer.rs` `Turn::session` / `lock_key`,
+  `turn.rs`, `writer_turn.rs` `keep`): a schedule's fire the core queued runs as a routine run on a fresh session the host made,
+  begun by its turn id through the same steps as any Writer-mode turn (gate, `claim_next`, the stub's `take`, `redeem`). The claim
+  row is on the core's conversation `schedule:<agent>:<job>:<engine>`, the lock key and the claim's `sessionId` are the session.
+  It is outside the thread (no lane names that session, as the group and hq lanes above). A terminal that resumes the session
+  while the run is live is not refused by the claim row (another conversation) but by the session's `warm_procs` row
+  (`blocked_in`'s loaded count answers `waiting`) and the stub's lock (busy, 75), so it keeps both layers; the files path refuses
+  a pulled turn outright. A move to the next account keeps the turn id (`keep`: `exit` requeues it, no cancel) and begins it
+  again: for the writer that is `FailoverReclaims` (claim ended with the process, a new claim). The runner itself is the
+  schedule-fire skill's `HostRuns.tla`.
+- `KITH_ROOM_GEN` in bin/kith's env names (rooms D): no writer effect.
+- Not modelled, and checked by reading: the **claims step's switch moment** (#1010, `cutover/modules/claims.rs`,
+  `kith-sessions` `take_claim`). `CoreWriter` is a constant here, never a transition. The code closes the gap from both sides:
+  the step puts the takers' tombstone (`live/terminal/claims.tombstone`) down, then the core's marker and switched record, then
+  re-reads the claim files (a live file that is not a row stops the step), and a file taker links its claim and then reads the
+  tombstone again (switched: it unlinks its own file and asks the
+  core). Each side writes, then reads the other's write, so at least one of them sees the other. The host is stopped for the
+  step (preflight) and the stub is required, so a run caught in it is still under the lock.
+
+The changes from `1978d087` to `b3f38db7` were re-read at that sync: the core's claim list and reconcile check (`claims.rs`), the writer
 mode re-checks, the abandon order (`stop`, `killpg`, `settle_gone`, already `AbandonKeepsLock`), the stray sweep and
 `claim_since` (a reload after another claim) in `core_writer.rs` / `writer*.rs`: none changes who may write, so the model
 is unchanged by them; the L-clear code (`kith-sessions` `LOCK_ALONE`, bin/kith `--lock-alone`, `core/stub/src/{clear,loaded,main}.rs`,

@@ -8,10 +8,10 @@
 # set SYNC below to the commit you checked (and in .claude/skills/writer-lock/SKILL.md).
 set -euo pipefail
 
-# Confirmed at 1720d27e (M3-12, 2026-11-14): every covered change since the old pin (73a03656) was read against the
-# models (verification/writer-lock/results4.md, "Added by M3-12"). Move SYNC only after the next re-read (skill, "When you
-# change covered code").
-SYNC=1720d27eef3ac4f1208b94fa7c61f268a9e824b4
+# Confirmed at f9b5e509 (2026-11-17, the re-sync before the claims step): every covered change since the last pin (1720d27e)
+# was read against the models (verification/writer-lock/results4.md, "Added by the re-sync before the claims step"). Move SYNC
+# only after the next re-read (skill, "When you change covered code").
+SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
 
 FILES=(
   core/stub                           # the start stub: the writer lock (fd CLOEXEC, kept to the engine's exit), redeem, the engine as its child
@@ -30,6 +30,7 @@ FILES=(
   core/runtime/src/holder_link_tests.rs # (M3-12) the holder link's tests (the link itself is holder_link.rs)
   core/kernel/src/procstart.rs        # (M3-12, K2) orphan_group, same_process, comparable, claim_victims: what "the process is gone" means
   core/procstart                      # (M3-12) the stamp crate behind it (Linux b<boot_id>:<ticks>, unknown cross-form)
+  core/runtime/src/cutover/modules/claims.rs # (#1010) the claims step: files imported as external rows, tombstone then marker then re-read, rollback refuses live claims
   serve/host/src/terminal             # (M3-12, M3-10f) core_claims.rs (the host's turn claims: HOST_INSTANCE, the claim file as the writer with the core row as its shadow), claim.rs, sync.rs, registry.rs
 )
 paths=()
