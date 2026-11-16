@@ -130,7 +130,7 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 if !env.iter().any(|(k, _)| *k == "KITH_SERVE_CHANNELS") {
                     assert_channels_off(&base).await;
                 }
-                assert_quick_start(&log_path);
+                assert_quick_start(&log_path, env);
                 let child = child.0.take().unwrap();
                 return (child, base);
             }
@@ -141,7 +141,8 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
     }
 }
 
-/// Where a test host's output goes: beside its machine state (short, in /tmp), never in the home a test lists.
+/// Where a test host's output goes: beside its machine state (short; in /tmp on Unix, in the home's `machine-state`
+/// folder elsewhere), not among the files a test reads.
 fn host_log(home: &Path) -> std::path::PathBuf {
     let dir = machine_state(home);
     let _ = std::fs::create_dir_all(&dir);
@@ -155,24 +156,30 @@ fn log_tail(path: &Path) -> String {
     format!("; the host's log ({}):\n{}", path.display(), lines[lines.len().saturating_sub(40)..].join("\n"))
 }
 
-/// How long a test host may spend in its own start-up (from `serve` to listening). A healthy one takes about a second
-/// even on a busy CI runner; a start that does more (a hash of the whole debug binary, a wait on the core) is a bug, and
-/// it fails here with the phases instead of as a flaky "host didn't start" under load.
+/// How long a test host may spend in its own start-up (from `serve` to listening, less the wait for the host lock). A
+/// healthy one takes about a second even on a busy CI runner; a start that does more (a hash of the whole debug binary, a
+/// wait on the core) is a bug, and it fails here with the phases instead of as a flaky "host didn't start" under load.
 const QUICK_START: Duration = Duration::from_secs(10);
 
-/// The host's own start-up time, read from its last `kith-serve listening` line, is under [`QUICK_START`].
-fn assert_quick_start(path: &Path) {
+/// The host's own start-up time, from its last `start-up` and `kith-serve listening` lines, is under [`QUICK_START`]. A
+/// host that logged no such line fails too (the guard must not turn itself off), unless `RUST_LOG` chose what it logs.
+fn assert_quick_start(path: &Path, env: &[(&str, &str)]) {
     let text = std::fs::read_to_string(path).unwrap_or_default();
-    let Some(line) = text.lines().rev().find(|l| l.contains("kith-serve listening")) else { return };
-    let plain = strip_ansi(line);
-    let Some(ms) =
-        plain.split_whitespace().find_map(|w| w.strip_prefix("start_up_ms=")).and_then(|v| v.parse::<u64>().ok())
+    let field = |marker: &str, name: &str| -> Option<u64> {
+        let line = strip_ansi(text.lines().rev().find(|l| l.contains(marker))?);
+        line.split_whitespace().find_map(|w| w.strip_prefix(name)?.strip_prefix('=')?.parse().ok())
+    };
+    let (Some(total), Some(lock)) =
+        (field("kith-serve listening", "start_up_ms"), field("start-up: the host lock", "lock_ms"))
     else {
+        let filtered = std::env::var_os("RUST_LOG").is_some() || env.iter().any(|(k, _)| *k == "RUST_LOG");
+        assert!(filtered, "the host logged no start-up time{}", log_tail(path));
         return;
     };
+    let ms = total.saturating_sub(lock);
     assert!(
         Duration::from_millis(ms) < QUICK_START,
-        "the host took {ms} ms to start (at most {} s){}",
+        "the host took {ms} ms to start, not counting {lock} ms for the host lock (at most {} s){}",
         QUICK_START.as_secs(),
         log_tail(path)
     );
