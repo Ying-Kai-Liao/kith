@@ -412,6 +412,10 @@ impl Actor {
         if self.writer_claim(sid, lane, false).await? {
             return Ok(());
         }
+        // A turn the core queued is the core's to claim: it never runs on the files path.
+        if self.writer.acc.as_ref().is_some_and(|a| a.pulled.is_some()) {
+            return Err(anyhow!("this scheduled run is the core's: it runs only while the core is the writer"));
+        }
         let pid = self.conn.as_ref().and_then(|c| c.acp.pid());
         if pid.is_some() && self.turn_claim.as_ref().is_some_and(|(held, by)| held == sid && Some(*by) == pid) {
             return Ok(());

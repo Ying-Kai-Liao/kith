@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kith-sched-tombstone-check: once `kith migrate step schedules` has tombstoned <machine>/sched/state.json, kith-sched stops
-# with the note's message instead of carrying on as if it had no state (every job would start again), and leaves the note
-# exactly as it is. A routine job the core fires (a `trigger`, no `cron`) is never listed or ticked by kith-sched. A plain
+# its jobs with the note's message instead of carrying on as if it had no state (every job would start again), and leaves
+# the note exactly as it is; its housekeeping (prune) goes on. A routine job the core fires (a `trigger`, no `cron`) is never listed or ticked by kith-sched. A plain
 # state file, or none, behaves as before. Throwaway folders; nothing real is touched. The Rust half is the runtime's
 # cutover/modules tests (schedules).
 #
@@ -37,7 +37,8 @@ NOTE=$(cat "$S")
 K tick >"$T/out" 2>&1 </dev/null; rc=$?
 check "tick on a tombstoned state.json exits 0 with one quiet line" "[[ $rc -eq 0 ]] && [[ \$(wc -l <'$T/out') -eq 1 ]] && grep -q 'moved to the Kith core' '$T/out' && ! grep -q Traceback '$T/out' && [[ \"\$(cat '$S')\" == \"\$NOTE\" ]]"
 check "ls refuses" "refuses ls"
-check "prune refuses" "refuses prune"
+# The tombstone stops the jobs, not the housekeeping: prune runs, keeps its hour in a stamp of its own, leaves the note.
+check "prune runs and leaves the note" "K prune >'$T/out' 2>&1 </dev/null && [[ -s '$MACHINE/sched/pruned.stamp' ]] && [[ \"\$(cat '$S')\" == \"\$NOTE\" ]] && [[ ! -e '$S.tmp' ]]"
 check "--json says so as an error, exit 1" "K ls --json >'$T/out' 2>&1; rc=\$?; [[ \$rc -eq 1 ]] && grep -q '\"ok\": false' '$T/out' && grep -q 'kith rollback schedules' '$T/out' && [[ \"\$(cat '$S')\" == '$NOTE' ]]"
 check "editing the jobs still works (the file is the agent's, not the state's)" "K pause house a >'$T/out' 2>&1 && grep -q '\"paused\": true' '$J'"
 

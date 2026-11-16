@@ -394,14 +394,30 @@ def prune_terminal(dirpath, now=None, days=TERMINAL_DAYS):
 
 
 def prune(force=False):
-    """Hourly housekeeping from the tick: run logs, auth.log, terminal records. Deletes are idempotent."""
-    s = machine()
+    """Hourly housekeeping from the tick: run logs, auth.log, terminal records. Deletes are idempotent.
+
+    The schedules' tombstone stops the jobs, not this: once the core fires them, kith-sched runs no job (so no log of
+    its own is busy) and keeps the hour in a stamp file of its own instead of state.json."""
     t = epoch()
-    if not force and t - s.get('pruned', 0) < PRUNE_EVERY:
-        return
-    s['pruned'] = t
-    save_machine(s)
-    busy = {v.get('log') for v in s.get('last', {}).values() if running(v.get('pid'))}
+    try:
+        s = machine()
+    except kith_tombstone.Tombstoned:
+        stamp = MACHINE / 'pruned.stamp'
+        try:
+            last = int(stamp.read_text().strip())
+        except (OSError, ValueError):
+            last = 0
+        if not force and t - last < PRUNE_EVERY:
+            return
+        MACHINE.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(str(t))
+        busy = set()
+    else:
+        if not force and t - s.get('pruned', 0) < PRUNE_EVERY:
+            return
+        s['pruned'] = t
+        save_machine(s)
+        busy = {v.get('log') for v in s.get('last', {}).values() if running(v.get('pid'))}
     prune_runs(LOGS / 'runs', busy, t)
     auth = Path(os.environ.get('KITH_AUTH') or paths()['KITH_SECRETS'] / 'auth.json').with_name('auth.log')
     rotate_log(auth)
@@ -411,8 +427,6 @@ def prune(force=False):
 def tick():
     try:
         prune()
-    except kith_tombstone.Tombstoned:
-        pass   # said once, below, where the tick stops
     except Exception as e:   # housekeeping must never stop jobs from starting
         print('kith-sched: prune: %s' % e, file=sys.stderr)
     # The wake queue (kith-wake): owed turns of ended sessions start here once their writer lets go, and turns whose

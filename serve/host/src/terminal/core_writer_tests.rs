@@ -64,6 +64,8 @@ pub(crate) struct World {
     pub sent_accounts: Vec<Option<String>>,
     /// `hostclaim.proc` refuses the row of a session (not the process's own), as data and not as a revoke.
     pub session_register_refused: bool,
+    /// The turns the core queued itself (a schedule's fire), as `hostclaim.queued` lists them while their turn waits.
+    pub fired: Vec<Value>,
 }
 
 /// An ended claim of `conv` as the core would list it.
@@ -116,6 +118,12 @@ impl World {
                 data(json!({"ok": self.switched.unwrap_or(false)}))
             }
             "hostclaim.epoch" => data(json!({"epoch": 0})),
+            "hostclaim.queued" => {
+                let waits = |id: i64| self.turns.iter().any(|t| t.0 == id && ["queued", "parked"].contains(&t.1.as_str()));
+                let turns: Vec<Value> =
+                    self.fired.iter().filter(|f| f["turn"].as_i64().is_some_and(waits)).cloned().collect();
+                data(json!({"turns": turns}))
+            }
             "hostclaim.enqueue" => {
                 if self.revoke_enqueue {
                     return refused("revoked");
@@ -443,6 +451,7 @@ impl Rig {
             key: Box::leak(new_turn_key().into_boxed_str()),
             id,
             conversation: conv,
+            session: None,
             agent: "builder",
             engine: "claude",
             source: "app",

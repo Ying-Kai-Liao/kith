@@ -38,7 +38,10 @@ impl Actor {
                 self.tools_changed = true;
             }
             Cmd::Routine(id) => {
-                let acc = self.accept(&[]).await;
+                let acc = match self.hub.routines.pulled_of(&id) {
+                    Some((turn, pulled)) => self.accept_pulled(turn, pulled).await,
+                    None => self.accept(&[]).await,
+                };
                 self.queue.push_back(Queued::Routine(id, acc));
                 if self.turn.is_none() {
                     self.next_in_queue(done_tx).await;

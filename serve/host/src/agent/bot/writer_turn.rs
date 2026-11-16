@@ -185,10 +185,16 @@ impl Actor {
             .map(|b| b.people.clone())
             .unwrap_or_default();
         let mut acc = self.writer.acc.take().unwrap_or_else(Accept::unread);
+        // A pulled turn runs as its own person (the core's turn names it), on the core's conversation.
+        let principal =
+            acc.pulled.as_ref().map_or_else(|| self.cfg.person.clone().unwrap_or_default(), |p| p.person.clone());
+        if acc.pulled.is_some() && acc.turn.is_none() {
+            self.writer.acc = Some(acc);
+            bail!("a scheduled run the core queued has lost its turn id; it is not enqueued again");
+        }
         let covers = |s: &Seen| basis.iter().all(|p| s.basis.iter().any(|(q, _)| q == p));
         if !acc.seen.as_ref().is_some_and(covers) {
-            let principal = self.cfg.person.clone().unwrap_or_default();
-            acc.seen = read_epochs(core.clone(), principal, basis).await;
+            acc.seen = read_epochs(core.clone(), principal.clone(), basis).await;
         }
         let Some(seen) = acc.seen.clone() else {
             self.writer.acc = Some(acc);
@@ -198,13 +204,18 @@ impl Actor {
         let deadline = self.routine_deadline.map(|d| {
             now_ms() + i64::try_from(d.saturating_duration_since(std::time::Instant::now()).as_millis()).unwrap_or(0)
         });
+        let (conversation, session) = match &acc.pulled {
+            Some(p) => (p.conversation.clone(), Some(sid.to_owned())),
+            None => (sid.to_owned(), None),
+        };
         let turn = OwnedTurn {
             id: acc.turn,
-            conversation: sid.to_owned(),
+            conversation,
+            session,
             agent: self.writer_agent(),
             engine: if self.cfg.backend == "codex" { "codex" } else { "claude" }.into(),
             source: self.turn_source(off),
-            person: self.cfg.person.clone().unwrap_or_default(),
+            person: principal,
             cwd: self.conn_started_as.as_ref().map_or_else(|| self.cfg.cwd.clone(), |s| s.1.clone()),
             revoke_seen: seen.principal,
             deadline,

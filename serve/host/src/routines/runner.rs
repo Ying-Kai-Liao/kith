@@ -49,6 +49,9 @@ impl Routines {
     }
 
     pub fn timeout(&self, id: &str) -> Duration {
+        if let Some(t) = self.pulled_timeout(id) {
+            return t;
+        }
         let s = self.state.locked();
         let seconds = s
             .runs
@@ -62,6 +65,9 @@ impl Routines {
     /// Reserve a run at the point the actor can actually execute it. A paused,
     /// deleted or superseded queued request never reaches the agent.
     pub fn begin(&self, hub: &Hub, bot: &str, id: &str) -> Result<Option<Prepared>> {
+        if let Some(pulled) = self.begin_pulled(hub, bot, id) {
+            return pulled;
+        }
         if self.stopping() {
             return Ok(None);
         }
@@ -89,6 +95,9 @@ impl Routines {
 
     /// Called immediately before sending session/prompt, after session setup.
     pub fn mark_started(&self, store: &Store, id: &str) -> Result<()> {
+        if let Some(pulled) = self.mark_pulled(id) {
+            return pulled;
+        }
         self.change(store, |s| {
             let r = s.runs.iter_mut().find(|r| r.id == id).context("routine run not found")?;
             if !matches!(r.status, Status::Starting | Status::Recovering) {
@@ -108,6 +117,9 @@ impl Routines {
         detail: Option<String>,
         text: Option<String>,
     ) -> Result<()> {
+        if let Some(pulled) = self.complete_pulled(hub, id, status, detail.as_deref(), text.clone()) {
+            return pulled;
+        }
         let bot = self.change(&hub.store, |s| {
             let r = s.runs.iter_mut().find(|r| r.id == id).context("routine run not found")?;
             if r.status.active() {
@@ -263,7 +275,11 @@ pub fn start(hub: &Arc<Hub>) {
             if core_tick {
                 // Not awaited: a slow core must not hold up publishing or the gate; `core_tick_due` lets one run at a time.
                 let work = Arc::clone(&hub);
-                tokio::task::spawn_blocking(move || work.routines.forward_tick());
+                tokio::task::spawn_blocking(move || {
+                    work.routines.forward_tick();
+                    // What the tick fired runs now, not on the next pull.
+                    work.routines.pull_due(&work, now_ms(), true);
+                });
             }
         }
     });
@@ -286,6 +302,9 @@ fn tick(hub: &Arc<Hub>) -> Result<bool> {
         Gate::Held(_) => return Ok(false),
     }
     dispatch(hub)?;
+    if gate == Gate::Core {
+        hub.routines.pull_due(hub, now_ms(), false);
+    }
     Ok(gate == Gate::Core && hub.routines.core_tick_due(now_ms()))
 }
 

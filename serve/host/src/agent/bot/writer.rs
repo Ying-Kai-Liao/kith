@@ -210,6 +210,16 @@ pub(super) struct Accept {
     pub seen: Option<Seen>,
     /// The core's id of the turn, once it was enqueued: a repeated begin (a park, a requeue after a usage limit) never enqueues it twice.
     pub turn: Option<i64>,
+    /// A turn the core queued and the host's runner pulled (`routines/core_runs.rs`): it begins by its id on the core's
+    /// conversation, as the turn's person, and is never enqueued (`key` is empty).
+    pub pulled: Option<Pulled>,
+}
+
+/// What a pulled turn's begin needs that the actor does not know: the core's conversation and the person the turn runs as.
+#[derive(Clone, Debug)]
+pub(crate) struct Pulled {
+    pub conversation: String,
+    pub person: String,
 }
 
 /// The principal's epoch (`revokeSeen`) and every basis person's. A room's `room-<id>` is swept by `cut_off` itself, so it has its own.
@@ -222,7 +232,18 @@ pub(super) struct Seen {
 impl Accept {
     /// An item accepted with nothing read (Files or Shadow, or an internal turn: a compaction, a resumed turn).
     pub(super) fn unread() -> Self {
-        Self { key: new_turn_key(), seen: None, turn: None }
+        Self { key: new_turn_key(), seen: None, turn: None, pulled: None }
+    }
+
+    /// The item of a turn the core queued (`turn`, on `conversation`, for `person`): no key, begun by id. `seen` is
+    /// `person`'s epoch read now, before the start's may checks; `None` has it read at the begin.
+    pub(super) fn pulled(turn: i64, pulled: Pulled, seen: Option<i64>) -> Self {
+        Self {
+            key: String::new(),
+            seen: seen.map(|principal| Seen { principal, basis: Vec::new() }),
+            turn: Some(turn),
+            pulled: Some(pulled),
+        }
     }
 }
 
@@ -237,6 +258,17 @@ impl Actor {
             acc.seen = read_epochs(core, principal, basis.to_vec()).await;
         }
         acc
+    }
+
+    /// [`Self::accept`] for a turn the core queued: its person's epoch, read now (Writer mode only; a pulled turn runs in no
+    /// other).
+    pub(super) async fn accept_pulled(&self, turn: i64, pulled: Pulled) -> Accept {
+        let (mode, core) = mode_of(&self.hub).await;
+        let seen = match (mode, core) {
+            (Mode::Writer, Some(core)) => read_epochs(core, pulled.person.clone(), Vec::new()).await.map(|s| s.principal),
+            _ => None,
+        };
+        Accept::pulled(turn, pulled, seen)
     }
 }
 
@@ -535,6 +567,7 @@ impl std::error::Error for WriterWait {}
 pub(super) struct OwnedTurn {
     pub id: Option<i64>,
     pub conversation: String,
+    pub session: Option<String>,
     pub agent: String,
     pub engine: String,
     pub source: &'static str,
@@ -551,6 +584,7 @@ impl OwnedTurn {
         Turn {
             id: self.id,
             conversation: &self.conversation,
+            session: self.session.as_deref(),
             agent: &self.agent,
             engine: &self.engine,
             source: self.source,

@@ -136,8 +136,13 @@ pub trait WarmStub {
 #[derive(Clone, Debug)]
 pub struct Turn<'a> {
     pub id: Option<i64>,
-    /// The Claude session id: the conversation, and the stub's lock key.
+    /// The core's conversation the turn is queued on: the Claude session id, which is also the stub's lock key, unless
+    /// [`Self::session`] names another.
     pub conversation: &'a str,
+    /// The Claude session the turn runs on, when it is not the conversation's id: a turn the core queued on a conversation of
+    /// its own (a schedule's fire, `schedule:<agent>:<job>:<engine>`) runs on a fresh session the host made. It is the lock key
+    /// and the session id the claim records.
+    pub session: Option<&'a str>,
     pub agent: &'a str,
     pub engine: &'a str,
     /// `app`, `bot`, `wake`, `routine`, `group`...
@@ -154,6 +159,13 @@ pub struct Turn<'a> {
     /// The room fields of the enqueue (`basis`, `epochs`, `room`, `gen`, `level`, `joinEpoch`, `author`, `budget`...), a JSON
     /// object merged in as it is.
     pub room: Option<&'a Value>,
+}
+
+impl Turn<'_> {
+    /// The stub's lock key: the session the turn writes.
+    pub fn lock_key(&self) -> &str {
+        self.session.unwrap_or(self.conversation)
+    }
 }
 
 /// A fresh turn key, for [`Turn::key`]: made when the item is accepted, never again for the same item.
@@ -376,6 +388,13 @@ impl CoreWriter {
         done
     }
 
+    /// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire), for the host's runner
+    /// (`routines/core_runs.rs`). `Err(why)`: the core did not answer.
+    pub fn queued(&self) -> Result<Vec<Value>, String> {
+        let v = self.data("hostclaim.queued", &json!({}))?;
+        Ok(v["turns"].as_array().cloned().unwrap_or_default())
+    }
+
     /// Cancels a turn the host gave up before it ran (the item was stopped while it waited): a turn row left queued would be
     /// the core's to expire, never the host's to run. `false`: the core did not answer, the caller may try again.
     pub fn cancel_turn(&self, turn: i64, why: &str) -> bool {
@@ -511,7 +530,7 @@ impl CoreWriter {
         }
         // 5. The lock.
         let pid = stub.pid();
-        match stub.take(t.conversation, claim_id) {
+        match stub.take(t.lock_key(), claim_id) {
             Ok(Take::Locked) => {}
             Ok(Take::Busy) => {
                 return Step::Go(match self.busy(claim_id, pid) {
@@ -537,7 +556,7 @@ impl CoreWriter {
         account: Option<&str>,
     ) -> Result<(i64, Option<String>), Begin> {
         let mut ask = json!({"conversation": t.conversation, "turn": turn_id, "person": person,
-                             "revokeSeen": t.revoke_seen, "cwd": t.cwd, "sessionId": t.conversation,
+                             "revokeSeen": t.revoke_seen, "cwd": t.cwd, "sessionId": t.lock_key(),
                              "holderInstance": self.instance});
         if let Some(a) = account {
             ask["account"] = json!(a);
@@ -610,7 +629,7 @@ impl CoreWriter {
     fn redeem(&self, t: &Turn<'_>, stub: &mut dyn WarmStub, turn: i64, claim: i64, account: Option<&String>) -> Begin {
         let pid = stub.pid();
         let Some(started) = proc_start(pid) else {
-            return if give_lock_back(stub, t.conversation, claim) {
+            return if give_lock_back(stub, t.lock_key(), claim) {
                 // Put back, so `Failed` means ended: a claim left `claimed` would hold the conversation with nobody running.
                 let _ =
                     self.call("hostclaim.stop", &json!({"claimId": claim, "reason": "no start time", "requeue": true}));
@@ -630,7 +649,7 @@ impl CoreWriter {
                 // would be killed under its prompt. The lock goes back and the turn is put back; the next begin finds the stub
                 // gone (or the mark lifted) and starts on a process that stays.
                 Answer::Done(v) if v["refused"] == "killing" => {
-                    if !give_lock_back(stub, t.conversation, claim) {
+                    if !give_lock_back(stub, t.lock_key(), claim) {
                         return self.lock_stuck(stub, claim, "redeem refused (killing)");
                     }
                     let ask = json!({"claimId": claim, "reason": "process is being stopped", "requeue": true});
@@ -640,7 +659,7 @@ impl CoreWriter {
                 Answer::Done(v) if v["refused"].is_string() => {
                     // Revoked, stopped or ended between the claim and the redeem: the lock goes back, the claim is not running.
                     let state = v["refused"].as_str().unwrap_or_default().to_owned();
-                    if !give_lock_back(stub, t.conversation, claim) {
+                    if !give_lock_back(stub, t.lock_key(), claim) {
                         return self.lock_stuck(stub, claim, &format!("redeem refused ({state})"));
                     }
                     self.cancel(turn, "not redeemed");
@@ -658,7 +677,7 @@ impl CoreWriter {
                     Ok(s) if s["claim"]["state"] == "claimed" => {}
                     Ok(s) => {
                         // Ended meanwhile (a stop, a revoke): nothing is running, so the lock goes back.
-                        if !give_lock_back(stub, t.conversation, claim) {
+                        if !give_lock_back(stub, t.lock_key(), claim) {
                             return self.lock_stuck(stub, claim, "claim ended during the redeem");
                         }
                         self.cancel(turn, "not redeemed");

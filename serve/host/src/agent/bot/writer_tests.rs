@@ -993,3 +993,88 @@ mod units {
         assert_eq!(chain_root(Path::new("kw-other"), "conv-1"), None, "another host's state");
     }
 }
+
+// MARK: the runner (design 2026-11-16-core-queued-runner): turns the core's schedule tick queued
+
+/// A turn the core fired for `job` of the native bot `a` (agent `bot:a`), waiting in the scripted core.
+fn fire(rig: &Rig, turn: i64, job: &str, redeemed_before: bool) {
+    let mut w = rig.w();
+    w.turns.push((turn, "queued".into(), None));
+    w.fired.push(json!({"turn": turn, "conversation": format!("schedule:bot:a:{job}:claude"), "agent": "bot:a",
+                        "engine": "claude", "job": job, "person": "kai", "owner": true, "prompt": format!("run {job}"),
+                        "deadline": null, "parkedReason": null, "redeemedBefore": redeemed_before}));
+}
+
+/// The runner's pull, as the routines runner calls it after a tick, until `ok`.
+async fn pull_until(rig: &Rig, what: &str, ok: impl Fn(&Rig) -> bool) {
+    let by = Instant::now() + Duration::from_secs(40);
+    while !ok(rig) {
+        assert!(Instant::now() < by, "timed out waiting for {what}; the core was asked: {:?}", rig.w().log);
+        let hub = rig.hub.clone();
+        tokio::task::spawn_blocking(move || hub.routines.pull_due(&hub, crate::store::now_ms(), true)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+actor_test! {
+    /// A fired cron job and a fired routine each run once, by their id, on the core's conversation, and end done. Neither is enqueued
+    /// again, each is claimed once, and each result reaches the chat.
+    async fn a_fired_cron_job_and_a_fired_routine_each_run_once_and_end_done(rig) {
+        let saved = rig
+            .hub
+            .routines
+            .save(&rig.hub, "a", &json!({"name": "Digest", "instruction": "digest", "triggers": [{"type": "interval", "seconds": 3600}]}))
+            .unwrap();
+        let routine = saved["routine"]["id"].as_str().unwrap().to_owned();
+        fire(&rig, 101, "daily", false);
+        fire(&rig, 102, &routine, false);
+        pull_until(&rig, "both turns done", |r| r.turn_state(101) == "done" && r.turn_state(102) == "done").await;
+        let w = rig.w();
+        assert!(w.log.iter().all(|m| m != "hostclaim.enqueue"), "a pulled turn is never enqueued: {:?}", w.log);
+        for (turn, job) in [(101, "daily".to_owned()), (102, routine.clone())] {
+            let claims: Vec<&serde_json::Value> =
+                w.asked.iter().filter(|(m, p)| m == "hostclaim.turn" && p["turn"] == turn).map(|(_, p)| p).collect();
+            assert_eq!(claims.len(), 1, "turn {turn} is claimed once: {claims:?}");
+            assert_eq!(claims[0]["conversation"], format!("schedule:bot:a:{job}:claude"), "on the core's conversation");
+            assert_eq!(claims[0]["person"], "kai", "as the turn's person");
+            assert_ne!(claims[0]["sessionId"], claims[0]["conversation"], "on a session of its own");
+        }
+        assert_eq!(w.reports.iter().filter(|(k, _)| k == "done").count(), 2, "{:?}", w.reports);
+        drop(w);
+        assert!(rig.replied("a", "run daily") && rig.replied("a", "run "), "the results reach the chat");
+        assert!(rig.noticed("a", "Scheduled · daily") && rig.noticed("a", "Scheduled · Digest"));
+        // Pulled again later: nothing is waiting, nothing runs twice.
+        let hub = rig.hub.clone();
+        tokio::task::spawn_blocking(move || hub.routines.pull_due(&hub, crate::store::now_ms(), true)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(rig.calls("hostclaim.turn"), 2);
+    }
+}
+
+actor_test! {
+    /// A fired turn whose earlier claim was redeemed (a host restart cut it off) is cancelled "interrupted" and never run again.
+    async fn a_fired_turn_redeemed_before_a_restart_is_cancelled_not_run(rig) {
+        fire(&rig, 201, "daily", true);
+        pull_until(&rig, "the cancel", |r| r.turn_state(201) == "cancelled").await;
+        let w = rig.w();
+        let cancel = &w.asked.iter().find(|(m, _)| m == "hostclaim.cancel").unwrap().1;
+        assert_eq!(cancel["reason"], "interrupted: a restart cut this run off");
+        assert!(w.log.iter().all(|m| m != "hostclaim.turn"), "never begun: {:?}", w.log);
+        drop(w);
+        assert!(!rig.prompted("a"));
+        assert!(rig.noticed("a", "a restart cut this run off"));
+    }
+}
+
+actor_test! {
+    /// Outside Writer mode nothing is pulled: the core's turns run on its claims and nowhere else.
+    async fn nothing_is_pulled_outside_writer_mode(rig) {
+        rig.w().switched = Some(false);
+        fire(&rig, 301, "daily", false);
+        let hub = rig.hub.clone();
+        tokio::task::spawn_blocking(move || hub.routines.pull_due(&hub, crate::store::now_ms(), true)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(rig.calls("hostclaim.queued"), 0);
+        assert_eq!(rig.turn_state(301), "queued");
+    }
+}

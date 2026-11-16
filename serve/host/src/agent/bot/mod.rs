@@ -35,6 +35,7 @@ mod session;
 mod turn;
 mod updates;
 mod writer;
+pub(crate) use writer::{Pulled, core as writer_core};
 mod writer_turn;
 mod writer_wait;
 
