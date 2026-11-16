@@ -16,11 +16,22 @@ what M3-0a added. This skill is the only other documentation.
 State today (M3-12, 2026-11-14): the stub, the holder (every Pipes engine under `kith-stub --resident`, claim ids on every frame),
 the core's claim transaction, the holder link (claim ids, exit reports, turn lock steps, kill re-send, hello's step 7), the
 wake turns and the host's core claims (`KITH_HOST_CORE_CLAIMS`, off by default) exist; the holder link's per-turn lock steps (`begin_turn` / `finish_turn`, M3-5) are built but have no production caller yet; the
-host's claim files are still the writer until the cutover. The holder's relay rules (in-flight take, report keeping) are bookkeeping on top of the modelled
+host's claim files are still the writer until the cutover. Since then (2026-11-17): the claims step (`kith migrate step claims`,
+#1010) moves a Mac to Writer mode, where the host's turns, the kernel takers and `terminal.open` claim through the core and the
+stub's lock and no claim file is written. The holder's relay rules (in-flight take, report keeping) are bookkeeping on top of the modelled
 safety properties and are not in `Holder.tla`. A green run says the design holds; it does not say the code follows it.
 `drift.sh` lists the code that exists and tells you when it moves. `Holder.tla` was derived from the holder at 73a03656 and,
 for the core's claim record (switch `RedeemWrite`), from `claims.rs` (M3-2); `WriterLock4.tla` models the design only;
-`Claims4.tla` is derived from the claim code and was re-read at 1720d27e.
+`Claims4.tla` is derived from the claim code and was re-read at 1720d27e and again at f9b5e509 (the re-sync before the claims
+step: the core writer of M3, the claims step, rule K, L-clear; `results4.md`, "Added by the re-sync before the claims step").
+
+Since that re-read (2026-11-17) the core writer is code, not only design: the host's per-start instance and `hostclaim.adopt`
+(B5) are what `c4-hostholder` checks, the idle-warm kill in `external.rs` `blocked_in` is `r4-killidle`, and step 5 runs at the
+first connected hello of a core generation (`holder_link.rs` `open_claims`). The claims step itself (`cutover/modules/claims.rs`,
+#1010: the claim files imported as `external` rows; `before_tombstone` writes the takers' tombstone and then re-reads the claim
+files, and only then are the core's marker and `Switched` record written) is **not modelled**; the modules start with the
+claims already in core.db. Why that is safe by reading, and the two file takers it does not re-check, are in `results4.md`
+and the thread-writers skill (Sync commit).
 
 The one-shot stub's take (a direct run, `DLock`) now has a step after it when the run goes on under the lock alone
 (`--lock-alone`, design 2026-11-16-offturn-lock-alone, `core/stub/src/clear.rs`): holding the lock and before the engine starts,
@@ -51,9 +62,11 @@ the architect's version; Temurin JRE 21 only when no Java 11+ is on PATH; cached
 
 ## Sync commit
 
-**Pinned at `1720d27eef3ac4f1208b94fa7c61f268a9e824b4`** (rust-rebuild, 2026-11-14, the M3-12 gate): `drift.sh` was read change
-by change from the old pin (73a03656) and every covered file's change checked against the three models; `results4.md`
-("Added by M3-12") has each change and its verdict. The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
+**Pinned at `f9b5e509f476bb88f6203a125ae863369ba03aa9`** (rust-rebuild after #1009, #1010, #1015, #1016, #1017, 2026-11-17, the
+re-sync the architect asked for before the claims step runs on a real Mac): `drift.sh` was read change by change from the last
+pin (1720d27e) and every covered file's change checked against the three models; `results4.md` ("Added by the re-sync before the
+claims step") has each change and its verdict. No model action changed (rule K came with #1015); every row, the two slow ones
+too, was re-run. The pin before was 1720d27e (the M3-12 gate, "Added by M3-12"). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
 re-read the changes and confirmed the models describe the code at the new commit, and change both places.
 
 ## What is promised, and the harm if not
@@ -96,7 +109,8 @@ take-over. `survive` = the holder's group outlives a holder crash, `die` = it di
 stays for reasons the model does not check (a revoke has nothing to chase; the conversation does not look claimed).
 Its full-scope run ran out of memory (see `results4.md`); the three small ones are in the table.
 
-**Q2, the idle warm process (M3-0a).** Decided default (2026-11-04): kill it first. Variant `killidle`
+**Q2, the idle warm process (M3-0a).** Decided default (2026-11-04): kill it first; since P7 that is the code (`external.rs`
+`blocked_in` marks the idle `warm_procs` row `kill_at` and answers `waiting` until the group is gone). Variant `killidle`
 (`r4-killidle`, pass, 4.6M states) adds `CoreKillIdle` and makes a terminal register only once the group is empty;
 `r4-keepidle` (the "fix" design, idle process kept) fails P7 on purpose: it shows P7 is not vacuous, not that keeping
 the idle process is unsafe (P1 to P6 hold either way). Modelled with the existing kill (a revoke's: `killReq` then
@@ -167,7 +181,7 @@ turn of source `ask` or `wake` (`TurnArrive` of an `Auto` turn) for the conversa
 The module does not model the lock itself (WriterLock4 does): "the lock is taken" = no other claim's process is writing.
 Bounds: 1 conversation, 2 turns (turn 2 is an ask/wake turn), 4 claims, 1 holder crash, 1 revoke, 1 take-over.
 
-Code, cited at `origin/rust-rebuild` cf308ebc (`core/runtime/src/...`; line numbers are from then, M3-12 re-read the changes since: `results4.md`):
+Code, cited at `origin/rust-rebuild` cf308ebc (`core/runtime/src/...`; line numbers are from then, M3-12 and the 2026-11-17 re-sync re-read the changes since: `results4.md`):
 
 | Action | Code |
 |---|---|
@@ -180,7 +194,7 @@ Code, cited at `origin/rust-rebuild` cf308ebc (`core/runtime/src/...`; line numb
 | `Revoke` | `revoke_person` :674 |
 | `TakeOver`, `PromoteTW` | a queued claim (`state = 'queued'`, kind terminal); **promotion is not in the code** (claims.rs header: M3-11); modelled as the rule it must follow. `TakeOver` also cancels the live turn and stops its claim: that is the M3-11 rule, not code. It queues one claim at most (`claims_one_queued`, m0080) |
 | `SendKill`, `HKill`, `EndGone` | the `Kill` the stops return, re-sent; `end_gone` :739 |
-| `HCrash`, `HUp`, `Meet` | `different_holder` :922 -> `release_unlisted` :779 (both in `conversations/reconcile.rs` since rule K) |
+| `HCrash`, `HUp`, `Meet` | `different_holder` :922 -> `release_unlisted` :779 (both in `conversations/reconcile.rs` since rule K); for the host's instance `warm.rs` `adopt` (B5, the same three outcomes: unredeemed ended by CAS, the rest `ending` until gone, its warm processes marked) |
 | `CoreRestart` (variants `corekeep`, `corekeepdead`) | step 5 after a core restart: `reconcile_with` -> `release_unlisted` with `foreign_to = None` (`conversations/reconcile.rs`): rule K keeps the host's `claimed` claims and its `running` ones whose recorded process is alive (`host_gone`, probed outside the transaction as `end_gone` is). One per behaviour (`cr`), bounded apart from `HCrash`'s `MaxHC`. Property `CoreKeepsLive`: a core restart never takes a running claim on a live process |
 | give-back | wake/queue.rs `give_back` :288, `release` :296: only the wake's own bookkeeping; what restarts the conversation is a new turn, which `claim_in`'s fence refuses |
 
@@ -206,7 +220,7 @@ about 320k states); `fix-doubletake` = two take-overs, no crash. Broken variants
 | `c4-stopall` | `stop_conversation_in` sparing a person's (take-over) claim | `AskSparesTakeOver` |
 | `c4-fenceleak` / `c4-epochleak` | nothing (the code): a refused turn stays queued; `MaxRev=1` for the epoch | `P3Strict` (the `c4-fencecancel` / `c4-epochcancel` rows, where the caller cancels it, pass) |
 | `WriterLock4 r4-tonolock` | the take-over writer taking the lock | `P1_NoTwoWriters` |
-| `c4-hostconst` (M3-12, `HostHolder`) | one constant host instance (core_claims.rs `HOST_INSTANCE` today): a restarted host reads the old claim as its own and reports it done under the old stub's live engine. `c4-hostholder` (per-start instance, the old claims stopped to `ending` and killed, the group surviving) passes. The design's "fails P4" is `WriterHasClaim` here: the claim ends while the engine writes | `WriterHasClaim` |
+| `c4-hostconst` (M3-12, `HostHolder`) | one constant host instance (the code at 1720d27e; since B5 each host start names its own, `kith-serve-host/<pid>-<start>`, and `hostclaim.adopt` is `c4-hostholder`): a restarted host reads the old claim as its own and reports it done under the old stub's live engine. `c4-hostholder` (per-start instance, the old claims stopped to `ending` and killed, the group surviving) passes. The design's "fails P4" is `WriterHasClaim` here: the claim ends while the engine writes | `WriterHasClaim` |
 | `c4-corenokeep` (rule K, design 2026-11-16-core-queued-runner) | the old step 5: a core restart reconciles every live host claim, also a `running` one on a live process (the in-flight turn a daemon update killed). `c4-corekeep` (the code: `claimed` and `running` on a live process kept, a gone one reconciled) passes. `c4-corekeepdead` (K without the alive probe) also passes: `Meet` still ends a running claim whose process died, so the probe makes that end prompt and nothing in the model rests on it | `CoreKeepsLive` (action) |
 | `c4-pidonly` (M3-12) | `end_gone` waiting for the pid only, not the process group it led (K2): a stub killed alone while the holder is down leaves a writing `orphan` engine | `WriterHasClaim` (`c4-orphan`, the code, passes) |
 
@@ -265,7 +279,7 @@ Park and wake (q217/q218): `r4-edge`, `r4-parkclaim-*`, `c4-fix-*` (`P3`). Take-
 ## Map of the folder
 
 - `WriterLock4.tla`, `r4-*.cfg`: the lock model and its runs (architect's; the `M3-0a` lines are the Q2 variant).
-- `Claims4.tla`, `c4-*.cfg`: the claim and turn rows against the processes (M3-10b1; derived from `claims.rs`, `asks/mod.rs`, `wake/queue.rs` at rust-rebuild cf308ebc, re-synced at 1720d27e by M3-12).
+- `Claims4.tla`, `c4-*.cfg`: the claim and turn rows against the processes (M3-10b1; derived from `claims.rs`, `asks/mod.rs`, `wake/queue.rs` at rust-rebuild cf308ebc, re-synced at 1720d27e by M3-12 and at f9b5e509 before the claims step).
 - `Holder.tla`, `holder-*.cfg`: the holder model (architect's) and the runs M3-0a added.
 - `results4.md`: the architect's result table, plus what M3-0a added.
 - `checks.tsv`: the table `run.sh` enforces. `run.sh`: runner (tools from `verification/threads/run.sh --tools`).

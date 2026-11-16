@@ -159,6 +159,11 @@ jobs:
               - 'kernel/tests/kith-threads-race'
               - 'core/stub/**'
               - 'kernel/lib/kith-core.sh'
+              - 'kernel/lib/kith_claims.py'
+              - 'core/runtime/src/conversations/**'
+              - 'core/runtime/src/terminal.rs'
+              - 'core/runtime/src/cutover/modules/claims.rs'
+              - 'serve/host/src/routines/core_runs.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill),
             # plus the thread-writers code (the writer lock is what makes one thread have one writer). Not ci.yml: a workflow edit runs
@@ -179,7 +184,14 @@ jobs:
               - 'core/runtime/src/import/claims.rs'
               - 'core/runtime/src/kill_resend.rs'
               - 'core/runtime/src/hostclaim.rs'
+              - 'core/runtime/src/hostclaim_tests.rs'
+              - 'core/runtime/src/holder_link_tests.rs'
               - 'core/kernel/src/procstart.rs'
+              - 'core/procstart/**'
+              - 'core/runtime/src/cutover/modules/claims.rs'
+              - 'kernel/lib/kith_claims.py'
+              - 'kernel/lib/kith-core.sh'
+              - 'serve/host/src/routines/core_runs.rs'
               - 'kernel/bin/kith-sessions'
               - 'kernel/bin/kith-lifecycle'
               - 'kernel/bin/kith-wake'
@@ -211,6 +223,13 @@ jobs:
               - 'serve/host/src/api/people.rs'
               - 'serve/host/src/api/botguests.rs'
               - 'serve/host/src/remote/**'
+              # the rest of drift.sh's list
+              - 'serve/host/src/terminal/core_holders.rs'
+              - 'serve/host/src/cards/mod.rs'
+              - 'serve/host/src/api/authority.rs'
+              - 'serve/host/src/run_outbox.rs'
+              - 'core/runtime/src/revoke_order.rs'
+              - 'core/runtime/src/import/authority.rs'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
@@ -242,6 +261,10 @@ jobs:
               - 'serve/host/src/agent/bot/room_turn.rs'
               - 'serve/host/src/runauth/room.rs'
               - 'core/kernel/src/launch/room.rs'
+              # RoomsRename.tla: a join, a removal and a leave over every id held_under returns (R-rename)
+              - 'serve/host/src/chat/room_people.rs'
+              - 'serve/host/src/store/room_people.rs'
+              - 'serve/host/src/remote/core_revokes.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ model of the holder lease and the code it covers (the list in the holder-lease skill).
             lease:

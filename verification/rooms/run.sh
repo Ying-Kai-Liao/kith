@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Model-checks rooms with people (Rooms2.tla: what a room turn reads, stamps and is reused for; RoomJobs.tla: what a revoke
-# ends) with TLC. The models are the architect's (designs/2026-11-12-rooms-with-people/model), copied here with the
-# variants the code is held to. Same tools and cache as verification/threads/run.sh (which this asks where they are).
+# ends; RoomsRename.tla: one stay per person across a rename) with TLC. The models are the architect's
+# (designs/2026-11-12-rooms-with-people/model, designs/2026-11-16-rooms-rename), copied here with the variants the code is
+# held to. Same tools and cache as verification/threads/run.sh (which this asks where they are).
 #
 #   verification/rooms/run.sh          every row of checks.tsv: variant x module, expected pass/fail
 #   verification/rooms/run.sh --list   the rows
