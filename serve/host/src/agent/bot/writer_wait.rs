@@ -146,7 +146,10 @@ impl Actor {
         if self.writer.tick.is_some_and(|t| t.elapsed() < SLOW) {
             return;
         }
-        if self.writer.run.is_none() && self.writer.parked.is_none() && self.writer.lost.is_none() && !self.writer.dirty
+        if self.writer.run.is_none()
+            && self.writer.parked.is_none()
+            && self.writer.lost.is_empty()
+            && !self.writer.dirty
         {
             return;
         }
@@ -157,12 +160,15 @@ impl Actor {
                 tracing::warn!(bot = %self.cfg.id, error = format!("{error:#}"), "couldn't bring the core's process rows in step");
             }
         }
-        if let (Some((run, end)), Some(core)) = (self.writer.lost.take(), core(&self.hub)) {
-            let (r, e) = (run.clone(), end);
-            // The end that put the turn back is the one that cancels it (`writer_turn::cancel_reason`), once the core took it.
-            let sent = tokio::task::spawn_blocking(move || super::writer_turn::end_report(&core, &r, e)).await;
-            if !matches!(sent, Ok(crate::terminal::core_writer::Finished::Reported)) {
-                self.writer.lost = Some((run, end));
+        // Every end the core did not take, one by one: an abandoned turn's stop must not be written over by another end.
+        if let Some(core) = core(&self.hub) {
+            for (run, end) in std::mem::take(&mut self.writer.lost) {
+                let (r, e, c) = (run.clone(), end, core.clone());
+                // The end that put the turn back is the one that cancels it (`writer_turn::cancel_reason`), once the core took it.
+                let sent = tokio::task::spawn_blocking(move || super::writer_turn::end_report(&c, &r, e)).await;
+                if !matches!(sent, Ok(crate::terminal::core_writer::Finished::Reported)) {
+                    self.writer.lost.push((run, end));
+                }
             }
         }
         self.writer_wake(done_tx).await;

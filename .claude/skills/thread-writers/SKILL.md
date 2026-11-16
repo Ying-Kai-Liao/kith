@@ -49,7 +49,7 @@ core row (`hostclaim.*` for the host, `claim.external` / `claim_terminal` for ke
 stub's flock (`lk`, `core/stub/src/resident.rs`) is a second, independent layer. Every taker claims first and locks second:
 the host `claim_next`, then the stub's `take`, then `redeem`; a terminal `claim.external`, then the stub takes the lock when
 claude starts (busy: exit 75, claim given back). Switch-by-switch: `HostTakesLock`, `TermTakesLock`, `TermRegistersClaim`,
-`ClaimNextChecksHeld`, `GateRead`, `SettlesOwnEnding`, `DiedReports`, `FailoverReclaims`, `AbandonSettlesEarly`,
+`ClaimNextChecksHeld`, `GateRead`, `SettlesOwnEnding`, `DiedReports`, `FailoverReclaims`, `AbandonKeepsLock`, `AbandonSettlesEarly`,
 `RestartKeepsClaim`, `ExternalChecksWarm`, `RequireStub`, `OwnerNoAnswer` (all TRUE / FALSE as the code is in
 `base.consts`). The core rows run with one terminal and `MaxSends = 1` (`variants/core*.set`), about 5M states and 90 s
 each for the full `core` scope; the smaller scopes (`core-gate`, `core-handover`, `core-forks`: no off-turn wakes, no
@@ -89,7 +89,7 @@ the same take as open's, so it adds no behaviour to the model.
 
 | Property | Plain sentence | Harm |
 |---|---|---|
-| `OneWriter` (core) | Also counts any engine process writing: a turn, an abandoned one not gone yet, one a host restart left, an off-turn wake. | Two writers. |
+| `OneWriter` (core) | Counts a live engine process writing: a turn, an abandoned one not gone yet, one a host restart left, an off-turn wake (the host's `running` state alone is not a writer once its engine is gone). | Two writers. |
 | `ClaimOutlivesEngine` | A host engine that writes always has its claim row: the claim ends after the process is gone, never before ("gone means empty"). | A terminal or another turn claims under a live engine. |
 | `EngineCovered` | ... or at least its lock. | |
 | `LockCoversRunning` | A running turn's engine holds the stub's lock (not while abandoned, not an off-turn wake). | The second layer is missing. |
@@ -164,7 +164,7 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | step 6 `redeem`, then the transcript sync under the lock and the prompt | `HostRedeem` |
 | `finish` Done / OutOfUsage / Left: `release`, then the report; a move to the next account cancels the requeued core turn and begins a NEW one | `HostFinish`, `HostReport` (`FailoverReclaims`) |
 | `finish` Killed (the 15 s kill): `exit` reported at once, the claim ends, the process group is killed (`acp.kill`: stdin closed, a grace, `killpg`; the routine-deadline kill is the same and ends `done`): dying, not writing, the lock until the stub exits | `HostKilled`, `StubExit` |
-| `writer_turn.rs` abandon: `core.abandon` (`release` first, then `stop`), `kill_group`, `settle_gone`: the claim stays `ending` until the group is gone | `HostAbandon`, `HostKill`, `HostSettle` (`AbandonSettlesEarly`) |
+| `writer_turn.rs` abandon: `core.abandon` (`stop`, then `killpg` SIGKILL, then `settle_gone`; no `release`: the lock goes when the stub dies): the claim stays `ending` until the group is gone, the lock is held until then | `HostAbandon`, `HostKill`, `HostSettle`, `StubExit` (`AbandonKeepsLock`, `AbandonSettlesEarly`) |
 | a begun turn given up before the prompt; a redeem the core refused | `HostGiveUp` |
 | the process ends under its turn; `End::Died` reports `exit`, the item is rerun or cancelled | `EngineDied`, `HostDied` (`DiedReports`) |
 | `offturn.rs`: an agent that woke itself writes before the gate and the begin, no claim, no lock; anything short of Running kills its group | `OffTurnWrite`, `OffTurnKilled` |
@@ -245,15 +245,14 @@ All come from the code as it is; none was "fixed" in the model. `run.sh --show <
    the terminal's lines or forgotten the actor's cached session (`start_gate` does not `sync_one`). Window: one scan
    interval; the run must start and end while the send waits.
 
-5. **With no core answering, only the lock holds, and some engines have none (`core-held` `OneWriter`).** The owner's run goes on under
-   the conversation lock alone when the core gives no answer (`core_take` `NoAnswer`). A host engine that has already given its lock
-   back is held only by its claim row, which the core can no longer be asked about: an abandoned turn not yet killed
-   (`core.abandon` releases, then stops), or an agent that woke itself (an off-turn wake takes neither). Steps: abandon a running
-   turn (the lock is given back, the claim is `ending`), the core stops answering (gate Held), an owner run starts on the lock
-   alone (`kith-sessions claim` / `terminal` / `--resume` all reach `core_take`'s no-answer branch, and none asks the host): two
-   writers until `kill_group` / `settle_gone` ends the old one. Window: the abandon-to-kill gap, with the core down. Follow-up for the
-   code (architect): in the abandon branch kill the group before giving the lock back (`writer_turn.rs`, `core_writer.rs` abandon);
-   the stub's exit frees the lock anyway. Not fixed here.
+5. **With no core answering, only the lock holds, and an engine that woke itself has none (`core-held` `OneWriter`).** The owner's run goes on
+   under the conversation lock alone when the core gives no answer (`core_take` `NoAnswer`). An agent that woke itself (an off-turn
+   wake) takes neither a claim nor the lock, and the core, no longer answering, cannot be asked about it: the owner run starts on the
+   lock alone and two writers follow until the off-turn engine is killed. Open line. The architect logged two ways to close it, neither
+   built: kill a self-woken engine whenever the gate is not Writer, or have the host mark its own warm row while the core is down.
+   The abandon half is closed: an abandon is `stop`, `killpg` SIGKILL, `settle_gone`, with no lock release (the lock goes when the stub
+   dies, `core_writer.rs` abandon, `warm_stub.rs`), so both layers hold until the engine is gone. `core-held-no-offturn` (no off-turn
+   wakes) passes `OneWriter`; `core-held-old-abandon` (the lock given back first, `AbandonKeepsLock = FALSE`) fails it, with the core down.
    (`core` and `core-gate` pass `OneWriter` and friends: with the core answering, both layers hold.)
 6. **A terminal that moves to a new session id writes it under neither claim nor lock (`core-forks` `TerminalCovered`, `core-forks-two`
    `OneWriter`).** Finding 1 for the core writer: both layers are keyed by the id bin/kith claimed. With one terminal `OneWriter`
@@ -300,8 +299,9 @@ counterexample with `run.sh --show <variant> <property>`). The new ones keep cla
 | `core-failover-no-reclaim` | the new core turn of a move to the next account (the host's own retry runs on) | `EngineCovered` |
 | `core-host-no-lock` | the host's stub `take` | `LockCoversRunning`, and `OneWriter` (a terminal whose wrapper died holds only the lock) |
 | `core-term-no-claim-no-lock` | both layers for a terminal | `TerminalCovered`, `OneWriter` |
-| `core-term-no-claim`, `core-term-no-lock`, `core-unlocked-owner` | one layer for a terminal (no claim row; no lock; no stub program) | `OneWriter`: neither layer is redundant. The lock covers a terminal whose wrapper died (its claim ended while claude runs) and an owner with the core down; a terminal with no claim row is not kept out of an abandoned turn that gave its lock back, except by the warm-process check |
-| `core-abandon-settles-early` | the claim staying `ending` until the group is gone (the lock was given back at the stop) | `ClaimOutlivesEngine`. `OneWriter` still passes: the warm-process check in `claim.external` (the abandoned process is still registered) also keeps a terminal out |
+| `core-term-no-claim`, `core-term-no-lock`, `core-unlocked-owner` | one layer for a terminal (no claim row; no lock; no stub program) | `OneWriter`: neither layer is redundant. The lock covers a terminal whose wrapper died (its claim ended while claude runs) and an owner with the core down; a terminal with no claim row is kept out of an abandoned turn by the lock it still holds, and by the warm-process check |
+| `core-abandon-settles-early` | the claim staying `ending` until the group is gone | `ClaimOutlivesEngine`. `OneWriter` still passes: the warm-process check in `claim.external` (the abandoned process is still registered) also keeps a terminal out |
+| `core-held-old-abandon` | the abandon keeping the lock until the stub dies (the old order gave it back first) | `OneWriter`, with the core not answering (no off-turn wakes, so only the abandon window is left) |
 | `core-external-ignores-warm` | the warm-process check in `claim.external` | `OneWriter` (a terminal next to an off-turn wake) |
 | `core-claim-next-ignores-held` | the `held` answer of `claim_next` (with the warm check also off, which otherwise keeps the terminal out of the window) | `ClaimsExclusive` |
 | `core-died-no-report` | the `exit` report of `End::Died` | `NoLeakedClaim` |

@@ -267,6 +267,9 @@ pub(crate) struct Proc {
     pub(super) seen: i64,
     /// The conversations that have a row.
     rows: HashSet<String>,
+    /// Per session, the claim this process last ran a turn under (step 7): a claim of someone else above it means the session was
+    /// written beside this process, and the next turn loads it again (see `CoreWriter::claim_since`).
+    pub(super) ran: HashMap<String, i64>,
 }
 
 impl Proc {
@@ -279,7 +282,7 @@ impl Proc {
         agent: String,
         seen: i64,
     ) -> Self {
-        Self { core, stub: Some(stub), pid, started, person, agent, seen, rows: HashSet::new() }
+        Self { core, stub: Some(stub), pid, started, person, agent, seen, rows: HashSet::new(), ran: HashMap::new() }
     }
 }
 
@@ -631,12 +634,10 @@ impl Drop for Watch {
 }
 
 /// What a begin leaves behind when nobody waits for it any more: a claim running is given up, a turn queued is cancelled.
-pub(super) fn orphaned(core: &CoreWriter, conversation: &str, begin: &Begin, stub: &mut dyn WarmStub) {
+pub(super) fn orphaned(core: &CoreWriter, begin: &Begin, stub: &mut dyn WarmStub) {
     match begin {
         Begin::Running(r) => {
-            core.abandon(r.turn, r.claim, conversation, stub);
-            stub.kill_group();
-            core.settle_gone(r.pid, &r.started);
+            let _ = core.abandon(r, stub);
         }
         Begin::Queued { turn }
         | Begin::Retry { turn, .. }

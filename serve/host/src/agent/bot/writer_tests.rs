@@ -19,7 +19,7 @@ use crate::api::devices::Caller;
 use crate::hub::Hub;
 use crate::store::{BotConfig, Lane, Store};
 use crate::terminal::core_claims::tests::{Fake, register};
-use crate::terminal::core_writer::tests::{C, World};
+use crate::terminal::core_writer::tests::{C, World, ended};
 use kith_kernel::paths::Paths;
 use serde_json::json;
 use std::path::PathBuf;
@@ -176,6 +176,11 @@ impl Rig {
             .lines()
             .filter_map(|l| serde_json::from_str::<String>(l).ok())
             .collect()
+    }
+
+    /// Whether the fixture agent of `bot` has been prompted (its process is past the session load).
+    fn prompted(&self, bot: &str) -> bool {
+        std::fs::read_to_string(self.dir.join(bot).join("prompts.jsonl")).is_ok_and(|s| !s.is_empty())
     }
 
     fn texts(&self, bot: &str, kind: &str) -> Vec<String> {
@@ -367,13 +372,13 @@ actor_test! {
         rig.send("a", "park me").await;
         rig.until("the park", |r| r.turn_state(1) == "parked").await;
         assert_eq!(rig.w().turns[0].2.as_deref(), Some("terminal_live"));
-        assert!(rig.hub.runtime("a").activity.contains("waiting for your terminal session"));
+        rig.until("the activity", |r| r.hub.runtime("a").activity.contains("waiting for your terminal session")).await;
         assert!(rig.texts("a", "agent").is_empty(), "nothing runs under a terminal's claim");
         rig.end_seeded();
         rig.until("the reply", |r| r.replied("a", "park me")).await;
         assert_eq!(rig.calls("hostclaim.enqueue"), 1, "the retried begin is the same turn");
         assert!(rig.calls("hostclaim.unpark") >= 1);
-        assert_eq!(rig.turn_state(1), "done");
+        rig.until("its end", |r| r.turn_state(1) == "done").await;
     }
 }
 
@@ -488,8 +493,12 @@ actor_test! {
     async fn a_lock_that_cannot_be_given_back_kills_the_process(rig) {
         rig.w().kill_on_redeem = true;
         rig.send("a", "stuck").await;
-        rig.until("the failure", |r| r.noticed("a", "session lock could not be released")).await;
-        assert!(rig.calls("hostclaim.stop") >= 1, "the claim is stopped");
+        // The kill lands on the stub before or after the host's release: after, the lock is stuck (the claim is stopped, the start
+        // fails); before, the stub is simply gone with its lock (the turn is cancelled, no stop is needed).
+        rig.until("the failure", |r| r.noticed("a", "session lock could not be released") || r.turn_state(1) == "cancelled").await;
+        if rig.noticed("a", "session lock could not be released") {
+            assert!(rig.calls("hostclaim.stop") >= 1, "the claim is stopped");
+        }
         assert!(rig.texts("a", "agent").is_empty());
     }
 }
@@ -525,7 +534,7 @@ actor_test! {
         assert_eq!(rig.texts("a", "notice").iter().filter(|t| t.contains("core not answering")).count(), 1, "said once");
         rig.w().down = false;
         rig.until("the reply", |r| r.replied("a", "hold")).await;
-        assert_eq!(rig.turn_state(1), "done");
+        rig.until("its end", |r| r.turn_state(1) == "done").await;
     }
 }
 
@@ -563,7 +572,8 @@ actor_test! {
         assert_eq!(rig.calls("hostclaim.turn"), 1, "the second turn does not begin while the first holds the conversation");
         rig.until("both replies", |r| r.replied("a", "one") && r.replied("a", "two")).await;
         assert_eq!(rig.calls("hostclaim.turn"), 2);
-        assert_eq!(rig.w().turns.iter().filter(|t| t.1 == "done").count(), 2);
+        // The reply lands before the end report: wait for it.
+        rig.until("both ends", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 2).await;
     }
 }
 
@@ -586,7 +596,8 @@ actor_test! {
     /// A user's Stop is `session/cancel` and the normal end: `done`, never `exit` (only the 15 s kill reports it).
     async fn a_stop_ends_with_done_not_exit(rig) {
         rig.send("a", "HANG").await;
-        rig.until("running", |r| r.running_pid("sess-a").is_some()).await;
+        // Stopped once the prompt is under way: a stop before it abandons the turn (no end report), it does not end it.
+        rig.until("prompted", |r| r.prompted("a")).await;
         rig.hub.send_to_actor("a", Cmd::Stop).unwrap();
         rig.until("the end report", |r| !r.w().reports.is_empty()).await;
         let w = rig.w();
@@ -602,7 +613,9 @@ actor_test! {
     /// runs a requeued core turn, so it must not be left queued.
     async fn a_process_killed_under_a_turn_ends_exit_and_the_turn_is_cancelled_not_left_queued(rig) {
         rig.send("a", "HANG").await;
-        rig.until("running", |r| r.running_pid("sess-a").is_some()).await;
+        // Killed only once the prompt is under way: a kill between the redeem and the session load is a failed start (an abandon,
+        // which reports no exit), not the process dying under its turn.
+        rig.until("prompted", |r| r.prompted("a")).await;
         kill_group(rig.running_pid("sess-a").unwrap());
         rig.until("the end report", |r| !r.w().reports.is_empty()).await;
         {
@@ -656,7 +669,7 @@ actor_test! {
     /// it puts back is cancelled, not left queued.
     async fn the_fifteen_second_kill_reports_exit_and_cancels_the_turn(rig) {
         rig.send("a", "STUBBORN").await;
-        rig.until("running", |r| r.running_pid("sess-a").is_some()).await;
+        rig.until("prompted", |r| r.prompted("a")).await;
         rig.hub.send_to_actor("a", Cmd::Stop).unwrap();
         rig.until("the end report", |r| !r.w().reports.is_empty()).await;
         let w = rig.w();
@@ -718,6 +731,7 @@ actor_test! {
         rig.w().session_register_refused = false;
         rig.send("a", "after").await;
         rig.until("the reply", |r| r.replied("a", "after")).await;
+        rig.until("its end", |r| r.turn_state(3) == "done").await;
         let w = rig.w();
         assert_eq!(w.turns.len(), 3, "the next message is a turn of its own: {:?}", w.turns);
         assert_eq!(w.turns[2].1, "done");
@@ -769,10 +783,39 @@ actor_test! {
         rig.send_thread("a", &root, "after the terminal").await;
         rig.until("the reply", |r| r.replied_in("a", &root, "after the terminal")).await;
         assert_eq!(rig.loads("a").len(), before + 1, "the session was loaded again before the prompt: {:?}", rig.loads("a"));
+        rig.until("its end", |r| r.turn_state(3) == "done").await;
         let w = rig.w();
         assert_eq!(w.turns.len(), 3, "the same turn, no new one");
         assert_eq!(w.turns[2].1, "done");
         assert_eq!(w.claims.len(), 3, "one claim for the turn");
+    }
+}
+
+actor_test! {
+    /// M3 gap 3: a lock-only `--direct` run on an idle warm conversation leaves no transcript line, only a claim of the core above the
+    /// last this process ran under. The next turn loads the session again, on the main lane (no thread), and only that one.
+    async fn a_claim_of_someone_else_since_the_last_turn_reloads_the_session_on_the_main_lane(rig) {
+        rig.send("a", "first").await;
+        rig.until("the first reply", |r| r.replied("a", "first")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 1).await;
+        let conversation = rig.w().claims[0].conv.clone();
+        // Nobody else claimed: the loaded session is current.
+        let before = rig.loads("a").len();
+        rig.send("a", "second").await;
+        rig.until("the second reply", |r| r.replied("a", "second")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 2).await;
+        assert_eq!(rig.loads("a").len(), before, "no reload without a claim of someone else: {:?}", rig.loads("a"));
+        // A run of someone else on it, over by now.
+        let direct = i64::try_from(rig.w().claims.len()).unwrap() + 1;
+        rig.w().claims.push(ended(direct, &conversation, "external"));
+        rig.send("a", "third").await;
+        rig.until("the third reply", |r| r.replied("a", "third")).await;
+        rig.until("its end", |r| r.w().turns.iter().filter(|t| t.1 == "done").count() == 3).await;
+        assert_eq!(rig.loads("a").len(), before + 1, "the session was loaded again: {:?}", rig.loads("a"));
+        // Told once: the process ran under a claim above it since.
+        rig.send("a", "fourth").await;
+        rig.until("the fourth reply", |r| r.replied("a", "fourth")).await;
+        assert_eq!(rig.loads("a").len(), before + 1, "and not again: {:?}", rig.loads("a"));
     }
 }
 
@@ -792,6 +835,7 @@ actor_test! {
         rig.send_thread("a", &root, "after the fork").await;
         rig.until("the reply", |r| r.replied_in("a", &root, "after the fork")).await;
         assert!(rig.loads("a").contains(&"sess-fork".to_owned()), "the new session loaded: {:?}", rig.loads("a"));
+        rig.until("its end", |r| r.turn_state(4) == "done").await;
         let w = rig.w();
         assert_eq!(w.turns[2].1, "cancelled", "the turn on the old session is cancelled: {:?}", w.turns);
         assert_eq!(w.turns[3].1, "done", "a new turn on the new session");
@@ -892,7 +936,11 @@ mod units {
     fn the_end_is_out_of_usage_only_for_a_move_and_every_other_ending_is_done() {
         assert_eq!(end_for(Some(Rel::OutOfUsage), false, false), End::OutOfUsage);
         assert_eq!(end_for(None, false, false), End::Done, "no failover: done");
-        assert_eq!(end_for(Some(Rel::Abandon), false, false), End::Done);
+        assert_eq!(
+            end_for(Some(Rel::Abandon), false, false),
+            End::Abandoned,
+            "only the stop is sent again, never an exit"
+        );
         assert_eq!(
             end_for(Some(Rel::Died), false, false),
             End::Done,
