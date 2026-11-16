@@ -1029,6 +1029,7 @@ actor_test! {
         fire(&rig, 101, "daily", false);
         fire(&rig, 102, &routine, false);
         pull_until(&rig, "both turns done", |r| r.turn_state(101) == "done" && r.turn_state(102) == "done").await;
+        {
         let w = rig.w();
         assert!(w.log.iter().all(|m| m != "hostclaim.enqueue"), "a pulled turn is never enqueued: {:?}", w.log);
         for (turn, job) in [(101, "daily".to_owned()), (102, routine.clone())] {
@@ -1040,7 +1041,7 @@ actor_test! {
             assert_ne!(claims[0]["sessionId"], claims[0]["conversation"], "on a session of its own");
         }
         assert_eq!(w.reports.iter().filter(|(k, _)| k == "done").count(), 2, "{:?}", w.reports);
-        drop(w);
+        }
         assert!(rig.replied("a", "run daily") && rig.replied("a", "run "), "the results reach the chat");
         assert!(rig.noticed("a", "Scheduled · daily") && rig.noticed("a", "Scheduled · Digest"));
         // Pulled again later: nothing is waiting, nothing runs twice.
@@ -1056,11 +1057,12 @@ actor_test! {
     async fn a_fired_turn_redeemed_before_a_restart_is_cancelled_not_run(rig) {
         fire(&rig, 201, "daily", true);
         pull_until(&rig, "the cancel", |r| r.turn_state(201) == "cancelled").await;
-        let w = rig.w();
-        let cancel = &w.asked.iter().find(|(m, _)| m == "hostclaim.cancel").unwrap().1;
-        assert_eq!(cancel["reason"], "interrupted: a restart cut this run off");
-        assert!(w.log.iter().all(|m| m != "hostclaim.turn"), "never begun: {:?}", w.log);
-        drop(w);
+        {
+            let w = rig.w();
+            let cancel = &w.asked.iter().find(|(m, _)| m == "hostclaim.cancel").unwrap().1;
+            assert_eq!(cancel["reason"], "interrupted: a restart cut this run off");
+            assert!(w.log.iter().all(|m| m != "hostclaim.turn"), "never begun: {:?}", w.log);
+        }
         assert!(!rig.prompted("a"));
         assert!(rig.noticed("a", "a restart cut this run off"));
     }

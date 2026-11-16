@@ -140,7 +140,8 @@ impl Routines {
                 if cancel(turn)
                     && let Some((bot, name, _)) = where_
                 {
-                    let text = format!("{name} was interrupted: a restart cut this run off. It runs again at its next time.");
+                    let text =
+                        format!("{name} was interrupted: a restart cut this run off. It runs again at its next time.");
                     let data = json!({"text": text, "style": "error", "coreTurn": turn});
                     if let Err(error) =
                         hub.add_entry_once(&format!("schedule-cut-{turn}"), &Lane::main(&bot), EntryKind::Notice, &data)
@@ -218,7 +219,8 @@ impl Routines {
             "Scheduled routine: {}\n\n{}\n\nThis is an autonomous routine run. Follow its saved instruction. If there is nothing to report and the instruction permits silence, return exactly (pass). Otherwise give the user your final result. Do not recreate this routine.",
             item.name, item.prompt
         );
-        let notice = json!({"text": format!("Scheduled · {}", item.name), "coreTurn": item.turn, "runId": id, "style": "info"});
+        let notice =
+            json!({"text": format!("Scheduled · {}", item.name), "coreTurn": item.turn, "runId": id, "style": "info"});
         if let Err(e) = hub.add_entry_once(&root, &Lane::main(bot), EntryKind::Notice, &notice) {
             return Some(Err(e));
         }
@@ -276,10 +278,11 @@ impl Routines {
         )
     }
 
-    /// Tests: the items held now, `(turn, bot, status)`.
+    /// Tests: the items held now, `(turn, bot, pending)`.
     #[cfg(test)]
-    pub(super) fn pulled_items(&self) -> Vec<(i64, String, Status)> {
-        let mut v: Vec<_> = self.pulled.locked().values().map(|i| (i.turn, i.bot.clone(), i.status)).collect();
+    pub(super) fn pulled_items(&self) -> Vec<(i64, String, bool)> {
+        let mut v: Vec<_> =
+            self.pulled.locked().values().map(|i| (i.turn, i.bot.clone(), i.status == Status::Pending)).collect();
         v.sort_by_key(|i| i.0);
         v
     }

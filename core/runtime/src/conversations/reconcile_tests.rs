@@ -31,11 +31,26 @@ fn a_core_restart_leaves_a_live_running_host_claim_and_a_claimed_one() {
     let (claimed, claimed_turn) = take_as(&mut c, "b", HOST, None);
     unreconcile(&c);
     let out = reconcile_with(&mut c, &procs, &[], &[], i64::MAX, 50).expect("reconcile");
-    assert_eq!(state(&c, running), "running", "its process is alive: the host's to end");
-    assert_eq!(turn_state(&c, running_turn), "running", "not put back: nothing runs it twice");
-    assert_eq!(state(&c, claimed), "claimed", "the host's redeem or stop decides it");
+    assert_eq!(
+        state(&c, running),
+        "running",
+        "its process is alive: the host's to end"
+    );
+    assert_eq!(
+        turn_state(&c, running_turn),
+        "running",
+        "not put back: nothing runs it twice"
+    );
+    assert_eq!(
+        state(&c, claimed),
+        "claimed",
+        "the host's redeem or stop decides it"
+    );
     assert_eq!(turn_state(&c, claimed_turn), "claimed");
-    assert!(out.kill.is_empty() && out.holder_kill.is_empty() && out.ended.is_empty(), "{out:?}");
+    assert!(
+        out.kill.is_empty() && out.holder_kill.is_empty() && out.ended.is_empty(),
+        "{out:?}"
+    );
     // The host reports the turn done afterwards, as it would have without the restart.
     report(&mut c, running, "done", r#"{"pid":200}"#, 60).expect("done");
     assert_eq!(state(&c, running), "ended");
@@ -55,9 +70,16 @@ fn a_host_claim_whose_process_is_gone_is_reconciled_as_before() {
     let out = reconcile_with(&mut c, &procs, &[], &[], i64::MAX, 50).expect("reconcile");
     assert_eq!(state(&c, gone), "ending", "never straight to ended");
     assert_eq!(state(&c, reused), "ending");
-    assert_eq!(turn_state(&c, gone_turn), "queued", "the turn is put back, as before");
+    assert_eq!(
+        turn_state(&c, gone_turn),
+        "queued",
+        "the turn is put back, as before"
+    );
     let killed: Vec<_> = out.kill.iter().filter_map(|k| k.claim_id).collect();
-    assert!(killed.contains(&gone) && killed.contains(&reused), "{out:?}");
+    assert!(
+        killed.contains(&gone) && killed.contains(&reused),
+        "{out:?}"
+    );
 }
 
 #[test]
@@ -82,6 +104,12 @@ fn holder_and_external_claims_are_unchanged() {
     assert_eq!(state(&c, held_claimed), "ended");
     assert_eq!(turn_state(&c, held_turn), "queued");
     assert_eq!(state(&c, external), "claimed");
-    assert!(out.kill.iter().any(|k| k.claim_id == Some(held_running)), "{out:?}");
-    assert!(out.kill.iter().all(|k| k.claim_id != Some(external)), "{out:?}");
+    assert!(
+        out.kill.iter().any(|k| k.claim_id == Some(held_running)),
+        "{out:?}"
+    );
+    assert!(
+        out.kill.iter().all(|k| k.claim_id != Some(external)),
+        "{out:?}"
+    );
 }

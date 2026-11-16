@@ -173,7 +173,8 @@ Code, cited at `origin/rust-rebuild` cf308ebc (`core/runtime/src/...`; line numb
 | `Revoke` | `revoke_person` :674 |
 | `TakeOver`, `PromoteTW` | a queued claim (`state = 'queued'`, kind terminal); **promotion is not in the code** (claims.rs header: M3-11); modelled as the rule it must follow. `TakeOver` also cancels the live turn and stops its claim: that is the M3-11 rule, not code. It queues one claim at most (`claims_one_queued`, m0080) |
 | `SendKill`, `HKill`, `EndGone` | the `Kill` the stops return, re-sent; `end_gone` :739 |
-| `HCrash`, `HUp`, `Meet` | `different_holder` :922 -> `release_unlisted` :779 |
+| `HCrash`, `HUp`, `Meet` | `different_holder` :922 -> `release_unlisted` :779 (both in `conversations/reconcile.rs` since rule K) |
+| `CoreRestart` (variants `corekeep`, `corekeepdead`) | step 5 after a core restart: `reconcile_with` -> `release_unlisted` with `foreign_to = None` (`conversations/reconcile.rs`): rule K keeps the host's `claimed` claims and its `running` ones whose recorded process is alive (`host_gone`, probed outside the transaction as `end_gone` is). Shares `MaxHC` with `HCrash` |
 | give-back | wake/queue.rs `give_back` :288, `release` :296: only the wake's own bookkeeping; what restarts the conversation is a new turn, which `claim_in`'s fence refuses |
 
 Properties (`INVARIANTS` and `PROPERTIES` of the cfgs): `OneLive` (the unique index), `OneWriter`, `WriterHasClaim` (a writing
@@ -199,6 +200,7 @@ about 320k states); `fix-doubletake` = two take-overs, no crash. Broken variants
 | `c4-fenceleak` / `c4-epochleak` | nothing (the code): a refused turn stays queued; `MaxRev=1` for the epoch | `P3Strict` (the `c4-fencecancel` / `c4-epochcancel` rows, where the caller cancels it, pass) |
 | `WriterLock4 r4-tonolock` | the take-over writer taking the lock | `P1_NoTwoWriters` |
 | `c4-hostconst` (M3-12, `HostHolder`) | one constant host instance (core_claims.rs `HOST_INSTANCE` today): a restarted host reads the old claim as its own and reports it done under the old stub's live engine. `c4-hostholder` (per-start instance, the old claims stopped to `ending` and killed, the group surviving) passes. The design's "fails P4" is `WriterHasClaim` here: the claim ends while the engine writes | `WriterHasClaim` |
+| `c4-corekeepdead` (rule K, design 2026-11-16-core-queued-runner) | the alive probe of K: a core restart's step 5 keeps every `running` host claim, also one whose process is gone. Its turn stays `running` with nothing to end it (`c4-corekeep`, the code: `claimed` and `running` on a live process kept, a gone one reconciled as `Meet` does, passes) | `P3` (temporal) |
 | `c4-pidonly` (M3-12) | `end_gone` waiting for the pid only, not the process group it led (K2): a stub killed alone while the holder is down leaves a writing `orphan` engine | `WriterHasClaim` (`c4-orphan`, the code, passes) |
 
 **Round-4 list to rows**: holder crash with the stub dying `r4-fix-die-*`, `c4-fix-die`; with it surviving `r4-fix-survive-*`,

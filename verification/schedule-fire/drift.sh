@@ -17,6 +17,8 @@ FILES=(
   core/runtime/src/schedules          # M4-2 store and index; M4-3 tick, fire (the one transaction), run now, the webhook entry
   core/runtime/src/migrations/schedules  # sched_tick, sched_fires, sched_runs (unique keys)
   core/runtime/src/conversations/claims.rs  # enqueue_turn, claim, park, unpark_ready, expire_parked, revoke_person
+  core/runtime/src/conversations/reconcile.rs  # Restart: step 5 (rule K keeps the host's live claims)
+  serve/host/src/routines/core_runs.rs  # who runs a fired turn: the host's runner (hostclaim.queued, cancel a redeemed one)
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

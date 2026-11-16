@@ -13,7 +13,8 @@ use std::collections::HashSet;
 use rusqlite::{Transaction, params};
 
 use super::claims::{
-    HOST_INSTANCE, Kill, RECONCILED, Released, is_host_instance, kill_of, reconciled, recorded_gone, requeue_turn, row,
+    HOST_INSTANCE, Kill, RECONCILED, Released, is_host_instance, kill_of, reconciled,
+    recorded_gone, requeue_turn, row,
 };
 use crate::db::{Core, RecordedProc};
 use crate::error::{Error, Result};
@@ -33,7 +34,9 @@ fn host_gone(core: &Core, live: &dyn Liveness, high_water: i64) -> Result<HashSe
             "SELECT claim_id, pid, pid_started, holder_instance FROM claims
              WHERE state = 'running' AND kind <> 'external' AND holder_instance IS NOT NULL AND claim_id <= ?1",
         )?;
-        for r in st.query_map([high_water], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))? {
+        for r in st.query_map([high_water], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })? {
             rows.push(r?);
         }
     }
@@ -64,8 +67,18 @@ fn release_unlisted(
     now: i64,
 ) -> Result<Released> {
     let mut out = Released::default();
-    #[allow(clippy::type_complexity, reason = "one row of the query below, used once")]
-    let mut live: Vec<(i64, String, bool, Option<i64>, Option<String>, Option<String>)> = Vec::new();
+    #[allow(
+        clippy::type_complexity,
+        reason = "one row of the query below, used once"
+    )]
+    let mut live: Vec<(
+        i64,
+        String,
+        bool,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+    )> = Vec::new();
     {
         // Only claims at or below the high-water mark read before the holder's list: a newer one may simply be missing
         // from a list that was read before it was taken.
@@ -77,7 +90,14 @@ fn release_unlisted(
                         AND NOT (holder_instance = ?3 OR substr(holder_instance, 1, length(?3) + 1) = ?3 || '/')))",
         )?;
         for r in st.query_map(params![foreign_to, high_water, HOST_INSTANCE], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
         })? {
             live.push(r?);
         }
@@ -166,7 +186,11 @@ fn release_unlisted(
     }
     for p in procs {
         if !known.contains(&(i64::from(p.pid), p.started.clone())) {
-            out.kill_procs.push(Kill { claim_id: None, pid: Some(p.pid), started: Some(p.started.clone()) });
+            out.kill_procs.push(Kill {
+                claim_id: None,
+                pid: Some(p.pid),
+                started: Some(p.started.clone()),
+            });
         }
     }
     Ok(out)
@@ -200,7 +224,9 @@ pub(crate) fn reconcile_with(
     let gone = host_gone(core, live, high_water)?;
     let tx = core.claim_tx()?;
     if reconciled(&tx)? == Some(generation) {
-        return Err(Error::Refused(format!("kith-core: generation {generation} is already reconciled")));
+        return Err(Error::Refused(format!(
+            "kith-core: generation {generation} is already reconciled"
+        )));
     }
     let set: HashSet<i64> = listed.iter().copied().collect();
     let mut out = release_unlisted(&tx, &set, None, &gone, procs, high_water, now)?;
@@ -233,7 +259,15 @@ pub(crate) fn different_holder(
 ) -> Result<Released> {
     let tx = core.claim_tx()?;
     let set: HashSet<i64> = listed.iter().copied().collect();
-    let out = release_unlisted(&tx, &set, Some(new_instance), &HashSet::new(), procs, high_water, now)?;
+    let out = release_unlisted(
+        &tx,
+        &set,
+        Some(new_instance),
+        &HashSet::new(),
+        procs,
+        high_water,
+        now,
+    )?;
     tx.commit()?;
     Ok(out)
 }

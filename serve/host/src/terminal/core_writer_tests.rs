@@ -119,7 +119,8 @@ impl World {
             }
             "hostclaim.epoch" => data(json!({"epoch": 0})),
             "hostclaim.queued" => {
-                let waits = |id: i64| self.turns.iter().any(|t| t.0 == id && ["queued", "parked"].contains(&t.1.as_str()));
+                let waits =
+                    |id: i64| self.turns.iter().any(|t| t.0 == id && ["queued", "parked"].contains(&t.1.as_str()));
                 let turns: Vec<Value> =
                     self.fired.iter().filter(|f| f["turn"].as_i64().is_some_and(waits)).cloned().collect();
                 data(json!({"turns": turns}))

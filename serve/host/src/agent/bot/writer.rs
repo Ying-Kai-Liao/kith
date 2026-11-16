@@ -265,7 +265,9 @@ impl Actor {
     pub(super) async fn accept_pulled(&self, turn: i64, pulled: Pulled) -> Accept {
         let (mode, core) = mode_of(&self.hub).await;
         let seen = match (mode, core) {
-            (Mode::Writer, Some(core)) => read_epochs(core, pulled.person.clone(), Vec::new()).await.map(|s| s.principal),
+            (Mode::Writer, Some(core)) => {
+                read_epochs(core, pulled.person.clone(), Vec::new()).await.map(|s| s.principal)
+            }
             _ => None,
         };
         Accept::pulled(turn, pulled, seen)
