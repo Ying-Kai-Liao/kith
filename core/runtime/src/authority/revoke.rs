@@ -68,6 +68,18 @@ fn check_id(id: &str) -> R<()> {
     }
 }
 
+/// A person id that starts with `room-` is refused for a new person, a rename and an invite: it is the grant of a room's
+/// people (the host's `room-<room>-<gen>`), and a person there would be that grant's id. kith-auth refuses the same
+/// (`room_prefix_msg`); an id that already exists keeps working everywhere else.
+pub(super) fn check_not_room(id: &str) -> R<()> {
+    if id.starts_with("room-") {
+        return usage(
+            "a person id can not start with room-: that is reserved for a room's own grant",
+        );
+    }
+    Ok(())
+}
+
 /// `person_folders`: (label, path) of what kith keeps for a person outside the tables.
 fn person_folders(life: &Life, pid: &str) -> Vec<(String, PathBuf)> {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(&life.agents)
@@ -216,6 +228,7 @@ pub(crate) fn person_set(
         return die(format!("'{pid}' was renamed to {canon}"));
     }
     if !known {
+        check_not_room(pid)?;
         need_free(auth, life, pid, !owner)?;
         // a new person starts with nothing, whatever an older removal left behind
         forget(auth, &[pid]);
@@ -353,6 +366,7 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
     tables(auth);
     need_person(auth, old)?;
     check_id(new)?;
+    check_not_room(new)?;
     let taken = people(auth).contains_key(new)
         || people(auth)
             .values()

@@ -52,6 +52,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
+use super::schedules_gate as gate;
 use crate::cutover::state::{self, Phase};
 use crate::cutover::{Env, Module, Opts};
 use crate::db::Core;
@@ -64,21 +65,58 @@ const ROUTINES_KEY: &str = "routines.v1";
 /// How long the import waits for another writer of an agent's jobs.json.
 const LOCK_WAIT: Duration = Duration::from_secs(30);
 
+/// Whether the core runs the turns a schedule fire makes (a fired cron job or routine becomes a turn that runs and ends).
+/// False: the core only writes the fire row and the turn, and nothing runs it. `step_refusal` refuses while this is
+/// false (with the other conditions in `schedules_gate`). It flips to true only in the PR that adds the runner (the
+/// host's Writer path), together with a test that a fired cron job and a fired routine each run and end done.
+pub(crate) const RUNS_FIRED_TURNS: bool = false;
+
 type KeyFactory = std::sync::Arc<dyn Fn() -> Box<dyn KeyStore>>;
 
 pub(crate) struct Schedules {
     /// Tests: the key store the envelope opens, in place of this computer's. `None`: the operating system's.
     keys: Option<KeyFactory>,
+    /// Tests: skip the build gate, so the step tests can step. Never set outside tests.
+    #[cfg(test)]
+    gate_open: bool,
 }
 
 impl Schedules {
     pub(crate) const fn new() -> Self {
-        Self { keys: None }
+        Self {
+            keys: None,
+            #[cfg(test)]
+            gate_open: false,
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn with_keys(keys: KeyFactory) -> Self {
-        Self { keys: Some(keys) }
+        Self {
+            keys: Some(keys),
+            gate_open: true,
+        }
+    }
+
+    /// Tests: the same module with the build gate shut, as it is in the field.
+    #[cfg(test)]
+    pub(crate) fn gated(mut self) -> Self {
+        self.gate_open = false;
+        self
+    }
+
+    /// The gate's refusal for this build, if any (the step, its dry run and `check` all say it).
+    fn build_refusal(&self, env: &Env) -> Option<String> {
+        #[cfg(test)]
+        if self.gate_open {
+            return None;
+        }
+        gate::refusal(&gate::Facts {
+            runs_fired_turns: RUNS_FIRED_TURNS,
+            depends_on_claims: self.depends_on().contains(&"claims"),
+            serves_rows: gate::serves_rows(),
+            launchd: gate::launchd_runs_this_build(&env.home),
+        })
     }
 
     /// Runs `f` with the core's envelope, opening it first when this core has not yet.
@@ -684,11 +722,19 @@ impl Module for Schedules {
         "schedules"
     }
 
+    /// The runner will be the host's Writer path, which is the claims lane's.
+    fn depends_on(&self) -> &'static [&'static str] {
+        &["claims"]
+    }
+
     fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
         vec![env.machine.join("sched").join("state.json")]
     }
 
     fn step_refusal(&self, env: &Env) -> Option<String> {
+        if let Some(why) = self.build_refusal(env) {
+            return Some(why);
+        }
         // The host reads the switch when it starts. A running host started before the step would keep running every
         // routine from serve.db next to the core's fire, so each would run twice.
         host_refusal(
@@ -707,7 +753,9 @@ impl Module for Schedules {
     }
 
     fn check_notes(&self, env: &Env) -> Vec<String> {
-        other_mac_notes(env)
+        let mut notes = other_mac_notes(env);
+        notes.extend(self.build_refusal(env));
+        notes
     }
 
     fn dry_run_despite_refusal(&self) -> bool {

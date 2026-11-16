@@ -15,7 +15,7 @@
 //! Posting is one step with the check (`Hub::commit_room_post`). A new post opens a conversation (`group::start`), which
 //! runs the room-person turns of the agents it @-mentions (`room_turn`).
 
-use super::room_people::{self, Seat, live_seat};
+use super::room_people::{self, Seat, live_seat, live_seat_held};
 use super::room_pointer;
 use crate::api::authority::Authority;
 use crate::api::devices::NotAllowed;
@@ -56,14 +56,16 @@ pub fn seen_by(seat: i64, kind: &str, origin: Option<i64>) -> bool {
 }
 
 /// [`live_seat`] for the places that can't wait on the authority (a live event): `access` is the authority the stream
-/// chose, so it answers the same question as [`crate::api::roles::may_use`]. The open stay's `joined_gen`, or `None`.
-pub fn seat_now(access: &dyn Authority, store: &Store, person: &str, room: &str) -> Option<i64> {
-    // A revoke leaves the host's people mirror as it stands (its rows wait for the undo), so a person set aside is a no
-    // here whatever the mirror says; on the core, `granted` already says no.
-    if store.is_suspended(person) {
+/// chose, so it answers the same question as [`crate::api::roles::may_use`]. `ids` are the person's ids, read once when
+/// the stream began (a later rename only adds ids, so a stay under one it does not know is a miss: nothing is shown).
+/// The open stay's `joined_gen`, or `None`.
+pub fn seat_now(access: &dyn Authority, store: &Store, person: &str, ids: &[String], room: &str) -> Option<i64> {
+    // A revoke leaves the host's people mirror as it stands (its rows wait for the undo), so a person set aside under any
+    // of their ids is a no here whatever the mirror says; on the core, `granted` already says no.
+    if store.is_suspended(person) || ids.iter().any(|id| store.is_suspended(id)) {
         return None;
     }
-    let seat = store.room_open_seat(room, person)?;
+    let (_, seat) = store.room_open_stay(room, ids)?;
     let agents = room_people::room_agents(store, room).ok()?;
     agents.iter().all(|agent| access.granted(person, agent)).then_some(seat)
 }
@@ -225,14 +227,14 @@ pub async fn react(hub: &Hub, person: &str, b: &Value) -> Result<Value> {
     let entry = hub.store.entry(id).ok_or_else(not_in_room)?;
     let seat = seat_of(hub, person, &entry.bot_id).await?;
     let _members = super::group::membership_lock();
-    let shown = hub.store.room_open_seat(&entry.bot_id, person) == Some(seat.joined)
-        && !hub.store.is_suspended(person)
+    let shown = hub.store.room_open_seat(&entry.bot_id, &seat.under) == Some(seat.joined)
+        && !seat.ids.iter().any(|id| hub.store.is_suspended(id))
         && SEEN_KINDS.contains(&entry.kind.as_str())
         && sees(seat.joined, hub.store.origin_gen(id));
     if !shown {
         return Err(not_in_room());
     }
-    let e = hub.react_as(id, b["emoji"].as_str().unwrap_or_default(), Some((person, seat.joined)))?;
+    let e = hub.react_as(id, b["emoji"].as_str().unwrap_or_default(), Some((&seat.under, &seat.ids, seat.joined)))?;
     Ok(json!({"entry": shown_entries(person, &[e]).remove(0)}))
 }
 
@@ -240,11 +242,14 @@ pub async fn react(hub: &Hub, person: &str, b: &Value) -> Result<Value> {
 /// and as `agentList` `{id, name}`; `ownerName` is the owner's display name, left out when kith-auth has none.
 pub async fn my_rooms(hub: &Hub, person: &str) -> Vec<Value> {
     let mut out = vec![];
+    // Their ids, read once for every room; none when they can't be read (no room is shown on a guess).
+    let Ok(held) = crate::remote::core_revokes::held(person).await else { return out };
     let mut owner: Option<Option<String>> = None;
     for row in hub.store.bots().unwrap_or_default() {
-        if row.deleted || !row.config.is_group() || live_seat(&hub.store, person, &row.config.id).await.is_none() {
+        if row.deleted || !row.config.is_group() {
             continue;
         }
+        let Some(seat) = live_seat_held(&hub.store, person, &held, &row.config.id).await else { continue };
         let bots: Vec<_> =
             row.config.members.iter().filter_map(|m| hub.store.bot(m).ok().flatten().filter(|b| !b.deleted)).collect();
         let agents: Vec<&str> = bots.iter().map(|b| b.config.name.as_str()).collect();
@@ -262,7 +267,7 @@ pub async fn my_rooms(hub: &Hub, person: &str) -> Vec<Value> {
             }
             owner = Some(name);
         }
-        let stay = hub.store.room_open_seat(&row.config.id, person);
+        let stay = seat.joined;
         let mut room = json!({"id": row.config.id, "name": row.config.name, "agents": agents, "agentList": agent_list, "stay": stay});
         if let Some(Some(name)) = &owner {
             room["ownerName"] = json!(name);
@@ -273,12 +278,16 @@ pub async fn my_rooms(hub: &Hub, person: &str) -> Vec<Value> {
 }
 
 /// `person` leaves `room` (only an open stay is needed: leaving never widens anything, and someone whose agent was taken
-/// away can still get out). Whether it changed anything.
-pub fn leave(hub: &Arc<Hub>, person: &str, room: &str) -> Result<bool> {
-    if hub.store.room_open_seat(room, person).is_none() {
+/// away can still get out). The stay may be under any of their ids, and the leave ends it under every one. Whether it
+/// changed anything.
+pub async fn leave(hub: &Arc<Hub>, person: &str, room: &str) -> Result<bool> {
+    let held = crate::remote::core_revokes::held(person)
+        .await
+        .map_err(|e| e.context("This computer couldn't check who you are; try again."))?;
+    if hub.store.room_open_stay(room, &held.ids).is_none() {
         return Err(not_in_room());
     }
-    Ok(room_people::remove_person(hub, room, person)?.changed)
+    Ok(room_people::remove_held(hub, room, &held)?.changed)
 }
 
 #[cfg(test)]

@@ -290,7 +290,7 @@ async fn a_reaction_is_refused_once_a_revoke_is_recorded_even_after_the_check() 
     let (r, room) = rig().await;
     let ann = join(&r, &room, "ann");
     let e = say(&r, &room, EntryKind::Agent, "react to me", Some(ann));
-    assert!(r.hub.react_as(&e.id, "👍", Some(("ann", ann))).is_ok());
+    assert!(r.hub.react_as(&e.id, "👍", Some(("ann", &["ann".to_owned()], ann))).is_ok());
     // A revoke sets aside what the person holds: a membership is something to set aside.
     let m = crate::store::Membership {
         membership_id: "m1".into(),
@@ -301,7 +301,7 @@ async fn a_reaction_is_refused_once_a_revoke_is_recorded_even_after_the_check() 
     };
     r.hub.store.add_membership(&m).unwrap();
     r.hub.store.suspend_person("ann").unwrap();
-    let err = r.hub.react_as(&e.id, "🎉", Some(("ann", ann))).unwrap_err();
+    let err = r.hub.react_as(&e.id, "🎉", Some(("ann", &["ann".to_owned()], ann))).unwrap_err();
     assert!(err.is::<super::devices::NotAllowed>(), "{err:#}");
     assert_eq!(r.hub.store.entry(&e.id).unwrap().data["reactions"], json!(["👍"]), "nothing written");
 }
