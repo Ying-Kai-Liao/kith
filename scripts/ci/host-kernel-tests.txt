@@ -27,6 +27,7 @@ src/api/room_member_tests.rs	api::room_member_tests::
 src/api/room_turn_tests.rs	api::room_turn_tests::
 src/api/room_pointer_tests.rs	api::room_pointer_tests::
 src/api/room_withdraw_tests.rs	api::room_withdraw_tests::
+src/api/room_rename_tests.rs	api::room_rename_tests::
 src/api/roles_props/rooms.rs	api::roles_props::rooms::
 src/api/botguests_props.rs	api::botguests_props::
 src/api/revoke_tests.rs	api::revoke_tests::
