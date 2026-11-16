@@ -413,7 +413,8 @@ fn queued(core: &Core) -> Result<Value> {
                 "agent": r.get::<_, String>(2)?,
                 "engine": r.get::<_, String>(3)?,
                 "job": r.get::<_, Option<String>>(9)?,
-                "owner": owner.as_deref() == Some(person.as_str()),
+                // null when the owner can't be read: the host says so instead of letting every run expire quietly.
+                "owner": owner.as_deref().map(|o| o == person),
                 "person": person,
                 "prompt": r.get::<_, String>(5)?,
                 "deadline": r.get::<_, Option<i64>>(6)?,

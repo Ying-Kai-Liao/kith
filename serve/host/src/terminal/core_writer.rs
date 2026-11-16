@@ -187,6 +187,9 @@ pub struct Running {
     pub account: Option<String>,
     /// The core had redeemed it already (a repeated begin).
     pub again: bool,
+    /// The turn goes on by its id after this end (a scheduled run the core queued, moved to the next account): its `exit` is not
+    /// followed by a cancel.
+    pub keep: bool,
 }
 
 /// Why a turn is parked.
@@ -640,7 +643,15 @@ impl CoreWriter {
         };
         let ask = json!({"claimId": claim, "pid": pid, "started": started, "holderInstance": self.instance});
         let running = |again| {
-            Begin::Running(Running { turn, claim, pid, started: started.clone(), account: account.cloned(), again })
+            Begin::Running(Running {
+                turn,
+                claim,
+                pid,
+                started: started.clone(),
+                account: account.cloned(),
+                again,
+                keep: false,
+            })
         };
         for _ in 0..2 {
             match self.call("hostclaim.redeem", &ask) {

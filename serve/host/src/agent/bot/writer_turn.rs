@@ -82,7 +82,7 @@ pub(super) fn cancel_reason(end: End) -> Option<&'static str> {
 /// The turn `exit` put back is not wanted again ([`cancel_reason`]): a cancel the core did not answer turns a taken end into a lost one,
 /// so the slow tick sends both again (the report on an ended claim changes nothing).
 pub(super) fn cancelled(core: &CoreWriter, run: &Running, end: End, finished: Finished) -> Finished {
-    match (finished, cancel_reason(end)) {
+    match (finished, cancel_reason(end).filter(|_| !run.keep)) {
         (Finished::Reported, Some(why)) if !core.cancel_turn(run.turn, why) => {
             Finished::ReportLost("the cancel of the turn did not reach the core".into())
         }
@@ -472,12 +472,17 @@ impl Actor {
     /// through `release_turn_claim`. The end runs on a blocking thread; the next begin, and the slow tick, collect it
     /// ([`Self::writer_settle_end`]).
     pub(super) fn writer_release(&mut self) {
-        let Some(run) = self.writer.run.take() else { return };
+        let Some(mut run) = self.writer.run.take() else { return };
         let how = self.writer.end.take();
         let end = end_for(how, !pid_runs(run.run.pid), self.is_room_actor());
         // The item's last end drops what it carried. A move to the next account, or to another session (a fork), keeps the epochs and
-        // starts a new turn: the old turn's row (on the old session) is cancelled below, so the next begin makes its own.
-        if matches!(how, Some(Rel::OutOfUsage | Rel::Left)) {
+        // starts a new turn: the old turn's row (on the old session) is cancelled below, so the next begin makes its own. A scheduled
+        // run the core queued is on the core's conversation, not the session: the move begins the same turn again by its id (`exit`
+        // requeued it), and nothing cancels it.
+        let pulled = self.writer.acc.as_ref().is_some_and(|a| a.pulled.is_some());
+        if how == Some(Rel::OutOfUsage) && pulled {
+            run.run.keep = true;
+        } else if matches!(how, Some(Rel::OutOfUsage | Rel::Left)) {
             if let Some(acc) = self.writer.acc.as_mut() {
                 acc.turn = None;
                 acc.key = new_turn_key();

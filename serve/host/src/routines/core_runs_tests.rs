@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used)]
 
 use super::switch_tests::{hub, routine};
-use super::{Value, json};
+use super::{LockExt, Value, json};
 use std::cell::RefCell;
 
 fn fired(turn: i64, agent: &str, job: &str) -> Value {
@@ -77,4 +77,20 @@ fn a_turn_held_here_is_not_pulled_twice_and_one_with_no_place_or_owner_is_left()
     // A pending item whose turn stopped waiting (expired at its deadline) is dropped.
     hub.routines.take(&hub, &[], never);
     assert_eq!(hub.routines.pulled_items(), []);
+}
+
+#[test]
+fn a_started_run_whose_actor_is_gone_frees_its_bots_slot() {
+    let hub = hub();
+    let (bot, id) = routine(&hub, Some("mel"), &json!([{"type": "interval", "seconds": 60}]));
+    let never = |_: i64| -> bool { panic!("nothing is cancelled") };
+    hub.routines.take(&hub, &[fired(1, "mel", &id)], never);
+    hub.routines.active.locked().insert(bot.clone());
+    for item in hub.routines.pulled.locked().values_mut() {
+        item.status = super::Status::Running;
+    }
+    // No actor runs for the bot (it was stopped or replaced): nothing would ever complete the item.
+    hub.routines.take(&hub, &[], never);
+    assert_eq!(hub.routines.pulled_items(), []);
+    assert!(!hub.routines.active.locked().contains(&bot), "the slot is free for the next run");
 }

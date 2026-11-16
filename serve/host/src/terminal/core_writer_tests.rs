@@ -1065,6 +1065,25 @@ async fn a_usage_limit_move_is_a_new_turn_on_the_backups_session() {
     assert_eq!(r.turn_state(next.turn).0, "running");
 }
 
+/// A scheduled run the core queued claims on the core's conversation with the session as the lock key: a usage move ends it `exit`
+/// and begins the same turn again on the backup's session, by its id. Nothing cancels it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_usage_limit_move_of_a_pulled_run_begins_the_same_turn_on_the_backups_session() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let conv = "schedule:bot:a:daily:claude";
+    let first = Turn { session: Some("s1"), ..r.turn(conv, None) };
+    let run = running(r.writer.begin(&first, &mut stub));
+    assert_eq!(r.writer.finish(&run, "s1", &mut stub, End::OutOfUsage), Finished::Reported);
+    assert_eq!(r.turn_state(run.turn).0, "queued", "exit requeued it");
+    let mut backup = r.stub("backup");
+    let again = Turn { session: Some("s1-backup"), ..r.turn(conv, Some(run.turn)) };
+    let next = running(r.writer.begin(&again, &mut backup));
+    assert_eq!(next.turn, run.turn, "the same turn");
+    assert_eq!(r.turn_state(run.turn).0, "running");
+    assert!(r.w().log.iter().all(|m| m != "hostclaim.cancel"), "never cancelled: {:?}", r.w().log);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_room_level_turn_ends_with_a_stop_a_kill_and_the_process_forgotten() {
     let r = Rig::new();

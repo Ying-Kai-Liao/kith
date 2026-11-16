@@ -43,7 +43,7 @@ pub(super) struct Item {
     prompt: String,
     name: String,
     timeout: Duration,
-    status: Status,
+    pub(super) status: Status,
 }
 
 /// The item id the actor is sent: `core-<turn>`.
@@ -127,6 +127,18 @@ impl Routines {
         let listed: Vec<i64> = turns.iter().filter_map(|t| t["turn"].as_i64()).collect();
         // A pending item whose turn is no longer waiting (expired, cancelled) is gone; one that started is the actor's.
         self.pulled.locked().retain(|_, i| i.status != Status::Pending || listed.contains(&i.turn));
+        // One that started on an actor that is gone has no one to end it: it would hold the bot's routine slot until a host restart.
+        // Dropped, the slot freed; its turn, if the core put it back, is pulled again.
+        let orphans: Vec<String> = self
+            .pulled
+            .locked()
+            .extract_if(|_, i| i.status != Status::Pending && !hub.has_actor(&i.bot))
+            .map(|(_, i)| i.bot)
+            .collect();
+        for bot in orphans {
+            tracing::warn!(bot, "routines: a scheduled run's actor is gone; its slot is freed");
+            self.release(&bot);
+        }
         for t in turns {
             let Some(turn) = t["turn"].as_i64() else { continue };
             if self.pulled.locked().contains_key(&item_id(turn)) {
@@ -149,6 +161,14 @@ impl Routines {
                         tracing::warn!(%error, "routines: couldn't post an interrupted run's notice");
                     }
                 }
+                continue;
+            }
+            if t["owner"].is_null() {
+                tracing::warn!(
+                    turn,
+                    agent,
+                    "routines: the core can't read the owner; a scheduled run waits and expires at its deadline"
+                );
                 continue;
             }
             if t["owner"] != true {

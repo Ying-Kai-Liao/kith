@@ -674,7 +674,11 @@ fn queued_lists_the_schedule_turns_no_host_began_and_says_which_ran_before() {
     assert_eq!(one["engine"], "claude");
     assert_eq!(one["job"], "daily");
     assert_eq!(one["person"], "sam");
-    assert_eq!(one["owner"], false, "no owner in these tables");
+    assert_eq!(
+        one["owner"],
+        Value::Null,
+        "no owner in these tables: unknown, not false"
+    );
     assert_eq!(one["prompt"], "do it");
     assert_eq!(one["deadline"], MS + 60_000);
     assert_eq!(one["redeemedBefore"], false);
