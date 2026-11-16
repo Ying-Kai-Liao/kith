@@ -349,6 +349,24 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             tx.commit()?;
             Ok(json!({ "cancelled": !done.is_empty() }))
         }
+        "hostclaim.strays" => {
+            // Turns a host enqueued (they carry its key) that wait: the host cancels those it has no item for. The core's own
+            // turns (a schedule's fire, a wake's) carry no key and are never listed.
+            let mut st = core.conn().prepare(
+                "SELECT id, conversation, enq_key FROM turns
+                 WHERE enq_key IS NOT NULL AND state IN ('queued', 'parked') ORDER BY id",
+            )?;
+            let turns = st
+                .query_map([], |r| {
+                    Ok(json!({
+                        "turn": r.get::<_, i64>(0)?,
+                        "conversation": r.get::<_, String>(1)?,
+                        "key": r.get::<_, String>(2)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(json!({ "turns": turns }))
+        }
         "hostclaim.park" => match claims::park(core, int(p, "turn")?, need(p, "reason")?, now) {
             Ok(parked) => Ok(json!({ "parked": parked })),
             Err(e) => refusal(e),

@@ -20,6 +20,9 @@
 #     W8 kith-wake: a live claim is a writer, a dead one is not, one claim.list serves a tick
 #     W9 claim files left from before the switch are never read: they neither block nor crash
 #     W10 the compaction's writer_free reads no files
+#     W11 the launcher's proc gate: with the marker any failure of proc stops a person's run
+#     W12 the step's race: a taker that looked before the marker and linked after it takes its file back and claims in the core
+#     W13 Writer mode is either source: the module's switch file alone (not `stepping`) counts, a marker alone counts
 #   core_front.rs lists the rows (CORE_CALL_METHODS): the fake refuses any method outside the real list.
 # Throwaway dirs, never ~/.kith.
 #
@@ -342,7 +345,8 @@ import sys
 s = open(sys.argv[1]).read()
 a = s.index('if [[ $p_owner != 1 && $launch -ne 1 ]]; then')
 b = s.index('# Another harness: the same run')
-print(s[a:b])
+f = s.index('claims_core() {')
+print(s[f:s.index('\n}\n', f) + 3] + s[a:b])
 PY
 mkdir -p "$T/gk/bin"
 gate() {   # gate <proc exit code> <owner 0|1>: runs the launcher's block against a stand-in kith-sessions
@@ -356,6 +360,49 @@ check "W11 the owner's run is not gated" "[ $rco -eq 0 ]"
 rm -f "$REG/claims.tombstone"
 gate 1; rcf=$?; gate 9; rcf9=$?
 check "W11 no marker (Files): only exit 9 stops it, as before" "[ $rcf -eq 0 ] && [ $rcf9 -ne 0 ]"
+
+# ---- W12: a taker that read Files mode, then the marker landed, then it linked (the step's race, ClaimsStep.tla) -------------------
+files_mode; reset; up
+sleeper PR
+race_out=$(KITH_REVOKE_SEEN=sam:0 python3 - "$SK" "$PR" <<'PY' 2>&1
+import importlib.machinery, importlib.util, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); ks = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(ks)
+looks = []
+def flip():   # the first look says Files; the marker lands right after it
+    looks.append(1)
+    if len(looks) == 1:
+        return False
+    open(os.path.join(os.environ['KITH_STATE'], 'live/terminal/claims.tombstone'), 'w').write('{}')
+    return True
+ks.writer_mode = flip
+print('claim', ks.take_claim('race1', int(sys.argv[2]), agent='house'))
+looks.clear(); os.unlink(os.path.join(os.environ['KITH_STATE'], 'live/terminal/claims.tombstone'))
+print('proc', ks.proc_claim(int(sys.argv[2]), 'sam', 'house'))
+PY
+)
+check "W12 the taker's file is taken back and the claim is the core's" "[ ! -e $REG/race1.claim ] && grep -q '^claim.external.*race1' $FAKE_DIR/calls && grep -q 'claim None' <<<\"$race_out\""
+check "W12 a person's proc claim file is taken back too, and the core holds proc-<pid>-<start>" "[ ! -e $REG/proc-$PR.claim ] && grep -q '^claim.external.*proc-$PR-' $FAKE_DIR/calls"
+files_mode
+
+# ---- W13: either source says Writer ---------------------------------------------------------------------------------------
+reset; up; files_mode
+mkdir -p "$KITH_MACHINE/core/cutover"
+sleeper PS
+printf 'state=stepping\nat=1\n' > "$KITH_MACHINE/core/cutover/claims.switch"
+SKR claim sw1 "$PS" >/dev/null 2>&1
+check "W13 a switch file that says stepping is not Writer mode (files, no call)" "[ -f $REG/sw1.claim ] && [ -z \"\$(calls)\" ]"
+reset; printf 'state=switched\nat=1\n' > "$KITH_MACHINE/core/cutover/claims.switch"
+SKR claim sw2 "$PS" >/dev/null 2>&1
+check "W13 a switch file that says switched is Writer mode with no marker (a call, no file)" "[ ! -e $REG/sw2.claim ] && grep -q '^claim.external.*sw2' $FAKE_DIR/calls"
+reset; printf 'state=rolling-back\nat=1\n' > "$KITH_MACHINE/core/cutover/claims.switch"
+SKR claim sw3 "$PS" >/dev/null 2>&1
+check "W13 rolling-back is still Writer mode (a half-done rollback is not the files')" "[ ! -e $REG/sw3.claim ] && grep -q '^claim.external.*sw3' $FAKE_DIR/calls"
+rm -f "$KITH_MACHINE/core/cutover/claims.switch"; reset
+writer_mode
+SKR claim sw4 "$PS" >/dev/null 2>&1
+check "W13 the marker alone is Writer mode, as before" "[ ! -e $REG/sw4.claim ] && grep -q '^claim.external.*sw4' $FAKE_DIR/calls"
+check "W13 the marker is a tombstone kith_tombstone.py refuses (exit 3, names the rollback)" "writer_mode; python3 -I \"$KERNEL/lib/kith_tombstone.py\" $REG/claims.tombstone >$T/tomb.out 2>&1; [ \$? -eq 3 ] && grep -q 'kith rollback claims' $T/tomb.out"
+files_mode
 
 echo
 [ $fail -eq 0 ] && echo "all checks passed" || echo "some checks FAILED"
