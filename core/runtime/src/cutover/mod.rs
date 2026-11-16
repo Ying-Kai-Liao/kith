@@ -269,7 +269,8 @@ pub(crate) fn step(
     opts: Opts,
 ) -> Result<Vec<String>> {
     let m = find(reg, name)?;
-    if let Some(why) = m.step_refusal(env)
+    let refusal = m.step_refusal(env);
+    if let Some(why) = &refusal
         && !(opts.dry_run && m.dry_run_despite_refusal())
     {
         return Err(Error::Refused(format!("cutover: {name}: {why}")));
@@ -286,7 +287,8 @@ pub(crate) fn step(
             "cutover: {name} is part-way through a rollback; finish it first (kith rollback {name})"
         )));
     }
-    for dep in m.depends_on() {
+    // A dry run that looks past a refusal says it, and stops short of the dependency check: the refusal is the reason.
+    for dep in m.depends_on().iter().filter(|_| refusal.is_none()) {
         if phase_of(env, dep)? != Some(Phase::Switched) {
             return Err(Error::Refused(format!(
                 "cutover: {name} needs {dep} switched first (kith migrate step {dep})"
@@ -313,6 +315,7 @@ pub(crate) fn step(
             "dry run: {name} is {}; nothing was changed",
             cur.map_or("not switched", |s| s.phase.word())
         ));
+        lines.extend(refusal);
         return Ok(lines);
     }
     let mut core = lock(env)?;
