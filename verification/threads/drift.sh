@@ -11,7 +11,7 @@ set -euo pipefail
 # The commit at which the model was confirmed to describe the files below. It is the L-clear commit (design 2026-11-16-offturn-lock-alone) on origin/rust-rebuild after M3 P9:
 # every change to the files below up to it re-read, the claim files as before (#324) and the core writer (CoreWriter in
 # Threads.tla: the claim is a core row, the stub's lock the second layer). What that read did not cover is in the skill.
-SYNC=f609e5d6651f04c2f6c570e0330ace0797e6fccc
+SYNC=b3f38db7668dbe192907daa204b8b0c8578713ff
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run

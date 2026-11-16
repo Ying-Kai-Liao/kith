@@ -42,7 +42,7 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `f609e5d6651f04c2f6c570e0330ace0797e6fccc`** (L-clear, design 2026-11-16-offturn-lock-alone, on origin/rust-rebuild
+**Last confirmed to describe the code: `b3f38db7668dbe192907daa204b8b0c8578713ff`** (L-clear, design 2026-11-16-offturn-lock-alone, on origin/rust-rebuild
 4192f0da1). The changes since `1978d087` were re-read: the core's claim list and reconcile check (`claims.rs`), the writer
 mode re-checks, the abandon order (`stop`, `killpg`, `settle_gone`, already `AbandonKeepsLock`), the stray sweep and
 `claim_since` (a reload after another claim) in `core_writer.rs` / `writer*.rs`: none changes who may write, so the model
