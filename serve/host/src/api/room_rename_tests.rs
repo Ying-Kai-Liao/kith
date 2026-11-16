@@ -112,14 +112,17 @@ async fn a_device_under_the_new_id_sees_and_leaves_the_stay_under_the_old_one() 
     assert!(call(&r, &mac, "leaveRoom", json!({"room": room})).await.is_err(), "nothing left to leave");
 }
 
-/// The text of every room entry `stream` sends within a moment.
+/// The text of every room entry `stream` sends: the first event may take a while (the stream asks the core for the
+/// ids, and a live event asks it again), then whatever follows within a moment.
 async fn shown(stream: &mut (impl futures::Stream<Item = Value> + Unpin)) -> Vec<String> {
     use futures::StreamExt as _;
     let mut out = vec![];
-    while let Ok(Some(v)) = tokio::time::timeout(std::time::Duration::from_millis(300), stream.next()).await {
+    let mut wait = std::time::Duration::from_secs(10);
+    while let Ok(Some(v)) = tokio::time::timeout(wait, stream.next()).await {
         if v["type"] == "entry" {
             out.push(v["entry"]["data"]["text"].as_str().unwrap_or_default().to_owned());
         }
+        wait = std::time::Duration::from_millis(300);
     }
     out
 }
