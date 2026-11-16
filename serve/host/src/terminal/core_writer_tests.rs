@@ -66,6 +66,20 @@ pub(crate) struct World {
     pub session_register_refused: bool,
 }
 
+/// An ended claim of `conv` as the core would list it.
+pub(crate) fn ended(id: i64, conv: &str, kind: &str) -> C {
+    C {
+        id,
+        conv: conv.into(),
+        state: "ended".into(),
+        kind: kind.into(),
+        pid: None,
+        started: None,
+        instance: None,
+        turn: None,
+    }
+}
+
 fn data(v: Value) -> Answer {
     Answer::Done(v)
 }
@@ -264,6 +278,15 @@ impl World {
                 };
                 data(json!({"claim": c.map(|c| json!({"claimId": c.id, "conversation": c.conv, "state": c.state,
                     "kind": c.kind, "person": "owner", "pid": c.pid, "started": c.started, "holderInstance": c.instance, "turn": c.turn}))}))
+            }
+            "claim.list" => {
+                let row = |c: &C| json!({"claimId": c.id, "conversation": c.conv, "state": c.state, "kind": c.kind});
+                let live: Vec<Value> =
+                    self.claims.iter().filter(|c| LIVE.contains(&c.state.as_str())).map(row).collect();
+                let mut ended: Vec<&C> = self.claims.iter().filter(|c| c.state == "ended").collect();
+                ended.sort_by_key(|c| std::cmp::Reverse(c.id));
+                let recent: Vec<Value> = ended.into_iter().take(20).map(row).collect();
+                data(json!({"live": live, "recent": recent}))
             }
             "hostclaim.cancel" => {
                 let t = p["turn"].as_i64().unwrap();
@@ -1056,39 +1079,86 @@ async fn a_user_stop_that_ended_in_a_kill_reports_exit_without_releasing() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn abandoning_a_begun_turn_frees_the_lock_and_cancels_the_claim() {
+async fn abandoning_a_begun_turn_stops_the_claim_kills_the_process_and_frees_the_lock_with_it() {
     let r = Rig::new();
     let mut stub = r.stub("main");
     let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
-    r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
-    assert!(r.lock_free("s1"));
-    assert_eq!(r.claim_state(1), "ending", "stopped; the process is the stub's, still there");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_abandon_whose_process_is_killed_is_settled_and_the_conversation_claims_again() {
-    let r = Rig::new();
-    let mut stub = r.stub("main");
-    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
-    r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
-    assert_eq!(r.claim_state(run.claim), "ending", "stopped, the process still there: the core keeps it");
-    stub.kill_group();
-    stub.wait_dead();
-    assert!(r.writer.settle_gone(run.pid, &run.started));
-    assert_eq!(r.claim_state(run.claim), "ended", "settled once the process is gone");
+    assert_eq!(r.writer.abandon(&run, &stub), Finished::Reported);
+    assert!(stub.killed.get());
+    assert_eq!(r.claim_state(run.claim), "ended", "stopped first, then settled once the process was gone");
+    assert!(r.lock_free("s1"), "the lock went with the process");
     assert_eq!(r.w().procs.len(), 0, "and forgotten");
-    assert!(r.writer.settle_gone(run.pid, &run.started), "settling again is harmless");
+    let log = r.log();
+    let (stop, settle) = (
+        log.iter().position(|m| m == "hostclaim.stop").unwrap(),
+        log.iter().rposition(|m| m == "hostclaim.settle").unwrap(),
+    );
+    assert!(stop < settle, "stop before settle: {log:?}");
     let mut next = r.stub("main");
     running(r.writer.begin(&r.turn("s1", None), &mut next));
 }
 
+/// A stub that says whether the conversation's lock was free at the moment its process group was killed.
+struct KillProbe<'a> {
+    inner: &'a Real,
+    free_at_kill: std::cell::Cell<Option<bool>>,
+    rig: &'a Rig,
+}
+
+impl WarmStub for KillProbe<'_> {
+    fn pid(&self) -> u32 {
+        self.inner.pid()
+    }
+    fn account(&self) -> Option<String> {
+        self.inner.account()
+    }
+    fn take(&self, key: &str, claim: i64) -> std::io::Result<Take> {
+        self.inner.take(key, claim)
+    }
+    fn release(&self, key: &str, claim: i64) -> std::io::Result<Release> {
+        self.inner.release(key, claim)
+    }
+    fn restart(&mut self, _: Option<&str>) -> std::io::Result<()> {
+        unreachable!("an abandon never restarts")
+    }
+    fn kill_group(&self) {
+        self.free_at_kill.set(Some(self.rig.lock_free("s1")));
+        self.inner.kill_group();
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_begin_settles_our_own_ending_claim_whose_process_is_gone() {
-    // The abandon's settle was lost (the core was down): the claim stays `ending` with a dead pid and read as `held`.
+async fn an_abandon_with_the_core_down_never_frees_the_lock_while_the_process_lives() {
+    // P10 finding 5: the lock must not be free while the claim is still running, or an owner run on the lock alone writes beside it.
+    // The lock is held at the moment of the kill (it was not given back first), and it is free only once the process is gone.
     let r = Rig::new();
     let mut stub = r.stub("main");
     let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
-    r.writer.abandon(run.turn, run.claim, "s1", &mut stub);
+    r.w().down = true;
+    let probe = KillProbe { inner: &stub, free_at_kill: std::cell::Cell::new(None), rig: &r };
+    assert!(matches!(r.writer.abandon(&run, &probe), Finished::ReportLost(_)), "the stop did not reach the core");
+    assert_eq!(probe.free_at_kill.get(), Some(false), "the lock was held when the process was killed");
+    assert!(!pid_runs(run.pid));
+    assert!(r.lock_free("s1"), "and goes with the process");
+    assert_eq!(r.claim_state(run.claim), "running", "the core never heard");
+    // The slow tick sends the stop again (never an exit, which would put the abandoned turn back): the claim ends.
+    assert!(matches!(r.writer.retry_end(&run, End::Abandoned), Finished::ReportLost(_)), "still down");
+    r.w().down = false;
+    assert_eq!(r.writer.retry_end(&run, End::Abandoned), Finished::Reported);
+    assert_eq!(r.claim_state(run.claim), "ended");
+    assert!(r.w().reports.is_empty(), "no report of any kind: {:?}", r.w().reports);
+    let mut next = r.stub("main");
+    let again = running(r.writer.begin(&r.turn("s1", None), &mut next));
+    assert_eq!(r.claim_state(again.claim), "running");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_begin_settles_our_own_ending_claim_whose_process_is_gone() {
+    // The settle after a stop was lost: the claim stays `ending` with a dead pid and read as `held`.
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    r.writer.stop_abandoned(run.claim).unwrap();
     stub.kill_group();
     stub.wait_dead();
     assert_eq!(r.claim_state(run.claim), "ending");
@@ -1096,6 +1166,25 @@ async fn a_begin_settles_our_own_ending_claim_whose_process_is_gone() {
     let again = running(r.writer.begin(&r.turn("s1", None), &mut next));
     assert_eq!(r.claim_state(run.claim), "ended");
     assert_eq!(r.claim_state(again.claim), "running");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn claim_since_sees_a_claim_of_someone_else_above_the_last_one_this_process_ran_under() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let first = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    assert_eq!(r.writer.finish(&first, "s1", &mut stub, End::Done), Finished::Reported);
+    // Nothing since the first claim: the next claim is this turn's own, not "someone else's".
+    let next = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    assert!(!r.writer.claim_since("s1", first.claim, next.claim));
+    // A claim on another conversation does not count; one on this conversation does, live or ended.
+    r.w().claims.push(ended(90, "other", "terminal"));
+    assert!(!r.writer.claim_since("s1", first.claim, next.claim));
+    r.w().claims.push(ended(91, "s1", "external"));
+    assert!(r.writer.claim_since("s1", first.claim, next.claim), "a direct run that is over still means a reload");
+    assert!(!r.writer.claim_since("s1", 91, next.claim), "told once: the process ran under a later claim since");
+    r.w().down = true;
+    assert!(r.writer.claim_since("s1", 91, next.claim), "an unreadable core is doubt, and doubt reloads");
 }
 
 // --- the host restart --------------------------------------------------------------------------------------------------

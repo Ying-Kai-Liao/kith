@@ -66,6 +66,7 @@ CONSTANTS
     SettlesOwnEnding,      \* W begin: an `ending` turn claim whose stub is gone is settled, then the begin claims
     DiedReports,           \* W finish End::Died: the end is reported (`exit`), so the claim ends
     FailoverReclaims,      \* writer_turn: a move to the next account begins a NEW core turn (a new claim and lock)
+    AbandonKeepsLock,      \* TRUE in the code: an abandon keeps the stub's lock until the stub dies with the kill (FALSE: the old order)
     AbandonSettlesEarly,   \* FALSE in the code: stop leaves the claim `ending` until the group is gone (settle_gone)
     RestartKeepsClaim,     \* W adopt: an old instance's claim is not "ours": it stays until its process is gone
     ExternalChecksWarm,    \* X external.rs blocked_in: claim.external refuses (and marks the kill) while a warm process
@@ -425,13 +426,15 @@ HostGiveUp ==
     /\ UNCHANGED <<TS, sidOf, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, taking, to, lw, sig, n, C,
                    eng, ot, na, gate, again, pend, ev, ld>>
 
-\* writer_turn.rs Rel::Abandon on a running turn: core.abandon = `release` (lock given back, the engine is still alive)
-\* then `hostclaim.stop`: the claim stays `ending` until the process is gone (the core ends a stopped running claim only
-\* then, X end_gone). The claim is the only layer holding the conversation in this window.
+\* writer_turn.rs Rel::Abandon on a running turn: core.abandon = `hostclaim.stop` (the claim stays `ending` until the process
+\* is gone: the core ends a stopped running claim only then, X end_gone), then killpg SIGKILL (HostKill), then settle_gone.
+\* The lock is NOT given back: it goes when the stub dies (core_writer.rs abandon, warm_stub.rs), so both layers hold until
+\* the engine is gone.
+\* AbandonKeepsLock = FALSE (broken: the old order): the lock is given back first, the engine is held by its claim alone.
 \* AbandonSettlesEarly = TRUE (broken): the claim ends at the stop.
 HostAbandon ==
     /\ CoreWriter /\ hp = "running" /\ eng = hcl
-    /\ lk' = (IF lk[hcl] = "host" THEN [lk EXCEPT ![hcl] = "none"] ELSE lk)
+    /\ lk' = (IF ~AbandonKeepsLock /\ lk[hcl] = "host" THEN [lk EXCEPT ![hcl] = "none"] ELSE lk)
     /\ hp' = "ending"
     /\ cl' = (IF AbandonSettlesEarly THEN RelOwn(cl) ELSE cl)
     /\ ev' = ev \cup {"abandoned"}
@@ -445,10 +448,10 @@ HostKill ==
     /\ UNCHANGED <<TS, sidOf, cl, regPid, regSid, hooked, ghost, infoPid, infoSid, cur, lane, gs, hq, H, taking, to, lw,
                    sig, n, C, lk, ot, na, gate, again, pend, ev>>
 
-\* W settle_gone (after an abandon, and an End::Room): wait for the group to go, then hostclaim.settle + proc_gone:
-\* the claim ends only now. Not before the process is gone.
+\* W settle_gone (after an abandon, and an End::Room): wait for the group to go (the engine and the stub, so its lock too),
+\* then hostclaim.settle + proc_gone: the claim ends only now. Not before the process is gone.
 HostSettle ==
-    /\ CoreWriter /\ hp = "ending" /\ eng /= hcl
+    /\ CoreWriter /\ hp = "ending" /\ eng /= hcl /\ lk[hcl] /= "host"
     /\ cl' = RelOwn(cl) /\ HostWrites
     /\ hr' = "none" /\ hp' = "none" /\ hcl' = 0
     /\ UNCHANGED <<TS, sidOf, regPid, regSid, hooked, ghost, infoPid, infoSid, lane, gs, hq, taking, to, lw, sig, n, C,
@@ -784,7 +787,9 @@ Spec == Init /\ [][Next]_vars
 
 \* P1. At most one writer holds the thread: a live terminal session, or a host turn that has sent its prompt (CoreWriter:
 \* or any engine process writing to it: an abandoned turn not gone yet, one a restart left, an off-turn wake).
-OneWriter == Cardinality(Holding) + (IF hp = "running" \/ eng /= 0 THEN 1 ELSE 0) <= 1
+\* With the core writer only a live engine counts: the host's "running" state is a record, not a writer, once its engine is gone.
+OneWriter ==
+    Cardinality(Holding) + (IF eng /= 0 \/ (~CoreWriter /\ hp = "running") THEN 1 ELSE 0) <= 1
 
 \* P2. A take-over never ends a terminal that is working on a turn.
 TakeoverOnlyWhenIdle == [][\A p \in Terminals : ~(TS[p] = "busy" /\ TS'[p] = "dying")]_vars

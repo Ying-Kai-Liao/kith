@@ -32,7 +32,7 @@ pub(super) struct State {
     pub end: Option<Rel>,
     pub ending: Option<InFlight>,
     /// An end the core did not take: sent again on the slow tick.
-    pub lost: Option<(Running, End)>,
+    pub lost: Vec<(Running, End)>,
     pub parked: Option<super::writer_wait::Parked>,
     /// The wait a resumed start came from (why, tries, since), while that start runs: a park that follows continues it.
     pub waited: Option<(Why, u32, std::time::Instant)>,
@@ -46,7 +46,7 @@ pub(super) struct State {
 impl State {
     /// Nothing of Writer mode is pending: the actor may rest (stop its agent, retire).
     pub(super) fn idle(&self) -> bool {
-        self.parked.is_none() && self.ending.is_none() && self.lost.is_none() && self.run.is_none()
+        self.parked.is_none() && self.ending.is_none() && self.lost.is_empty() && self.run.is_none()
     }
 }
 
@@ -59,6 +59,7 @@ pub(super) fn end_for(how: Option<Rel>, gone: bool, room: bool) -> End {
         Some(Rel::Died) if gone => End::Died,
         Some(Rel::OutOfUsage) => End::OutOfUsage,
         Some(Rel::Left) => End::Left,
+        Some(Rel::Abandon) => End::Abandoned,
         _ if room => End::Room,
         _ => End::Done,
     }
@@ -73,7 +74,8 @@ pub(super) fn cancel_reason(end: End) -> Option<&'static str> {
         End::Died => Some("process died"),
         End::OutOfUsage => Some("moved to the next account"),
         End::Left => Some("the session was forked"),
-        End::Done | End::Room => None,
+        // The stop of an abandon cancels the turn itself.
+        End::Done | End::Room | End::Abandoned => None,
     }
 }
 
@@ -113,12 +115,12 @@ impl Actor {
                     let begin = core.begin(&t.as_turn(), &mut armed);
                     (begin, armed.restarted())
                 };
-                (begin, restarted, stub, t, core)
+                (begin, restarted, stub, core)
             })
             .await;
-            let Ok((begin, restarted, stub, t, core)) = joined else { return };
+            let Ok((begin, restarted, stub, core)) = joined else { return };
             if let Err((begin, _, mut stub)) = tx.send((begin, restarted, stub)) {
-                let _ = tokio::task::spawn_blocking(move || orphaned(&core, &t.conversation, &begin, &mut stub)).await;
+                let _ = tokio::task::spawn_blocking(move || orphaned(&core, &begin, &mut stub)).await;
             }
         });
         let mut watch = Watch::new(gone);
@@ -278,23 +280,39 @@ impl Actor {
         restarted: bool,
         off: bool,
     ) -> Result<Option<String>> {
+        let claim = self.writer.run.as_ref().map(|r| r.run.claim);
         if restarted {
             // A new process has loaded nothing: its session loads under the lock, as a reload does.
             self.writer_reload(lane).await?;
+            self.note_ran(sid, claim);
         }
-        let synced = crate::terminal::sync_for_turn(&self.hub, lane, sid).await?;
+        let mut synced = crate::terminal::sync_for_turn(&self.hub, lane, sid).await?;
+        // A claim of someone else on this conversation above the last this process ran under (a lock-only `--direct` run leaves no
+        // transcript line the sync above could see) means the same: the session loads again, on any lane. For an off-turn turn too:
+        // its engine is then stopped below, not left on stale context.
+        if synced == crate::terminal::Synced::Unchanged
+            && !restarted
+            && let Some(claim) = claim
+            && self.newer_claim(sid, claim).await
+        {
+            synced = crate::terminal::Synced::Moved;
+        }
         // An off-turn turn's engine is already writing `sid`: it cannot be moved to another session or made to load this one again,
         // so anything but `Unchanged` is an error, and the caller stops the process (check-in MUST 6).
         if off && synced != crate::terminal::Synced::Unchanged {
             bail!("the session moved under a turn the agent started by itself");
         }
         match synced {
-            crate::terminal::Synced::Unchanged => Ok(None),
+            crate::terminal::Synced::Unchanged => {
+                self.note_ran(sid, claim);
+                Ok(None)
+            }
             crate::terminal::Synced::Moved => {
                 if let Some(c) = self.conn.as_mut() {
                     c.loaded.remove(sid);
                 }
                 self.writer_reload(lane).await?;
+                self.note_ran(sid, claim);
                 Ok(None)
             }
             crate::terminal::Synced::Forked { .. } => {
@@ -315,6 +333,23 @@ impl Actor {
                 }
                 Ok(Some(next))
             }
+        }
+    }
+
+    /// Whether someone else claimed `sid` since this process last ran a turn on it (`CoreWriter::claim_since`). No record: the
+    /// session was loaded outside a begin (`claim_before_load` only registers the row) and nobody can say what wrote since, so it
+    /// reads as moved, once per session per process. A restart records its own load first.
+    async fn newer_claim(&mut self, sid: &str, claim: i64) -> bool {
+        let Some(proc) = self.conn.as_ref().and_then(|c| c.writer.as_ref()) else { return false };
+        let Some(after) = proc.ran.get(sid).copied() else { return true };
+        let (core, sid) = (proc.core.clone(), sid.to_owned());
+        tokio::task::spawn_blocking(move || core.claim_since(&sid, after, claim)).await.unwrap_or(true)
+    }
+
+    /// The process has loaded `sid` as of this turn's claim (recorded after a load went through).
+    fn note_ran(&mut self, sid: &str, claim: Option<i64>) {
+        if let (Some(claim), Some(proc)) = (claim, self.conn.as_mut().and_then(|c| c.writer.as_mut())) {
+            proc.ran.insert(sid.to_owned(), claim);
         }
     }
 
@@ -454,12 +489,9 @@ impl Actor {
                 return;
             };
             let finished = if abandon {
-                core.abandon(r.turn, r.claim, &conv, &mut stub);
-                // The core ends a stopped running claim only once its process is gone (`end_gone`), and `stop` only names the kill: a
-                // process left alive would hold the conversation `ending` for as long as it lives. The next begin restarts the stub.
-                stub.kill_group();
-                core.settle_gone(r.pid, &r.started);
-                Finished::Reported
+                // Stops the claim, kills and waits for the process (the lock must not be free while it lives). The next begin
+                // restarts the stub. A stop the core did not take is sent again on the slow tick (`End::Abandoned`).
+                core.abandon(&r, &stub)
             } else if !pid_runs(r.pid) {
                 // The stub is gone with its lock: nothing to release, only the end to report (`end` is `Died`, or `Killed`).
                 end_report(&core, &r, end)
@@ -512,7 +544,7 @@ impl Actor {
             Finished::Reported => {}
             Finished::ReportLost(why) => {
                 tracing::warn!(bot = %self.cfg.id, why, "the core did not take the end of a turn; sending it again");
-                self.writer.lost = Some((run, end));
+                self.writer.lost.push((run, end));
             }
             // The process is stopped (a room turn, or a lock that could not be given back): its connection goes.
             Finished::RoomEnded { .. } | Finished::LockStuck(_) => self.conn = None,

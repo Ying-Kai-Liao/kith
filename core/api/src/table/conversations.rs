@@ -21,8 +21,11 @@ pub(super) const ROWS: &[Method] = &[
     ),
     conversation(
         "claim.list",
-        "The writer claims: the live ones (queued, claimed, running, ending) and the recent ended ones, as `{live, recent}`; each row carries the conversation's `agent` and the `holderInstance` the claim went to. The owner reads it (`kith-wake`) and so does the host (a revoke's narrowed sweep).",
-        &[],
+        "The writer claims: the live ones (queued, claimed, running, ending) and the recent ended ones, as `{live, recent}`; each row carries the conversation's `agent` and the `holderInstance` the claim went to. The owner reads it (`kith-wake`) and so does the host (a revoke's narrowed sweep; a warm process's step 7, which asks whether anyone claimed its conversation since). With `conversation` (and `after`, a claim id) only that conversation's claims above `after`, in both lists.",
+        &[
+            caller("conversation", "string", "Only this conversation's claims."),
+            caller("after", "int", "Only claims with an id above this (default 0)."),
+        ],
         &["claims", "list"],
     )
     .principals(OWNER_HOST),

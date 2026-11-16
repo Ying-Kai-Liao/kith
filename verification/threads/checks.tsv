@@ -72,9 +72,14 @@ core	PROPERTY	ClaimsExclusive	pass
 core	INVARIANT	NoLeakedClaim	pass
 core	INVARIANT	NeverRefusedByDeadOwnClaim	pass
 # a gate that is not ok:true is Held. An owner run on the lock alone while the core is not answering, next to an off-turn
-# wake that writes with no lock and no claim, is a finding (see the skill): the warm process is not marked while no core answers
+# wake that writes with no lock and no claim, is a finding (see the skill): the warm process is not marked while no core answers.
+# The abandon half is closed (stop, killpg, settle_gone; the lock goes with the stub): without off-turn wakes the row passes,
+# and the old order (lock given back first) fails it
 core-gate	PROPERTY	NoBeginWhileHeld	pass
 core-held	INVARIANT	OneWriter	fail
+core-held-no-offturn	INVARIANT	OneWriter	pass
+core-held-old-abandon	INVARIANT	OneWriter	fail
+core-held-no-offturn	INVARIANT	NeverAbandonEnding	fail
 # --held: the hand-over gap never gives two writers, but it can lose the run the user asked for (open's busy, 75)
 core-handover	INVARIANT	OneWriter	pass
 core-handover	PROPERTY	HandoverNeverRefused	fail

@@ -270,6 +270,9 @@ pub enum End {
     /// The prompt failed and the process is gone (the core killed it, or it crashed): `exit`, so the core puts the turn back
     /// instead of reading a finished one. The lock went with the stub: nothing is released.
     Died,
+    /// The turn was given up before it ran and its process killed ([`CoreWriter::abandon`]): only the stop of the claim is sent again,
+    /// never an `exit` (that would put the abandoned item back to run).
+    Abandoned,
 }
 
 /// What [`CoreWriter::finish`] came to.
@@ -685,7 +688,7 @@ impl CoreWriter {
                 let gone = self.settle_gone(run.pid, &run.started);
                 Finished::RoomEnded { gone }
             }
-            End::Killed | End::Died => self.retry_end(run, end),
+            End::Killed | End::Died | End::Abandoned => self.retry_end(run, end),
             End::Done | End::OutOfUsage | End::Left => {
                 if !give_lock_back(stub, conversation, run.claim) {
                     let Begin::LockStuck { why } = self.lock_stuck(stub, run.claim, "release failed") else {
@@ -723,6 +726,16 @@ impl CoreWriter {
             End::OutOfUsage => self.report(run.claim, "exit", run.pid, &json!({"out_of_usage": true})),
             End::Killed | End::Died | End::Left => self.report(run.claim, "exit", run.pid, &json!({})),
             End::Room => return Finished::RoomEnded { gone: !pid_runs(run.pid) },
+            End::Abandoned => {
+                return match self.stop_abandoned(run.claim) {
+                    Ok(()) => {
+                        // The process is gone already (the kill went first): the claim, now `ending`, is settled.
+                        self.settle_gone(run.pid, &run.started);
+                        Finished::Reported
+                    }
+                    Err(why) => Finished::ReportLost(why),
+                };
+            }
         };
         match sent {
             Ok(()) => Finished::Reported,
@@ -731,14 +744,39 @@ impl CoreWriter {
     }
 
     /// Gives a begun turn up before it ran (the item was cancelled between `begin` and the prompt, or a begin was left
-    /// unresolved): the lock back, the claim stopped, the turn cancelled.
-    pub fn abandon(&self, run_turn: i64, claim: i64, conversation: &str, stub: &mut dyn WarmStub) {
-        if !give_lock_back(stub, conversation, claim) {
-            let _ = self.lock_stuck(stub, claim, "release failed");
-            return;
+    /// unresolved): the claim is stopped (which cancels the turn), the process group killed and waited for, and the claim settled.
+    /// The lock goes with the process and is never handed back while it lives: a lock given back before the claim ended would let an
+    /// owner run on the lock alone write next to the engine. The kill does not wait for the core, so with the core down the process
+    /// is gone and the claim still `running`: [`Finished::ReportLost`], and the caller's slow tick sends [`End::Abandoned`] again.
+    /// A process that outlives the wait still holds the lock, and the stopped claim leaves the kill to the core.
+    pub fn abandon(&self, run: &Running, stub: &dyn WarmStub) -> Finished {
+        // Stop first, as a room end does: `end_gone` settles only an `ending` claim (the stop also cancels the turn, not requeued).
+        let stopped = self.stop_abandoned(run.claim);
+        stub.kill_group();
+        self.settle_gone(run.pid, &run.started);
+        match stopped {
+            Ok(()) => Finished::Reported,
+            Err(why) => Finished::ReportLost(why),
         }
-        let _ = self.call("hostclaim.stop", &json!({"claimId": claim, "reason": "abandoned"}));
-        self.cancel(run_turn, "abandoned");
+    }
+
+    fn stop_abandoned(&self, claim: i64) -> Result<(), String> {
+        self.data("hostclaim.stop", &json!({"claimId": claim, "reason": "abandoned"})).map(drop)
+    }
+
+    /// Whether a claim on `conversation` other than `except` has an id above `after`: someone else (a `--direct` run, a terminal, a
+    /// take-over) held it since a warm process last ran a turn under claim `after`, so what that process loaded may be stale (step 7:
+    /// the next turn reloads on any lane, a lock-only run leaves no transcript line for the thread's sync to see). The core's own
+    /// `claim.list`, asked for this conversation's claims above `after`. Doubt reads `true`, for a reload is cheap: the core cannot
+    /// be asked. Not seen: a run with no claim in the core (on the lock alone: an owner terminal after `OwnerNoAnswer`, a `--direct`
+    /// run while the core was unreachable) and one with no lock at all (a raw `claude --resume`).
+    pub fn claim_since(&self, conversation: &str, after: i64, except: i64) -> bool {
+        let Ok(v) = self.data("claim.list", &json!({"conversation": conversation, "after": after})) else {
+            return true;
+        };
+        ["live", "recent"].iter().flat_map(|k| v[k].as_array().into_iter().flatten()).any(|c| {
+            c["conversation"] == conversation && c["claimId"].as_i64().is_some_and(|id| id > after && id != except)
+        })
     }
 
     /// The slow tick, or the kick when the core reports an external claim ended: parked turns of the conversation go back to
