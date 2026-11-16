@@ -24,3 +24,11 @@ jobs-switchednolock	RoomJobs	fail	switched, the sweep does not take the door loc
 jobs-switchedsweepperson	RoomJobs	fail	switched, the sweep matches the claim's room person, not its basis: Bill's room door keeps running
 doors-fixed	Rooms3	pass	a door's result stamped with its turn's start gen and level lands hidden from a later joiner (4,972,112 states)
 doors-stampland	Rooms3	fail	a door's result stamped with the gen when it lands is sent to Ben, who joined after (9,818)
+# --- R-rename (#1013, design 2026-11-16-rooms-rename): a person is one identity across every id the core lists for them (held_under). Each op reads the ids before the membership lock; a rename can land in between. RoomsRename.tla is the architect's, copied as written -----
+rename-code	RoomsRename	pass	the code: every op over all the ids, a join writes under the first id (Held::first), no re-read after a removal
+rename-code-paired	RoomsRename	pass	the same with the person's devices under the first id: the reader finds the stay (ReaderFinds)
+rename-design	RoomsRename	pass	the architect's design row: also a re-read after a removal, not needed with the first-id key
+rename-today-sticks	RoomsRename	fail	before #1013, the id handed in only: Kai's remove by the new id leaves the old-id stay open (RemoveSticks, 6 steps)
+rename-today	RoomsRename	fail	before #1013: two open stays for one person (OneStay)
+rename-heldkey	RoomsRename	fail	a join keyed by the devices' id else the current one: two joins either side of a rename write two stays (OneStay)
+rename-givenkey	RoomsRename	fail	a join keyed by the id handed in, over all ids: OneStay fails
