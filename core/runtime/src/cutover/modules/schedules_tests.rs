@@ -795,7 +795,7 @@ fn a_rollback_waits_for_unfinished_scheduled_turns_unless_forced() {
         core.conn()
             .execute_batch(
                 "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('c1', 'mel', 'claude', 0, 0);
-                 INSERT INTO turns (conversation, source, state, queued_at) VALUES ('c1', 'schedule', 'queued', 0);
+                 INSERT INTO turns (conversation, source, state, queued_at) VALUES ('c1', 'schedule', 'running', 0);
                  INSERT INTO sched_fires (agent, job, slot, outcome, turn_id, at)
                    VALUES ('mel', 'r1', '2026-11-04T08:00:00Z', 'fired', (SELECT max(id) FROM turns), 0);",
             )
@@ -804,7 +804,7 @@ fn a_rollback_waits_for_unfinished_scheduled_turns_unless_forced() {
     let err = rollback(&reg, &w.env, "schedules", opts())
         .unwrap_err()
         .to_string();
-    assert!(err.contains("scheduled turn(s) have not finished"), "{err}");
+    assert!(err.contains("scheduled turn(s) are running"), "{err}");
     assert!(state::read(&w.env.layout, "schedules").unwrap().is_some());
     rollback(
         &reg,
