@@ -221,6 +221,7 @@ extension BotStore {
         Task { [weak self] in
             for await event in mailbox {
                 guard let self, !self.retired else { return }
+                await self.cacheReady()
                 self.applyMailbox(event)
             }
         }

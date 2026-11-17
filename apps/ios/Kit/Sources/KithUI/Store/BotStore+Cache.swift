@@ -23,21 +23,71 @@ extension BotStore {
         URL.cachesDirectory.appending(path: "kith-mirror-\(Bundle.main.bundleIdentifier ?? "app")-\(storage.id)-\(computer.id).json")
     }
 
+    /// What a launch reads from disk, ready to apply.
+    private struct Loaded: Sendable {
+        var cache: Cache
+        var bots: [String: Bot]
+        var rooms: [String: HostContract.MyRoom]
+        var entries: [String: [Entry]]
+    }
+
+    /// Reads the mirror off the main actor: decoding a few MB of chats there held the first frames of a launch. The
+    /// connection waits for it (`cacheReady`) before it asks for events, so it still resumes from the cached rev.
     func loadCache() {
+        let url = cacheURL
+        cacheLoad = Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) { Self.read(url) }.value
+            guard let self else { return }
+            if let loaded, !retired { apply(loaded) }
+            finishLoad()
+        }
+    }
+
+    /// Resolves once the cached mirror (if any) is in.
+    func cacheReady() async { await cacheLoad?.value }
+
+    private nonisolated static func read(_ url: URL) -> Loaded? {
         // A cache from another app build still shows at once; the stamp mismatch makes the next
         // hello fetch everything again underneath it.
-        guard let data = try? Data(contentsOf: cacheURL),
-              let cache = try? JSONDecoder().decode(Cache.self, from: data) else { return }
-        cacheStamp = cache.stamp ?? ""
-        hostId = cache.hostId
-        rev = cache.rev
-        bots = Dictionary(cache.bots.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        myRooms = Dictionary((cache.rooms ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        entries.replaceAll(Dictionary(grouping: cache.entries, by: \.botId))
+        guard let data = try? Data(contentsOf: url), let cache = try? JSONDecoder().decode(Cache.self, from: data) else { return nil }
+        return Loaded(
+            cache: cache,
+            bots: Dictionary(cache.bots.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            rooms: Dictionary((cache.rooms ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            entries: Dictionary(grouping: cache.entries, by: \.botId))
+    }
+
+    /// The file's mirror under what arrived while it was being read (a share sent at a cold launch, a chat started):
+    /// memory is newer, so its entries go into the cached chat by the same rule an event does.
+    private func apply(_ loaded: Loaded) {
+        cacheStamp = loaded.cache.stamp ?? ""
+        hostId = loaded.cache.hostId
+        rev = max(rev, loaded.cache.rev)
+        bots = loaded.bots.merging(bots) { _, live in live }
+        myRooms = loaded.rooms.merging(myRooms) { _, live in live }
+        var merged = loaded.entries
+        for (chat, live) in entries.all {
+            guard !live.isEmpty else { continue }
+            var list = merged[chat] ?? []
+            for e in live { Self.upsert(e, into: &list) }
+            merged[chat] = list
+        }
+        entries.replaceAll(merged)
+    }
+
+    /// After the file is in: the host may already have turned this invited person away (the unauthorized answer came
+    /// before there was a mirror to wipe), and what was just read must not outlive that.
+    private func finishLoad() {
+        cacheLoaded = true
+        if case .unauthorized = connection, inviteTokens?.stored(for: computer.id) != nil {
+            hello = nil
+            resetMirror()
+        }
+        onRosterChanged?()
     }
 
     func scheduleSave() {
-        guard !retired else { return }
+        guard !retired, cacheLoaded else { return }
         saveTask?.cancel()
         saveTask = Task {
             try? await Task.sleep(for: .seconds(2))
@@ -53,7 +103,8 @@ extension BotStore {
 
     /// Writes now, on this thread (leaving for the background, where the app may be suspended next).
     public func saveCache() {
-        guard !retired, let cache = snapshot() else { return }
+        // Before the file is read the mirror is empty: writing it would replace the cache with nothing.
+        guard !retired, cacheLoaded, let cache = snapshot() else { return }
         let url = cacheURL
         // After any write already queued, so it is not overwritten by an older one.
         Self.writer.sync { Self.write(cache, to: url) }
