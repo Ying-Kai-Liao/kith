@@ -957,6 +957,21 @@ async fn initialized(s: &Setup, n: usize) -> usize {
     s.requests("initialize").len()
 }
 
+/// The agent's initialize count once it has not changed for 1.5 s (a person's activation can start a second process a moment
+/// after its reply), at most 30 s.
+async fn settled(s: &Setup) -> usize {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let (mut n, mut since) = (s.requests("initialize").len(), Instant::now());
+    while since.elapsed() < Duration::from_millis(1500) && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let now = s.requests("initialize").len();
+        if now != n {
+            (n, since) = (now, Instant::now());
+        }
+    }
+    n
+}
+
 #[tokio::test]
 async fn a_warm_owner_process_in_a_room_starts_again_when_the_rooms_members_change() {
     let mut s = start().await;
@@ -997,6 +1012,64 @@ async fn a_warm_owner_process_in_a_room_starts_again_when_the_rooms_members_chan
     assert_eq!(initialized(&s, 3).await, 3);
     assert_eq!(s.launches().len(), 3);
     assert_eq!(last_room_env(&s), (None, Some("1".to_owned())));
+}
+
+/// A stay of `person` in `room` as the host writes it, written straight into the host's database (the rig has no
+/// authority to grant `addRoomPerson` against): `left` closes it. The host reads the store on every turn.
+fn stay(s: &Setup, room: &str, person: &str, joined: i64, left: Option<i64>) {
+    let db = rusqlite::Connection::open(s.host.home.join("serve.db")).unwrap();
+    db.execute(
+        "INSERT INTO room_people(room, person, joined_gen, left_gen) VALUES(?1, ?2, ?3, ?4)",
+        rusqlite::params![room, person, joined, left],
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_or_while_anyone_is_in() {
+    // `ann` may use the agent (the fixture kith-auth beside the stub kernel says yes for her): a room person's turn asks
+    // the authority live, and without that yes it does not start at all.
+    let home = std::env::temp_dir().join(format!("kith-hq-e2e-{}", uuid::Uuid::new_v4()));
+    let auth = home.join("auth.json").to_string_lossy().into_owned();
+    let s = start_in("instructions_agent.py claude", home, &[("KITH_AUTH", &auth), ("STUB_AUTH_ALLOW", "ann")]).await;
+    let house_bot = s.house().await;
+    let house = house_bot["id"].as_str().unwrap().to_owned();
+    let name = house_bot["name"].as_str().unwrap().to_owned();
+    s.host.call("updateBot", json!({"id": house, "tasks": false})).await;
+    let group = s.host.call("createBot", json!({"name": "Room", "kind": "group", "members": [house]})).await;
+    let group = group["bot"]["id"].as_str().unwrap().to_owned();
+    let inits = || s.requests("initialize").len();
+
+    s.host.reply(&group, "first").await;
+    s.host.reply(&group, "second").await;
+    assert_eq!((s.launches().len(), inits()), (1, 1), "nobody in the room: the warm process answers");
+
+    // Someone joined and left between two turns: the members are the owner's bots alone again, but the room's gen
+    // moved, so the process that started before is not trusted with what happened in between.
+    stay(&s, &group, "sam", 1_000_000, Some(1_000_001));
+    s.host.reply(&group, "third").await;
+    assert_eq!(initialized(&s, 2).await, 2, "a join then a leave starts the process again");
+    assert_eq!(last_room_env(&s), (None, Some("1".to_owned())), "and the room reads as owner only again");
+
+    // The gen is the same now and nobody is in: warm again.
+    s.host.reply(&group, "fourth").await;
+    assert_eq!((s.launches().len(), inits()), (2, 2), "the new process is reused while nothing changes");
+
+    // Someone is in the room: a process for it is never reused, though the members are the same as last turn.
+    // (With a person in the room only an @-mentioned agent answers.)
+    stay(&s, &group, "ann", 1_000_002, None);
+    s.host.reply(&group, &format!("@{name} fifth")).await;
+    // The scripted agent never passes, so a message's conversation runs every round its budget allows (10), and each round
+    // is a turn of the room person that starts its own process (no process is warm for one): the "about nine initializes a
+    // turn" is those rounds, not a restart within a turn. The count is read once it stops moving.
+    let n5 = settled(&s).await;
+    assert!(n5 >= 3, "the person's turn started a process: {n5} initializes");
+    assert_eq!(last_room_env(&s), (Some("ann".to_owned()), None), "the room's person is in the room's members");
+    s.host.reply(&group, &format!("@{name} sixth")).await;
+    let n6 = settled(&s).await;
+    assert!(n6 > n5, "with a person in the room no process is warm: {n5} initializes after turn five, {n6} after six");
+    assert_eq!(s.launches().len(), n6, "one launch for each process");
+    assert!(n6 <= 2 + 2 * 10, "no more turns than the two messages' budgets allow: {n6}");
 }
 
 #[tokio::test]

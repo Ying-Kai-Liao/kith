@@ -92,6 +92,10 @@ pub struct RunIdentity {
     pub project: Option<String>,
     /// The `kith ask` this run answers (an owner run only): its cards carry it, so a card it parks on answers that ask.
     pub reply: Option<AskReply>,
+    /// A room person's run (`room`): the people the turn is for, its basis. The token's audience is the room cut to what
+    /// every one of them may see: `kith recall` for it gets them as `KITH_ROOM_MEMBERS` (`run_kernel`), never from a
+    /// request. Empty for everyone else's.
+    pub members: Vec<String>,
 }
 
 /// The `kith ask` a run was started by: its id (the asker's mailbox) and the agent that asked, none for a terminal.
@@ -423,6 +427,7 @@ pub fn grant_for(
         session: session_of(person, session),
         project: project.filter(|p| !p.is_empty()).map(str::to_owned),
         reply: None,
+        members: Vec::new(),
     };
     match RunGrant::issue(table(), identity) {
         Ok(grant) => {
@@ -455,6 +460,7 @@ pub fn ask_identity(agent: &str, session: &str, reply: Option<AskReply>) -> RunI
         session: format!("run:o:{session}"),
         project: None,
         reply,
+        members: Vec::new(),
     }
 }
 
@@ -973,6 +979,9 @@ async fn run_kernel(job: &Authorized) -> Response {
     if let Some(room) = &job.identity.room {
         command.envs(crate::kernel::both("ROOM", room));
     }
+    if !job.identity.members.is_empty() {
+        command.env(crate::agent::hq::MEMBERS_ENV, job.identity.members.join(","));
+    }
     // The project's shared files are part of what a guest's memory search may read (kith-memory narrows to this one).
     if let (Run::MemorySearch, Some(project)) = (job.run, &job.identity.project) {
         command.envs(crate::kernel::both("PROJECT", project));
@@ -1103,6 +1112,7 @@ mod tests {
             session: "run:1:1:echo:sam".into(),
             project: Some("alpha".into()),
             reply: None,
+            members: Vec::new(),
         }
     }
 
@@ -1660,6 +1670,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
+
+pub(crate) mod room;
 
 // Property tests (method in the file); a child of this module so they reach `with_ancestry`.
 #[cfg(test)]

@@ -2,6 +2,7 @@ import type { CallError } from '@shared/ipc'
 import { isChat, normalizeBot, type Bot, type BotDraft, type Entry, type GroupDraft } from '@shared/models'
 import { isAccountName } from '@shared/secret-card'
 import * as story from './story'
+import * as peopleScene from './people-scene'
 
 // An in-memory kith-serve for the website demo: the methods the renderer calls, with the
 // host's JSON shapes (host/src/api/), and the events stream (hello, then catch-up in rev
@@ -28,6 +29,8 @@ export class FakeHost {
     { personId: 'leo', name: 'Leo', agents: { pacer: 'guest' }, projects: [], joined: false, openInvites: 0, devices: [], autoBots: false, revoked: false },
   ]
   private invites: Record<string, unknown>[] = []
+  /** Stays in group rooms as `roomPeople` has them (the `?people` scene); null while the scene is off. */
+  private stays: { room: string; person: string; joinedGen: number; leftGen: number | null }[] | null = null
   /** The grants ledger as `accessLedger` returns it (fake people, folders and sites). */
   private grants: { key: string; kind: string; agent: string; person: string; name: string; target: string; since: number | null }[] = [
     { key: 'g1', kind: 'read', agent: 'pacer', person: 'mia', name: 'Mia', target: '~/docs', since: Date.now() - 12 * 86_400_000 },
@@ -71,6 +74,8 @@ export class FakeHost {
       this.bots.set(story.taskBot.id, normalizeBot({ ...story.taskBot, cwd: story.cwd, createdAt: now - 86_400_000, permission: 'default', workingLanes: story.taskLanes }))
       for (const s of story.taskEntries) this.add({ botId: s.botId, threadId: s.threadId ?? null, kind: s.kind, data: s.data }, s.id, now - s.at * 60_000, false)
     }
+    // `?people`: Studio, a room with people (see people-scene.ts).
+    if (typeof location !== 'undefined' && /[?&]people\b/.test(location.search)) this.seedPeople(now)
     // `?room=live|livebot|idle|spent|quiet|stopped|late|bot` puts a room run in the Ship room (screenshots of the agent conversations).
     const room = typeof location !== 'undefined' ? /[?&]room=(\w+)/.exec(location.search)?.[1] : undefined
     if (room === 'topic' || room === 'topicwait') this.seedTopic(room === 'topicwait', now)
@@ -103,6 +108,22 @@ export class FakeHost {
       }, 'topic-perm', now - 18.5 * 60_000, false)
     }
     root.data = { ...root.data, topic: { id: 'topic-1', title: 'Is weeklyTotals ready to ship?', untilId: until.id, untilAt: until.createdAt, turns: [], createdAt: now } }
+  }
+
+  private seedPeople(now: number) {
+    for (const b of [peopleScene.coder, peopleScene.studio]) this.bots.set(b.id, normalizeBot({ ...b, cwd: b.kind === 'group' ? '' : story.cwd, createdAt: now - 86_400_000, permission: 'auto' }))
+    this.people.push(...peopleScene.people, ...peopleScene.extraPeople)
+    this.invites.push(...peopleScene.invites)
+    const gens = new Map<string, number>()
+    for (const s of peopleScene.entries) {
+      const e = this.add({ botId: s.botId, threadId: null, kind: s.kind, data: s.data }, s.id, now - s.at * 60_000, false)
+      gens.set(s.id, e.seq)
+    }
+    // Ben joined at `st-join`; the answer after it is marked "From before Ben joined" (its seq is above his join).
+    this.stays = [
+      { room: 'studio', person: 'ben', joinedGen: gens.get('st-join')!, leftGen: null },
+      { room: 'studio', person: 'ann', joinedGen: gens.get('st-join2')!, leftGen: null },
+    ]
   }
 
   /** One run of the Ship room in a state; the entries it left are in the story's room already. */
@@ -478,6 +499,22 @@ export class FakeHost {
         return { enabled: this.analytics }
       case 'track':
         return {}
+      case 'roomPeople':
+        return { enabled: this.stays !== null, gen: this.seq, people: (this.stays ?? []).filter((x) => x.room === str('room')).map(({ person, joinedGen, leftGen }) => ({ person, joinedGen, leftGen })) }
+      case 'addRoomPerson': {
+        const person = this.people.find((p) => p.personId === str('person'))
+        if (!person || !this.stays) throw fail('That person is not invited.')
+        const entry = this.add({ botId: str('room'), threadId: null, kind: 'notice', data: { notice: 'personJoined', person: { id: String(person.personId), name: String(person.name) }, style: 'info', text: `${person.name} joined · sees this room from now on` } })
+        this.stays.push({ room: str('room'), person: String(person.personId), joinedGen: entry.seq, leftGen: null })
+        return { gen: entry.seq, changed: true }
+      }
+      case 'removeRoomPerson': {
+        const stay = this.stays?.find((x) => x.room === str('room') && x.person === str('person') && x.leftGen === null)
+        if (!stay) return { gen: this.seq, changed: false }
+        const entry = this.add({ botId: str('room'), threadId: null, kind: 'notice', data: { notice: 'personLeft', person: { id: stay.person, name: String(this.people.find((p) => p.personId === stay.person)?.name) }, style: 'info', text: 'left' } })
+        stay.leftGen = entry.seq
+        return { gen: entry.seq, changed: true }
+      }
       case 'people':
         return { people: this.people }
       case 'invites':
@@ -492,7 +529,8 @@ export class FakeHost {
         if (holder) holder.agents = { ...(holder.agents as object), ...agents }
         const inviteId = `inv-${this.invites.length + 1}`
         const expiresAt = Date.now() + 86_400_000
-        this.invites.push({ inviteId, personId, agents, createdAt: Date.now(), expiresAt, usedAt: null, revokedAt: null })
+        const rooms = Array.isArray(b.rooms) ? (b.rooms as string[]).map((room) => ({ room, done: false })) : undefined
+        this.invites.push({ inviteId, personId, agents, createdAt: Date.now(), expiresAt, usedAt: null, revokedAt: null, ...(rooms ? { rooms } : {}) })
         return { inviteId, link: `https://kith.app/join#${inviteId}-demo`, expiresAt, personId }
       }
       case 'revokeInvite':

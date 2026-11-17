@@ -8,10 +8,11 @@
 # set SYNC below to the commit you checked (and in .claude/skills/thread-writers/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below. It is one commit of origin/main:
-# every change to the files below up to it re-read (the wakes, kith-wake, compaction, guest rooms, set harness, must-ask settings, one-host collapse): no writer step the
-# model lacks; every Claude start still claims its session (#324) and a host turn takes the claim or is refused.
-SYNC=6fc1ae0d527a4960227609f7413fa76f3ecade9e
+# The commit at which the model was confirmed to describe the files below: origin/rust-rebuild after #1015 (rule K, the host
+# runner of the core's queued turns) and #1016 (L-clear), re-read before the claims step runs on a Mac:
+# every change to the files below up to it re-read, the claim files as before (#324) and the core writer (CoreWriter in
+# Threads.tla: the claim is a core row, the stub's lock the second layer). What that read did not cover is in the skill.
+SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
@@ -34,6 +35,25 @@ FILES=(
   core/kernel/src/threads/os.rs       # pid_runs / start time the twin judges a claim by
   core/kernel/src/threads/registry.rs # the twin's registry reads and writes
   serve/host/src/hub/actors.rs        # working_lanes, Cmd::ForgetLoaded fan-out
+  serve/host/src/terminal/core_writer.rs  # CoreWriter: begin (gate, settle, claim_next, take, redeem), finish, abandon, adopt
+  serve/host/src/terminal/warm_stub.rs    # the host's resident stub: take / release / kill_group
+  serve/host/src/agent/bot/writer.rs      # the actor's use of CoreWriter: orphaned begins, the mode
+  serve/host/src/agent/bot/writer_turn.rs # End choice (Done / Died / Killed / OutOfUsage / Left), abandon + settle_gone, failover
+  core/stub/src/resident.rs           # the stub's lock: take / release, nothing released on close; loaded / forgot markers
+  core/stub/src/main.rs               # the one-shot take, then --lock-alone's clear before the engine
+  core/stub/src/clear.rs              # L-clear: stale markers, a stub holding another key's lock (75), killpg + wait gone
+  core/stub/src/loaded.rs             # the <key>.loaded/<stubpid>-<start> markers
+  core/runtime/src/conversations/claims.rs   # claim_next, end_gone, the one live row per conversation
+  core/runtime/src/conversations/external.rs # claim.external / claim_terminal: blocked_in (warm process), takeover
+  core/runtime/src/conversations/warm.rs     # warm_procs: kill_at, adopt
+  core/runtime/src/conversations/reconcile.rs # steps 5 and 7: rule K (a core restart keeps the host's live claims), not modelled here (Claims4)
+  core/runtime/src/cutover/modules/claims.rs # the claims step: the takers' tombstone, then the files re-read, then the marker and Switched (the switch moment)
+  serve/host/src/terminal/core_holders.rs # Writer mode readers: writer_folders, terminal_claim (the take-over's claim), Stop by claim id
+  serve/host/src/terminal/core_claims.rs  # take_over / live_settled: the Writer-mode take-over through the core row
+  serve/host/src/routines/core_runs.rs # the host runner: the core's queued turns begun by id on a fresh session (outside the thread)
+  core/runtime/src/terminal.rs        # terminal.open: the --held claim and the stub's lock
+  kernel/lib/kith_claims.py           # the kernel takers' route to the core claims
+  kernel/lib/kith-core.sh             # kith_held_launch
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

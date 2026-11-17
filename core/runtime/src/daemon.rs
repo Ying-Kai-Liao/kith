@@ -304,6 +304,13 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        // The kernel takers' claim rows (P5): claim transactions; nothing calls them until the claims are switched.
+        if crate::conversations::external::serves(method) {
+            let answer =
+                self.with_core(|c| crate::conversations::external::call(c, method, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         // The wake queue (M3-7): nothing calls these until kith-wake is switched; the daemon runs no drain and fires no waiter.
         if crate::wake::serves(method) {
             let answer = self.with_core(|c| crate::wake::call(c, method, params))?;
@@ -701,6 +708,7 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
                 }
                 let holder = crate::kill_resend::connected_instance(&for_resend);
                 crate::kill_resend::pass(&for_resend, holder.as_deref(), crate::kill_resend::GRACE);
+                crate::kill_resend::settle(&for_resend);
             }
         })
     {

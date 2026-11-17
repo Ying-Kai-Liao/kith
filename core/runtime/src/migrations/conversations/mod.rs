@@ -6,10 +6,14 @@ use super::Migration;
 
 mod m0080_conversations;
 mod m0081_reports_by_pid;
+mod m0082_room_basis;
+mod m0083_warm_procs_per_conversation;
 #[cfg(test)]
 mod tests;
 
 pub(super) const STEPS: &[Migration] = &[
     m0080_conversations::MIGRATION,
     m0081_reports_by_pid::MIGRATION,
+    m0082_room_basis::MIGRATION,
+    m0083_warm_procs_per_conversation::MIGRATION,
 ];

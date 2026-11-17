@@ -11,6 +11,20 @@ pub fn actor_key(bot: &str, home: &Lane) -> String {
     if home.chat == bot && home.thread.is_none() { bot.to_owned() } else { format!("{bot}|{}", home.key()) }
 }
 
+/// [`actor_key`] of the room person's actor in `home`: `bot|lane#room-id`, one per room and join gen (rooms with people).
+/// Without a person it is the owner's actor of that place.
+pub fn actor_key_as(bot: &str, home: &Lane, person: Option<&str>) -> String {
+    match person {
+        Some(p) => format!("{}#{p}", actor_key(bot, home)),
+        None => actor_key(bot, home),
+    }
+}
+
+/// The room person an actor key runs as, if it is a room actor's.
+pub fn person_of(key: &str) -> Option<&str> {
+    key.split_once('|').and_then(|(_, place)| place.split_once('#')).map(|(_, p)| p)
+}
+
 /// The bot an actor key belongs to.
 pub fn bot_of(key: &str) -> &str {
     key.split_once('|').map_or(key, |(bot, _)| bot)
@@ -19,6 +33,7 @@ pub fn bot_of(key: &str) -> &str {
 /// The place an actor key names.
 pub fn place_of(key: &str) -> Lane {
     let Some((_, place)) = key.split_once('|') else { return Lane::main(key) };
+    let place = place.split_once('#').map_or(place, |(lane, _)| lane);
     match place.split_once('/') {
         Some((chat, root)) => Lane::in_thread(chat, root),
         None => Lane::main(place),
@@ -90,6 +105,16 @@ mod tests {
             assert_eq!(place_of(&key), home);
         }
         assert_eq!(actor_key("b", &Lane::main("b")), "b", "the bot's own chat is the bot");
+    }
+
+    #[test]
+    fn a_room_persons_actor_has_a_key_of_its_own_in_the_same_place() {
+        let home = Lane::main("room");
+        let key = actor_key_as("b", &home, Some("room-room-9"));
+        assert_ne!(key, actor_key("b", &home), "never the owner's actor");
+        assert_eq!((bot_of(&key), place_of(&key), person_of(&key)), ("b", home.clone(), Some("room-room-9")));
+        assert_eq!(actor_key_as("b", &home, None), actor_key("b", &home));
+        assert_eq!(person_of(&actor_key("b", &home)), None);
     }
 
     #[test]

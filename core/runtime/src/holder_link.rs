@@ -36,7 +36,7 @@ use crate::terminal::{
 use crate::{log, perms};
 
 pub(crate) struct HolderConfig {
-    /// The holder program. `None`: look for `$KITH_HOLDER_BIN`, then `kith-holder` beside this program.
+    /// The holder program. `None`: look for `$KITH_HOLDER_BIN`, then `kith-holder` beside this program ([`beside_this`]).
     pub exe: Option<PathBuf>,
     /// How long a holder with no connection and no process lives before it exits by itself.
     pub idle: Duration,
@@ -70,14 +70,19 @@ impl HolderConfig {
             let e = PathBuf::from(e);
             return e.is_file().then_some(e);
         }
-        let name = if cfg!(windows) {
+        beside_this(if cfg!(windows) {
             "kith-stub.exe"
         } else {
             "kith-stub"
-        };
-        let beside = std::env::current_exe().ok()?.parent()?.join(name);
-        beside.is_file().then_some(beside)
+        })
     }
+}
+
+/// A helper program where an installed kith keeps it (`kith_kernel::helpers::beside`: beside this program, symlinks
+/// resolved, or in the Mac app's CLI folder). The host's service names the holder for its launchd job through the same
+/// function, so the job's holder is the one this core connects to.
+fn beside_this(name: &str) -> Option<PathBuf> {
+    kith_kernel::helpers::beside_this(name)
 }
 
 impl Default for HolderConfig {
@@ -124,13 +129,11 @@ fn find_exe(cfg: &HolderConfig) -> Option<PathBuf> {
         let e = PathBuf::from(e);
         return e.is_file().then_some(e);
     }
-    let name = if cfg!(windows) {
+    beside_this(if cfg!(windows) {
         "kith-holder.exe"
     } else {
         "kith-holder"
-    };
-    let beside = std::env::current_exe().ok()?.parent()?.join(name);
-    beside.is_file().then_some(beside)
+    })
 }
 
 /// The holder secret: made once, owner-only, in the core folder.
@@ -423,6 +426,9 @@ fn connected(
         let listed = listed_claims(&client.welcome.procs);
         reconcile(shared, &instance, &procs, &listed, high_water, cfg)?;
     }
+    // Once per generation, for a remote holder too: until the mark is written every claim waits for the reconcile.
+    let listed = listed_claims(&client.welcome.procs);
+    open_claims(shared, &client.welcome.procs, &listed, high_water)?;
     // Before the state says connected: whoever waits for that state may call terminal.open at once.
     // What the core keeps of each held process (its claim, pid and conversation), so an exit the holder reports can be
     // told to the claim it ended, including one that happened while this core was down (the welcome lists it).
@@ -778,7 +784,55 @@ fn listed_claims(held: &[proto::Held]) -> Vec<i64> {
         .collect()
 }
 
+/// Step 5 (design 1.1): the first connected hello of a generation releases the claims the holder does not list and marks
+/// the generation reconciled, so claims open. A second hello in the same generation (a reconnect) finds the mark and
+/// does nothing: `claims::reconcile` refuses a repeat. Not inside [`reconcile`], which the poll calls again. The holder
+/// entries whose claim is ended or unknown are ended through the link; the claims that went `ending` are signalled by
+/// the daemon's kill re-send tick.
+fn open_claims(
+    shared: &Shared,
+    held: &[proto::Held],
+    listed: &[i64],
+    high_water: i64,
+) -> std::result::Result<(), Lost> {
+    let released = shared
+        .with_core(|c| {
+            if claims::is_reconciled(c)? {
+                return Ok(None);
+            }
+            claims::reconcile(c, listed, &[], high_water, now_ms()).map(Some)
+        })
+        .map_err(|e| Lost::Blocked(format!("reconciling the claims failed: {e}")))?;
+    let Some(released) = released else {
+        return Ok(());
+    };
+    for h in held
+        .iter()
+        .filter(|h| h.exit.is_none())
+        .filter(|h| i64::try_from(h.claim).is_ok_and(|c| released.kill_listed.contains(&c)))
+    {
+        shared.terminals.requeue_end(
+            proto::HeldId {
+                instance: h.instance.clone(),
+                id: h.id,
+            },
+            0,
+        );
+    }
+    log::note(
+        &shared.logs,
+        &format!(
+            "holder: claims reconciled: ended {}, {} wait for their process, {} holder entr(ies) ended",
+            released.ended.len(),
+            released.kill.len(),
+            released.kill_listed.len()
+        ),
+    );
+    Ok(())
+}
+
 /// The serve host's instance name on its turn claims; no holder may say hello under it (see [`reconcile`]).
+#[cfg(test)]
 pub(crate) const HOST_INSTANCE: &str = claims::HOST_INSTANCE;
 
 /// Step 7: a hello that meets an instance other than the recorded one ends what the old one held, confirms it gone,
@@ -805,7 +859,7 @@ pub(crate) fn reconcile(
     high_water: i64,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), Lost> {
-    if instance == HOST_INSTANCE {
+    if claims::is_host_instance(instance) {
         return Err(Lost::Blocked(format!(
             "the holder's instance id {instance:?} is the serve host's own claim name; not recorded"
         )));

@@ -395,11 +395,12 @@ impl Selected {
         }
     }
 
-    pub fn event(&self, store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
+    /// One event for the owner (`who` None) or a person known under `ids` (every id of theirs, read once per stream).
+    pub fn event(&self, store: &Store, who: Option<&str>, ids: &[String], v: Value) -> Option<Value> {
         match self {
-            Self::Host => roles::event_for_with(&HostData(store), store, who, v),
-            Self::Core(c) => roles::event_for_with(c.as_ref(), store, who, v),
-            Self::Closed => roles::event_for_with(&NoAccess, store, who, v),
+            Self::Host => roles::event_for_held(&HostData(store), store, who, ids, v),
+            Self::Core(c) => roles::event_for_held(c.as_ref(), store, who, ids, v),
+            Self::Closed => roles::event_for_held(&NoAccess, store, who, ids, v),
         }
     }
 }

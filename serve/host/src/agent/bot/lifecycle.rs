@@ -151,7 +151,7 @@ impl Actor {
             return false;
         }
         let (Some(own), Some(rx)) = (self.own_tx.upgrade(), self.cmd_rx.as_mut()) else { return false };
-        let retired = self.hub.retire_actor(&self.cfg.id, &self.home, &own, rx);
+        let retired = self.hub.retire_actor(&self.rt, &own, rx);
         if retired {
             tracing::info!(bot = %self.cfg.id, place = %self.rt, "retiring an unused actor");
         }
@@ -167,6 +167,8 @@ impl Actor {
             && self.active_routine.is_none()
             && self.routine_completion.is_none()
             && self.cancel_deadline.is_none()
+            // Writer mode: a parked start, a claim, or an end still going keeps the process (and its lock) where it is.
+            && self.writer.idle()
     }
 
     /// A routine run's session is spent once the run is. When it was the only session open and nothing waits, the
@@ -202,6 +204,10 @@ impl Actor {
             Ok(_) => {
                 tracing::info!(bot = %self.cfg.id, session = sid, "closed a session");
                 conn.loaded.remove(sid);
+                // The engine let it go: its `loaded` marker may go with the row (writer.rs `sync_warm`).
+                if let Some(proc) = conn.writer.as_mut() {
+                    proc.closed.insert(sid.to_owned());
+                }
                 conn.fast_options.remove(sid);
                 conn.usage.remove(sid);
                 conn.profiles.remove(sid);

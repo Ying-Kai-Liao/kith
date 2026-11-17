@@ -74,6 +74,7 @@ jobs:
       writer_lock: ${{ steps.f.outputs.writer_lock }}
       revoke: ${{ steps.f.outputs.revoke }}
       secrets: ${{ steps.f.outputs.secrets }}
+      rooms: ${{ steps.f.outputs.rooms }}
       lease: ${{ steps.f.outputs.lease }}
       schedule_fire: ${{ steps.f.outputs.schedule_fire }}
       ios: ${{ steps.h.outputs.ios }}
@@ -156,6 +157,13 @@ jobs:
               - 'core/kernel/src/threads.rs'
               - 'core/kernel/src/threads/**'
               - 'kernel/tests/kith-threads-race'
+              - 'core/stub/**'
+              - 'kernel/lib/kith-core.sh'
+              - 'kernel/lib/kith_claims.py'
+              - 'core/runtime/src/conversations/**'
+              - 'core/runtime/src/terminal.rs'
+              - 'core/runtime/src/cutover/modules/claims.rs'
+              - 'serve/host/src/routines/core_runs.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill),
             # plus the thread-writers code (the writer lock is what makes one thread have one writer). Not ci.yml: a workflow edit runs
@@ -173,6 +181,17 @@ jobs:
               - 'core/runtime/src/holder_link.rs'
               - 'core/runtime/src/terminal.rs'
               - 'core/runtime/src/conversations/**'
+              - 'core/runtime/src/import/claims.rs'
+              - 'core/runtime/src/kill_resend.rs'
+              - 'core/runtime/src/hostclaim.rs'
+              - 'core/runtime/src/hostclaim_tests.rs'
+              - 'core/runtime/src/holder_link_tests.rs'
+              - 'core/kernel/src/procstart.rs'
+              - 'core/procstart/**'
+              - 'core/runtime/src/cutover/modules/claims.rs'
+              - 'kernel/lib/kith_claims.py'
+              - 'kernel/lib/kith-core.sh'
+              - 'serve/host/src/routines/core_runs.rs'
               - 'kernel/bin/kith-sessions'
               - 'kernel/bin/kith-lifecycle'
               - 'kernel/bin/kith-wake'
@@ -204,6 +223,13 @@ jobs:
               - 'serve/host/src/api/people.rs'
               - 'serve/host/src/api/botguests.rs'
               - 'serve/host/src/remote/**'
+              # the rest of drift.sh's list
+              - 'serve/host/src/terminal/core_holders.rs'
+              - 'serve/host/src/cards/mod.rs'
+              - 'serve/host/src/api/authority.rs'
+              - 'serve/host/src/run_outbox.rs'
+              - 'core/runtime/src/revoke_order.rs'
+              - 'core/runtime/src/import/authority.rs'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
@@ -222,6 +248,23 @@ jobs:
               - 'core/runtime/src/secrets/**'
               - 'core/runtime/src/authority/secret_writes.rs'
               - 'core/api/src/table/cards.rs'
+              - '.github/workflows/ci.yml'
+            # The TLA+ models of rooms with people (what a room turn reads, stamps and is reused for; what a revoke ends) and
+            # the code they cover (the room parts of the invitee-access and revoke-access skills).
+            rooms:
+              - 'verification/rooms/**'
+              - 'verification/threads/run.sh'
+              - 'serve/host/src/chat/room_turn.rs'
+              - 'serve/host/src/chat/room_input.rs'
+              - 'serve/host/src/chat/group.rs'
+              - 'serve/host/src/hub/room_turns.rs'
+              - 'serve/host/src/agent/bot/room_turn.rs'
+              - 'serve/host/src/runauth/room.rs'
+              - 'core/kernel/src/launch/room.rs'
+              # RoomsRename.tla: a join, a removal and a leave over every id held_under returns (R-rename)
+              - 'serve/host/src/chat/room_people.rs'
+              - 'serve/host/src/store/room_people.rs'
+              - 'serve/host/src/remote/core_revokes.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ model of the holder lease and the code it covers (the list in the holder-lease skill).
             lease:
@@ -242,6 +285,8 @@ jobs:
               - 'core/runtime/src/schedules/**'
               - 'core/runtime/src/migrations/schedules/**'
               - 'core/runtime/src/conversations/claims.rs'
+              - 'core/runtime/src/conversations/reconcile.rs'
+              - 'serve/host/src/routines/core_runs.rs'
               - 'kernel/bin/kith-sched'
       # 'every': a file must match the whole list, so each filter is one brace pattern plus a markdown
       # exclusion. A docs-only change then runs no heavy job. The only markdown that ships is
@@ -365,6 +410,7 @@ jobs:
               Load check|kernel/tests/kith-load-check
               Guest helper check|kernel/tests/kith-guest-helper-check
               Wake check|kernel/tests/kith-wake-check
+              Sessions core check (the kernel claim takers in Files and Writer mode, a fake core)|kernel/tests/kith-sessions-core-check
               Procstart check (Python process start stamps, the same string core/procstart writes)|kernel/tests/kith-procstart-check
               Guest jobs check|kernel/tests/kith-guest-jobs-check
               Schedule jobs file check|kernel/tests/kith-sched-jobs-check
@@ -427,7 +473,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.threads == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 40   # the core-writer rows are ~5M states each (about 90 s on a laptop), four at a time
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -440,6 +486,28 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/threads/run.sh
+
+  # The large passing rows of the same model (verification/threads/checks-slow.tsv, run.sh --slow): one at a time on every
+  # core. core-held-cleared OneWriter is 61.5M states, 13 min on 8 laptop cores; it did not finish in 2 h on one worker.
+  thread-writers-slow:
+    needs: changes
+    if: needs.changes.outputs.threads == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check (large rows)
+        env:
+          KITH_TLC_HEAP: 10g
+        run: verification/threads/run.sh --slow
 
   # The same for the writer lock (WriterLock4.tla) and the holder's claim rules (Holder.tla): the fast rows of
   # verification/writer-lock/checks.tsv. The two slow rows (15-30 min each) run only with `run.sh --all`.
@@ -509,6 +577,25 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/secrets/run.sh
+
+  # The same for rooms with people (a room turn's input, stamps and reuse; a revoke ending its turns): verification/rooms/checks.tsv.
+  rooms-with-people:
+    needs: changes
+    if: needs.changes.outputs.rooms == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check
+        run: verification/rooms/run.sh
 
   # The same for the holder lease (ping-anchored deadline, sleep-aware clock): verification/lease/checks.tsv.
   holder-lease:
@@ -720,6 +807,8 @@ jobs:
           # A direct run holds its conversation's lock under kith-stub (M1-3).
           cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
           KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check
+          # A compaction (kith-lifecycle) holds the conversation's lock the same way: busy, held for its whole life, killed with claude.
+          KITH_REAL_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-lifecycle-check
           # An installed kith finds its stub through the ~/.local/bin link; kith serve puts one beside the host.
           kernel/tests/kith-stub-install-check
           # kith --held and kith attach: the real daemon, holder, stub and attach client with a fake engine (M1-7).
@@ -1199,7 +1288,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

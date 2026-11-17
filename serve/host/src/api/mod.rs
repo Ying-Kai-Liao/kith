@@ -32,6 +32,8 @@ mod folders;
 mod guard_props;
 mod host;
 mod http;
+#[cfg(test)]
+mod invite_rooms_tests;
 mod kith_info;
 mod kith_new;
 pub(crate) mod kith_tools;
@@ -54,10 +56,24 @@ pub mod roles;
 mod roles_props;
 #[cfg(test)]
 mod roles_tests;
+mod room_member;
+#[cfg(test)]
+mod room_member_tests;
+mod room_people;
+#[cfg(test)]
+mod room_people_tests;
+#[cfg(test)]
+mod room_pointer_tests;
 #[cfg(test)]
 mod room_points_props;
 #[cfg(test)]
+mod room_rename_tests;
+#[cfg(test)]
 mod room_secrets_props;
+#[cfg(test)]
+mod room_turn_tests;
+#[cfg(test)]
+mod room_withdraw_tests;
 mod scratch;
 #[cfg(test)]
 mod stepped_e2e_tests;
@@ -152,6 +168,7 @@ fn user_facing(e: &anyhow::Error) -> bool {
         || e.is::<UserError>()
         || e.is::<Forbidden>()
         || e.is::<NotAllowed>()
+        || e.is::<crate::hub::PostRefused>()
         || e.is::<crate::remote::cloud::Conflict>()
         || e.is::<crate::terminal::HeldByWriter>()
         || e.is::<crate::terminal::TerminalBusy>()
@@ -179,6 +196,10 @@ pub async fn dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -
 }
 
 async fn run_dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, mut b: Value) -> Result<Value> {
+    // Never taken from a client: only `member_call` says that a call is a person's in a room.
+    if let Some(o) = b.as_object_mut() {
+        o.remove("asRoomPerson");
+    }
     let permitted = devices::permit(caller, method);
     match devices::principal(&hub.store, caller) {
         Principal::Owner => {
@@ -264,6 +285,14 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };
+    let b = match room_people::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match room_member::call(hub, caller, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
     let b = match bots::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
@@ -319,6 +348,10 @@ async fn member_call(
     }
     if let Some(o) = b.as_object_mut() {
         o.remove("asMember");
+    }
+    // A call on a group room is the person's own, read and written by the room's rules (`chat::room_post`).
+    if proven && roles::room_named(hub, method, &b).is_some() {
+        b["asRoomPerson"] = person.into();
     }
     if method == "upload" {
         b["asMember"] = person.into();

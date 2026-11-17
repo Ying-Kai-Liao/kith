@@ -12,6 +12,12 @@
 //!   owner's, from the app.
 //! - It acts only on a read that worked, and never on the owner.
 //! - The stops (`cut_off`) come after the lock is let go, as in the app's revoke.
+//!
+//! An owed cut (`ReconcileOwed.tla`, design 2026-11-17-rename-failcut): a revoke whose read of the person's ids failed
+//! (the core down) cuts only the id it was given, while the host keeps a renamed person's rows under the old one, and
+//! the core shows no revoke, so the reconcile above never cuts those. [`owe_cut`] keeps a durable row for the person,
+//! and each tick pays it under `AUTH_WRITES` once the ids can be read again ([`pay_owed`]). Every undo clears it in its
+//! own locked section ([`clear_owed`]), or the retry would cut a person the owner gave back (`undo-keeps.cfg`).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -39,8 +45,12 @@ pub(crate) struct Due {
 }
 
 impl Due {
-    /// One tick of the poll. `changed`: the core's revision moved since the last tick. Does nothing unless switched.
+    /// One tick of the poll. `changed`: the core's revision moved since the last tick. Pays the owed cuts, then does
+    /// nothing more unless switched.
     pub(crate) async fn tick(&mut self, hub: &Arc<Hub>, changed: bool) {
+        // Before the switch test, so a row kept while switched is settled after a rollback too: the id then reads alone,
+        // so it is cut again by that id and the row dropped; its former ids are given up (kith-auth knows no rename).
+        pay_owed(hub).await;
         if !switched_now() {
             self.last = None;
             self.done.clear();
@@ -63,16 +73,100 @@ pub(crate) fn host_ids(row: &Value) -> Vec<String> {
     own.chain(was).map(str::to_owned).collect()
 }
 
+/// One person as the host may hold them: every id ([`host_ids`]) and the first of them. A person is one identity across
+/// all of these (R-rename, design 2026-11-16-rooms-rename), so a narrowing acts on every one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Held {
+    /// The person's first id: the oldest former one (`was[0]`), or the id itself when never renamed. A rename only adds
+    /// ids, so this one never changes: a room stay is written under it, and two joins that read the ids on either side
+    /// of a rename still write one stay.
+    pub first: String,
+    /// The current id and every former one.
+    pub ids: Vec<String>,
+}
+
+impl Held {
+    /// Someone the core lists under no other id: `person` alone.
+    pub(crate) fn alone(person: &str) -> Self {
+        Self { first: person.to_owned(), ids: vec![person.to_owned()] }
+    }
+}
+
+/// [`Held`] of `person` from the core's `listPeople` rows (`withWas`); `person` alone when no row names them.
+fn held_in(rows: &Value, person: &str) -> Held {
+    let Some(row) = rows.as_array().into_iter().flatten().find(|r| host_ids(r).iter().any(|i| i == person)) else {
+        return Held::alone(person);
+    };
+    let first = row["was"].as_array().and_then(|w| w.first()).and_then(Value::as_str).or_else(|| row["id"].as_str());
+    Held { first: first.unwrap_or(person).to_owned(), ids: host_ids(row) }
+}
+
+/// [`Held`] of `person` as the core lists them now; `person` alone when the host is not switched. An error when it is
+/// and the core can't say: a caller that would write by these ids (a join, a removal) refuses rather than guess.
+pub(crate) async fn held(person: &str) -> anyhow::Result<Held> {
+    if !switched_now() {
+        return Ok(Held::alone(person));
+    }
+    let said = owner_call("people.listPeople", json!({"viaSwitch": true, "withWas": true}), true).await?;
+    Ok(held_in(&said["rows"], person))
+}
+
 /// [`host_ids`] of `person` as the core lists them now; just `person` when the host is not switched or the core can't say.
 pub(crate) async fn held_under(person: &str) -> Vec<String> {
-    if switched_now()
-        && let Ok(said) = owner_call("people.listPeople", json!({"viaSwitch": true, "withWas": true}), true).await
-        && let Some(row) =
-            said["rows"].as_array().into_iter().flatten().find(|r| host_ids(r).iter().any(|i| i == person))
-    {
-        return host_ids(row);
+    held(person).await.map_or_else(|_| vec![person.to_owned()], |h| h.ids)
+}
+
+/// The host store's key of one owed cut: a revoke of the person whose ids could not be read, so some may be uncut.
+const OWED: &str = "revoke.owed_cut.";
+
+/// Records that `person` was cut off under the given id alone because their ids could not be read. Durable: a host
+/// restart before the core is back still owes it. A failed write is logged; the owner was told to revoke again.
+pub(crate) fn owe_cut(hub: &Hub, person: &str) {
+    if let Err(e) = hub.store.kv_set(&format!("{OWED}{person}"), &crate::store::now_ms().to_string()) {
+        tracing::warn!(error = format!("{e:#}"), person, "couldn't keep an owed cut: a former id may stay uncut");
     }
-    vec![person.to_owned()]
+}
+
+/// Who is owed a cut ([`owe_cut`]).
+pub(crate) fn owed(hub: &Hub) -> Vec<String> {
+    hub.store.kv_prefix(OWED).into_iter().filter_map(|k| k.strip_prefix(OWED).map(str::to_owned)).collect()
+}
+
+/// An undo of `person`: no cut is owed any more under any id the host may hold them under. The caller holds
+/// `AUTH_WRITES` for the section that writes the undo, so a tick paying the row can't land between the two.
+pub(crate) async fn clear_owed(hub: &Hub, person: &str) {
+    if owed(hub).is_empty() {
+        return;
+    }
+    let mut ids = held_under(person).await;
+    if !ids.iter().any(|i| i == person) {
+        ids.push(person.to_owned());
+    }
+    for id in ids {
+        if let Err(e) = hub.store.kv_delete(&format!("{OWED}{id}")) {
+            tracing::warn!(error = format!("{e:#}"), person = id, "couldn't drop an owed cut on an undo");
+        }
+    }
+}
+
+/// Pays every owed cut whose ids can be read now: under `AUTH_WRITES`, the person is cut off under every id and the row
+/// dropped, one step against the undo. A read that fails leaves the row for the next tick. The rows are read under the
+/// lock: one an undo cleared just before is not paid.
+pub(crate) async fn pay_owed(hub: &Hub) {
+    if owed(hub).is_empty() {
+        return;
+    }
+    let _w = AUTH_WRITES.lock().await;
+    for person in owed(hub) {
+        let Ok(held) = held(&person).await else { continue };
+        tracing::info!(person, ids = ?held.ids, "an owed cut is paid: the person is cut off under every id");
+        for id in &held.ids {
+            cut_off(hub, id).await;
+        }
+        if let Err(e) = hub.store.kv_delete(&format!("{OWED}{person}")) {
+            tracing::warn!(error = format!("{e:#}"), person, "couldn't drop a paid owed cut: it is paid again");
+        }
+    }
 }
 
 /// Whom the core's rows say to cut: every non-owner person shown revoked, and every non-owner the host still holds live
@@ -218,6 +312,19 @@ mod tests {
         // cut once, nothing live under either id: a second look leaves it
         let done = BTreeSet::from([key("samuel", "7"), key("sam", "7")]);
         assert_eq!(to_cut(&rows, &[], &done).0, Vec::<Cut>::new());
+    }
+
+    #[test]
+    fn the_first_id_is_the_oldest_former_one_and_never_moves_on_a_rename() {
+        let once = json!([{"id": "kai", "owner": true}, {"id": "samuel", "was": ["sam"]}, {"id": "amy"}]);
+        let want = Held { first: "sam".into(), ids: vec!["samuel".into(), "sam".into()] };
+        assert_eq!(held_in(&once, "samuel"), want, "asked by the current id");
+        assert_eq!(held_in(&once, "sam"), want, "asked by the old one");
+        let twice = json!([{"id": "sammy", "was": ["sam", "samuel"]}]);
+        assert_eq!(held_in(&twice, "samuel").first, "sam", "a second rename keeps the first id");
+        assert_eq!(held_in(&once, "amy"), Held::alone("amy"), "never renamed: the id itself");
+        assert_eq!(held_in(&once, "gone"), Held::alone("gone"), "not listed: alone");
+        assert_eq!(held_in(&json!(null), "sam"), Held::alone("sam"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 ---
 name: revoke-access
-description: Model-checks (TLA+/TLC) that a revoked person, and their bots, reach nothing on any of the owner's Macs, and that undo restores exactly what they had. Use when a change touches kernel/bin/kith-auth may(), cut_off, bot_may, bridge_held, door_state, owner_cut/resolve_bot or cmd_person/revoke_person, core/runtime/src/authority/ (revoke.rs person_suspend/person_remove/person_rename, the readers), the helper spawn's in-sync wait in kernel/bin/kith (and kith-permit ask_helper, and its Rust port core/kernel/src/permit/{helper,door}.rs), serve/host/src/api/people.rs revoke_person or cut_off, serve/host/src/remote/{members,cloud,relay,sync_lease,core_revokes}.rs (and the authority poll in cards/mod.rs), the bot ask/thread gates in api/botguests.rs, a guest door's start or sweep (kernel/lib/kith_door.py, serve/host/src/doors.rs), the chat channels' access checks in serve/host/src/channels/ (core.rs handle/held/take/access, queue.rs work, run.rs Recheck/finish/flush, hq.rs who/resolve_in_sync), or the cloud's person revoke in serve/cloud/src/routes/invites.ts. Also use to answer "can a revoked person still get through?".
+description: Model-checks (TLA+/TLC) that a revoked person, and their bots, reach nothing on any of the owner's Macs, and that undo restores exactly what they had. Use when a change touches kernel/bin/kith-auth may(), cut_off, bot_may, bridge_held, door_state, owner_cut/resolve_bot or cmd_person/revoke_person, core/runtime/src/authority/ (revoke.rs person_suspend/person_remove/person_rename, the readers), the helper spawn's in-sync wait in kernel/bin/kith (and kith-permit ask_helper, and its Rust port core/kernel/src/permit/{helper,door}.rs), serve/host/src/api/people.rs revoke_person or cut_off, serve/host/src/remote/{members,cloud,relay,sync_lease,core_revokes}.rs (and the authority poll in cards/mod.rs; held/held_under, the ids a renamed person is held under; cut_off_held), the owed sweep in serve/host/src/terminal/core_holders.rs, the bot ask/thread gates in api/botguests.rs, a guest door's start or sweep (kernel/lib/kith_door.py, serve/host/src/doors.rs), the chat channels' access checks in serve/host/src/channels/ (core.rs handle/held/take/access, queue.rs work, run.rs Recheck/finish/flush, hq.rs who/resolve_in_sync), or the cloud's person revoke in serve/cloud/src/routes/invites.ts. Also use to answer "can a revoked person still get through?".
 ---
 
 # Revoke access: a revoked person reaches nothing, anywhere
@@ -18,7 +18,7 @@ design). This skill is its only documentation.
 ## Run it
 
 ```
-verification/revoke/run.sh                          # every row of checks.tsv (111 rows, about 13 minutes)
+verification/revoke/run.sh                          # every row of checks.tsv (228 rows), then the 7 Reconcile.tla rows
 verification/revoke/run.sh --show VARIANT PROPERTY   # TLC's full output (the counterexample) for one row
 verification/revoke/drift.sh                        # covered files changed since the sync commit?
 ```
@@ -40,7 +40,7 @@ cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of th
 
 ## Sync commit
 
-**f5b92e19daddcfdfc92162abfc38be2b63dd3e4d** (2026-11-12, M2-23 S-b: the secret writers' switched path; the model gained `switched-grant`, `broken-grant-no-person`, `broken-forget-keeps-grant`; `run.sh` every row as expected.) Earlier: **0e958a1b99a5444265d2803158087462147d6911** (2026-11-06, rust-rebuild after #886/#882: the covered changes since `ff380b33` were read, see "Re-sync 2026-11-06 (3)" at the end; no revoke step, no model change.) Earlier: **ff380b3343ac78a03ca5b4ab5936a48e8d89633e** (2026-11-06, rust-rebuild after #884: every covered change since `10c4eb6c` was read, see "Re-sync 2026-11-06 (2)" at the end. Three new switches (`Switched`, `SwitchLag`, `CoreOnlyWrite`); a finding on the rollback window; no base row changed.) Earlier: **10c4eb6c012f6ad77389633bd7ecb5881054f5f4** (2026-11-06, rust-rebuild after #871: every covered change since `fb5f140f` was read against the model, see "Re-sync 2026-11-06" at the end. One new switch, `CoreGate`; no other step, check or door changed; `run.sh` gave every row as expected.) Earlier: **fb5f140f6c84bc079684575a8ce93373eba51275** (NOT moved by the F3-F6 PR: about 940 lines changed in files that hold revoke steps since this sha (`kernel/bin/kith` 437, `botguests.rs` 409, `people.rs`, `members.rs` 122, `cloud.rs` 78, `relay.rs` 33) and nobody has read them against the model yet. All 80 rows of `run.sh` passed again at `0872ea58892e` (2026-11-03, rust-rebuild with the built-in agent rule); that shows the model unchanged, not that the code still matches it. `people.rs` `local_revoke` was read: kith-auth's `--revoke --local` first, then `cut_off`. Earlier: **fb5f140f6c84bc079684575a8ce93373eba51275** (2026-10-30: the guest jobs (#428) at `89162b85` merged into the guest door (#438). The model is the union of both: #428's `HelperNoSync` and its rows with the door's `GuestDoor`, `DoorNoHold`, `DoorSplit`, `NoDoorSweep` and their rows, 44 in all; the cards' `answer` takes the person as an `Option` (None for the owner) and keeps the door's door and helper branch. `run.sh` gave every row as expected.) Earlier: `5a7898911c39` (2026-10-30: origin/main `a9db7339` merged into the guest jobs (#428), over #428's merge of #421. Main's covered changes: the `send-to` dispatch line in `kernel/bin/kith`, and bot `ask` in `botguests.rs` refusing a reused nonce for a different message (`is_retry`), after the sync wait and `roles::may_use`; neither is a revoke step. With #428's jobs and edge grants (below), rows as expected in `run.sh`.) The guest door (#438) was checked on its own branch before it merged this: `961325fb23ac` (2026-10-30: the door's review fixes. A tool installed where the box would read the home folder is refused, and `run()` kills the box whenever its claim was written. A box that would not die keeps its claim (`left`), and the sweep keeps a claim until its kill ends. This makes the code meet `DoorStart`'s one-step claim and the weakly fair `DoorSweep`. No state, row or step changed) and `ab050f9277a3` (2026-10-30: the guest door. A door starts in one locked step under the person's flock that reads `may()` and the held state and claims it (`DoorStart`), and the host's sweep ends a door whose person may no longer run it (`DoorSweep`); new rows `DoorD2`, `DoorD2c`, `DoorD1` behind `GuestDoor`); `run.sh` gave every row as expected at both. Earlier: `c6d8a1cf2752` (2026-10-30: origin/main `996b76c0` merged with the guest workbench (#421). #421's changes: the temp folder removal in `cut_off` after the bot sweep and in `revoke_person`/`--rm`, `kith-auth exec` scrubbing paths into a guest's folders, no local servers in a guest's shell; none is a revoke step, rows as expected in `run.sh`. #400's helper in-sync wait in `kernel/bin/kith` stays on every helper spawn, which #421's paths use too.) Earlier: `1f397684bb18` (main `bc3d92b8` plus the helper's in-sync wait) and `892b64dd7d2d` (the workbench without it). The jobs half of the guest workbench (#428) was checked on its own branch before it merged this: `62f5a5c7c80d` (2026-10-30: an invitee's bot gets only the jobs its owner holds, and `job`/`helper --rm` take a former person id; no state, row or door changed) and `a0b2e759d7b9` (2026-10-30: the jobs and edge grants. A tick (`job`), a helper's always (`helper`) and its once (`helper_once`) are fields of the person's own row, so revoke and undo still touch no row and `may()` still checks the revoked state before any row; the once is used up by `resolve --take-once` in the locked step that runs `may()`, so a revoke between the card and the launch wins (`kith-guest-jobs-check` "a revoke beats a once"; `kith-auth-props` break M15 fails); `run.sh` gave every row as expected at both. History:
+**f9b5e509f476bb88f6203a125ae863369ba03aa9** (2026-11-17, rust-rebuild after #1013 R-rename, #1007 rooms D, #1010, #1015: every covered change since `f5b92e19` was read, see "Re-sync 2026-11-17" at the end. `Reconcile.tla` gained the rename (`Renames`, `RecByCurrent`) and four rows, two of them findings; `RoomsRename.tla` is in `verification/rooms/`; no `RevokeDoors.tla` row changed.) Earlier: **f5b92e19daddcfdfc92162abfc38be2b63dd3e4d** (2026-11-12, M2-23 S-b: the secret writers' switched path; the model gained `switched-grant`, `broken-grant-no-person`, `broken-forget-keeps-grant`; `run.sh` every row as expected.) Earlier: **0e958a1b99a5444265d2803158087462147d6911** (2026-11-06, rust-rebuild after #886/#882: the covered changes since `ff380b33` were read, see "Re-sync 2026-11-06 (3)" at the end; no revoke step, no model change.) Earlier: **ff380b3343ac78a03ca5b4ab5936a48e8d89633e** (2026-11-06, rust-rebuild after #884: every covered change since `10c4eb6c` was read, see "Re-sync 2026-11-06 (2)" at the end. Three new switches (`Switched`, `SwitchLag`, `CoreOnlyWrite`); a finding on the rollback window; no base row changed.) Earlier: **10c4eb6c012f6ad77389633bd7ecb5881054f5f4** (2026-11-06, rust-rebuild after #871: every covered change since `fb5f140f` was read against the model, see "Re-sync 2026-11-06" at the end. One new switch, `CoreGate`; no other step, check or door changed; `run.sh` gave every row as expected.) Earlier: **fb5f140f6c84bc079684575a8ce93373eba51275** (NOT moved by the F3-F6 PR: about 940 lines changed in files that hold revoke steps since this sha (`kernel/bin/kith` 437, `botguests.rs` 409, `people.rs`, `members.rs` 122, `cloud.rs` 78, `relay.rs` 33) and nobody has read them against the model yet. All 80 rows of `run.sh` passed again at `0872ea58892e` (2026-11-03, rust-rebuild with the built-in agent rule); that shows the model unchanged, not that the code still matches it. `people.rs` `local_revoke` was read: kith-auth's `--revoke --local` first, then `cut_off`. Earlier: **fb5f140f6c84bc079684575a8ce93373eba51275** (2026-10-30: the guest jobs (#428) at `89162b85` merged into the guest door (#438). The model is the union of both: #428's `HelperNoSync` and its rows with the door's `GuestDoor`, `DoorNoHold`, `DoorSplit`, `NoDoorSweep` and their rows, 44 in all; the cards' `answer` takes the person as an `Option` (None for the owner) and keeps the door's door and helper branch. `run.sh` gave every row as expected.) Earlier: `5a7898911c39` (2026-10-30: origin/main `a9db7339` merged into the guest jobs (#428), over #428's merge of #421. Main's covered changes: the `send-to` dispatch line in `kernel/bin/kith`, and bot `ask` in `botguests.rs` refusing a reused nonce for a different message (`is_retry`), after the sync wait and `roles::may_use`; neither is a revoke step. With #428's jobs and edge grants (below), rows as expected in `run.sh`.) The guest door (#438) was checked on its own branch before it merged this: `961325fb23ac` (2026-10-30: the door's review fixes. A tool installed where the box would read the home folder is refused, and `run()` kills the box whenever its claim was written. A box that would not die keeps its claim (`left`), and the sweep keeps a claim until its kill ends. This makes the code meet `DoorStart`'s one-step claim and the weakly fair `DoorSweep`. No state, row or step changed) and `ab050f9277a3` (2026-10-30: the guest door. A door starts in one locked step under the person's flock that reads `may()` and the held state and claims it (`DoorStart`), and the host's sweep ends a door whose person may no longer run it (`DoorSweep`); new rows `DoorD2`, `DoorD2c`, `DoorD1` behind `GuestDoor`); `run.sh` gave every row as expected at both. Earlier: `c6d8a1cf2752` (2026-10-30: origin/main `996b76c0` merged with the guest workbench (#421). #421's changes: the temp folder removal in `cut_off` after the bot sweep and in `revoke_person`/`--rm`, `kith-auth exec` scrubbing paths into a guest's folders, no local servers in a guest's shell; none is a revoke step, rows as expected in `run.sh`. #400's helper in-sync wait in `kernel/bin/kith` stays on every helper spawn, which #421's paths use too.) Earlier: `1f397684bb18` (main `bc3d92b8` plus the helper's in-sync wait) and `892b64dd7d2d` (the workbench without it). The jobs half of the guest workbench (#428) was checked on its own branch before it merged this: `62f5a5c7c80d` (2026-10-30: an invitee's bot gets only the jobs its owner holds, and `job`/`helper --rm` take a former person id; no state, row or door changed) and `a0b2e759d7b9` (2026-10-30: the jobs and edge grants. A tick (`job`), a helper's always (`helper`) and its once (`helper_once`) are fields of the person's own row, so revoke and undo still touch no row and `may()` still checks the revoked state before any row; the once is used up by `resolve --take-once` in the locked step that runs `may()`, so a revoke between the card and the launch wins (`kith-guest-jobs-check` "a revoke beats a once"; `kith-auth-props` break M15 fails); `run.sh` gave every row as expected at both. History:
 Between `3eb9f9a50c25` (2026-10-28, the channels' revoke checks) and it, the covered files changed by the invite link's
 web origin (`people.rs`, #376), the iPhone's answer to members' access requests, the owner-approved proven device and
 idle web devices (`cloud.rs`, #382/#383/#387; `pull` still applies revoked before memberships), and in `kernel/bin/kith`
@@ -78,6 +78,7 @@ confirmed that the model still describes the covered code (see "When you change 
 | `DoorD2c` | D2, R8 | Same, from the moment the cloud has the revoke, on every Mac: a Mac behind the cloud holds the start. | Same, through a Mac that hasn't heard yet. |
 | `DoorD1` | D1 | A door running for a revoked person is stopped (liveness, given the host's sweep runs). | Their render keeps running, writing, after they were cut off. |
 | `BotDoorCut` | I6 | An invitee's bot starts a guest door only while the invitee holds it (its own tick is cut to its owner's). | A bot ticked more than its owner runs a door the owner was never given. |
+| `RetryKeepsRestored` | M3 P8 | A revoke sweep the core did not take is owed (a row in the host store, `terminal/core_holders.rs`) and retried; a retry after the revoke was undone ends nothing (`claim.sweepPerson` is a full `revoke_person`). Rows `owed-sweep`, `broken-owed-retry-revokes` (model: `OwedSweeps`, `SweepOwed`, `RetrySweep`). The model drops the row when P is not revoked now; the code drops it only if the row was owed while P was suspended in the host store and P has no suspend rows now. GAP: a revoke that left nothing to suspend, or whose `suspend_person` failed, is never dropped, so an undo then the retry ends the restored person's runs once (fails safe; fix: judge by the authority's revoked state). | A retry after an undo ends the runs the undo restored. |
 
 The probes (`Never*` that must fail, and `NoBridgeRefusal`) show the good paths are reachable: the bridge serves a
 guest end to end when in sync, an undo gives app turns back, a queued or held message is served once in sync, and the
@@ -110,6 +111,7 @@ member's door runs and the sweep does stop one; `NeverBotDoorRuns` and `NeverBot
 | delivery | app: a run's outbox (`run_outbox.rs`, #388) posts into the person's own app chat with no re-check here; their devices are revoked in `cut_off` and blocked by the relay, so it is the app door's `RelayOK`; bridge: `channels/run.rs` `Recheck::still` (via `resolve_in_sync`) at the start of `finish` (the answer) and in `flush` before posting the outbox (refused: the outbox files are deleted, nothing posted); the owner is never re-checked; bot: `botThread` gate; app: the device is revoked here and blocked by the relay | `Deliver` |
 | a bot takes a room secret (`botSecretFetch`, room secrets) | `botguests.rs` `secret_fetch`: the bot's own row only (404 for anything else), member and join point, `sync_lease::wait` (503 while out of sync), then claim `pending -> taking`, `kith-auth once take`, a **re-check** that the bot is still active and a member, then `taking -> taken` as a compare-and-set that answers only if it wins; `end_bot` (via `group::left_rooms`), a room edit, `delete_bot` and the sweep end the row (`dropped`/`expired`, both `pending` and `taking`) and `once drop` the item. No new TLA+ variant: it is the model's bot `Deliver` door with the `botThread` gate's post-take re-check; the architect's own model of the ordering is `designs/2026-10-31-room-secrets/model/` (RoomSecret.tla, `OnlyCurrentMember`). Tested by `cards::room_secret_tests::a_bot_ended_between_the_claim_and_the_answer_gets_no_value` | `Deliver` (bot door) |
 | stop a running turn once the revoke lands | `people.rs` `cut_off`: devices revoked, `botguests::enforce`, `stop_runs`, `sweep_claims` | `Stop` |
+| a renamed person's revoke whose ids can't be read (the core down) | `people.rs` `cut_off_held` (from `local_revoke`'s failure branch, `revoke_person`'s core-down branch and `cloud.rs` `pull`): `core_revokes::held` errs -> cut by the given id and `owe_cut` (kv `revoke.owed_cut.<person>`, durable); `core_revokes::pay_owed` on every tick of the 3 s poll, under `AUTH_WRITES`: rows read under the lock, a read of the ids that answers -> `cut_off` every id, row dropped; a failed read leaves it. Every undo clears it in its own locked section (`clear_owed`, every id the person is held under): `local_revoke`'s undo (the app's, and a paired Mac's handle undo through `handle_revokes::exchange_in`) and `members::apply_revoked`'s `--unrevoke` (the cloud `pull`); `pull`'s restored gives back under `held_under`, as `local_revoke`'s undo does | `ReconcileOwed.tla`: `AppCut` (owed when the read fails), `OwedRetry`, `AppUndo` (clears the row) |
 | network up / cloud down / offline | the relay connection (`relay.rs` loop: `set(false)` on every (re)connect until a pull succeeds, `renew` on each ping) | `SetNet` |
 | a guest door starts | `kernel/lib/kith_door.py` `run`: under kith-auth's lock (`auth_lock`), `check` (= `kith-auth door`, `door_state`: `may()`, then `bridge_held` -> held, then the job and its tick), the claim written, then the box started, one step; ON A SWITCHED MAC (RouterDoor) `check` reads the core under the core's lock, which the revoke holds instead of kith-auth's flock: a check, then a start, and a revoke can land between (DoorD2 fails on `switched-router-door`); the guarantee is the named sweep (`CutOffSweep`, DoorCutAtSweep: one-shot under the flock, some time after the commit, triggered by the app's `cut_off` or by the host's reconcile of a core-only revoke, `remote/core_revokes.rs`) and the 60 s loop; kith-permit `run_door` asks the owner's job card first when not ticked | `DoorStart` (`DoorGate` = `MayP` and `InSync`) |
 | the host's guard with `KITH_CORE_AUTHORITY=1` (OFF in every deploy, but the code takes it today) | `api/authority.rs` `core_selected` = opt-in and `gate_open(fingerprint_of(auth.json))`: the gate thread stats auth.json BEFORE each `cutover.mayServe` ask and latches the answer with that fingerprint; every `save_auth` is a new inode, so any write shuts the gate at once and the host is back on kith-auth until the core is told. kith-auth `mirror_to_core` (`people.suspend` / `people.undo`, over `kith kernel core-call`, an embedded core when no daemon runs) runs AFTER `save_auth`, one try, a failure only warns. The guard (`roles::resolve`: `may_use`, the app and bot starts, `botThread`) asks the core only while the gate is open, where core and file agree | `CoreMirror`, `GuardP`/`GuardB`/`GateOpen` (`CoreGate`; the app door's and bot door's start and the app/bot delivery re-check use them; the bridge, the helper spawn and the guest door read kith-auth directly and are unchanged) |
@@ -147,7 +149,13 @@ The model's "bridge" is this door.
 - **The person has one id on every Mac: their Kith account** (the `kith` handle, a `user_...` id). The cloud's
   `revocations` table and host state are keyed by it, and `apply_revoked` matches people by it. A person known only by
   a bridge handle (no Kith account) is revoked on that Mac only, without the cloud (`everywhere: false`): outside the
-  model, which has one cross-Mac person.
+  model, which has one cross-Mac person. **On a switched Mac a rename in the core** leaves the host's rows (devices,
+  memberships, invites, room stays, claims) under the old id; the model still has one id because every host narrowing
+  acts on every id `core_revokes::held_under` returns (R-rename, #1013): `cut_off_held` (the app's and terminal's
+  `local_revoke`, the cloud's `pull`), `set_person_access`, the reconcile's `to_cut`, the "no card for a set-aside
+  person" fence in `cards/mod.rs`, `local_revoke`'s undo (`restored` per id). That is checked in `Reconcile.tla` (`rename` rows) and, for room
+  stays, `verification/rooms/RoomsRename.tla`. Where `held_under` cannot ask the core it falls back to the id given, and
+  the cloud's undo restores only the id it names: see the findings in "Re-sync 2026-11-17".
 - `InSync(m)` reads the cloud in the same step as the check. The code uses a lease: `sync_lease` ends it at once on
   `cloud.changed` and on a dropped connection, and otherwise `LEASE` (120 s) after the last ping heard. So a Mac whose
   link died silently (no close), or whose kith serve crashed, keeps its bridge serving guests for up to `LEASE` while
@@ -179,6 +187,10 @@ The model's "bridge" is this door.
    the revoke once it is on the Mac. `kernel/bin/kith` read only `allowed` from `resolve` until 2026-10-29, which #380
    (`ask_helper` for guests) made reachable; it now waits while `held`, as the channels' `resolve_in_sync` does.
 3. The probes under `code` and `app-only` (see above) are reachable, as they should be.
+4. **A failed revoke of a renamed person cuts only the current id** (`reconcile/rename-failcut` / `FailCutHolds`, 2026-11-17).
+   See "Re-sync 2026-11-17". Closed the same day by the owed cut (`reconcile-owed` `fix` passes, `today` fails
+   FailCutReached, `undo-keeps` fails NoLostUndo; see "Owed cut" at the end). 5. **An undo after a rename can leave the old id set aside** (`reconcile/rename-undo-miss`,
+   accepted: fail closed).
 
 ## How we know it can fail
 
@@ -198,7 +210,9 @@ The model's "bridge" is this door.
 | `door` (without `CoreDoorHook`) | the core's revoke sweeping the doors in its own step: a revoke leaves a window with a door still running until the sweep action | `DoorsCutWithRevoke` (fails in `door` and `bot-door`, passes in `core-door` and `core-bot-door`); row-level: the rows are swept with the revoke, a box is stopped later by the host |
 | `broken-door-undo-revives` | an undo that puts a swept door row back (the core must leave swept final) | `DoorNoResurrect` |
 | `broken-bot-door-no-cut` | the owner cut in a bot's door check (kith-auth `door_state` before N2) | `BotDoorCut` |
+| `broken-owed-retry-revokes` | the retry's re-judge from the person's state now (it sweeps the restored person again) | `RetryKeepsRestored` |
 | `broken-core-gate-stale` | the gate's fingerprint check (`gate_open_at`): the core's copy answers for the host's guard after auth.json changed and before the mirror told the core | `R1`, `R5` |
+| `reconcile/broken-rename-current` (Reconcile.tla) | the reconcile's former ids (`host_ids` reading `was` in `to_cut`): a renamed person is cut by the current id only | `Narrows` |
 
 On the code (dry run at the sync commit, edits dropped after):
 
@@ -238,7 +252,8 @@ On the code (dry run at the sync commit, edits dropped after):
 | `verification/revoke/variants/*.set` | each variant's overrides |
 | `verification/revoke/checks.tsv` | variant, kind, property, expected verdict |
 | `verification/revoke/run.sh`, `drift.sh` | run every row; what changed since the sync commit |
-| `verification/revoke/Reconcile.tla`, `reconcile/*.cfg`, `reconcile.tsv` | the host's reconcile of a revoke made in the core alone (migration blockers P1): `design` passes (132 states: TypeOK, NoLostUndo, FailCutHolds, Narrows), `broken-split-read` fails NoLostUndo (the read outside `AUTH_WRITES`: an app undo lands before the set-aside), `broken-restore-too` fails FailCutHolds (a tick that also gives back undoes a fail-closed cut). `run.sh` runs them after the main rows. Code: `remote/core_revokes.rs` (read and `suspend_person` in one step under `AUTH_WRITES`, then `cut_off`; narrowing only; only on a read that worked; never the owner; on a revision change, at start, and every 60 s), called from the 3 s authority poll in `cards/mod.rs` |
+| `verification/revoke/Reconcile.tla`, `reconcile/*.cfg`, `reconcile.tsv` | the host's reconcile of a revoke made in the core alone (migration blockers P1): `design` passes (132 states: TypeOK, NoLostUndo, FailCutHolds, Narrows), `broken-split-read` fails NoLostUndo (the read outside `AUTH_WRITES`: an app undo lands before the set-aside), `broken-restore-too` fails FailCutHolds (a tick that also gives back undoes a fail-closed cut). With a rename (`Renames`, 2026-11-17): `rename` passes (338 states: TypeOK, NoLostUndo, Narrows), `broken-rename-current` fails Narrows (a reconcile by the current id alone), and two findings fail on purpose: `rename-undo-miss` (NoLostUndoStrict) and `rename-failcut` (FailCutHolds). `run.sh` runs them after the main rows. Code: `remote/core_revokes.rs` (read and `suspend_person` in one step under `AUTH_WRITES`, then `cut_off`; narrowing only; only on a read that worked; never the owner; on a revision change, at start, and every 60 s), called from the 3 s authority poll in `cards/mod.rs` |
+| `verification/revoke/ReconcileOwed.tla`, `reconcile-owed/*.cfg`, `reconcile-owed.tsv` | the owed cut of a renamed person's revoke whose ids could not be read (design 2026-11-17-rename-failcut, finding 1 of PR #1020): `fix` passes (497 states: TypeOK, NoLostUndo, FailCutHoldsOwed, Narrows, FailCutReached), `today` (no owed row) fails FailCutReached, `undo-keeps` (the undo leaves the row) fails NoLostUndo. `run.sh` runs them after the reconcile rows. Code: `core_revokes.rs` `owe_cut`, `pay_owed`, `clear_owed`; `people.rs` `cut_off_held` |
 
 Re-run 2026-11-03 (review cleanup PR, rust-rebuild): `run.sh` 80 rows, every row as expected. SYNC stays at fb5f140f: the ~940 changed lines in the covered files were not read; only the F8 change to `remote/members.rs` (mirror takes AUTH_WRITES, mirrors `*` rows; a revoked person is still skipped) was read, and it adds no revoke step.
 
@@ -342,11 +357,11 @@ The `switched-router*` pass rows are the switched rows under a new name: under `
 `MayP` is the same predicate. They prove the properties hold; the sensitivity proof is the breaks. "Every router path reads that one fact
 in the step it acts" is an assumption TLC does not test; the router-check's byte-for-byte parity does. `RouterStale` reads live `rows`,
 not rows frozen at the switch, which is a weaker break than described, and still fails.
-**The door row models L1's route, not the code at this head:** `door` is not in kith-auth's ROUTES and exits 3 on the tombstone (a
-guest door is refused, the recheck sweep kills a running one). When L1 routes it, L1 must re-check `switched-router-door` against the
-code: `kith_door`'s start is "allowed and not held, one step under the kith-auth lock" (`kith_door.py:15`), while a routed
-`door_state` reads under the core's lock, so the model's one-step start holds only if the core's door check and the claim are one
-transaction.
+**The door row is the code since L1** (`621e9b528`, re-read 2026-11-17): `door` is in kith-auth's ROUTES (`route_secret_read('door')`,
+kith-auth's own `door_state` over the core's tables), so on the tombstone `kith_door.run` checks under its flock while the read is
+under the core's lock, and a core revoke takes the core's lock only: a check, then a claim, which is `RouterDoor`'s two-step start;
+`DoorD2` fails on `switched-router-door` by design and the named sweep (`CutOffSweep`, from `cut_off` or the reconcile) plus the 60 s
+loop end the door (`DoorD1`, `DoorCutAtSweep` pass). `kith_door.py`'s docstring says the same.
 Rows (checks.tsv, "the router"): `switched-router` (TypeOK, CoreInStep, R2, R4, SyncAgrees, BotBelowOwner, R1, R5, R5c, R6, R6c, R6cDown,
 R6cWake pass), `switched-router-door` (DoorD2, DoorD2c, DoorD1, DoorsCutWithRevoke pass), `switched-router-kill` (NoLiveProc passes),
 and the breaks `broken-router-stale` (R2, R1, R6 fail) and `broken-router-stale-door` (DoorD2 fails). Two smoke rows
@@ -355,3 +370,108 @@ and the breaks `broken-router-stale` (R2, R1, R6 fail) and `broken-router-stale-
 file that answers what the core answered. SYNC is not moved: the lift (runtime refusals in `cutover/authority.rs`) adds no revoke step.
 
 Migration blockers P1 (2026-11-13, rust-rebuild): `Reconcile.tla` and its three rows were ported from the architect's design (`verification/revoke/reconcile.tsv`). A terminal revoke on a stepped Mac is `kith kernel core-call people.suspend` (`kith people suspend` does not exist and `kith-auth person --revoke` exits 3); the host half follows in the next poll. An undo is always from the app. The verdicts of the other rows are unchanged: the reconcile is the trigger the `switched-router-door` variant's `CutOffSweep` already stood for. `cards/mod.rs` and `remote/core_revokes.rs` are in `drift.sh`. SYNC is not moved.
+
+## Room turns (2026-11-14, rooms with people, PR C)
+A revoke (and a removal, and an agent taken from a person) ends every room turn whose basis holds the person:
+`Hub::end_room_turns_of` from `api/people.rs` `cut_off` (which the core's reconcile calls too, per held id), then the sweep of
+claims, helpers and doors also names the room persons the person has run as (`room_person_ids_of`). A revoke writes no room
+row, so the undo gives the room back as it was. The models are in `verification/rooms/` (`run.sh`): `jobs-fixed` passes,
+`jobs-revokekeepsturn` (the revoke leaves the turn running, 53 states) and `revokedeletes` (33) fail on purpose.
+
+### Room doors (2026-11-15, rooms with people, PR D)
+A room person's door (`room-<id>`) is a claim over its basis: `kith-auth door --basis a,b` ANDs `door_state` over the people
+(a definite no beats `held`), `kith_door.run` writes the claim with `basis`, `gen` and `level` in the same locked step, and
+`sweep --person p` (and its recheck) reaches every claim whose basis holds p; a room claim with no usable basis is ended by any
+sweep (a room id alone in `--person` ends none, on purpose; after an untick the 60 s recheck ends it). No card: a room's door that a basis person lacks is refused, naming them. Rows in `verification/rooms/checks.tsv`:
+`jobs-switched` passes (the switched start/sweep order of #975, the sweep owed until it runs), `jobs-switchednolock` and
+`jobs-switchedsweepperson` fail on purpose, `jobs-switchedwindow` fails on purpose (the window Kai accepted: a commit between a
+switched start's check and its claim), and `jobs-liveonly`, `jobs-snaponly`, `jobs-split`, `jobs-joinnarrows`,
+`jobs-sweepperson` and `doors-stampland` fail on purpose. Tested by `kernel/tests/kith-guest-door-check` (room section) and
+`kith-auth-props.py` (`room_door_properties`).
+
+## Re-sync 2026-11-17 (SYNC moved to f9b5e509, rust-rebuild after #1013, #1007, #1010, #1015)
+
+Every covered change since `f5b92e19` was read (`git diff f5b92e19 f9b5e509 -- <drift.sh's files>`, 14 files, about 1,040
+lines). The sections above (P1 reconcile, P8 owed sweeps, room turns C, room doors D, the router) already described part of
+it without moving SYNC; this pass read all of it. `drift.sh` gains `terminal/core_holders.rs`. Classified:
+
+**Covered by a model row (new or existing):**
+- **R-rename (#1013): a person is one identity across every id the core lists** (`core_revokes::held`/`held_under`:
+  `host_ids` of their `listPeople` row, current id plus `was`; `Held::first` = `was[0]`). Every host narrowing loops over
+  them: `local_revoke` and the cloud `pull` call `cut_off_held` (was `cut_off(id)`), `local_revoke`'s undo restores under each (the cloud's undo does not: finding 3),
+  `set_person_access` runs `enforce`, `stop_runs` and the room-turn end per id, the card fence ("no card for a set-aside
+  person", `cards/mod.rs`) checks every id, and the reconcile's `to_cut` cuts the current id and each former one (keyed by
+  `revoked_at`, so a new revoke is cut again). `RevokeDoors.tla` keeps one id (see "Bounds"); the rename is in
+  `Reconcile.tla` (`Renames`): `rename` passes, `broken-rename-current` fails Narrows. Tests:
+  `core_revokes::tests::a_renamed_then_revoked_person_is_cut_under_every_id_the_host_may_hold`,
+  `the_first_id_is_the_oldest_former_one_and_never_moves_on_a_rename`,
+  `api/core_revokes_tests.rs` `a_person_renamed_then_revoked_in_the_core_is_set_aside_under_the_old_id`,
+  `api/room_rename_tests.rs`. Room stays across a rename (joins under the first id, "already in" and leave over every id,
+  the readers keyed on the stay's id): `verification/rooms/RoomsRename.tla` (rows `rename-*`; the code is `rename-code`).
+- **A revoke with the core down cuts locally** (`revoke_person`, `f88017e3d`): when `auth_person` cannot read who is who
+  (a switched Mac whose core is not running), an invited person known to the host (never the owner or a bot) is `cut_off`
+  here and the owner told it is not complete. The fact is not stored: `Reconcile.tla`'s `AppRevokeFails` (fail-closed cut,
+  `FailCutHolds`); in `RevokeDoors.tla` a stutter plus a stronger stop. Test: `api/stepped_e2e_tests.rs`.
+- **The kernel launch's revoke epoch** (`kernel/bin/kith`, P5/P9: `cad67a6d7`, `dd52f5a25`): once the claims are the
+  core's, a non-owner's revoke epoch is read BEFORE kith-auth decides they may run and travels with the claim
+  (`KITH_REVOKE_SEEN`); a revoke between the two refuses the claim in its transaction (`claims.rs` `revoke_seen`), and a
+  guest run the core cannot record does not start (`proc` exit 9 or any failure while `claims_core`). That keeps the
+  model's start (`MayP` and the claim, one step) true against a revoke. Modelled in writer-lock (`c4-epochleak`); tested
+  by `kernel/tests/kith-sessions-core-check`. The bash launch also refuses `room-` persons (fewer starts).
+- **The guest door on the tombstone** (L1, `621e9b528`): `door` routed; now the code of `switched-router-door` (see "The
+  router on the tombstone"). **Room doors over a basis** (#1007): "Room doors" above.
+- **The tick on the tombstone** (`people.job` with `tick`, `card.rs` `job_tick`): `own_row` checks the person, the owner,
+  the own row and `may()` in the same locked step as the write: the `AlwaysWrite` shape (`AlwaysOnlyIfMay`), no row of its
+  own. Tests: `authority/tests/card.rs` `a_job_is_ticked_as_the_owner_saw_it_*`.
+- **Owed sweeps** (`botguests::sweep_claims` -> `core_holders::sweep`, P8): `RetryKeepsRestored` (above).
+- **Room-turn cards withdrawn with the revoke** (`cards::withdraw_room_person`, `283820001`, `b1581438b`) and stopped asks'
+  cards (`withdraw_asks`): the host side of `CardsCut`; tested by `api/room_withdraw_tests.rs` (`a_revoke_withdraws_the_card_of_a_running_room_turn_and_only_that_one`, after a restart, a parked turn).
+
+**Read, no revoke step:** the core refusing new `room-` person, rename, invite and bot ids (`revoke.rs` `check_not_room`,
+`write.rs`; kith-auth `room_prefix_msg`; the host's `slug` gives `p-room-...`); kith-auth's `APP_ONLY` people writes exiting
+3 on the tombstone (a terminal revoke there is `kith kernel core-call people.suspend`, as P1 says); `owner`/`share`/`browser`
+through the core (`secret_writes.rs` `secret_owner`/`secret_share`/`secret_browser`: profiles, owner-only; `secretShare
+--rm` a removal); `people.link` and `/link` through the core when switched (`hq.rs`; the link refuses a cut-off person,
+invitee-access 37); `people.listPeople` `withWas`; `mcp-names`/`ls`/`connectors` routes; `helper-mcp` reading the core's
+tables; the host's `resolved` bundle (`consumeAccess`) and the test rig's opt-in split (`TEST_OPT_IN`); invite rooms on
+`createInvite` and `proveInvite` (widening only for a person the live `may_use` allows, invitee-access); the off-turn
+lock-alone stub flag (thread-writers).
+
+**Findings (not fixed here: no production code in this PR):**
+1. **A failed revoke of a renamed person cuts only the current id** (`reconcile/rename-failcut`, FailCutHolds fails:
+   AppRevokeFails, rename, AppCut with the read falling back). On a switched Mac where the core cannot answer, both the
+   core-down branch of `revoke_person` (`cut_off(id)`) and `local_revoke`'s failure branch (`cut_off_held`, whose
+   `held_under` falls back to the id given) set aside and stop only what the host holds under the CURRENT id. A renamed
+   person's devices, memberships, invites, claims and room stays are under the old id, so their runs there keep running and
+   their devices stay live. The core shows no revoke (the write failed), so the reconcile never cuts the old id either.
+   While the core is down the switched guard refuses new starts, but a running turn under the old id is not stopped,
+   against the comment's "the host's half is fail-closed"; and once the core is back it shows no revoke and the host
+   set aside only the current id, so the old id's devices work again until the owner revokes a second time (they are
+   told the revoke is not complete). `cut_off_held`'s doc (`people.rs` ~:714) says the core's poll cuts the old ids: it
+   does not (no revoke to see). Proposed fix (architect, `designs/2026-11-17-rename-failcut/`, model-checked, not yet
+   agreed): a durable "owed cut" row when the ids cannot be read, paid by the 3 s poll under `AUTH_WRITES` once they can,
+   cleared by every undo route; the core-down branch of `revoke_person` uses `cut_off_held` too.
+2. **An undo after a rename can leave the old id set aside** (`reconcile/rename-undo-miss`, NoLostUndoStrict fails;
+   NoLostUndo with `missed` passes): the undo's `held_under` runs after the core commit; if that read fails the host
+   restores only the current id. Fail closed (narrower); the owner undoes again (idempotent in the core). Accepted.
+3. **An undo that arrives through the cloud restores only the id the cloud names** (`cloud.rs` `pull`:
+   `restored(hub, &person)` for `changed.restored`, while the cut above it is `cut_off_held` and `local_revoke`'s undo
+   loops over `held_under`). After a rename on a switched Mac, an undo made on another Mac leaves this Mac's rows under the
+   old id set aside, every time, not only when a read fails: the `missed` state of finding 2 without the fallback. Fail
+   closed; the owner's undo in this Mac's app restores every id. Fix: the same `held_under` loop in `pull`.
+4. `cut_off_held` and the cloud `pull` cut each id with a separate `cut_off`, one after another: the stop is per id, not one
+   step. No property is about the order of ids; a revoke is never narrower for it.
+
+`verification/revoke/run.sh` and `verification/rooms/run.sh` (under `mcp__flow__test_slot`, `nice`): every row as expected,
+new rows included. `drift.sh` shows no changed covered file at f9b5e509.
+
+## Owed cut of a renamed person's failed revoke (2026-11-17, flow/rename-owed-cut, #1022)
+Closes findings 1 and 3 of the re-sync above (PR #1020), design 2026-11-17-rename-failcut (`ReconcileOwed.tla`, rows in `reconcile-owed.tsv`): see the
+code table's last row. Finding 3: the cloud `pull`'s restored now gives back under
+`held_under`, as `local_revoke`'s undo does. `revoke_person`'s core-down branch calls `cut_off_held` too, but it is taken
+only for an id the host holds a person row under; a revoke by a new id (`samuel`, whose host rows are under `sam`) with
+the core down is refused before any cut, so the owed cut is reached from `local_revoke`'s failure branch (the person
+read, then the core write failed) and from a revoke by the old id. Tested by `api/core_revokes_tests.rs`
+(`a_renamed_persons_revoke_without_the_core_cuts_the_old_id_once_the_core_is_back`,
+`the_app_revoke_with_the_core_down_owes_the_cut_too`, `an_undo_before_the_owed_cut_is_paid_restores_and_clears_it`).
+SYNC is not moved.

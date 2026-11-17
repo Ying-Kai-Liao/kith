@@ -3,6 +3,7 @@
 use super::model::{Entry, EntryKind, Lane, ReadScope};
 use super::{Store, logged, next_rev, now_ms};
 use crate::LockExt;
+use crate::chat::room_pointer::SEEN_ROWS_SQL;
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
@@ -28,6 +29,49 @@ pub(super) const ENTRY_COLS: &str = "seq, id, bot_id, rev, kind, turn, data, cre
 /// A bot still winding down after its deletion can't leave lines behind (`?2` is the chat).
 const LIVE_CHAT: &str = "WHERE NOT EXISTS (SELECT 1 FROM bots WHERE id = ?2 AND deleted = 1)";
 
+/// Writes one entry on `c` (a connection or a transaction); an `id` already stored comes back as that entry.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn insert_entry_in(
+    c: &rusqlite::Connection,
+    id: &str,
+    lane: &Lane,
+    kind: EntryKind,
+    turn: i64,
+    data: &Value,
+    now: i64,
+    origin_gen: Option<i64>,
+) -> Result<(Entry, bool)> {
+    if let Some(e) =
+        c.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?1"), [id], row_entry).optional()?
+    {
+        return Ok((e, false));
+    }
+    let rev = next_rev(c)?;
+    let added = c.execute(
+        &format!(
+            "INSERT INTO entries(id, bot_id, thread_id, rev, kind, turn, data, created_at, updated_at, origin_gen)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9 {LIVE_CHAT}"
+        ),
+        params![id, lane.chat, lane.thread, rev, kind.as_str(), turn, data.to_string(), now, origin_gen],
+    )?;
+    ensure!(added == 1, "the chat was deleted");
+    Ok((
+        Entry {
+            id: id.to_owned(),
+            seq: c.last_insert_rowid(),
+            bot_id: lane.chat.clone(),
+            thread_id: lane.thread.clone(),
+            rev,
+            kind: kind.as_str().to_owned(),
+            turn,
+            data: data.clone(),
+            created_at: now,
+            updated_at: now,
+        },
+        true,
+    ))
+}
+
 impl Store {
     /// Production writes go through `Hub::add_entry` (which holds and retries); this is the tests' direct way in.
     #[cfg(test)]
@@ -52,35 +96,70 @@ impl Store {
         now: i64,
     ) -> Result<(Entry, bool)> {
         let c = self.db.locked();
-        if let Some(e) =
-            c.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?1"), [id], row_entry).optional()?
-        {
-            return Ok((e, false));
+        insert_entry_in(&c, id, lane, kind, turn, data, now, None)
+    }
+
+    /// [`Self::insert_entry_as`] naming the room gen the line comes from (`origin_gen`), written with the row.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_entry_stamped(
+        &self,
+        id: &str,
+        lane: &Lane,
+        kind: EntryKind,
+        turn: i64,
+        data: &Value,
+        now: i64,
+        origin_gen: Option<i64>,
+    ) -> Result<(Entry, bool)> {
+        let c = self.db.locked();
+        insert_entry_in(&c, id, lane, kind, turn, data, now, origin_gen)
+    }
+
+    /// [`Self::insert_entry_at`] naming the room gen the entry comes from (`origin_gen`): a person's post takes the gen
+    /// at its append, a turn's output the gen its turn started in. Written with the row and never changed after, so
+    /// nothing re-stamps it; a row without one is unstamped, which a person in a room never sees.
+    #[cfg(test)]
+    pub fn insert_entry_from_gen(
+        &self,
+        lane: &Lane,
+        kind: EntryKind,
+        turn: i64,
+        data: &Value,
+        now: i64,
+        origin_gen: i64,
+    ) -> Result<Entry> {
+        let c = self.db.locked();
+        let id = uuid::Uuid::new_v4().to_string();
+        insert_entry_in(&c, &id, lane, kind, turn, data, now, Some(origin_gen)).map(|(e, _)| e)
+    }
+
+    /// The room gen entry `id` came from; `None` for an entry that was never stamped (or no such entry). An unstamped
+    /// entry is hidden from every person in a room: only the writers that name a gen make an entry visible to one.
+    pub fn origin_gen(&self, id: &str) -> Option<i64> {
+        let c = self.db.locked();
+        c.query_row("SELECT origin_gen FROM entries WHERE id = ?1", [id], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+            .flatten()
+    }
+
+    /// The gen of each of `ids` that has one (an unstamped entry is left out), in one read, for marking a page of a
+    /// room's history for its owner.
+    pub fn origin_gens(&self, ids: &[&str]) -> std::collections::HashMap<String, i64> {
+        let c = self.db.locked();
+        let mut out = std::collections::HashMap::new();
+        for chunk in ids.chunks(400) {
+            let marks = vec!["?"; chunk.len()].join(",");
+            let Ok(mut st) = c.prepare(&format!(
+                "SELECT id, origin_gen FROM entries WHERE origin_gen IS NOT NULL AND id IN ({marks})"
+            )) else {
+                continue;
+            };
+            let rows = st.query_map(rusqlite::params_from_iter(chunk.iter()), |r| Ok((r.get(0)?, r.get(1)?)));
+            out.extend(rows.into_iter().flatten().flatten());
         }
-        let rev = next_rev(&c)?;
-        let added = c.execute(
-            &format!(
-                "INSERT INTO entries(id, bot_id, thread_id, rev, kind, turn, data, created_at, updated_at)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8 {LIVE_CHAT}"
-            ),
-            params![id, lane.chat, lane.thread, rev, kind.as_str(), turn, data.to_string(), now],
-        )?;
-        ensure!(added == 1, "the chat was deleted");
-        Ok((
-            Entry {
-                id: id.to_owned(),
-                seq: c.last_insert_rowid(),
-                bot_id: lane.chat.clone(),
-                thread_id: lane.thread.clone(),
-                rev,
-                kind: kind.as_str().to_owned(),
-                turn,
-                data: data.clone(),
-                created_at: now,
-                updated_at: now,
-            },
-            true,
-        ))
+        out
     }
 
     /// Deterministic IDs make routine transcript publication retryable after a crash.
@@ -136,11 +215,32 @@ impl Store {
         logged("entry", row.optional()).flatten()
     }
 
-    pub fn find_by_nonce(&self, bot_id: &str, nonce: &str) -> Option<Entry> {
+    /// [`Self::find_by_nonce`] among the lines `person` posted in a room: another sender's line with the same nonce is
+    /// never theirs to be handed back.
+    pub fn find_person_nonce(&self, room: &str, person: &str, nonce: &str, stay: i64) -> Option<Entry> {
         let c = self.db.locked();
+        // Only this stay's lines: a nonce the person used in an earlier stay (before a leave and a re-add) names a line
+        // they were never shown, and answering with it would hand it back.
         let row = c.query_row(
             &format!(
-                "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND kind = 'user' AND json_extract(data, '$.clientNonce') = ?2"
+                "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND kind = 'user'
+                   AND json_extract(data, '$.clientNonce') = ?2 AND json_extract(data, '$.sender.person') = ?3
+                   AND origin_gen >= ?4"
+            ),
+            params![room, nonce, person, stay],
+            row_entry,
+        );
+        logged("entry by person nonce", row.optional()).flatten()
+    }
+
+    pub fn find_by_nonce(&self, bot_id: &str, nonce: &str) -> Option<Entry> {
+        let c = self.db.locked();
+        // The owner's own lines: a person's post in the same room with the same nonce is another sender's, and the owner
+        // must not be answered with it.
+        let row = c.query_row(
+            &format!(
+                "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND kind = 'user' AND json_extract(data, '$.clientNonce') = ?2
+                   AND json_extract(data, '$.sender.person') IS NULL"
             ),
             params![bot_id, nonce],
             row_entry,
@@ -188,6 +288,26 @@ impl Store {
         Ok(st.query_map(params![since, cap], row_entry)?.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// An app's catch-up: entries changed after `since`, exactly, once it has a cursor. A fresh app (`since == 0`) gets
+    /// a window that does not grow with a chat's history: per chat the newest `cap` main-chat entries and the newest
+    /// `cap` thread replies (ranked apart, so one busy task can't push the chat's own messages out), plus the roots of
+    /// those replies. Older messages page in with `history`, threads with `thread`.
+    pub fn catch_up_since(&self, since: i64, cap: i64) -> Result<Vec<Entry>> {
+        if since != 0 {
+            return self.entries_since(since, cap);
+        }
+        let c = self.db.locked();
+        let mut st = c.prepare(&format!(
+            "WITH ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY bot_id, thread_id IS NULL ORDER BY seq DESC) AS rn
+                             FROM entries)
+             SELECT {ENTRY_COLS} FROM ranked
+             WHERE rn <= ?1
+                OR id IN (SELECT thread_id FROM ranked WHERE rn <= ?1 AND thread_id IS NOT NULL)
+             ORDER BY seq"
+        ))?;
+        Ok(st.query_map(params![cap], row_entry)?.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// The entries of one chat (a room, threads included) after `since`, oldest first, at most `cap`. A fresh reader
     /// (`since == 0`) gets the newest `cap`; one with a cursor gets the next `cap` after it, so it skips nothing.
     /// Only entries inserted after `after_seq` count (an outside bot's join point), however far an edit moved their `rev`.
@@ -218,6 +338,58 @@ impl Store {
             st.query_map(params![bot_id, before_seq, limit], row_entry)?.collect::<rusqlite::Result<_>>()?;
         rows.reverse();
         Ok(rows)
+    }
+
+    /// [`Self::history`] as a person in a room is shown it: only messages (the user's and the agents') stamped with a gen
+    /// of at least `seat` (their open stay's `joined_gen`). The test is in the query, so a page is full of what they may
+    /// see, and `NULL` (never stamped) matches nothing.
+    pub fn history_seen(&self, bot_id: &str, before_seq: i64, limit: i64, seat: i64) -> Result<Vec<Entry>> {
+        let c = self.db.locked();
+        let mut st = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND thread_id IS NULL AND seq < ?2
+               AND {SEEN_ROWS_SQL} AND origin_gen >= ?4
+             ORDER BY seq DESC LIMIT ?3"
+        ))?;
+        let mut rows: Vec<Entry> =
+            st.query_map(params![bot_id, before_seq, limit, seat], row_entry)?.collect::<rusqlite::Result<_>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
+    /// [`Self::thread`] as a person in a room is shown it (see [`Self::history_seen`]).
+    pub fn thread_seen(&self, bot_id: &str, root: &str, limit: i64, seat: i64) -> Result<Vec<Entry>> {
+        let c = self.db.locked();
+        let mut st = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND thread_id = ?2
+               AND {SEEN_ROWS_SQL} AND origin_gen >= ?4
+             ORDER BY seq DESC LIMIT ?3"
+        ))?;
+        let mut rows: Vec<Entry> =
+            st.query_map(params![bot_id, root, limit, seat], row_entry)?.collect::<rusqlite::Result<_>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
+    /// Every "waiting" pointer still marked `waiting`, whatever became of its card (for the start-up sweep).
+    pub fn waiting_room_pointers(&self) -> Vec<Entry> {
+        let c = self.db.locked();
+        let rows = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE kind = 'notice'
+               AND json_extract(data, '$.notice') = 'roomCardWaiting' AND json_extract(data, '$.state') = 'waiting'"
+        ));
+        let found = rows.and_then(|mut st| st.query_map([], row_entry)?.collect::<rusqlite::Result<_>>());
+        logged("waiting_room_pointers", found).unwrap_or_default()
+    }
+
+    /// The "waiting" pointers (any lane of the room) of the card entry `card_entry`, open or closed.
+    pub fn room_pointers_of(&self, card_entry: &str) -> Vec<Entry> {
+        let c = self.db.locked();
+        let rows = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE kind = 'notice'
+               AND json_extract(data, '$.notice') = 'roomCardWaiting' AND json_extract(data, '$.card') = ?1"
+        ));
+        let found = rows.and_then(|mut st| st.query_map([card_entry], row_entry)?.collect::<rusqlite::Result<_>>());
+        logged("room_pointers_of", found).unwrap_or_default()
     }
 
     /// Cards still waiting for the user to sign in to agent `backend`, oldest first.
@@ -252,6 +424,19 @@ impl Store {
     // ponytail: substring scan, no index (CJK needs no tokenizer this way): 0.6 s over 180k messages of one bot.
     // An FTS5 trigram table once a bot's search passes a second.
     pub fn search_messages(&self, bot_id: &str, terms: &[String], from: Option<i64>, limit: i64) -> Result<Vec<Entry>> {
+        self.search_messages_seen(bot_id, terms, from, limit, None)
+    }
+
+    /// [`Self::search_messages`] for a person in a room: with `seat` (their open stay's `joined_gen`) only messages
+    /// stamped with a gen of at least that (see [`Self::history_seen`]).
+    pub fn search_messages_seen(
+        &self,
+        bot_id: &str,
+        terms: &[String],
+        from: Option<i64>,
+        limit: i64,
+        seat: Option<i64>,
+    ) -> Result<Vec<Entry>> {
         let mut sql = format!(
             "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND seq <= ?3 AND
                (kind = 'user' OR (kind = 'agent' AND json_extract(data, '$.final') = 1))"
@@ -259,10 +444,14 @@ impl Store {
         for i in 0..terms.len() {
             let _ = write!(sql, " AND instr(lower(json_extract(data, '$.text')), ?{}) > 0", i + 4);
         }
-        sql.push_str(" ORDER BY seq DESC LIMIT ?2");
         let mut args: Vec<rusqlite::types::Value> =
             vec![bot_id.to_owned().into(), limit.into(), from.unwrap_or(i64::MAX).into()];
         args.extend(terms.iter().map(|t| t.to_lowercase().into()));
+        if let Some(seat) = seat {
+            let _ = write!(sql, " AND origin_gen >= ?{}", args.len() + 1);
+            args.push(seat.into());
+        }
+        sql.push_str(" ORDER BY seq DESC LIMIT ?2");
         let c = self.db.locked();
         let mut st = c.prepare(&sql)?;
         Ok(st.query_map(rusqlite::params_from_iter(args), row_entry)?.collect::<rusqlite::Result<_>>()?)
@@ -492,6 +681,67 @@ mod tests {
         };
         // The newest 3 are all replies; the old root rides along, and the main chat row outside the window does not.
         assert_eq!(ids(3), ["task", "reply 2", "reply 3", "reply 4"]);
+    }
+
+    #[test]
+    fn an_apps_fresh_catch_up_ranks_main_chat_and_replies_apart_and_stays_exact_with_a_cursor() {
+        let s = temp_store();
+        let root =
+            s.insert_entry(&Lane::main("b1"), EntryKind::User, 1, &json!({"text": "task", "task": true})).unwrap();
+        for i in 0..4 {
+            s.insert_entry(&Lane::main("b1"), EntryKind::User, 1, &json!({"text": format!("main {i}")})).unwrap();
+        }
+        let thread = Lane::in_thread("b1", &root.id);
+        for i in 0..5 {
+            s.insert_entry(&thread, EntryKind::Agent, 1, &json!({"text": format!("reply {i}"), "final": true}))
+                .unwrap();
+        }
+        let texts = |rows: Vec<Entry>| -> Vec<String> {
+            rows.into_iter().map(|e| e.data["text"].as_str().unwrap().to_owned()).collect()
+        };
+        // The busy task's replies don't push the chat's own newest messages out; its old root rides along.
+        assert_eq!(texts(s.catch_up_since(0, 2).unwrap()), ["task", "main 2", "main 3", "reply 3", "reply 4"]);
+        // With a cursor nothing is cut.
+        assert_eq!(texts(s.catch_up_since(root.rev, 2).unwrap()).len(), 9);
+    }
+
+    #[test]
+    fn a_fresh_catch_up_stays_bounded_however_long_the_history() {
+        let s = temp_store();
+        // 10,000 entries over 20 chats, a quarter of them thread replies under a few tasks per chat.
+        for chat in 0..20 {
+            let main = Lane::main(&format!("b{chat}"));
+            let mut root = None;
+            for i in 0..500 {
+                if i % 4 == 3 {
+                    let r: &Entry = root.as_ref().unwrap();
+                    let lane = Lane::in_thread(&r.bot_id, &r.id);
+                    s.insert_entry(&lane, EntryKind::Agent, 1, &json!({"text": "reply", "final": true})).unwrap();
+                } else {
+                    let e =
+                        s.insert_entry(&main, EntryKind::User, 1, &json!({"text": "m", "task": i % 100 == 0})).unwrap();
+                    if i % 100 == 0 {
+                        root = Some(e);
+                    }
+                }
+            }
+        }
+        let cold = s.catch_up_since(0, 40).unwrap();
+        let old = s.entries_since(0, 200).unwrap();
+        let bytes = |rows: &[Entry]| serde_json::to_vec(rows).unwrap().len();
+        println!(
+            "10k entries over 20 chats: cold catch-up {} entries, {} B (was {}, {} B)",
+            cold.len(),
+            bytes(&cold),
+            old.len(),
+            bytes(&old)
+        );
+        assert!(cold.len() <= 20 * (40 + 40 + 5), "{}", cold.len());
+        for chat in 0..20 {
+            let id = format!("b{chat}");
+            let main = cold.iter().filter(|e| e.bot_id == id && e.thread_id.is_none()).count();
+            assert!((40..=45).contains(&main), "{id}: {main} main rows");
+        }
     }
 
     #[test]

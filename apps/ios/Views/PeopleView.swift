@@ -322,8 +322,12 @@ private struct InviteSheet: View {
     @State private var personId: String?
     @State private var roles: [String: InviteRole] = [:]
     @State private var created: CreatedInvite?
+    /// The rooms this invite adds the person to; off until ticked, and only while their agents are on above.
+    @State private var ticked: [String] = []
 
     private var agents: [String] { agentsOffered(on: store) }
+    private var rooms: [(id: String, name: String, agents: [RoomAgent])] { store.inviteRooms }
+    private var followed: [String] { RoomPeopleLogic.followAgents(ticked: ticked, rooms: rooms.map { ($0.id, $0.agents) }, roles: roles) }
     private var whoOptions: [(id: String, label: String)] {
         var options: [(id: String, label: String)] = [(id: "", label: "New person")]
         options += people.people.map { (id: $0.personId, label: $0.name) }
@@ -336,13 +340,15 @@ private struct InviteSheet: View {
     var body: some View {
         Group {
             if let created {
-                InviteLinkView(invite: created, name: people.person(created.personId ?? "")?.name ?? name)
+                InviteLinkView(invite: created, name: people.person(created.personId ?? "")?.name ?? name,
+                               joins: RoomPeopleLogic.inviteJoinsLine(name: people.person(created.personId ?? "")?.name ?? name, rooms: followed.compactMap { id in rooms.first { $0.id == id }?.name }))
             } else {
                 form
             }
         }
         .background(Palette.background)
         .safeAreaInset(edge: .top, spacing: 0) { ModalHeader("Invite someone") }
+        .task { await store.refreshAllRoomPeople() }
     }
 
     private var form: some View {
@@ -362,7 +368,20 @@ private struct InviteSheet: View {
                         ? "No agents on this computer yet."
                         : "A member can do more with an agent than a guest. Guest is the safer start.") {
                 ForEach(agents, id: \.self) { agent in
-                    AgentRoleRow(agent: agent, role: Binding(get: { roles[agent] }, set: { roles[agent] = $0 }))
+                    AgentRoleRow(agent: agent, role: Binding(get: { roles[agent] }, set: { roles[agent] = $0; ticked = followed }))
+                }
+            }
+            if !rooms.isEmpty {
+                CardSection("Rooms") {
+                    ForEach(rooms, id: \.id) { room in
+                        let needs = RoomPeopleLogic.roomNeeds(room.agents, roles: roles)
+                        Toggle(needs.isEmpty ? room.name : "\(room.name) · Needs \(RoomPeopleLogic.joined(needs.map(\.name)))",
+                               isOn: Binding(get: { ticked.contains(room.id) && needs.isEmpty }, set: { on in
+                                   ticked.removeAll { $0 == room.id }
+                                   if on { ticked.append(room.id) }
+                               }))
+                            .toggleStyle(.kith).disabled(!needs.isEmpty)
+                    }
                 }
             }
             if let error = people.error {
@@ -384,7 +403,7 @@ private struct InviteSheet: View {
 
     private func create() async {
         let typed = name.trimmingCharacters(in: .whitespaces)
-        if let made = await people.createInvite(name: personId == nil ? typed : nil, personId: personId, agents: roles) {
+        if let made = await people.createInvite(name: personId == nil ? typed : nil, personId: personId, agents: roles, rooms: followed) {
             created = made
         }
     }
@@ -411,6 +430,8 @@ private struct AgentRoleRow: View {
 struct InviteLinkView: View {
     let invite: CreatedInvite
     let name: String
+    /// "Mia joins Studio when Mia accepts." when the invite adds the person to rooms.
+    var joins: String?
     @State private var copied = false
 
     var body: some View {
@@ -422,6 +443,7 @@ struct InviteLinkView: View {
                     .textSelection(.enabled)
                     .lineLimit(4)
                     .truncationMode(.middle)
+                if let joins { Text(joins).foregroundStyle(Palette.text) }
                 Button(copied ? "Copied" : "Copy link") {
                     UIPasteboard.general.string = invite.link
                     copied = true
@@ -490,6 +512,10 @@ private struct EditPersonSheet: View {
 
     private var agents: [String] { agentsOffered(on: store, plus: person.agents.keys) }
     private var changed: Bool { roles != person.agents || projects != Set(person.projects) }
+    /// Rooms that would close for this person if the switches stay as they are.
+    private var closing: [String] {
+        RoomPeopleLogic.closingLines(person: person.name, closing: RoomPeopleLogic.closingRooms(person: person, newRoles: roles, inRooms: store.rooms(of: person.personId)))
+    }
 
     var body: some View {
         CardForm {
@@ -497,6 +523,7 @@ private struct EditPersonSheet: View {
                 ForEach(agents, id: \.self) { agent in
                     AgentRoleRow(agent: agent, role: Binding(get: { roles[agent] }, set: { roles[agent] = $0 }))
                 }
+                ForEach(closing, id: \.self) { line in Text(line).font(.footnote).foregroundStyle(Palette.text) }
             }
             if !people.projects.isEmpty || !projects.isEmpty {
                 CardSection("Shared rooms", footer: "Only the rooms you tick are shared with \(person.name).") {
@@ -556,9 +583,9 @@ private struct EditPersonSheet: View {
         }
         .background(Palette.background)
         .safeAreaInset(edge: .top, spacing: 0) { ModalHeader(person.name) }
-        .task { await people.loadProjects() }
+        .task { await people.loadProjects(); await store.refreshAllRoomPeople() }
         .kithDialog("Remove \(person.name)?", isPresented: $confirmRemove,
-                    message: "They lose access to this computer. Their memory stays on the Mac.") {
+                    message: ["They lose access to this computer. Their memory stays on the Mac.", RoomPeopleLogic.revokeLine(person: person.name, rooms: store.rooms(of: person.personId).map(\.name))].compactMap { $0 }.joined(separator: " ")) {
             [DialogAction("Remove", destructive: true) {
                 Task { if await people.remove(person.personId) { dismiss() } }
             }]

@@ -120,7 +120,8 @@ extension BotStore {
                         }
                     }
                     return try await client.send(botId: botId, text: text, clientNonce: nonce, threadId: thread, attachments: ids,
-                                                 pasted: pasted, newTask: newTask, start: start, via: via, budget: budget)
+                                                 pasted: self.myRooms[botId] != nil ? [] : pasted, newTask: newTask, start: start, via: via,
+                                                 budget: self.myRooms[botId] != nil ? nil : budget, stay: self.myRooms[botId]?.stay)
                 }
                 outgoingFiles[nonce] = nil
                 outgoingStarts[nonce] = nil
@@ -131,6 +132,8 @@ extension BotStore {
             } catch {
                 if outgoingFiles[nonce] != nil { lastError = "Couldn't send the files: \(error.localizedDescription)" }
                 markLocal(nonce: nonce, botId: botId, status: "failed")
+                // A refused room send may mean the stay ended: the room list says so.
+                if myRooms[botId] != nil { await refreshMyRooms() }
             }
         }
     }

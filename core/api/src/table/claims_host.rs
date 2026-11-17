@@ -56,6 +56,12 @@ pub(super) const ROWS: &[Method] = &[
             need("conversation", "string", "The session id."),
             need("agent", "string", "The agent."),
             need("engine", "string", "The engine (claude)."),
+            opt(
+                "room",
+                "string",
+                "A room conversation: the conversation of (agent, room, joinEpoch), made when missing. A second one for the same key is refused.",
+            ),
+            opt("joinEpoch", "int", "The room's join epoch (with `room`)."),
         ],
     ),
     host(
@@ -90,7 +96,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.enqueue",
-        "Queues a turn for a conversation (created when missing). Refused when the person was revoked after `revokeSeen`. Answers `{turn}`.",
+        "Queues a turn for a conversation (created when missing). Refused when the person was revoked after `revokeSeen`, or, for a room turn, when a `basis` person was revoked after their `epochs` entry (`revoked`), the turn has no basis, a bot's post opens a chain, or the conversation belongs to another join epoch (`other`), or the chain's turn budget is spent (`budget`). A room turn's basis, room, gen, level, author and budget are fixed here and never change. `key` makes a retry after a lost reply answer the same turn without spending the budget again. Answers `{turn}`.",
         &[
             need("conversation", "string", "The session id."),
             need("agent", "string", "The agent."),
@@ -112,11 +118,100 @@ pub(super) const ROWS: &[Method] = &[
                 "int",
                 "Expire a waiting turn at this time (ms).",
             ),
+            opt(
+                "level",
+                "string",
+                "`owner` (default) or `room`: a room turn speaks for the people of its basis.",
+            ),
+            opt("basis", "[string]", "The people the turn speaks for."),
+            opt(
+                "epochs",
+                "{int}",
+                "`hostclaim.epoch` of each basis person, read before the may check.",
+            ),
+            opt("room", "string", "The room."),
+            opt(
+                "gen",
+                "int",
+                "The room's membership generation at the start.",
+            ),
+            opt(
+                "joinEpoch",
+                "int",
+                "The room's join epoch: which conversation it goes to.",
+            ),
+            opt(
+                "author",
+                "string",
+                "Whose post made the turn: a person, `bot:<id>` or an agent name.",
+            ),
+            opt(
+                "budget",
+                "int",
+                "A person's post: the follow-up rounds the chain may have.",
+            ),
+            opt(
+                "budgetFrom",
+                "int",
+                "A bot's or agent's turn: the turn that caused it. It spends one of that turn's rounds.",
+            ),
+            opt(
+                "key",
+                "string",
+                "The caller's id for this enqueue, so a retry is not counted twice.",
+            ),
         ],
     ),
     host(
+        "hostclaim.proc",
+        "A host engine process, idle or not, with a session it has loaded: registers it or adds one more session to it (one core row per process and session; a process loads its agent's main session and its chat's threads), so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
+        &[
+            need("pid", "int", "The process."),
+            need("started", "string", "Its start stamp."),
+            need("instance", "string", "The host instance that runs it."),
+            opt(
+                "person",
+                "string",
+                "Whose process it is (a guest's principal).",
+            ),
+            opt("agent", "string", "The agent."),
+            opt(
+                "conversation",
+                "string",
+                "A session it has loaded. Leave out for a process with none yet.",
+            ),
+            opt(
+                "revokeSeen",
+                "int",
+                "`hostclaim.epoch` of `person`, read before the process was started.",
+            ),
+        ],
+    ),
+    host(
+        "hostclaim.procGone",
+        "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. With `conversation`, only that session is forgotten (the process stays known, with its other sessions). Answers `{gone}`.",
+        &[
+            need("pid", "int", "The process."),
+            need("started", "string", "Its start stamp."),
+            opt(
+                "conversation",
+                "string",
+                "Forget only this session of the process (it unloaded or forked it away).",
+            ),
+        ],
+    ),
+    host(
+        "hostclaim.adopt",
+        "This host start's instance takes over: every claim and process of another host instance is ended (a claim never redeemed at once and its turn given back; one with a process goes to `ending`, its process to be killed until gone). Answers `{ended, kill}`.",
+        &[need(
+            "instance",
+            "string",
+            "`kith-serve-host/<pid>-<start stamp>`.",
+        )],
+    ),
+    host(
         "hostclaim.turn",
-        "The claim for a queued or parked turn, through `claim_next` (it picks the account and starts the session row). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
+        "The claim for a queued or parked turn, through `claim_next` (it starts the session row on the account: the core picks it once accounts are switched; until then it is the `account` the host sends). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
         &[
             need("conversation", "string", "The session id."),
             need("turn", "int", "The turn."),
@@ -136,6 +231,11 @@ pub(super) const ROWS: &[Method] = &[
                 "holderInstance",
                 "string",
                 "The holder instance the spawn goes to.",
+            ),
+            opt(
+                "account",
+                "string",
+                "The account the host's warm process runs as. Used and recorded while accounts are not switched (the core does not pick then); ignored once the core owns account state.",
             ),
             opt("kernel", "string", "The kernel folder."),
             HOME,
@@ -194,6 +294,16 @@ pub(super) const ROWS: &[Method] = &[
             need("turn", "int", "The turn."),
             need("reason", "string", "Why (logged)."),
         ],
+    ),
+    host(
+        "hostclaim.strays",
+        "The turns a host enqueued (they carry its `key`) that are still queued or parked: `{turns: [{turn, conversation, key}]}`. The host cancels those it has no item for (a turn requeued after a restart, whose item is gone). A turn the core made itself carries no key and is never listed.",
+        &[],
+    ),
+    host(
+        "hostclaim.queued",
+        "The turns the core queued that no host began (a schedule's fire: `enq_key` NULL, source `schedule`) and that wait (queued or parked): `{turns: [{turn, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed.",
+        &[],
     ),
     host(
         "hostclaim.park",

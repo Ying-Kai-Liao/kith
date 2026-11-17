@@ -3,7 +3,7 @@
 
 use super::{BotStatus, Hub, Runtime};
 use crate::LockExt;
-use crate::agent::bot::{self, BotHandle, Cmd, actor_key, bot_of, place_of};
+use crate::agent::bot::{self, BotHandle, Cmd, actor_key, actor_key_as, bot_of, person_of, place_of};
 use crate::chat::memory;
 use crate::store::{BotConfig, Lane, lane_key};
 use anyhow::{Result, anyhow};
@@ -135,11 +135,22 @@ impl Hub {
                 self.send_to_actor(&key, cmd)
             }
             Cmd::Group(ref turn) => {
-                let key = self.actor_in(bot_id, &turn.lane);
+                // A turn at room level runs on the room person's own actor, which no other turn ever shares; one at owner
+                // level on the owner's (see `chat::room_turn`).
+                let key = match turn.basis.as_ref().and_then(crate::chat::room_turn::RoomBasis::person_id) {
+                    Some(person) => actor_key_as(bot_id, &turn.lane, Some(&person)),
+                    None => self.actor_in(bot_id, &turn.lane),
+                };
                 self.send_to_actor(&key, cmd)
             }
             Cmd::Permission { ref entry_id, .. } | Cmd::Routed { ref entry_id, .. } => {
-                let lane = self.store.entry(entry_id).map(|e| Lane { chat: e.bot_id, thread: e.thread_id });
+                let entry = self.store.entry(entry_id);
+                // A room person's card sits in the owner's chat with the agent; it names the actor that waits on it.
+                let waiting = entry.as_ref().and_then(|e| e.data["actor"].as_str()).filter(|k| bot_of(k) == bot_id);
+                if let Some(key) = waiting.filter(|k| self.has_actor(k)) {
+                    return self.send_to_actor(key, cmd);
+                }
+                let lane = entry.map(|e| Lane { chat: e.bot_id, thread: e.thread_id });
                 let key = lane.map_or_else(|| bot_id.to_owned(), |l| self.actor_in(bot_id, &l));
                 // A card in a place with no actor has no turn waiting on it; the bot's own chat drops the answer.
                 let key = if self.has_place(bot_id, &place_of(&key)) { key } else { bot_id.to_owned() };
@@ -200,7 +211,12 @@ impl Hub {
 
     /// A command for one actor (by its key, see [`actor_key`]), started if it isn't running.
     pub fn send_to_actor(&self, key: &str, cmd: Cmd) -> Result<()> {
-        self.deliver(bot_of(key), &place_of(key), cmd)
+        self.deliver_as(bot_of(key), &place_of(key), person_of(key), cmd)
+    }
+
+    /// Whether an actor is running under exactly this key (a room person's included).
+    pub fn has_actor(&self, key: &str) -> bool {
+        self.bots.locked().get(bot_of(key)).is_some_and(|a| a.places.contains_key(key))
     }
 
     /// Stop in one place: the actor there, and an actor whose turn talks there (a routine run in its thread).
@@ -238,10 +254,17 @@ impl Hub {
     }
 
     fn deliver(&self, bot_id: &str, home: &Lane, cmd: Cmd) -> Result<()> {
+        self.deliver_as(bot_id, home, None, cmd)
+    }
+
+    /// [`Self::deliver`] to the room person's actor of that place when `person` is one.
+    fn deliver_as(&self, bot_id: &str, home: &Lane, person: Option<&str>, cmd: Cmd) -> Result<()> {
         // A send can fail when it raced the actor's retirement (see `retire_actor`): the place is gone from
         // `places` by then, so asking again starts a fresh actor.
-        let Err(mpsc::error::SendError(cmd)) = self.actor_tx(bot_id, home)?.send(cmd) else { return Ok(()) };
-        self.actor_tx(bot_id, home)?.send(cmd).map_err(|_| anyhow!("bot stopped"))
+        let Err(mpsc::error::SendError(cmd)) = self.actor_tx_as(bot_id, home, person)?.send(cmd) else {
+            return Ok(());
+        };
+        self.actor_tx_as(bot_id, home, person)?.send(cmd).map_err(|_| anyhow!("bot stopped"))
     }
 
     /// An actor of a thread or group lane that has sat unused asks to end (see `Actor::retire_if_unused`). It
@@ -252,23 +275,22 @@ impl Hub {
     /// Its runtime shows idle. False: something arrived, the actor carries on.
     pub(crate) fn retire_actor(
         &self,
-        bot_id: &str,
-        home: &Lane,
+        key: &str,
         own: &mpsc::UnboundedSender<Cmd>,
         rx: &mut mpsc::UnboundedReceiver<Cmd>,
     ) -> bool {
-        let key = actor_key(bot_id, home);
+        let bot_id = bot_of(key);
         {
             let mut bots = self.bots.locked();
             if !rx.is_empty() {
                 return false;
             }
             if let Some(actors) = bots.get_mut(bot_id)
-                && actors.places.get(&key).is_some_and(|(_, h)| h.tx.same_channel(own))
+                && actors.places.get(key).is_some_and(|(_, h)| h.tx.same_channel(own))
             {
-                actors.places.remove(&key);
+                actors.places.remove(key);
                 // Nothing of the finished turns shows any more; the Fast mode support is the bot's.
-                if let Some(rt) = self.runtime.locked().get_mut(&key) {
+                if let Some(rt) = self.runtime.locked().get_mut(key) {
                     *rt = Runtime { fast_mode: rt.fast_mode.clone(), ..Runtime::default() };
                 }
             }
@@ -285,7 +307,7 @@ impl Hub {
                     | Cmd::BotRequest(_)
                     | Cmd::Routed { .. }
                     | Cmd::Permission { .. }
-            ) && let Err(error) = self.send_to_actor(&key, cmd)
+            ) && let Err(error) = self.send_to_actor(key, cmd)
             {
                 tracing::warn!(bot = bot_id, error = format!("{error:#}"), "a command to a retiring actor was lost");
             }
@@ -316,13 +338,21 @@ impl Hub {
         let runtime = self.runtime.locked();
         runtime
             .iter()
-            .find(|(key, rt)| bot_of(key) == bot_id && rt.lane.as_ref() == Some(lane))
+            .find(|(key, rt)| bot_of(key) == bot_id && person_of(key).is_none() && rt.lane.as_ref() == Some(lane))
             .map_or_else(|| actor_key(bot_id, lane), |(key, _)| key.clone())
     }
 
     /// The channel to the bot's actor for `home`, starting the actor on first use.
+    #[cfg(test)]
     fn actor_tx(&self, bot_id: &str, home: &Lane) -> Result<mpsc::UnboundedSender<Cmd>> {
-        let key = actor_key(bot_id, home);
+        self.actor_tx_as(bot_id, home, None)
+    }
+
+    /// [`Self::actor_tx`] for the room person's actor of `home` when `person` is one: the same bot's config with that
+    /// person, started on first use. The person is the actor's own, fixed here for as long as it lives (a bot edited
+    /// meanwhile does not change who it runs as).
+    fn actor_tx_as(&self, bot_id: &str, home: &Lane, person: Option<&str>) -> Result<mpsc::UnboundedSender<Cmd>> {
+        let key = actor_key_as(bot_id, home, person);
         let tidier = {
             let bots = self.bots.locked();
             let actors = bots.get(bot_id).ok_or_else(|| anyhow!("unknown bot"))?;
@@ -331,7 +361,10 @@ impl Hub {
             }
             actors.tidier.clone()
         };
-        let cfg = self.store.bot(bot_id)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("unknown bot"))?.config;
+        let mut cfg = self.store.bot(bot_id)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("unknown bot"))?.config;
+        if let Some(person) = person {
+            cfg.person = Some(person.to_owned());
+        }
         let hub = self.me.upgrade().ok_or_else(|| anyhow!("the host is shutting down"))?;
         // Started outside the lock: an actor's first steps update its runtime, which emits the bot.
         let handle = bot::spawn(hub, cfg, home.clone(), tidier);
@@ -502,20 +535,20 @@ mod tests {
 
         // A command already queued: it stays.
         tx.send(Cmd::Stop).unwrap();
-        assert!(!hub.retire_actor(&bot, &thread, &tx, &mut rx));
+        assert!(!hub.retire_actor(&actor_key(&bot, &thread), &tx, &mut rx));
         assert!(hub.has_place(&bot, &thread));
         rx.try_recv().unwrap();
 
         // A newer actor holds the place: the old one leaves it alone.
         let (newer, _newer_rx) = mpsc::unbounded_channel();
         hub.bots.locked().get_mut(&bot).unwrap().places.insert(key.clone(), place(&newer));
-        assert!(hub.retire_actor(&bot, &thread, &tx, &mut rx));
+        assert!(hub.retire_actor(&actor_key(&bot, &thread), &tx, &mut rx));
         assert!(hub.has_place(&bot, &thread), "the newer actor's entry stays");
 
         // At rest and alone: the entry goes, the old channel refuses, and a send through the hub starts a new actor.
         let (tx, mut rx) = mpsc::unbounded_channel();
         hub.bots.locked().get_mut(&bot).unwrap().places.insert(key.clone(), place(&tx));
-        assert!(hub.retire_actor(&bot, &thread, &tx, &mut rx));
+        assert!(hub.retire_actor(&actor_key(&bot, &thread), &tx, &mut rx));
         assert!(!hub.has_place(&bot, &thread));
         assert!(tx.send(Cmd::Stop).is_err(), "a sender cloned before the retirement fails instead of vanishing");
         hub.send_to_actor(&key, Cmd::Permission { entry_id: "none".into(), option_id: None }).unwrap();

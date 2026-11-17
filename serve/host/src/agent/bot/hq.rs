@@ -60,9 +60,9 @@ fn process_env(saved: Vec<(String, String)>, launch: &hq::Launch, backup: bool) 
 }
 
 /// Whether a process for `person` in `room` is the owner's own 1:1 with `agent`: the only run of the app that gets an
-/// ask token.
-fn owner_may_ask(person: Option<&str>, agent: &str, room: &str) -> bool {
-    person.is_none() && room == hq::room_of(agent, None, None)
+/// ask token. Not while a person has an open stay in the room: no owner-level process is there to hold one (L1086).
+fn owner_may_ask(person: Option<&str>, agent: &str, room: &str, people_in_room: bool) -> bool {
+    person.is_none() && !people_in_room && room == hq::room_of(agent, None, None)
 }
 
 /// The project set of a turn and what changed with it.
@@ -90,9 +90,32 @@ impl Actor {
     /// group, or any member), is `Unknown`, which the kernel reads as shared only. `OwnerOnly` needs this very read to
     /// succeed and find nobody but the owner's own bots, and a run that is itself a person's never gets it.
     pub(super) fn run_members(&self) -> hq::Members {
+        self.run_members_with(&self.run_room_people().0)
+    }
+
+    /// [`Self::run_members`] with the room's people already read (see [`Self::run_room_people`]), so a turn start
+    /// decides on one read of them.
+    fn run_members_with(&self, room_people: &[String]) -> hq::Members {
+        if let Some(room) = self.room_members() {
+            return room;
+        }
         match self.active_group.as_ref() {
-            Some(g) => room_members(&self.hub.store, &g.lane.chat, self.cfg.person.as_deref()),
+            Some(g) => room_members(&self.hub.store, &g.lane.chat, self.cfg.person.as_deref(), room_people),
             None => hq::Members::Unknown,
+        }
+    }
+
+    /// The people with an open stay in this run's group room and the room's gen, read together under the membership
+    /// lock (a 1:1, or no room: nobody, gen 0). A warm owner process is reused only with nobody in the room and the gen
+    /// it started in.
+    fn run_room_people(&self) -> (Vec<String>, i64) {
+        // A group turn reads the room once, at its start: a join meanwhile is not its business (see `room_turn`).
+        if let Some(basis) = &self.turn_basis {
+            return (basis.people.clone(), basis.room_gen);
+        }
+        match self.active_group.as_ref() {
+            Some(g) => crate::chat::room_people::people_and_gen(&self.hub.store, &g.lane.chat),
+            None => (Vec::new(), 0),
         }
     }
 
@@ -355,6 +378,8 @@ impl Actor {
     /// chain that is ready and not out of usage. A turn already running is never moved.
     pub(super) async fn ensure_hq_session(&mut self, slot: Option<&str>) -> Result<()> {
         let agent = self.cfg.hq_agent.clone().ok_or_else(|| anyhow!("not an hq agent"))?;
+        // Writer mode: the process runs under a resident stub; one that was started without is stopped first. `Held` parks the turn.
+        let resident = self.writer_align().await?;
         let chain = self.hq_chain(&agent).await;
         let mut skip: HashSet<String> = self.turn_tried.clone();
         let mut prepared = None;
@@ -364,6 +389,8 @@ impl Actor {
         let lane = self.lane.clone();
         let mut warm;
         let mut members;
+        let mut room_people;
+        let mut room_gen;
         let (mut launch, backup, mut reservation) = loop {
             let backup = match self.hub.backups.pick(&agent, &chain, &skip) {
                 Pick::Primary => None,
@@ -373,7 +400,8 @@ impl Actor {
             self.serving.clone_from(&backup);
             let current = self.hq_session(slot);
             // Read once per attempt: the same value decides whether the process is reused and what a new one launches with.
-            members = self.run_members();
+            (room_people, room_gen) = self.run_room_people();
+            members = self.run_members_with(&room_people);
             // An invited person's turn asks the kernel again even when a session is warm: their membership may have
             // been taken away, their budget used up or their mode changed since the last turn.
             warm = matches!((&current, &self.conn), (Some(sid), Some(conn)) if conn.loaded.contains_key(sid))
@@ -381,7 +409,11 @@ impl Actor {
                 && self.conn_room == self.run_room()
                 // A process keeps the room's members it was started with (owner only, or who is in): any change, in
                 // either direction, starts it again, or its recall and notes would treat the room as it was.
-                && self.conn_members == members;
+                && self.conn_members == members
+                // Nor does it outlive a change of the room's people: with anyone in the room it is never reused, and
+                // after a join and a leave the members are equal again but the gen has moved.
+                && room_people.is_empty()
+                && self.conn_gen == room_gen;
             // A process on another account than the main one is started again below: its launch says so.
             if warm && person.is_none() && self.conn_on_main(&chain) {
                 self.turn_session = current;
@@ -394,7 +426,7 @@ impl Actor {
                 && self.conn.is_some()
                 && let Some(sid) = &current
             {
-                self.claim_for_turn(sid, &lane).await?;
+                self.claim_before_load(sid, &lane).await?;
             }
             // The once grants the loaded session was given before stay with it.
             let carried = match (&current, &self.conn) {
@@ -421,7 +453,17 @@ impl Actor {
             // "always"), asked for with a token of its own: one per launch, since a run takes its access once. Its once
             // grants are reserved, and taken when the session started or loaded with them.
             let access = person.as_deref().and_then(|p| {
-                crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, target.project.as_deref())
+                let project = target.project.as_deref();
+                if crate::chat::room_turn::is_room_person(p) {
+                    // A room person's token holds the turn's basis, which only a room turn has (see `runauth::room`).
+                    return match &members {
+                        hq::Members::Room { people, .. } => {
+                            crate::runauth::room::grant_for_room(p, &agent, &room, people, &conversation, project)
+                        }
+                        _ => None,
+                    };
+                }
+                crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, project)
             });
             let reservation = access.as_ref().map(|(grant, _)| Reservation::open(grant.run_id(), carried));
             // A quick chat's thread keeps the engine and model it was started with, on every launch.
@@ -488,7 +530,9 @@ impl Actor {
         if self.conn.is_some()
             && (self.conn_started_as.as_ref() != Some(&started_as)
                 || self.conn_serving != self.serving
-                || self.conn_members != members)
+                || self.conn_members != members
+                || !room_people.is_empty()
+                || self.conn_gen != room_gen)
             && let Some(c) = self.conn.take()
         {
             c.acp.kill().await;
@@ -542,6 +586,7 @@ impl Actor {
             self.conn_account.clone_from(&launch.account_id);
             self.conn_room = self.run_room();
             self.conn_members.clone_from(&members);
+            self.conn_gen = room_gen;
             let provider = launch.other_engine().unwrap_or(self.cfg.backend.as_str());
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
             // Anyone but the owner asks the host who they are (`kith recall` over the run socket), with a token that
@@ -554,7 +599,7 @@ impl Actor {
             // The owner's own 1:1 with the agent can raise approval cards (`card.py`): a cards-only token, under
             // its own env names. Not a group room, not a guest's, and not another engine's process, which has no use for it.
             if grant.is_none()
-                && owner_may_ask(person.as_deref(), &agent, &self.run_room())
+                && owner_may_ask(person.as_deref(), &agent, &self.run_room(), !room_people.is_empty())
                 && launch.other_engine().is_none()
             {
                 grant = crate::runauth::owner_ask_grant(&agent, &conversation, None);
@@ -583,7 +628,17 @@ impl Actor {
             for (i, command) in candidates.iter().enumerate() {
                 // A local CLI too old for ACP just hangs; don't make the user wait long before the fallback.
                 let budget = Duration::from_secs(if i + 1 < candidates.len() { 20 } else { 180 });
-                match start_agent(command, launch.cwd(&self.cfg), &env, budget).await {
+                let started = if resident {
+                    let account = backup
+                        .clone()
+                        .or_else(|| launch.account_id.clone())
+                        .or_else(|| launch.other_engine().map(str::to_owned))
+                        .unwrap_or_else(|| self.cfg.backend.clone());
+                    self.start_resident(command, launch.cwd(&self.cfg), &env, budget, &account).await
+                } else {
+                    start_agent(command, launch.cwd(&self.cfg), &env, budget).await
+                };
+                match started {
                     Ok(mut conn) => {
                         if let Some((grant, _)) = grant.take() {
                             if let Some(pid) = conn.acp.pid() {
@@ -607,8 +662,8 @@ impl Actor {
         if let Some(sid) = current {
             if self.conn.as_ref().is_some_and(|c| c.sessions.load) {
                 self.hub.set_runtime(&self.rt, |r| r.activity = "Resuming session…".into());
-                // The writer claim comes before the load (access-arch rule 4).
-                self.claim_for_turn(&sid, &lane).await?;
+                // The writer claim comes before the load (access-arch rule 4); in Writer mode it is the process's row.
+                self.claim_before_load(&sid, &lane).await?;
                 let params = self.hq_params(&launch, Some(&sid));
                 let res = self.session_request("session/load", params).await;
                 let Some(conn) = self.conn.as_mut() else { return res.map(drop) };
@@ -719,13 +774,24 @@ impl Actor {
 }
 
 /// [`Actor::run_members`] for the group `chat`, run by the bot of `run_person` (`None` is the owner's).
-fn room_members(store: &crate::store::Store, chat: &str, run_person: Option<&str>) -> hq::Members {
+/// `room_people` are the people let into the room itself (rooms with people), on top of the ones its member bots run as.
+fn room_members(
+    store: &crate::store::Store,
+    chat: &str,
+    run_person: Option<&str>,
+    room_people: &[String],
+) -> hq::Members {
     use hq::Members::{OwnerOnly, People, Unknown};
     let Ok(Some(group)) = store.bot(chat) else { return Unknown };
     if group.deleted {
         return Unknown;
     }
-    match group_people(store, &group.config.members) {
+    match group_people(store, &group.config.members).map(|mut people| {
+        people.extend(room_people.iter().cloned());
+        people.sort();
+        people.dedup();
+        people
+    }) {
         None => Unknown,
         Some(people) if !people.is_empty() => People(people),
         Some(_) if run_person.is_some() => Unknown,
@@ -845,11 +911,11 @@ mod tests {
         save("solo", json!(null), json!(["mine", "mine2", "gone"]), false);
         save("mixed", json!(null), json!(["mine", "theirs"]), false);
         save("dead-group", json!(null), json!(["mine"]), true);
-        assert_eq!(room_members(&store, "solo", None), OwnerOnly, "owner's bots and a deleted guest");
-        assert_eq!(room_members(&store, "mixed", None), People(vec!["sam".to_owned()]));
-        assert_eq!(room_members(&store, "nope", None), Unknown, "group not found is a failed read");
-        assert_eq!(room_members(&store, "dead-group", None), Unknown, "a group deleted mid-run");
-        assert_eq!(room_members(&store, "solo", Some("sam")), Unknown, "a person's own run is never owner only");
+        assert_eq!(room_members(&store, "solo", None, &[]), OwnerOnly, "owner's bots and a deleted guest");
+        assert_eq!(room_members(&store, "mixed", None, &[]), People(vec!["sam".to_owned()]));
+        assert_eq!(room_members(&store, "nope", None, &[]), Unknown, "group not found is a failed read");
+        assert_eq!(room_members(&store, "dead-group", None, &[]), Unknown, "a group deleted mid-run");
+        assert_eq!(room_members(&store, "solo", Some("sam"), &[]), Unknown, "a person's own run is never owner only");
     }
 }
 
@@ -859,9 +925,10 @@ mod owner_ask_tests {
 
     #[test]
     fn only_the_owners_own_one_to_one_gets_an_ask_token() {
-        assert!(owner_may_ask(None, "house", "1:1:house:owner"));
-        assert!(!owner_may_ask(None, "house", "group:abc"), "a group room");
-        assert!(!owner_may_ask(Some("sam"), "house", "1:1:house:sam"), "a guest or bot guest");
-        assert!(!owner_may_ask(Some("sam"), "house", "1:1:house:owner"));
+        assert!(owner_may_ask(None, "house", "1:1:house:owner", false));
+        assert!(!owner_may_ask(None, "house", "group:abc", false), "a group room");
+        assert!(!owner_may_ask(Some("sam"), "house", "1:1:house:sam", false), "a guest or bot guest");
+        assert!(!owner_may_ask(Some("sam"), "house", "1:1:house:owner", false));
+        assert!(!owner_may_ask(None, "house", "1:1:house:owner", true), "a person has a stay in the room");
     }
 }

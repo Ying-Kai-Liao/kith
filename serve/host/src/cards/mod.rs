@@ -771,6 +771,38 @@ pub fn withdraw_person(hub: &Hub, person: &str, agent: Option<&str>) {
     }
 }
 
+/// `kith ask` runs ended (Stop, a revoke, a timeout, the end of a chain): the open cards they parked on are withdrawn, and a
+/// waiting call is told so. The ask is gone, so nobody is told of an answer (no `tell_asker`). A secret card being written
+/// is left to its own steps (see `delivered`).
+pub fn withdraw_asks(hub: &Hub, ended: &[&str]) {
+    for card in hub.store.cards_open_all() {
+        if !card.reply_to.as_deref().is_some_and(|ask| ended.contains(&ask)) || secret::claimed(&card.id) {
+            continue;
+        }
+        if hub.store.card_withdraw(&card.id).unwrap_or(false) {
+            deliver(&card.id, &Verdict::Deny("The request that asked for this was stopped.".into()));
+            close_entry(hub, &card, "cancelled");
+        }
+    }
+}
+
+/// A room person's (rooms with people) cards end with the turn that raised them: every open card of `person_id` is
+/// withdrawn, its waiting call told, its entry closed "cancelled". A secret card under a write is left to its own steps
+/// (`secret::claimed`), and so is its owner's other grants. Idempotent: `card_withdraw` says whether the card was open.
+pub fn withdraw_room_person(hub: &Hub, person_id: &str) {
+    let mine: Vec<Card> = hub.store.cards_open_all().into_iter().filter(|c| c.person == person_id).collect();
+    for card in &mine {
+        if !secret::claimed(&card.id) && hub.store.card_withdraw(&card.id).unwrap_or(false) {
+            deliver(&card.id, &Verdict::Deny("That access was withdrawn.".into()));
+            close_entry(hub, card, "cancelled");
+        }
+    }
+    // Unused grants of an approved card go too, unless a claimed card of theirs is still being written.
+    if !mine.iter().any(|c| secret::claimed(&c.id)) {
+        withdraw_person(hub, person_id, None);
+    }
+}
+
 /// Past their deadline, cards expire: silence is no (A1).
 pub fn sweep(hub: &Hub) {
     expire(hub, now_ms());

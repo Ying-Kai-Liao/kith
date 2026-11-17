@@ -154,12 +154,17 @@ fn raise(hub: &Hub, all: &[Delegation], d: &Delegation) -> bool {
     true
 }
 
-/// One look at the records: a card for each chain that reached its cap.
+/// One look at the records: a card for each chain that reached its cap, and the cards of asks that ended withdrawn.
 pub async fn sweep(hub: &Arc<Hub>) {
     let all = match list().await {
         Ok(all) => all,
         Err(error) => return tracing::debug!(error = format!("{error:#}"), "couldn't read the delegation records"),
     };
+    // An ask that ended leaves no card open: nothing would receive its answer.
+    let ended: Vec<&str> = all.iter().filter(|d| d.state == DelegationState::Stopped).map(|d| d.id.as_str()).collect();
+    if !ended.is_empty() {
+        crate::cards::withdraw_asks(hub, &ended);
+    }
     for d in needing_a_card(&all) {
         // Told first: a crash after the card must not raise it again; a card that fails to save is logged.
         let Ok(bin) = kernel().await else { return };

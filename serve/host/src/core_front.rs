@@ -469,6 +469,12 @@ const CORE_CALL_METHODS: &[&str] = &[
     "terminal.open",
     "terminal.attach",
     "terminal.list",
+    // the kernel takers' claim rows (P5), see kernel/bin/kith-sessions and kith-wake
+    "claim.external",
+    "claim.release",
+    "claim.sweepPerson",
+    "claim.list",
+    "claim.epoch",
     "people.suspend",
     "people.undo",
     "people.removePerson",
@@ -638,8 +644,9 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         return 2;
     }
     let folders = kernel::folders(&kith_kernel::paths::process_home());
-    // Only a list is repeated when the connection breaks: an open or a ticket may have run.
-    match kith_core::reach(&folders, method, &params, method == "terminal.list") {
+    // Only a list (or a read) is repeated when the connection breaks: an open or a ticket may have run.
+    let repeatable = matches!(method, "terminal.list" | "claim.list" | "claim.epoch");
+    match kith_core::reach(&folders, method, &params, repeatable) {
         kith_core::Reached::Answered(answer) => {
             println!("{answer}");
             0

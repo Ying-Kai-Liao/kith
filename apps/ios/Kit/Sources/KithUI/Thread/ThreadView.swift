@@ -50,6 +50,8 @@ public struct ThreadView: View {
         transcript
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
+                // Rooms with people: which agents won't answer, and why. Fix opens Room info (owner only).
+                if let bot, bot.isGroup { WontAnswerLine(group: bot) { roomInfo = true }.padding(.horizontal, 16) }
                 // A bot's tasks carry their own writer banner on the card, so the box stays (a send to a held task
                 // takes it over first, or waits for the terminal); elsewhere the banner sits over the box.
                 switch ThreadFeed.chatBottom(held: bot?.usesTasks == true && bot?.botGuest == nil ? nil : ThreadFeed.heldTask(in: model.chat(botId)),
@@ -107,10 +109,14 @@ public struct ThreadView: View {
                 guard bot?.isGroup == true else { return }
                 await model.botGuests.refresh()
                 await model.refreshConversation(botId)
+                await model.refreshRoomPeople(botId)
+                await model.loadRoom(botId)
             }
             .kithSheet(isPresented: $roomInfo) {
-                RoomInfoView(groupId: botId)
+                if model.myRooms[botId] != nil { MemberRoomInfoView(roomId: botId) } else { RoomInfoView(groupId: botId) }
             }
+            .memberRoomRefresh(botId)
+            .overlay { if let name = model.closedRooms[botId] { MemberRoomClosed(name: name) } }
             .kithSheet(item: Binding<FileDownloads.Export?>(get: {
                 guard let item = model.fileDownloads.export, item.botId == botId else { return nil }
                 return item
@@ -589,6 +595,9 @@ extension ThreadView {
                     .onAppear { showEarlier() }
             })
         }
+        if !moreOnComputer, let bot, model.myRooms[botId] != nil {
+            rows.append(ConversationRow("member-start") { MemberStartLines(room: bot.name, owner: MemberRoomLogic.ownerName(model.myRooms[botId])) })
+        }
         if items.isEmpty, let bot {
             rows.append(ConversationRow("intro") {
                 if bot.isGroup { GroupIntroCard(group: bot).padding(.top, 40) } else { IntroCard(bot: bot).padding(.top, 40) }
@@ -607,6 +616,9 @@ extension ThreadView {
                     } : nil)
                 })
             }
+        }
+        if let room = model.myRooms[botId], let asked = MemberRoomLogic.askedLine(entries: model.chat(botId), agents: MemberRoomLogic.agentNames(room)) {
+            rows.append(ConversationRow("asked") { AskedLine(text: asked) })
         }
         // Offline, "working" is only what the computer last said; don't show it as live. In a group the live line above
         // the box says who is working, so the chat shows it once.

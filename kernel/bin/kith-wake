@@ -60,6 +60,7 @@ BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN.parent / 'lib'))
 from kith_paths import paths  # noqa: E402
 import kith_procstart  # noqa: E402
+import kith_claims  # noqa: E402
 
 KEEP_DAYS = 7
 MAX_TRIES = 5                     # a run-door turn that fails this often without reaching the session ends as failed
@@ -194,12 +195,33 @@ def alive(pid, started=None):
 
 def writer_live(sid):
     """Whether a live writer holds SESSION's claim (or the host's take-over claim): the one-writer claim the turn would need (S1/R1)."""
+    if kith_claims.switched(state()):
+        return core_writer_live(sid)
     d = state() / 'live' / 'terminal'
     for name in (f'{sid}.claim', f'{sid}.takeover.claim'):
         c = read_json(d / name, {})
         if c and alive(c.get('pid'), c.get('procStart')):
             return c
     return None
+
+
+_CORE_LIVE = None      # (when, the core's live claims): one `claim.list` serves a tick's items, not one call per item
+CORE_LIVE_TTL = 2.0    # seconds
+
+
+def core_writer_live(sid):
+    """writer_live once the claims are the core's (the claims tombstone): the live claim of sid in `claim.list`, take-over
+    included (a queued claim). A core that does not answer is read as a writer: the wake stays queued and is offered again,
+    never started on a conversation whose writer is not known."""
+    global _CORE_LIVE
+    if _CORE_LIVE is None or time.monotonic() - _CORE_LIVE[0] > CORE_LIVE_TTL:
+        try:
+            _CORE_LIVE = (time.monotonic(), kith_claims.call('claim.list', {}).get('live') or [])
+        except (kith_claims.NoAnswer, kith_claims.Refused) as e:
+            return {'pid': 0, 'kind': 'unknown', 'why': f'the Kith core gave no answer: {e}'}
+    # A claim whose process is gone is not a writer: the core ends it at the next claim, and nothing reads it as live until then.
+    return next((c for c in _CORE_LIVE[1] if c.get('conversation') == sid
+                 and (c.get('pid') is None or alive(c['pid'], c.get('started')))), None)
 
 
 def transcript_has(sid, marker):

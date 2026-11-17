@@ -1758,8 +1758,12 @@ fn cap_log() {
 }
 
 async fn serve(bind: &str, port: u16) -> Result<()> {
+    // The start-up phases are timed before the log exists, then logged once: a slow start says where it spent its time.
+    let started = std::time::Instant::now();
     let _instance_lock = watchdog::blocking("host-lock", || service::lock_host_within(service::LOCK_WAIT)).await??;
+    let locked = started.elapsed();
     watchdog::blocking("binary-identity", service::capture_binary_identity).await??;
+    let identified = started.elapsed().saturating_sub(locked);
     let listener =
         tokio::net::TcpListener::bind((bind, port)).await.with_context(|| format!("binding {bind}:{port}"))?;
     cap_log();
@@ -1771,6 +1775,11 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
         // too (a closed terminal, a full disk): a log line must never take a task down.
         .log_internal_errors(false)
         .init();
+    tracing::info!(
+        lock_ms = locked.as_millis(),
+        binary_identity_ms = identified.as_millis(),
+        "start-up: the host lock and the binary's identity"
+    );
     let (store, host_id, token) = open_store()?;
     write_token_file(&token)?;
     let identity = identity::Identity::load_or_create(&service::data_dir())?;
@@ -1798,7 +1807,13 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
     let core_front = core_front::start_beside_host();
     // `KITH_CORE_AUTHORITY=1` is honoured only while the core's gate says so (M2-18a).
     api::authority::start_gate();
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), bind, port, "kith-serve listening");
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        bind,
+        port,
+        start_up_ms = started.elapsed().as_millis(),
+        "kith-serve listening"
+    );
     // Peer addresses: some settings may only be changed from this computer.
     let app = api::router(hub.clone()).into_make_service_with_connect_info::<std::net::SocketAddr>();
     // SSE/WebSocket clients can stay connected forever. Stop agents immediately

@@ -11,7 +11,7 @@
 //!   itself and moves them on), and it ignores rows the core holds that the registry does not.
 //! - Switched means the core is the only writer, and here Python is not: sessions recorded after a step never reach the core,
 //!   and a switched module's `step` does not import again (only `kith migrate --transcripts` does). So `step` refuses until
-//!   S2's claims module is switched, which moves `kith-sessions record` into the core. Until then the core serves transcripts
+//!   S2's claims module is switched (`depends_on`), which moves the writers into the core. Until then the core serves transcripts
 //!   through the opt-in path, whose guard re-checks whenever the registry changes (`fingerprint`).
 //! - Before a switch an import adds sessions registered since and replaces rows that differ (a resume rewrites the record).
 //!   A rollback has nothing to export: the registry was never touched, so it clears the marker and the switch file, and the
@@ -46,10 +46,17 @@ impl Module for Transcripts {
         "transcripts"
     }
 
-    // TODO(M3-10e S2): once the claims module exists, replace the refusal below with `depends_on(&["claims"])`.
+    fn depends_on(&self) -> &'static [&'static str] {
+        // Python's `kith-sessions record` writes the registry beside its claims; once the claims are the core's it records
+        // through the core, so the registry's rows stay the core's only after that (S2).
+        &["claims"]
+    }
+
     fn step_refusal(&self, _env: &Env) -> Option<String> {
+        // Not lifted by the claims switch: `kith-sessions record` still writes `<sid>.json` in both modes (P5 did not route it),
+        // so a switch would miss every session recorded after it.
         Some(
-            "not stepped: Python still writes the session registry, so a switch would miss every session recorded after it; step transcripts only after S2's claims module is switched"
+            "not stepped: `kith-sessions record` (the SessionStart hook) still writes the session registry, so a switch would miss every session recorded after it; step transcripts only once the core records sessions"
                 .into(),
         )
     }

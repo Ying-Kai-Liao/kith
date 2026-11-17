@@ -48,9 +48,12 @@ struct ChatRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 UserBubble(entry: entry, botWorking: chat?.isWorking == true, reply: reply, makeTopic: topicAction)
                 ReactionsRow(entry: entry)
+                if entry.data.hiddenFrom?.isEmpty == false { HiddenMarker(entry: entry) }
             }
             .animation(Motion.reduced(Motion.layout, reduceMotion), value: entry.data.reactions)
             .padding(.top, groupStart ? 12 : 4)
+        case "agent" where entry.data.unanswered == true:
+            UnansweredLine(entry: entry).padding(.top, 8)
         case "agent":
             VStack(alignment: .leading, spacing: 4) {
                 if groupStart || entry.data.isLate { AuthorLabel(botId: entry.data.author ?? chat?.id, late: entry.data.isLate) }
@@ -83,6 +86,7 @@ struct ChatRow: View {
                             .transition(.opacity)
                     }
                     ReactionsRow(entry: entry)
+                    if entry.data.hiddenFrom?.isEmpty == false { HiddenMarker(entry: entry) }
                 }
                 .padding(.leading, chat?.isGroup == true ? 34 : 0)
             }
@@ -91,6 +95,7 @@ struct ChatRow: View {
         case "permission":
             VStack(alignment: .leading, spacing: 4) {
                 if chat?.isGroup == true { AuthorLabel(botId: entry.data.author) }
+                if entry.data.room != nil, chat?.isGroup != true { CardOrigin(entry: entry) }
                 if let fold = CardFold.of(entry) {
                     FoldedCard(fold: fold, time: Self.clock(entry.date)) { permissionBody(tint: tint) }
                 } else {
@@ -109,6 +114,10 @@ struct ChatRow: View {
             } else if let card = entry.data.richCard, card.type == "schedule", card.drawsInChat {
                 // A routine's card arrives as a notice from the host, not as the bot's message.
                 ScheduleCard(entry: entry, card: card).padding(.top, 10)
+            } else if RoomPeopleLogic.isPersonNotice(entry) {
+                PersonLine(entry: entry).padding(.top, 10)
+            } else if model.isOwner, let agent = RoomPeopleLogic.waitingAgent(entry) {
+                WaitingPointer(entry: entry, agent: agent).padding(.top, 8)
             } else {
                 NoticeRow(entry: entry).padding(.top, 10)
             }

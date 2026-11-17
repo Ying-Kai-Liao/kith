@@ -201,6 +201,16 @@ pub(crate) trait Module {
     fn switched_file(&self, _env: &Env, _db: &rusqlite::Connection) -> Result<SwitchedFile> {
         Ok(SwitchedFile::Changed)
     }
+    /// Runs in `rollback` under the lifetime lock, before the live check: settles what a stopped world left behind (a claim whose
+    /// process is gone) so the check counts only what is really live. Default: nothing.
+    fn before_rollback(&self, _env: &Env, _core: &mut Core) -> Result<()> {
+        Ok(())
+    }
+    /// Runs when a `stepping` module's step is cancelled (`rollback` of a step that never switched): undoes what a refused or
+    /// crashed step already put in place before the marker (a file the old readers fail closed on). Default: nothing.
+    fn cancel_step(&self, _env: &Env) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
     /// The lock the old store's writers take, held by `rollback` from before the rolling-back record to the end: a
     /// refusal at the lock then writes nothing (no record, no secret restored). Default: none.
     fn rollback_lock(&self, _env: &Env) -> Result<Option<SourceLock>> {
@@ -269,7 +279,8 @@ pub(crate) fn step(
     opts: Opts,
 ) -> Result<Vec<String>> {
     let m = find(reg, name)?;
-    if let Some(why) = m.step_refusal(env)
+    let refusal = m.step_refusal(env);
+    if let Some(why) = &refusal
         && !(opts.dry_run && m.dry_run_despite_refusal())
     {
         return Err(Error::Refused(format!("cutover: {name}: {why}")));
@@ -286,7 +297,8 @@ pub(crate) fn step(
             "cutover: {name} is part-way through a rollback; finish it first (kith rollback {name})"
         )));
     }
-    for dep in m.depends_on() {
+    // A dry run that looks past a refusal says it, and stops short of the dependency check: the refusal is the reason.
+    for dep in m.depends_on().iter().filter(|_| refusal.is_none()) {
         if phase_of(env, dep)? != Some(Phase::Switched) {
             return Err(Error::Refused(format!(
                 "cutover: {name} needs {dep} switched first (kith migrate step {dep})"
@@ -313,6 +325,7 @@ pub(crate) fn step(
             "dry run: {name} is {}; nothing was changed",
             cur.map_or("not switched", |s| s.phase.word())
         ));
+        lines.extend(refusal);
         return Ok(lines);
     }
     let mut core = lock(env)?;
@@ -517,11 +530,13 @@ pub(crate) fn rollback(
     if cur.phase == Phase::Stepping {
         // Nothing was tombstoned and Python never stopped writing; the imported rows stay (a re-step is idempotent).
         // A crash repair (S1) leaves a marker on a Stepping module; none must outlive the record.
+        lines.extend(m.cancel_step(env)?);
         marker::clear(&mut core, name)?;
         state::clear(&env.layout, name)?;
         lines.push(format!("{name}: an unfinished step was cancelled"));
         return Ok(lines);
     }
+    m.before_rollback(env, &mut core)?;
     let mut live = m.live(env, &core)?;
     if m.guards_claims() {
         let n: i64 = core.conn().query_row(

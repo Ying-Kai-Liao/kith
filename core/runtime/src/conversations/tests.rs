@@ -300,6 +300,48 @@ fn redeem_moves_claimed_to_running_and_records_the_process() {
     );
 }
 
+/// P7b: the idle-kill before a terminal claim marks the process (`warm_procs.kill_at`); a turn claimed meanwhile must not be
+/// redeemed onto it, or the engine is killed under a running turn. A retry of a redeem that already ran stands.
+#[test]
+fn a_process_marked_for_a_kill_takes_no_new_redeem() {
+    let (_t, mut c) = open();
+    let (id, t) = take(&mut c, "c1");
+    c.conn()
+        .execute(
+            "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation, kill_at)
+             VALUES (321, 'e321', 'kith-serve-host/1-x', '', 'echo', 'c1', 5)",
+            [],
+        )
+        .expect("a marked process");
+    assert_eq!(
+        redeem(&mut c, id, 321, "e321", "h1", 20).expect("refused"),
+        Redeemed::Refused("killing".into())
+    );
+    assert_eq!(
+        state(&c, id),
+        "claimed",
+        "nothing moved: the caller stops it with the turn put back"
+    );
+    assert_eq!(turn_state(&c, t), "claimed");
+    // Another process is not the marked one.
+    assert_eq!(
+        redeem(&mut c, id, 322, "e322", "h1", 21).expect("other process"),
+        Redeemed::Running { again: false }
+    );
+    // A retried redeem of the claim that ran is not a new one, whatever the mark says now.
+    c.conn()
+        .execute(
+            "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation, kill_at)
+             VALUES (322, 'e322', 'kith-serve-host/1-x', '', 'echo', 'c1', 6)",
+            [],
+        )
+        .expect("marked after");
+    assert_eq!(
+        redeem(&mut c, id, 322, "e322", "h1", 22).expect("again"),
+        Redeemed::Running { again: true }
+    );
+}
+
 #[test]
 fn a_retried_redeem_is_idempotent_and_another_process_is_refused() {
     let (_t, mut c) = open();
@@ -924,6 +966,51 @@ fn reconcile_ends_unlisted_claimed_claims_and_holds_unlisted_running_ones_as_end
     );
     assert_eq!(out.kill_listed, vec![4242], "listed with no row");
     assert_eq!(state(&c, kept), "running", "re-adopted");
+}
+
+/// Step 5 takes a host's running turn claim whose recorded process is gone (rule K keeps only a live one, `reconcile_tests.rs`;
+/// pid 200 here has no process started `e200`) into `ending` (`holder_changed`, the turn queued again), and an imported claim
+/// with no instance. Both stay the writer until `end_gone`.
+/// The tick signals the host's; the instance-less one is never signalled (`kill_resend::pass` skips a `holder_changed` claim
+/// that no holder started, which `end_reason` alone says).
+#[test]
+fn reconcile_takes_a_hosts_running_turn_and_an_instanceless_one_into_ending() {
+    let (_t, mut c) = open();
+    let host = take_as(&mut c, "a", Some("kith-serve-host"), Some(200));
+    let imported = take_as(&mut c, "b", None, Some(300));
+    unreconcile(&c);
+    let out = reconcile(&mut c, &[], &[], i64::MAX, 50).expect("reconcile");
+    assert_eq!(state(&c, host), "ending", "never straight to ended");
+    assert_eq!(state(&c, imported), "ending");
+    let reason = |id: i64| -> String {
+        c.conn()
+            .query_row(
+                "SELECT end_reason FROM claims WHERE claim_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .expect("reason")
+    };
+    assert_eq!(reason(host), "holder_changed");
+    assert_eq!(
+        reason(imported),
+        "holder_changed",
+        "the field `kill_resend::pass` reads to never signal it"
+    );
+    let turn = |conv: &str| -> String {
+        c.conn()
+            .query_row(
+                "SELECT state FROM turns WHERE conversation = ?1",
+                [conv],
+                |r| r.get(0),
+            )
+            .expect("turn")
+    };
+    assert_eq!(turn("a"), "queued", "the turn runs again, once");
+    assert_eq!(out.kill.len(), 2);
+    // Still the writer: no new claim on either conversation until the process is seen gone.
+    assert!(claim(&mut c, &new_claim("a", None), 51).is_err());
+    assert!(claim(&mut c, &new_claim("b", None), 51).is_err());
 }
 
 #[test]

@@ -1,0 +1,34 @@
+# variant	module	expected	what it is (the states TLC found when the model was checked, 2026-11-12/13)
+# --- the design as built (PR C): every one of its invariants holds ---------------------------------------
+fixed-A	Rooms2	pass	reads, replies, owner level, no widening, removal (1,783,558 states)
+fixed-B	Rooms2	pass	undo restores exactly, removal (50,553)
+jobs-fixed	RoomJobs	pass	a revoke ends the room turn whose basis holds the person; never wider than the basis (72,480)
+# --- each rule is load-bearing: take it away and an invariant breaks -------------------------------------
+design-r2	Rooms2	fail	an owner turn after the last leave reads the person's post: input is not cut (214)
+design-flow	Rooms2	fail	a room turn after a join answers a pre-join post: the trigger is not checked (3,148)
+steer	Rooms2	fail	a person's post is steered into a running owner turn (4,632)
+warmreuse	Rooms2	fail	a warm owner process is reused across a join: reuse ignores gen and level (8,753)
+warmreuse-check	Rooms2	fail	same, with the edit ending the other warm processes (20,065)
+notag	Rooms2	fail	a viewer filter of "member now" shows a pre-join post (202)
+revokedeletes	Rooms2	fail	a revoke that closes the person's rows: the undo does not restore the room (61)
+jobs-revokekeepsturn	RoomJobs	fail	a revoke does not end the room turn whose basis holds the person (78)
+jobs-sweepperson	RoomJobs	fail	the sweep names the person, not the room persons: their room door keeps running (311)
+# --- PR D: room jobs and doors. The room door is a claim over its basis (RoomJobs); the same rows run on a switched Mac, where an untick or revoke commits in the core without the door lock and the sweep (under the lock, by basis) catches the claim -----
+jobs-switched	RoomJobs	pass	switched Mac (#975's order): a start checks then claims under the lock; an untick or revoke lands between; the sweep by basis stays owed until it runs
+jobs-switchedwindow	RoomJobs	fail	the window Kai accepted (Accept current): a commit between a switched start's check and its claim; the sweep ends the door after
+jobs-liveonly	RoomJobs	fail	narrow by the room now, no turn cap: an owner-level door starts in Bill's turn after Bill left (168)
+jobs-snaponly	RoomJobs	fail	narrow by the start snapshot only: Kai unticks Bill, the door still starts (415)
+jobs-split	RoomJobs	fail	a door checked in one step starts later, above its people's grant (2,074)
+jobs-joinnarrows	RoomJobs	fail	the Oct J2 rule, narrow by the room now: Bill leaves, Kai unticks his job, the door starts at owner level (1,012)
+jobs-switchednolock	RoomJobs	fail	switched, the sweep does not take the door lock: a claim that lands after it is never swept
+jobs-switchedsweepperson	RoomJobs	fail	switched, the sweep matches the claim's room person, not its basis: Bill's room door keeps running
+doors-fixed	Rooms3	pass	a door's result stamped with its turn's start gen and level lands hidden from a later joiner (4,972,112 states)
+doors-stampland	Rooms3	fail	a door's result stamped with the gen when it lands is sent to Ben, who joined after (9,818)
+# --- R-rename (#1013, design 2026-11-16-rooms-rename): a person is one identity across every id the core lists for them (held_under). Each op reads the ids before the membership lock; a rename can land in between. RoomsRename.tla is the architect's, copied as written -----
+rename-code	RoomsRename	pass	the code: every op over all the ids, a join writes under the first id (Held::first), no re-read after a removal
+rename-code-paired	RoomsRename	pass	the same with the person's devices under the first id: the reader finds the stay (ReaderFinds)
+rename-design	RoomsRename	pass	the architect's design row: also a re-read after a removal, not needed with the first-id key
+rename-today-sticks	RoomsRename	fail	before #1013, the id handed in only: Kai's remove by the new id leaves the old-id stay open (RemoveSticks, 6 steps)
+rename-today	RoomsRename	fail	before #1013: two open stays for one person (OneStay)
+rename-heldkey	RoomsRename	fail	a join keyed by the devices' id else the current one: two joins either side of a rename write two stays (OneStay)
+rename-givenkey	RoomsRename	fail	a join keyed by the id handed in, over all ids: OneStay fails

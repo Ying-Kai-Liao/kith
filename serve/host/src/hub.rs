@@ -22,6 +22,9 @@ mod actors;
 mod folders;
 pub(crate) mod hq;
 mod order;
+mod room_people;
+mod room_turns;
+pub use room_people::PostRefused;
 mod sync;
 
 /// What a bot is doing right now (wire values: `idle` / `working` / `needsInput` / `error`).
@@ -101,6 +104,10 @@ pub struct Hub {
     pub gate: Arc<crate::agent::gate::Gate>,
     /// Transcript entries the store refused (disk full, read-only), waiting to be written again.
     unsaved: Mutex<Unsaved>,
+    /// The room turns running as a room person (actor key -> the people each is for), see `room_turns`.
+    room_turns: Mutex<HashMap<String, Vec<String>>>,
+    /// The owner's display name as kith-auth last answered it, and when (see `owner_name`).
+    owner_name: Mutex<Option<(std::time::Instant, String)>>,
 }
 
 /// How many unsaved entries the host holds; the oldest is dropped (and counted) past it.
@@ -115,6 +122,8 @@ struct PendingEntry {
     turn: i64,
     data: Value,
     at: i64,
+    /// The room gen the line comes from (a room turn's start gen); `None` is unstamped.
+    origin_gen: Option<i64>,
 }
 
 #[derive(Default)]
@@ -126,7 +135,26 @@ struct Unsaved {
     error: Option<String>,
 }
 
+/// How long the owner's name is kept before kith-auth is asked again, so a rename shows within this.
+const OWNER_NAME_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
 impl Hub {
+    /// The owner's display name, asked of kith-auth through `agent` at most once per [`OWNER_NAME_TTL`]. The owner is one
+    /// person for every agent, so one answer covers them all; no answer is not kept (it is asked again next time).
+    pub async fn owner_name(&self, agent: &str) -> Option<String> {
+        let kept = {
+            let c = self.owner_name.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            c.as_ref().filter(|(at, _)| at.elapsed() < OWNER_NAME_TTL).map(|(_, n)| n.clone())
+        };
+        if kept.is_some() {
+            return kept;
+        }
+        let name = crate::api::roles::owner_name(agent).await?;
+        *self.owner_name.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((std::time::Instant::now(), name.clone()));
+        Some(name)
+    }
+
     pub fn busy(&self) -> bool {
         self.runtime.locked().values().any(|r| matches!(r.status, BotStatus::Working | BotStatus::NeedsInput))
             || self.terms.busy()
@@ -177,12 +205,15 @@ impl Hub {
             terminal: crate::terminal::Terminal::default(),
             gate,
             unsaved: Mutex::default(),
+            room_turns: Mutex::default(),
+            owner_name: Mutex::default(),
         })
     }
 
     pub fn start(self: &Arc<Self>) -> Result<()> {
         // Approval cards and queued sends from a previous run can't be honored anymore.
         self.store.expire_pending()?;
+        crate::chat::room_pointer::sweep(self);
         crate::chat::memory::import_old_memory(self);
         self.routines.restore(&self.store)?;
         crate::market::turn_on_installed_once(&self.store)?;
@@ -263,6 +294,16 @@ impl Hub {
     }
 
     pub fn update_bot(&self, patch: &Value) -> Result<Value> {
+        self.update_bot_checked(patch, None)
+    }
+
+    /// [`Self::update_bot`] with the live check of the members it adds to a room with people (`verified`, made by the
+    /// async handler: `chat::room_people::verify_adds`). Without it such an edit is refused.
+    pub fn update_bot_checked(
+        &self,
+        patch: &Value,
+        verified: Option<&crate::chat::room_people::Verified>,
+    ) -> Result<Value> {
         let id = patch["id"].as_str().ok_or_else(|| anyhow!("id required"))?.to_owned();
         let row = self.store.bot(&id)?.filter(|b| !b.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
         let mut merged = serde_json::to_value(&row.config)?;
@@ -314,6 +355,10 @@ impl Hub {
             // A room's member list changes under the membership lock, so a bot's post or ask is checked and lands
             // entirely before the edit or entirely after it (always membership, then emit).
             let _members = crate::chat::group::membership_lock();
+            if cfg.is_group() {
+                // A room with people takes only members somebody checked against every person in it just now.
+                crate::chat::room_people::guard_adds(&self.store, &id, &cfg.members, verified)?;
+            }
             let _g = self.emit_lock.locked();
             self.store.save_bot(&cfg)?;
         }
@@ -483,6 +528,19 @@ impl Hub {
     /// kept in memory (bounded) and retried in order (see [`Self::retry_unsaved`]); it yields `None` and the
     /// conversation goes on. Held entries are lost if the host restarts first: there is no disk to keep them on.
     pub fn add_entry(&self, lane: &Lane, kind: EntryKind, turn: i64, data: &Value) -> Option<Entry> {
+        self.add_entry_from(lane, kind, turn, data, None)
+    }
+
+    /// [`Self::add_entry`] naming the room gen the line comes from (`origin_gen`): a room turn's output takes the gen its
+    /// turn STARTED in, set here with the write, never the gen at landing (a person who joined meanwhile must not see it).
+    pub fn add_entry_from(
+        &self,
+        lane: &Lane,
+        kind: EntryKind,
+        turn: i64,
+        data: &Value,
+        origin_gen: Option<i64>,
+    ) -> Option<Entry> {
         let (added, mut landed) = {
             let _g = self.emit_lock.locked();
             // Older held entries go first, so a thread's lines stay in order.
@@ -494,6 +552,7 @@ impl Hub {
                 turn,
                 data: data.clone(),
                 at: crate::store::now_ms(),
+                origin_gen,
             };
             let added = if self.unsaved.locked().queue.is_empty() {
                 match self.write_pending(&pending) {
@@ -545,6 +604,7 @@ impl Hub {
                 turn: self.store.max_turn(&secret.room),
                 data: notice.clone(),
                 at: crate::store::now_ms(),
+                origin_gen: None,
             };
             let written =
                 self.write_pending(&line).and_then(|e| self.store.set_secret_notice(&secret.id, e.seq).map(|()| e));
@@ -566,7 +626,7 @@ impl Hub {
     /// Writes and broadcasts one entry, under `emit_lock`. Clears the store flag when the write lands.
     fn write_pending(&self, p: &PendingEntry) -> Result<Entry> {
         // An entry stored by an attempt that reported an error comes back as it is: no duplicate row.
-        let (e, _) = self.store.insert_entry_as(&p.id, &p.lane, p.kind, p.turn, &p.data, p.at)?;
+        let (e, _) = self.store.insert_entry_stamped(&p.id, &p.lane, p.kind, p.turn, &p.data, p.at, p.origin_gen)?;
         self.set_store_error(None);
         let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));
         Ok(e)
@@ -720,6 +780,8 @@ impl Hub {
         };
         if let Some(e) = &updated {
             self.update_thread_summary(e);
+            // Every way a room turn's card closes lands here, so its "waiting" pointer in the room closes with it.
+            crate::chat::room_pointer::after_set(self, e);
         }
         updated
     }
@@ -727,6 +789,13 @@ impl Hub {
     /// Toggles the user's `emoji` reaction on a chat message (`data.reactions`, oldest first).
     /// A message keeps `reactions: []` once reacted to, so it never turns unread again.
     pub fn react(&self, id: &str, emoji: &str) -> Result<Entry> {
+        self.react_as(id, emoji, None)
+    }
+
+    /// [`Self::react`] for a person in a room: `person` is `(the id their stay is under, every id of theirs, the stay's
+    /// joined_gen)`, and the stay and the "no revoke has set them aside" check are made in the same transaction as the
+    /// write (as a post's are).
+    pub fn react_as(&self, id: &str, emoji: &str, person: Option<(&str, &[String], i64)>) -> Result<Entry> {
         let emoji = emoji.trim();
         if emoji.is_empty() || emoji.len() > 32 || emoji.chars().any(|c| c.is_alphanumeric() || c.is_whitespace()) {
             bail!("`emoji` must be one emoji");
@@ -746,7 +815,20 @@ impl Hub {
             reactions.push(emoji.to_owned());
         }
         e.data["reactions"] = json!(reactions);
-        self.set_entry(id, &e.data).ok_or_else(|| anyhow!("couldn't save the reaction"))
+        let Some(seat) = person else {
+            return self.set_entry(id, &e.data).ok_or_else(|| anyhow!("couldn't save the reaction"));
+        };
+        let updated = {
+            let _g = self.emit_lock.locked();
+            let updated = self.store.update_entry_for_person(&e.bot_id, seat, id, &e.data)?;
+            if let Some(e) = &updated {
+                let _ = self.events.send(json!({"type": "entry", "rev": e.rev, "entry": e}));
+            }
+            updated
+        };
+        let e = updated.ok_or_else(|| crate::api::devices::NotAllowed("You aren't in that room.".to_owned()))?;
+        self.update_thread_summary(&e);
+        Ok(e)
     }
 
     /// A message in a thread refreshes the summary on its root (`data.thread`: reply count,
@@ -957,6 +1039,7 @@ mod unsaved_tests {
             turn: 1,
             data: json!({"text": "x"}),
             at: 1,
+            origin_gen: None,
         };
         hub.hold_queued(p);
         hub.store.insert_entry_as("same", &lane, EntryKind::User, 1, &json!({"text": "x"}), 1).unwrap();

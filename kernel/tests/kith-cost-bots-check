@@ -55,4 +55,15 @@ A bots-cap 5 >/dev/null
 check "bots-cap --json gives the cap and the owner's bot ids" \
   "[ \"\$(A bots-cap --json | J 'd[\"cap\"], d[\"bots\"]')\" = \"5.0 ['bot-k']\" ]"
 check "bots --json sets the spend against the cap" "[ \"\$(C bots --json | J 'd[\"cap\"], d[\"spent\"]')\" = '5.0 3.0' ]"
+# a room's run (the turns of a group room with people) is written down for whoever asked, the owner's as none
+CP() { KERNEL=$KERNEL python3 -c "
+import os, sys
+sys.path.insert(0, os.path.join(os.environ['KERNEL'], 'bin'))
+import importlib.machinery, importlib.util
+l = importlib.machinery.SourceFileLoader('kc', os.environ['KERNEL'] + '/bin/kith-cost'); sp = importlib.util.spec_from_loader('kc', l)
+m = importlib.util.module_from_spec(sp); l.exec_module(m)
+print(m.cost_person(os.environ.get))"; }
+check "a room run is the cost of the person who asked" "[ \"\$(KITH_PERSON=room-g-9 KITH_COST_PERSON=sam CP)\" = sam ]"
+check "a room run the owner asked is the owner's own (none)" "[ \"\$(KITH_PERSON=room-g-9 KITH_COST_PERSON=owner CP)\" = None ]"
+check "any other run is KITH_PERSON's" "[ \"\$(KITH_PERSON=sam CP)\" = sam ] && [ \"\$(CP)\" = None ]"
 exit $fail

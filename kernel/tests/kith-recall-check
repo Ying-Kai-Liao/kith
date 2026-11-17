@@ -175,6 +175,24 @@ check "room notes by ledger: everyone present was there: shown; a guest who join
   "[ \"\$(RN \"['sam']\")\" = True ] && [ \"\$(RN \"['sam', 'eve']\")\" = True ] && [ \"\$(RN \"['sam', 'ann']\")\" = False ]"
 F "k.record_room_write('echo', 'grp1', 'rooms/grp1/rec.md', ['sam'], False)"
 check "room notes by ledger: a later write with fewer present narrows it for good" "[ \"\$(RN \"['sam', 'eve']\")\" = False ] && [ \"\$(RN \"['sam']\")\" = True ]"
+F "k.record_room_write('echo', 'grp1', 'rooms/grp1/MEMORY.md', ['sam', 'eve'], False)"
+GR() { env KITH_AGENT=echo KITH_ROOM=grp1 "$@" "$R" 'grp1 room' | grep -q 'grp1 room'; }
+check "group room: a person the member list names recalls the room's notes" "GR KITH_PERSON=sam KITH_ROOM_MEMBERS=sam,eve"
+check "group room: a person the member list leaves out does not" "! GR KITH_PERSON=eve KITH_ROOM_MEMBERS=sam"
+check "group room: a bot guest the member list names is not widened to the room" \
+  "[ \"\$(env KITH_AGENT=echo KITH_PERSON=bot-ab12 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=bot-ab12 python3 -c \"import sys; sys.path.insert(0,'$KERNEL/lib'); import kith_recall as r; print(r.caller()['audiences'])\")\" = \"['shared']\" ]"
+check "group room: the owner with named members recalls the room's notes" "GR KITH_ROOM_MEMBERS=sam,eve"
+# a room person (room-<id>): the host's own asker for the turns of a room with people; its basis is the member list
+check "room person: recalls the room's notes and shared craft only, never a person's or the owner's" \
+  "[ \"\$(aud KITH_AGENT=echo KITH_PERSON=room-grp1-9 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam,eve)\" = 'room:grp1 shared' ]"
+check "room person: a basis person who has lost the agent cuts it to nothing but shared" \
+  "[ \"\$(aud KITH_AGENT=echo KITH_PERSON=room-grp1-9 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam,zed)\" = '' ]"
+check "room person: no members listed, no room, or another room's id: nothing" \
+  "[ \"\$(env KITH_AGENT=echo KITH_PERSON=room-grp1-9 KITH_ROOM=grp1 \"$R\" zebra --json)\" = '[]' ] && [ \"\$(env KITH_AGENT=echo KITH_PERSON=room-grp1-9 KITH_ROOM_MEMBERS=sam \"$R\" zebra --json)\" = '[]' ]"
+check "room person: inside a guest's sandbox (no token, the process itself) it gets nothing" \
+  "[ \"\$(env KITH_AGENT=echo KITH_PERSON=room-grp1-9 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam,eve python3 -c \"import sys; sys.path.insert(0,'$KERNEL/lib'); import kith_recall as r; r.guest_sandbox = lambda: True; print(r.caller()['audiences'])\")\" = '[]' ]"
+check "room person: --room of another room only narrows, it never reads that room" \
+  "[ \"\$(env KITH_AGENT=echo KITH_PERSON=room-grp1-9 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam,eve \"$R\" zebra --room 1:1:echo:sam --json)\" = '[]' ]"
 check "room notes by ledger: a note Tidy moved to another audience is not held to the room's record" \
   "python3 -c \"import sys; sys.path.insert(0,'$KERNEL/lib'); import kith_recall as r; print(r._room_note_ok({'agent':'echo','audiences':['x'],'present':['zed']}, 'shared', '$M/rooms/grp1/rec.md', {}))\" | grep -q True"
 check "room notes by ledger: the owner outside a group sees everything" \

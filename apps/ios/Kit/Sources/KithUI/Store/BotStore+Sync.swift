@@ -10,6 +10,8 @@ extension BotStore {
         var backoff: Double = 1
         while !Task.isCancelled {
             do {
+                // What the last stream sent goes in before the hello (which may rewind) and before `rev` is read.
+                flushEvents()
                 try await proveInviteIfNeeded(client)
                 try await refreshHello(client)
                 guard !Task.isCancelled, !retired else { return }
@@ -26,7 +28,7 @@ extension BotStore {
                     guard !Task.isCancelled, !retired else { return }
                     setConnection(.online)
                     backoff = 1
-                    apply(event)
+                    enqueue(event)
                 }
             } catch is CancellationError {
                 return
@@ -67,7 +69,11 @@ extension BotStore {
     public func startChat(agent: String) async throws -> Bot {
         guard let client else { throw HostError.unreachable }
         let bot = try await client.startChat(agent: agent)
-        if !retired { apply(.bot(bot)) }
+        if !retired {
+            apply(.bot(bot))
+            flushAcks()
+            scheduleSave()
+        }
         return bot
     }
 
@@ -91,6 +97,7 @@ extension BotStore {
         hello = h
         // Pending bots come back from the host on every connect, so a card survives a restart.
         Task { [weak self] in await self?.botGuests.refresh() }
+        Task { [weak self] in await self?.refreshMyRooms() }
         noteHostVersion(HostVersion(version: h.version, protocolLevel: h.protocolLevel, minProtocol: h.minProtocol))
     }
 
@@ -105,6 +112,37 @@ extension BotStore {
         cacheStamp = nil
         // An update notice may appear or go away with it.
         if new != hostVersion { Motion.animate { hostVersion = new } }
+    }
+
+    /// Holds an event for the next batch. What arrives within the wait (a catch-up is thousands of events) is applied in
+    /// one go: the chats and the roster redraw once per batch, not once per event, and a chat on screen is
+    /// acknowledged once.
+    private func enqueue(_ event: HostEvent) {
+        pendingEvents.append(event)
+        guard flushTask == nil else { return }
+        let wait = caughtUp ? Self.liveBatchWait : Self.catchUpBatchWait
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled else { return }
+            self?.flushEvents()
+        }
+    }
+
+    /// Applies the events held so far, in order. A restart (`resync`, a rewind) ends the batch: the rest came on the
+    /// stream it replaces, as the old per-event loop stopped reading it.
+    func flushEvents() {
+        flushTask?.cancel()
+        flushTask = nil
+        guard !pendingEvents.isEmpty, !retired else { return }
+        let batch = pendingEvents
+        pendingEvents = []
+        let generation = eventsGeneration
+        for event in batch {
+            apply(event)
+            if eventsGeneration != generation { break }
+        }
+        flushAcks()
+        scheduleSave()
     }
 
     private func apply(_ event: HostEvent) {
@@ -129,10 +167,14 @@ extension BotStore {
             if hostRewound { rev = 0 }
             windowFloors = requestedSince > 0 && !hostRewound ? loadedFloors() : [:]
             catchUpRev = hostRev
+            // Each connection's catch-up batches as the first one does (`enqueue`); `bump` sets it again at once
+            // when nothing is owed.
+            caughtUp = false
             bump(rev)
             // Live changes come as events; what was already waiting is read once per connection.
             Task { [weak self] in await self?.refreshAccessRequests() }
         case let .bot(bot):
+            guard closedRooms[bot.id] == nil else { break }
             let neededInput = bots[bot.id]?.needsInput == true
             let before = bots[bot.id]
             bots[bot.id] = bot
@@ -141,7 +183,7 @@ extension BotStore {
             if before?.status == bot.status, before?.workingThread == bot.workingThread { refreshThreadFolders(bot.id) }
             onBotUpdated?(bot)
             onRosterChanged?()
-            if bot.unread > 0 { acknowledgeVisibleConversations(bot.id) }
+            if bot.unread > 0 { noteVisibleConversations(bot.id) }
             if let before, before.isWorking != bot.isWorking {
                 for call in Array(voiceCalls.values) where call.botId == bot.id { call.working?(bot.isWorking) }
             }
@@ -166,8 +208,9 @@ extension BotStore {
             let known = entries[e.botId]?.first(where: { $0.id == e.id })
             upsert(e)
             bump(e.rev)
-            acknowledgeVisibleConversations(e.botId, entry: e)
+            noteVisibleConversations(e.botId, entry: e)
             let calls = Array(voiceCalls.values).filter { $0.botId == e.botId && e.rev > $0.startRev }
+            guard !calls.isEmpty else { break }
             // The chat's replies and its tasks' are heard; other threads aren't.
             let heard = e.threadId.map { root in chat(e.botId).contains { $0.id == root && $0.isTask } } ?? true
             // A shared file's entry carries only its name and size for the chat's card: never read aloud.
@@ -216,7 +259,6 @@ extension BotStore {
                 if mismatch != nil { restartEvents() }
             }
         }
-        scheduleSave()
     }
 
     /// In a group, a reply is said with its speaker's name.
@@ -226,6 +268,12 @@ extension BotStore {
     }
 
     func resetMirror() {
+        // Events not applied yet would put back what is wiped here (an invited person turned away). Inside a flush
+        // the batch is already taken, so nothing of the new mirror is lost.
+        flushTask?.cancel()
+        flushTask = nil
+        pendingEvents = []
+        pendingAcks = []
         composerDrafts = [:]
         persistComposerDrafts()
         bots = [:]
@@ -254,6 +302,8 @@ extension BotStore {
 
     /// Resubscribes from the current `rev` on the same link.
     private func restartEvents() {
+        // Before the guard: a batch applied while the link is down must stop at this event too.
+        eventsGeneration += 1
         guard let client, eventsTask != nil else { return }
         eventsTask?.cancel()
         eventsTask = Task { [weak self] in await self?.runEvents(client) }
@@ -268,9 +318,8 @@ extension BotStore {
     /// Only entries the mirror had at `requestedSince`: newer ones (a send's RPC response landing
     /// before this hello) come again in this catch-up and say nothing about the window.
     private func loadedFloors() -> [String: Int64] {
-        entries.compactMapValues { list in
-            list.filter { $0.threadId == nil && $0.seq > 0 && $0.seq != .max && $0.rev <= requestedSince }.map(\.seq).min()
-        }
+        // An old thread root held for its fresh replies says nothing about the window (`oldestWindowSeq`).
+        entries.compactMapValues { list in Self.oldestWindowSeq(list, upTo: requestedSince) }
     }
 
     /// An entry event the mirror doesn't hold, in the main chat, below the floor the mirror had
@@ -284,7 +333,13 @@ extension BotStore {
     }
 
     func upsert(_ e: Entry) {
-        var list = entries[e.botId] ?? []
+        // A room the person left or was removed from is gone: nothing more of it is kept.
+        guard closedRooms[e.botId] == nil else { return }
+        // In place: copying the chat for every event made a catch-up quadratic.
+        Self.upsert(e, into: &entries[e.botId, default: []])
+    }
+
+    static func upsert(_ e: Entry, into list: inout [Entry]) {
         if let i = list.firstIndex(where: { $0.id == e.id }) {
             // A late API response mustn't undo a newer SSE update.
             guard e.rev >= list[i].rev else { return }
@@ -301,7 +356,6 @@ extension BotStore {
                 list.append(e)
             }
         }
-        entries[e.botId] = list
     }
 
     func setUsage(_ u: Usage) {

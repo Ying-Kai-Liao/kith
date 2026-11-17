@@ -3,6 +3,9 @@ mod editor;
 pub use editor::preview as schedule_preview;
 pub mod hooks;
 use hooks::Refused;
+mod core_runs;
+#[cfg(test)]
+mod core_runs_tests;
 mod runner;
 mod schedule;
 #[cfg(test)]
@@ -110,6 +113,10 @@ pub struct Routines {
     link: Mutex<Arc<dyn switch::Link>>,
     last_core_tick: Mutex<i64>,
     core_ticking: std::sync::atomic::AtomicBool,
+    /// The turns the core queued that this host run pulled (`core_runs.rs`), by item id. In memory only.
+    pulled: Mutex<std::collections::HashMap<String, core_runs::Item>>,
+    last_pull: Mutex<i64>,
+    pulling: std::sync::atomic::AtomicBool,
 }
 
 impl Default for Routines {
@@ -119,6 +126,9 @@ impl Default for Routines {
             link: Mutex::new(Arc::new(switch::CoreLink)),
             last_core_tick: Mutex::default(),
             core_ticking: std::sync::atomic::AtomicBool::default(),
+            pulled: Mutex::default(),
+            last_pull: Mutex::default(),
+            pulling: std::sync::atomic::AtomicBool::default(),
             state: Mutex::default(),
             active: Mutex::default(),
             scheduler: Mutex::default(),
@@ -514,7 +524,7 @@ pub fn tools() -> Value {
         ("run_routine", "Start a test run, including for a paused routine."),
         (
             "routine_webhook",
-            "Get the routine's webhook: its public url (through the Kith cloud; null when the cloud is off, then only localUrl on this computer works), localUrl and per-routine key. Senders POST with Authorization: Bearer <key>; for GitHub, set the webhook's content type to application/json and its secret to the key (deliveries are verified by X-Hub-Signature-256) and they become events {source:github, event:<event>.<action>, repo, sender, text, url, payload} that event triggers can filter. Deliveries made while the computer is offline wait up to 72 hours in the cloud, which sees their contents (not end-to-end encrypted). rotate:true replaces the key; the old one stops working at once. This doesn't register a provider subscription: set that up with the user, and report the webhook as awaiting connection until then.",
+            "Get the routine's webhook: its public url (through the Kith cloud; null when the cloud is off, then only localUrl on this computer works), localUrl and per-routine key. Senders POST with Authorization: Bearer <key>; for GitHub, set the webhook's content type to application/json and its secret to the key (deliveries are verified by X-Hub-Signature-256) and they become events {source:github, event:<event>.<action>, repo, sender, text, url, payload} that event triggers can filter. Deliveries made while the computer is offline wait up to 72 hours in the cloud, which sees their contents (not end-to-end encrypted). The localUrl does not queue a delivery made while the routine is running (it answers 503 with Retry-After: retry later); senders that do not retry on their own, such as GitHub, should use the public url, which queues and retries for up to 72 hours. rotate:true replaces the key; the old one stops working at once. This doesn't register a provider subscription: set that up with the user, and report the webhook as awaiting connection until then.",
         ),
     ] {
         let required = if name == "set_routine_enabled" { vec!["id", "enabled"] } else { vec!["id"] };

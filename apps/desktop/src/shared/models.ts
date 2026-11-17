@@ -323,7 +323,8 @@ export interface EntryData {
   approver?: 'owner' | 'member'
   /** permission: whether this account may answer it, from who the card names (sent per viewer; older hosts don't). */
   canAnswer?: boolean
-  person?: string
+  /** permission: the person whose run it is; notice (personJoined, personLeft): who joined or left. */
+  person?: string | { id?: string; name?: string }
   personName?: string
   agent?: string
   /** permission, from a run `kith ask` started: "<agent>, asked by <caller agent>" (or "a terminal"). */
@@ -359,8 +360,14 @@ export interface EntryData {
   lateWhy?: string
   /** A bot's post with nothing open: kept, not late. */
   unprompted?: boolean
-  /** notice: botJoined | botLeft | botPassed | botTimedOut, with the bot it is about. */
+  /** notice: botJoined | botLeft | botPassed | botTimedOut, with the bot it is about; personJoined | personLeft | roomCardWaiting (rooms with people). */
   notice?: string
+  /** The owner's copy of a room message: the people who can't see it (ids; shown only below their join line). */
+  hiddenFrom?: string[]
+  /** agent: the room turn did not answer (its text says why); the person may send the message again. */
+  unanswered?: boolean
+  /** permission, a room turn's card in the owner's 1:1 with the agent: the room it came from. */
+  room?: string
   bot?: { botId?: string; name?: string; provider?: string }
   thread?: ThreadSummary
   /** user, in the main chat: the first message of a task; the task goes on in its thread (see `tasks`). */

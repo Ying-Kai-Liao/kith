@@ -38,6 +38,7 @@ fn guest(person: &str, session: &str) -> RunIdentity {
         session: format!("run:g:{}:{person}:{session}", person.len()),
         project: None,
         reply: None,
+        members: Vec::new(),
     }
 }
 

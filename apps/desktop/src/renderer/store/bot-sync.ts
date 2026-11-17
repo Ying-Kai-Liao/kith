@@ -137,6 +137,7 @@ export class BotSync extends BotMirror {
         }
         // After the hello the role is known, so the model knows which half to read; a pending bot survives a restart this way.
         this.onBotGuests?.('connect')
+        void this.refreshMyRooms()
         if (!alive()) return
         await new Promise<void>((resolve, reject) => {
           this.requestedSince = this.rev
@@ -170,6 +171,9 @@ export class BotSync extends BotMirror {
     }
     void attempt()
   }
+
+  /** An invited person's rooms; `BotStore` reads them. */
+  async refreshMyRooms(): Promise<void> {}
 
   /** Resubscribes from the current `rev` on the same link. */
   private restartEvents() {
@@ -212,6 +216,7 @@ export class BotSync extends BotMirror {
         this.floors = snapshotFloors(this.entries, this.rev === 0 ? 0 : this.requestedSince)
         break
       case 'bot':
+        if (this.closedRooms.has(event.bot.id)) break
         this.bots.set(event.bot.id, event.bot)
         this.bump(event.bot.rev)
         this.onRosterChanged?.()
@@ -228,7 +233,7 @@ export class BotSync extends BotMirror {
         break
       case 'entry':
         // Old entries re-stamped by the host (new rev) belong to history paging, not the live window.
-        if (!this.isBelowFloor(event.entry)) this.upsert(event.entry)
+        if (!this.isBelowFloor(event.entry) && !this.closedRooms.has(event.entry.botId)) this.upsert(event.entry)
         this.bump(event.entry.rev)
         this.acknowledgeVisible(event.entry.botId, event.entry)
         break

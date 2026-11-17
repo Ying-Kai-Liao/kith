@@ -68,6 +68,7 @@ fn build(specs: &[(usize, usize, usize)], bind: bool) -> (Arc<TokenTable>, Vec<L
                 session: format!("run:s{i}"),
                 project: PROJECTS[(p + i) % PROJECTS.len()].map(Into::into),
                 reply: None,
+                members: Vec::new(),
             };
             let grant = RunGrant::issue(&table, identity.clone()).unwrap();
             let pid = BASE + u32::try_from(i).unwrap() * SPACING;
