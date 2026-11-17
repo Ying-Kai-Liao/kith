@@ -17,7 +17,7 @@
 //! fd and closes it, so the engine never sees it. It makes "busy" unambiguous (the engine can itself exit 75);
 //! exit 75 stays as the fallback.
 //!
-//! `--lock-alone` (Unix): the run goes on under the lock alone, because no core answered its claim (bin/kith passes it when
+//! `--lock-alone` (the clear is Unix only; Windows takes the flag as the plain lock): the run goes on under the lock alone, because no core answered its claim (bin/kith passes it when
 //! `kith-sessions` says so). After the lock is taken and before the engine starts, every host warm engine marked as having the
 //! conversation loaded is killed and waited for (`kith_stub::clear`); one running a host turn, or one not confirmed gone within
 //! about 5 s, makes the run busy (75, the status fd says `busy`) and the lock is let go. A resident stub records those markers
@@ -80,7 +80,7 @@ struct Args {
     status_fd: Option<i32>,
     ctl: Option<Ctl>,
     /// Clear the conversation's marked warm engines after the take (one-shot only).
-    #[cfg_attr(windows, allow(dead_code))] // Unix only; parse refuses it on Windows
+    #[cfg_attr(windows, allow(dead_code))] // only read on Unix; Windows has nothing to clear
     lock_alone: bool,
     engine: Vec<OsString>,
 }
@@ -104,12 +104,8 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
                 )
             }
             Some("--resident") => resident = true,
-            Some("--lock-alone") => {
-                if cfg!(windows) {
-                    return Err("--lock-alone is Unix only".into());
-                }
-                lock_alone = true;
-            }
+            // Windows takes it as the plain lock: the clear is Unix only and nothing is ever marked there.
+            Some("--lock-alone") => lock_alone = true,
             Some("--ctl-fd") => {
                 let fd: i32 = args
                     .next()
