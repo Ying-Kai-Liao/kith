@@ -13,8 +13,8 @@
 //!   follows `CLAUDE_CONFIG_DIR` (kith-kernel's definition), so run the import with the owner's normal environment. A record whose `transcriptPath` is gone, or
 //!   under an account folder that was removed, still gets its row, with no hash.
 //! - `conversations.transcript_ptr/hash` (m0080) are left empty: `engine_sessions` is the source.
-//! - Each record is also kept whole in `session_records` (migration 111), replacing a row that holds another object: the
-//!   registry is the truth until the switch, and the core writes the files from these rows after it.
+//! - Each record is also kept whole in `session_records` (migration 111), replacing a row older than it by the one order
+//!   key (A6): the registry is the truth until the switch, and the core writes the files from these rows after it.
 //! - Not wired into `kith migrate`'s default run yet (M3-10).
 
 use std::path::Path;
@@ -210,7 +210,22 @@ fn has_tables(c: &Connection) -> bool {
         })
 }
 
-/// Whether the record's `session_records` row is missing or holds another object (migration 111; a core.db from before it
+/// The record as its `session_records` row would take it, when the row is missing or older by the one order key (A6, A7;
+/// a file with no `recordedAt` by its mtime): the same newer-wins decision as `session.record`'s.
+fn newer_row(
+    c: &Connection,
+    r: &Record,
+) -> Result<
+    Option<(
+        serde_json::Map<String, Value>,
+        crate::transcripts::record::Key,
+    )>,
+> {
+    use crate::transcripts::record::{Tie, newer};
+    newer(c, &r.sid, r.raw.clone(), r.mtime, Tie::Strict)
+}
+
+/// Whether the record's `session_records` row is missing or older than it (migration 111; a core.db from before it
 /// has no such table, and a dry run then counts every record).
 fn record_stale(c: Option<&Connection>, r: &Record) -> Result<bool> {
     let Some(c) = c else {
@@ -224,7 +239,7 @@ fn record_stale(c: Option<&Connection>, r: &Record) -> Result<bool> {
     if has == 0 {
         return Ok(true);
     }
-    Ok(crate::transcripts::record::row(c, &r.sid)?.is_none_or(|(have, _)| have != r.raw))
+    Ok(newer_row(c, r)?.is_some())
 }
 
 /// Which records need writing: `(conversation missing, session missing or different from the registry)`.
@@ -386,15 +401,12 @@ pub(crate) fn run_in(
         add_conversation(&tx, s, agent, now)?;
         rows::put(&tx, s, now)?;
     }
-    // The whole record, the file winning (Python is the writer until the switch). Straight into the table: the engine
-    // session and the conversation were written just above, from the same record, with the hash read now.
+    // The whole record where the file is newer than its row (Python is the writer until the switch). Only the row: the
+    // engine session and the conversation were written just above, from the same record, with the hash read now.
     for r in &whole {
-        let key = crate::transcripts::record::Key::of(&r.raw, r.mtime);
-        tx.execute(
-            "INSERT INTO session_records (sid, record, recorded_at, proc_start, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT (sid) DO UPDATE SET record = ?2, recorded_at = ?3, proc_start = ?4, updated_at = ?5",
-            rusqlite::params![r.sid, Value::Object(r.raw.clone()).to_string(), key.at, key.proc_start, now],
-        )?;
+        if let Some((rec, key)) = newer_row(&tx, r)? {
+            crate::transcripts::record::put_row(&tx, &r.sid, &rec, &key)?;
+        }
     }
     tx.execute(
         "INSERT INTO import_log (step, at, source, source_sha256, backup, summary) VALUES ('transcripts', ?1, ?2, ?3, ?4, ?5)",

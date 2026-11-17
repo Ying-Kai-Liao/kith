@@ -108,7 +108,13 @@ fn an_older_hooks_file_with_no_recorded_at_is_taken_into_the_row_by_its_mtime() 
     let pass = reconcile_once(&mut core, &c, &dir(&m)).unwrap();
     assert_eq!(pass.taken, 2, "{pass:?}");
     assert_eq!(row_of(&core, SID)["cwd"], "/old-hook");
-    assert_eq!(Value::Object(row_of(&core, OTHER)), fresh);
+    // The row stores the file's st_mtime_ns as its recordedAt (A6), and the file is written again with it.
+    let stored = row_of(&core, OTHER);
+    assert!(stored["recordedAt"].as_i64().unwrap() > 0);
+    let mut stamped = fresh.as_object().unwrap().clone();
+    stamped.insert("recordedAt".into(), stored["recordedAt"].clone());
+    assert_eq!(stored, stamped);
+    assert_eq!(file(&m, OTHER)["recordedAt"], stored["recordedAt"]);
     assert_eq!(file(&m, SID), row_of(&core, SID));
     // Its key is the file's st_mtime_ns: a new record (recordedAt now) still wins over it.
     let now = i64::try_from(
@@ -154,6 +160,73 @@ fn the_prune_takes_old_dead_records_and_keeps_the_engine_sessions() {
     // A pruned session's file is not brought back by the reconcile.
     reconcile_once(&mut core, &ctx(&m), &dir(&m)).unwrap();
     assert!(!file_of(&dir(&m), SID).exists());
+    // The session's lock file stays (A8): a flock lives on the file, so it is never deleted.
+    assert!(project::lock_of(&dir(&m), SID).exists());
+}
+
+#[test]
+fn the_prune_deletes_only_the_row_it_judged() {
+    let (_t, m) = machine();
+    let mut core = core(&m, true);
+    let now = 100 * 86_400 * 1_000_000_000_i64;
+    let day = 86_400 * 1_000_000_000_i64;
+    ask(
+        &mut core,
+        &rec(SID, now - 8 * day, &json!({"procStart": "e1"})),
+    );
+    // Same recordedAt, a later procStart: another key, so a prune that judged the first must not delete it.
+    let cx = ctx(&m);
+    let judged = validate(Some(&rec(SID, now - 8 * day, &json!({"procStart": "e1"}))))
+        .unwrap()
+        .1;
+    assert_eq!(record::row(core.conn(), SID).unwrap().unwrap().0, judged);
+    record::commit(
+        &mut core,
+        &cx,
+        SID,
+        validate(Some(&rec(SID, now - 8 * day, &json!({"procStart": "e2"}))))
+            .unwrap()
+            .1,
+        0,
+    )
+    .unwrap();
+    let n = core
+        .conn()
+        .execute(
+            "DELETE FROM session_records WHERE sid = ?1 AND recorded_at = ?2 AND proc_start IS ?3",
+            rusqlite::params![SID, now - 8 * day, "e1"],
+        )
+        .unwrap();
+    assert_eq!(
+        n, 0,
+        "the compare-and-delete misses a row whose key changed"
+    );
+    assert!(record::row(core.conn(), SID).unwrap().is_some());
+}
+
+#[test]
+fn a_settle_that_read_an_older_row_never_writes_it_over_a_row_committed_in_between() {
+    // Contract A7: the settle reads row 3 and file 5; row 6 commits in between; the settle must leave row 6 and file 6.
+    let (_t, m) = machine();
+    let mut core = core(&m, true);
+    let cx = ctx(&m);
+    ask(&mut core, &rec(SID, 3, &json!({"cwd": "/row3"})));
+    write_atomic(
+        &file_of(&dir(&m), SID),
+        &rec(SID, 5, &json!({"cwd": "/file5"})),
+    )
+    .unwrap();
+    let six = validate(Some(&rec(SID, 6, &json!({"cwd": "/row6"}))))
+        .unwrap()
+        .1;
+    let done = project::settle_with(&mut core, &cx, &dir(&m), SID, &mut |core| {
+        assert_eq!(row_of(core, SID)["cwd"], "/row3");
+        record::commit(core, &cx, SID, six.clone(), 0).map(|_| ())
+    })
+    .unwrap();
+    assert!(!done.taken, "file 5 is older than row 6");
+    assert_eq!(row_of(&core, SID)["cwd"], "/row6");
+    assert_eq!(file(&m, SID)["cwd"], "/row6");
 }
 
 #[test]
@@ -166,11 +239,15 @@ fn the_import_takes_files_into_rows_and_the_export_writes_only_newer_rows() {
     let (n, notes) = import_files(core.conn(), &cx, &dir(&m)).unwrap();
     assert_eq!((n, notes.len()), (1, 0));
     assert_eq!(Value::Object(row_of(&core, SID)), first, "the full JSON");
-    // Files win before the switch, even an older one.
+    // The one order key (A6): an older file does not replace its row, a newer one does.
     let older = rec(SID, 5, &json!({"cwd": "/older"}));
     write_atomic(&file_of(&dir(&m), SID), &older).unwrap();
+    assert_eq!(import_files(core.conn(), &cx, &dir(&m)).unwrap().0, 0);
+    assert_eq!(row_of(&core, SID)["cwd"], "/a");
+    let newer_file = rec(SID, 15, &json!({"cwd": "/newer"}));
+    write_atomic(&file_of(&dir(&m), SID), &newer_file).unwrap();
     assert_eq!(import_files(core.conn(), &cx, &dir(&m)).unwrap().0, 1);
-    assert_eq!(row_of(&core, SID)["cwd"], "/older");
+    assert_eq!(row_of(&core, SID)["cwd"], "/newer");
     assert_eq!(
         import_files(core.conn(), &cx, &dir(&m)).unwrap().0,
         0,
@@ -195,4 +272,30 @@ fn the_import_takes_files_into_rows_and_the_export_writes_only_newer_rows() {
     );
     assert_eq!(file(&m, OTHER)["cwd"], "/hook");
     assert!(project::read_file(&file_of(&dir(&m), OTHER)).is_some());
+}
+
+/// Contract A9: every shared fixture under `kernel/tests/fixtures/registry-records/` (the same files `kith_registry`'s tests
+/// run): a `valid/` file is taken as the record of the session its name names, an `invalid/` one is refused.
+#[test]
+fn the_shared_registry_fixtures_are_taken_or_refused_as_their_folder_says() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../kernel/tests/fixtures/registry-records");
+    for (kind, taken) in [("valid", true), ("invalid", false)] {
+        let mut names: Vec<_> = std::fs::read_dir(root.join(kind))
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        names.sort();
+        assert!(!names.is_empty(), "no {kind} fixtures");
+        for path in names {
+            let t = tempfile::tempdir().unwrap();
+            let name = path.file_name().unwrap();
+            std::fs::copy(&path, t.path().join(name)).unwrap();
+            let mut notes = Vec::new();
+            let got = super::reconcile::files(t.path(), &mut notes);
+            assert_eq!(got.len() == 1, taken, "{kind}/{name:?}: {notes:?}");
+        }
+    }
 }

@@ -4,48 +4,69 @@
 //!
 //! The bytes are Python's `json.dump` spacing (`kith_kernel::secrets::pyjson`), so a reader sees the same JSON object the hook
 //! wrote; only the object is promised, not the bytes. Lock order: the core first (`&mut Core` or the daemon's core mutex),
-//! then the session's lock; nothing takes them the other way round.
+//! then the session's lock (a flock on `locks/<sid>.lock`, A8); nothing in the core takes them the other way round, and
+//! Python never takes the core's.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
+use fs2::FileExt as _;
 use kith_kernel::threads::Ctx;
 use rusqlite::Connection;
 use serde_json::{Map, Value};
 
-use super::record::{self, Key};
+use super::record::{self, Key, Tie};
 use crate::db::Core;
-use crate::error::Result;
+use crate::error::{Error, Result};
 
-type Locks = Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>;
+/// The folder of the per-session locks, under the registry folder.
+pub(crate) const LOCKS: &str = "locks";
 
-fn locks() -> &'static Locks {
-    static LOCKS: OnceLock<Locks> = OnceLock::new();
-    LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+/// How long a lock is waited for before the call fails (the Python side waits at most 1 s and then skips).
+const LOCK_WAIT: Duration = Duration::from_secs(5);
+
+/// `<dir>/locks/<sid>.lock`.
+pub(crate) fn lock_of(dir: &Path, sid: &str) -> PathBuf {
+    dir.join(LOCKS).join(format!("{sid}.lock"))
 }
 
-/// Runs `f` holding the lock of one registry file.
-pub(crate) fn with_lock<R>(file: &Path, f: impl FnOnce() -> R) -> R {
-    let one = locks()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .entry(file.to_path_buf())
-        .or_default()
-        .clone();
-    let out = {
-        let _held = one
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        f()
-    };
-    let mut all = locks()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    // Ours and the map's: nobody else waits on it, so it goes (the map stays as small as the live calls).
-    if Arc::strong_count(&one) == 2 {
-        all.remove(file);
+/// Runs `f` holding the session's lock (contract A8): `flock(LOCK_EX)` on `<dir>/locks/<sid>.lock` (folder 0700, file
+/// 0600, never deleted), the same lock Python's Files-mode write and drains take, so it holds across processes. Waits at
+/// most [`LOCK_WAIT`]; a lock held longer is an error and the next pass tries again.
+pub(crate) fn with_lock<R>(dir: &Path, sid: &str, f: impl FnOnce() -> Result<R>) -> Result<R> {
+    let path = lock_of(dir, sid);
+    let folder = dir.join(LOCKS);
+    std::fs::create_dir_all(&folder)?;
+    let mut o = std::fs::OpenOptions::new();
+    o.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700))?;
+        o.mode(0o600);
     }
+    let file = o.open(&path)?;
+    let start = Instant::now();
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => break,
+            Err(e)
+                if e.kind() == fs2::lock_contended_error().kind()
+                    && start.elapsed() < LOCK_WAIT =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(e) if e.kind() == fs2::lock_contended_error().kind() => {
+                return Err(Error::Io(format!(
+                    "{} is held by another writer",
+                    path.display()
+                )));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let out = f();
+    let _ = fs2::FileExt::unlock(&file);
     out
 }
 
@@ -128,8 +149,20 @@ pub(crate) struct Settled {
 /// that writes `<sid>.json` itself can land its file, and the rename then replaces it. The next pass sees the row only (that
 /// record is lost unless the hook records again); the window is the few microseconds of one write.
 pub(crate) fn settle(core: &mut Core, ctx: &Ctx<'_>, dir: &Path, sid: &str) -> Result<Settled> {
+    settle_with(core, ctx, dir, sid, &mut |_| Ok(()))
+}
+
+/// [`settle`], with `between` run after the file is read and before the row is (a test stands another writer's commit
+/// there, contract A7).
+pub(crate) fn settle_with(
+    core: &mut Core,
+    ctx: &Ctx<'_>,
+    dir: &Path,
+    sid: &str,
+    between: &mut dyn FnMut(&mut Core) -> Result<()>,
+) -> Result<Settled> {
     let path = file_of(dir, sid);
-    with_lock(&path, || {
+    with_lock(dir, sid, || {
         let mut done = Settled::default();
         let file = read_file(&path).and_then(|(obj, mtime)| {
             match record::validate(Some(&Value::Object(obj))) {
@@ -137,35 +170,50 @@ pub(crate) fn settle(core: &mut Core, ctx: &Ctx<'_>, dir: &Path, sid: &str) -> R
                 _ => None,
             }
         });
-        let mut row = record::row(core.conn(), sid)?;
-        if let Some((rec, mtime)) = &file {
-            let newer = row
-                .as_ref()
-                .is_none_or(|(have, key)| have != rec && Key::of(rec, *mtime) > *key);
-            if newer
-                && record::commit(core, ctx, sid, rec.clone(), *mtime)? == record::Took::Recorded
-            {
-                done.taken = true;
-                row = record::row(core.conn(), sid)?;
-            }
+        between(core)?;
+        // The adoption is the record's own newer-wins upsert (A7): the decision is made inside its transaction, against
+        // the row as it is then, never against a row read before.
+        if let Some((rec, mtime)) = &file
+            && record::commit_as(core, ctx, sid, rec.clone(), *mtime, Tie::Strict)?
+                == record::Took::Recorded
+        {
+            done.taken = true;
         }
-        let Some((rec, _)) = row else {
+        // The row as it is now. A record committed after this read settles under this same lock after us.
+        let Some((rec, _)) = record::row(core.conn(), sid)? else {
             return Ok(done);
         };
         if file.as_ref().is_some_and(|(have, _)| *have == rec) {
             return Ok(done);
         }
-        write_atomic(&path, &Value::Object(rec))?;
+        write_atomic(&path, &projection(rec, &key_of_row(core.conn(), sid)?))?;
         done.written = true;
         Ok(done)
     })
+}
+
+/// The row's key, for [`projection`].
+fn key_of_row(conn: &Connection, sid: &str) -> Result<Key> {
+    Ok(record::row(conn, sid)?.map_or(
+        Key {
+            at: 0,
+            proc_start: None,
+        },
+        |(_, k)| k,
+    ))
+}
+
+/// The file's object for a row: the row's record, with its key's `recordedAt` when the record has none (A6).
+fn projection(mut rec: Map<String, Value>, key: &Key) -> Value {
+    record::stamp(&mut rec, key);
+    Value::Object(rec)
 }
 
 /// A rollback's rows into files (contract A3): a row is written only when its file is missing or the row is newer than
 /// the file (a file with no `recordedAt` by its `st_mtime_ns`), under the session's lock. Answers whether it wrote.
 pub(crate) fn export_one(conn: &Connection, dir: &Path, sid: &str) -> Result<bool> {
     let path = file_of(dir, sid);
-    with_lock(&path, || {
+    with_lock(dir, sid, || {
         let Some((rec, key)) = record::row(conn, sid)? else {
             return Ok(false);
         };
@@ -174,7 +222,7 @@ pub(crate) fn export_one(conn: &Connection, dir: &Path, sid: &str) -> Result<boo
         {
             return Ok(false);
         }
-        write_atomic(&path, &Value::Object(rec))?;
+        write_atomic(&path, &projection(rec, &key))?;
         Ok(true)
     })
 }

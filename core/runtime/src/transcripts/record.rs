@@ -20,7 +20,8 @@
 //! commit in one order and rename in the other.
 //!
 //! The order key is `(recordedAt, procStart)`, later wins, and a full tie goes to the record that arrives last. A record
-//! with no `recordedAt` (an older hook's file) is keyed by the file's `st_mtime_ns` where there is a file, else 0 (A1).
+//! with no `recordedAt` (an older hook's file) is keyed by the file's `st_mtime_ns` where there is a file, else 0 (A1), and
+//! the row stores that key as its `recordedAt`, so every file the core writes carries one (A6).
 //!
 //! `startedAt` survives a compact (`source: "compact"` keeps the row's `startedAt`), the rule `kith-sessions record` applied
 //! to its own file until now.
@@ -38,7 +39,8 @@ use crate::error::Result;
 /// The spool folder under the registry (`inbox/<sid>.<recordedAt>.<pid>.json`); readers that glob `*.json` never see it.
 pub(crate) const INBOX: &str = "inbox";
 
-/// The order of two records of one session: `(recordedAt in ns, procStart)`, `None` sorting first.
+/// The order of two records of one session: `(recordedAt in ns, procStart)`, `None` sorting first. [`Key::of`] is the one
+/// order key (contract A6): the record, the settle, the reconcile, the import and the rollback's export all use it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Key {
     pub at: i64,
@@ -149,6 +151,21 @@ fn text(rec: &Map<String, Value>, key: &str) -> String {
         .to_owned()
 }
 
+/// Writes the `session_records` row alone (inside the caller's transaction, after [`newer`] allowed it).
+pub(crate) fn put_row(
+    conn: &Connection,
+    sid: &str,
+    rec: &Map<String, Value>,
+    key: &Key,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO session_records (sid, record, recorded_at, proc_start, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (sid) DO UPDATE SET record = ?2, recorded_at = ?3, proc_start = ?4, updated_at = ?5",
+        params![sid, Value::Object(rec.clone()).to_string(), key.at, key.proc_start, now_secs()],
+    )?;
+    Ok(())
+}
+
 /// Writes the row and what it stands for in `engine_sessions` and `conversations` (inside the caller's transaction). The
 /// engine session keeps its hash while its pointer stays; a new pointer clears it (the core reads the files again).
 pub(crate) fn put(
@@ -159,11 +176,7 @@ pub(crate) fn put(
     key: &Key,
 ) -> Result<()> {
     let now = now_secs();
-    conn.execute(
-        "INSERT INTO session_records (sid, record, recorded_at, proc_start, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT (sid) DO UPDATE SET record = ?2, recorded_at = ?3, proc_start = ?4, updated_at = ?5",
-        params![sid, Value::Object(rec.clone()).to_string(), key.at, key.proc_start, now],
-    )?;
+    put_row(conn, sid, rec, key)?;
     let given = text(rec, "account");
     let account = if given.is_empty() {
         DEFAULT_ACCOUNT.to_owned()
@@ -190,17 +203,26 @@ pub(crate) fn put(
     Ok(())
 }
 
-/// The newer-wins write in one claim transaction: the row takes `rec` unless it holds a newer one. A compact keeps the row's
-/// `startedAt`. `fallback` keys a record without `recordedAt`.
-pub(crate) fn commit(
-    core: &mut Core,
-    ctx: &Ctx<'_>,
+/// Who wins a full tie of the order key: a record that arrives (`session.record`, a spool entry) takes the row; a file
+/// adopted into the row (the settle, the reconcile, the import) must be strictly newer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Tie {
+    Arrival,
+    Strict,
+}
+
+/// The newer-wins decision (contracts A6, A7), the only one: `Some((record, key))` to write when `rec` beats the row,
+/// `None` when the row keeps. A compact keeps the row's `startedAt`; a record with no `recordedAt` gets `fallback` (its
+/// file's `st_mtime_ns`) as its `recordedAt`, so every file written from the row carries one. Read inside the caller's
+/// transaction, so the check and the write it allows are one.
+pub(crate) fn newer(
+    conn: &Connection,
     sid: &str,
     mut rec: Map<String, Value>,
     fallback: i64,
-) -> Result<Took> {
-    let tx = core.claim_tx()?;
-    let have = row(&tx, sid)?;
+    tie: Tie,
+) -> Result<Option<(Map<String, Value>, Key)>> {
+    let have = row(conn, sid)?;
     if rec.get("source").and_then(Value::as_str) == Some("compact")
         && let Some(started) = have
             .as_ref()
@@ -210,9 +232,50 @@ pub(crate) fn commit(
         rec.insert("startedAt".into(), started.clone());
     }
     let key = Key::of(&rec, fallback);
-    if have.as_ref().is_some_and(|(_, k)| key < *k) {
-        return Ok(Took::Older);
+    if let Some((_, k)) = &have
+        && (key < *k || (tie == Tie::Strict && key == *k))
+    {
+        return Ok(None);
     }
+    stamp(&mut rec, &key);
+    Ok(Some((rec, key)))
+}
+
+/// Gives `rec` its key's `recordedAt` when it has none (A6).
+pub(crate) fn stamp(rec: &mut Map<String, Value>, key: &Key) {
+    if !rec
+        .get("recordedAt")
+        .is_some_and(|v| v.is_i64() || v.is_u64())
+    {
+        rec.insert("recordedAt".into(), json!(key.at));
+    }
+}
+
+/// The newer-wins write in one claim transaction: the row takes `rec` unless it holds a newer one ([`newer`]).
+/// `fallback` keys a record without `recordedAt`.
+pub(crate) fn commit(
+    core: &mut Core,
+    ctx: &Ctx<'_>,
+    sid: &str,
+    rec: Map<String, Value>,
+    fallback: i64,
+) -> Result<Took> {
+    commit_as(core, ctx, sid, rec, fallback, Tie::Arrival)
+}
+
+/// [`commit`] with the tie rule given.
+pub(crate) fn commit_as(
+    core: &mut Core,
+    ctx: &Ctx<'_>,
+    sid: &str,
+    rec: Map<String, Value>,
+    fallback: i64,
+    tie: Tie,
+) -> Result<Took> {
+    let tx = core.claim_tx()?;
+    let Some((rec, key)) = newer(&tx, sid, rec, fallback, tie)? else {
+        return Ok(Took::Older);
+    };
     put(&tx, ctx, sid, &rec, &key)?;
     tx.commit()?;
     Ok(Took::Recorded)

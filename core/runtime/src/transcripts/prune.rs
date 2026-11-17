@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use super::project::{file_of, with_lock};
 use super::record;
+use super::record::Key;
 use crate::db::Core;
 use crate::error::Result;
 
@@ -30,27 +31,36 @@ pub(crate) fn prune_once(
     running: &dyn Fn(i64) -> bool,
 ) -> Result<Vec<String>> {
     let cutoff = now_ns.saturating_sub(DAYS * NS_PER_DAY);
-    let old: Vec<(String, i64)> = {
+    let old: Vec<(String, Key)> = {
         let mut q = core.conn().prepare(
-            "SELECT sid, recorded_at FROM session_records WHERE recorded_at <= ?1 ORDER BY sid",
+            "SELECT sid, recorded_at, proc_start FROM session_records WHERE recorded_at <= ?1 ORDER BY sid",
         )?;
-        q.query_map([cutoff], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?
+        q.query_map([cutoff], |r| {
+            Ok((
+                r.get(0)?,
+                Key {
+                    at: r.get(1)?,
+                    proc_start: r.get(2)?,
+                },
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?
     };
     let mut gone = Vec::new();
-    for (sid, at) in old {
+    for (sid, key) in old {
         let pid =
             record::row(core.conn(), &sid)?.and_then(|(m, _)| m.get("pid").and_then(Value::as_i64));
         if pid.is_some_and(|p| p > 0 && running(p)) {
             continue;
         }
         let path = file_of(dir, &sid);
-        let pruned = with_lock(&path, || -> Result<bool> {
+        let pruned = with_lock(dir, &sid, || -> Result<bool> {
             let tx = core.claim_tx()?;
-            // Only the row that was judged: a record that came in since keeps its session.
+            // Compare-and-delete (A7): only the row that was judged, by its whole key; a record that came in since keeps
+            // its session. The session's lock file stays (A8: a flock lives on the file, never deleted).
             let n = tx.execute(
-                "DELETE FROM session_records WHERE sid = ?1 AND recorded_at = ?2",
-                params![sid, at],
+                "DELETE FROM session_records WHERE sid = ?1 AND recorded_at = ?2 AND proc_start IS ?3",
+                params![sid, key.at, key.proc_start],
             )?;
             tx.commit()?;
             if n > 0 {

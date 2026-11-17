@@ -9,7 +9,7 @@
 //!   again. A file with no `recordedAt` is keyed by its `st_mtime_ns` (A1): an older hook's write after the core's is newer
 //!   than the row it replaced.
 //!
-//! The cutover module (P3) also calls [`import_files`] (files into rows, the files winning, before the switch) and
+//! The cutover module (P3) also calls [`import_files`] (files into rows where they are newer, before the switch) and
 //! [`export_rows`] (rows into files at a rollback, a row only where it is newer than its file).
 
 use std::path::Path;
@@ -18,7 +18,7 @@ use kith_kernel::threads::Ctx;
 use serde_json::{Map, Value};
 
 use super::project::{self, file_of, read_file};
-use super::record::{self, INBOX, Key, Took};
+use super::record::{self, INBOX, Tie, Took};
 use crate::db::Core;
 use crate::error::Result;
 
@@ -129,8 +129,8 @@ pub(crate) fn reconcile_once(core: &mut Core, ctx: &Ctx<'_>, dir: &Path) -> Resu
     Ok(pass)
 }
 
-/// Files into rows with the files winning (the import before a switch, while Python is still the writer): every valid
-/// `<sid>.json` whose row is missing or holds another object replaces the row. Answers how many rows changed. Inside the
+/// Files into rows (the import before a switch, while Python is still the writer): every valid `<sid>.json` whose row is
+/// missing or older by the order key (A6; a file with no `recordedAt` by its mtime) replaces the row. Answers how many rows changed. Inside the
 /// caller's transaction when it is given one through `conn`.
 pub(crate) fn import_files(
     conn: &rusqlite::Connection,
@@ -139,11 +139,11 @@ pub(crate) fn import_files(
 ) -> Result<(usize, Vec<String>)> {
     let (mut changed, mut notes) = (0, Vec::new());
     for (sid, rec, mtime) in files(dir, &mut notes) {
-        if record::row(conn, &sid)?.is_some_and(|(have, _)| have == rec) {
-            continue;
+        // The same newer-wins decision as the record (A6, A7): a file replaces its row only when it is strictly newer.
+        if let Some((rec, key)) = record::newer(conn, &sid, rec, mtime, Tie::Strict)? {
+            record::put(conn, ctx, &sid, &rec, &key)?;
+            changed += 1;
         }
-        record::put(conn, ctx, &sid, &rec, &Key::of(&rec, mtime))?;
-        changed += 1;
     }
     Ok((changed, notes))
 }
