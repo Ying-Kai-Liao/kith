@@ -45,6 +45,7 @@ from pathlib import Path
 KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_launchd  # noqa: E402
+import kith_registry  # noqa: E402
 import kith_runenv  # noqa: E402
 import kith_tombstone  # noqa: E402
 from kith_paths import paths, launcher, job_installed, retire_old_job, stable_kernel  # noqa: E402  the one place that knows where kith's folders are
@@ -393,6 +394,16 @@ def prune_terminal(dirpath, now=None, days=TERMINAL_DAYS):
     return gone
 
 
+def prune_registry(state, now=None):
+    """The session registry's housekeeping, in $KITH_STATE/live/terminal (where kith-sessions writes it and the host reads it).
+    Once it is the core's (kith_registry.switched) nothing here: the core prunes its rows and their files. In Files mode a
+    spool entry left by a Writer-mode hook (before a rollback) is put in place first when newer, then old records go."""
+    if kith_registry.switched(state):
+        return 0
+    kith_registry.drain(state)
+    return prune_terminal(kith_registry.reg_dir(state), now)
+
+
 def prune(force=False):
     """Hourly housekeeping from the tick: run logs, auth.log, terminal records. Deletes are idempotent.
 
@@ -421,7 +432,7 @@ def prune(force=False):
     prune_runs(LOGS / 'runs', busy, t)
     auth = Path(os.environ.get('KITH_AUTH') or paths()['KITH_SECRETS'] / 'auth.json').with_name('auth.log')
     rotate_log(auth)
-    prune_terminal(paths()['KITH_MACHINE'] / 'live' / 'terminal', t)
+    prune_registry(STATE, t)
 
 
 def tick():

@@ -58,5 +58,24 @@ try:
     assert b2.exists() and c.exists() and e.exists()
 finally:
     live.kill(); live.wait()
-print('ok: run logs keep 50 or 30 days, auth.log rotates not truncates, terminal records keep live pids')
+
+# the registry as prune() reaches it: $KITH_STATE/live/terminal (not KITH_MACHINE's). Files mode drains the spool first, then
+# prunes; Writer mode (the transcripts marker, or its switch file past stepping) touches nothing: the core prunes its own rows.
+state = tmp / 'state'; os.environ['KITH_MACHINE'] = str(tmp / 'machine')
+reg = state / 'live' / 'terminal'
+old_dead = mk(reg / 'old.json', 10, '{"pid": %d, "recordedAt": 1}' % dead.pid)
+spooled = mk(reg / 'inbox' / 'new.5.1.json', 0, '{"sessionId": "new", "recordedAt": 5, "pid": null}')
+mk(reg / 'registry.tombstone', 0, '{}')
+assert ks.prune_registry(state, now=now) == 0 and old_dead.exists() and spooled.exists(), 'Writer mode: nothing pruned or drained'
+(reg / 'registry.tombstone').unlink()
+sw = tmp / 'machine' / 'core' / 'cutover' / 'transcripts.switch'
+mk(sw, 0, 'state=switched\nat=1\n')
+assert ks.prune_registry(state, now=now) == 0 and old_dead.exists() and spooled.exists(), 'the switch file alone is Writer mode'
+sw.write_text('state=stepping\nat=1\n')
+assert ks.prune_registry(state, now=now) == 1, 'Files mode: the old dead record goes'
+assert not old_dead.exists() and not spooled.exists() and (reg / 'new.json').exists(), 'the spool entry was put in place first'
+assert ks.STATE == ks.paths()['KITH_STATE']
+src_text = open(src).read()
+assert "prune_registry(STATE, t)" in src_text and "paths()['KITH_MACHINE'] / 'live' / 'terminal'" not in src_text
+print('ok: run logs keep 50 or 30 days, auth.log rotates not truncates, terminal records keep live pids, the registry pruned in KITH_STATE in Files mode only')
 PY

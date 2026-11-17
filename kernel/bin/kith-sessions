@@ -28,6 +28,7 @@
   kith-sessions run AGENT -- CMD...        run CMD (claude) as a child: signals and exit code pass through; afterwards gives back the
                                            claims of this process and says how to get the session back: `kith AGENT --resume ID` (also when the host took it over)
 
+  kith-sessions caps                       what this copy knows, one per line (`registry-core`: the registry's Writer mode)
   kith-sessions epoch PERSON               Writer mode only: prints PERSON:N, the core's revoke epoch for them (bin/kith reads it before kith-auth decides)
 
 Writer mode (the claims are the core's: the marker $KITH_STATE/live/terminal/claims.tombstone, kernel/lib/kith_claims.py). The claim files
@@ -37,7 +38,10 @@ on under the conversation's stub lock alone, `sweep` exits 3. No marker (today):
 
 Registry file (contract with the host, serve/): dir 0700, file 0600, written by tmp + rename:
   {"v":1,"sessionId","agent","cwd","transcriptPath","pid" (the claude process),"project","source","resumedFrom","startedAt",
-   "account" (the login it was made under: KITH_ACCOUNT_ID, e.g. claude or claude:work; bin/kith resumes it only there)}
+   "account" (the login it was made under: KITH_ACCOUNT_ID, e.g. claude or claude:work; bin/kith resumes it only there),
+   "recordedAt" (nanoseconds since the epoch: the order key, kernel/lib/kith_registry.py)}
+  Once the registry is the core's (the marker live/terminal/registry.tombstone or the transcripts switch, kith_registry.switched)
+  record writes no file: it spools inbox/<sid>.<recordedAt>.<pid>.json, calls session.record, and deletes its entry on an answer.
 Writer claim (contract with the host, serve/host/src/terminal/claim.rs): $KITH_STATE/live/terminal/<sid>.claim, made whole in a
 temp file and linked into place (exclusive), 0600: {"pid","procStart","at","kind"}. Whoever holds it is the one writer of the
 session, before the registry file exists and with the host down. Stale (pid gone, or started at another time) = free, taken over by rename.
@@ -192,14 +196,47 @@ def record():
         kind = run_kind()
         pid = claude_pid(sid)
         resumed = env.get('KITH_RESUMED_FROM') or None
-        write_atomic(path, {
+        rec = {
             'v': 1, 'sessionId': sid, 'agent': env['KITH_AGENT'], 'cwd': cwd, 'transcriptPath': hook.get('transcript_path'),
             'pid': pid, 'project': env.get('KITH_PROJECT') or None, 'source': hook.get('source') or 'startup',
             'resumedFrom': resumed, 'startedAt': started, 'account': env.get('KITH_ACCOUNT_ID') or None,
             'kind': kind, 'label': run_label(kind), 'procStart': proc_start(pid) if pid and kind != 'terminal' else None,
-            **launcher_of(pid)})
+            **launcher_of(pid), 'recordedAt': time.time_ns()}
+        reg, state = registry_lib(), os.environ['KITH_STATE']
+        if reg.switched(state):
+            record_in_core(reg, state, rec)
+            return
+        write_atomic(path, rec)
+        reg.drain(state)
+        if reg.switched(state):   # the step's marker landed after the first look: the core may have read the folder already
+            record_in_core(reg, state, rec)
     except Exception as e:  # noqa: BLE001 — listing must never block a session
         print(f'kith-sessions record: {e}', file=sys.stderr)
+
+
+def registry_lib():
+    """kernel/lib/kith_registry.py: the session registry as rows in the Kith core (Writer mode), the spool and the marker."""
+    lib = str(Path(__file__).resolve().parent.parent / 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_registry
+    return kith_registry
+
+
+def record_in_core(reg, state, rec):
+    """Writer mode's record: the spool entry first (a hook killed mid-call loses nothing), then session.record; only an answer
+    that settles it deletes this hook's own entry. Never writes <sid>.json: the core writes it from its row."""
+    if not reg.safe_id(rec['sessionId']):
+        print(f"kith-sessions record: session id {rec['sessionId']!r} is not one the registry can name; not listed", file=sys.stderr)
+        return
+    entry = reg.spool(state, rec)
+    what, why = reg.call(rec)
+    if what in ('settled', 'invalid'):
+        entry.unlink(missing_ok=True)
+    if what == 'invalid':
+        print(f'kith-sessions record: the core refused the record ({why}); not listed', file=sys.stderr)
+    elif what == 'keep':
+        print(f'kith-sessions record: kept for the core ({why})', file=sys.stderr)
 
 
 def host_endpoint():
@@ -1077,6 +1114,9 @@ if __name__ == '__main__':
     a = sys.argv[1:]
     if a[:1] == ['record']:
         record()
+    elif a == ['caps']:
+        # What this copy knows, one per line: the transcripts step checks the installed copy for registry-core (Writer mode).
+        print('registry-core')
     elif a[:1] == ['resolve'] and len(a) in (3, 4, 5):
         # A fifth word "oneshot": a `-p` run, which waits a little for a held session instead of refusing at once.
         resolve(a[1], a[2], int(a[3]) if len(a) > 3 else None, claim_wait() if a[4:] == ['oneshot'] else 0)

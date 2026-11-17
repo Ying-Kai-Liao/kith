@@ -23,6 +23,8 @@
 #     W11 the launcher's proc gate: with the marker any failure of proc stops a person's run
 #     W12 the step's race: a taker that looked before the marker and linked after it takes its file back and claims in the core
 #     W13 Writer mode is either source: the module's switch file alone (not `stepping`) counts, a marker alone counts
+#   The session registry's Writer mode (registry.tombstone, kernel/lib/kith_registry.py), R1-R6 below: the hook spools first, a
+#   settling answer removes its entry, anything else keeps it; Files mode writes the file and drains the spool.
 #   core_front.rs lists the rows (CORE_CALL_METHODS): the fake refuses any method outside the real list.
 # Throwaway dirs, never ~/.kith.
 #
@@ -47,6 +49,9 @@ body = re.search(r'const CORE_CALL_METHODS: &\[&str\] =\s*&\[(.*?)\];', src, re.
 print(' '.join(re.findall(r'"([^"]+)"', body)))
 PY
 )
+# session.record (the registry's Writer mode) joins that list with the core side (transcripts P1). Until it is there the fake allows it
+# too, with a note, so these cases run; once it is, the real list covers it.
+case " $FAKE_ALLOWED " in *" session.record "*) ;; *) echo "note session.record is not in CORE_CALL_METHODS yet (transcripts P1); the fake allows it"; FAKE_ALLOWED="$FAKE_ALLOWED session.record";; esac
 cat > "$T/fakekith" <<'PY'
 #!/usr/bin/env python3
 """The core, as far as the claim rows go: one writer per conversation, a dead claimer is free, a person's claim needs the epoch."""
@@ -62,6 +67,21 @@ if method not in os.environ['FAKE_ALLOWED'].split():
     print(f'core-call: {method} is not one of the allowed', file=sys.stderr); sys.exit(2)
 if os.path.exists(d + '/down'):
     print('no core daemon answers', file=sys.stderr); sys.exit(3)
+if method == 'session.record':   # the registry row: what to answer is the `answer` file (default recorded)
+    with open(d + '/calls', 'a') as f:
+        f.write(method + ' ' + json.dumps(params, sort_keys=True) + '\n')
+    if set(params) != {'record'} or not isinstance(params['record'], dict):
+        print('session.record: params are {"record": {...}}', file=sys.stderr); sys.exit(4)
+    ans = open(d + '/answer').read().strip() if os.path.exists(d + '/answer') else 'recorded'
+    if ans == 'exit3':
+        print('no core daemon answers', file=sys.stderr); sys.exit(3)
+    if ans == 'exit4':
+        print('session.record: rejected', file=sys.stderr); sys.exit(4)
+    if ans == 'hang':
+        import time; time.sleep(30)
+    if ans in ('invalid', 'not-serving'):
+        print(json.dumps({'refused': ans, 'why': 'fake ' + ans})); sys.exit(0)
+    print(json.dumps({'outcome': ans})); sys.exit(0)
 store = json.load(open(d + '/store.json')) if os.path.exists(d + '/store.json') else {'claims': [], 'epoch': {}, 'convs': {}, 'n': 0}
 with open(d + '/calls', 'a') as f:
     f.write(method + ' ' + json.dumps(params, sort_keys=True) + '\n')
@@ -413,6 +433,102 @@ SKR claim sw4 "$PS" >/dev/null 2>&1
 check "W13 the marker alone is Writer mode, as before" "[ ! -e $REG/sw4.claim ] && grep -q '^claim.external.*sw4' $FAKE_DIR/calls"
 check "W13 the marker is a tombstone kith_tombstone.py refuses (exit 3, names the rollback)" "writer_mode; python3 -I \"$KERNEL/lib/kith_tombstone.py\" $REG/claims.tombstone >$T/tomb.out 2>&1; [ \$? -eq 3 ] && grep -q 'kith rollback claims' $T/tomb.out"
 files_mode
+
+# ---- R: the session registry's Writer mode (kernel/lib/kith_registry.py; transcripts P2) ---------------------------------
+#   R1 an answer that settles it (recorded, older) deletes the hook's own spool entry, and no <sid>.json is written
+#   R2 refused:invalid deletes it too (dropped, one line); not-serving, exit 3/4, no daemon and a timeout keep it
+#   R3 the entry is inbox/<sid>.<recordedAt>.<pid>.json, 0600 in a 0700 folder; two hooks of one session leave two entries
+#   R4 Files mode: the file as today plus recordedAt, no call; the inbox drained (newer moves in, older goes)
+#   R5 the marker landing after the first look: the file is written and the Writer steps run too
+#   R6 Writer mode is either source (registry.tombstone, or transcripts.switch past stepping); caps says registry-core
+files_mode; reset; up
+INBOX=$REG/inbox
+reg_files() { rm -f "$REG/registry.tombstone" "$KITH_MACHINE/core/cutover/transcripts.switch"; }
+reg_writer() { printf '{"kith_tombstone": 1, "module": "transcripts"}\n' > "$REG/registry.tombstone"; }
+answer() { echo "$1" > "$FAKE_DIR/answer"; }
+hook() {   # hook SID: the SessionStart hook of an owner's terminal run
+  env -u KITH_HIDE_SESSION -u KITH_RUN_KIND KITH_AGENT=house KITH_TERMINAL_SESSION=1 python3 "$SK" record \
+    <<<"{\"session_id\": \"$1\", \"cwd\": \"/tmp\", \"transcript_path\": \"/tmp/$1.jsonl\", \"source\": \"startup\"}"
+}
+nin() { ls "$INBOX" 2>/dev/null | grep -c "^$1\\." ; }
+rreset() { reset; rm -rf "$INBOX" "$FAKE_DIR/answer"; rm -f "$REG"/r*.json "$REG"/d*.json; }
+
+reg_writer; rreset
+hook r1 2>"$T/err"
+check "R1 Writer mode, recorded: session.record was called with the record and recordedAt" "grep -q '^session.record .*\"sessionId\": \"r1\"' $FAKE_DIR/calls && grep -Eq '\"recordedAt\": [0-9]{18,}' $FAKE_DIR/calls"
+check "R1 the spool entry is gone and no registry file was written" "[ \"\$(nin r1)\" -eq 0 ] && [ ! -e $REG/r1.json ]"
+answer older; hook r1b 2>/dev/null
+check "R1 older settles it too: entry gone, no file" "[ \"\$(nin r1b)\" -eq 0 ] && [ ! -e $REG/r1b.json ]"
+answer invalid; hook r2 2>"$T/err"
+check "R2 refused:invalid: the entry is deleted and the record dropped with a line" "[ \"\$(nin r2)\" -eq 0 ] && [ ! -e $REG/r2.json ] && grep -q 'refused the record' $T/err"
+answer not-serving; hook r2a 2>"$T/err"
+check "R2 refused:not-serving keeps the entry (fail open, a line)" "[ \"\$(nin r2a)\" -eq 1 ] && [ ! -e $REG/r2a.json ] && grep -q 'kept for the core' $T/err"
+answer exit3; hook r2b 2>/dev/null; rc=$?
+check "R2 exit 3 (no answer) keeps it and the hook still exits 0" "[ $rc -eq 0 ] && [ \"\$(nin r2b)\" -eq 1 ] && [ ! -e $REG/r2b.json ]"
+answer exit4; hook r2c 2>/dev/null
+check "R2 exit 4 (a rejected call) keeps it" "[ \"\$(nin r2c)\" -eq 1 ]"
+rm -f "$FAKE_DIR/answer"; down; hook r2d 2>/dev/null; up
+check "R2 no daemon keeps it" "[ \"\$(nin r2d)\" -eq 1 ] && [ ! -e $REG/r2d.json ]"
+answer hang; t0=$SECONDS; hook r2e 2>/dev/null; took=$((SECONDS - t0))
+check "R2 a hung core: the hook gives up within the hook's 5 s and keeps the entry" "[ $took -le 5 ] && [ \"\$(nin r2e)\" -eq 1 ]"
+pkill -f "$T/fakekith" 2>/dev/null
+f=$(ls "$INBOX" | grep '^r2a\.')
+check "R3 the entry is <sid>.<recordedAt>.<pid>.json with the record in it" "[[ $f =~ ^r2a\\.[0-9]{18,}\\.[0-9]+\\.json$ ]] && grep -q '\"sessionId\": \"r2a\"' $INBOX/$f"
+check "R3 file 0600, folder 0700, no temp file left" "[ \"\$(stat -f %Lp $INBOX/$f)\" = 600 ] && [ \"\$(stat -f %Lp $INBOX)\" = 700 ] && ! ls -A $INBOX | grep -q '^\\.'"
+answer not-serving; hook r3 2>/dev/null; hook r3 2>/dev/null
+check "R3 two hooks of the same session leave two entries" "[ \"\$(nin r3)\" -eq 2 ]"
+
+reg_files; rreset
+mkdir -p -m 700 "$INBOX"
+printf '{"v": 1, "sessionId": "da", "recordedAt": 100, "agent": "old"}' > "$REG/da.json"
+printf '{"v": 1, "sessionId": "da", "recordedAt": 200, "agent": "spooled"}' > "$INBOX/da.200.1.json"
+printf '{"v": 1, "sessionId": "db", "recordedAt": 300, "agent": "file"}' > "$REG/db.json"
+printf '{"v": 1, "sessionId": "db", "recordedAt": 200, "agent": "spooled"}' > "$INBOX/db.200.1.json"
+printf '{"v": 1, "sessionId": "dc", "recordedAt": 5, "agent": "spooled"}' > "$INBOX/dc.5.1.json"
+printf '{"v": 1, "sessionId": "dd", "agent": "nostamp"}' > "$REG/dd.json"
+printf '{"v": 1, "sessionId": "dd", "recordedAt": 1, "agent": "spooled"}' > "$INBOX/dd.1.1.json"
+printf '{"v": 1, "sessionId": "other", "recordedAt": 9}' > "$INBOX/de.9.1.json"
+printf 'half' > "$INBOX/.df.9.1.json.tmp"
+hook r4 2>"$T/err"
+check "R4 Files mode: the file is written with recordedAt, the core not asked" "grep -Eq '\"recordedAt\": [0-9]{18,}' $REG/r4.json && grep -q '\"sessionId\": \"r4\"' $REG/r4.json && [ -z \"\$(calls)\" ]"
+check "R4 the drain: a newer entry replaces the file, one with no file is put in place, a stamp beats no stamp" "grep -q spooled $REG/da.json && grep -q spooled $REG/dc.json && grep -q spooled $REG/dd.json"
+check "R4 an older entry is deleted and the file kept; a misnamed one is deleted; a temp file is left" "grep -q file $REG/db.json && [ ! -e $INBOX/db.200.1.json ] && [ ! -e $INBOX/de.9.1.json ] && [ ! -e $REG/other.json ] && [ -e $INBOX/.df.9.1.json.tmp ] && [ \"\$(ls $INBOX)\" = '' ]"
+check "R4 a moved entry is 0600" "[ \"\$(stat -f %Lp $REG/da.json)\" = 600 ]"
+
+rreset; reg_files
+race_out=$(env -u KITH_HIDE_SESSION -u KITH_RUN_KIND KITH_AGENT=house KITH_TERMINAL_SESSION=1 python3 - "$SK" <<'PY' 2>&1
+import importlib.machinery, importlib.util, io, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); ks = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(ks)
+reg = ks.registry_lib()
+looks = []
+real = reg.switched
+def flip(state):   # the first look says Files; the step's marker lands right after it
+    looks.append(1)
+    if len(looks) == 1:
+        return False
+    open(os.path.join(state, 'live/terminal/registry.tombstone'), 'w').write('{}')
+    return real(state)
+reg.switched = flip
+sys.stdin = io.StringIO('{"session_id": "r5", "cwd": "/tmp", "transcript_path": "/tmp/r5.jsonl"}')
+ks.record()
+print('looks', len(looks))
+PY
+)
+check "R5 the marker after the first look: the file is written and the core is called too" "[ -f $REG/r5.json ] && grep -q '^session.record .*\"sessionId\": \"r5\"' $FAKE_DIR/calls && [ \"\$(nin r5)\" -eq 0 ]"
+
+rreset; reg_files; mkdir -p "$KITH_MACHINE/core/cutover"
+printf 'state=stepping\nat=1\n' > "$KITH_MACHINE/core/cutover/transcripts.switch"
+hook r6 2>/dev/null
+check "R6 transcripts.switch saying stepping is Files mode (a file, no call)" "[ -f $REG/r6.json ] && [ -z \"\$(calls)\" ]"
+printf 'state=switched\nat=1\n' > "$KITH_MACHINE/core/cutover/transcripts.switch"
+hook r6b 2>/dev/null
+check "R6 switched, no marker: Writer mode (a call, no file)" "[ ! -e $REG/r6b.json ] && grep -q '^session.record .*r6b' $FAKE_DIR/calls"
+printf 'state=switched\nat=1\n' > "$KITH_MACHINE/core/cutover/claims.switch"; rm -f "$KITH_MACHINE/core/cutover/transcripts.switch"
+hook r6c 2>/dev/null
+check "R6 the claims switch alone is not the registry's (a file)" "[ -f $REG/r6c.json ]"
+rm -f "$KITH_MACHINE/core/cutover/claims.switch"
+check "R6 caps prints registry-core on its own line" "[ \"\$(python3 '$SK' caps)\" = registry-core ]"
+reg_files; rreset
 
 echo
 [ $fail -eq 0 ] && echo "all checks passed" || echo "some checks FAILED"
