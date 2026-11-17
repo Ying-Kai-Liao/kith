@@ -58,4 +58,11 @@ check "guard: -m/KITH_MODEL with a Claude model on codex is dropped too" "[ '$OU
 OUT=$(KITH_MODEL=gpt-5 "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["model"])')
 check "guard: a codex model passes" "[ '$OUT' = gpt-5 ]"
 
+# KITH_RUN_DIRS reach the harness as real paths, once each: codex refuses a writable root with a symlink in it.
+mkdir -p "$T/real/dir" && ln -s "$T/real/dir" "$T/link"
+OUT=$(KITH_RUN_PROMPT=/dev/null KITH_RUN_DIRS="$T/link
+$T/real/dir
+$T/link" PYTHONPATH=$KERNEL/adapters python3 -c 'import harness; print("|".join(harness.Run("codex", "t", None, None, None).dirs))' 2>&1)
+check "run dirs: symlinks resolved, duplicates collapsed" "[ '$OUT' = '$T/real/dir' ]"
+
 [ $fails = 0 ] && echo "all harness checks passed" || { echo "$fails check(s) failed"; exit 1; }
