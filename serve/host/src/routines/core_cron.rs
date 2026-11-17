@@ -65,7 +65,7 @@ impl Ops for Live {
             RunClaim::Gone => return Started::Gone,
             RunClaim::Refused(why) => return Started::Failed(why),
         };
-        let Some(kernel) = crate::kernel::current_kernel() else {
+        let Some(kernel) = kernel_here() else {
             let why = "no kith kernel here to run the job".to_owned();
             self.free(turn, &why);
             return Started::Failed(why);
@@ -86,6 +86,18 @@ impl Ops for Live {
         }
     }
 }
+
+/// The kernel the run starts from; a test of the runner gives it a stand-in (`TEST_KERNEL`) whose `bin/kith-sched` ends at once.
+fn kernel_here() -> Option<std::path::PathBuf> {
+    #[cfg(test)]
+    if let Some(k) = TEST_KERNEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
+        return Some(k);
+    }
+    crate::kernel::current_kernel()
+}
+
+#[cfg(test)]
+pub(crate) static TEST_KERNEL: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 
 /// The `person` of the spec `run-turn` checks: null for the owner (the core's `owner: true`, whatever people id it is), else the
 /// turn's person. `None`: the core could not read the owner, so the turn cannot be placed.
