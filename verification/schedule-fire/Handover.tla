@@ -166,9 +166,17 @@ KSRec2 ==                                   \* ... then rename: last = {at: now,
 (* takes. One such tick; none starts once the update has happened.                                                      *)
 OTGone == [ot EXCEPT !.pc = "gone"]
 
-OTRead ==
-  /\ OldTick /\ ~moved /\ ot.pc = "idle" /\ ~sj.tomb
-  /\ ot' = [pc |-> "save1", tick |-> sj.tick, lastAt |-> sj.lastAt, lastRun |-> sj.lastRun, t |-> now, newRun |-> 0]
+\* launchd starts the old code before the update moves cli/current. Its prune, ask sweep and wake drain come first (up to
+\* about 90 s), so it may read state.json (and the clock) after the update: OTRead has no ~moved.
+OTBegin ==
+  /\ OldTick /\ ~moved /\ ot.pc = "idle"
+  /\ ot' = [ot EXCEPT !.pc = "read"]
+  /\ UNCHANGED <<imp, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded, moved>>
+
+OTRead ==                                   \* machine(): a tombstone stops it here
+  /\ ot.pc = "read"
+  /\ ot' = IF sj.tomb THEN OTGone
+          ELSE [pc |-> "save1", tick |-> sj.tick, lastAt |-> sj.lastAt, lastRun |-> sj.lastRun, t |-> now, newRun |-> 0]
   /\ UNCHANGED <<imp, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded, moved>>
 
 OTSave1 ==
@@ -356,7 +364,7 @@ Next ==
   \/ StepLock \/ StepImport \/ StepCheck \/ StepTomb \/ HostCore
   \/ CoreTick \/ Begin \/ End
   \/ RBStop \/ RBCancel \/ RBWrite
-  \/ OTRead \/ OTSave1 \/ OTSave2 \/ OTStart \/ OTRec1 \/ OTRec2 \/ Move
+  \/ OTBegin \/ OTRead \/ OTSave1 \/ OTSave2 \/ OTStart \/ OTRec1 \/ OTRec2 \/ Move
 
 Spec == Init /\ [][Next]_vars
 

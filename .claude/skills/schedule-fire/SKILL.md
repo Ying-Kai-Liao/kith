@@ -32,8 +32,8 @@ skill, or the covered code; by hand, only this job: `gh workflow run ci.yml --re
 `run.sh` exits 0 only when every row of `checks.tsv` (variant, kind, property, expected pass/fail) came out as
 expected. Tools are the same pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE as the holder-lease and
 writer-lock skills (`run.sh` is a copy of their harness). `fixed` (the design) has 639,988 distinct states, `rev` (the design
-with one revoke per person and no edit) 6,364,984, `h-design` 341,602, `h-old` 939,384, `hr-design` 18,414; a row takes from a
-second to a few minutes, the whole table (102 rows) about 35 minutes on a Mac one row at a time, about 30 minutes on CI (four workers)
+with one revoke per person and no edit) 6,364,984, `h-design` 341,602, `h-old` 939,514, `hr-design` 18,414; a row takes from a
+second to a few minutes, the whole table (106 rows) about 35 minutes on a Mac one row at a time, about 30 minutes on CI (four workers)
 (the CI schedule-fire job runs the whole table, not --smoke, when any covered path or this folder changes). A failing row stops at its first counterexample. A row that changes (a finding fixed, a new break)
 exits 1: read this skill, do not edit the table to fit.
 
@@ -197,10 +197,12 @@ one host restart, at most `MaxC` = 3 claims of `c`. The model header maps each a
 | C: run-turn attaches with the check-and-set on its own claim before the engine starts | `sched_run::attach` (`claim.attach`), `kith-sched` run-turn exit 4 | `hr-no-cas` (`PromptOnce`: a run-turn spawned by the host before its restart attaches to the next host's claim, and the next host's run attaches too) |
 | C: an attached run's claim is `external`: adopt and step 5 leave it, end_gone fails its turn when the process is gone | `warm.rs` adopt, `reconcile.rs`, `claims.rs` end_gone | no row; removing `EndGoneC` fails `hr-design NoStuck` (checked by hand at the re-sync) |
 
-`hr-runner` is the architect's design row without the cron turn (830 states, as in his results). `HostRuns.tla` does not
+`hr-runner` is the architect's design row without the cron turn (830 states, as in his results). The model keeps one
+`over` thread (`thr`): where a newer claim spawns while an older thread still waits (only without rule K), the older one
+drops out of the model. `HostRuns.tla` does not
 model: pause, revoke and rollback (they cancel a claim with no pid: `Fire.tla` and `Handover.tla`), the person check of
-run-turn (exit 3 before it attaches), a run-turn process dying before it attaches (the host's thread cancels its turn),
-a bad exit (failed, like `done` final), the bot actor's out-of-usage keep path (`Fire.tla` `routine`, `keep-nocheck`).
+run-turn (exit 3 before it attaches; a run-turn that exits before it attaches is `DieC`, row `hr-dies`: the host's thread
+cancels its turn, and `FiredRuns` does not count such a behaviour), a bad exit (failed, like `done` final), the bot actor's out-of-usage keep path (`Fire.tla` `routine`, `keep-nocheck`).
 
 ## The handover (M4-5; the model is `Handover.tla`)
 
@@ -226,7 +228,13 @@ attach check-and-set); `Handover.tla` has no host restart mid-run (its `Begin`/`
 The old tick (`OldTick`) assumes what launchd does: it never starts `dev.kith.sched` again while a tick of that label still
 runs, so a new-code tick never overlaps the old one; and the old code is the KS path with `TickLock = FALSE` (kith-sched
 at 1cf2b5f44: read with a tombstone check, save the tick by check-then-rename, start, record by check-then-rename). One old
-tick; it never starts after the update. A `kith-sched run` or `tick` by hand with the old code is not modelled.
+tick; it starts (`OTBegin`) only before the update, but may read `state.json` after it (`OTRead`: prune, the ask sweep and the
+wake drain come first). A `kith-sched run` or `tick` by hand with the old code is not modelled.
+
+What makes `h-old`'s pass mean something on a Mac: condition 6's lister finds a tick by resolving the kith-sched path in
+its argv now, and the launchd plist names `cli/current/bin/kith-sched` (the installer writes `stable_kernel()` on purpose,
+`kith-sched` `install`), so an old tick's path resolves to the new program and is listed. A plist with a versioned path
+would make condition 6 blind to old ticks, and `OldWait` would then describe nothing.
 
 `Handover.tla` does not model: the 1-day catch-up windows, interval and once triggers (H2's once row and the interval
 anchor are argued, not checked), webhooks, a host restart mid-run (C), two Macs, a crash inside kith-sched's locked
@@ -263,7 +271,7 @@ J2 a host routine due every minute. The architect's first H4 fix (`next_run = ma
 | `routine` | `Cron = FALSE`: a host routine's job | pass: `AtMostOncePerSlot`, `NoStacking`, `PausedNeverStarts` |
 | `h-old` | `OldTick = TRUE`: an old-code tick still running at the step, condition 6 waits it out | pass: `AtMostOnce`, `NoSilentLoss`, `NoStack` |
 | `h-old-nowait` | `OldTick = TRUE`, `OldWait = FALSE` | `AtMostOnce` |
-| `hr-design`, `hr-runner` | `HostRuns.tla` as designed, with and without the cron turn | pass: `PromptOnce`, `NoLiveKill`, `NoStuck`, `FiredRuns` |
+| `hr-design`, `hr-runner`, `hr-dies` | `HostRuns.tla` as designed, with and without the cron turn, and with run-turn dying before it attaches (`RunDies`) | pass: `PromptOnce`, `NoLiveKill`, `NoStuck`, `FiredRuns` |
 | `hr-today`, `hr-no-keep`, `hr-no-runner`, `hr-pull-any`, `hr-rerun-redeemed`, `hr-no-cas` | `Runner = FALSE` and `KeepLiveHost = FALSE`; `KeepLiveHost = FALSE`; `Runner = FALSE`; `PullOnlyUnkeyed = FALSE` and `SkipRedeemed = FALSE`; `SkipRedeemed = FALSE`; `AttachCAS = FALSE` | `NoLiveKill`; `NoLiveKill`; `NoStuck`; `PromptOnce`; `PromptOnce`; `PromptOnce` |
 | `h-no-lock`, `h-no-anchor`, `h-wm-back`, `h-no-h3`, `h-perjob-as-written`, `h-global-rewind`, `h-bare`, `h-nolast` | `TickLock = FALSE`; `Anchor = "wm"`; `Anchor = "wmback"`; `LiveSkip = FALSE`; `Rollback = "perjob"`, `"global"`, `"bare"`, `"perjobnolast"` | `AtMostOnce`; `AtMostOnce` and `NoSilentLoss`; `AtMostOnce`; `NoStack`; `AtMostOnce`; `AtMostOnce`; `NoSilentLoss`; `NoStack` |
 

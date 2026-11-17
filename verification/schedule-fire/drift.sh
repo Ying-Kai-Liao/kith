@@ -22,6 +22,7 @@ FILES=(
   core/runtime/src/cutover/modules/schedules_switch.rs  # the step: host.lock, tick.lock (H1), the import (H2 anchor, H3 live run)
   core/runtime/src/cutover/modules/schedules_gate.rs  # gate conditions; condition 6 (package F) is Handover.tla's OldWait
   serve/host/src/agent/bot/writer_turn.rs  # HostRuns SeeDied: End::Died cancels a bot turn
+  core/procstart  # the start stamps condition 6's lister of old ticks matches on (OldWait)
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)
   core/runtime/src/schedules          # M4-2 store and index; M4-3 tick, fire (the one transaction), run now, the webhook entry
   core/runtime/src/migrations/schedules  # sched_tick, sched_fires, sched_runs (unique keys)

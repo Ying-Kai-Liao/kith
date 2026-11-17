@@ -7,3 +7,4 @@ KeepLiveHost = TRUE
 Cron = TRUE
 AttachCAS = TRUE
 MaxC = 3
+RunDies = FALSE

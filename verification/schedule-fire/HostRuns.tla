@@ -31,6 +31,7 @@
 \*   AttachC, LoseC         kith-sched run_turn -> claim.attach (sched_run::attach): the check-and-set kind `turn`,
 \*                          `claimed`, no pid -> `external`, `running`, pid + start, BEFORE the exec of the engine; refused
 \*                          (exit 4: nothing ran) when the claim is not that one any more
+\*   DieC                   run-turn exiting before it attaches (RunDies)
 \*   EndC                   the engine (`kith AGENT task`, the same pid) exits
 \*   ReportC                core_cron.rs `over`: the host thread that waits for the child cancels a turn that never attached
 \*                          (cancel_waiting: a queued turn or a claimed one with no pid) and reports done/exit (claims.rs
@@ -45,7 +46,9 @@ CONSTANTS Runner,          \* the host pulls core-queued turns it did not begin
           Cron,            \* the turn "c" exists: a kith-sched job's fired turn, run by `kith-sched run-turn` (package C)
           AttachCAS,       \* run-turn attaches with the check-and-set on its own claim (claim id, `claimed`, no pid);
                            \* FALSE: it attaches to the turn's current claim whatever it is (the break the CAS prevents)
-          MaxC             \* claims of "c" at most (bounds the model; one per host start and core restart is enough)
+          MaxC,            \* claims of "c" at most (bounds the model; one per host start and core restart is enough)
+          RunDies          \* a run-turn process may exit before it attaches while its claim is still its own (an error, a
+                           \* kill, a failed exec): DieC
 
 HTurns == {"f", "h"}
 Turns == IF Cron THEN HTurns \cup {"c"} ELSE HTurns
@@ -64,7 +67,9 @@ VARIABLES ts,       \* turn state: none, queued, claimed, running, done, cancell
           ev,
           cid,      \* "c": the number of its current claim (0: never claimed)
           sp,       \* "c": the claims whose run-turn process was spawned and has not attached or given up yet
-          thr,      \* "c": the claim the live host's `over` thread waits on (0: none; a host restart loses it)
+          thr,      \* "c": the claim the live host's `over` thread waits on (0: none; a host restart loses it). One only:
+                    \* where a newer claim spawns while an older `over` still waits (hr-no-keep), the older one drops
+                    \* out of the model
           pa        \* "c": the claim a run attached to (0: none)
 
 vars == <<ts, cl, red, sent, psent, eng, owner, up, crs, hrs, adopted, ev, cid, sp, thr, pa>>
@@ -214,7 +219,20 @@ EndGoneC == cl["c"] = "running" /\ pa = cid /\ ~eng["c"]
           /\ cl' = [cl EXCEPT !["c"] = "ended"] /\ ts' = [ts EXCEPT !["c"] = "failed"]
           /\ U(<<red, sent, psent, eng, owner, up, crs, hrs, adopted, ev, cvars>>)
 
-CronNext == Cron /\ (FireC \/ ClaimC \/ SpawnC \/ AttachC \/ LoseC \/ EndC \/ ReportC \/ EndGoneC)
+\* run-turn exits before it attaches while its claim is still its own (exit 2/3/5, a kill, a failed exec): the live
+\* host's thread cancels the turn as it does for LoseC; a dead host's claim goes at the next adopt. Architect's action
+\* (review of #1047). "died" marks the behaviour so FiredRuns does not count such a turn as one that should have run.
+DieC == RunDies /\ \E k \in sp : CASOk(k)
+          /\ sp' = sp \ {k}
+          /\ (IF up /\ thr = k /\ (ts["c"] = "queued" \/ (ts["c"] = "claimed" /\ cl["c"] = "claimed"))
+               THEN /\ ts' = [ts EXCEPT !["c"] = "cancelled"]
+                    /\ cl' = [cl EXCEPT !["c"] = IF @ = "claimed" THEN "ended" ELSE @]
+               ELSE U(<<ts, cl>>))
+          /\ thr' = (IF thr = k THEN 0 ELSE thr)
+          /\ ev' = ev \cup {"died"}
+          /\ U(<<red, sent, psent, eng, owner, up, crs, hrs, adopted, cid, pa>>)
+
+CronNext == Cron /\ (FireC \/ ClaimC \/ SpawnC \/ AttachC \/ LoseC \/ EndC \/ ReportC \/ EndGoneC \/ DieC)
 
 Next == Fire \/ HostEnqueue \/ CoreRestart \/ HostDown \/ HostUp \/ Adopt \/ Strays \/ CronNext
         \/ (\E t \in Turns : SkipIt(t) \/ Kill(t) \/ EndGone(t) \/ Expire(t))
@@ -233,6 +251,6 @@ Quiet == ~ENABLED Next
 NoStuck == Quiet => \A t \in Turns : (ts[t] \in Final \cup {"none"}) /\ cl[t] \in {"none", "ended"}
 
 \* A fired turn the host was up to run, and that was never handed to an engine, is not expired or cancelled.
-FiredRuns == Quiet => \A t \in {"f", "c"} \cap Turns :
+FiredRuns == ("died" \notin ev /\ Quiet) => \A t \in {"f", "c"} \cap Turns :
                         (ts[t] # "none" => ts[t] \in {"done", "expired", "failed"} \/ red[t])
 ====

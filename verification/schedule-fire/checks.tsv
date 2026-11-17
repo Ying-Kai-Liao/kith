@@ -125,3 +125,8 @@ hr-no-runner	INVARIANT	NoStuck	fail
 hr-pull-any	INVARIANT	PromptOnce	fail
 hr-rerun-redeemed	INVARIANT	PromptOnce	fail
 hr-no-cas	INVARIANT	PromptOnce	fail
+# --- hr-dies: run-turn may exit before it attaches while its claim is its own (architect's DieC, review of #1047) ---
+hr-dies	INVARIANT	PromptOnce	pass
+hr-dies	INVARIANT	NoLiveKill	pass
+hr-dies	INVARIANT	NoStuck	pass
+hr-dies	INVARIANT	FiredRuns	pass
