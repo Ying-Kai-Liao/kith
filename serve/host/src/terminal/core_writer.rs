@@ -110,7 +110,8 @@ impl Mode {
             SAID.call_once(|| {
                 tracing::warn!("Writer mode is not supported on Windows (no warm stub there): conversations keep using claim files");
             });
-            return Self::Files;
+            // A switched machine never falls back to files (see `decide`): it waits.
+            return if crate::core_front::switch_file_exists(folders, MODULE) { Self::Held } else { Self::Files };
         }
         let said = row_answer(folders, "cutover.mayServe", &json!({"module": MODULE}));
         Self::decide(&said, crate::core_front::switch_file_exists(folders, MODULE), super::core_claims::flag_on())
