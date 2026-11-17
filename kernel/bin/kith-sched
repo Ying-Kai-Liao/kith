@@ -213,7 +213,7 @@ class LockBusy(Exception):
 
 
 _lock_held = False   # this process holds tick.lock: the lock is taken once, at the outer level (flock is per open file)
-LOCK_WAIT = 50       # seconds: a step holds the lock for tens of seconds; the next launchd tick is a minute away
+LOCK_WAIT = float(os.environ.get('KITH_SCHED_LOCK_WAIT') or 50)   # seconds: a step holds it for tens of seconds, the next launchd tick is a minute away (tests shorten it)
 
 
 @contextlib.contextmanager
@@ -532,7 +532,7 @@ def _fire_due(now, since):
         if still_running(prev, now):
             print('kith-sched: %s/%s still running (pid %s), skipped' % (agent, job['id'], prev['pid']), file=sys.stderr)
             continue
-        if prev.get('at', '') >= due.isoformat(timespec='minutes') and str(prev.get('why', '')).startswith('due'):
+        if 'pid' not in prev and prev.get('at', '') >= due.isoformat(timespec='minutes') and str(prev.get('why', '')).startswith('due'):
             continue   # this slot was recorded already (a crash before the pid was saved): skipped, never run twice
         why = 'due %s' % due.strftime('%H:%M') + ('' if due == now else ', caught up after sleep')
         log = start(agent, job, now, why)
