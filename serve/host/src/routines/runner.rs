@@ -379,8 +379,8 @@ mod tests {
     #[test]
     fn switched_the_host_fires_nothing_and_asks_the_core_for_one_tick_a_minute() {
         use super::super::switch_tests::{hub, switched};
-        let hub = hub();
         const T: i64 = 100_000;
+        let hub = hub();
         due_routine(&hub);
         let fake = switched(&hub, Gate::Core);
         assert!(tick_at(&hub, T).unwrap(), "the first second after the switch is due");
