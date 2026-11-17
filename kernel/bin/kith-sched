@@ -45,9 +45,11 @@ from pathlib import Path
 KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_launchd  # noqa: E402
+import kith_procstart  # noqa: E402
 import kith_runenv  # noqa: E402
 import kith_tombstone  # noqa: E402
 from kith_paths import paths, launcher, job_installed, retire_old_job, stable_kernel  # noqa: E402  the one place that knows where kith's folders are
+KITH_SCHED_TICK_LOCK = 1  # honours sched/tick.lock (cutover gate reads this line)
 STATE = paths()['KITH_STATE']
 MACHINE = paths()['KITH_MACHINE'] / 'sched'  # last tick, last run per job
 LOGS = paths()['KITH_LOGS'] / 'sched'  # tick.log, one log per run
@@ -206,12 +208,49 @@ def machine():
         return {}
 
 
-def save_machine(s):
+class LockBusy(Exception):
+    pass
+
+
+_lock_held = False   # this process holds tick.lock: the lock is taken once, at the outer level (flock is per open file)
+LOCK_WAIT = float(os.environ.get('KITH_SCHED_LOCK_WAIT') or 50)   # seconds: a step holds it for tens of seconds, the next launchd tick is a minute away (tests shorten it)
+RUN_LOCK_WAIT = min(LOCK_WAIT, 20)   # `run` by hand: under the 30 s the host gives `kith schedule run`, so it is rarely killed between Popen and the pid's save
+PRUNE_LOCK_WAIT = min(LOCK_WAIT, 2)   # housekeeping only: a held lock skips it until a later tick rather than delay this one
+
+
+@contextlib.contextmanager
+def tick_lock(wait=LOCK_WAIT):
+    """<machine>/sched/tick.lock, exclusive, around everything that reads state.json and then writes it or starts a job
+    (the tick, `run`). `kith kernel cutover step schedules` takes the same flock from its import to its tombstone, so
+    the two exclude each other (Rust's fs2 lock_exclusive is flock on macOS): a slot is run by one of us, never both.
+    flock goes with the process, so a crash frees it. Not taken within `wait` seconds: LockBusy. Reentrant."""
+    global _lock_held
+    if _lock_held:
+        yield; return
     MACHINE.mkdir(parents=True, exist_ok=True)
-    kith_tombstone.check(MACHINE / 'state.json')   # the last stop before the rename would replace the note
-    tmp = MACHINE / 'state.json.tmp'
-    tmp.write_text(json.dumps(s, indent=1))
-    tmp.replace(MACHINE / 'state.json')
+    with open(MACHINE / 'tick.lock', 'a') as lock:
+        end = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB); break
+            except OSError:
+                if time.monotonic() >= end:
+                    raise LockBusy('sched/tick.lock is held (a cutover step?)')
+                time.sleep(0.2)
+        _lock_held = True
+        try:
+            yield
+        finally:
+            _lock_held = False
+
+
+def save_machine(s):
+    with tick_lock():   # the tombstone re-check and the rename happen under the lock the step tombstones under
+        MACHINE.mkdir(parents=True, exist_ok=True)
+        kith_tombstone.check(MACHINE / 'state.json')   # the last stop before the rename would replace the note
+        tmp = MACHINE / 'state.json.tmp'
+        tmp.write_text(json.dumps(s, indent=1))
+        tmp.replace(MACHINE / 'state.json')
 
 
 def slug(text):
@@ -278,7 +317,15 @@ def tell_app(agent, jid, op):
 
 def start(agent, job, now, why):
     """Start `kith AGENT task` detached; its output goes to a log file. Returns the log path, or None when the job's
-    person may not run it now (said on stdout, the tick log)."""
+    person may not run it now (said on stdout, the tick log). Runs under tick.lock (taken here when the caller has not).
+
+    The run is recorded in state.json (at, why, log) and saved BEFORE the process starts, then pid and procStart are
+    added: a crash in between leaves a recorded run with no pid, a skipped slot and never a second start."""
+    with tick_lock(wait=LOCK_WAIT if why.startswith('due') else RUN_LOCK_WAIT):
+        return _start(agent, job, now, why)
+
+
+def _start(agent, job, now, why):
     no = refused(agent, job)
     if no:
         print('%s skipped %s/%s: it runs for %s, and %s' % (now.isoformat(timespec='minutes'), agent, job['id'],
@@ -321,13 +368,16 @@ def start(agent, job, now, why):
     if job.get('model'): env['KITH_MODEL'] = job['model']
     if job.get('effort'): env['KITH_EFFORT'] = job['effort']
     if job.get('harness'): env['KITH_HARNESS'] = job['harness']
+    key = '%s/%s' % (agent, job['id'])
+    s = machine()
+    s.setdefault('last', {})[key] = {'at': now.isoformat(timespec='minutes'), 'why': why, 'log': str(log)}
+    save_machine(s)   # recorded before the run exists
     with open(log, 'w') as fh:
         fh.write('# %s %s %s (%s)\n' % (now.isoformat(timespec='minutes'), agent, job['id'], why)); fh.flush()
         p = subprocess.Popen([str(KITH / 'bin/kith'), agent, task], cwd=str(Path.home()), env=env, stdin=subprocess.DEVNULL,
                              stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
     s = machine()
-    s.setdefault('last', {})['%s/%s' % (agent, job['id'])] = {'at': now.isoformat(timespec='minutes'),
-                                                              'pid': p.pid, 'log': str(log), 'why': why}
+    s.setdefault('last', {})[key].update({'pid': p.pid, 'procStart': kith_procstart.start_stamp(p.pid)})
     save_machine(s)
     return log
 
@@ -337,6 +387,14 @@ def running(pid):
         os.kill(pid, 0); return True
     except (OSError, TypeError):
         return False
+
+
+def still_running(prev, now):
+    """A recorded run still counts as running: its pid is alive, under 6 h old and, when the record has a procStart (older
+    ones have none), that process started when it says (a reused pid is not our run)."""
+    if not running(prev.get('pid')) or prev.get('at', '') < (now - dt.timedelta(hours=6)).isoformat():
+        return False
+    return kith_procstart.same_process(prev.get('procStart'), kith_procstart.start_stamp(prev['pid']))
 
 
 # --- pruning ----------------------------------------------------------------------------------------------------------
@@ -398,6 +456,14 @@ def prune(force=False):
 
     The schedules' tombstone stops the jobs, not this: once the core fires them, kith-sched runs no job (so no log of
     its own is busy) and keeps the hour in a stamp file of its own instead of state.json."""
+    try:
+        with tick_lock(wait=PRUNE_LOCK_WAIT):   # read and save of state.json under the lock, so a `run` by hand in between keeps its `last`
+            _prune(force)
+    except LockBusy:
+        pass   # held (a step?): a later tick prunes
+
+
+def _prune(force):
     t = epoch()
     try:
         s = machine()
@@ -441,13 +507,27 @@ def tick():
     except Exception as e:  # noqa: BLE001
         print('kith-sched: wake drain: %s' % e, file=sys.stderr)
     now = clock().replace(second=0, microsecond=0)
-    s = machine()
+    try:
+        with tick_lock():   # one exclusive lock over read, decide, record, save; prune, the sweep and the drain are outside
+            _tick(now)
+    except LockBusy as e:
+        print('kith-sched: %s; nothing started this minute' % e, file=sys.stderr)
+
+
+def _tick(now):
+    s = machine()   # a tombstone stops here, before anything is read or started
     last = dt.datetime.fromisoformat(s['tick']) if s.get('tick') else now - dt.timedelta(minutes=1)
     since = max(last, now - CATCH_UP)
-    s['tick'] = now.isoformat(timespec='minutes')
-    save_machine(s)
-    if since >= now:
-        return
+    try:
+        if since < now:
+            _fire_due(now, since)
+    finally:
+        s = machine()
+        s['tick'] = now.isoformat(timespec='minutes')   # last: a run is recorded before it starts, the tick after
+        save_machine(s)
+
+
+def _fire_due(now, since):
     for agent, job in all_jobs():
         if job.get('paused'):
             continue
@@ -459,9 +539,11 @@ def tick():
         if due is None or due > now:
             continue
         prev = machine().get('last', {}).get('%s/%s' % (agent, job['id']), {})
-        if running(prev.get('pid')) and prev.get('at', '') >= (now - dt.timedelta(hours=6)).isoformat():
+        if still_running(prev, now):
             print('kith-sched: %s/%s still running (pid %s), skipped' % (agent, job['id'], prev['pid']), file=sys.stderr)
             continue
+        if prev.get('at', '') >= due.isoformat(timespec='minutes') and str(prev.get('why', '')).startswith('due'):
+            continue   # this slot was started already, pid or not (killed before the tick was saved): never run twice
         why = 'due %s' % due.strftime('%H:%M') + ('' if due == now else ', caught up after sleep')
         log = start(agent, job, now, why)
         if log:
@@ -747,3 +829,5 @@ if __name__ == '__main__':
             print('kith-sched: tick skipped, the schedules moved to the Kith core (%s)' % e.module)
             sys.exit(0)
         sys.exit('kith-sched: %s' % e)
+    except LockBusy as e:   # `run` by hand while a cutover step holds the lock
+        sys.exit('kith-sched: %s; try again in a minute' % e)
