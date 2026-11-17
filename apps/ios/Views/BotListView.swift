@@ -285,7 +285,7 @@ struct BotListView: View {
                     machineChips
                     labelChips(all)
                     // A computer waiting for an update has its card instead; its bots aren't known yet.
-                    if all.isEmpty && shownStores.allSatisfy({ $0.mismatch == nil }) {
+                    if all.isEmpty && shownStores.allSatisfy({ $0.mismatch == nil && $0.cacheLoaded }) {
                         EmptyRoster(canCreate: allStores.contains { $0.mismatch == nil }, hasComputer: !accounts.computers.isEmpty,
                                     create: newBot, showComputers: { app.showComputers = true })
                     }

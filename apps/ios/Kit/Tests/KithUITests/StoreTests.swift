@@ -15,6 +15,7 @@ actor FakeRemote: RemoteTransport {
     private var failReadReceipts = false
     private(set) var readAttempts = 0
     private(set) var shutdownCount = 0
+    private(set) var kicks = 0
     private var isShutdown = false
 
     func setReadFailure(_ fail: Bool) { failReadReceipts = fail }
@@ -114,6 +115,8 @@ actor FakeRemote: RemoteTransport {
         AsyncStream { c in Task { await self.addMailbox(c) } }
     }
 
+    func kick() async { kicks += 1 }
+
     func shutdown() async {
         shutdownCount += 1
         isShutdown = true
@@ -193,6 +196,39 @@ private func botEvent(_ id: String, name: String, rev: Int) -> String {
     #expect(await fake.shutdownCount == 0) // Foreground keeps the ordinary connection.
     store.setActive(false)
     #expect(await until { await fake.shutdownCount == 1 })
+}
+
+@MainActor @Test func foregroundKicksALinkAVoiceCallHeldThroughBackground() async throws {
+    let (storage, suite) = context()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let fake = FakeRemote(.ready(.relay))
+    let store = BotStore(computer: randomComputer("Mac"), storage: storage) { fake }
+    defer { store.retire() }
+    store.setActive(true)
+    #expect(await until { await fake.subscribed })
+    await fake.emit(botEvent("b1", name: "Bot", rev: 1))
+    #expect(await until { store.connection == .online })
+    store.beginVoiceCall(UUID(), botId: "b1", speak: { _ in }, end: {})
+    store.setActive(false)
+    store.setActive(true)
+    #expect(await until { await fake.kicks == 1 })
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await fake.kicks == 1)
+    #expect(await fake.shutdownCount == 0) // The call's link is kept, not restarted.
+}
+
+@MainActor @Test func foregroundRestartsAnOfflineLinkWithoutKicking() async throws {
+    let (storage, suite) = context()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let fake = FakeRemote(.failed("down"))
+    let store = BotStore(computer: randomComputer("Mac"), storage: storage) { fake }
+    defer { store.retire() }
+    store.setActive(true)
+    #expect(await until { store.isOffline })
+    store.setActive(true)
+    #expect(await until { await fake.shutdownCount == 1 })
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await fake.kicks == 0)
 }
 
 @MainActor @Test func lastVoiceCallEndingDisconnectsBackgroundStore() async throws {
@@ -775,7 +811,7 @@ private func helloJSON(version: String, protocolLevel: Int? = nil, minProtocol: 
     #expect(anotherAccount.composerDrafts.isEmpty)
 }
 
-@MainActor @Test func existingCachesKeepTheirMessagesAndLocalSends() throws {
+@MainActor @Test func existingCachesKeepTheirMessagesAndLocalSends() async throws {
     let (storage, suite) = context()
     defer { storage.erase(); UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
     let computer = randomComputer("Fixture")
@@ -792,6 +828,7 @@ private func helloJSON(version: String, protocolLevel: Int? = nil, minProtocol: 
     try Data(cached.utf8).write(to: url)
     let store = BotStore(computer: computer, storage: storage) { FakeRemote(.ready(.direct)) }
     defer { store.retire() }
+    await store.cacheReady()
     // Adding conversation metadata does not invalidate the existing base cache.
     #expect(store.allEntries("dex").map(\.id) == ["notice", "local-pending"])
     #expect(store.allEntries("dex").last?.data.text == "My unsent message")

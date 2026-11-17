@@ -10,6 +10,8 @@ extension BotStore {
         var backoff: Double = 1
         while !Task.isCancelled {
             do {
+                // `rev` is the cache's until it is read.
+                await cacheReady()
                 // What the last stream sent goes in before the hello (which may rewind) and before `rev` is read.
                 flushEvents()
                 try await proveInviteIfNeeded(client)
@@ -277,7 +279,7 @@ extension BotStore {
         composerDrafts = [:]
         persistComposerDrafts()
         bots = [:]
-        entries = entries.mapValues { $0.filter { $0.id.hasPrefix("local-") } }.filter { !$0.value.isEmpty }
+        entries.transform { $0.filter { $0.id.hasPrefix("local-") } }
         selection = nil
         onRosterChanged?()
         rev = 0
@@ -295,8 +297,7 @@ extension BotStore {
     /// pages from the oldest one held. Threads (loaded whole when opened) and messages still sending stay.
     private func refetchAll() {
         rev = 0
-        entries = entries.mapValues { $0.filter { $0.threadId != nil || $0.id.hasPrefix("local-") } }
-            .filter { !$0.value.isEmpty }
+        entries.transform { $0.filter { $0.threadId != nil || $0.id.hasPrefix("local-") } }
         historyComplete = []
     }
 
@@ -319,7 +320,7 @@ extension BotStore {
     /// before this hello) come again in this catch-up and say nothing about the window.
     private func loadedFloors() -> [String: Int64] {
         // An old thread root held for its fresh replies says nothing about the window (`oldestWindowSeq`).
-        entries.compactMapValues { list in Self.oldestWindowSeq(list, upTo: requestedSince) }
+        entries.all.compactMapValues { list in Self.oldestWindowSeq(list, upTo: requestedSince) }
     }
 
     /// An entry event the mirror doesn't hold, in the main chat, below the floor the mirror had
