@@ -132,11 +132,12 @@ private func row(_ id: String, bot: String = "b1", seq: Int64, thread: String? =
 }
 
 /// 10,000 entries over 20 chats paged in: the cache, and so the next launch's decode, holds each chat's window only.
-@MainActor @Test func theCacheKeepsEachChatsWindowHoweverMuchWasPagedIn() throws {
+@MainActor @Test func theCacheKeepsEachChatsWindowHoweverMuchWasPagedIn() async throws {
     let (storage, suite) = context()
     defer { storage.erase(); UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
     let computer = randomComputer("Mac")
     let store = BotStore(computer: computer, storage: storage) { FakeRemote(.ready(.direct)) }
+    await store.cacheReady()
     var seq: Int64 = 0
     for c in 0..<20 {
         var list: [Entry] = []
@@ -153,6 +154,7 @@ private func row(_ id: String, bot: String = "b1", seq: Int64, thread: String? =
     let start = ContinuousClock.now
     let relaunched = BotStore(computer: computer, storage: storage) { FakeRemote(.ready(.direct)) }
     defer { relaunched.retire() }
+    await relaunched.cacheReady()
     let held = relaunched.entries.values.map(\.count).reduce(0, +)
     print("cache after 10,000 entries over 20 chats: \(held) entries, loaded in \(ContinuousClock.now - start)")
     #expect(held <= 20 * (2 * BotStore.cachedPerChat + 5))

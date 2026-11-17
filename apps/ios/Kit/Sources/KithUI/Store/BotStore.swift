@@ -217,6 +217,9 @@ public final class BotStore {
     @ObservationIgnored var readingViews: [UUID: ReadingScope] = [:]
 
     var cacheStamp: String?
+    /// False until the cached mirror has been read (and applied, when there is one): an empty roster before then is not an empty account.
+    public internal(set) var cacheLoaded = false
+    var cacheLoad: Task<Void, Never>?
 
     /// Loads this context's `DeviceIdentity` itself.
     public convenience init(computer: Computer, storage: SharedStore.Context) {

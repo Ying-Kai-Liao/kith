@@ -10,6 +10,8 @@ extension BotStore {
         var backoff: Double = 1
         while !Task.isCancelled {
             do {
+                // `rev` is the cache's until it is read.
+                await cacheReady()
                 // What the last stream sent goes in before the hello (which may rewind) and before `rev` is read.
                 flushEvents()
                 try await proveInviteIfNeeded(client)

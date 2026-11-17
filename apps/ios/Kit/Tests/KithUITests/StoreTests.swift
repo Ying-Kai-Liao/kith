@@ -811,7 +811,7 @@ private func helloJSON(version: String, protocolLevel: Int? = nil, minProtocol: 
     #expect(anotherAccount.composerDrafts.isEmpty)
 }
 
-@MainActor @Test func existingCachesKeepTheirMessagesAndLocalSends() throws {
+@MainActor @Test func existingCachesKeepTheirMessagesAndLocalSends() async throws {
     let (storage, suite) = context()
     defer { storage.erase(); UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
     let computer = randomComputer("Fixture")
@@ -828,6 +828,7 @@ private func helloJSON(version: String, protocolLevel: Int? = nil, minProtocol: 
     try Data(cached.utf8).write(to: url)
     let store = BotStore(computer: computer, storage: storage) { FakeRemote(.ready(.direct)) }
     defer { store.retire() }
+    await store.cacheReady()
     // Adding conversation metadata does not invalidate the existing base cache.
     #expect(store.allEntries("dex").map(\.id) == ["notice", "local-pending"])
     #expect(store.allEntries("dex").last?.data.text == "My unsent message")
