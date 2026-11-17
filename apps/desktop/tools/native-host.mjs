@@ -3,7 +3,7 @@
 // layout; universal). `fast` (the sandbox runs of tools/dev.mjs): the host's `dev-app` profile for this
 // Mac's architecture only, since that build never leaves the Mac that made it. KITH_HOST_NATIVE_ONLY=1
 // does the same for the release profile (CI's unsigned build: its runner has no x86_64 target). Windows:
-// build/native/kith-serve.exe and kith-servew.exe (runs it at sign-in), plus the computer-use
+// build/native/kith-serve.exe and kith-servew.exe (runs it at sign-in), build/native/kith/bin/kith-stub.exe and kith-holder.exe, plus the computer-use
 // driver the host starts from beside itself. Linux apps use the installed host, so there's
 // nothing to do there.
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
@@ -33,6 +33,15 @@ if (process.platform === 'win32') {
   build(target)
   copyFileSync(built(target, 'kith-serve.exe'), join(out, 'kith-serve.exe'))
   copyFileSync(built(target, 'kith-servew.exe'), join(out, 'kith-servew.exe'))
+  // The conversation lock's launcher and the process holder, in the macOS layout (Resources/kith/bin) where the core's
+  // `beside_this` looks (kith/bin beside kith-serve.exe). There is no kith.exe here, so no check-bin-dir.sh.
+  const bin = join(out, 'kith/bin')
+  rmSync(join(out, 'kith'), { recursive: true, force: true })
+  mkdirSync(bin, { recursive: true })
+  for (const name of ['kith-stub', 'kith-holder']) {
+    build(target, '-p', name)
+    copyFileSync(built(target, `${name}.exe`), join(bin, `${name}.exe`))
+  }
   run(process.execPath, [join(root, '../packaging/cua-driver/fetch.mjs'), 'windows-x86_64', out])
 } else {
   const native = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
