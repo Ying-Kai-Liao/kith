@@ -12,7 +12,7 @@ public struct MarkdownText: View, Equatable {
     }
 
     public var body: some View {
-        let blocks = MarkdownBlocks.parse(source)
+        let blocks = MarkdownCache.blocks(source)
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 MarkdownBlock(block: block)
@@ -23,6 +23,10 @@ public struct MarkdownText: View, Equatable {
 
     /// Underlines keep links distinct in the monochrome theme; inline code gets a soft tint.
     static func inline(_ s: String) -> AttributedString {
+        MarkdownCache.inline(s, parse: parseInline)
+    }
+
+    private static func parseInline(_ s: String) -> AttributedString {
         guard var text = try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
         else { return AttributedString(s) }
         for run in text.runs where run.link != nil {
