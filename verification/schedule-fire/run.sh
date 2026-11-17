@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Model-checks "the schedule fire protocol" (Fire.tla) and the M4-5 handover (Handover.tla, variants h-*) with TLC, one command, no global install.
+# Model-checks "the schedule fire protocol" (Fire.tla), the M4-5 handover (Handover.tla, variants h-*) and who runs a fired turn
+# (HostRuns.tla, variants hr-*) with TLC, one command, no global install.
 #
 #   verification/schedule-fire/run.sh                  every row of checks.tsv: variant x property, expected pass/fail
 #   verification/schedule-fire/run.sh --smoke                       only the rows named in smoke.txt (CI when nothing the model covers changed)
@@ -74,9 +75,10 @@ setup() {
   JAVA=$(find_java)
 }
 
-# A variant named h-* checks Handover.tla (base.handover.consts); every other one checks Fire.tla (base.consts).
-module_of() { if [[ $1 == h-* ]]; then echo Handover; else echo Fire; fi; }
-base_of() { if [[ $1 == h-* ]]; then echo "$HERE/base.handover.consts"; else echo "$HERE/base.consts"; fi; }
+# A variant named h-* checks Handover.tla (base.handover.consts), hr-* HostRuns.tla (base.hostruns.consts); every other one
+# checks Fire.tla (base.consts).
+module_of() { case $1 in h-*) echo Handover ;; hr-*) echo HostRuns ;; *) echo Fire ;; esac; }
+base_of() { case $1 in h-*) echo "$HERE/base.handover.consts" ;; hr-*) echo "$HERE/base.hostruns.consts" ;; *) echo "$HERE/base.consts" ;; esac; }
 
 # compose VARIANT KIND NAME -> a cfg on stdout: the base consts with the variant's overrides, then the property.
 compose() {
@@ -143,6 +145,7 @@ fi
 setup
 echo "tla2tools $TLA_VERSION, java $(java_major "$JAVA") ($JAVA)"
 jobs=$(( $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) > 4 ? 4 : $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) ))
+jobs=${VERIFY_JOBS:-$jobs}   # VERIFY_JOBS=1: one TLC at a time (a busy Mac)
 res=$(mktemp "${TMPDIR:-/tmp}/kith-verify-res.XXXXXX")
 start=$(date +%s)
 rows \

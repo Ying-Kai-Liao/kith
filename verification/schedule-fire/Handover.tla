@@ -1,8 +1,28 @@
 ---------------------------- MODULE Handover ----------------------------
 (* Schedules handover (M4-5): kith-sched + the host's routines -> the core.   *)
-(* Design: ../design.md.  One atomic step = one action.                       *)
+(* Design: the architect's 2026-11-17-schedules-handover folder (design.md). *)
+(* One atomic step = one action.                                              *)
 (* J1 = kith-sched cron job, due every minute.  J2 = host routine (cron),     *)
 (* due every minute.  Slots are minutes 1..MaxMin.                            *)
+(* Code (re-synced after #1033, #1042, #1043, #1044):                         *)
+(*   KS*        kernel/bin/kith-sched tick()/_tick/_fire_due/start under      *)
+(*              tick_lock (H1). Under the lock the code's order (record the   *)
+(*              run, start it, save the tick last) differs from the model's,  *)
+(*              but nothing else reads state.json inside the locked section.  *)
+(*              With TickLock = FALSE the KS path is the code before #1033.   *)
+(*   OT*, Move  an old-code tick (that path) launchd started before the       *)
+(*              update moved cli/current; launchd never starts dev.kith.sched *)
+(*              again while it runs (one instance per label).                 *)
+(*   Step*      cutover/modules/schedules_switch.rs (host.lock, tick.lock,    *)
+(*              gate condition 6 = OldWait in schedules_gate.rs, import,      *)
+(*              tombstone); the anchor: schedules/anchor.rs (H2); the live    *)
+(*              kith-sched run imported into sched_runs, which the core's     *)
+(*              skip rule reads (schedules/running.rs, H3).                   *)
+(*   Core*      schedules/fire.rs tick / plan / fire_in.                      *)
+(*   RB*        cutover/modules/schedules_back.rs cancel_waiting, next_runs,  *)
+(*              write_state_back (H4, "perjobfrom").                          *)
+(* Who runs a core turn (the host's runner, a cron turn's run-turn process,   *)
+(* a host restart mid-run) is HostRuns.tla; Begin/End here stand for it.      *)
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS
@@ -11,7 +31,11 @@ CONSTANTS
   Anchor,      \* "anchor" (H2) | "wm" (J2 counts from the watermark) | "wmback" (watermark := min(tick, next_run-1))
   LiveSkip,    \* H3: an imported live kith-sched run counts as unfinished for the core's skip rule
   Rollback,    \* "perjob" (H4) | "global" (manager's variant B) | "bare" (no rewind, no skipped:rollback row) | "off"
-  CoreSpan     \* TRUE: a core fire's run covers the span of due slots that have no row; FALSE: only the latest slot
+  CoreSpan,    \* TRUE: a core fire's run covers the span of due slots that have no row; FALSE: only the latest slot
+  OldTick,     \* an old-code kith-sched tick (no tick.lock: the code before #1033) that launchd started before the update moved
+               \* cli/current, still running when the step starts (FALSE: no such tick, the update happened long before)
+  OldWait,     \* gate condition 6 (package F): after taking tick.lock the step waits until every tick process it listed is gone
+  ShaCheck     \* before_tombstone (schedules.rs): the step refuses, tombstoning nothing, when state.json changed since its import
 
 Jobs  == {"J1", "J2"}
 Slots == 1..MaxMin
@@ -28,7 +52,7 @@ VARIABLES
   lock,       \* tick.lock holder: "none" | "ks" | "step"
   host,       \* "own" (Gate::Own) | "stopped" | "core" (Gate::Core)
   nextRun,    \* host's next_run for J2
-  step,       \* operator's step: "pre" | "imp" | "tomb" | "switched"
+  step,       \* operator's step: "pre" | "imp" | "chk" | "tomb" | "switched"
   wm,         \* core watermark
   anchor,     \* H2: J2's imported next_run
   anchorUsed, \* J2's first core plan done
@@ -37,9 +61,12 @@ VARIABLES
   runs,       \* every run ever: [job, sl (slots covered), by, st: queued|running|done|cancelled]
   rows,       \* decided rows [job, slot, kind]; kind "ks_busy" = kith-sched's own 'still running' skip (not in the core's table)
   h,          \* per job: the last minute a scheduler evaluated it
-  unrecorded  \* kith-sched runs started but never recorded in state.json (diagnostic)
+  unrecorded, \* kith-sched runs started but never recorded in state.json (diagnostic)
+  ot,         \* the old-code tick (OldTick): [pc, tick, lastAt, lastRun, t, newRun]; pc "idle" = not started, "gone" = ended
+  moved,      \* the update has moved cli/current: launchd starts new code from here on (TRUE from the start without OldTick)
+  imp         \* state.json as the step's import read it (its sha, recorded for before_tombstone)
 
-vars == <<now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+vars == <<now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded, ot, moved, imp>>
 
 RunIds == 1..Len(runs)
 Unfinished(rns, i) == rns[i].st \in {"queued", "running"}
@@ -59,41 +86,49 @@ Init ==
   /\ rows = {}
   /\ h = [j \in Jobs |-> 0]
   /\ unrecorded = {}
+  /\ ot = [pc |-> "idle", tick |-> 0, lastAt |-> 0, lastRun |-> 0, t |-> 0, newRun |-> 0]
+  /\ moved = ~OldTick
+  /\ imp = sj
 
-Clock == now < MaxMin /\ now' = now + 1 /\ UNCHANGED <<sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+Clock == now < MaxMin /\ now' = now + 1 /\ UNCHANGED <<imp, ot, moved, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 (* ---------------- kith-sched tick ---------------- *)
 KSFree == IF lock = "ks" THEN "none" ELSE lock
 KSIdle == [ks EXCEPT !.pc = "idle"]
 
+\* launchd starts dev.kith.sched again only once the previous tick has exited (one instance per label): a new-code tick
+\* never overlaps the old one. OldGone: the old tick is not running (never started, or ended).
+OldGone == ot.pc \in {"idle", "gone"}
+
 KSLock ==                                   \* H1
-  /\ TickLock /\ ks.pc = "idle" /\ lock = "none"
+  /\ TickLock /\ ks.pc = "idle" /\ lock = "none" /\ moved /\ OldGone
   /\ lock' = "ks" /\ ks' = [ks EXCEPT !.pc = "chk"]
-  /\ UNCHANGED <<now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 KSCheck ==                                  \* H1: tombstone check under the lock
   /\ ks.pc = "chk"
   /\ IF sj.tomb THEN ks' = KSIdle /\ lock' = KSFree
                 ELSE ks' = [ks EXCEPT !.pc = "read"] /\ UNCHANGED lock
-  /\ UNCHANGED <<now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 KSRead ==                                   \* machine(): fails closed on a tombstone; reads tick + last; fixes its now
   /\ ks.pc = (IF TickLock THEN "read" ELSE "idle")
+  /\ TickLock \/ (moved /\ OldGone)
   /\ ~sj.tomb
   /\ ks' = [pc |-> "save1", tick |-> sj.tick, lastAt |-> sj.lastAt, lastRun |-> sj.lastRun, t |-> now, newRun |-> 0]
-  /\ UNCHANGED <<now, sj, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 KSSave1 ==                                  \* save_machine(): tombstone check ...
   /\ ks.pc = "save1"
   /\ IF sj.tomb THEN ks' = KSIdle /\ lock' = KSFree
                 ELSE ks' = [ks EXCEPT !.pc = "save2"] /\ UNCHANGED lock
-  /\ UNCHANGED <<now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 KSSave2 ==                                  \* ... then rename (tick := now) over whatever is there
   /\ ks.pc = "save2"
   /\ sj' = [tomb |-> FALSE, tick |-> ks.t, lastAt |-> ks.lastAt, lastRun |-> ks.lastRun]
   /\ ks' = [ks EXCEPT !.pc = "start"]
-  /\ UNCHANGED <<now, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 KSStart ==
   /\ ks.pc = "start"
@@ -109,19 +144,76 @@ KSStart ==
         /\ runs' = Append(runs, [job |-> "J1", sl |-> due, by |-> "ks", st |-> "running"])
         /\ ks' = [ks EXCEPT !.pc = "rec1", !.newRun = Len(runs) + 1]
         /\ UNCHANGED <<lock, rows, h>>
-  /\ UNCHANGED <<now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, unrecorded>>
 
 KSRec1 ==                                   \* record: tombstone check ...
   /\ ks.pc = "rec1"
   /\ IF sj.tomb THEN ks' = KSIdle /\ lock' = KSFree /\ unrecorded' = unrecorded \cup {ks.newRun}
                 ELSE ks' = [ks EXCEPT !.pc = "rec2"] /\ UNCHANGED <<lock, unrecorded>>
-  /\ UNCHANGED <<now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h>>
 
 KSRec2 ==                                   \* ... then rename: last = {at: now, pid}
   /\ ks.pc = "rec2"
   /\ sj' = [tomb |-> FALSE, tick |-> ks.t, lastAt |-> ks.t, lastRun |-> ks.newRun]
   /\ ks' = KSIdle /\ lock' = KSFree /\ h' = [h EXCEPT !["J1"] = Mx(@, ks.t)]
-  /\ UNCHANGED <<now, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, unrecorded>>
+
+(* ---------------- the old-code tick (OldTick, SHOULD 7 of the F review) ---------------- *)
+(* kith-sched as it was before #1033 (1cf2b5f44): no tick.lock. tick() reads state.json (a tombstone stops it), saves   *)
+(* the tick (a tombstone check, then the rename over whatever is there), starts the due job, then records it (the same    *)
+(* check and rename). It is the KS path with TickLock = FALSE, run by a second process that launchd started before the   *)
+(* update moved cli/current: a tick of the old code that is still running when the step takes tick.lock, which it never *)
+(* takes. One such tick; none starts once the update has happened.                                                      *)
+OTGone == [ot EXCEPT !.pc = "gone"]
+
+OTRead ==
+  /\ OldTick /\ ~moved /\ ot.pc = "idle" /\ ~sj.tomb
+  /\ ot' = [pc |-> "save1", tick |-> sj.tick, lastAt |-> sj.lastAt, lastRun |-> sj.lastRun, t |-> now, newRun |-> 0]
+  /\ UNCHANGED <<imp, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded, moved>>
+
+OTSave1 ==
+  /\ ot.pc = "save1"
+  /\ ot' = IF sj.tomb THEN OTGone ELSE [ot EXCEPT !.pc = "save2"]
+  /\ UNCHANGED <<imp, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded, moved>>
+
+OTSave2 ==                                  \* the rename: a tombstone written since OTSave1 is replaced
+  /\ ot.pc = "save2"
+  /\ sj' = [tomb |-> FALSE, tick |-> ot.t, lastAt |-> ot.lastAt, lastRun |-> ot.lastRun]
+  /\ ot' = [ot EXCEPT !.pc = "start"]
+  /\ UNCHANGED <<imp, now, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded, moved>>
+
+OTStart ==
+  /\ ot.pc = "start"
+  /\ LET due == {s \in Slots : ot.tick < s /\ s <= ot.t} IN
+     IF due = {} THEN
+        /\ ot' = OTGone /\ h' = [h EXCEPT !["J1"] = Mx(@, ot.t)]
+        /\ UNCHANGED <<runs, rows>>
+     ELSE IF ot.lastRun # 0 /\ runs[ot.lastRun].st = "running" THEN
+        /\ rows' = rows \cup {[job |-> "J1", slot |-> s, kind |-> "ks_busy"] : s \in due}
+        /\ ot' = OTGone /\ h' = [h EXCEPT !["J1"] = Mx(@, ot.t)]
+        /\ UNCHANGED runs
+     ELSE
+        /\ runs' = Append(runs, [job |-> "J1", sl |-> due, by |-> "ks", st |-> "running"])
+        /\ ot' = [ot EXCEPT !.pc = "rec1", !.newRun = Len(runs) + 1]
+        /\ UNCHANGED <<rows, h>>
+  /\ UNCHANGED <<imp, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, unrecorded, moved>>
+
+OTRec1 ==
+  /\ ot.pc = "rec1"
+  /\ IF sj.tomb THEN ot' = OTGone /\ unrecorded' = unrecorded \cup {ot.newRun}
+                ELSE ot' = [ot EXCEPT !.pc = "rec2"] /\ UNCHANGED unrecorded
+  /\ UNCHANGED <<imp, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, moved>>
+
+OTRec2 ==
+  /\ ot.pc = "rec2"
+  /\ sj' = [tomb |-> FALSE, tick |-> ot.t, lastAt |-> ot.t, lastRun |-> ot.newRun]
+  /\ ot' = OTGone /\ h' = [h EXCEPT !["J1"] = Mx(@, ot.t)]
+  /\ UNCHANGED <<imp, now, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, unrecorded, moved>>
+
+\* The update moves cli/current: any time, also while the old tick runs.
+Move ==
+  /\ ~moved /\ moved' = TRUE
+  /\ UNCHANGED <<imp, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded, ot>>
 
 (* ---------------- host (Gate::Own) ---------------- *)
 HostFire ==   \* next_run <= now: one run covering [next_run..now]; waits while a J2 turn is unfinished (host queue)
@@ -130,39 +222,51 @@ HostFire ==   \* next_run <= now: one run covering [next_run..now]; waits while 
   /\ runs' = Append(runs, [job |-> "J2", sl |-> nextRun..now, by |-> "host", st |-> "running"])
   /\ nextRun' = now + 1
   /\ h' = [h EXCEPT !["J2"] = Mx(@, now)]
-  /\ UNCHANGED <<now, sj, ks, lock, host, step, wm, anchor, anchorUsed, liveRun, rb, rows, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, lock, host, step, wm, anchor, anchorUsed, liveRun, rb, rows, unrecorded>>
 
 HostStop ==   \* stopped for the step, possibly long before it
   /\ host = "own" /\ step = "pre" /\ rb = "none"
   /\ host' = "stopped"
-  /\ UNCHANGED <<now, sj, ks, lock, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, lock, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 (* ---------------- the step ---------------- *)
-StepLock ==
-  /\ TickLock /\ step = "pre" /\ host = "stopped" /\ lock = "none"
+StepLock ==                                  \* the operator runs the step with the updated CLI (gate condition 5)
+  /\ TickLock /\ step = "pre" /\ host = "stopped" /\ lock = "none" /\ moved
   /\ lock' = "step" /\ step' = "imp"
-  /\ UNCHANGED <<now, sj, ks, host, nextRun, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, host, nextRun, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
+\* Gate condition 6 (OldWait; schedules_gate.rs, package F): right after taking tick.lock the step lists this home's tick
+\* processes and waits until each is gone. At TICK_WAIT it refuses and changes nothing, so the refusal is no action here.
 StepImport ==
-  /\ step = (IF TickLock THEN "imp" ELSE "pre") /\ host = "stopped" /\ ~sj.tomb
+  /\ step = (IF TickLock THEN "imp" ELSE "pre") /\ host = "stopped" /\ ~sj.tomb /\ moved
+  /\ OldWait => OldGone
   /\ wm' = IF Anchor = "wmback" THEN Mn(sj.tick, nextRun - 1) ELSE sj.tick
   /\ rows' = rows \cup (IF sj.lastRun # 0 THEN {[job |-> "J1", slot |-> sj.lastAt, kind |-> "fired"]} ELSE {})
   /\ liveRun' = sj.lastRun
   /\ anchor' = nextRun
-  /\ step' = "tomb"
-  /\ UNCHANGED <<now, sj, ks, lock, host, nextRun, anchorUsed, rb, runs, h, unrecorded>>
+  /\ step' = "chk" /\ imp' = sj
+  /\ UNCHANGED <<ot, moved, now, sj, ks, lock, host, nextRun, anchorUsed, rb, runs, h, unrecorded>>
+
+\* before_tombstone: state.json's sha against the import's. A refusal leaves the module stepping and frees the locks; the
+\* operator runs the step again, which imports again.
+StepCheck ==
+  /\ step = "chk"
+  /\ IF ~ShaCheck \/ sj = imp
+       THEN step' = "tomb" /\ UNCHANGED lock
+       ELSE step' = "pre" /\ lock' = (IF lock = "step" THEN "none" ELSE lock)
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, host, nextRun, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 StepTomb ==
   /\ step = "tomb"
   /\ sj' = [sj EXCEPT !.tomb = TRUE]
   /\ lock' = IF lock = "step" THEN "none" ELSE lock
   /\ step' = "switched"
-  /\ UNCHANGED <<now, ks, host, nextRun, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, ks, host, nextRun, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 HostCore ==   \* host restarts with Gate::Core
   /\ step = "switched" /\ host = "stopped" /\ rb = "none"
   /\ host' = "core"
-  /\ UNCHANGED <<now, sj, ks, lock, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, lock, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, runs, rows, h, unrecorded>>
 
 (* ---------------- the core tick ---------------- *)
 From(j) == IF j = "J2" /\ Anchor = "anchor" /\ ~anchorUsed THEN anchor - 1 ELSE wm
@@ -190,28 +294,28 @@ CoreTick ==
   /\ wm' = Mx(wm, now)
   /\ anchorUsed' = TRUE
   /\ h' = [j \in Jobs |-> Mx(h[j], now)]
-  /\ UNCHANGED <<now, sj, ks, lock, host, nextRun, step, anchor, liveRun, rb, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, lock, host, nextRun, step, anchor, liveRun, rb, unrecorded>>
 
 Begin ==      \* a queued core turn begins (the host runs turns)
   /\ host = "core"
   /\ \E i \in RunIds : runs[i].st = "queued" /\ runs' = [runs EXCEPT ![i].st = "running"]
-  /\ UNCHANGED <<now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, rows, h, unrecorded>>
 
 End ==
   /\ \E i \in RunIds : runs[i].st = "running" /\ runs' = [runs EXCEPT ![i].st = "done"]
-  /\ UNCHANGED <<now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rb, rows, h, unrecorded>>
 
 (* ---------------- rollback ---------------- *)
 RBStop ==
   /\ Rollback # "off" /\ rb = "none" /\ host = "core"
   /\ host' = "stopped" /\ rb' = "stopped"
-  /\ UNCHANGED <<now, sj, ks, lock, nextRun, step, wm, anchor, anchorUsed, liveRun, runs, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, lock, nextRun, step, wm, anchor, anchorUsed, liveRun, runs, rows, h, unrecorded>>
 
 RBCancel ==   \* cancel every queued, not yet begun core turn
   /\ rb = "stopped"
   /\ runs' = [i \in RunIds |-> IF runs[i].st = "queued" THEN [runs[i] EXCEPT !.st = "cancelled"] ELSE runs[i]]
   /\ rb' = "cancelled"
-  /\ UNCHANGED <<now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rows, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, sj, ks, lock, host, nextRun, step, wm, anchor, anchorUsed, liveRun, rows, h, unrecorded>>
 
 RBWrite ==
   /\ rb = "cancelled"
@@ -243,15 +347,16 @@ RBWrite ==
                         \cup {[job |-> p[1], slot |-> p[2], kind |-> "skipped_rollback"] : p \in cj}
                    ELSE rows
   /\ host' = "own" /\ rb' = "done"
-  /\ UNCHANGED <<now, ks, lock, step, wm, anchor, anchorUsed, liveRun, runs, h, unrecorded>>
+  /\ UNCHANGED <<imp, ot, moved, now, ks, lock, step, wm, anchor, anchorUsed, liveRun, runs, h, unrecorded>>
 
 Next ==
   \/ Clock
   \/ KSLock \/ KSCheck \/ KSRead \/ KSSave1 \/ KSSave2 \/ KSStart \/ KSRec1 \/ KSRec2
   \/ HostFire \/ HostStop
-  \/ StepLock \/ StepImport \/ StepTomb \/ HostCore
+  \/ StepLock \/ StepImport \/ StepCheck \/ StepTomb \/ HostCore
   \/ CoreTick \/ Begin \/ End
   \/ RBStop \/ RBCancel \/ RBWrite
+  \/ OTRead \/ OTSave1 \/ OTSave2 \/ OTStart \/ OTRec1 \/ OTRec2 \/ Move
 
 Spec == Init /\ [][Next]_vars
 
@@ -269,7 +374,7 @@ Covered(j, s) == Covers(j, s) # {} \/ \E r \in rows : r.job = j /\ r.slot = s /\
 (* and every scheduler that is still active has caught up to now (nothing left it would do). *)
 Quiet ==
   /\ now = MaxMin
-  /\ ks.pc = "idle"
+  /\ ks.pc = "idle" /\ OldGone
   /\ step \in {"pre", "switched"}
   /\ rb \in {"none", "done"}
   /\ (step = "switched" /\ rb = "none") => host = "core"

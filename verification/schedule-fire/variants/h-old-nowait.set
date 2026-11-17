@@ -1,0 +1,3 @@
+# an old-code tick still running when the step starts, and no condition 6 wait
+OldTick = TRUE
+OldWait = FALSE

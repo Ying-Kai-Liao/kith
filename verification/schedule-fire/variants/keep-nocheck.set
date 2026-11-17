@@ -1,3 +1,5 @@
+\* a routine (the keep path is the bot actor's): no paused check at the claim
+Cron = FALSE
 AdoptMode = "c"
 ClaimPausedCheck = FALSE
 KeepRebegin = TRUE
