@@ -10,6 +10,7 @@
 //! - `next` is the cron rule's, which lives in the kernel (`core/kernel/src/schedule/`, M4-1). Until that is wired in,
 //!   [`NoRule`] answers, and a row's `next` is `null` with a note; the wiring is one `Rule` impl and one argument.
 
+pub(crate) mod anchor;
 mod call;
 // The fire decides with the authority tables, which are Unix only for now.
 #[cfg(unix)]
@@ -22,6 +23,7 @@ mod fire_tests;
 mod hooks;
 #[cfg(all(test, unix))]
 mod hooks_tests;
+mod running;
 #[cfg(unix)]
 mod sync;
 // The import it is tested with is Unix-only for now (like the authority one).
