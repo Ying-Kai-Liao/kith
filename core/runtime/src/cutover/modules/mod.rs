@@ -31,5 +31,7 @@ mod schedules_switch_tests;
 #[cfg(test)]
 mod schedules_tests;
 #[cfg(test)]
+mod schedules_ticks_tests;
+#[cfg(test)]
 mod tests;
 pub(crate) mod transcripts;

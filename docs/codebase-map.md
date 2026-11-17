@@ -169,6 +169,10 @@ the last tick (at most a day back) and that isn't still running: `kith <agent> "
 `~/.kith/logs/sched/runs/<agent>/`, delivery by `kith-send`. Once `kith kernel cutover step schedules` has moved the schedules to
 the core, the core fires the turn and the host runs it: it claims the turn and starts `kith-sched run-turn <agent> <job> --turn N
 --claim C` detached, which builds the same run, records its own pid on the claim (`claim.attach`) and `exec`s `kith <agent> task`.
+The step only goes through when the gate holds (`cutover/modules/schedules_gate.rs`: the build runs fired turns, launchd runs this
+`kith` and a `kith-sched` that takes `tick.lock`, and no `kith-sched tick` that started before the step is still running); the
+checklist behind `RUNS_FIRED_TURNS` is on the flag, and `serve/host/tests/schedules_cutover_e2e.rs` runs the step, the host, the
+core daemon and the real `kith-sched` as processes (host-build runs it).
 
 **Cost** → Claude Code writes transcripts → `kith-cost sync` (every 6 h, and before each report) → `cost.db`;
 `runs` (from the hook) and `kith:` subagent types attribute requests to agents.

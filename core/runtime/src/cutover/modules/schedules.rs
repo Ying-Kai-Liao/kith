@@ -71,10 +71,25 @@ const ROUTINES_KEY: &str = "routines.v1";
 const LOCK_WAIT: Duration = Duration::from_secs(30);
 
 /// Whether the core runs the turns a schedule fire makes (a fired cron job or routine becomes a turn that runs and ends).
-/// `step_refusal` refuses while this is false (with the other conditions in `schedules_gate`). False again: guest jobs
-/// and agents with no bot never run, a kith-sched job's model and effort are lost, and a host restart kills a
-/// scheduled run, and the switch/rollback handover is not done yet. Only the temp-home end-to-end test PR sets it true.
-pub(crate) const RUNS_FIRED_TURNS: bool = false;
+/// `step_refusal` refuses while this is false (with the other conditions in `schedules_gate`). Each line names its PR and
+/// the test that proves it; if one stops being true, this goes back to false.
+///
+/// - [x] Guest jobs and agents with no bot run: they go through `kith-sched run-turn` under an external claim (#1044).
+///   Proved by `kernel/tests/kith-sched-run-turn-check` and
+///   `a_revoke_kills_a_guests_scheduled_run_because_its_claim_is_swept_by_person` (the e2e has no guest job).
+/// - [x] A job's model, effort, harness and person are fixed when the slot fires (`sched_fires.settings`, m0126, #1044).
+///   Proved by `the_settings_of_the_run_are_fixed_on_the_turn_when_it_fires_and_listed_for_the_host`.
+/// - [x] A host restart neither kills nor repeats a scheduled run: an attached run keeps going, and `end_gone` marks a
+///   dead one failed and never requeues it (#1044). Proved by
+///   `a_run_that_died_after_it_attached_is_ended_and_its_turn_failed_never_requeued` and e2e case (a) (a restart adds
+///   no row and no run).
+/// - [x] Step and rollback hold `host.lock` and then `tick.lock`, and the anchor and the hand-back work per job (#1033,
+///   #1042). Proved by e2e cases (b) and (c).
+/// - [x] Gate conditions 2-5 hold, and condition 6 (the step waits out the ticks that started before it took
+///   `tick.lock`, #1043 SHOULD 1). Proved by `schedules_gate_tests` and e2e case (d).
+/// - [x] The real-process e2e passes in CI: `serve/host/tests/schedules_cutover_e2e.rs`, cases (a) to (d), run by the
+///   host-build job's `schedules cutover e2e` step; the schedule-fire model is re-synced with its `HostRuns` rows.
+pub(crate) const RUNS_FIRED_TURNS: bool = true;
 
 type KeyFactory = std::sync::Arc<dyn Fn() -> Box<dyn KeyStore>>;
 
@@ -89,6 +104,8 @@ pub(crate) struct Schedules {
     imported: std::cell::RefCell<Option<String>>,
     /// Tests: how long the step waits for `tick.lock`.
     tick_wait: Duration,
+    /// Tests: the lister of running `kith-sched tick` processes (condition 6).
+    ticks: gate::Lister,
 }
 
 impl Schedules {
@@ -99,6 +116,7 @@ impl Schedules {
             gate_open: false,
             imported: std::cell::RefCell::new(None),
             tick_wait: switch::TICK_WAIT,
+            ticks: gate::list_ticks,
         }
     }
 
@@ -109,6 +127,13 @@ impl Schedules {
         self
     }
 
+    /// Tests: a fixed list of running ticks, in place of the process table.
+    #[cfg(test)]
+    pub(super) fn ticks(mut self, list: gate::Lister) -> Self {
+        self.ticks = list;
+        self
+    }
+
     #[cfg(test)]
     pub(crate) fn with_keys(keys: KeyFactory) -> Self {
         Self {
@@ -116,6 +141,7 @@ impl Schedules {
             gate_open: true,
             imported: std::cell::RefCell::new(None),
             tick_wait: switch::TICK_WAIT,
+            ticks: gate::list_ticks,
         }
     }
 
@@ -136,8 +162,8 @@ impl Schedules {
             runs_fired_turns: RUNS_FIRED_TURNS,
             depends_on_claims: self.depends_on().contains(&"claims"),
             serves_rows: gate::serves_rows(),
-            launchd: gate::launchd_runs_this_build(&env.home),
-            sched_locks: gate::launchd_sched_locks(&env.home),
+            launchd: gate::launchd_runs_this_build(&gate::user_home(env)),
+            sched_locks: gate::launchd_sched_locks(&gate::user_home(env)),
         })
     }
 
@@ -819,7 +845,13 @@ impl Module for Schedules {
     /// `host.lock` (held, so the host cannot start between the refusal and the tombstone) and then `tick.lock` (a
     /// kith-sched tick finishes first and none starts), from before the import to the tombstone (MUST 2, H1).
     fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
-        let held = switch::hold_both(env, STEP_RUNNING, self.tick_wait)?;
+        let held = switch::hold_both(
+            env,
+            STEP_RUNNING,
+            self.tick_wait,
+            self.ticks,
+            switch::OldTicks::Refuse,
+        )?;
         *self.imported.borrow_mut() = None;
         Ok(Some(Box::new(held)))
     }
@@ -827,7 +859,13 @@ impl Module for Schedules {
     /// The same two locks for a rollback, taken before the rolling-back record, so a refusal writes nothing and a host
     /// cannot start (and save its routines over the write-back) until the rollback is done.
     fn rollback_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
-        let held = switch::hold_both(env, ROLLBACK_RUNNING, self.tick_wait)?;
+        let held = switch::hold_both(
+            env,
+            ROLLBACK_RUNNING,
+            self.tick_wait,
+            self.ticks,
+            switch::OldTicks::Note,
+        )?;
         Ok(Some(Box::new(held)))
     }
 

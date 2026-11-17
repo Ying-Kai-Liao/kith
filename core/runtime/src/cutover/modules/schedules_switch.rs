@@ -25,13 +25,24 @@ use fs2::FileExt as _;
 use kith_kernel::schedule::Trigger;
 use serde_json::Value;
 
+use super::schedules_gate::{self as gate, Lister};
 use crate::cutover::Env;
 use crate::error::{Error, Result};
 
-/// How long a step waits for a tick that holds `tick.lock`. A tick holds it while it asks kith-auth about each person's
-/// job (up to 30 s each) and while it fetches a run's environment from the host (up to 4 s); prune waits only 2 s.
-/// Past this the step refuses "held by a kith-sched tick ... try again" and changes nothing.
-pub(super) const TICK_WAIT: Duration = Duration::from_secs(30);
+/// How long a step waits for a tick: for one that holds `tick.lock`, and (condition 6) for one that started before it
+/// took the lock to end. A tick's work before the lock is the prune, the 30 s ask sweep and the 30 s wake drain, and then
+/// its own 30 s wait for the lock; past this the step refuses and changes nothing.
+pub(super) const TICK_WAIT: Duration = Duration::from_secs(120);
+
+/// A test of the real binary shortens the wait with this (milliseconds).
+const TICK_WAIT_ENV: &str = "KITH_SCHEDULES_TICK_WAIT_MS";
+
+fn tick_wait_of(default: Duration) -> Duration {
+    std::env::var(TICK_WAIT_ENV)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map_or(default, Duration::from_millis)
+}
 
 /// `host.lock`, exclusive; let go on drop.
 pub(super) struct HostHold(#[allow(dead_code, reason = "held for its drop")] File);
@@ -79,10 +90,16 @@ pub(super) fn hold_tick(machine: &Path, wait: Duration) -> Result<TickHold> {
         .open(&path)
         .map_err(|e| Error::Io(format!("cutover: schedules: {}: {e}", path.display())))?;
     let until = Instant::now() + wait;
+    let mut said = false;
     loop {
         match f.try_lock_exclusive() {
             Ok(()) => return Ok(TickHold(f)),
             Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                if !said {
+                    // Where the step is, for whoever runs it (the end-to-end test reads this, not the lock).
+                    eprintln!("cutover: schedules: waiting for {}", path.display());
+                    said = true;
+                }
                 if Instant::now() >= until {
                     return Err(Error::Refused(format!(
                         "cutover: schedules: {} is held by a kith-sched tick for more than {}s (a tick waiting on kith-auth for a person's job holds it that long); nothing was changed, try again",
@@ -108,9 +125,44 @@ pub(super) struct SwitchHold {
     _host: HostHold,
 }
 
-pub(super) fn hold_both(env: &Env, running: &str, tick_wait: Duration) -> Result<SwitchHold> {
+/// What a step does about a tick that started before it took `tick.lock` (condition 6): refuse while one is running, or,
+/// for a rollback (the escape hatch, and an old tick that does not take the lock stops at the tombstone), only say so.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum OldTicks {
+    Refuse,
+    Note,
+}
+
+pub(super) fn hold_both(
+    env: &Env,
+    running: &str,
+    tick_wait: Duration,
+    list: Lister,
+    old: OldTicks,
+) -> Result<SwitchHold> {
+    let wait = tick_wait_of(tick_wait);
     let host = hold_host(env, running)?;
-    let tick = hold_tick(&env.machine, tick_wait)?;
+    let tick = hold_tick(&env.machine, wait)?;
+    if let Some(program) = gate::sched_program(&gate::user_home(env)) {
+        match old {
+            OldTicks::Refuse => {
+                eprintln!("cutover: schedules: waiting for a running kith-sched tick to end");
+                gate::wait_out_old_ticks(list, &program, wait).map_err(|pid| {
+                    Error::Refused(format!(
+                        "cutover: schedules: 6: a kith-sched tick (pid {pid}) is still running; try again in a minute; nothing was changed"
+                    ))
+                })?;
+            }
+            OldTicks::Note => {
+                for t in list(&program) {
+                    eprintln!(
+                        "cutover: schedules: note: a kith-sched tick (pid {}) is running; it stops at the tombstone",
+                        t.pid
+                    );
+                }
+            }
+        }
+    }
     Ok(SwitchHold {
         _tick: tick,
         _host: host,
@@ -143,6 +195,10 @@ pub(super) fn next_of(routine: &Value, i: usize, trigger: &Trigger, now: i64) ->
         .and_then(|a| a.get(i))
         .and_then(Value::as_i64);
     match (next, trigger) {
+        // A cron slot is a whole minute, but the host keeps the next run with the sub-minute part of the clock it counted
+        // from (found by the real-process end-to-end test: `14:00:00.406`). Taken as it is, the core would count from just
+        // before an instant that is past the slot, and the first run after the switch would be a whole period late.
+        (Some(t), Trigger::Cron { .. }) => Next::At(t.div_euclid(60_000) * 60_000),
         (Some(t), _) => Next::At(t),
         // The host stores no next run for a `once` after it fired it. One whose time is still ahead was never fired
         // (the host always stores its next run), so it is left to the plain rule.
