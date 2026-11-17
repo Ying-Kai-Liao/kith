@@ -137,6 +137,7 @@ impl Schedules {
             depends_on_claims: self.depends_on().contains(&"claims"),
             serves_rows: gate::serves_rows(),
             launchd: gate::launchd_runs_this_build(&env.home),
+            sched_locks: gate::launchd_sched_locks(&env.home),
         })
     }
 

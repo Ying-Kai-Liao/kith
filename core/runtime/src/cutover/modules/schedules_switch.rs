@@ -28,8 +28,9 @@ use serde_json::Value;
 use crate::cutover::Env;
 use crate::error::{Error, Result};
 
-/// How long a step waits for a tick that holds `tick.lock` (a tick takes it for milliseconds; prune, the ask sweep and
-/// the wake drain are outside it).
+/// How long a step waits for a tick that holds `tick.lock`. A tick holds it while it asks kith-auth about each person's
+/// job (up to 30 s each) and while it fetches a run's environment from the host (up to 4 s); prune waits only 2 s.
+/// Past this the step refuses "held by a kith-sched tick ... try again" and changes nothing.
 pub(super) const TICK_WAIT: Duration = Duration::from_secs(30);
 
 /// `host.lock`, exclusive; let go on drop.
