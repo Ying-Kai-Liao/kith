@@ -15,6 +15,7 @@ actor FakeRemote: RemoteTransport {
     private var failReadReceipts = false
     private(set) var readAttempts = 0
     private(set) var shutdownCount = 0
+    private(set) var kicks = 0
     private var isShutdown = false
 
     func setReadFailure(_ fail: Bool) { failReadReceipts = fail }
@@ -113,6 +114,8 @@ actor FakeRemote: RemoteTransport {
     nonisolated func mailboxEvents() -> AsyncStream<MailboxEvent> {
         AsyncStream { c in Task { await self.addMailbox(c) } }
     }
+
+    func kick() async { kicks += 1 }
 
     func shutdown() async {
         shutdownCount += 1
