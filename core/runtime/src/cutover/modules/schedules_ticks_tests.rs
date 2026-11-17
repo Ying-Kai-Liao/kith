@@ -196,8 +196,13 @@ fn the_real_lister_finds_this_homes_ticks_and_not_run_turn_or_another_homes() {
         std::thread::sleep(Duration::from_millis(50));
     };
     let pids: Vec<u32> = found.iter().map(|x| x.pid).collect();
-    assert_eq!(pids, [tick_p.id()], "{found:?}");
-    assert!(found[0].stamp.is_some());
+    // The shell may have forked its `sleep` and not yet exec'd it: that child shows the same arguments, so it may be listed too.
+    assert!(pids.contains(&tick_p.id()), "{found:?}");
+    assert!(
+        !pids.contains(&run_turn.id()) && !pids.contains(&theirs.id()),
+        "{found:?}"
+    );
+    assert!(found.iter().all(|x| x.stamp.is_some()));
     for c in [&mut tick_p, &mut run_turn, &mut theirs] {
         c.kill().unwrap();
         c.wait().unwrap();
