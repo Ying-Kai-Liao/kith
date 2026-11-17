@@ -29,7 +29,7 @@ skill, or the covered code; by hand, only this job: `gh workflow run ci.yml --re
 `run.sh` exits 0 only when every row of `checks.tsv` (variant, kind, property, expected pass/fail) came out as
 expected. Tools are the same pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE as the holder-lease and
 writer-lock skills (`run.sh` is a copy of their harness). `fixed` (the design) has 283,124 states, `rev` (the design
-with one revoke per person and no edit) 3,767,524; a row takes from a few seconds to about two minutes, the whole table (80 rows) about 15 minutes on four workers
+with one revoke per person and no edit) 3,767,524; a row takes from a few seconds to about two minutes, the whole table (80 rows) about 30 minutes on CI (four workers)
 (the CI schedule-fire job runs the whole table, not --smoke, when any covered path or this folder changes). A failing row stops at its first counterexample. A row that changes (a finding fixed, a new break)
 exits 1: read this skill, do not edit the table to fit.
 
