@@ -20,7 +20,9 @@ enum MarkdownCache {
     }()
 
     /// `parse` is the real parser; a test passes its own to count how often it runs.
-    static func blocks(_ source: String, parse: (String) -> [MarkdownBlocks.Block] = MarkdownBlocks.parse) -> [MarkdownBlocks.Block] {
+    static func blocks(_ source: String, cached: Bool = true, parse: (String) -> [MarkdownBlocks.Block] = MarkdownBlocks.parse) -> [MarkdownBlocks.Block] {
+        // A reply still being written is a new string every token: keeping each would only push real replies out.
+        guard cached else { return parse(source) }
         let key = source as NSString
         if let hit = blockCache.object(forKey: key) { return hit.value }
         let parsed = parse(source)
@@ -28,7 +30,8 @@ enum MarkdownCache {
         return parsed
     }
 
-    static func inline(_ source: String, parse: (String) -> AttributedString) -> AttributedString {
+    static func inline(_ source: String, cached: Bool = true, parse: (String) -> AttributedString) -> AttributedString {
+        guard cached else { return parse(source) }
         let key = source as NSString
         if let hit = inlineCache.object(forKey: key) { return hit.value }
         let parsed = parse(source)

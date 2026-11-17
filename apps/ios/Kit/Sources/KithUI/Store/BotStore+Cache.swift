@@ -39,7 +39,7 @@ extension BotStore {
             let loaded = await Task.detached(priority: .userInitiated) { Self.read(url) }.value
             guard let self else { return }
             if let loaded, !retired { apply(loaded) }
-            cacheLoaded = true
+            finishLoad()
         }
     }
 
@@ -57,14 +57,33 @@ extension BotStore {
             entries: Dictionary(grouping: cache.entries, by: \.botId))
     }
 
+    /// The file's mirror under what arrived while it was being read (a share sent at a cold launch, a chat started):
+    /// memory is newer, so its entries go into the cached chat by the same rule an event does.
     private func apply(_ loaded: Loaded) {
         cacheStamp = loaded.cache.stamp ?? ""
         hostId = loaded.cache.hostId
-        rev = loaded.cache.rev
-        bots = loaded.bots
-        myRooms = loaded.rooms
-        // A message sent before the file was read keeps its chat as it is.
-        entries.replaceAll(loaded.entries.filter { entries[$0.key] == nil })
+        rev = max(rev, loaded.cache.rev)
+        bots = loaded.bots.merging(bots) { _, live in live }
+        myRooms = loaded.rooms.merging(myRooms) { _, live in live }
+        var merged = loaded.entries
+        for (chat, live) in entries.all {
+            guard !live.isEmpty else { continue }
+            var list = merged[chat] ?? []
+            for e in live { Self.upsert(e, into: &list) }
+            merged[chat] = list
+        }
+        entries.replaceAll(merged)
+    }
+
+    /// After the file is in: the host may already have turned this invited person away (the unauthorized answer came
+    /// before there was a mirror to wipe), and what was just read must not outlive that.
+    private func finishLoad() {
+        cacheLoaded = true
+        if case .unauthorized = connection, inviteTokens?.stored(for: computer.id) != nil {
+            hello = nil
+            resetMirror()
+        }
+        onRosterChanged?()
     }
 
     func scheduleSave() {
