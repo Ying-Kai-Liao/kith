@@ -5,7 +5,9 @@
 use std::path::Path;
 
 use super::schedules::{RUNS_FIRED_TURNS, Schedules};
-use super::schedules_gate::{Facts, MESSAGE, launchd_runs, refusal, serves_rows};
+use super::schedules_gate::{
+    Facts, MESSAGE, launchd_runs, launchd_sched_locks, refusal, serves_rows,
+};
 use crate::cutover::Module;
 
 fn all() -> Facts {
@@ -14,6 +16,7 @@ fn all() -> Facts {
         depends_on_claims: true,
         serves_rows: true,
         launchd: Ok(()),
+        sched_locks: Ok(()),
     }
 }
 
@@ -178,4 +181,82 @@ fn a_launcher_or_holder_word_is_not_taken_for_the_program() {
     // No `serve --port`: no program found.
     write_plist(t.path(), &[mine.to_str().unwrap(), "serve"]);
     assert!(launchd_runs(t.path(), &mine).is_err());
+}
+
+fn write_sched_plist(home: &Path, words: &[&str]) {
+    let dir = home.join("Library/LaunchAgents");
+    std::fs::create_dir_all(&dir).unwrap();
+    let strings = format!("<string>{}</string>", words.join("</string><string>"));
+    std::fs::write(
+        dir.join("dev.kith.sched.plist"),
+        format!("<plist><dict><key>ProgramArguments</key><array>{strings}</array></dict></plist>"),
+    )
+    .unwrap();
+}
+
+const MARKED: &str =
+    "#!/usr/bin/env python3\nKITH_SCHED_TICK_LOCK = 1  # honours sched/tick.lock\n";
+
+#[test]
+fn launchds_kith_sched_must_carry_the_tick_lock_marker() {
+    let t = tempfile::tempdir().unwrap();
+    let home = t.path();
+    // Missing plist.
+    assert!(
+        launchd_sched_locks(home)
+            .unwrap_err()
+            .contains("update kith first")
+    );
+    // Through a `current` symlink, with the launcher words in front.
+    let v = home.join("cli/v2/bin");
+    std::fs::create_dir_all(&v).unwrap();
+    std::fs::write(v.join("kith-sched"), MARKED).unwrap();
+    std::os::unix::fs::symlink(home.join("cli/v2"), home.join("cli/current")).unwrap();
+    let via = home.join("cli/current/bin/kith-sched");
+    let via = via.to_str().unwrap();
+    write_sched_plist(
+        home,
+        &["kith-uv", "run", "--quiet", "--script", via, "tick"],
+    );
+    assert_eq!(launchd_sched_locks(home), Ok(()));
+    // Direct program.
+    write_sched_plist(home, &[via, "tick"]);
+    assert_eq!(launchd_sched_locks(home), Ok(()));
+    // No marker: refused, naming the program.
+    std::fs::write(v.join("kith-sched"), "#!/usr/bin/env python3\n").unwrap();
+    let why = launchd_sched_locks(home).unwrap_err();
+    assert!(why.contains(via) && why.contains("tick.lock"), "{why}");
+    // Not utf-8, and a program that is not there.
+    std::fs::write(v.join("kith-sched"), [0xff, 0xfe]).unwrap();
+    assert!(launchd_sched_locks(home).is_err());
+    write_sched_plist(home, &["/no/such/kith-sched", "tick"]);
+    assert!(launchd_sched_locks(home).is_err());
+}
+
+#[test]
+fn a_marked_kith_sched_beside_this_binary_does_not_stand_in_for_launchds() {
+    let t = tempfile::tempdir().unwrap();
+    let home = t.path();
+    let beside = home.join("beside");
+    std::fs::create_dir_all(&beside).unwrap();
+    std::fs::write(beside.join("kith-sched"), MARKED).unwrap();
+    let old = home.join("old-kith-sched");
+    std::fs::write(&old, "#!/usr/bin/env python3\n").unwrap();
+    write_sched_plist(home, &[old.to_str().unwrap(), "tick"]);
+    assert!(launchd_sched_locks(home).is_err());
+}
+
+#[test]
+fn condition_five_refuses_on_its_own() {
+    let r = refusal(&Facts {
+        sched_locks: Err(
+            "launchd's kith-sched (/x) does not take sched/tick.lock; update kith first".into(),
+        ),
+        ..all()
+    })
+    .unwrap();
+    assert!(
+        r.starts_with(MESSAGE) && r.contains("5: launchd's kith-sched") && !r.contains("4:"),
+        "{r}"
+    );
 }
