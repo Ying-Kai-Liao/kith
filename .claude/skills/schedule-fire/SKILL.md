@@ -28,25 +28,30 @@ CI runs `run.sh` (job `schedule-fire`) on pull requests and pushes that touch `v
 skill, or the covered code; by hand, only this job: `gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model`.
 `run.sh` exits 0 only when every row of `checks.tsv` (variant, kind, property, expected pass/fail) came out as
 expected. Tools are the same pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE as the holder-lease and
-writer-lock skills (`run.sh` is a copy of their harness). `fixed` (the design) has 274,370 states, `rev` (the design
-with one revoke per person and no edit) 3,767,524; a row takes from a few seconds to about two minutes, the whole table (63 rows) about four minutes
-on four workers. A failing row stops at its first counterexample. A row that changes (a finding fixed, a new break)
+writer-lock skills (`run.sh` is a copy of their harness). `fixed` (the design) has 283,124 states, `rev` (the design
+with one revoke per person and no edit) 3,767,524; a row takes from a few seconds to about two minutes, the whole table (80 rows) about 30 minutes on CI (four workers)
+(the CI schedule-fire job runs the whole table, not --smoke, when any covered path or this folder changes). A failing row stops at its first counterexample. A row that changes (a finding fixed, a new break)
 exits 1: read this skill, do not edit the table to fit.
 
 ## What is modelled
 
 Slots at times P, 2P .. NS*P (NS = 2, P = 2); the clock runs 0..6. One job with one person and a definition
-(`paused`, `person`, `ver`: the index row), three turn rows, one ad hoc slot (run now and a webhook are the same code
+(`paused`, `person`, `ver`: the index row), three turn rows (a claim happens only for an owner turn that has a bot: person 1
+has one, person 2 has none, so person 2's turns only ever expire; `HostBotOnly`), one ad hoc slot (run now and a webhook are the same code
 path), and the caller's answer for it (`ans`: none, busy, or the recorded outcome). Actions: the tick (fresh clock, or
 a clock read before the transaction: stale), an ad hoc fire or its retry, edit (with a pause cancel), the authority
-revoke, then `revoke_person` in its own transaction, grant, host crash and restart (a claim dies with the core), the
+revoke, then `revoke_person` in its own transaction, grant, the core's crash and restart (rule K: the host's live claims
+stay, so claimed and running turns are kept), the host's own restart (`HostAdopt`, today's adopt: a claim never redeemed
+ends and its turn is queued again; a running one is killed and its turn is queued again), the
 conversation held and released, time (it runs while the core is down), and the turn lifecycle (claim with its may
 check, or park; expire; start; finish).
 
 Two sizes keep the state space small: `fixed` has one edit and no revoke; `rev` has one revoke per person and no edit
 (the person of the job never changes there). An edit that moves the job to a revoked person is not checked.
 
-Not modelled: cron arithmetic, a webhook's payload, today's 6 h "still running" window (a turn is unfinished until it
+Not modelled: which process (the core's reconcile, the host's adopt, a holder) ends a claim, a claim's pid and the redeem
+(a `running` turn is one state), `Crash` and `HostAdopt` at every point of a transaction (a transaction is atomic),
+cron arithmetic, a webhook's payload, today's 6 h "still running" window (a turn is unfinished until it
 ends or expires), the delivery of output, claim fencing (M3-2's model), several jobs (independent: the key is (agent,
 job, slot)), a second core, the run-now / webhook TTL (their deadline is the next slot after the clock only), the
 `jobs.json` hash compare (requirement 3), the watermark as a UTC instant in ms and never moving back (requirement 10).
@@ -153,9 +158,38 @@ M4-3 is `core/runtime/src/schedules/fire.rs` (with `sync.rs`, the index). The ta
 | `Claim` (may check) | `claim` (`:246`), `revoke_epoch` (`:182`), `NewClaim::revoke_seen` (`:91`, checked `:273`), the deadline check in the claim's UPDATE (`:350`) |
 | `Hold`, `Release`, park | `park_in` (called by `fire_in` when the conversation is held), `unpark_ready` |
 | `Expire` | `expire_turns_in` (the sweep in `fire_in`, step 3), `expire_parked` (q218) |
-| `Start`, `Finish`, `Crash`, `Restart` | `redeem` (`:373`), `report` (`:415`), `reconcile` (`conversations/reconcile.rs`: a core restart keeps the host's live claims, rule K of design 2026-11-16-core-queued-runner) |
+| `Start`, `Finish` | `redeem` (`:373`), `report` (`:415`) |
+| `Crash`, `Restart` | the core restarting: `reconcile` (`conversations/reconcile.rs`: step 5 keeps the host's live claims, rule K of design 2026-11-16-core-queued-runner). Turns are left as they are |
+| `HostAdopt` | the host's own restart: `hostclaim.adopt` (`hostclaim.rs:219`) -> `conversations/warm.rs` `adopt` (`:247`): a `claimed` claim with no pid ends (`host_changed`) and its turn is queued again; one with a pid goes to `ending`, its turn is queued again and the process is killed. Package C of M4-5 changes this for scheduled runs (see "Pending code") |
+| `Claim` scoped to a bot | the host's runner (`routines/core_runs.rs`) begins only turns of an owner that has a bot; a turn it cannot run is left to expire |
 | the turn row | `enqueue_turn_in` (`fire_in`, step 5), source `schedule` |
-| who runs the turn (not in `Fire.tla`; `HostRuns.tla` in the architect's design folder) | the host's runner: `hostclaim.queued` (`hostclaim.rs`, unkeyed `schedule` turns, `redeemedBefore`), `serve/host/src/routines/core_runs.rs` (pull after each `schedule.tick` and every 2 s in Writer mode; a turn redeemed before is cancelled "interrupted", any other begins by its id through the bot's actor, never enqueued). `RUNS_FIRED_TURNS` is on since it landed |
+| who runs the turn (not in `Fire.tla`; `HostRuns.tla` in the architect's design folder) | the host's runner: `hostclaim.queued` (`hostclaim.rs`, unkeyed `schedule` turns, `redeemedBefore`), `serve/host/src/routines/core_runs.rs` (pull after each `schedule.tick` and every 2 s in Writer mode; a turn redeemed before is cancelled "interrupted", any other begins by its id through the bot's actor, never enqueued). `RUNS_FIRED_TURNS` is off again since #1035 (architect MUST 1) and comes back on only in the PR that lands the temp-home e2e (package F) |
+
+## Pending code: the handover (M4-5, packages A2, B, C; the model is `Handover.tla`)
+
+`Handover.tla` models kith-sched, the host's routines (J2) and the core during the switch: the operator's step (pre,
+import, tombstone, switched), the core's tick, and the rollback. Properties: `AtMostOnce` (no slot is covered by two
+runs), `NoSilentLoss` (every slot a scheduler evaluated is covered or has a decided row) and `NoStack` (no job has two
+running runs). Design and verdict: the architect's `2026-11-17-schedules-handover` folder (design.md, model/results.md).
+The rules, each with the `h-*` row that fails without it:
+
+| Rule | What | Code | Row |
+|---|---|---|---|
+| H1 `tick.lock` | kith-sched's tick and the step share one lock; the tick checks the tombstone under it | pending: packages A1 (`kith-sched`), A2 (the step) | `h-no-lock` (`AtMostOnce`) |
+| H2 anchor | J2 (a host routine) counts from its imported `next_run` (the anchor) until its first core plan, never from the watermark; the once row is the anchor too | pending: package A2 (import) and B (plan) | `h-no-anchor` (`AtMostOnce`, `NoSilentLoss`), `h-wm-back` (`AtMostOnce`) |
+| H3 live old run | an imported kith-sched run that is still live counts as unfinished for the core's skip rule | pending: package A2 (import writes `last` into `sched_runs`) and B | `h-no-h3` (`NoStack`) |
+| H4 per-job rollback | a rollback rewinds only the job it concerns: its next run counts from where it would next count (the anchor until used, never below anchor - 1), the core's cancelled runs leave a `skipped:rollback` row, a running core run is written into `state.json`'s `last` last | pending: package C (rollback) | `h-perjob-as-written` (`AtMostOnce`), `h-global-rewind` (`AtMostOnce`), `h-bare` (`NoSilentLoss`), `h-nolast` (`NoStack`) |
+
+Package C's change of the host's adopt for scheduled runs (pid alive: keeps running; redeemed then dead: ends and is
+never retried; no pid: queued again) is not in `Fire.tla` (it models today's adopt) and not in `Handover.tla` (it has no
+host restart mid-run). Re-check both when C lands.
+
+`Handover.tla` does not model: the 1-day catch-up windows, interval and once triggers (H2's once row and the interval
+anchor are argued, not checked), webhooks, a host restart mid-run (C), two Macs, a crash inside kith-sched's locked
+section. Bounds: `MaxMin` 3 (4 did not finish in 20 minutes on a busy Mac), J1 a kith-sched cron job due every minute,
+J2 a host routine due every minute. The architect's first H4 fix (`next_run = max(wm, anchor-1) + 1`) failed
+`NoSilentLoss` too (about 86k states); it has no row here, `perjobfrom` is the fix. State counts of the rows are in
+`results` below.
 
 ## Broken variants
 
@@ -181,6 +215,8 @@ M4-3 is `core/runtime/src/schedules/fire.rs` (with `sync.rs`, the index). The ta
 | `no-missed`, `no-missed-live` | `MissedRows = FALSE` | `WatermarkRows`; `DueGetsRow` |
 | `no-record` | `RecordSkips = FALSE` (live) | `DueGetsRow` |
 | `wide-window`, `may-in-txn`, `rev`, `edit-rev`, `live`, `hook` | a wider window; may read in the same database; the revoke size; an edit and a revoke together (NS 1, no Hold); time guarded; redelivery | pass |
+| `h-design` | `Handover.tla` as designed (H1 to H4) | pass: `AtMostOnce`, `NoSilentLoss`, `NoStack` |
+| `h-no-lock`, `h-no-anchor`, `h-wm-back`, `h-no-h3`, `h-perjob-as-written`, `h-global-rewind`, `h-bare`, `h-nolast` | `TickLock = FALSE`; `Anchor = "wm"`; `Anchor = "wmback"`; `LiveSkip = FALSE`; `Rollback = "perjob"`, `"global"`, `"bare"`, `"perjobnolast"` | `AtMostOnce`; `AtMostOnce` and `NoSilentLoss`; `AtMostOnce`; `NoStack`; `AtMostOnce`; `AtMostOnce`; `NoSilentLoss`; `NoStack` |
 
 The two "cancel in a second transaction" variants, run against every property (not all are in `checks.tsv`):
 - `pause-later` (the pause commits, its cancel is a second transaction): only `PausedNeverStarts` fails (52 states: the
@@ -212,9 +248,13 @@ The two "cancel in a second transaction" variants, run against every property (n
 - *All-fail limit (10 ticks):* when nothing went through a tick with more than one job due, the failure may be the core's (a locked keychain, an unwritable database), so jobs get 10 failing minutes before each is given up on, against 3 when something else went through. It is a bounded hold, not tied to the 1-day catch-up window: that would hold the watermark (and make every tick plan from further back) for a day. Ten minutes covers a keychain prompt or a restart; longer outages are then recorded as `skipped:error` rows rather than silently replayed.
 - *`mac` on a job:* a job naming another Mac is not planned, counted or recorded here. A webhook/event delivery (`not-here`, answered before the key is looked at) and run-now (refused) for such a job are refused too, with nothing written (M4-5b); this Mac's id is only read for the refusal, never made. A job with no `mac` is every Mac's.
 
-**Sync commit:** `5f4cfbb73eb8d0bf1dfa261c35ec5f1e2b6c4d86` (M4-5a: the fire skips a job whose `mac` is another Mac's, a tick where every due job fails is counted (limit 10), and old `sched_fires` rows are pruned hourly; none is a modelled action, `run.sh` was run again and every row is as expected. Before that: origin/rust-rebuild after M4-3 and #776; the code table above was checked against `fire.rs` / `sync.rs` at M4-4a. The model itself, `Fire.tla`, was not run again: nothing in M4-3 or M4-4a changes a modelled action).
+- *Fairness of `RunnerCancelAny`:* it has none. `TurnsEnd` holds through `Expire`'s strong fairness, but nothing checks that a redeemed turn is cancelled rather than expired.
+- *Not modelled (adopt):* core reconcile step 5's requeue of a claim whose process is gone (`HostAdopt`'s any-time requeue over-approximates it). The out-of-usage keep path re-begins a running turn by the same id inside the actor, so a paused job's running turn can continue on the backup account; deliberate per rule 5.
+
+**Sync commit:** `6f02eea582c60cf7c6a223d3254fcb7d5786e84b` (origin/rust-rebuild; Gap 10 re-sync: `Fire.tla` split Crash and Restart by rule K, added `HostAdopt` (today's adopt), the bot-only claim (`HostBotOnly`) with the runner's cancel of a turn redeemed before (`rd`, `RunnerCancel`; this is why `fixed PausedNeverStarts` passes: a pause leaves a running turn alone and adopt requeues it, but the runner then cancels it), and package C ahead of its brief (`AdoptMode` "c", `ClaimPausedCheck`; rows `c-nocheck`, `c-check`, `c-check-rev`); copied the architect's `Handover.tla` with its 12 `h-*` rows; `rev` now runs with `HostBotOnly = FALSE` so `RevokedNeverStarts` checks the core's claim rule for any claimer. `run.sh` was run in full and every row is as expected. The H1-H4 rows are pending packages A2/B/C; re-check them, C's adopt change and the HostAdopt / bot-only rows at the final re-sync.)
 
 ## Map of the folder
 
 - `Fire.tla`: the model. `base.consts`: the switches for the design. `variants/*.set`: overrides per variant.
+- `Handover.tla`: the M4-5 handover model (variants `h-*`, switches in `base.handover.consts`), copied from the architect's folder.
 - `checks.tsv`: the table `run.sh` enforces. `run.sh`: pinned tools and the table. `drift.sh`: sync commit and covered files.
