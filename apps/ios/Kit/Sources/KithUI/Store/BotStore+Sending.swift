@@ -206,6 +206,8 @@ extension BotStore {
     /// "Failed" is safe even if one was delivered: the events catch-up replaces it by clientNonce,
     /// and a resend reuses that nonce, so the computer never runs it twice.
     func reconcileQueued(_ remote: any RemoteTransport) async {
+        // The waiting messages may still be in the file.
+        await cacheReady()
         let waiting = entries.values.flatMap { $0 }.filter { $0.data.status == "waiting" }
         guard !waiting.isEmpty else { return }
         let heldItems: [QueuedItem]

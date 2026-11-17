@@ -5,6 +5,8 @@ import Foundation
 /// people on its events stream, so a room is read on open and on foreground, and its list on connect.
 extension BotStore {
     func refreshMyRooms() async {
+        // `myRooms` is restored from the file, and the list below is compared with it.
+        await cacheReady()
         guard !isOwner, let client, !retired else { return }
         let rooms: [HostContract.MyRoom]
         do {

@@ -454,17 +454,15 @@ struct ChatItem: Identifiable {
             if e.kind == "tool" { all.append(.tool(e)) } else if e.threadId != nil, e.isChat { all.append(.slot(.entry(e))) }
         }
         for group in topics { all.append(.topic(group)) }
-        func date(_ f: Flat) -> Date {
+        // Dates once, and the sort moves indexes: moving the slots themselves copied an entry per comparison.
+        let dates = all.map { f -> Date in
             switch f {
             case .topic(let g): g.date
             case .slot(let s): s.date
             case .tool(let e): e.date
             }
         }
-        return all.enumerated().sorted { a, b in
-            let (da, db) = (date(a.element), date(b.element))
-            return da == db ? a.offset < b.offset : da < db
-        }.map(\.element)
+        return all.indices.sorted { a, b in dates[a] == dates[b] ? a < b : dates[a] < dates[b] }.map { all[$0] }
     }
 
     /// Whether this row shows the entry (a search result's message, or a thread reply or tool call in the flat chat).

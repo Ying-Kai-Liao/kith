@@ -322,10 +322,10 @@ struct AgentBubble: View {
                     }
                 } else if late {
                     LateBubble(quote: lateQuote) {
-                        MarkdownText(entry.data.text ?? "").equatable().fixedSize(horizontal: false, vertical: true)
+                        MarkdownText(entry.data.text ?? "", cached: entry.data.status != "streaming").equatable().fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
-                    MarkdownText(entry.data.text ?? "").equatable()
+                    MarkdownText(entry.data.text ?? "", cached: entry.data.status != "streaming").equatable()
                         // A reply is never cut: take the height the text needs, whatever the row proposes.
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14)
