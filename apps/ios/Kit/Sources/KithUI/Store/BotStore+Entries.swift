@@ -69,6 +69,25 @@ public final class EntryShelf {
         }
     }
 
+    /// Just these chats' entries; observes only their holders, so another chat's event leaves the reader alone.
+    public func chats(_ ids: some Sequence<String>) -> [String: [Entry]] {
+        ids.reduce(into: [:]) { out, id in
+            let list = holder(id).list
+            if !list.isEmpty { out[id] = list }
+        }
+    }
+
+    /// Every chat but these (guests' cards live in chats the account has no bot for). Observes `membership` for a new
+    /// chat appearing and the holders outside `known`; an event in a known chat does not reach the reader.
+    public func chats(excluding known: Set<String>) -> [String: [Entry]] {
+        _ = membership.generation
+        return holders.reduce(into: [:]) { out, pair in
+            guard !known.contains(pair.key) else { return }
+            let list = pair.value.list
+            if !list.isEmpty { out[pair.key] = list }
+        }
+    }
+
     public var isEmpty: Bool { all.isEmpty }
     public var values: [[Entry]] { Array(all.values) }
 

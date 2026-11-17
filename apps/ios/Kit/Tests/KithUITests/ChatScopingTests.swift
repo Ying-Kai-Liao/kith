@@ -58,3 +58,38 @@ private func entry(_ id: String, bot: String, seq: Int64) -> Entry {
     #expect(openChat.count == 2 && rowB.count == 1)
     #expect(store.entries["a"] == nil && store.entries["b"]?.count == 1)
 }
+
+@MainActor @Test func theHomeBoardIgnoresChatsItDoesNotShow() async throws {
+    let (storage, suite) = context()
+    defer { storage.erase(); UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let fake = FakeRemote(.ready(.relay))
+    let store = BotStore(computer: randomComputer("Mac"), storage: storage) { fake }
+    defer { store.retire() }
+    store.setActive(true)
+    #expect(await until { await fake.subscribed })
+    await fake.emit(#"{"type":"hello","hostId":"h1","rev":3}"#)
+    await fake.emit(#"{"type":"bot","bot":{"id":"a","name":"A","rev":1,"lastAt":1}}"#)
+    await fake.emit(#"{"type":"bot","bot":{"id":"h","name":"H","rev":2,"lastAt":1,"hidden":true}}"#)
+    #expect(await until { store.bots.count == 2 })
+    store.upsert(entry("a0", bot: "a", seq: 3))
+    store.upsert(entry("h0", bot: "h", seq: 4))
+
+    let board = Fires(), prompts = Fires()
+    board.watch { _ = BoardComputer(store: store, guestPrompts: []).entries }
+    prompts.watch { _ = store.guestPrompts(isOwner: true) }
+
+    store.upsert(entry("h1", bot: "h", seq: 5))   // a chat the roster hides
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(board.count == 0, "the Board stays put for a chat it does not show")
+    #expect(prompts.count == 0, "guest cards stay put for a chat with a bot")
+
+    store.upsert(entry("a1", bot: "a", seq: 6))   // a chat the Board shows
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(board.count == 1)
+    #expect(prompts.count == 0, "a known bot's event never reaches the guest-card reader")
+
+    store.upsert(entry("g1", bot: "stranger", seq: 7))   // a chat with no bot: a guest's
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(prompts.count == 1)
+    #expect(board.count == 1)
+}

@@ -47,9 +47,11 @@ public struct BoardComputer: Sendable {
     }
 
     @MainActor public init(store: BotStore, guestPrompts: [GuestPrompt], botRequests: [BotGuest] = []) {
+        // Only the roster's chats: the Board reads nothing else, so another chat's event doesn't redraw the home.
+        let roster = store.roster
         self.init(id: store.computer.id, hostName: store.hostName,
                   trouble: store.isOffline ? .unreachable : store.shownConnection == .connecting ? .catchingUp : nil,
-                  bots: store.roster, entries: store.entries.all, guestPrompts: guestPrompts, botRequests: botRequests)
+                  bots: roster, entries: store.entries.chats(roster.map(\.id)), guestPrompts: guestPrompts, botRequests: botRequests)
     }
 }
 
