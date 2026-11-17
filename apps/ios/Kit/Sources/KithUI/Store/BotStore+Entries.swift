@@ -6,13 +6,20 @@ import Observation
 @Observable
 final class ChatEntries {
     var list: [Entry] = []
+
+    /// Moves the list out, leaving it empty, so a caller mutating it holds the only reference (no copy-on-write).
+    func take() -> [Entry] {
+        var out: [Entry] = []
+        swap(&out, &list)
+        return out
+    }
 }
 
 /// Every chat's entries, one `ChatEntries` holder each, created once and kept. The shelf itself is not observed (the
 /// store keeps it `@ObservationIgnored`): a read observes only the holders it touches, and `all` (the board, which
 /// really wants every chat) also observes `membership`, which moves when a chat gains its first entry or loses its last.
 /// A holder is created on read too, so a view can watch a chat that has no entries yet; it stays when the chat empties.
-public final class EntryShelf {
+@MainActor public final class EntryShelf {
     @Observable final class Membership { var generation = 0 }
 
     private var holders: [String: ChatEntries] = [:]
@@ -31,9 +38,12 @@ public final class EntryShelf {
         set { write(id, newValue ?? []) }
         _modify {
             let h = holder(id)
-            var value: [Entry]? = h.list.isEmpty ? nil : h.list
-            yield &value
-            commit(h, value ?? [])
+            let wasEmpty = h.list.isEmpty
+            var taken: [Entry]? = wasEmpty ? nil : h.take()
+            yield &taken
+            let list = taken ?? []
+            h.list = list
+            if wasEmpty != list.isEmpty { membership.generation += 1 }
         }
     }
 
@@ -41,10 +51,12 @@ public final class EntryShelf {
         get { holder(id).list }
         set { write(id, newValue) }
         _modify {
+            // In place, on the holder's own storage: a copy per event made a catch-up quadratic.
             let h = holder(id)
-            var value = h.list
-            yield &value
-            commit(h, value)
+            let wasEmpty = h.list.isEmpty
+            yield &h.list
+            // A known chat's first or last entry also bumps `membership`, so the board re-reads once then.
+            if wasEmpty != h.list.isEmpty { membership.generation += 1 }
         }
     }
 
@@ -88,7 +100,10 @@ public final class EntryShelf {
         }
     }
 
-    public var isEmpty: Bool { all.isEmpty }
+    public var isEmpty: Bool {
+        _ = membership.generation
+        return !holders.values.contains { !$0.list.isEmpty }
+    }
     public var values: [[Entry]] { Array(all.values) }
 
     /// Replaces every chat's entries at once (cache load).

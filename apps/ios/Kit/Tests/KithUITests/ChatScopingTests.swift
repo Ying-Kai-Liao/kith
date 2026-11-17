@@ -50,7 +50,6 @@ private func entry(_ id: String, bot: String, seq: Int64) -> Entry {
     try await Task.sleep(for: .milliseconds(50))
     #expect(openChat.count == 1)
     #expect(rowB.count == 1, "chat B's row stays put for chat A's event")
-    print("redraws per live event, chat+row readers: before 2 (both), after 1 (the owner only); board reader fires \(everything.count) for 2 events")
 
     // Dropping a chat's entries tells its readers only.
     store.entries["a"] = nil
@@ -92,4 +91,17 @@ private func entry(_ id: String, bot: String, seq: Int64) -> Entry {
     try await Task.sleep(for: .milliseconds(50))
     #expect(prompts.count == 1)
     #expect(board.count == 1)
+}
+
+@MainActor @Test func upsertingIntoAChatIsInPlaceAndStaysLinear() {
+    let shelf = EntryShelf()
+    shelf["a", default: []].reserveCapacity(5000)
+    shelf["a", default: []].append(entry("e0", bot: "a", seq: 0))
+    let base = shelf["a", default: []].withUnsafeBufferPointer { $0.baseAddress }
+    let start = ContinuousClock.now
+    for i in 1..<4000 { shelf["a", default: []].append(entry("e\(i)", bot: "a", seq: Int64(i))) }
+    let took = ContinuousClock.now - start
+    #expect(shelf["a", default: []].withUnsafeBufferPointer { $0.baseAddress } == base, "appends reuse the chat's own storage")
+    #expect(shelf["a", default: []].count == 4000)
+    #expect(took < .seconds(2), "4000 appends into one chat took \(took); a copy per event is quadratic")
 }
