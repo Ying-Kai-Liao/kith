@@ -429,7 +429,7 @@ mod tests {
         }
         assert_eq!(fake.calls_of("schedule.tick").len(), ticked.len());
         let first = start.div_euclid(60_000);
-        let want: Vec<i64> = (first..first + 120).collect();
+        let want: Vec<i64> = (first..=first + 120).collect();
         assert_eq!(ticked, want, "exactly one tick per minute, none skipped");
     }
 
