@@ -351,7 +351,11 @@ impl World {
             "hostclaim.procGone" => {
                 let pid = p["pid"].as_u64().unwrap();
                 let had = self.procs.contains(&pid);
-                self.procs.retain(|x| *x != pid);
+                // One session's row when the call names one (the process stays known), every row of the pid otherwise, as in the
+                // real core (`warm::gone`). The calls are in `asked`.
+                if p["conversation"].is_null() {
+                    self.procs.retain(|x| *x != pid);
+                }
                 // Only the warm_procs rows go: a stopped claim is ended by `settle`, never here (as in the real core).
                 data(json!({"gone": had}))
             }

@@ -540,9 +540,7 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     }
     for person in changed.restored {
         // under every id the host may hold them under, as the cut and the app's undo (a rename keeps the old rows)
-        for held in crate::remote::core_revokes::held_under(&person).await {
-            crate::api::people::restored(hub, &held);
-        }
+        crate::remote::core_revokes::restore_held(hub, &person).await;
     }
     // Before the grants: a member's device is kept only while its account is bound to its person.
     super::members::sync(hub, state.memberships.as_deref(), owner_uid.as_deref()).await;
