@@ -213,8 +213,9 @@ class LockBusy(Exception):
 
 
 _lock_held = False   # this process holds tick.lock: the lock is taken once, at the outer level (flock is per open file)
-LOCK_WAIT = float(os.environ.get('KITH_SCHED_LOCK_WAIT') or 50)
-RUN_LOCK_WAIT = min(LOCK_WAIT, 20)   # `run` by hand: under the 30 s the host gives `kith schedule run`, so it is never killed between Popen and the pid's save   # seconds: a step holds it for tens of seconds, the next launchd tick is a minute away (tests shorten it)
+LOCK_WAIT = float(os.environ.get('KITH_SCHED_LOCK_WAIT') or 50)   # seconds: a step holds it for tens of seconds, the next launchd tick is a minute away (tests shorten it)
+RUN_LOCK_WAIT = min(LOCK_WAIT, 20)   # `run` by hand: under the 30 s the host gives `kith schedule run`, so it is rarely killed between Popen and the pid's save
+PRUNE_LOCK_WAIT = min(LOCK_WAIT, 2)   # housekeeping only: a held lock skips it until a later tick rather than delay this one
 
 
 @contextlib.contextmanager
@@ -456,10 +457,10 @@ def prune(force=False):
     The schedules' tombstone stops the jobs, not this: once the core fires them, kith-sched runs no job (so no log of
     its own is busy) and keeps the hour in a stamp file of its own instead of state.json."""
     try:
-        with tick_lock():   # read and save of state.json under the lock, so a `run` by hand in between keeps its `last`
+        with tick_lock(wait=PRUNE_LOCK_WAIT):   # read and save of state.json under the lock, so a `run` by hand in between keeps its `last`
             _prune(force)
     except LockBusy:
-        pass   # the next hour's tick prunes
+        pass   # held (a step?): a later tick prunes
 
 
 def _prune(force):

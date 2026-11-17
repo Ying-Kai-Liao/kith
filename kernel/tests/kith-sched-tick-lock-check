@@ -108,7 +108,7 @@ check "a recorded slot with no pid is not started again" "! ran"
 # 8. A slot started with a pid, then kith-sched killed before the tick was saved: the run has ended, nothing starts again.
 printf '{"tick": "2026-11-04T07:59", "last": {"house/a": {"at": "2026-11-04T08:00", "why": "due 08:00", "log": "x", "pid": 999999}}}\n' > "$S"
 K tick >"$T/out" 2>"$T/err" </dev/null
-check "a started slot whose pid has ended is not started again (tick not saved)" "! ran"
+check "a started slot whose pid has ended is not started again (tick not saved)" "! ran && ! grep -q 'still running' '$T/err'"
 
 [[ $fails -eq 0 ]] && echo "all ok" || echo "$fails failed"
 exit $((fails > 0))
