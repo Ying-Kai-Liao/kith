@@ -348,11 +348,18 @@ impl Ctx<'_> {
             )));
         };
         let mut fires = self.conn.prepare(
-            "SELECT slot, turn_id, at, outcome FROM sched_fires WHERE agent = ?1 AND job = ?2 ORDER BY at DESC, slot DESC LIMIT 20",
+            "SELECT f.slot, f.turn_id, f.at, f.outcome, t.state, c.end_reason
+             FROM sched_fires f
+               LEFT JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER)
+               LEFT JOIN claims c ON c.claim_id = t.claim_id
+             WHERE f.agent = ?1 AND f.job = ?2 ORDER BY f.at DESC, f.slot DESC LIMIT 20",
         )?;
+        // `outcome` is the fire's decision (`fired`); `turnState` and `ended` say how the turn went (queued, running, done,
+        // failed, or cancelled with the reason the claim was ended by: paused, revoked, rollback, a host's no-runner reason).
         let fires = fires
             .query_map(params![agent, id], |r| {
-                Ok(json!({"slot": r.get::<_, String>(0)?, "turn": r.get::<_, Option<String>>(1)?, "at": r.get::<_, i64>(2)?, "outcome": r.get::<_, String>(3)?}))
+                Ok(json!({"slot": r.get::<_, String>(0)?, "turn": r.get::<_, Option<String>>(1)?, "at": r.get::<_, i64>(2)?, "outcome": r.get::<_, String>(3)?,
+                          "turnState": r.get::<_, Option<String>>(4)?, "ended": r.get::<_, Option<String>>(5)?}))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(json!({

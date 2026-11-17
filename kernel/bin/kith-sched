@@ -9,6 +9,7 @@
   kith-sched log [AGENT [ID]]                            the last runs, with the path of each run's output
   kith-sched prune                                       trim old run logs, rotate auth.log, drop dead terminal records (tick does it hourly)
   kith-sched tick                                        (launchd, every minute) start the jobs that are due
+  kith-sched run-turn AGENT JOB --turn N --claim C       (the Kith host, once the core fires the schedules) run the core's turn N of a job
   kith-sched --install | --uninstall                     the LaunchAgent dev.kith.sched that ticks
 
 --json (ls, add, rm, pause, resume, run, log; anywhere after the verb): one JSON object on stdout, nothing else. A
@@ -35,11 +36,21 @@ defaultMode, else in kith's default (auto; ~/.kith/settings.json changes it): no
 one that would need it is refused. The agent's settings.json allow/deny rules still apply.
 Machine state (last tick, last runs): ~/.kith/sched/. Logs (tick.log, each run's output): ~/.kith/logs/sched/.
 
+run-turn is the host's way to run a turn the core fired for a job of this file (`kith kernel cutover step schedules`): the host
+claims the turn, starts `kith-sched run-turn` detached and pipes the turn's fields to its stdin as one JSON object
+{"prompt", "settings": {"model", "effort", "harness", "person"} | null}. It builds the run exactly as `run` and the tick do
+(`run_env`), records its own pid and start time on the turn's claim (`claim.attach`, a check-and-set) and only then replaces
+itself with `kith AGENT task`, so the pid IS the run. It never reads or writes state.json (a tombstone by then) and never takes
+tick.lock. Exit codes: 2 no such job or bad input, 3 the person may not run it now, 4 the claim is gone (cancelled, ended,
+already running: nothing ran), 5 the core did not answer (nothing ran). A turn with `settings: null` (fired before they were kept)
+uses the job's current model, effort and harness. KITH_SCHED_PERMISSION_MODE is read from the environment run-turn gets, which
+is the host's (the launchd plist of the tick does not set it either).
+
 KITH_SCHED_NOW (tests): the time kith-sched takes as now, instead of the clock: ISO local time ("2026-11-03T08:00") or
 epoch seconds. Unset, nothing changes. It sets the tick, the catch-up window, the 6 h still-running rule, `ls`'s next
 times and the stamps kith-sched writes; it does not move the clock of the runs it starts.
 """
-import contextlib, datetime as dt, fcntl, io, json, os, plistlib, re, subprocess, sys, time
+import contextlib, datetime as dt, fcntl, io, json, os, plistlib, re, shutil, subprocess, sys, time
 from pathlib import Path
 
 KITH = Path(__file__).resolve().parent.parent
@@ -325,7 +336,11 @@ def start(agent, job, now, why):
         return _start(agent, job, now, why)
 
 
-def _start(agent, job, now, why):
+def run_env(agent, job, now, why):
+    """Everything a run of `job` starts with: (argv, env, log path), or None when the job's person may not run it now (said on
+    stdout, the tick log). The one builder for the tick, `run` and `run-turn`, so a run is the same whoever starts it: the task
+    text, model, effort, harness, permission mode, KITH_PERSON, the outbox (its meta out of the run's reach), via=schedule and the
+    backup chain. Makes the log folder and the outbox, writes nothing else."""
     no = refused(agent, job)
     if no:
         print('%s skipped %s/%s: it runs for %s, and %s' % (now.isoformat(timespec='minutes'), agent, job['id'],
@@ -368,18 +383,111 @@ def _start(agent, job, now, why):
     if job.get('model'): env['KITH_MODEL'] = job['model']
     if job.get('effort'): env['KITH_EFFORT'] = job['effort']
     if job.get('harness'): env['KITH_HARNESS'] = job['harness']
+    return [str(KITH / 'bin/kith'), agent, task], env, log
+
+
+def log_header(now, agent, job, why):
+    return '# %s %s %s (%s)\n' % (now.isoformat(timespec='minutes'), agent, job['id'], why)
+
+
+def _start(agent, job, now, why):
+    built = run_env(agent, job, now, why)
+    if not built:
+        return None
+    argv, env, log = built
     key = '%s/%s' % (agent, job['id'])
     s = machine()
     s.setdefault('last', {})[key] = {'at': now.isoformat(timespec='minutes'), 'why': why, 'log': str(log)}
     save_machine(s)   # recorded before the run exists
-    with open(log, 'w') as fh:
-        fh.write('# %s %s %s (%s)\n' % (now.isoformat(timespec='minutes'), agent, job['id'], why)); fh.flush()
-        p = subprocess.Popen([str(KITH / 'bin/kith'), agent, task], cwd=str(Path.home()), env=env, stdin=subprocess.DEVNULL,
-                             stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        with open(log, 'w') as fh:
+            fh.write(log_header(now, agent, job, why)); fh.flush()
+            p = subprocess.Popen(argv, cwd=str(Path.home()), env=env, stdin=subprocess.DEVNULL,
+                                 stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as e:
+        # The record is saved and no process exists: say so in it, or ls and log would show a run that never was as done.
+        s = machine()
+        s.setdefault('last', {}).setdefault(key, {})['error'] = 'not started: %s' % e
+        save_machine(s)
+        print('%s %s/%s not started: %s' % (now.isoformat(timespec='minutes'), agent, job['id'], e))
+        return None
     s = machine()
     s.setdefault('last', {})[key].update({'pid': p.pid, 'procStart': kith_procstart.start_stamp(p.pid)})
     save_machine(s)
     return log
+
+
+# --- run-turn: the core's turn, run as kith-sched runs a job --------------------------------------------------------------
+
+EXIT_BAD, EXIT_REFUSED, EXIT_GONE, EXIT_NOANSWER = 2, 3, 4, 5
+
+
+def turn_job(job, spec):
+    """The job as this turn runs it: the turn's prompt and the job's settings fixed when the core fired it (model, effort,
+    harness and the job's own `person`, none when the job had none: the run is then the owner's, as `start` runs it), the rest
+    (id, cron for the task text) from the job. A turn with no `settings` (fired before they were kept) takes the job's current
+    ones. The turn's own person (who the claim is swept by) is the host's business, not the run's environment."""
+    out = dict(job, task=spec['prompt'])
+    out.setdefault('cron', '')
+    settings = spec.get('settings')
+    if isinstance(settings, dict):
+        for k in ('model', 'effort', 'harness', 'person'):
+            out.pop(k, None)
+            if settings.get(k):
+                out[k] = settings[k]
+    return out
+
+
+def attach(claim, pid):
+    """Records this process on the turn's claim (check-and-set: claimed, no process yet). Exits without running when the core
+    refuses or does not answer."""
+    import kith_claims
+    try:
+        ans = kith_claims.call('claim.attach', {'claimId': claim, 'pid': pid, 'started': kith_procstart.start_stamp(pid)})
+    except kith_claims.Refused as e:
+        _quit(EXIT_NOANSWER, 'the core refused claim %s: %s' % (claim, e))
+    except kith_claims.NoAnswer as e:
+        _quit(EXIT_NOANSWER, 'the core did not answer for claim %s: %s' % (claim, e.why))
+    if not ans.get('attached'):
+        _quit(EXIT_GONE, 'claim %s is gone (%s); nothing ran' % (claim, ans.get('state') or ans.get('refused')))
+
+
+def _quit(code, msg):
+    print('kith-sched: run-turn: %s' % msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def run_turn(agent, jid, claim, spec):
+    """Runs the core's turn of job `jid`: builds the run as `start` does, attaches this process to the claim, then execs kith.
+    Never returns. No state.json, no tick.lock: the schedules are the core's by now."""
+    job = next((j for j in load(agent) if j.get('id') == jid), None)
+    if job is None:
+        _quit(EXIT_BAD, '%s has no job %r' % (agent, jid))
+    if not isinstance(spec.get('prompt'), str) or not spec['prompt']:
+        _quit(EXIT_BAD, 'the turn has no prompt')
+    now = clock().replace(second=0, microsecond=0)
+    why = 'core turn %s' % spec.get('turn', '?')
+    built = run_env(agent, turn_job(job, spec), now, why)
+    if not built:
+        _quit(EXIT_REFUSED, 'the job may not run now (see the line above)')
+    argv, env, log = built
+    try:
+        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        os.write(fd, log_header(now, agent, job, why).encode())
+    except OSError as e:
+        _quit(EXIT_BAD, "can't open the log %s: %s" % (log, e))
+    try:
+        attach(claim, os.getpid())
+    except SystemExit:
+        box = env.get('KITH_RUN_OUTBOX')   # made for a run that will not happen
+        if box:
+            shutil.rmtree(box, ignore_errors=True)
+            Path(box + '.json').unlink(missing_ok=True)
+        raise
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0); os.dup2(fd, 1); os.dup2(fd, 2)
+    os.chdir(str(Path.home()))
+    os.execve(argv[0], argv, env)
 
 
 def running(pid):
@@ -610,7 +718,7 @@ def log(agent=None, jid=None):
     for k, v in sorted(machine().get('last', {}).items(), key=lambda kv: kv[1]['at']):
         a, j = k.split('/', 1)
         if agent in (None, a) and jid in (None, j):
-            state = 'running' if running(v.get('pid')) else 'done'
+            state = 'failed' if v.get('error') else 'running' if still_running(v, clock()) else 'done'
             print('%s  %-24s %-7s %s' % (v['at'], k, state, v['log'].replace(str(Path.home()), '~', 1)))
     if agent and jid:
         runs = sorted((LOGS / 'runs' / agent).glob(jid + '-*.log'))
@@ -635,7 +743,9 @@ def job_row(agent, j, last, now):
     row['next'] = nxt
     l = last.get('%s/%s' % (agent, j['id']))
     row['last'] = {'at': l.get('at'), 'why': l.get('why'), 'pid': l.get('pid'), 'log': l.get('log'),
-                   'running': bool(running(l.get('pid')))} if l else None
+                   'running': still_running(l, now)} if l else None
+    if row['last'] and l.get('error'):
+        row['last']['error'] = l['error']
     return row
 
 
@@ -662,7 +772,8 @@ def json_cmd(cmd, rest):
             a, j = k.split('/', 1)
             if agent in (None, a) and jid in (None, j):
                 runs.append({'agent': a, 'id': j, 'at': v.get('at'), 'why': v.get('why'), 'pid': v.get('pid'),
-                             'log': v.get('log'), 'running': bool(running(v.get('pid')))})
+                             'log': v.get('log'), 'running': still_running(v, now)})
+                if v.get('error'): runs[-1]['error'] = v['error']
         if n: runs = runs[-int(n):]
         return {'agent': agent, 'id': jid, 'runs': runs}
     if cmd == 'add':
@@ -744,6 +855,26 @@ def main_json(argv):
     sys.exit(code)
 
 
+def main_run_turn(rest):
+    """`run-turn AGENT JOB --turn N --claim C` with the turn's JSON on stdin (see the module doc)."""
+    pos, opts, i = [], {}, 0
+    while i < len(rest):
+        if rest[i] in ('--turn', '--claim') and i + 1 < len(rest) and rest[i + 1].isdigit():
+            opts[rest[i][2:]] = int(rest[i + 1]); i += 2
+        else:
+            pos.append(rest[i]); i += 1
+    if len(pos) != 2 or 'claim' not in opts:
+        _quit(EXIT_BAD, 'usage: kith-sched run-turn AGENT JOB --turn N --claim C   (the turn as JSON on stdin)')
+    try:
+        spec = json.loads(sys.stdin.read())
+        if not isinstance(spec, dict):
+            raise ValueError('not an object')
+    except ValueError as e:
+        _quit(EXIT_BAD, 'stdin is not the turn as JSON: %s' % e)
+    spec['turn'] = opts.get('turn')
+    run_turn(pos[0], pos[1], opts['claim'], spec)
+
+
 def main(argv):
     if '--json' in argv and argv[:1] != ['tick']:
         return main_json([a for a in argv if a != '--json'])
@@ -751,6 +882,7 @@ def main(argv):
         print(__doc__.strip()); return
     cmd, rest = argv[0], argv[1:]
     if cmd == 'tick': return tick()
+    if cmd == 'run-turn': return main_run_turn(rest)
     if cmd == 'prune': return prune(force=True)
     if cmd == '--install': return install()
     if cmd == '--uninstall': return uninstall()

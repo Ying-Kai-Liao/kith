@@ -27,6 +27,9 @@
 //! person's claim without it, and the fence runs before the "same process asking again" answer, so a retry after a revoke
 //! never gets its own `revoked` row handed back as a claim.
 //!
+//! `claim.attach` is not a taker's claim: the run of a scheduled cron job records its own pid on the claim the host made for its
+//! turn (`conversations::sched_run`), so the pid IS the run. It answers `{attached: true}` or `{refused: "gone", state}`.
+//!
 //! A session id is a file name for the stub's lock (`a-z0-9._-`, the stub's own rule): any other id would run without the
 //! lock, so these rows refuse it.
 
@@ -44,7 +47,12 @@ use crate::gate::Liveness;
 pub(crate) fn serves(method: &str) -> bool {
     matches!(
         method,
-        "claim.external" | "claim.release" | "claim.sweepPerson" | "claim.epoch" | "claim.list"
+        "claim.external"
+            | "claim.attach"
+            | "claim.release"
+            | "claim.sweepPerson"
+            | "claim.epoch"
+            | "claim.list"
     )
 }
 
@@ -111,6 +119,12 @@ pub(crate) fn lockable(id: &str) -> bool {
         })
 }
 
+fn int(p: &Value, key: &str) -> Result<i64> {
+    p.get(key)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| bad(&format!("{key} is required")))
+}
+
 fn pid_of(p: &Value) -> Result<u32> {
     p.get("pid")
         .and_then(Value::as_u64)
@@ -143,6 +157,13 @@ pub(crate) fn call_at(
 ) -> Result<Value> {
     match method {
         "claim.external" => external(core, p, now, live),
+        "claim.attach" => super::sched_run::attach(
+            core,
+            int(p, "claimId")?,
+            pid_of(p)?,
+            need(p, "started")?,
+            now,
+        ),
         "claim.release" => release(core, p, now),
         "claim.sweepPerson" => sweep_person(core, p, now),
         "claim.epoch" => Ok(json!({ "epoch": claims::revoke_epoch(core, principal(p))? })),

@@ -201,6 +201,21 @@ pub enum Parked {
     LockBusy,
 }
 
+/// What [`CoreWriter::claim_run`] came to.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RunClaim {
+    /// The claim, with no process yet.
+    Claimed(i64),
+    /// Not now (a writer holds the conversation, the claims wait for a reconcile): the turn stays queued and is pulled again.
+    Later,
+    /// The turn is gone for good (the core cancelled it, it is no longer waiting, its person was revoked).
+    Gone,
+    /// The core did not answer: the turn stays queued and is pulled again.
+    Down(String),
+    /// The core refused for a reason the host cannot mend: the caller cancels the turn with it.
+    Refused(String),
+}
+
 /// Why a turn is dropped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dropped {
@@ -404,6 +419,39 @@ impl CoreWriter {
         self.cancel(turn, why)
     }
 
+    /// Claims a pulled schedule turn for a cron run that has no process yet (`hostclaim.claim`, kind `scheduleRun`): the run's
+    /// own process attaches itself with `claim.attach` before it starts the engine. The revoke epoch is read first, before the
+    /// host's may check of the turn's person.
+    pub fn claim_run(&self, conversation: &str, person: &str, turn: i64) -> RunClaim {
+        let epoch = match self.epoch(person) {
+            Ok(e) => e,
+            Err(e) => return RunClaim::Down(e.to_string()),
+        };
+        let ask = json!({"conversation": conversation, "kind": "scheduleRun", "person": person, "turn": turn,
+                         "revokeSeen": epoch, "holderInstance": self.instance});
+        match self.call("hostclaim.claim", &ask) {
+            Answer::Down { why, .. } | Answer::Refused(why) => RunClaim::Down(why),
+            Answer::Done(v) => match (v["claimId"].as_i64(), v["refused"].as_str()) {
+                (Some(id), _) => RunClaim::Claimed(id),
+                // A writer holds the conversation, or the claims wait for the reconcile: the turn stays queued, pulled again.
+                (None, Some("held" | "waiting")) => RunClaim::Later,
+                // Cancelled by the core (a paused job, a stopped ask), gone, or the person was revoked meanwhile.
+                (None, Some("paused" | "stopped" | "notWaiting" | "revoked")) => RunClaim::Gone,
+                _ => RunClaim::Refused(v["why"].as_str().unwrap_or("the core refused the claim").to_owned()),
+            },
+        }
+    }
+
+    /// The end of a cron run's process, as its starter saw it: `done` for a clean exit, `exit` otherwise (the turn is `failed`,
+    /// never put back: its prompt may have gone out). A run that never attached (its claim gone, or `run-turn` refused) has its
+    /// claim ended and its turn cancelled first, which is a no-op for a run that did.
+    pub fn run_over(&self, claim: i64, turn: i64, pid: u32, clean: bool, why: &str) -> Result<(), String> {
+        if !clean {
+            self.cancel(turn, why);
+        }
+        self.report(claim, if clean { "done" } else { "exit" }, pid, &json!({"why": why}))
+    }
+
     fn report(&self, claim: i64, kind: &str, pid: u32, extra: &Value) -> Result<(), String> {
         let mut body = json!({"out_of_usage": false, "pid": pid});
         if let (Some(b), Some(e)) = (body.as_object_mut(), extra.as_object()) {
@@ -600,7 +648,8 @@ impl CoreWriter {
             },
             Some("waiting") => Begin::Retry { turn, after: RECONCILE_RETRY },
             Some("notWaiting") => drop(Dropped::NotWaiting),
-            Some("stopped") => drop(Dropped::Stopped),
+            // A paused job's turn is cancelled by the core already, as a stopped ask's is.
+            Some("stopped" | "paused") => drop(Dropped::Stopped),
             Some("revoked") => {
                 self.cancel(turn, "revoked");
                 drop(Dropped::Revoked)

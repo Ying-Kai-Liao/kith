@@ -90,6 +90,7 @@ fn every_row_is_well_formed() {
             || m.name == "cutover.mayServe"
             || [
                 "claim.external",
+                "claim.attach",
                 "claim.release",
                 "claim.sweepPerson",
                 "claim.epoch",

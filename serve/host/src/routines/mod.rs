@@ -3,6 +3,7 @@ mod editor;
 pub use editor::preview as schedule_preview;
 pub mod hooks;
 use hooks::Refused;
+mod core_cron;
 mod core_runs;
 #[cfg(test)]
 mod core_runs_tests;
