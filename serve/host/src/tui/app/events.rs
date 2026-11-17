@@ -86,10 +86,7 @@ impl App {
         self.floors = if self.stream_since > 0 {
             self.entries
                 .iter()
-                .filter_map(|(bot, loaded)| {
-                    let oldest = loaded.values().filter(|e| e.thread_id.is_none() && e.seq > 0).map(|e| e.seq).min();
-                    Some((bot.clone(), oldest?))
-                })
+                .filter_map(|(bot, loaded)| Some((bot.clone(), super::window_floor(loaded.values())?)))
                 .collect()
         } else {
             HashMap::new()
@@ -365,6 +362,24 @@ mod tests {
         assert_eq!(app.lane("a").iter().map(|e| e.seq).collect::<Vec<_>>(), [90]);
         app.on_reply(After::History("a".into()), Ok(json!({"entries": []})));
         assert!(app.history_complete("a"));
+    }
+
+    #[test]
+    fn history_pages_from_the_window_not_from_an_old_task_root_held_for_its_replies() {
+        let ev = |seq: i64, thread: Value| {
+            json!({"type": "entry", "entry": {"botId": "a", "id": format!("e{seq}"), "seq": seq, "turn": seq,
+                "kind": "user", "threadId": thread}})
+        };
+        let mut app = test_app();
+        app.on_event(&ev(10, Value::Null));
+        app.on_event(&ev(200, Value::Null));
+        app.on_event(&ev(210, Value::Null));
+        app.on_event(&ev(300, json!("e10")));
+        assert_eq!(app.oldest_main("a"), Some(200));
+        let mut roots_only = test_app();
+        roots_only.on_event(&ev(10, Value::Null));
+        roots_only.on_event(&ev(300, json!("e10")));
+        assert_eq!(roots_only.oldest_main("a"), Some(10));
     }
 
     fn connect(app: &mut App, since: i64) {

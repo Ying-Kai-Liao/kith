@@ -18,6 +18,7 @@ import {
 } from '@shared/models'
 import { normalizeFolder, type PlaceFolder, type PlaceSelection, type StartingFolder } from '@shared/place-folders'
 import { partialUpdate } from '@shared/optimistic'
+import { mainChatFloor } from '@shared/mirror-window'
 import { expireCalls, type IncomingCall } from '@shared/incoming-call'
 import { CANT_STOP, failureOf, OWN_TURN, STILL_ENDING, type HeldPhase } from '@shared/held-run'
 import { DEFAULT_TURNS } from '@shared/conversation'
@@ -737,7 +738,8 @@ export class BotStore extends BotSync {
 
   async loadOlder(botId: string) {
     if (!this.client || this.historyComplete.has(botId)) return
-    const first = this.chat(botId).find((e) => e.seq > 0 && e.seq !== Number.MAX_SAFE_INTEGER)?.seq ?? Number.MAX_SAFE_INTEGER
+    // From where the held main chat is unbroken: an old task root a catch-up brought for its replies would skip the gap.
+    const first = mainChatFloor(this.allEntries(botId)) ?? Number.MAX_SAFE_INTEGER
     try {
       const older = await this.client.history(botId, first, 100)
       if (older.length < 100) this.historyComplete.add(botId)

@@ -33,6 +33,10 @@ actor FakeRemote: RemoteTransport {
 
     var subscribed: Bool { !eventSinks.isEmpty }
     var eventSubscriptionCount: Int { eventSinks.count }
+    /// The `since` of each events subscription, in the order they were opened.
+    private(set) var eventSince: [Int64] = []
+    /// Events subscriptions whose consumer has not gone away.
+    private(set) var openEventStreams = 0
 
     func set(_ new: LinkState) {
         state = new
@@ -76,7 +80,15 @@ actor FakeRemote: RemoteTransport {
         try await respond(method, body)
     }
 
-    private func addEvents(_ c: AsyncThrowingStream<Data, Error>.Continuation) { eventSinks.append(c) }
+    private func addEvents(_ c: AsyncThrowingStream<Data, Error>.Continuation, _ request: HostStreamRequest) {
+        eventSinks.append(c)
+        if case let .events(since, _) = request {
+            eventSince.append(since)
+            openEventStreams += 1
+            c.onTermination = { _ in Task { await self.closeEvents() } }
+        }
+    }
+    private func closeEvents() { openEventStreams -= 1 }
     private func addState(_ c: AsyncStream<LinkState>.Continuation) {
         isShutdown = false
         c.yield(state)
@@ -85,7 +97,7 @@ actor FakeRemote: RemoteTransport {
     private func addMailbox(_ c: AsyncStream<MailboxEvent>.Continuation) { mailboxSinks.append(c) }
 
     nonisolated func stream(_ request: HostStreamRequest) -> AsyncThrowingStream<Data, Error> {
-        AsyncThrowingStream { c in Task { await self.addEvents(c) } }
+        AsyncThrowingStream { c in Task { await self.addEvents(c, request) } }
     }
 
     nonisolated func states() -> AsyncStream<LinkState> {
@@ -112,7 +124,7 @@ actor FakeRemote: RemoteTransport {
     }
 }
 
-private func randomComputer(_ name: String) -> Computer {
+func randomComputer(_ name: String) -> Computer {
     let sk = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
     return Computer(id: RelayCrypto.computerId(signKey: sk), name: name, signKey: sk.base64URLForTests,
                     boxKey: Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation.base64URLForTests,
@@ -125,14 +137,14 @@ private extension Data {
     }
 }
 
-private func context() -> (SharedStore.Context, String) {
+func context() -> (SharedStore.Context, String) {
     let suite = "KithUITests.\(UUID().uuidString)"
     return (SharedStore.Context(accountID: "user_\(UUID().uuidString)", suite: suite), suite)
 }
 
 /// Polls until `condition` holds (2 s at most).
 @MainActor
-private func until(_ condition: @MainActor () async -> Bool) async -> Bool {
+func until(_ condition: @MainActor () async -> Bool) async -> Bool {
     for _ in 0..<200 {
         if await condition() { return true }
         try? await Task.sleep(for: .milliseconds(10))

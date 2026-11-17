@@ -286,12 +286,20 @@ extension BotStore {
         }
     }
 
-    func acknowledgeVisibleConversations(_ botId: String, entry: Entry? = nil) {
+    /// The conversations on screen this event lands in, read once the batch it came in is applied (`flushAcks`): a
+    /// catch-up of a chat on screen is one read receipt, not one per message.
+    func noteVisibleConversations(_ botId: String, entry: Entry? = nil) {
         guard connection == .online else { return }
-        for scope in Set(readingViews.values) where scope.botId == botId {
+        for scope in readingViews.values where scope.botId == botId {
             if let entry, (!entry.isChat || entry.threadId != scope.thread) { continue }
-            markRead(botId, thread: scope.thread)
+            pendingAcks.insert(scope)
         }
+    }
+
+    func flushAcks() {
+        let acks = pendingAcks
+        pendingAcks = []
+        for scope in acks { markRead(scope.botId, thread: scope.thread) }
     }
 
     /// The main chat on screen (or the thread on `thread`) is read; the host ignores it
@@ -520,7 +528,7 @@ extension BotStore {
 
     public func loadOlder(_ botId: String) async {
         guard let client, !historyComplete.contains(botId) else { return }
-        let first: Int64 = chat(botId).first(where: { $0.seq > 0 && $0.seq != Int64.max })?.seq ?? Int64.max
+        let first = Self.oldestWindowSeq(allEntries(botId)) ?? Int64.max
         let older: [Entry]
         do {
             older = try await client.history(botId: botId, beforeSeq: first, limit: 100)
@@ -530,5 +538,16 @@ extension BotStore {
         }
         if older.count < 100 { historyComplete.insert(botId) }
         for e in older { upsert(e) }
+    }
+
+    /// Where the main chat held is unbroken from: its oldest synced entry, leaving out the roots of threads whose
+    /// replies are held. A catch-up brings such a root however far back it is (a task card with fresh replies), and
+    /// paging from it would skip every message between it and the window for good. Only roots held: the oldest.
+    /// The overlap paging may fetch again is harmless (`upsert` goes by id).
+    /// `upTo`: only main-chat entries synced at that rev count.
+    static func oldestWindowSeq(_ all: [Entry], upTo rev: Int64 = .max) -> Int64? {
+        let roots = Set(all.compactMap(\.threadId))
+        let main = all.filter { $0.threadId == nil && $0.seq > 0 && $0.seq != .max && $0.rev <= rev }
+        return (main.filter { !roots.contains($0.id) }.map(\.seq).min()) ?? main.map(\.seq).min()
     }
 }

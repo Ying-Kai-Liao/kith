@@ -12,6 +12,8 @@ extension BotStore {
         fileDownloads.retire()
         for call in calls { call.end() }
         saveTask?.cancel()
+        flushTask?.cancel()
+        pendingEvents = []
         dropTimer?.cancel()
         onConnected = nil
         onBotUpdated = nil
@@ -30,8 +32,13 @@ extension BotStore {
 
     public func setActive(_ active: Bool) {
         guard !retired else { return }
+        let wasActive = isActive
         isActive = active
         if active {
+            // Still in the foreground with a link: the app only passed through `.inactive` (Control Center, the app
+            // switcher, a system prompt). Restarting here tore the link down and caught up again each time. A link that
+            // is down still gets the retry.
+            if wasActive && streamTask != nil && !isOffline { return }
             // Returning to the foreground must not interrupt a live call's sends.
             if voiceCalls.isEmpty || streamTask == nil { restartStream() }
         } else if voiceCalls.isEmpty && callHolds.isEmpty {

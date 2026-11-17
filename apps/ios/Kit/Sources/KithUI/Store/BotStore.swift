@@ -172,6 +172,17 @@ public final class BotStore {
     var hostId: String?
     var streamTask: Task<Void, Never>?
     var eventsTask: Task<Void, Never>?
+    /// Events received and not applied yet (see `enqueue`), and the task that applies them.
+    @ObservationIgnored var pendingEvents: [HostEvent] = []
+    @ObservationIgnored var flushTask: Task<Void, Never>?
+    /// Read receipts the batch being applied owes (see `noteVisibleConversations`).
+    @ObservationIgnored var pendingAcks: Set<ReadingScope> = []
+    /// Bumped by each restart of the events stream, so a batch stops at the event that restarted it.
+    @ObservationIgnored var eventsGeneration = 0
+    /// How long events gather before they are applied: during the catch-up, long enough that a few thousand events
+    /// draw a handful of times; once caught up, short enough that a reply still streams in smoothly.
+    static let catchUpBatchWait: Duration = .milliseconds(150)
+    static let liveBatchWait: Duration = .milliseconds(30)
     var isActive = true
     struct VoiceCall {
         let botId: String

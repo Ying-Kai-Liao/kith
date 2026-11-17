@@ -2,7 +2,7 @@ import KithKit
 import Foundation
 
 extension BotStore {
-    private struct Cache: Codable {
+    private struct Cache: Codable, Sendable {
         /// App build + host version that wrote the cache; any change means refetch everything.
         var stamp: String?
         var hostId: String?
@@ -41,21 +41,49 @@ extension BotStore {
         saveTask?.cancel()
         saveTask = Task {
             try? await Task.sleep(for: .seconds(2))
-            if !Task.isCancelled { saveCache() }
+            guard !Task.isCancelled, !retired, let cache = snapshot() else { return }
+            // Encoding a few MB of chats took the main thread long enough to stutter a scroll: it is written off it,
+            // in order.
+            let url = cacheURL
+            Self.writer.async { Self.write(cache, to: url) }
         }
     }
 
+    private static let writer = DispatchQueue(label: "com.yingkailiao.kith.mirror-cache", qos: .utility)
+
+    /// Writes now, on this thread (leaving for the background, where the app may be suspended next).
     public func saveCache() {
-        guard !retired else { return }
-        // Keep the newest 200 entries per bot; older ones page in from the host. Local queued and
-        // failed messages stay visible so they can be cancelled or retried after a relaunch.
+        guard !retired, let cache = snapshot() else { return }
+        let url = cacheURL
+        // After any write already queued, so it is not overwritten by an older one.
+        Self.writer.sync { Self.write(cache, to: url) }
+    }
+
+    private nonisolated static func write(_ cache: Cache, to url: URL) {
+        if let data = try? JSONEncoder().encode(cache) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Entries per chat kept on disk: this many main-chat ones and this many thread replies, like the host's catch-up.
+    static let cachedPerChat = 50
+
+    /// A chat's newest main-chat entries and newest replies, with the roots of those replies, in the chat's order.
+    static func cacheWindow(_ list: [Entry]) -> [Entry] {
+        let main = list.filter { $0.threadId == nil }.suffix(cachedPerChat)
+        let replies = list.filter { $0.threadId != nil }.suffix(cachedPerChat)
+        let keep = Set(main.map(\.id)).union(replies.map(\.id)).union(replies.compactMap(\.threadId))
+        return list.filter { keep.contains($0.id) }
+    }
+
+    private func snapshot() -> Cache? {
+        guard !retired else { return nil }
+        // Each chat's window (older ones page in from the host), so a launch reads the same few MB however much was
+        // paged in. Local queued and failed messages stay visible so they can be cancelled or retried after a relaunch.
         let kept = entries.values.flatMap { list in
-            list.filter { !$0.id.hasPrefix("local-") }.suffix(200)
+            Self.cacheWindow(list.filter { !$0.id.hasPrefix("local-") })
                 + list.filter { $0.id.hasPrefix("local-") && ["waiting", "delivering", "failed"].contains($0.data.status) }
         }
-        let cache = Cache(stamp: "\(Self.appBuild)/\(hello?.version ?? "")\(Self.cacheSchema)", hostId: hostId, rev: rev, bots: Array(bots.values), rooms: Array(myRooms.values), entries: kept)
-        if let data = try? JSONEncoder().encode(cache) {
-            try? data.write(to: cacheURL, options: .atomic)
-        }
+        return Cache(stamp: "\(Self.appBuild)/\(hello?.version ?? "")\(Self.cacheSchema)", hostId: hostId, rev: rev, bots: Array(bots.values), rooms: Array(myRooms.values), entries: kept)
     }
 }
