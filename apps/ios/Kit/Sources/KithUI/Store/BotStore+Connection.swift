@@ -39,8 +39,13 @@ extension BotStore {
             // switcher, a system prompt). Restarting here tore the link down and caught up again each time. A link that
             // is down still gets the retry.
             if wasActive && streamTask != nil && !isOffline { return }
-            // Returning to the foreground must not interrupt a live call's sends.
-            if voiceCalls.isEmpty || streamTask == nil { restartStream() }
+            // Returning to the foreground must not interrupt a live call's sends. A call kept the link alive in the
+            // background, so a retry it was waiting out is still pending: kick it now (a live link ignores the kick).
+            if !voiceCalls.isEmpty && streamTask != nil {
+                if let remote = transport as? any RemoteTransport { Task { await remote.kick() } }
+            } else {
+                restartStream()
+            }
         } else if voiceCalls.isEmpty && callHolds.isEmpty {
             // Disconnect so the host knows we're gone and sends pushes instead.
             stopTransport()
@@ -216,6 +221,7 @@ extension BotStore {
         Task { [weak self] in
             for await event in mailbox {
                 guard let self, !self.retired else { return }
+                await self.cacheReady()
                 self.applyMailbox(event)
             }
         }
