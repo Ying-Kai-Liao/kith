@@ -132,13 +132,73 @@ pub(crate) fn owed(hub: &Hub) -> Vec<String> {
     hub.store.kv_prefix(OWED).into_iter().filter_map(|k| k.strip_prefix(OWED).map(str::to_owned)).collect()
 }
 
+/// The host store's key of one undo that could not read the person's ids: what the host set aside under a former id may
+/// not have been given back.
+const UNREAD: &str = "revoke.undo_unread.";
+
+/// What the owner is told on the person's row while [`UNREAD`] stands.
+pub(crate) const UNREAD_NOTE: &str = "Undo isn't finished on this computer: Kith's core isn't answering, so what was set \
+    aside under this person's earlier name may not be back yet. Start the core and undo the revoke again.";
+
+/// An undo of `person` could not read the ids they are held under: said in the log, the audit and (until a later undo
+/// reads them) on the person's row, not only given back under the one id.
+fn note_undo_unread(hub: &Hub, person: &str, why: &str) {
+    tracing::warn!(error = why, person, "an undo that can't read the person's ids: given back by this id only");
+    hub.store.audit_add(person, "", "undo.unread", Some(why), false);
+    if let Err(e) = hub.store.kv_set(&format!("{UNREAD}{person}"), &crate::store::now_ms().to_string()) {
+        tracing::warn!(error = format!("{e:#}"), person, "couldn't keep the note of an unfinished undo");
+    }
+}
+
+/// The note to show on `person`'s row: set by an undo that could not read the ids, until a later undo reads them or a
+/// new revoke makes it moot.
+pub(crate) fn undo_note(hub: &Hub, person: &str) -> Option<&'static str> {
+    hub.store.kv_get(&format!("{UNREAD}{person}")).map(|_| UNREAD_NOTE)
+}
+
+/// Drops the note of an unfinished undo of `person`.
+pub(crate) fn clear_undo_note(hub: &Hub, person: &str) {
+    if let Err(e) = hub.store.kv_delete(&format!("{UNREAD}{person}")) {
+        tracing::warn!(error = format!("{e:#}"), person, "couldn't drop the note of an unfinished undo");
+    }
+}
+
+/// An undo's give-back: what the host set aside is restored under every id the person may be held under. When the core
+/// can't say which, it is given back under `person` alone and the owner is told it is not finished ([`undo_note`]).
+pub(crate) async fn restore_held(hub: &Hub, person: &str) {
+    match held(person).await {
+        Ok(h) => {
+            for id in &h.ids {
+                crate::api::people::restored(hub, id);
+            }
+            clear_undo_note(hub, person);
+        }
+        Err(e) => {
+            note_undo_unread(hub, person, &format!("{e:#}"));
+            crate::api::people::restored(hub, person);
+        }
+    }
+}
+
 /// An undo of `person`: no cut is owed any more under any id the host may hold them under. The caller holds
 /// `AUTH_WRITES` for the section that writes the undo, so a tick paying the row can't land between the two.
 pub(crate) async fn clear_owed(hub: &Hub, person: &str) {
     if owed(hub).is_empty() {
         return;
     }
-    let mut ids = held_under(person).await;
+    // A read that fails leaves the person's own row only; a row under a former id stays, and `pay_owed` refuses to cut a
+    // person the core shows unrevoked. The undo's give-back says the same to the owner (`restore_held`).
+    let mut ids = match held(person).await {
+        Ok(h) => h.ids,
+        Err(e) => {
+            tracing::warn!(
+                error = format!("{e:#}"),
+                person,
+                "an undo that can't read the person's ids: owed cuts kept"
+            );
+            Vec::new()
+        }
+    };
     if !ids.iter().any(|i| i == person) {
         ids.push(person.to_owned());
     }
@@ -158,6 +218,18 @@ pub(crate) async fn pay_owed(hub: &Hub) {
     }
     let _w = AUTH_WRITES.lock().await;
     for person in owed(hub) {
+        // Never cut a person the owner has since undone: the undo's clear may have missed this row (its ids unread).
+        match still_revoked(&person).await {
+            Ok(false) => {
+                tracing::info!(person, "an owed cut is dropped: the person is not revoked any more");
+                if let Err(e) = hub.store.kv_delete(&format!("{OWED}{person}")) {
+                    tracing::warn!(error = format!("{e:#}"), person, "couldn't drop an owed cut of an undone person");
+                }
+                continue;
+            }
+            Ok(true) => {}
+            Err(_) => continue,
+        }
         let Ok(held) = held(&person).await else { continue };
         tracing::info!(person, ids = ?held.ids, "an owed cut is paid: the person is cut off under every id");
         for id in &held.ids {
@@ -167,6 +239,23 @@ pub(crate) async fn pay_owed(hub: &Hub) {
             tracing::warn!(error = format!("{e:#}"), person, "couldn't drop a paid owed cut: it is paid again");
         }
     }
+}
+
+/// Whether the core's `listPeople` rows show `person` (by any id) revoked. None when no row names them: not known.
+fn revoked_in(rows: &Value, person: &str) -> Option<bool> {
+    let row = rows.as_array()?.iter().find(|r| host_ids(r).iter().any(|i| i == person))?;
+    Some(row["revoked"] == true)
+}
+
+/// Whether `person` is revoked now, for an owed cut. Switched: the core's rows. Not switched (a rolled back core):
+/// kith-auth's. A person no row names counts as revoked (a removal is cut as before). An error when it can't be read.
+async fn still_revoked(person: &str) -> anyhow::Result<bool> {
+    if switched_now() {
+        let said = owner_call("people.listPeople", json!({"viaSwitch": true, "withWas": true}), true).await?;
+        return Ok(revoked_in(&said["rows"], person).unwrap_or(true));
+    }
+    let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow::anyhow!("kith-auth wasn't found"))?;
+    Ok(crate::remote::members::auth_person(&bin, person).await?.is_none_or(|p| p.revoked_at.is_some()))
 }
 
 /// Whom the core's rows say to cut: every non-owner person shown revoked, and every non-owner the host still holds live
@@ -312,6 +401,36 @@ mod tests {
         // cut once, nothing live under either id: a second look leaves it
         let done = BTreeSet::from([key("samuel", "7"), key("sam", "7")]);
         assert_eq!(to_cut(&rows, &[], &done).0, Vec::<Cut>::new());
+    }
+
+    #[test]
+    fn a_person_the_core_shows_unrevoked_is_not_revoked_for_an_owed_cut() {
+        let r = json!([
+            {"id": "kai", "owner": true},
+            {"id": "samuel", "revoked": false, "was": ["sam"]},
+            {"id": "amy", "revoked": true},
+        ]);
+        assert_eq!(revoked_in(&r, "sam"), Some(false), "asked by the former id: undone");
+        assert_eq!(revoked_in(&r, "amy"), Some(true));
+        assert_eq!(revoked_in(&r, "gone"), None, "no row: unknown");
+        assert_eq!(revoked_in(&json!(null), "sam"), None);
+    }
+
+    #[test]
+    fn the_note_of_an_unfinished_undo_stands_until_a_later_undo_reads_the_ids() {
+        let store = crate::store::Store::open(std::path::Path::new(":memory:")).unwrap();
+        let dir = std::env::temp_dir().join(format!("kith-undo-note-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let identity = crate::remote::identity::Identity::load_or_create(&dir).unwrap();
+        let hub = Hub::new(store, "t".into(), identity, "t".into(), 0);
+        assert_eq!(undo_note(&hub, "sam"), None);
+        note_undo_unread(&hub, "sam", "core down");
+        assert_eq!(undo_note(&hub, "sam"), Some(UNREAD_NOTE));
+        assert_eq!(undo_note(&hub, "amy"), None);
+        let audit = hub.store.audit_list(0, Some("sam")).unwrap();
+        assert!(audit.iter().any(|a| a.method == "undo.unread" && !a.allowed), "{audit:?}");
+        clear_undo_note(&hub, "sam");
+        assert_eq!(undo_note(&hub, "sam"), None);
     }
 
     #[test]

@@ -475,3 +475,16 @@ read, then the core write failed) and from a revoke by the old id. Tested by `ap
 (`a_renamed_persons_revoke_without_the_core_cuts_the_old_id_once_the_core_is_back`,
 `the_app_revoke_with_the_core_down_owes_the_cut_too`, `an_undo_before_the_owed_cut_is_paid_restores_and_clears_it`).
 SYNC is not moved.
+
+## Refusal words, unread undo, owed cut of an undone person (2026-11-17, flow/rebuild-followups-revoke-words)
+Follow-ups 1 and 2 of #1022. No model change (`ReconcileOwed.tla` already has `AppUndo` clear the row; the code now also
+judges the row by the person's state, as the model's retry does). Code: `revoke_person` words every refusal (`unreadable`:
+the record unreadable, a revoke by the new id with the core down says plainly it was NOT revoked, nothing was cut, start the
+core and revoke again; `unfinished`: this computer's half refused, a revoke has still cut here). `core_revokes::restore_held`
+is the one give-back of an undo (`local_revoke`, the cloud `pull`): a read of the ids that fails gives back under the one id,
+warns, writes an `undo.unread` audit row and a kv `revoke.undo_unread.<person>`, shown as `undoNote` on the `people` row, cleared by a
+later `restore_held` that reads, or by a new revoke (`cut_off_held`). `pay_owed` drops, never pays, an owed row whose
+person the core (or kith-auth when not switched) shows not revoked; a failed read leaves the row. Tests:
+`api/core_revokes_tests.rs` (`a_revoke_of_the_new_id_with_the_core_down_says_it_did_not_happen_and_what_to_do`,
+`an_undo_that_cannot_read_the_ids_leaves_a_note_until_a_later_undo_reads_them`,
+`an_owed_cut_of_a_person_since_undone_is_dropped_not_paid`), `remote/core_revokes.rs` unit tests.

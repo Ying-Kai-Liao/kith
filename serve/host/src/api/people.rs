@@ -460,6 +460,8 @@ async fn people(hub: &Arc<Hub>) -> Result<Value> {
                 "openInvites": waiting, "devices": devices, "createdAt": host.map(|p| p.created_at),
                 "autoBots": host.is_some_and(|p| p.auto_bots),
                 "revoked": a.revoked_at.is_some(),
+                // Set while an undo could not give back everything it should: what to do is in the text.
+                "undoNote": crate::remote::core_revokes::undo_note(hub, &a.id),
             })
         })
         .collect();
@@ -607,7 +609,11 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
 async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> {
     let bin = auth_bin().await?;
     let who = match crate::remote::members::auth_person(&bin, id).await {
-        Ok(who) => who.ok_or_else(|| anyhow!("`{id}` isn't a person on this computer"))?,
+        Ok(who) => who.ok_or_else(|| {
+            anyhow!(
+                "`{id}` isn't a person on this computer, so nothing was changed. Check the name on the People list."
+            )
+        })?,
         // The record of who is who is out of reach (a switched Mac whose core is not running). A revoke still stops what
         // runs and takes their devices, from this host's own record: an invited person, never the owner or a bot. The
         // owner is told it is not done everywhere, and nothing of it reaches the cloud or the core until they try again.
@@ -624,7 +630,7 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
                  isn't running, so the revoke is not complete yet; start it and revoke again to finish."
             );
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(unreadable(id, revoke, e)),
     };
     if who.owner {
         if revoke {
@@ -632,7 +638,7 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
         }
         // Undo on the owner clears old data (an owner who was also revoked). It stays on this Mac: the cloud never holds
         // the owner (apply_revoked skips them), so there is nothing to post and no other computer to tell.
-        let (core_updated, _) = local_revoke(hub, &bin, id, false).await?;
+        let (core_updated, _) = local_revoke(hub, &bin, id, false).await.map_err(|e| unfinished(id, false, e))?;
         return Ok(json!({"revoked": false, "everywhere": false, "coreUpdated": core_updated}));
     }
     if !who.bot_of.is_empty() {
@@ -649,7 +655,7 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    let (core_updated, pending) = local_revoke(hub, &bin, id, revoke).await?;
+    let (core_updated, pending) = local_revoke(hub, &bin, id, revoke).await.map_err(|e| unfinished(id, revoke, e))?;
     if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
         crate::remote::handle_revokes::changed(hub, &who, revoke);
@@ -661,6 +667,35 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
         out["revokePending"] = pending.into();
     }
     Ok(out)
+}
+
+/// What the owner reads when the record of who is who can't be read at all: nothing was changed, and what to do. The
+/// core being down is said in plain words; any other reason follows as it was given.
+fn unreadable(id: &str, revoke: bool, e: anyhow::Error) -> anyhow::Error {
+    let (did, again) = if revoke { ("revoked", "revoke") } else { ("restored", "undo the revoke") };
+    if e.downcast_ref::<super::authority::CoreDown>().is_some() {
+        anyhow!(
+            "{id} was not {did}. Kith's core isn't running, so this computer can't tell who {id} is yet. Start it, \
+             then {again} again."
+        )
+    } else {
+        anyhow!(
+            "{id} was not {did}: {e:#}. Nothing was changed; try again, and if it keeps failing, check that Kith is running."
+        )
+    }
+}
+
+/// What the owner reads when this computer's half of a revoke or undo was refused. A refused revoke has still stopped
+/// what runs (`local_revoke` cuts first); a refused undo gave nothing back.
+fn unfinished(id: &str, revoke: bool, e: anyhow::Error) -> anyhow::Error {
+    if revoke {
+        anyhow!(
+            "{id} was cut off on this computer (their turns were stopped and their devices set aside), but the revoke \
+             didn't finish: {e:#}. Revoke again once that is sorted out."
+        )
+    } else {
+        anyhow!("{id} was not restored: {e:#}. Nothing was given back; try the undo again.")
+    }
 }
 
 /// This computer's half of a revoke or its undo, for the owner's own call, a change from the cloud and one from a paired
@@ -700,9 +735,7 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
         cut_off_held(hub, id).await;
     } else {
         // an undo gives back what the host set aside under every id it may hold them under
-        for held in crate::remote::core_revokes::held_under(id).await {
-            restored(hub, &held);
-        }
+        crate::remote::core_revokes::restore_held(hub, id).await;
     }
     Ok((core_updated, pending))
 }
@@ -726,6 +759,8 @@ pub(crate) fn restored(hub: &Hub, person: &str) {
 /// instead (`core_revokes::owe_cut`), and the poll pays it under every id once the core answers, unless an undo clears
 /// it first.
 pub(crate) async fn cut_off_held(hub: &Hub, person: &str) {
+    // A new revoke settles an earlier undo that could not finish: its note would be false now.
+    crate::remote::core_revokes::clear_undo_note(hub, person);
     let ids = match crate::remote::core_revokes::held(person).await {
         Ok(held) => held.ids,
         Err(e) => {

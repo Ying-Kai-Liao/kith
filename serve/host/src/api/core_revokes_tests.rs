@@ -260,3 +260,47 @@ async fn the_clouds_undo_clears_an_owed_cut_too() {
     assert_eq!(undone.restored, ["samuel"]);
     assert!(owed(&r.hub).is_empty(), "the cloud's undo cleared the row kept under the old id");
 }
+
+/// Revoke refusal wording: the renamed person's NEW id is not in the host's record, so the core being down refuses the
+/// revoke before any cut. The owner reads that nobody was revoked, why, and what to do.
+#[tokio::test]
+async fn a_revoke_of_the_new_id_with_the_core_down_says_it_did_not_happen_and_what_to_do() {
+    let (r, _core, _turn) = renamed_with_the_core_down().await;
+    let said = call(&r, "revokePerson", json!({"personId": "samuel"})).await.unwrap_err().to_string();
+    assert!(said.contains("samuel was not revoked"), "{said}");
+    assert!(said.contains("core isn't running") && said.contains("Start it, then revoke again"), "{said}");
+    assert!(!said.contains("Changes made before this point may stand"), "{said}");
+    assert!(owed(&r.hub).is_empty() && !set_aside(&r, "sam"), "nothing was cut: the words are true");
+    let undo = call(&r, "unrevokePerson", json!({"personId": "samuel"})).await.unwrap_err().to_string();
+    assert!(undo.contains("samuel was not restored") && undo.contains("undo the revoke again"), "{undo}");
+}
+
+/// The undo-read-fail row: an undo that can't read the ids is given back by the one id and says so, until a later undo
+/// reads them.
+#[tokio::test]
+async fn an_undo_that_cannot_read_the_ids_leaves_a_note_until_a_later_undo_reads_them() {
+    let (r, mut core, _turn) = renamed_with_the_core_down().await;
+    crate::remote::core_revokes::restore_held(&r.hub, "sam").await;
+    assert!(crate::remote::core_revokes::undo_note(&r.hub, "sam").is_some(), "the owner is told it isn't finished");
+    let audit = r.hub.store.audit_list(0, Some("sam")).unwrap();
+    assert!(audit.iter().any(|a| a.method == "undo.unread"), "{audit:?}");
+    core.restart();
+    crate::remote::core_revokes::restore_held(&r.hub, "sam").await;
+    assert!(crate::remote::core_revokes::undo_note(&r.hub, "sam").is_none(), "a later undo read the ids");
+}
+
+/// A cut still owed when its person was undone (the undo's clear missed the row) is dropped, never paid.
+#[tokio::test]
+async fn an_owed_cut_of_a_person_since_undone_is_dropped_not_paid() {
+    let (r, core) = switched_with_sam().await;
+    core.ask("people.renamePerson", json!({"id": "sam", "to": "samuel"})).expect("rename");
+    crate::remote::core_revokes::owe_cut(&r.hub, "sam");
+    Due::default().tick(&r.hub, false).await;
+    assert!(owed(&r.hub).is_empty(), "the row is dropped");
+    assert!(held(&r, "sam") && !set_aside(&r, "sam"), "the unrevoked person was not cut");
+    // still revoked: paid as before
+    core.ask("people.suspend", json!({"id": "samuel"})).expect("suspend");
+    crate::remote::core_revokes::owe_cut(&r.hub, "sam");
+    Due::default().tick(&r.hub, false).await;
+    assert!(owed(&r.hub).is_empty() && set_aside(&r, "sam"), "a revoked person's owed cut is paid");
+}
