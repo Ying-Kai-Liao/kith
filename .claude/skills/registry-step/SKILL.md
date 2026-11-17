@@ -1,6 +1,6 @@
 ---
 name: registry-step
-description: Model-checks (TLA+/TLC) the transcripts session-registry cutover, the rule that every session record a SessionStart hook makes ends up as the newest record where the readers read it (the file `$KITH_STATE/live/terminal/<sid>.json`; once switched also the core's session_records row), that the core never puts an older record over a newer file, and that write-ahead spool entries never erase each other. Use when a change touches kernel/bin/kith-sessions record (Files mode, Writer mode, the spool, the call, deleting its own entry), kernel/lib/kith_registry.py (switched, record, spool, drain), kernel/bin/kith-sched prune_terminal and its inbox drain, the core's session.record / reconcile / drain / prune (core/runtime/src/transcripts/, the daemon's 60 s pass in core/runtime/src/daemon.rs), core/runtime/src/import/transcripts.rs, core/runtime/src/cutover/modules/transcripts.rs (preflight, import, tombstone, before_tombstone re-read, cancel_step, export_back), or core/kernel/src/threads/registry.rs record. Also use to answer "can a session's record get lost or go backwards during or after the transcripts step?".
+description: Model-checks (TLA+/TLC) the transcripts session-registry cutover, the rule that every session record a SessionStart hook makes ends up as the newest record where the readers read it (the file `$KITH_STATE/live/terminal/<sid>.json`; once switched also the core's session_records row), that the core never puts an older record over a newer file, and that write-ahead spool entries never erase each other. Use when a change touches kernel/bin/kith-sessions record (Files mode, Writer mode, the spool, the call, deleting its own entry), kernel/lib/kith_registry.py (switched, order_key, valid, lock_at, spool, call, drain, sweep_temps), kernel/bin/kith-sched prune_terminal and its inbox drain, the core's session.record / reconcile / drain / prune (core/runtime/src/transcripts/, the daemon's 60 s pass in core/runtime/src/daemon.rs), core/runtime/src/import/transcripts.rs, core/runtime/src/cutover/modules/transcripts.rs (preflight, import, tombstone, before_tombstone re-read, cancel_step, export_back), or core/kernel/src/threads/registry.rs record. Also use to answer "can a session's record get lost or go backwards during or after the transcripts step?".
 ---
 
 # Registry step: every hook's record ends up newest where readers read it
@@ -120,8 +120,7 @@ the file back from the row.
 
 Not modelled: several sessions (independent per sid), the content of a record beyond its key, the compact
 `startedAt` rule, a second step after a rollback or cancel (to add with P3: `Begin` from `"files"`, the import
-clearing deleted rows, `Reread` dropping a row whose file was pruned after the import), kith-sched's own prune race with a Files-mode hook (as
-today), Windows (refused by preflight), the readers' Phase B.
+clearing deleted rows, `Reread` dropping a row whose file was pruned after the import), Windows (refused by preflight), the readers' Phase B.
 
 ## Broken variants
 
@@ -144,20 +143,30 @@ record, a not-serving answer, a prune and an invalid answer. So a pass is not va
 
 ## Code to model
 
-At the sync commit none of the Writer-mode code exists yet (P1 core, P2 Python, P3 module are being built against
-the contract). The first PR that lands each part fills in this table and moves `SYNC`.
+The Python side (P2, #1041) is in; the core (P1) and the module (P3) are still planned. The PR that lands each part
+fills in its rows and moves `SYNC`.
 
-| Model action | Code (planned) |
+| Model action | Code |
 |---|---|
-| `HookStart`, `FilesWrite`, `FilesHookDrain`, `FilesRecheck`, `Spool`, `Call`, `Answered`, `TimeOut`, `Kill` | `kernel/bin/kith-sessions` record() via `kernel/lib/kith_registry.py` (switched, record, spool, drain) |
+| `HookStart`, `FilesWrite`, `FilesRecheck` | `kernel/bin/kith-sessions` `record()`: `kith_registry.switched`, the Files-mode write of `<sid>.json` under `lock_at`, the re-check after the drain |
+| `FilesHookDrain` | `kith_registry.drain` (and `sweep_temps`), called from `record()` in Files mode |
+| `Spool`, `Call`, `Answered`, `TimeOut`, `Kill` | `kith-sessions` `record_in_core()`: `kith_registry.spool`, `kith_registry.call` (3 s), delete its own entry on `recorded`/`older`/`invalid` |
 | `OldWrite` | an older kernel's `kith-sessions` record() (today's code at the sync commit) |
-| `Txn`, `Project`, `ProjectWrite`, `Finish` | `core/runtime/src/transcripts/` session.record (daemon dispatch and embedded fallback) |
-| `DrainStart`, `Reconcile1`, `CorePrune`, `RcFinish` | the daemon's start and 60 s pass, the hourly prune (`core/runtime/src/daemon.rs`, transcripts/) |
+| `Txn`, `Project`, `ProjectWrite`, `Finish` | (planned, P1) `core/runtime/src/transcripts/` session.record (daemon dispatch and embedded fallback) |
+| `DrainStart`, `Reconcile1`, `CorePrune`, `RcFinish` | (planned, P1) the daemon's start and 60 s pass, the hourly prune (`core/runtime/src/daemon.rs`, transcripts/) |
 | `Crash`, `Restart` | the daemon or the embedded core dies, comes back |
-| `SchedDrain`, `SchedPrune` | `kernel/bin/kith-sched` prune_terminal (Files mode only) |
-| `Begin`, `Import`, `Tombstone`, `Reread`, `Switch`, `Cancel` | `core/runtime/src/cutover/modules/transcripts.rs` preflight, import (`import/transcripts.rs`), tombstones, before_tombstone, cancel_step |
-| `Rollback`, `ExportBack`, `RollbackDone` | the framework's rollback, the module's export_back |
-| (refuses under the marker) | `core/kernel/src/threads/registry.rs` record |
+| `SchedDrain`, `SchedPrune` | `kernel/bin/kith-sched` `prune_registry` (Files mode only: `kith_registry.drain`) and `prune_terminal` (deletes under `lock_at`, re-checks age and pid) |
+| `Begin`, `Import`, `Tombstone`, `Reread`, `Switch`, `Cancel` | (planned, P3) `core/runtime/src/cutover/modules/transcripts.rs` preflight, import (`import/transcripts.rs`), tombstones, before_tombstone, cancel_step |
+| `Rollback`, `ExportBack`, `RollbackDone` | (planned, P3) the framework's rollback, the module's export_back |
+| (refuses under the marker) | (planned, P1) `core/kernel/src/threads/registry.rs` record; today it writes `recordedAt` under `lock_at`'s flock, reached only by the difftest |
+
+Where the Python code differs from the model (the model allows more, so no action changes):
+- The drain takes one entry at a time under that sid's lock, reads the mode once at its start, and leaves an entry
+  whose lock is busy for the next drain. The model's drain is one atomic step that takes every entry.
+- When the spool write fails (disk full, permissions), that one hook calls the core without its write-ahead entry:
+  for it, the `no-write-ahead` variant applies (a kill mid-call loses that record).
+- kith-sched's prune deletes under the per-sid lock and re-checks age and pid there, so its race with a Files-mode
+  hook is closed (it was on the "Not modelled" list).
 
 ## When you change covered code
 
@@ -170,7 +179,7 @@ the contract). The first PR that lands each part fills in this table and moves `
 4. A pass can have lost the ability to fail. Break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `48ed39f13b7c71814a96fb59ea3a8be71a64333a` (rust-rebuild; the model came before the code).
+**Sync commit:** `06253be744095d5687d58b2d4849210c0b7b8af1` (#1041, the Python side; the core and module files at it are pre-P1 and match "planned").
 
 ## Map of the folder
 
