@@ -85,6 +85,17 @@ fn a_core_that_does_not_answer_cancels_nothing() {
 }
 
 #[test]
+fn a_failing_sweep_is_logged_when_it_starts_and_when_it_recovers_not_every_minute() {
+    use std::sync::atomic::AtomicBool;
+    let failing = AtomicBool::new(false);
+    assert!(!note_sweep(&failing, None), "healthy and quiet");
+    assert!(note_sweep(&failing, Some("down")), "the first failure speaks");
+    assert!(!note_sweep(&failing, Some("down")), "a core that stays down does not");
+    assert!(note_sweep(&failing, None), "the recovery speaks once");
+    assert!(!note_sweep(&failing, None));
+}
+
+#[test]
 fn register_never_unbinds_a_key_that_has_its_turn() {
     let k = key();
     register(&k);

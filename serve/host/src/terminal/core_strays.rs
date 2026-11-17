@@ -16,6 +16,7 @@
 //! just before its enqueue.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -80,11 +81,35 @@ fn live_keys_at(now: Instant) -> HashSet<String> {
         .collect()
 }
 
+/// Whether the last sweep's list call failed: the sweep runs every minute, so only a change of state is logged.
+static SWEEP_FAILING: AtomicBool = AtomicBool::new(false);
+
+/// Logs a warning when the sweep starts failing and a note when it recovers; a core that stays down says nothing more.
+/// Returns whether it logged.
+fn note_sweep(failing: &AtomicBool, error: Option<&str>) -> bool {
+    let was = failing.swap(error.is_some(), Ordering::Relaxed);
+    match (was, error) {
+        (false, Some(why)) => tracing::warn!(error = why, "the core did not list this host's stray turns; the sweep tries again"),
+        (true, None) => tracing::info!("the core lists this host's stray turns again"),
+        _ => return false,
+    }
+    true
+}
+
 impl CoreWriter {
     /// Cancels the host turns of the core that no item of this host holds. Returns how many it cancelled; a core that does not answer
     /// cancels nothing (the next sweep looks again). Blocking.
     pub fn sweep_strays(&self) -> usize {
-        let Answer::Done(v) = self.call("hostclaim.strays", &json!({})) else { return 0 };
+        let v = match self.call("hostclaim.strays", &json!({})) {
+            Answer::Done(v) => {
+                note_sweep(&SWEEP_FAILING, None);
+                v
+            }
+            Answer::Refused(why) | Answer::Down { why, .. } => {
+                note_sweep(&SWEEP_FAILING, Some(&why));
+                return 0;
+            }
+        };
         let listed: Vec<(i64, String)> = v["turns"]
             .as_array()
             .into_iter()
