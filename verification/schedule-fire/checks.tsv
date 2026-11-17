@@ -11,11 +11,7 @@ fixed	INVARIANT	WatermarkRows	pass
 fixed	INVARIANT	AnswerIsRecorded	pass
 rev	PROPERTY	NoFireForRevokedPerson	pass
 fixed	PROPERTY	PausedNeverFires	pass
-# FINDING (package C): PausedNeverStarts fails in the design variant because of HostAdopt: a pause leaves a running turn alone
-# (sync.rs rule 5), then a host restart's adopt (warm.rs:247) requeues it (requeue_turn) and the host claims it again; claims has no
-# paused check. Package C's adopt (pid alive keeps running; redeemed-then-dead ended, never retried) closes it: when C lands,
-# change HostAdopt in Fire.tla and flip this row back to pass.
-fixed	PROPERTY	PausedNeverStarts	fail
+fixed	PROPERTY	PausedNeverStarts	pass
 rev	PROPERTY	RevokedNeverStarts	pass
 fixed	PROPERTY	EditUsesNewDefinition	pass
 fixed	PROPERTY	DeadlineExpires	pass
@@ -93,3 +89,7 @@ h-no-h3	INVARIANT	NoStack	fail
 h-global-rewind	INVARIANT	AtMostOnce	fail
 h-bare	INVARIANT	NoSilentLoss	fail
 h-nolast	INVARIANT	NoStack	fail
+# --- package C ahead of its brief: AdoptMode "c" (pid alive keeps running, redeemed-then-dead ended, no-pid requeued), with and without ClaimPausedCheck ---
+c-nocheck	PROPERTY	PausedNeverStarts	pass
+c-check	PROPERTY	PausedNeverStarts	pass
+c-check-rev	PROPERTY	RevokedNeverStarts	pass

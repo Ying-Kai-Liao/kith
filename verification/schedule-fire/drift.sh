@@ -13,6 +13,10 @@ set -euo pipefail
 SYNC=6f02eea582c60cf7c6a223d3254fcb7d5786e84b
 
 FILES=(
+  core/runtime/src/conversations/warm.rs  # adopt: the host's claims after a host restart (HostAdopt; package C changes it)
+  core/runtime/src/hostclaim.rs  # hostclaim.queued, redeemedBefore (the runner's cancel of a redeemed turn)
+  core/runtime/src/import/schedules.rs  # import of the schedule files into the index
+  core/runtime/src/cutover/modules/schedules.rs  # the schedules cutover module
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)
   core/runtime/src/schedules          # M4-2 store and index; M4-3 tick, fire (the one transaction), run now, the webhook entry
   core/runtime/src/migrations/schedules  # sched_tick, sched_fires, sched_runs (unique keys)

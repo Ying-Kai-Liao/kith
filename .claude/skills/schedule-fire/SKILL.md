@@ -29,8 +29,8 @@ skill, or the covered code; by hand, only this job: `gh workflow run ci.yml --re
 `run.sh` exits 0 only when every row of `checks.tsv` (variant, kind, property, expected pass/fail) came out as
 expected. Tools are the same pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE as the holder-lease and
 writer-lock skills (`run.sh` is a copy of their harness). `fixed` (the design) has 283,124 states, `rev` (the design
-with one revoke per person and no edit) 3,767,524; a row takes from a few seconds to about two minutes, the whole table (63 rows) about four minutes
-on four workers. A failing row stops at its first counterexample. A row that changes (a finding fixed, a new break)
+with one revoke per person and no edit) 3,767,524; a row takes from a few seconds to about two minutes, the whole table (80 rows) about 15 minutes on four workers
+(the CI schedule-fire job runs the whole table, not --smoke, when any covered path or this folder changes). A failing row stops at its first counterexample. A row that changes (a finding fixed, a new break)
 exits 1: read this skill, do not edit the table to fit.
 
 ## What is modelled
@@ -77,7 +77,7 @@ version assumed finitely many crashes; the review showed that hid slots missed w
 | `AnswerIsRecorded` | A run-now / webhook caller's final answer is the recorded outcome. | The caller is told something the table does not say. |
 | `NoFireForRevokedPerson` | No turn is created for a revoked person once `revoke_person` ran (one created before it is cancelled by it). | A revoked person's job fires. |
 | `PausedNeverFires` | No turn is created for a paused job. | A paused job fires. |
-| `PausedNeverStarts` | After a pause commits, no turn is claimed. Fails in `fixed` today: HostAdopt requeues a running turn the pause left alone (package C finding). | A paused job still starts. |
+| `PausedNeverStarts` | After a pause commits, no turn is claimed. | A paused job still starts. |
 | `RevokedNeverStarts` | After `revoke_person` has run for a revoke, no turn of the person is claimed. (Between the authority revoke and `revoke_person` a claim with a stale may check can still commit; `revoke_person` then cancels it.) | A revoked person starts a run after `revoke_person`. |
 | `EditUsesNewDefinition` | A new turn carries the current definition (person, ver). | An edit is ignored for one run. |
 | `DeadlineExpires` | A turn is claimed only before its deadline (the claim is the start). | A late run (q218). |
@@ -248,7 +248,9 @@ The two "cancel in a second transaction" variants, run against every property (n
 - *All-fail limit (10 ticks):* when nothing went through a tick with more than one job due, the failure may be the core's (a locked keychain, an unwritable database), so jobs get 10 failing minutes before each is given up on, against 3 when something else went through. It is a bounded hold, not tied to the 1-day catch-up window: that would hold the watermark (and make every tick plan from further back) for a day. Ten minutes covers a keychain prompt or a restart; longer outages are then recorded as `skipped:error` rows rather than silently replayed.
 - *`mac` on a job:* a job naming another Mac is not planned, counted or recorded here. A webhook/event delivery (`not-here`, answered before the key is looked at) and run-now (refused) for such a job are refused too, with nothing written (M4-5b); this Mac's id is only read for the refusal, never made. A job with no `mac` is every Mac's.
 
-**Sync commit:** `6f02eea582c60cf7c6a223d3254fcb7d5786e84b` (origin/rust-rebuild; Gap 10 re-sync: `Fire.tla` split Crash and Restart by rule K, added `HostAdopt` (today's adopt) and the bot-only claim (`HostBotOnly`), copied the architect's `Handover.tla` with its 12 `h-*` rows, and fixed the stale comments in `schedules/mod.rs` and `schedule_store.rs`. `run.sh` was run in full: every row is as expected, with one deliberate exception: `fixed PausedNeverStarts` is `fail` (a finding for package C: a pause leaves a running turn alone, adopt requeues it, the host claims it again while paused). The H1-H4 rows are pending packages A2/B/C; re-check them, C's adopt change and the HostAdopt / bot-only rows at the final re-sync.)
+- *Not modelled (adopt):* core reconcile step 5's requeue of a claim whose process is gone (`HostAdopt`'s any-time requeue over-approximates it). The out-of-usage keep path re-begins a running turn by the same id inside the actor, so a paused job's running turn can continue on the backup account; deliberate per rule 5.
+
+**Sync commit:** `6f02eea582c60cf7c6a223d3254fcb7d5786e84b` (origin/rust-rebuild; Gap 10 re-sync: `Fire.tla` split Crash and Restart by rule K, added `HostAdopt` (today's adopt), the bot-only claim (`HostBotOnly`) with the runner's cancel of a turn redeemed before (`rd`, `RunnerCancel`; this is why `fixed PausedNeverStarts` passes: a pause leaves a running turn alone and adopt requeues it, but the runner then cancels it), and package C ahead of its brief (`AdoptMode` "c", `ClaimPausedCheck`; rows `c-nocheck`, `c-check`, `c-check-rev`); copied the architect's `Handover.tla` with its 12 `h-*` rows; `rev` now runs with `HostBotOnly = FALSE` so `RevokedNeverStarts` checks the core's claim rule for any claimer. `run.sh` was run in full and every row is as expected. The H1-H4 rows are pending packages A2/B/C; re-check them, C's adopt change and the HostAdopt / bot-only rows at the final re-sync.)
 
 ## Map of the folder
 
