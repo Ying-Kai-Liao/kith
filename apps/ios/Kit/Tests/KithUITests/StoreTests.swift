@@ -198,6 +198,39 @@ private func botEvent(_ id: String, name: String, rev: Int) -> String {
     #expect(await until { await fake.shutdownCount == 1 })
 }
 
+@MainActor @Test func foregroundKicksALinkAVoiceCallHeldThroughBackground() async throws {
+    let (storage, suite) = context()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let fake = FakeRemote(.ready(.relay))
+    let store = BotStore(computer: randomComputer("Mac"), storage: storage) { fake }
+    defer { store.retire() }
+    store.setActive(true)
+    #expect(await until { await fake.subscribed })
+    await fake.emit(botEvent("b1", name: "Bot", rev: 1))
+    #expect(await until { store.connection == .online })
+    store.beginVoiceCall(UUID(), botId: "b1", speak: { _ in }, end: {})
+    store.setActive(false)
+    store.setActive(true)
+    #expect(await until { await fake.kicks == 1 })
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await fake.kicks == 1)
+    #expect(await fake.shutdownCount == 0) // The call's link is kept, not restarted.
+}
+
+@MainActor @Test func foregroundRestartsAnOfflineLinkWithoutKicking() async throws {
+    let (storage, suite) = context()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let fake = FakeRemote(.failed("down"))
+    let store = BotStore(computer: randomComputer("Mac"), storage: storage) { fake }
+    defer { store.retire() }
+    store.setActive(true)
+    #expect(await until { store.isOffline })
+    store.setActive(true)
+    #expect(await until { await fake.shutdownCount == 1 })
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await fake.kicks == 0)
+}
+
 @MainActor @Test func lastVoiceCallEndingDisconnectsBackgroundStore() async throws {
     let (storage, suite) = context()
     defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }

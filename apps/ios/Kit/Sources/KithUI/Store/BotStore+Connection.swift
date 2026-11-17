@@ -38,13 +38,14 @@ extension BotStore {
             // Still in the foreground with a link: the app only passed through `.inactive` (Control Center, the app
             // switcher, a system prompt). Restarting here tore the link down and caught up again each time. A link that
             // is down still gets the retry.
-            if wasActive && streamTask != nil && !isOffline {
-                // Mid-retry (backoff) reconnects now instead of after the wait; a live link ignores the kick.
+            if wasActive && streamTask != nil && !isOffline { return }
+            // Returning to the foreground must not interrupt a live call's sends. A call kept the link alive in the
+            // background, so a retry it was waiting out is still pending: kick it now (a live link ignores the kick).
+            if !voiceCalls.isEmpty && streamTask != nil {
                 if let remote = transport as? any RemoteTransport { Task { await remote.kick() } }
-                return
+            } else {
+                restartStream()
             }
-            // Returning to the foreground must not interrupt a live call's sends.
-            if voiceCalls.isEmpty || streamTask == nil { restartStream() }
         } else if voiceCalls.isEmpty && callHolds.isEmpty {
             // Disconnect so the host knows we're gone and sends pushes instead.
             stopTransport()
