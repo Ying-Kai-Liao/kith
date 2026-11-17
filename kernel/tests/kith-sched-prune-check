@@ -59,6 +59,31 @@ try:
 finally:
     live.kill(); live.wait()
 
+# A10: the prune deletes under the sid's lock (live/terminal/locks/<sid>.lock, the hook's and the core's lock). A held lock
+# skips the record for the next prune; free again, it goes. A record made fresh again before the lock is had stays.
+held = mk(term / 'held-old.json', 10, '{"pid": %d}' % dead.pid)
+(term / 'locks').mkdir(exist_ok=True)
+holder = subprocess.Popen([sys.executable, '-c', 'import fcntl, sys, time; f = open(sys.argv[1], "w"); fcntl.flock(f, fcntl.LOCK_EX); print("held", flush=True); time.sleep(30)',
+                           str(term / 'locks' / 'held-old.lock')], stdout=subprocess.PIPE, text=True)
+try:
+    assert holder.stdout.readline().strip() == 'held'
+    t0 = time.monotonic()
+    ks.prune_terminal(term, now=now); assert held.exists(), 'a held lock: skipped'
+    assert time.monotonic() - t0 >= 0.8, 'it waited for the lock first'
+finally:
+    holder.kill(); holder.wait()
+ks.prune_terminal(term, now=now); assert not held.exists(), 'free again: pruned'
+assert (term / 'locks' / 'held-old.lock').exists(), 'the lock file stays'
+fresh = mk(term / 'fresh-again.json', 10, '{"pid": %d}' % dead.pid)
+real_lock = ks.kith_registry.lock_at
+def touching_lock(reg, sid, wait=1.0):   # a hook writes the record between the prune's first look and its lock
+    os.utime(fresh, (now, now)); return real_lock(reg, sid, wait)
+ks.kith_registry.lock_at = touching_lock
+try:
+    ks.prune_terminal(term, now=now); assert fresh.exists(), 'age read again under the lock'
+finally:
+    ks.kith_registry.lock_at = real_lock
+
 # the registry as prune() reaches it: $KITH_STATE/live/terminal (not KITH_MACHINE's). Files mode drains the spool first, then
 # prunes; Writer mode (the transcripts marker, or its switch file past stepping) touches nothing: the core prunes its own rows.
 state = tmp / 'state'; os.environ['KITH_MACHINE'] = str(tmp / 'machine')

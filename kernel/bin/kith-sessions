@@ -230,9 +230,13 @@ def record_in_core(reg, state, rec):
     if not reg.safe_id(rec['sessionId']):
         print(f"kith-sessions record: session id {rec['sessionId']!r} is not one the registry can name; not listed", file=sys.stderr)
         return
-    entry = reg.spool(state, rec)
+    try:
+        entry = reg.spool(state, rec)
+    except OSError as e:   # disk full, a permission: still ask the core, only the safety net is gone (A10)
+        print(f'kith-sessions record: no spool entry ({e}); asking the core anyway', file=sys.stderr)
+        entry = None
     what, why = reg.call(rec)
-    if what in ('settled', 'invalid'):
+    if what in ('settled', 'invalid') and entry is not None:
         entry.unlink(missing_ok=True)
     if what == 'invalid':
         print(f'kith-sessions record: the core refused the record ({why}); not listed', file=sys.stderr)

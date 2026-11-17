@@ -31,7 +31,7 @@ from pathlib import Path
 MARKER = 'registry.tombstone'
 MODULE = 'transcripts'
 CALL_SECS = 3   # a SessionStart hook has 5 s in all, and the ps walk comes first
-_SAFE = re.compile(r'^[A-Za-z0-9-]{1,64}$')   # the host's registry::safe_id: the file name rule
+_SAFE = re.compile(r'[A-Za-z0-9-]{1,64}')   # the host's registry::safe_id: the file name rule
 
 
 def claims_lib():
@@ -48,7 +48,7 @@ def inbox(state):
 
 
 def safe_id(sid):
-    return isinstance(sid, str) and bool(_SAFE.match(sid))
+    return isinstance(sid, str) and bool(_SAFE.fullmatch(sid))   # fullmatch: no trailing newline (A10)
 
 
 def switched(state):
@@ -89,8 +89,13 @@ def order_key(rec, path=None, arrival=0):
 LOCK_WAIT = 1.0   # seconds: A8's bounded wait for the per-sid lock
 
 
-@contextlib.contextmanager
 def sid_lock(state, sid, wait=LOCK_WAIT):
+    """lock_at for the registry of $KITH_STATE `state`."""
+    return lock_at(reg_dir(state), sid, wait)
+
+
+@contextlib.contextmanager
+def lock_at(reg, sid, wait=LOCK_WAIT):
     """The per-sid lock (contract A8): flock(LOCK_EX) on live/terminal/locks/<sid>.lock (folder 0700, file 0600, never
     deleted), the same lock the core's settle, reconcile, prune and export_back take. Yields True when held, False when
     another holder kept it past `wait` seconds (or it could not be opened): the caller skips or fails open."""
@@ -98,7 +103,7 @@ def sid_lock(state, sid, wait=LOCK_WAIT):
     try:
         if not safe_id(sid):
             raise OSError('not a lockable session id')
-        d = reg_dir(state) / 'locks'
+        d = Path(reg) / 'locks'
         d.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd = os.open(d / f'{sid}.lock', os.O_RDWR | os.O_CREAT, 0o600)
         end = time.monotonic() + wait
@@ -190,6 +195,31 @@ def _read(path, any_json=False):
     return v if any_json or isinstance(v, dict) else None
 
 
+TEMP_AGE = 300   # seconds: a dot-temp this old in the inbox is a hook killed mid-write (A10)
+
+
+def sweep_temps(state, now=None, age=TEMP_AGE):
+    """Delete inbox dot-names (a spool write's temp files) older than `age` seconds; a younger one may be a write in
+    progress. Returns how many went."""
+    now = time.time() if now is None else now
+    gone = 0
+    try:
+        names = os.listdir(inbox(state))
+    except OSError:
+        return 0
+    for n in names:
+        if not n.startswith('.'):
+            continue
+        p = inbox(state) / n
+        try:
+            if p.is_file() and not p.is_symlink() and now - p.lstat().st_mtime > age:
+                p.unlink()
+                gone += 1
+        except OSError:
+            pass
+    return gone
+
+
 def drain(state):
     """Files mode only: put each inbox entry newer (order_key) than its <sid>.json in place of it, delete the rest, each
     under the sid's lock (A8; a lock not had within LOCK_WAIT skips that entry for the next drain). An entry the core would
@@ -197,6 +227,7 @@ def drain(state):
     placed (A5). Returns how many moved. In Writer mode it does nothing: the core drains."""
     if switched(state):
         return 0
+    sweep_temps(state)
     moved = 0
     for n, (path, sid) in enumerate(entries(state), start=1):
         try:

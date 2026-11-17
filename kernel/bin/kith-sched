@@ -375,20 +375,33 @@ def rotate_log(log, limit=AUTH_LOG_MAX):
 
 
 def prune_terminal(dirpath, now=None, days=TERMINAL_DAYS):
-    """Remove live/terminal/*.json records older than `days` whose pid is not running (no pid: treated as gone)."""
+    """Remove live/terminal/*.json records older than `days` whose pid is not running (no pid: treated as gone). Each one
+    under its sid's lock (contract A10, kith_registry.lock_at, the lock the hook's write and the core take): a lock not had
+    within a second skips the file for the next prune, and the age and pid are read again under the lock, so a record
+    written while this looked is never the one deleted. A name that is no session id has no writer to wait for."""
     now = now or time.time()
     gone = 0
+
+    def stale(f):
+        if now - f.stat().st_mtime < days * 86400:
+            return False
+        try:
+            pid = json.loads(f.read_text()).get('pid')
+        except (OSError, ValueError, AttributeError):
+            pid = None
+        return not running(pid)
+
     for f in Path(dirpath).glob('*.json'):
         try:
-            if now - f.stat().st_mtime < days * 86400:
+            if not stale(f):
                 continue
-            try:
-                pid = json.loads(f.read_text()).get('pid')
-            except (OSError, ValueError, AttributeError):
-                pid = None
-            if running(pid):
+            sid = f.name[:-len('.json')]
+            if not kith_registry.safe_id(sid):
+                f.unlink(); gone += 1
                 continue
-            f.unlink(); gone += 1
+            with kith_registry.lock_at(dirpath, sid) as held:
+                if held and stale(f):
+                    f.unlink(); gone += 1
         except OSError:
             pass
     return gone
