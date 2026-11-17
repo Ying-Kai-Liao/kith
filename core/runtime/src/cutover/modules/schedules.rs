@@ -66,11 +66,10 @@ const ROUTINES_KEY: &str = "routines.v1";
 const LOCK_WAIT: Duration = Duration::from_secs(30);
 
 /// Whether the core runs the turns a schedule fire makes (a fired cron job or routine becomes a turn that runs and ends).
-/// `step_refusal` refuses while this is false (with the other conditions in `schedules_gate`). True since the runner:
-/// the host's Writer path pulls the fired turns (`hostclaim.queued`, `serve/host/src/routines/core_runs.rs`), and its
-/// test (`a_fired_cron_job_and_a_fired_routine_each_run_once_and_end_done`, `agent/bot/writer_tests.rs`) runs a fired
-/// cron job and a fired routine to done.
-pub(crate) const RUNS_FIRED_TURNS: bool = true;
+/// `step_refusal` refuses while this is false (with the other conditions in `schedules_gate`). False again: guest jobs
+/// and agents with no bot never run, a kith-sched job's model and effort are lost, and a host restart kills a
+/// scheduled run, and the switch/rollback handover is not done yet. Only the temp-home end-to-end test PR sets it true.
+pub(crate) const RUNS_FIRED_TURNS: bool = false;
 
 type KeyFactory = std::sync::Arc<dyn Fn() -> Box<dyn KeyStore>>;
 
