@@ -268,15 +268,15 @@ pub fn start(hub: &Arc<Hub>) {
                 Ok(Ok(due)) => due,
                 Ok(Err(error)) => {
                     tracing::error!(error = format!("{error:#}"), "routine scheduler failed");
-                    false
+                    None
                 }
-                Err(_) => false,
+                Err(_) => None,
             };
-            if core_tick {
+            if let Some(minute) = core_tick {
                 // Not awaited: a slow core must not hold up publishing or the gate; `core_tick_due` lets one run at a time.
                 let work = Arc::clone(&hub);
                 tokio::task::spawn_blocking(move || {
-                    work.routines.forward_tick();
+                    work.routines.forward_tick(minute);
                     // What the tick fired runs now, not on the next pull.
                     work.routines.pull_due(&work, now_ms(), true);
                 });
@@ -286,14 +286,14 @@ pub fn start(hub: &Arc<Hub>) {
     *hub.routines.scheduler.locked() = Some(task);
 }
 
-/// One second of the runner. True when a `schedule.tick` is due: the core owns the schedules and the wall-clock minute has changed
-/// (the caller then calls `forward_tick`).
-fn tick(hub: &Arc<Hub>) -> Result<bool> {
+/// One second of the runner. The minute to `forward_tick` when a `schedule.tick` is due: the core owns the schedules and the
+/// wall-clock minute has changed.
+fn tick(hub: &Arc<Hub>) -> Result<Option<i64>> {
     tick_at(hub, now_ms())
 }
 
 /// `tick` at a given time, so tests need not race the wall clock's minute edge.
-fn tick_at(hub: &Arc<Hub>, now: i64) -> Result<bool> {
+fn tick_at(hub: &Arc<Hub>, now: i64) -> Result<Option<i64>> {
     let gate = hub.routines.refresh_gate();
     hub.update_keep_awake();
     // Runs the host started before a switch still finish and publish, whoever owns the schedules now.
@@ -304,13 +304,13 @@ fn tick_at(hub: &Arc<Hub>, now: i64) -> Result<bool> {
         Gate::Own => hub.routines.schedule_due(&hub.store, now)?,
         // The core fires; and when the host cannot tell, nothing starts from serve.db.
         Gate::Core => {}
-        Gate::Held(_) => return Ok(false),
+        Gate::Held(_) => return Ok(None),
     }
     dispatch(hub)?;
     if gate == Gate::Core {
         hub.routines.pull_due(hub, now, false);
     }
-    Ok(gate == Gate::Core && hub.routines.core_tick_due(now))
+    Ok(if gate == Gate::Core { hub.routines.core_tick_due(now) } else { None })
 }
 
 fn dispatch(hub: &Arc<Hub>) -> Result<()> {
@@ -383,14 +383,15 @@ mod tests {
         let hub = hub();
         due_routine(&hub);
         let fake = switched(&hub, Gate::Core);
-        assert!(tick_at(&hub, T).unwrap(), "the first second after the switch is due");
+        let minute = tick_at(&hub, T).unwrap();
+        assert!(minute.is_some(), "the first second after the switch is due");
         assert!(hub.routines.state.locked().runs.is_empty(), "the host's own scheduler fires nothing");
         // A tick in flight is not queued behind: two overlapping asks make one tick.
-        assert!(!tick_at(&hub, T).unwrap());
-        hub.routines.forward_tick();
+        assert!(tick_at(&hub, T).unwrap().is_none());
+        hub.routines.forward_tick(minute.unwrap());
         assert_eq!(fake.calls_of("schedule.tick").len(), 1);
         // The core answered, so this minute is done: not asked again until the minute changes.
-        assert!(!tick_at(&hub, T).unwrap());
+        assert!(tick_at(&hub, T).unwrap().is_none());
         assert!(hub.routines.state.locked().routines[0].next_runs[0] == Some(1), "serve.db is not read as live");
     }
 
@@ -400,21 +401,21 @@ mod tests {
         let hub = hub();
         let fake = switched(&hub, Gate::Core);
         fake.says(|_, _| crate::core_front::Answer::Down { why: "no core is running".into(), lost: false });
-        assert!(hub.routines.core_tick_due(100_000));
-        assert!(!hub.routines.core_tick_due(100_000), "two ticks never overlap");
-        hub.routines.forward_tick();
-        assert!(hub.routines.core_tick_due(101_000), "a failed tick is claimed again at the next second");
+        let m = hub.routines.core_tick_due(100_000).unwrap();
+        assert!(hub.routines.core_tick_due(100_000).is_none(), "two ticks never overlap");
+        hub.routines.forward_tick(m);
+        let m = hub.routines.core_tick_due(101_000).expect("a failed tick is claimed again at the next second");
         fake.says(|_, _| crate::core_front::Answer::Done(json!({})));
-        hub.routines.forward_tick();
-        assert!(!hub.routines.core_tick_due(119_000), "the minute is done");
-        assert!(hub.routines.core_tick_due(120_000), "and the next minute is due on its first second");
-        hub.routines.forward_tick();
+        hub.routines.forward_tick(m);
+        assert!(hub.routines.core_tick_due(119_000).is_none(), "the minute is done");
+        let m = hub.routines.core_tick_due(120_000).expect("and the next minute is due on its first second");
+        hub.routines.forward_tick(m);
         // The clock went back (sleep, NTP): a different minute ticks, it does not wait for the old one.
-        assert!(hub.routines.core_tick_due(60_000));
+        assert!(hub.routines.core_tick_due(60_000).is_some());
     }
 
     #[test]
-    fn two_simulated_hours_tick_once_a_minute_with_jittery_latency_and_skip_none() {
+    fn two_simulated_hours_tick_once_a_wall_clock_minute_with_jittery_latency_and_skip_no_minute() {
         use super::super::switch_tests::{hub, switched};
         let hub = hub();
         let fake = switched(&hub, Gate::Core);
@@ -427,16 +428,19 @@ mod tests {
             if now < busy_until {
                 continue;
             }
-            if hub.routines.core_tick_due(now) {
-                ticked.push(now.div_euclid(60_000));
+            if let Some(minute) = hub.routines.core_tick_due(now) {
+                ticked.push(minute);
                 busy_until = now + (step * 31 % 3) * 1000 + 900;
-                hub.routines.forward_tick();
+                hub.routines.forward_tick(minute);
             }
         }
         assert_eq!(fake.calls_of("schedule.tick").len(), ticked.len());
         let first = start.div_euclid(60_000);
         let want: Vec<i64> = (first..=first + 120).collect();
-        assert_eq!(ticked, want, "exactly one tick per minute, none skipped");
+        assert_eq!(
+            ticked, want,
+            "exactly one tick per wall-clock minute of the host, none skipped (the core reads its own clock)"
+        );
     }
 
     #[test]
@@ -444,9 +448,21 @@ mod tests {
         use super::super::switch_tests::{hub, switched};
         let hub = hub();
         switched(&hub, Gate::Core);
-        assert!(hub.routines.core_tick_due(59_999));
-        hub.routines.forward_tick();
-        assert!(hub.routines.core_tick_due(60_000));
+        let m = hub.routines.core_tick_due(59_999).unwrap();
+        hub.routines.forward_tick(m);
+        assert!(hub.routines.core_tick_due(60_000).is_some());
+    }
+
+    #[test]
+    fn a_panic_inside_the_tick_still_frees_the_claim() {
+        use super::super::switch_tests::{hub, switched};
+        let hub = hub();
+        let fake = switched(&hub, Gate::Core);
+        fake.says(|_, _| panic!("the link died"));
+        let m = hub.routines.core_tick_due(100_000).unwrap();
+        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| hub.routines.forward_tick(m)));
+        assert!(died.is_err());
+        assert!(hub.routines.core_tick_due(101_000).is_some(), "the next second claims again, the minute is not done");
     }
 
     #[test]
@@ -481,12 +497,12 @@ mod tests {
         let hub = hub();
         due_routine(&hub);
         let fake = switched(&hub, Gate::Held("the core cannot be asked".into()));
-        assert!(!tick(&hub).unwrap());
+        assert!(tick(&hub).unwrap().is_none());
         assert!(hub.routines.state.locked().runs.is_empty());
         assert!(fake.calls.lock().unwrap().is_empty());
         // The core answers again and says no: the host's own runner is back.
         *fake.gate.lock().unwrap() = Gate::Own;
-        assert!(!tick(&hub).unwrap());
+        assert!(tick(&hub).unwrap().is_none());
         assert!(
             hub.routines.state.locked().routines[0].next_runs[0] != Some(1),
             "the due routine was advanced by the host's own scheduler"

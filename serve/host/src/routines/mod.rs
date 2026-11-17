@@ -113,7 +113,8 @@ pub struct Routines {
     link: Mutex<Arc<dyn switch::Link>>,
     /// The wall-clock minute (ms / 60000) of the last core tick that was answered.
     last_core_tick: Mutex<Option<i64>>,
-    claimed_minute: Mutex<i64>,
+    /// Failed core ticks in the current streak and when it began, so a core that is down warns once, not every second.
+    tick_streak: Mutex<Option<(u32, std::time::Instant)>>,
     core_ticking: std::sync::atomic::AtomicBool,
     /// The turns the core queued that this host run pulled (`core_runs.rs`), by item id. In memory only.
     pulled: Mutex<std::collections::HashMap<String, core_runs::Item>>,
@@ -127,7 +128,7 @@ impl Default for Routines {
             gate: Mutex::default(),
             link: Mutex::new(Arc::new(switch::CoreLink)),
             last_core_tick: Mutex::default(),
-            claimed_minute: Mutex::default(),
+            tick_streak: Mutex::default(),
             core_ticking: std::sync::atomic::AtomicBool::default(),
             pulled: Mutex::default(),
             last_pull: Mutex::default(),
