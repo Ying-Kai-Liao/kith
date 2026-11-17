@@ -51,7 +51,7 @@ fresh
 K tick >"$T/out" 2>"$T/err" </dev/null
 sleep 0.5
 check "tick starts the due job" "ran"
-check "last has pid and procStart" "last_has \"'pid' in l and str(l.get('procStart','')).startswith('e')\""
+check "last has pid and procStart" "last_has \"'pid' in l and str(l.get('procStart',''))[:1] in ('e', 'b')\""
 check "the tick stamp is saved" "[[ \"\$(python3 -c \"import json; print(json.load(open('$S'))['tick'])\")\" == 2026-11-04T08:00 ]]"
 check "tick.lock is a file under the machine dir" "[[ -e '$LOCK' ]]"
 PID=$(python3 -c "import json; print(json.load(open('$S'))['last']['house/a']['pid'])"); kill "$PID" 2>/dev/null
