@@ -910,6 +910,10 @@ actor_test! {
         // lock alone still stops this process (design 2026-11-16-offturn-lock-alone, architect MUST 1).
         assert_eq!(marked(&rig, "sess-a"), before, "a forgotten session keeps its marker");
         assert_eq!(marked(&rig, "sess-fork"), 1, "the new session is marked too");
+        // And its `warm_procs` row stays with it: the engine still has the session, so a revoke must still find the process
+        // (architect MUST of #1031). Only a session the engine closed loses its row.
+        let forgotten = rig.w().asked.iter().filter(|(m, p)| m == "hostclaim.procGone" && p["conversation"] == "sess-a").count();
+        assert_eq!(forgotten, 0, "a forgotten session keeps its warm row: {:?}", rig.w().asked);
     }
 }
 

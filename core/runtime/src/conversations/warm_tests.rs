@@ -160,7 +160,9 @@ fn a_revoke_and_a_host_change_name_a_process_once_however_many_sessions_it_holds
 }
 
 /// P7b: a guest's revoke kills the process that also holds the owner's session, and the owner's turn running there is not
-/// cancelled with it: it stays the owner's, and when the process's exit is reported it goes back to the queue.
+/// cancelled with it: it stays the owner's, and when the process's exit is reported it goes back to the queue. (Processes are
+/// per person, so this is the core's requeue on exit only; `claim_next` makes the same `claimed` row, which the redeem test
+/// below covers: `kill_at` is read only in `redeem`.)
 #[test]
 fn an_owner_turn_killed_with_a_revoked_guests_process_is_requeued() {
     let (_t, mut c) = open();
