@@ -22,8 +22,9 @@
 //! so the index never goes back to an older file. A failure anywhere rolls the whole thing back: nothing half-done is left for the next tick to
 //! find, and the watermark has not moved, so the slot is tried again (its row either exists whole or not at all).
 //!
-//! Nothing wires this to a live tick while `kith-sched` owns `jobs.json` (I14): the rows `schedule.tick` and
-//! `schedule.runNow` are experimental and the daemon runs neither.
+//! The tick follows the host's clock only on a Mac where `kith migrate step schedules` has switched (M4-5): until then
+//! `kith-sched` owns `jobs.json` and nothing calls `schedule.tick`. After the step a job's first plan may count from its
+//! anchor ([`super::anchor`]), and a run `kith-sched` left going skips the job like an unfinished turn (rule 4).
 
 use kith_kernel::paths::Paths;
 use kith_kernel::schedule::{CATCH_UP_MS, Trigger};
@@ -345,7 +346,10 @@ fn fire_with(tx: &Transaction<'_>, f: &Fire<'_>, event: Option<&Value>) -> Resul
         finish(tx, f, seen)?;
         return Ok(o);
     }
-    if !sync::unfinished_in(tx, agent, f.job)?.is_empty() {
+    // A run kith-sched left going at the switch is unfinished too (H3).
+    if !sync::unfinished_in(tx, agent, f.job)?.is_empty()
+        || super::running::imported_going(tx, agent, f.job, f.mac, f.now)?
+    {
         if kind == Kind::Timed {
             let o = skip(tx, f, slot, "busy: the previous run has not finished")?;
             finish(tx, f, seen)?;
@@ -567,9 +571,16 @@ fn counts_from(
     conn: &rusqlite::Connection,
     a: &str,
     job: &str,
+    def: &Value,
     t: &Trigger,
     wm: i64,
 ) -> Result<i64> {
+    // An imported routine's first plan counts from the host's next run, on either side of the watermark (H2).
+    if let Some(anchor) = super::anchor::of(def)
+        && super::anchor::unused(conn, a, job, anchor)?
+    {
+        return Ok(super::anchor::count_from(t, anchor));
+    }
     if !matches!(t, Trigger::Interval { .. }) {
         return Ok(wm);
     }
@@ -758,7 +769,7 @@ pub(super) fn tick(
                     continue;
                 }
             };
-            let planned = counts_from(core.conn(), &a.agent, &id, &trigger, wm)
+            let planned = counts_from(core.conn(), &a.agent, &id, def, &trigger, wm)
                 .map(|from| plan(&trigger, from, nowf));
             let p = match planned {
                 Ok(p) => p,

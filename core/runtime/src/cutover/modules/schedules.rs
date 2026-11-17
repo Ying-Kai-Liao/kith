@@ -53,8 +53,9 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
 use super::schedules_gate as gate;
+use super::schedules_switch::{self as switch, Next};
 use crate::cutover::state::{self, Phase};
-use crate::cutover::{Env, Module, Opts};
+use crate::cutover::{Env, Module, Opts, SourceLock};
 use crate::db::Core;
 use crate::error::{Error, Result};
 use crate::secrets::Envelope;
@@ -79,6 +80,11 @@ pub(crate) struct Schedules {
     /// Tests: skip the build gate, so the step tests can step. Never set outside tests.
     #[cfg(test)]
     gate_open: bool,
+    /// What the import read of state.json (its sha; empty for no file), checked again just before the tombstone.
+    /// `None`: no import has run under this step's lock.
+    imported: std::cell::RefCell<Option<String>>,
+    /// Tests: how long the step waits for `tick.lock`.
+    tick_wait: Duration,
 }
 
 impl Schedules {
@@ -87,7 +93,16 @@ impl Schedules {
             keys: None,
             #[cfg(test)]
             gate_open: false,
+            imported: std::cell::RefCell::new(None),
+            tick_wait: switch::TICK_WAIT,
         }
+    }
+
+    /// Tests: a short wait for `tick.lock`.
+    #[cfg(test)]
+    pub(crate) fn tick_wait(mut self, wait: Duration) -> Self {
+        self.tick_wait = wait;
+        self
     }
 
     #[cfg(test)]
@@ -95,6 +110,8 @@ impl Schedules {
         Self {
             keys: Some(keys),
             gate_open: true,
+            imported: std::cell::RefCell::new(None),
+            tick_wait: switch::TICK_WAIT,
         }
     }
 
@@ -152,6 +169,8 @@ struct Row {
     bot: String,
     def: Value,
     key: Option<String>,
+    /// A `once` the host already fired: the slot (UTC text) that gets a decided row (H2).
+    decided: Option<String>,
 }
 
 #[derive(Default)]
@@ -165,7 +184,31 @@ struct Plan {
     notes: Vec<String>,
 }
 
-fn serve_db_of(env: &Env) -> PathBuf {
+/// The folder the host keeps `host.lock` in: `KITH_SERVE_HOME`, else `~/.kith/serve` (`service::data_dir`), NOT the
+/// folder of serve.db (which `KITH_SERVE_DB` can move). `env.serve_db` (tests) names a folder of its own.
+pub(super) fn host_dir_of(env: &Env) -> PathBuf {
+    host_dir_with(env, &|k| std::env::var_os(k).filter(|v| !v.is_empty()))
+}
+
+pub(super) fn host_dir_with(
+    env: &Env,
+    var: &dyn Fn(&str) -> Option<std::ffi::OsString>,
+) -> PathBuf {
+    if let Some(d) = env.serve_db.as_ref().and_then(|p| p.parent()) {
+        return d.to_path_buf();
+    }
+    var("KITH_SERVE_HOME").map_or_else(
+        || {
+            var("HOME")
+                .map_or_else(|| env.home.clone(), PathBuf::from)
+                .join(".kith")
+                .join("serve")
+        },
+        PathBuf::from,
+    )
+}
+
+pub(super) fn serve_db_of(env: &Env) -> PathBuf {
     if let Some(p) = &env.serve_db {
         return p.clone();
     }
@@ -186,12 +229,12 @@ fn serve_db_of(env: &Env) -> PathBuf {
         .join("serve.db")
 }
 
-/// Why the host cannot be called stopped, if it cannot: `host.lock` in its data folder (the folder of serve.db) is an
+/// Why the host cannot be called stopped, if it cannot: `host.lock` in its data folder ([`host_dir_of`]) is an
 /// advisory lock the OS drops with the process, so a stale file or a reused pid never reads as running. Read-only: the
 /// file is never created. No file, or a free lock, is stopped. A held lock says "running"; any other open or lock error
 /// says the lock cannot be checked (still a refusal, but never worded as "stop the host").
 pub(super) fn host_blocker(env: &Env) -> Option<HostBlock> {
-    let dir = serve_db_of(env).parent().map(Path::to_path_buf)?;
+    let dir = host_dir_of(env);
     let file = match std::fs::File::open(dir.join("host.lock")) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -215,6 +258,9 @@ pub(super) enum HostBlock {
     Running,
     Unknown(String),
 }
+
+const STEP_RUNNING: &str = "not stepped: the host is running and reads the schedules switch only when it starts; stop the host, step schedules, start the host. `step schedules --dry-run` and `check schedules` work while it runs";
+const ROLLBACK_RUNNING: &str = "the host is running and would save its routines over the ones put back; stop the host first (then roll back, then start it); --force does not override this";
 
 /// The refusal line for a host in the way, in the words of the verb (`running` is that verb's "the host is running").
 fn host_refusal(env: &Env, running: &str) -> Option<String> {
@@ -319,6 +365,12 @@ fn convert(t: &Value) -> std::result::Result<Trigger, String> {
     };
     k.validate().map_err(|e| e.0)?;
     Ok(k)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0))
 }
 
 fn routines_of(db: &Connection) -> Result<Vec<Value>> {
@@ -463,16 +515,27 @@ fn routine_rows(
             def.insert("paused".into(), json!(true));
         }
         def.insert("mac".into(), json!(mac));
-        def.insert(
-            "routine".into(),
-            json!({
-                "id": id,
-                "bot": bot,
-                "trigger": i + 1,
-                "timeoutSeconds": r.get("timeoutSeconds").and_then(Value::as_u64).unwrap_or(3600),
-            }),
-        );
+        let mut block = json!({
+            "id": id,
+            "bot": bot,
+            "trigger": i + 1,
+            "timeoutSeconds": r.get("timeoutSeconds").and_then(Value::as_u64).unwrap_or(3600),
+        });
+        // What the host would do next: the job's first core plan counts from it (H2).
+        let mut decided = None;
+        match switch::next_of(r, i, &trigger, now_ms()) {
+            Next::At(at) => {
+                block["anchor"] = json!(at);
+                // The anchor counts only while the job keeps this trigger (`schedules::anchor::of`).
+                block["anchorTrigger"] =
+                    serde_json::to_value(&trigger).map_err(|e| e.to_string())?;
+            }
+            Next::OnceFired(ms) => decided = crate::schedules::slot_of_ms(ms),
+            Next::Nothing => {}
+        }
+        def.insert("routine".into(), block);
         rows.push(Row {
+            decided,
             agent: agent.clone(),
             job,
             routine: id.to_owned(),
@@ -575,7 +638,19 @@ fn made_for(job: &Value, routine: &str, bot: &str) -> bool {
         .is_some_and(|r| text(r, "id") == Some(routine) && text(r, "bot") == Some(bot))
 }
 
-fn verdict(jobs: &[Value], row: &Row, mac: &str) -> Verdict {
+/// A job without the host's next run (`routine.anchor` and the trigger it was read for): the anchor is a snapshot of the
+/// host's clock, so `same_answer` must not call a job different because the host's next run moved since.
+pub(super) fn without_anchor(job: &Value) -> Value {
+    let mut job = job.clone();
+    if let Some(r) = job.get_mut("routine").and_then(Value::as_object_mut) {
+        r.remove("anchor");
+        r.remove("anchorTrigger");
+    }
+    job
+}
+
+/// `same`: the check's reading, which leaves the anchor out of the compare (an import still brings it up to date).
+fn verdict(jobs: &[Value], row: &Row, mac: &str, same: bool) -> Verdict {
     let Some(at) = jobs
         .iter()
         .position(|j| text(j, "id") == Some(row.job.as_str()))
@@ -595,7 +670,12 @@ fn verdict(jobs: &[Value], row: &Row, mac: &str) -> Verdict {
             row.agent, row.job
         ));
     }
-    if have == &row.def {
+    let equal = if same {
+        without_anchor(have) == without_anchor(&row.def)
+    } else {
+        have == &row.def
+    };
+    if equal {
         Verdict::Same
     } else {
         Verdict::Update(at)
@@ -680,7 +760,7 @@ fn apply_agent(cx: &mut Apply<'_>, agent: &str, rows: &[&Row]) -> Result<()> {
     })?;
     let mut changed = false;
     for row in rows {
-        match verdict(&jobs, row, cx.mac) {
+        match verdict(&jobs, row, cx.mac, false) {
             Verdict::New => {
                 jobs.push(row.def.clone());
                 cx.counts.added += 1;
@@ -731,25 +811,51 @@ impl Module for Schedules {
         vec![env.machine.join("sched").join("state.json")]
     }
 
+    /// `host.lock` (held, so the host cannot start between the refusal and the tombstone) and then `tick.lock` (a
+    /// kith-sched tick finishes first and none starts), from before the import to the tombstone (MUST 2, H1).
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        let held = switch::hold_both(env, STEP_RUNNING, self.tick_wait)?;
+        *self.imported.borrow_mut() = None;
+        Ok(Some(Box::new(held)))
+    }
+
+    /// The same two locks for a rollback, taken before the rolling-back record, so a refusal writes nothing and a host
+    /// cannot start (and save its routines over the write-back) until the rollback is done.
+    fn rollback_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        let held = switch::hold_both(env, ROLLBACK_RUNNING, self.tick_wait)?;
+        Ok(Some(Box::new(held)))
+    }
+
+    /// state.json must still be what the import read: a writer that did not take `tick.lock` would otherwise lose its
+    /// tick to the tombstone.
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        let Some(want) = self.imported.borrow().clone() else {
+            return Err(Error::Refused(
+                "schedules: the import did not record state.json's sha, so the file cannot be checked before the tombstone; nothing was tombstoned, run it again".into(),
+            ));
+        };
+        if crate::import::schedules::state_sha(&env.machine)?.unwrap_or_default() == want {
+            Ok(())
+        } else {
+            Err(Error::Refused(
+                "schedules: sched/state.json changed after the import read it (a tick that did not take tick.lock?); nothing was tombstoned, run the step again".into(),
+            ))
+        }
+    }
+
     fn step_refusal(&self, env: &Env) -> Option<String> {
         if let Some(why) = self.build_refusal(env) {
             return Some(why);
         }
         // The host reads the switch when it starts. A running host started before the step would keep running every
         // routine from serve.db next to the core's fire, so each would run twice.
-        host_refusal(
-            env,
-            "not stepped: the host is running and reads the schedules switch only when it starts; stop the host, step schedules, start the host. `step schedules --dry-run` and `check schedules` work while it runs",
-        )
+        host_refusal(env, STEP_RUNNING)
     }
 
     fn rollback_refusal(&self, env: &Env) -> Option<String> {
         // Not a `live` reason: `--force` must not get past it. The running host saves its in-memory routines over
         // serve.db's `routines.v1`, silently undoing the keys and flags the rollback puts back there.
-        host_refusal(
-            env,
-            "the host is running and would save its routines over the ones put back; stop the host first (then roll back, then start it); --force does not override this",
-        )
+        host_refusal(env, ROLLBACK_RUNNING)
     }
 
     fn check_notes(&self, env: &Env) -> Vec<String> {
@@ -863,10 +969,12 @@ impl Module for Schedules {
             for row in plan.rows.iter().filter(|r| r.key.is_some()) {
                 lines.extend(self.put_key(core, row)?);
             }
-            lines.extend(
-                crate::import::schedules::run_in(&env.layout, &env.machine, false, Some(core))?
-                    .lines,
-            );
+            lines.extend(Self::decide_fired_onces(core, &plan)?);
+            let (rep, sha) =
+                crate::import::schedules::run_sha(&env.layout, &env.machine, false, Some(core))?;
+            // The sha of the bytes the import read (under tick.lock): what the tombstone is checked against.
+            *self.imported.borrow_mut() = Some(sha.unwrap_or_default());
+            lines.extend(rep.lines);
         } else {
             lines.extend(
                 crate::import::schedules::run_in(&env.layout, &env.machine, true, None)?.lines,
@@ -909,7 +1017,7 @@ impl Module for Schedules {
                 }
             };
             for row in plan.rows.iter().filter(|r| r.agent == agent) {
-                match verdict(&jobs, row, &mac) {
+                match verdict(&jobs, row, &mac, true) {
                     Verdict::Same => {}
                     Verdict::New => {
                         diffs.push(format!("{agent}/{}: a routine, not a job yet", row.job));
@@ -1056,6 +1164,32 @@ impl Schedules {
         Ok(envelope
             .get(db, &crate::schedules::hook_key_name(agent, job))?
             .map(|b| sha_hex(&b)))
+    }
+
+    /// A `once` the host already fired gets a decided row at its slot, so the core's plan finds it decided and never
+    /// refires it (H2). Idempotent; a row the core already decided is left as it is.
+    fn decide_fired_onces(core: &mut Core, plan: &Plan) -> Result<Vec<String>> {
+        let rows: Vec<&Row> = plan.rows.iter().filter(|r| r.decided.is_some()).collect();
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tx = core.claim_tx()?;
+        let mut lines = Vec::new();
+        for r in rows {
+            let Some(slot) = &r.decided else { continue };
+            let n = tx.execute(
+                "INSERT OR IGNORE INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES (?1, ?2, ?3, 'skipped:already fired by the host', NULL, ?4)",
+                rusqlite::params![r.agent, r.job, slot, now_ms()],
+            )?;
+            if n > 0 {
+                lines.push(format!(
+                    "{}/{}: its once already fired in the host: slot {slot} is decided, the core will not fire it again",
+                    r.agent, r.job
+                ));
+            }
+        }
+        tx.commit()?;
+        Ok(lines)
     }
 
     /// The job's key as the secret record hooks.rs reads. Written only when missing or different, so a re-import changes
