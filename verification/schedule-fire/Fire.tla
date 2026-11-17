@@ -78,7 +78,9 @@ CONSTANTS NS,            \* timed slots 1..NS, slot k at time P*k
           AdoptMode,     \* "today": the host's adopt requeues every claimed or running turn | "c" (package C): a claimed turn
                          \* (no process) is requeued, a running one keeps running (process alive) or ends, never retried
           ClaimPausedCheck, \* TRUE (package C): a claim of a schedule turn reads the job's paused row in its transaction and
-                         \* cancels the turn when paused
+                         \* cancels the turn when paused (`Fence::Paused`, claims.rs; `requeue_turn` cancels a paused job's turn too)
+          KeepRebegin,   \* TRUE: a bot run that exits out of usage is put back (OutOfUsage) and its actor claims it again by its id
+                         \* (Rebegin: the keep path, core_runs.rs "a requeue after a usage limit"), past the runner's redeemed check
           Holds,         \* TRUE: the conversation can be held by someone else
           AdHocLate,     \* TRUE: an ad hoc fire is possible at the last instant too (the webhook liveness row)
           Redeliver,     \* TRUE: an unaccepted ad hoc delivery is retried until accepted (strong fairness)
@@ -339,6 +341,18 @@ Claim(i) ==
 \* The host's runner cancels a turn that was redeemed before ("interrupted", hostclaim.queued redeemedBefore): never re-run.
 RunnerCancel(i) == /\ HostBotOnly /\ up /\ turn[i].st \in Pending /\ turn[i].rd /\ TurnStep(i, "cancelled")
 
+\* The keep path (package C's brief: pause wins over it). The claim's exit report with out_of_usage puts a running turn back
+\* (claims.rs apply -> requeue_turn, which cancels it instead when the job is paused: ClaimPausedCheck); the host's actor still
+\* holds the item and claims the turn again by its id, which is not the runner's redeemed check but the same claim.
+OutOfUsage(i) ==
+  /\ KeepRebegin /\ up /\ HasBot(turn[i].person) /\ turn[i].st = "running"
+  /\ IF ClaimPausedCheck /\ def.paused THEN TurnStep(i, "cancelled") ELSE TurnStep(i, "queued")
+Rebegin(i) ==
+  /\ KeepRebegin /\ up /\ HasBot(turn[i].person) /\ turn[i].st = "queued" /\ turn[i].rd /\ ~held
+  /\ (~DeadlineCheck \/ now < turn[i].dl)
+  /\ IF ClaimPausedCheck /\ def.paused THEN TurnStep(i, "cancelled")
+     ELSE ClaimMayOk(i) /\ TurnStep(i, "claimed")
+
 Expire(i) == /\ up /\ turn[i].st \in Pending /\ turn[i].dl <= now /\ TurnStep(i, "expired")
 Start(i) == /\ up /\ turn[i].st = "claimed" /\ turn' = [turn EXCEPT ![i].st = "running", ![i].rd = TRUE]
   /\ UNCHANGED <<now, wm, up, def, revoked, repoch, cut, held, fires, ans, pend, defHist, revHist>>
@@ -347,6 +361,7 @@ Finish(i) == /\ up /\ turn[i].st = "running" /\ TurnStep(i, "done")
 ClaimAny == \E i \in Ids : Claim(i)
 ExpireAny == \E i \in Ids : Expire(i)
 RunnerCancelAny == \E i \in Ids : RunnerCancel(i)
+KeepAny == \E i \in Ids : OutOfUsage(i) \/ Rebegin(i)
 StartAny == \E i \in Ids : Start(i)
 FinishAny == \E i \in Ids : Finish(i)
 
@@ -354,7 +369,7 @@ Next ==
   \/ TickFresh \/ TickStale \/ AdHocFire \/ FireB
   \/ Edit \/ CancelPaused \/ (\E p \in Persons : RevokeAuth(p) \/ RevokePerson(p) \/ Grant(p))
   \/ Crash \/ Restart \/ HostAdopt \/ Hold \/ Release \/ Advance
-  \/ ClaimAny \/ ExpireAny \/ RunnerCancelAny \/ StartAny \/ FinishAny
+  \/ ClaimAny \/ ExpireAny \/ RunnerCancelAny \/ StartAny \/ FinishAny \/ KeepAny
 
 \* The core may crash any number of times. A crash loop (claim -> crash -> restart -> claim ...) does not starve a turn:
 \* strong fairness lets it run in the stretches where the core is up (the review replaced "crashes finitely often").

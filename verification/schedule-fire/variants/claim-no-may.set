@@ -2,3 +2,4 @@ MaxEdits = 0
 MaxRevs = 1
 ClaimMay = FALSE
 MaxTurns = 2
+KeepRebegin = FALSE

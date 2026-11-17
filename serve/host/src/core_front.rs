@@ -471,6 +471,7 @@ const CORE_CALL_METHODS: &[&str] = &[
     "terminal.list",
     // the kernel takers' claim rows (P5), see kernel/bin/kith-sessions and kith-wake
     "claim.external",
+    "claim.attach",
     "claim.release",
     "claim.sweepPerson",
     "claim.list",

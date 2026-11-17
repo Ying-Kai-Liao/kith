@@ -71,10 +71,15 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.claim",
-        "A terminal or `external` writer claim (step 1). Refused when a writer holds the conversation. An `external` claim names its process. Answers `{claimId, generation}`.",
+        "A terminal or `external` writer claim (step 1), or a `scheduleRun`: the claim of a pulled schedule turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
         &[
             need("conversation", "string", "The session id."),
-            need("kind", "string", "terminal or external."),
+            need("kind", "string", "terminal, external or scheduleRun."),
+            opt(
+                "turn",
+                "int",
+                "The schedule turn a `scheduleRun` claim runs.",
+            ),
             need(
                 "person",
                 "string",

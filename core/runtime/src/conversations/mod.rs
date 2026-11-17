@@ -11,6 +11,7 @@ mod props;
 pub(crate) mod reconcile;
 #[cfg(test)]
 mod reconcile_tests;
+pub(crate) mod sched_run;
 #[cfg(test)]
 mod tests;
 pub(crate) mod warm;

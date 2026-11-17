@@ -89,7 +89,10 @@ h-no-h3	INVARIANT	NoStack	fail
 h-global-rewind	INVARIANT	AtMostOnce	fail
 h-bare	INVARIANT	NoSilentLoss	fail
 h-nolast	INVARIANT	NoStack	fail
-# --- package C ahead of its brief: AdoptMode "c" (pid alive keeps running, redeemed-then-dead ended, no-pid requeued), with and without ClaimPausedCheck ---
+# --- package C: AdoptMode "c" (pid alive keeps running, redeemed-then-dead ended, no-pid requeued) and the claim's paused check
+# (ClaimPausedCheck) are the base now; the rows switch each off. keep-nocheck: the out-of-usage keep path (KeepRebegin) claims a
+# paused job's turn again, so the paused check is what holds PausedNeverStarts ---
 c-nocheck	PROPERTY	PausedNeverStarts	pass
 c-check	PROPERTY	PausedNeverStarts	pass
 c-check-rev	PROPERTY	RevokedNeverStarts	pass
+keep-nocheck	PROPERTY	PausedNeverStarts	fail

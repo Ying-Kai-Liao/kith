@@ -6,6 +6,7 @@
 //! | answer | meaning |
 //! |---|---|
 //! | `{refused: "held", why}` | a writer holds the conversation (claimed, running or ending): the turn stays queued or parks |
+//! | `{refused: "paused", why}` | a schedule turn's job is paused: the core has cancelled the turn already |
 //! | `{refused: "stopped", why}` | the conversation's ask was stopped: the core has cancelled the turn already |
 //! | `{refused: "revoked", why}` | the person's revoke epoch moved after the caller's may check: the caller cancels the turn |
 //! | `{refused: "waiting", why}` | the claims wait for this generation's reconcile |
@@ -19,6 +20,7 @@ use serde_json::{Value, json};
 
 use crate::conversations::basis::{self, Basis, Chain, Level};
 use crate::conversations::claims::{self, Kind, NewClaim, NewTurn, Redeemed, Reported};
+use crate::conversations::sched_run;
 use crate::conversations::warm::{self, WarmProc};
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -131,6 +133,7 @@ fn refusal(e: Error) -> Result<Value> {
         Error::Refused(w) if w.contains("has a writer") => ("held", w.clone()),
         Error::Refused(w) if w.contains("turn budget of the chain") => ("budget", w.clone()),
         Error::Refused(w) if w.contains("was revoked") => ("revoked", w.clone()),
+        Error::Refused(w) if w.contains("is paused") => ("paused", w.clone()),
         Error::Refused(w) if w.contains("wait for the reconcile") => ("waiting", w.clone()),
         Error::Refused(w) if w.contains("is not waiting for") => ("notWaiting", w.clone()),
         Error::Refused(w) => ("other", w.clone()),
@@ -226,6 +229,22 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             }))
         }
         "hostclaim.epoch" => Ok(json!({ "epoch": claims::revoke_epoch(core, person(p)?)? })),
+        "hostclaim.claim" if word(p, "kind") == Some("scheduleRun") => {
+            // A cron job's turn run by `kith-sched run-turn` (`conversations::sched_run`): the claim has no process until the run
+            // attaches itself (`claim.attach`).
+            match sched_run::claim_run(
+                core,
+                need(p, "conversation")?,
+                person(p)?,
+                int(p, "turn")?,
+                word(p, "holderInstance"),
+                int(p, "revokeSeen")?,
+                now,
+            ) {
+                Ok(c) => Ok(json!({ "claimId": c.claim_id, "generation": c.generation })),
+                Err(e) => refusal(e),
+            }
+        }
         "hostclaim.claim" => {
             let kind = match need(p, "kind")? {
                 "terminal" => Kind::Terminal,
@@ -399,7 +418,8 @@ fn queued(core: &Core) -> Result<Value> {
     let mut st = core.conn().prepare(
         "SELECT t.id, t.conversation, c.agent, c.engine, t.person, t.prompt, t.deadline, t.parked_reason,
                 EXISTS (SELECT 1 FROM claims k WHERE k.turn = t.id AND k.running_at IS NOT NULL),
-                (SELECT f.job FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1)
+                (SELECT f.job FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1),
+                (SELECT f.settings FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1)
          FROM turns t JOIN conversations c ON c.id = t.conversation
          WHERE t.enq_key IS NULL AND t.source = 'schedule' AND t.state IN ('queued', 'parked')
          ORDER BY t.id",
@@ -413,6 +433,11 @@ fn queued(core: &Core) -> Result<Value> {
                 "agent": r.get::<_, String>(2)?,
                 "engine": r.get::<_, String>(3)?,
                 "job": r.get::<_, Option<String>>(9)?,
+                // `{model, effort, harness}` fixed when the turn was fired (null for a turn fired before they were kept: the run
+                // reads the job's current values).
+                "settings": r
+                    .get::<_, Option<String>>(10)?
+                    .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
                 // null when the owner can't be read: the host says so instead of letting every run expire quietly.
                 "owner": owner.as_deref().map(|o| o == person),
                 "person": person,

@@ -13,9 +13,13 @@
 //! - **Where it shows**: an imported routine (its job is one the import made from a routine of this host) in that
 //!   routine's bot, as before; a `kith-sched` job in its agent's own 1:1 chat. The thread opens with a notice in the
 //!   chat, and the result is posted there (the run card) when it ends.
-//! - **Only the owner's turns**: a run goes to an owner's bot (no `person`), so a job that runs as someone else is left
-//!   to expire at its deadline, as is a turn with no bot here. A keyed turn is never listed (the host actor that enqueued
-//!   it owns it; the strays sweep cancels an orphan).
+//! - **A cron job of `kith-sched`** (any job that is not an imported routine; M4-5 package C) is not run through a bot at all: the
+//!   host claims its turn and starts `kith-sched run-turn` detached, for the owner's jobs and a guest's alike (`core_cron.rs`).
+//! - **Only the owner's routine turns**: a routine's run goes to an owner's bot (no `person`). A turn the host cannot place
+//!   right away (a routine whose bot is gone or not the owner's, a turn that names no job, a run that would not start) is
+//!   cancelled with a reason and a notice where the run would have shown, so `kith schedule` says how it ended instead of
+//!   `fired` and nothing waits silently for its deadline. A keyed turn is never listed (the host actor that enqueued it owns
+//!   it; the strays sweep cancels an orphan).
 //!
 //! An item that ends without its turn having finished (its start failed) cancels the turn: nothing pulls it again.
 
@@ -56,29 +60,57 @@ fn root_of(turn: i64) -> String {
     format!("schedule-{turn}")
 }
 
+/// What the runner asks of the core and the system, so the rule below is tested without either.
+pub(super) trait Ops {
+    /// Cancels a turn at the core with a reason (true: it answered).
+    fn cancel(&self, turn: i64, why: &str) -> bool;
+    /// Claims a cron job's turn and starts its run (`core_cron.rs`). `job` is the job's id.
+    fn cron(&self, turn: &Value, job: &str) -> Started;
+}
+
+/// What [`Ops::cron`] came to.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Started {
+    /// Claimed and running as a process of its own.
+    Ran,
+    /// Not now (a writer holds the conversation, the core did not answer): the turn stays queued and is pulled again.
+    Later,
+    /// The turn is gone (the core cancelled it, it was claimed elsewhere, its person was revoked): nothing to do.
+    Gone,
+    /// It cannot run and the claim is given back: the turn is cancelled with this reason.
+    Failed(String),
+}
+
 /// The agent a bot's claims name (`Actor::writer_agent`): its hq agent's, or `bot:<id>` for a native bot.
 fn agent_of(cfg: &crate::store::BotConfig) -> String {
     cfg.hq_agent.clone().unwrap_or_else(|| format!("bot:{}", cfg.id))
 }
 
-/// Where a pulled turn shows, if anywhere here: `(bot, name, timeout)`. Only an owner's bot (no `person`) of the agent.
-fn place(hub: &Hub, routines: &Routines, agent: &str, job: Option<&str>) -> Option<(String, String, Duration)> {
-    let mine = |b: &crate::store::BotRow| !b.deleted && b.config.person.is_none() && agent_of(&b.config) == agent;
-    let owners = |bot: &str| hub.store.bot(bot).ok().flatten().is_some_and(|b| mine(&b));
-    if let Some(job) = job {
-        let s = routines.state.locked();
-        // The import names a routine's jobs `<id>` (one trigger) or `<id>-<n>`.
-        let routine = s.routines.iter().find(|r| {
+/// The imported routine a core job id names, if any: the import names a routine's jobs `<id>` (one trigger) or `<id>-<n>`.
+/// `(bot id, name, timeout)`, whether or not that bot is still here.
+fn routine_of(routines: &Routines, job: &str) -> Option<(String, String, Duration)> {
+    let s = routines.state.locked();
+    s.routines
+        .iter()
+        .find(|r| {
             !r.deleted
                 && (if r.triggers.len() == 1 {
                     r.id == job
                 } else {
                     (1..=r.triggers.len()).any(|n| format!("{}-{n}", r.id) == job)
                 })
-        });
-        if let Some(r) = routine.filter(|r| owners(&r.bot_id)) {
-            return Some((r.bot_id.clone(), r.name.clone(), Duration::from_secs(r.timeout_seconds)));
-        }
+        })
+        .map(|r| (r.bot_id.clone(), r.name.clone(), Duration::from_secs(r.timeout_seconds)))
+}
+
+/// Where a pulled turn shows, if anywhere here: `(bot, name, timeout)`. Only an owner's bot (no `person`) of the agent.
+fn place(hub: &Hub, routines: &Routines, agent: &str, job: Option<&str>) -> Option<(String, String, Duration)> {
+    let mine = |b: &crate::store::BotRow| !b.deleted && b.config.person.is_none() && agent_of(&b.config) == agent;
+    let owners = |bot: &str| hub.store.bot(bot).ok().flatten().is_some_and(|b| mine(&b));
+    if let Some(routine) = job.and_then(|job| routine_of(routines, job))
+        && owners(&routine.0)
+    {
+        return Some(routine);
     }
     let bots = hub.store.bots().ok()?;
     let own = bots.iter().find(|b| mine(b))?;
@@ -118,12 +150,12 @@ impl Routines {
                 return;
             }
         };
-        self.take(hub, &turns, |turn| core.cancel_turn(turn, INTERRUPTED));
+        self.take(hub, &turns, &super::core_cron::Live(core));
         self.dispatch_pulled(hub);
     }
 
-    /// The rule of the module doc over what `hostclaim.queued` listed. `cancel` cancels a turn at the core (true: it answered).
-    pub(super) fn take(&self, hub: &Hub, turns: &[Value], cancel: impl Fn(i64) -> bool) {
+    /// The rule of the module doc over what `hostclaim.queued` listed. `ops` is the core and the system.
+    pub(super) fn take(&self, hub: &Hub, turns: &[Value], ops: &dyn Ops) {
         let listed: Vec<i64> = turns.iter().filter_map(|t| t["turn"].as_i64()).collect();
         // A pending item whose turn is no longer waiting (expired, cancelled) is gone; one that started is the actor's.
         self.pulled.locked().retain(|_, i| i.status != Status::Pending || listed.contains(&i.turn));
@@ -149,7 +181,7 @@ impl Routines {
             let job = t["job"].as_str();
             let where_ = place(hub, self, agent, job);
             if t["redeemedBefore"] == true {
-                if cancel(turn)
+                if ops.cancel(turn, INTERRUPTED)
                     && let Some((bot, name, _)) = where_
                 {
                     let text =
@@ -163,6 +195,18 @@ impl Routines {
                 }
                 continue;
             }
+            let Some(job) = job else {
+                Self::give_up(hub, ops, turn, where_.as_ref(), "the fire names no job");
+                continue;
+            };
+            if routine_of(self, job).is_none() {
+                // A cron job of kith-sched: its own process, for the owner and a guest alike.
+                match ops.cron(t, job) {
+                    Started::Ran | Started::Later | Started::Gone => {}
+                    Started::Failed(why) => Self::give_up(hub, ops, turn, where_.as_ref(), &why),
+                }
+                continue;
+            }
             if t["owner"].is_null() {
                 tracing::warn!(
                     turn,
@@ -172,11 +216,13 @@ impl Routines {
                 continue;
             }
             if t["owner"] != true {
-                tracing::debug!(turn, agent, "routines: a scheduled run that is not the owner's is left to expire");
+                Self::give_up(hub, ops, turn, where_.as_ref(), "a routine runs for the owner only");
                 continue;
             }
+            // The routine's own bot; one that is gone or not the owner's falls back to the agent's chat (`place`), and with no
+            // bot at all there is nothing here to run it.
             let Some((bot, name, timeout)) = where_ else {
-                tracing::debug!(turn, agent, "routines: no bot here for a scheduled run; it expires at its deadline");
+                Self::give_up(hub, ops, turn, None, "no bot of the owner's here to run it");
                 continue;
             };
             let item = Item {
@@ -190,6 +236,22 @@ impl Routines {
                 status: Status::Pending,
             };
             self.pulled.locked().insert(item_id(turn), item);
+        }
+    }
+
+    /// Cancels a turn the host cannot place, with the reason, and says so where its run would have shown (the notice keeps
+    /// `kith schedule` from showing only `fired`).
+    fn give_up(hub: &Hub, ops: &dyn Ops, turn: i64, at: Option<&(String, String, Duration)>, why: &str) {
+        tracing::warn!(turn, why, "routines: a scheduled run can't be placed; cancelled");
+        if ops.cancel(turn, why)
+            && let Some((bot, name, _)) = at
+        {
+            let data = json!({"text": format!("{name} did not run: {why}."), "style": "error", "coreTurn": turn});
+            if let Err(error) =
+                hub.add_entry_once(&format!("schedule-cut-{turn}"), &Lane::main(bot), EntryKind::Notice, &data)
+            {
+                tracing::warn!(%error, "routines: couldn't post a cancelled run's notice");
+            }
         }
     }
 

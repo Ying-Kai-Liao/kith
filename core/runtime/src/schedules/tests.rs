@@ -225,6 +225,11 @@ fn next_and_show_use_the_rule_and_the_run_history() {
     assert_eq!(show["fires"][0]["slot"], "2026-11-04T08:00:00Z");
     assert_eq!(show["fires"][0]["outcome"], "skipped:paused");
     assert_eq!(show["fires"][0]["turn"], Value::Null);
+    assert_eq!(
+        show["fires"][0]["turnState"],
+        Value::Null,
+        "a skipped slot has no turn to have ended"
+    );
     // Refusals: an unknown job, an unknown agent, an agent whose file is unreadable.
     for (a, j) in [("mel", "nope"), ("zed", "digest")] {
         assert!(

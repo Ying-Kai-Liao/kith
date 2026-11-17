@@ -25,6 +25,8 @@ FILES=(
   core/runtime/src/conversations/claims.rs  # enqueue_turn, claim, park, unpark_ready, expire_parked, revoke_person
   core/runtime/src/conversations/reconcile.rs  # Restart: step 5 (rule K keeps the host's live claims)
   serve/host/src/routines/core_runs.rs  # who runs a fired turn: the host's runner (hostclaim.queued, cancel a redeemed one)
+  serve/host/src/routines/core_cron.rs  # a cron job's turn: claim it, start `kith-sched run-turn` detached, report its end (package C)
+  core/runtime/src/conversations/sched_run.rs  # the cron run's claim: claim_run, attach (the check-and-set), paused_in (package C)
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

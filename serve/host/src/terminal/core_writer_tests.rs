@@ -188,6 +188,31 @@ impl World {
                     json!({"status": "claimed", "claimId": n, "generation": 1, "account": self.account, "fresh": false}),
                 )
             }
+            // A cron run's claim (`kind: scheduleRun`, the core's `sched_run::claim_run`): a claim of kind `turn` with no process,
+            // its turn claimed; its `run-turn` attaches its own pid (`claim.attach`, tested on the real core), which this
+            // scripted core does not model: the report of the host's child ends it, as `hostclaim.report` above does for any
+            // claim with no pid.
+            "hostclaim.claim" if p["kind"] == "scheduleRun" => {
+                let turn = p["turn"].as_i64().unwrap();
+                if self.live(&conv).is_some() {
+                    return refused("held");
+                }
+                let n = i64::try_from(self.claims.len()).unwrap() + 1;
+                self.claims.push(C {
+                    id: n,
+                    conv,
+                    state: "claimed".into(),
+                    kind: "turn".into(),
+                    pid: None,
+                    started: None,
+                    instance: p["holderInstance"].as_str().map(str::to_owned),
+                    turn: Some(turn),
+                });
+                if let Some(t) = self.turn(turn) {
+                    t.1 = "claimed".into();
+                }
+                data(json!({"claimId": n, "generation": 1}))
+            }
             "hostclaim.redeem" => {
                 if self.kill_on_redeem {
                     if let Some(pid) = p["pid"].as_i64().and_then(|p| i32::try_from(p).ok()) {

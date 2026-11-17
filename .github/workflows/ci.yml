@@ -301,6 +301,8 @@ jobs:
               - 'core/runtime/src/conversations/claims.rs'
               - 'core/runtime/src/conversations/reconcile.rs'
               - 'serve/host/src/routines/core_runs.rs'
+              - 'serve/host/src/routines/core_cron.rs'
+              - 'core/runtime/src/conversations/sched_run.rs'
               - 'core/runtime/src/conversations/warm.rs'
               - 'core/runtime/src/hostclaim.rs'
               - 'core/runtime/src/import/schedules.rs'
@@ -411,6 +413,7 @@ jobs:
               Accounts tombstone check (a tombstoned state.json refuses writes; kith-account exits 4)|kernel/tests/kith-accounts-tombstone-check
               Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
               Schedules tick.lock check (kith-sched holds sched/tick.lock across read, decide, record, save; a held lock starts nothing)|kernel/tests/kith-sched-tick-lock-check
+              Schedules run-turn check (kith-sched run-turn: start()'s env, the claim's check-and-set before the engine, no state.json, no tick.lock)|kernel/tests/kith-sched-run-turn-check
               Grants check (connectors and skills as grants on an agent)|kernel/tests/kith-grants-check
               Limit check|kernel/tests/kith-limit-check
               Agent allow check|kernel/tests/kith-agent-allow-check
