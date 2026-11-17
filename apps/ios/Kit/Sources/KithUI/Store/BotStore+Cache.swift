@@ -33,7 +33,7 @@ extension BotStore {
         rev = cache.rev
         bots = Dictionary(cache.bots.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         myRooms = Dictionary((cache.rooms ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        entries = Dictionary(grouping: cache.entries, by: \.botId)
+        entries.replaceAll(Dictionary(grouping: cache.entries, by: \.botId))
     }
 
     func scheduleSave() {

@@ -49,7 +49,7 @@ public struct BoardComputer: Sendable {
     @MainActor public init(store: BotStore, guestPrompts: [GuestPrompt], botRequests: [BotGuest] = []) {
         self.init(id: store.computer.id, hostName: store.hostName,
                   trouble: store.isOffline ? .unreachable : store.shownConnection == .connecting ? .catchingUp : nil,
-                  bots: store.roster, entries: store.entries, guestPrompts: guestPrompts, botRequests: botRequests)
+                  bots: store.roster, entries: store.entries.all, guestPrompts: guestPrompts, botRequests: botRequests)
     }
 }
 
