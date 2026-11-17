@@ -1012,13 +1012,17 @@ fn a_build_that_cannot_run_fired_turns_refuses_the_step_and_says_so_in_the_dry_r
     .unwrap();
     assert!(
         dry.iter()
-            // The runner is in (condition 1 holds); a build launchd does not run still refuses.
-            .any(|l| l.starts_with(WORDS) && l.contains("Failed: 4:") && !l.contains("1:")),
+            // The core does not run fired turns yet (condition 1), and a build launchd does not run refuses too.
+            .any(|l| l.starts_with(WORDS)
+                && l.contains("1: the core does not run fired turns yet")
+                && l.contains("4:")),
         "{dry:?}"
     );
     let c = check(&reg, &w.env, "schedules").unwrap();
     assert!(
-        c.iter().any(|l| l.starts_with(WORDS) && l.contains("4:")),
+        c.iter().any(|l| l.starts_with(WORDS)
+            && l.contains("1: the core does not run fired turns yet")
+            && l.contains("4:")),
         "{c:?}"
     );
 }
