@@ -1,0 +1,4 @@
+ProjectRule = "row"
+MissingKey = "oldest"
+ExportRule = "different"
+FileWrite = "blind"
