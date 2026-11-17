@@ -133,10 +133,14 @@ pub(crate) fn owed(hub: &Hub) -> Vec<String> {
 }
 
 /// The host store's key of the order of the revoke path's durable rows: each owed row and undone marker takes the next
-/// number, so which came last is never read off a clock that can step back. Taken under `AUTH_WRITES` by every writer.
+/// number, so which came last is never read off a clock that can step back. Taken in one step under [`SEQ_STEP`]: the
+/// owed rows are written both under `AUTH_WRITES` and, after a revoke, without it.
 const SEQ: &str = "revoke.seq";
 
+static SEQ_STEP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn next_seq(hub: &Hub) -> u64 {
+    let _step = SEQ_STEP.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let last = hub.store.kv_get(SEQ).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
     let next = last.saturating_add(1).max(u64::try_from(crate::store::now_ms()).unwrap_or(0));
     if let Err(e) = hub.store.kv_set(SEQ, &next.to_string()) {
@@ -175,7 +179,8 @@ fn note_undo_unread(hub: &Hub, person: &str, e: &anyhow::Error) {
     if let Err(e) = hub.store.kv_set(&format!("{UNREAD}{person}"), kind) {
         tracing::warn!(error = format!("{e:#}"), person, "couldn't keep the note of an unfinished undo");
     }
-    mark_undone(hub, person);
+    // No marker here: this runs after the undo's locked section, and a revoke owed in between must still be paid.
+    // The undo's marker is written by `clear_owed`, under the lock.
 }
 
 /// The note to show on a person's row: set by an undo that could not read the ids, under any id they are held under,
@@ -257,6 +262,7 @@ pub(crate) async fn pay_owed(hub: &Hub) {
         return;
     }
     let _w = AUTH_WRITES.lock().await;
+    let mut handled: Vec<String> = Vec::new();
     for person in owed(hub) {
         let Ok(held) = held(&person).await else { continue };
         let row = hub.store.kv_get(&format!("{OWED}{person}")).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
@@ -271,10 +277,11 @@ pub(crate) async fn pay_owed(hub: &Hub) {
         if let Err(e) = hub.store.kv_delete(&format!("{OWED}{person}")) {
             tracing::warn!(error = format!("{e:#}"), person, "couldn't drop a handled owed cut: it is handled again");
         }
-        for id in &held.ids {
-            // The marker has done its work; one older than a later row is harmless, but none should pile up.
-            let _ = hub.store.kv_delete(&format!("{UNDONE}{id}"));
-        }
+        handled.extend(held.ids);
+    }
+    // After every row: a marker one row used must still stand for another row of the same person (owed under each id).
+    for id in handled {
+        let _ = hub.store.kv_delete(&format!("{UNDONE}{id}"));
     }
 }
 
