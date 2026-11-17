@@ -89,7 +89,9 @@ static SWEEP_FAILING: AtomicBool = AtomicBool::new(false);
 fn note_sweep(failing: &AtomicBool, error: Option<&str>) -> bool {
     let was = failing.swap(error.is_some(), Ordering::Relaxed);
     match (was, error) {
-        (false, Some(why)) => tracing::warn!(error = why, "the core did not list this host's stray turns; the sweep tries again"),
+        (false, Some(why)) => {
+            tracing::warn!(error = why, "the core did not list this host's stray turns; the sweep tries again");
+        }
         (true, None) => tracing::info!("the core lists this host's stray turns again"),
         _ => return false,
     }

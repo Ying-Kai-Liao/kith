@@ -1187,6 +1187,8 @@ actor_test! {
 
 /// A loaded marker goes only with a session the engine closed since it last loaded it (architect MUST 1 of #1016): close, load the
 /// same session again (no sync in between, as `close_reloadable` then the next turn), then a new chat drops it: the marker stays.
+/// The `warm_procs` row goes by the same rule (`sync_warm` forgets exactly `unmarks`): a new chat or fork with no close keeps the
+/// row, a close then a sync drops it, a close then a reload then a drop keeps it.
 #[test]
 fn a_marker_goes_only_with_a_session_closed_since_its_last_load() {
     use std::collections::HashSet;

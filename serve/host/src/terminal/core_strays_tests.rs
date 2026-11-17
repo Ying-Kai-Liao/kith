@@ -9,11 +9,8 @@ use std::sync::Arc;
 /// A scripted core with these waiting host turns `(turn, key)`; it records every cancel.
 fn core(listed: Vec<(i64, String)>, answers: bool) -> (CoreWriter, Arc<Mutex<Vec<i64>>>, std::path::PathBuf) {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "kith-strays-{}-{}",
-        std::process::id(),
-        N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("kith-strays-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     let state = dir.join("state");
     std::fs::create_dir_all(&state).unwrap();
     let folders = Paths {

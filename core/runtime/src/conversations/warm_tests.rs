@@ -165,15 +165,27 @@ fn a_revoke_and_a_host_change_name_a_process_once_however_many_sessions_it_holds
 fn an_owner_turn_killed_with_a_revoked_guests_process_is_requeued() {
     let (_t, mut c) = open();
     let (id, t) = running(&mut c, "o1", 100);
-    let w = |conv| WarmProc { started: "e100", ..proc_of(100, "ann", Some(conv)) };
+    let w = |conv| WarmProc {
+        started: "e100",
+        ..proc_of(100, "ann", Some(conv))
+    };
     warm::register(&mut c, &w("a1")).unwrap();
     warm::register(&mut c, &w("o1")).unwrap();
     let r = revoke_person(&mut c, "ann", 40).expect("revoke");
-    assert_eq!(r.kill.iter().filter_map(|k| k.pid).collect::<Vec<_>>(), vec![100]);
+    assert_eq!(
+        r.kill.iter().filter_map(|k| k.pid).collect::<Vec<_>>(),
+        vec![100]
+    );
     assert_eq!(r.cancelled_turns, 0);
-    assert_eq!((state(&c, id).as_str(), turn_state(&c, t).as_str()), ("running", "running"));
+    assert_eq!(
+        (state(&c, id).as_str(), turn_state(&c, t).as_str()),
+        ("running", "running")
+    );
     report(&mut c, id, "exit", r#"{"pid":100}"#, 41).expect("exit");
-    assert_eq!((state(&c, id).as_str(), turn_state(&c, t).as_str()), ("ended", "queued"));
+    assert_eq!(
+        (state(&c, id).as_str(), turn_state(&c, t).as_str()),
+        ("ended", "queued")
+    );
 }
 
 /// P7b: a claim made while a process is marked for a kill is refused at the redeem on that process, whichever step made
@@ -184,7 +196,9 @@ fn a_marked_process_refuses_a_redeem_even_through_its_placeholder_row() {
     let (_t, mut c) = open();
     super::tests::conversation(&c, "c1");
     let turn = super::tests::turn(&c, "c1", "sam");
-    let id = super::claims::claim(&mut c, &super::tests::new_claim("c1", Some(turn)), 10).unwrap().claim_id;
+    let id = super::claims::claim(&mut c, &super::tests::new_claim("c1", Some(turn)), 10)
+        .unwrap()
+        .claim_id;
     c.conn()
         .execute(
             "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation, kill_at)
