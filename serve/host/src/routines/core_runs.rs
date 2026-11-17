@@ -107,10 +107,10 @@ fn routine_of(routines: &Routines, job: &str) -> Option<(String, String, Duratio
 fn place(hub: &Hub, routines: &Routines, agent: &str, job: Option<&str>) -> Option<(String, String, Duration)> {
     let mine = |b: &crate::store::BotRow| !b.deleted && b.config.person.is_none() && agent_of(&b.config) == agent;
     let owners = |bot: &str| hub.store.bot(bot).ok().flatten().is_some_and(|b| mine(&b));
-    if let Some(routine) = job.and_then(|job| routine_of(routines, job)) {
-        if owners(&routine.0) {
-            return Some(routine);
-        }
+    if let Some(routine) = job.and_then(|job| routine_of(routines, job))
+        && owners(&routine.0)
+    {
+        return Some(routine);
     }
     let bots = hub.store.bots().ok()?;
     let own = bots.iter().find(|b| mine(b))?;
@@ -196,14 +196,14 @@ impl Routines {
                 continue;
             }
             let Some(job) = job else {
-                self.give_up(hub, ops, turn, where_.as_ref(), "the fire names no job");
+                Self::give_up(hub, ops, turn, where_.as_ref(), "the fire names no job");
                 continue;
             };
             if routine_of(self, job).is_none() {
                 // A cron job of kith-sched: its own process, for the owner and a guest alike.
                 match ops.cron(t, job) {
                     Started::Ran | Started::Later | Started::Gone => {}
-                    Started::Failed(why) => self.give_up(hub, ops, turn, where_.as_ref(), &why),
+                    Started::Failed(why) => Self::give_up(hub, ops, turn, where_.as_ref(), &why),
                 }
                 continue;
             }
@@ -216,13 +216,13 @@ impl Routines {
                 continue;
             }
             if t["owner"] != true {
-                self.give_up(hub, ops, turn, where_.as_ref(), "a routine runs for the owner only");
+                Self::give_up(hub, ops, turn, where_.as_ref(), "a routine runs for the owner only");
                 continue;
             }
             // The routine's own bot; one that is gone or not the owner's falls back to the agent's chat (`place`), and with no
             // bot at all there is nothing here to run it.
             let Some((bot, name, timeout)) = where_ else {
-                self.give_up(hub, ops, turn, None, "no bot of the owner's here to run it");
+                Self::give_up(hub, ops, turn, None, "no bot of the owner's here to run it");
                 continue;
             };
             let item = Item {
@@ -241,7 +241,7 @@ impl Routines {
 
     /// Cancels a turn the host cannot place, with the reason, and says so where its run would have shown (the notice keeps
     /// `kith schedule` from showing only `fired`).
-    fn give_up(&self, hub: &Hub, ops: &dyn Ops, turn: i64, at: Option<&(String, String, Duration)>, why: &str) {
+    fn give_up(hub: &Hub, ops: &dyn Ops, turn: i64, at: Option<&(String, String, Duration)>, why: &str) {
         tracing::warn!(turn, why, "routines: a scheduled run can't be placed; cancelled");
         if ops.cancel(turn, why)
             && let Some((bot, name, _)) = at

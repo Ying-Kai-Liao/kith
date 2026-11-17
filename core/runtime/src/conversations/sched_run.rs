@@ -130,7 +130,7 @@ pub(crate) fn attach(
         tx.commit()?;
         return Ok(json!({ "attached": true }));
     }
-    Ok(refusal(&tx, claim_id, pid, started)?)
+    refusal(&tx, claim_id, pid, started)
 }
 
 fn refusal(tx: &Transaction<'_>, claim_id: i64, pid: u32, started: &str) -> Result<Value> {

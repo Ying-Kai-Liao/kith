@@ -73,6 +73,6 @@ fn the_run_leads_a_process_group_of_its_own() {
     let k = kernel("ps -o pid=,pgid= -p $$ >&2");
     let (_, err) = run(&k, None, &json!({"prompt": "x", "settings": null}));
     let mut f = err.split_whitespace();
-    let (pid, pgid) = (f.next().unwrap(), f.next().unwrap());
-    assert_eq!(pid, pgid, "a host stop signals the host's group, not this one");
+    let (lead, group) = (f.next().unwrap(), f.next().unwrap());
+    assert_eq!(lead, group, "a host stop signals the host's group, not this one");
 }
