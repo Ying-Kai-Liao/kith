@@ -288,6 +288,26 @@ impl Store {
         Ok(st.query_map(params![since, cap], row_entry)?.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// An app's catch-up: entries changed after `since`, exactly, once it has a cursor. A fresh app (`since == 0`) gets
+    /// a window that does not grow with a chat's history: per chat the newest `cap` main-chat entries and the newest
+    /// `cap` thread replies (ranked apart, so one busy task can't push the chat's own messages out), plus the roots of
+    /// those replies. Older messages page in with `history`, threads with `thread`.
+    pub fn catch_up_since(&self, since: i64, cap: i64) -> Result<Vec<Entry>> {
+        if since != 0 {
+            return self.entries_since(since, cap);
+        }
+        let c = self.db.locked();
+        let mut st = c.prepare(&format!(
+            "WITH ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY bot_id, thread_id IS NULL ORDER BY seq DESC) AS rn
+                             FROM entries)
+             SELECT {ENTRY_COLS} FROM ranked
+             WHERE rn <= ?1
+                OR id IN (SELECT thread_id FROM ranked WHERE rn <= ?1 AND thread_id IS NOT NULL)
+             ORDER BY seq"
+        ))?;
+        Ok(st.query_map(params![cap], row_entry)?.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// The entries of one chat (a room, threads included) after `since`, oldest first, at most `cap`. A fresh reader
     /// (`since == 0`) gets the newest `cap`; one with a cursor gets the next `cap` after it, so it skips nothing.
     /// Only entries inserted after `after_seq` count (an outside bot's join point), however far an edit moved their `rev`.
@@ -661,6 +681,67 @@ mod tests {
         };
         // The newest 3 are all replies; the old root rides along, and the main chat row outside the window does not.
         assert_eq!(ids(3), ["task", "reply 2", "reply 3", "reply 4"]);
+    }
+
+    #[test]
+    fn an_apps_fresh_catch_up_ranks_main_chat_and_replies_apart_and_stays_exact_with_a_cursor() {
+        let s = temp_store();
+        let root =
+            s.insert_entry(&Lane::main("b1"), EntryKind::User, 1, &json!({"text": "task", "task": true})).unwrap();
+        for i in 0..4 {
+            s.insert_entry(&Lane::main("b1"), EntryKind::User, 1, &json!({"text": format!("main {i}")})).unwrap();
+        }
+        let thread = Lane::in_thread("b1", &root.id);
+        for i in 0..5 {
+            s.insert_entry(&thread, EntryKind::Agent, 1, &json!({"text": format!("reply {i}"), "final": true}))
+                .unwrap();
+        }
+        let texts = |rows: Vec<Entry>| -> Vec<String> {
+            rows.into_iter().map(|e| e.data["text"].as_str().unwrap().to_owned()).collect()
+        };
+        // The busy task's replies don't push the chat's own newest messages out; its old root rides along.
+        assert_eq!(texts(s.catch_up_since(0, 2).unwrap()), ["task", "main 2", "main 3", "reply 3", "reply 4"]);
+        // With a cursor nothing is cut.
+        assert_eq!(texts(s.catch_up_since(root.rev, 2).unwrap()).len(), 9);
+    }
+
+    #[test]
+    fn a_fresh_catch_up_stays_bounded_however_long_the_history() {
+        let s = temp_store();
+        // 10,000 entries over 20 chats, a quarter of them thread replies under a few tasks per chat.
+        for chat in 0..20 {
+            let main = Lane::main(&format!("b{chat}"));
+            let mut root = None;
+            for i in 0..500 {
+                if i % 4 == 3 {
+                    let r: &Entry = root.as_ref().unwrap();
+                    let lane = Lane::in_thread(&r.bot_id, &r.id);
+                    s.insert_entry(&lane, EntryKind::Agent, 1, &json!({"text": "reply", "final": true})).unwrap();
+                } else {
+                    let e =
+                        s.insert_entry(&main, EntryKind::User, 1, &json!({"text": "m", "task": i % 100 == 0})).unwrap();
+                    if i % 100 == 0 {
+                        root = Some(e);
+                    }
+                }
+            }
+        }
+        let cold = s.catch_up_since(0, 40).unwrap();
+        let old = s.entries_since(0, 200).unwrap();
+        let bytes = |rows: &[Entry]| serde_json::to_vec(rows).unwrap().len();
+        println!(
+            "10k entries over 20 chats: cold catch-up {} entries, {} B (was {}, {} B)",
+            cold.len(),
+            bytes(&cold),
+            old.len(),
+            bytes(&old)
+        );
+        assert!(cold.len() <= 20 * (40 + 40 + 5), "{}", cold.len());
+        for chat in 0..20 {
+            let id = format!("b{chat}");
+            let main = cold.iter().filter(|e| e.bot_id == id && e.thread_id.is_none()).count();
+            assert!((40..=45).contains(&main), "{id}: {main} main rows");
+        }
     }
 
     #[test]

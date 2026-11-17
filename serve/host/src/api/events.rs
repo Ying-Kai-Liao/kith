@@ -13,8 +13,12 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio_stream::wrappers::BroadcastStream;
 
-/// Entries a fresh client receives per bot before paging with `history`.
+/// Entries a fresh bot guest receives per conversation.
 const CATCH_UP_PER_BOT: i64 = 200;
+
+/// A fresh app's window per chat: this many main-chat entries and this many thread replies
+/// (`Store::catch_up_since`). Older ones page in with `history`, so the catch-up does not grow with the history.
+const CATCH_UP_PER_CHAT: i64 = 40;
 
 /// A setup terminal's output: everything so far, then live, ending after `exit`.
 pub fn term_events(hub: &Hub, id: &str) -> Option<impl Stream<Item = Value> + Send + use<>> {
@@ -88,7 +92,8 @@ const LOCAL_EVENTS: &[&str] = &["accessRequests", "cloud"];
 #[cfg(test)]
 mod tests;
 
-/// Subscribes first, then yields a catch-up (everything after `since`, in rev order),
+/// Subscribes first, then yields a catch-up (everything after `since`, in rev order; from 0, each chat's newest
+/// window: `CATCH_UP_PER_CHAT`),
 /// then live events. Duplicates are fine: clients upsert by id/rev. Shared by SSE and channels.
 pub fn events_stream(
     hub: &Arc<Hub>,
@@ -110,7 +115,7 @@ pub fn events_stream(
     for bot in hub.bots_json(since)? {
         catch_up.push(json!({"type": "bot", "rev": bot["rev"], "bot": bot}));
     }
-    for e in hub.store.entries_since(since, CATCH_UP_PER_BOT)? {
+    for e in hub.store.catch_up_since(since, CATCH_UP_PER_CHAT)? {
         catch_up.push(json!({"type": "entry", "rev": e.rev, "entry": e}));
     }
     // A call still ringing, for an app that connects (or reconnects) while it does.
