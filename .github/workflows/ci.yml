@@ -289,6 +289,10 @@ jobs:
               - 'core/runtime/src/conversations/claims.rs'
               - 'core/runtime/src/conversations/reconcile.rs'
               - 'serve/host/src/routines/core_runs.rs'
+              - 'core/runtime/src/conversations/warm.rs'
+              - 'core/runtime/src/hostclaim.rs'
+              - 'core/runtime/src/import/schedules.rs'
+              - 'core/runtime/src/cutover/modules/schedules.rs'
               - 'kernel/bin/kith-sched'
       # 'every': a file must match the whole list, so each filter is one brace pattern plus a markdown
       # exclusion. A docs-only change then runs no heavy job. The only markdown that ships is

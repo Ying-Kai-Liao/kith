@@ -22,6 +22,9 @@ pub(crate) mod schedules;
 mod schedules_gate;
 #[cfg(test)]
 mod schedules_gate_tests;
+mod schedules_switch;
+#[cfg(test)]
+mod schedules_switch_tests;
 #[cfg(test)]
 mod schedules_tests;
 #[cfg(test)]
