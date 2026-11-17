@@ -33,6 +33,11 @@ public actor ChannelTransport: RemoteTransport {
     var linkGeneration = 0
     var closed = false
     var restartRequested = false
+    /// The connection loop is waiting out a backoff (no attempt in flight): the only time `kick()` acts.
+    var inBackoff = false
+    var kickRequested = false
+    /// Test seam: replaces the jittered backoff delay.
+    let retryDelay: (@Sendable () -> Duration)?
     private var supervisor: Task<Void, Never>?
     private var monitor: NWPathMonitor?
     private var lastInterfaces: [String]?
@@ -81,7 +86,9 @@ public actor ChannelTransport: RemoteTransport {
     }
 
     init(computer: Computer, identity: DeviceIdentity, pairingCode: String?, dial: @escaping Dialer = URLSessionSocket.dial,
-         directBudget: Duration = .milliseconds(1500), watchesNetwork: Bool = true) {
+         directBudget: Duration = .milliseconds(1500), watchesNetwork: Bool = true,
+         retryDelay: (@Sendable () -> Duration)? = nil) {
+        self.retryDelay = retryDelay
         self.computer = computer
         self.identity = identity
         self.pairingCode = pairingCode
@@ -128,6 +135,15 @@ public actor ChannelTransport: RemoteTransport {
         guard !closed else { return }
         restartRequested = true
         link?.socket.close(code: 1000)
+        wake()
+    }
+
+    /// Cuts a pending backoff short and retries now (the app came back to the foreground mid-retry).
+    /// A no-op while an attempt is already in flight, a link is up, or the transport is closed or stopped,
+    /// so repeated kicks never stack a second stream.
+    public func kick() {
+        guard !closed, !isStopped, inBackoff else { return }
+        kickRequested = true
         wake()
     }
 
