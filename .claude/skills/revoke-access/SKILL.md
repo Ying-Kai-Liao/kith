@@ -476,15 +476,18 @@ read, then the core write failed) and from a revoke by the old id. Tested by `ap
 `the_app_revoke_with_the_core_down_owes_the_cut_too`, `an_undo_before_the_owed_cut_is_paid_restores_and_clears_it`).
 SYNC is not moved.
 
-## Refusal words, unread undo, owed cut of an undone person (2026-11-17, flow/rebuild-followups-revoke-words)
-Follow-ups 1 and 2 of #1022. No model change (`ReconcileOwed.tla` already has `AppUndo` clear the row; the code now also
-judges the row by the person's state, as the model's retry does). Code: `revoke_person` words every refusal (`unreadable`:
-the record unreadable, a revoke by the new id with the core down says plainly it was NOT revoked, nothing was cut, start the
-core and revoke again; `unfinished`: this computer's half refused, a revoke has still cut here). `core_revokes::restore_held`
-is the one give-back of an undo (`local_revoke`, the cloud `pull`): a read of the ids that fails gives back under the one id,
-warns, writes an `undo.unread` audit row and a kv `revoke.undo_unread.<person>`, shown as `undoNote` on the `people` row, cleared by a
-later `restore_held` that reads, or by a new revoke (`cut_off_held`). `pay_owed` drops, never pays, an owed row whose
-person the core (or kith-auth when not switched) shows not revoked; a failed read leaves the row. Tests:
-`api/core_revokes_tests.rs` (`a_revoke_of_the_new_id_with_the_core_down_says_it_did_not_happen_and_what_to_do`,
+## Refusal words, unread undo, owed cut of an undone person (2026-11-17, flow/rebuild-followups-revoke-words, #1029)
+Follow-ups 1 and 2 of #1022. Model: `ReconcileOwed.tla` gained `UndoBlind`/`UndoMarks` and a `mark` variable; rows `fix-blind`
+(pass, 961 states) and `undo-blind` (fails NoLostUndo). Code: `core_revokes.rs` takes an order number from a durable counter
+(`next_seq`, kv `revoke.seq`, never a clock) for each owed row (`revoke.owed_cut.<p>`) and each undo marker
+(`revoke.undone.<p>`). An undo whose read of the ids fails (`clear_owed` or `restore_held`) writes the marker; `pay_owed`
+reads the ids once and drops a row unpaid only when a marker on one of them is newer than the row, else pays (a revoke that
+failed leaves no marker, so it is paid: a guard on the person's revoked flag would drop it, as the core shows it unrevoked).
+`restore_held` is the one give-back of an undo (`local_revoke`, the cloud `pull`); on a failed read it also warns, writes an
+`undo.unread` audit row and a note (kv `revoke.undo_unread.<p>`) shown as `undoNote` on the `people` row under any id the person
+is held under, cleared by a later `restore_held` that reads, or by a new revoke (`cut_off_held`). `revoke_person` words every
+refusal (`unreadable`: a revoke by the new id with the core down says it was NOT revoked, nothing was cut, start the core and
+revoke again; `unfinished`). The apps do not render `undoNote` yet. Tests: `api/core_revokes_tests.rs`
+(`a_revoke_of_the_new_id_with_the_core_down_says_it_did_not_happen_and_what_to_do`,
 `an_undo_that_cannot_read_the_ids_leaves_a_note_until_a_later_undo_reads_them`,
-`an_owed_cut_of_a_person_since_undone_is_dropped_not_paid`), `remote/core_revokes.rs` unit tests.
+`an_owed_cut_older_than_an_undo_that_could_not_read_the_ids_is_dropped_not_paid`), `remote/core_revokes.rs` unit tests.

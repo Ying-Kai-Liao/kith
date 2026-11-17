@@ -45,11 +45,11 @@ AppCut     == app = "cut" /\ app' = "idle"
                                     /\ mark' = (mark /\ ~(Owed /\ ~ok))
               /\ UNCHANGED <<rev, seen, rec, failcut, termundo, ops, renamed, missed>>
 AppUndo    == Budget /\ app = "idle" /\ rec = "idle" /\ rev' = FALSE /\ app' = "restore" /\ ops' = ops + 1
+              /\ UNCHANGED <<hs, seen, rec, failcut, termundo, renamed, missed>>
               /\ \E blind \in BOOLEAN :
                    IF UndoBlind /\ blind
-                     THEN owed' = owed /\ mark' = (mark \/ UndoMarks)   \* the clear missed the row; the marker is written
-                     ELSE owed' = (owed /\ UndoKeepsOwed) /\ mark' = mark
-              /\ UNCHANGED <<hs, seen, rec, failcut, termundo, renamed, missed>>
+                     THEN (owed' = owed /\ mark' = (mark \/ UndoMarks))   \* the clear missed the row; the marker is written
+                     ELSE (owed' = (owed /\ UndoKeepsOwed) /\ mark' = mark)
 AppRestore == app = "restore" /\ failcut' = FALSE /\ termundo' = FALSE /\ app' = "idle"
               /\ \E ok \in BOOLEAN : /\ hs' = (hs /\ ~Reaches(ok))
                                     /\ missed' = (hs /\ ~Reaches(ok))
