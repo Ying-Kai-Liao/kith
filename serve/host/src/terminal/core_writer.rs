@@ -108,7 +108,9 @@ impl Mode {
         if cfg!(windows) {
             static SAID: std::sync::Once = std::sync::Once::new();
             SAID.call_once(|| {
-                tracing::warn!("Writer mode is not supported on Windows (no warm stub there): conversations keep using claim files");
+                tracing::warn!(
+                    "Writer mode is not supported on Windows (no warm stub there): conversations keep using claim files"
+                );
             });
             // A switched machine never falls back to files (see `decide`): it waits.
             return if crate::core_front::switch_file_exists(folders, MODULE) { Self::Held } else { Self::Files };
