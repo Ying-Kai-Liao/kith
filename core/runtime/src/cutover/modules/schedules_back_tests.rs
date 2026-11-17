@@ -285,7 +285,7 @@ fn a_once_the_core_decided_gets_no_next_run_and_one_it_never_reached_keeps_its_t
 }
 
 #[test]
-fn an_edited_trigger_does_not_use_the_hosts_old_anchor() {
+fn an_edited_trigger_is_dropped_the_host_keeps_its_own_trigger_and_it_is_said() {
     let w = stepped(
         &[rt(
             "a",
@@ -294,7 +294,7 @@ fn an_edited_trigger_does_not_use_the_hosts_old_anchor() {
         )],
         Some(t0() + 2 * HOUR),
     );
-    // After the switch the weekly became hourly (jobs.json by hand): the host's next run no longer means anything.
+    // After the switch the weekly became hourly (jobs.json by hand): the rollback does not write that edit back.
     let mut jobs = w.jobs();
     for j in &mut jobs {
         if j["id"] == "a" {
@@ -306,6 +306,25 @@ fn an_edited_trigger_does_not_use_the_hosts_old_anchor() {
         }
     }
     std::fs::write(w.mel_jobs(), serde_json::to_string_pretty(&jobs).unwrap()).unwrap();
+    let out = roll(&w);
+    // The next Monday 00:00Z after the watermark, not the hourly slot and not the old anchor.
+    assert_eq!(next_runs(&w, "a"), json!([t0() + 160 * HOUR]));
+    assert!(out.contains("the edit is dropped"), "{out}");
+}
+
+#[test]
+fn a_cron_routine_with_an_empty_watermark_table_still_gets_a_next_run_from_the_tick_text() {
+    let w = stepped(&[rt("a", &json!([hourly()]), &json!([t0() + HOUR]))], None);
+    // The core decided the host's anchor, so the next run counts from the tick.
+    decided(&w, "a", t0() + HOUR);
+    let at = local_minute(t0() + 2 * HOUR).unwrap();
+    exec(
+        &w,
+        &format!(
+            "DELETE FROM sched_watermark; INSERT OR REPLACE INTO sched_tick (mac, tick, updated_at) VALUES ('{}', '{at}', 0);",
+            w.mac()
+        ),
+    );
     roll(&w);
     assert_eq!(next_runs(&w, "a"), json!([t0() + 3 * HOUR]));
 }
@@ -511,4 +530,30 @@ fn stepping_again_after_a_rollback_brings_the_cancelled_slot_back_to_the_core() 
     let again = rollback(&w.reg(), &w.env, "schedules", opts()).unwrap();
     assert!(again.join("\n").contains("not switched"));
     let _ = find(&w.jobs(), "digest");
+}
+
+#[test]
+fn a_cron_run_the_refusal_lets_pass_lands_in_state_json_and_one_whose_claim_ended_refuses() {
+    let w = stepped(
+        &[rt("a", &json!([hourly()]), &json!([t0() + HOUR]))],
+        Some(t0()),
+    );
+    exec(
+        &w,
+        &format!(
+            "INSERT OR REPLACE INTO sched_jobs (agent, job, def, paused, first_seen) VALUES ('mel', 'digest', '{}', 0, 0);",
+            json!({"id": "digest", "cron": "0 * * * *"})
+        ),
+    );
+    // A claim that has ended but kept its pid is no run going: `live` counts the turn and refuses.
+    turn(&w, "digest", t0(), "running", Some((97, "s")));
+    exec(&w, "UPDATE claims SET state = 'ended';");
+    let err = rollback(&w.reg(), &w.env, "schedules", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("scheduled turn(s) are running"), "{err}");
+    // An ending claim with a process is still a run going: `live` lets it pass and it is written to `last`.
+    exec(&w, "UPDATE claims SET state = 'ending', pid = 91;");
+    roll(&w);
+    assert_eq!(state_json(&w)["last"]["mel/digest"]["pid"], 91);
 }

@@ -4,11 +4,15 @@
 //!
 //! The rule is per job, never a global rewind (a rewind replays every job that was not cancelled; TLC fails `AtMostOnce`).
 //! 1. [`cancel_waiting`] ends the schedule turns that wait (queued, parked, claimed with no process) and turns their fire
-//!    rows into `skipped:rollback`, stamped with the time of the rollback. A turn that runs is left to run.
+//!    rows into `skipped:rollback`, stamped with the time of the rollback. A turn that runs is left to run. A claimed turn
+//!    with no process still counts in `live` and refuses the rollback, so the "claimed with no process" cancel only runs
+//!    under `--force`.
 //! 2. [`next_runs`]: a routine trigger's `next_run` in serve.db is, in this order: the slot of the turn rollback cancelled;
 //!    else its anchor while no core plan reached it (`anchor::unused`, and only while `anchorTrigger` still matches);
 //!    else the next slot after what the core decided (a cron: the watermark; an interval: its last timed slot); a `once`
-//!    with a decided row gets none, one never decided keeps its `at`. A webhook or event trigger has none to write.
+//!    with a decided row gets none, one never decided keeps its `at`. A webhook or event trigger has none to write. A
+//!    rollback writes back only the flag and the key, so the host keeps its own trigger: where `jobs.json` edited trigger
+//!    i, the host's trigger rules (no anchor) and the edit is said to be dropped; a trigger the host lacks gets nothing.
 //! 3. [`write_state_back`]: `state.json`'s `tick` is the core's watermark and `last` carries each job's newest run: the
 //!    one kith-sched had, or a run the core started that is still going ([`going_in_core`]: any claim with a pid, so the
 //!    external claims package C adds are read the same way), so kith-sched's still-running rule skips it.
@@ -26,7 +30,31 @@ use serde_json::{Map, Value, json};
 use crate::cutover::Env;
 use crate::db::Core;
 use crate::error::{Error, Result};
-use crate::schedules::{anchor, local_minute, ms_of_slot, slot_of_ms};
+use crate::schedules::{anchor, local_minute, ms_of_slot, slot_of_ms, watermark_in};
+
+/// A claim that is a run still going: it has a process and has not ended. The one rule for `live` (which refuses on any
+/// other running turn) and [`going_in_core`] (which hands the run to kith-sched), so a run `live` lets pass always lands
+/// in `state.json`'s `last`. SQL over the alias `c` (claims).
+pub(super) const CLAIM_GOING: &str =
+    "c.pid IS NOT NULL AND c.state IN ('claimed', 'running', 'ending')";
+
+/// The host's triggers by routine id and trigger index, as the kernel's, read from `routines.v1`.
+pub(super) fn host_triggers(state: &Value) -> BTreeMap<Key, Trigger> {
+    let mut out = BTreeMap::new();
+    let list = state.get("routines").and_then(Value::as_array);
+    for r in list.into_iter().flatten() {
+        let Some(id) = r.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let triggers = r.get("triggers").and_then(Value::as_array);
+        for (i, t) in triggers.into_iter().flatten().enumerate() {
+            if let Ok(t) = super::schedules::convert(t) {
+                out.insert((id.to_owned(), i), t);
+            }
+        }
+    }
+    out
+}
 
 /// The outcome a cancelled slot's fire row is given.
 pub(super) const ROLLBACK_OUTCOME: &str = "skipped:rollback";
@@ -88,21 +116,17 @@ pub(super) fn cancel_waiting(core: &mut Core, now: i64) -> Result<Vec<String>> {
 }
 
 /// The next runs to write for these jobs (this Mac's routine jobs, as `(agent, job definition)`); `since` (ms) is when
-/// the step began.
+/// the step began; `host` the host's own triggers ([`host_triggers`]). Also the lines for edits dropped.
 pub(super) fn next_runs(
     conn: &Connection,
     mac: &str,
     since: i64,
     jobs: &[(String, Value)],
-) -> Result<NextRuns> {
-    let wm: Option<i64> = conn
-        .query_row(
-            "SELECT at FROM sched_watermark WHERE mac = ?1",
-            [mac],
-            |r| r.get(0),
-        )
-        .optional()?;
+    host: &BTreeMap<Key, Trigger>,
+) -> Result<(NextRuns, Vec<String>)> {
+    let wm = watermark_in(conn, mac)?;
     let mut out = NextRuns::new();
+    let mut said = Vec::new();
     for (agent, def) in jobs {
         let Some(routine) = def.get("routine") else {
             continue;
@@ -120,11 +144,24 @@ pub(super) fn next_runs(
         ) else {
             continue;
         };
-        if let Some(next) = next_of(conn, agent, job, def, &trigger, wm, since)? {
-            out.insert((id.to_owned(), i), next);
+        // The host keeps the trigger it has: an edit in `jobs.json` is not written back, so its slot would be one the
+        // host's trigger never has. No host trigger at that index (fewer than the jobs): nothing to write.
+        let key = (id.to_owned(), i);
+        let Some(theirs) = host.get(&key) else {
+            continue;
+        };
+        let edited = *theirs != trigger;
+        if edited {
+            said.push(format!(
+                "{agent}/{job}: its trigger was edited in jobs.json; the edit is dropped, the host keeps its own trigger"
+            ));
+        }
+        let anchored = anchor::of(def).filter(|_| !edited);
+        if let Some(next) = next_of(conn, agent, job, anchored, theirs, wm, since)? {
+            out.insert(key, next);
         }
     }
-    Ok(out)
+    Ok((out, said))
 }
 
 fn last_timed(conn: &Connection, agent: &str, job: &str) -> Result<Option<i64>> {
@@ -139,12 +176,12 @@ fn last_timed(conn: &Connection, agent: &str, job: &str) -> Result<Option<i64>> 
     Ok(slot.and_then(|s| ms_of_slot(&s)))
 }
 
-/// The H4 rule for one job. `None`: nothing to write. `Some(None)`: no next run.
+/// The H4 rule for one job; `anchored` is the host's own next run, none when the trigger was edited. `None`: nothing to write. `Some(None)`: no next run.
 fn next_of(
     conn: &Connection,
     agent: &str,
     job: &str,
-    def: &Value,
+    anchored: Option<i64>,
     trigger: &Trigger,
     wm: Option<i64>,
     since: i64,
@@ -170,10 +207,10 @@ fn next_of(
         if last.is_some() {
             return Ok(Some(None));
         }
-        return Ok(Some(Some(anchor::of(def).unwrap_or(*at))));
+        return Ok(Some(Some(anchored.unwrap_or(*at))));
     }
     // 2. The host's own next run, while no core plan has reached it.
-    if let Some(a) = anchor::of(def)
+    if let Some(a) = anchored
         && anchor::unused(conn, agent, job, a)?
     {
         return Ok(Some(Some(a)));
@@ -196,8 +233,13 @@ fn next_of(
     Ok(base.map(|b| trigger.next_after(b)))
 }
 
-/// Puts the next runs into the host's routines (`routines.v1`'s JSON); how many routines changed.
-pub(super) fn apply_next(state: &mut Value, next: &NextRuns) -> usize {
+/// Puts the next runs into the host's routines (`routines.v1`'s JSON); how many routines changed that are not in `counted`
+/// (the ones whose flags the caller already counted).
+pub(super) fn apply_next(
+    state: &mut Value,
+    next: &NextRuns,
+    counted: &std::collections::BTreeSet<String>,
+) -> usize {
     let mut changed = 0;
     let Some(list) = state.get_mut("routines").and_then(Value::as_array_mut) else {
         return 0;
@@ -225,7 +267,7 @@ pub(super) fn apply_next(state: &mut Value, next: &NextRuns) -> usize {
                 hit = true;
             }
         }
-        changed += usize::from(hit);
+        changed += usize::from(hit && !counted.contains(&id));
     }
     changed
 }
@@ -246,16 +288,15 @@ pub(super) fn rearm(core: &mut Core, jobs: &[(&str, &str, &Value)]) -> Result<()
     Ok(())
 }
 
-/// Runs the core started that still go: any claim with a process (`pid`, and its start stamp) on a schedule turn that has
-/// not finished. Read from the claim whatever its kind, so the external claims package C makes for cron jobs need no
+/// Runs the core started that still go ([`CLAIM_GOING`]: a claim with a process, and its start stamp) on a schedule turn
+/// that has not finished. Read from the claim whatever its kind, so the external claims package C makes for cron jobs need no
 /// change here. Oldest first.
 fn going_in_core(db: &Connection) -> Result<Vec<Going>> {
-    let mut st = db.prepare(
+    let mut st = db.prepare(&format!(
         "SELECT f.agent, f.job, f.slot, c.pid, c.pid_started, COALESCE(c.running_at, c.claimed_at, c.created_at)
          FROM sched_fires f JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER) JOIN claims c ON c.claim_id = t.claim_id
-         WHERE f.turn_id IS NOT NULL AND t.state IN ('claimed', 'running') AND c.state IN ('claimed', 'running', 'ending')
-           AND c.pid IS NOT NULL ORDER BY c.claim_id",
-    )?;
+         WHERE f.turn_id IS NOT NULL AND t.state IN ('claimed', 'running') AND {CLAIM_GOING} ORDER BY c.claim_id"
+    ))?;
     Ok(st
         .query_map([], |r| {
             Ok((

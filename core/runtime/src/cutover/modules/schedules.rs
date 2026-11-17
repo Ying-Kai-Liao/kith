@@ -334,7 +334,7 @@ fn text<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
 }
 
 /// The host's trigger (`serve/host/src/routines/schedule.rs`, camelCase, tagged by `type`) as the kernel's.
-fn convert(t: &Value) -> std::result::Result<Trigger, String> {
+pub(super) fn convert(t: &Value) -> std::result::Result<Trigger, String> {
     let kind = text(t, "type").ok_or("a trigger has no type")?;
     let word = |k: &str| text(t, k).ok_or_else(|| format!("a {kind} trigger has no {k}"));
     let number = |k: &str| {
@@ -883,11 +883,11 @@ impl Module for Schedules {
     fn live(&self, _env: &Env, core: &Core) -> Result<Vec<String>> {
         let mut out = Vec::new();
         let n: i64 = core.conn().query_row(
-            "SELECT COUNT(DISTINCT t.id) FROM sched_fires f JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER)
+            &format!("SELECT COUNT(DISTINCT t.id) FROM sched_fires f JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER)
              LEFT JOIN claims c ON c.claim_id = t.claim_id
              LEFT JOIN sched_jobs j ON j.agent = f.agent AND j.job = f.job
              WHERE f.turn_id IS NOT NULL AND t.state IN ('claimed', 'running')
-               AND NOT (c.pid IS NOT NULL AND j.def IS NOT NULL AND json_extract(j.def, '$.routine') IS NULL)",
+               AND NOT ({} AND j.def IS NOT NULL AND json_extract(j.def, '$.routine') IS NULL)", back::CLAIM_GOING),
             [],
             |r| r.get(0),
         )?;
@@ -1296,6 +1296,7 @@ impl Schedules {
         })?;
         let mut changed = 0;
         let mut seen = BTreeSet::new();
+        let mut flagged = BTreeSet::new();
         if let Some(list) = state.get_mut("routines").and_then(Value::as_array_mut) {
             for r in list.iter_mut() {
                 let Some(id) = text(r, "id").map(str::to_owned) else {
@@ -1304,7 +1305,7 @@ impl Schedules {
                 let Some((enabled, key)) = keep.get(&id) else {
                     continue;
                 };
-                seen.insert(id);
+                seen.insert(id.clone());
                 let Some(o) = r.as_object_mut() else { continue };
                 let mut set = |k: &str, v: Value| {
                     if o.get(k) == Some(&v) {
@@ -1318,13 +1319,21 @@ impl Schedules {
                 let b = key.as_ref().is_some_and(|k| set("webhookKey", json!(k)));
                 if a || b {
                     changed += 1;
+                    flagged.insert(id);
                 }
             }
         }
         // Each trigger's next run from what the core decided (H4), under the locks the rollback holds.
         let since = state::read(&env.layout, self.name())?.map_or(0, |s| s.at.saturating_mul(1000));
-        let next = back::next_runs(core.conn(), &mac, since, &mine)?;
-        changed += back::apply_next(&mut state, &next);
+        let (next, dropped) = back::next_runs(
+            core.conn(),
+            &mac,
+            since,
+            &mine,
+            &back::host_triggers(&state),
+        )?;
+        lines.extend(dropped);
+        changed += back::apply_next(&mut state, &next, &flagged);
         for id in keep.keys().filter(|id| !seen.contains(*id)) {
             lines.push(format!(
                 "routine {id} is no longer in serve.db; its job is removed and it is not brought back"
