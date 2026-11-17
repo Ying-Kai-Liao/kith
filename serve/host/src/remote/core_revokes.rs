@@ -263,8 +263,13 @@ pub(crate) async fn pay_owed(hub: &Hub) {
     }
     let _w = AUTH_WRITES.lock().await;
     let mut handled: Vec<String> = Vec::new();
+    // A row whose ids could not be read waits for a later tick and may still need its person's markers.
+    let mut unread = false;
     for person in owed(hub) {
-        let Ok(held) = held(&person).await else { continue };
+        let Ok(held) = held(&person).await else {
+            unread = true;
+            continue;
+        };
         let row = hub.store.kv_get(&format!("{OWED}{person}")).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
         if undone_at(hub, &held.ids) > row {
             tracing::info!(person, ids = ?held.ids, "an owed cut is dropped: the person was undone after it");
@@ -280,7 +285,7 @@ pub(crate) async fn pay_owed(hub: &Hub) {
         handled.extend(held.ids);
     }
     // After every row: a marker one row used must still stand for another row of the same person (owed under each id).
-    for id in handled {
+    for id in handled.into_iter().filter(|_| !unread) {
         let _ = hub.store.kv_delete(&format!("{UNDONE}{id}"));
     }
 }
