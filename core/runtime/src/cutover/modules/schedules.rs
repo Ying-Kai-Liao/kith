@@ -185,6 +185,30 @@ struct Plan {
     notes: Vec<String>,
 }
 
+/// The folder the host keeps `host.lock` in: `KITH_SERVE_HOME`, else `~/.kith/serve` (`service::data_dir`), NOT the
+/// folder of serve.db (which `KITH_SERVE_DB` can move). `env.serve_db` (tests) names a folder of its own.
+pub(super) fn host_dir_of(env: &Env) -> PathBuf {
+    host_dir_with(env, &|k| std::env::var_os(k).filter(|v| !v.is_empty()))
+}
+
+pub(super) fn host_dir_with(
+    env: &Env,
+    var: &dyn Fn(&str) -> Option<std::ffi::OsString>,
+) -> PathBuf {
+    if let Some(d) = env.serve_db.as_ref().and_then(|p| p.parent()) {
+        return d.to_path_buf();
+    }
+    var("KITH_SERVE_HOME").map_or_else(
+        || {
+            var("HOME")
+                .map_or_else(|| env.home.clone(), PathBuf::from)
+                .join(".kith")
+                .join("serve")
+        },
+        PathBuf::from,
+    )
+}
+
 pub(super) fn serve_db_of(env: &Env) -> PathBuf {
     if let Some(p) = &env.serve_db {
         return p.clone();
@@ -206,12 +230,12 @@ pub(super) fn serve_db_of(env: &Env) -> PathBuf {
         .join("serve.db")
 }
 
-/// Why the host cannot be called stopped, if it cannot: `host.lock` in its data folder (the folder of serve.db) is an
+/// Why the host cannot be called stopped, if it cannot: `host.lock` in its data folder ([`host_dir_of`]) is an
 /// advisory lock the OS drops with the process, so a stale file or a reused pid never reads as running. Read-only: the
 /// file is never created. No file, or a free lock, is stopped. A held lock says "running"; any other open or lock error
 /// says the lock cannot be checked (still a refusal, but never worded as "stop the host").
 pub(super) fn host_blocker(env: &Env) -> Option<HostBlock> {
-    let dir = serve_db_of(env).parent().map(Path::to_path_buf)?;
+    let dir = host_dir_of(env);
     let file = match std::fs::File::open(dir.join("host.lock")) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -501,7 +525,12 @@ fn routine_rows(
         // What the host would do next: the job's first core plan counts from it (H2).
         let mut decided = None;
         match switch::next_of(r, i, &trigger, now_ms()) {
-            Next::At(at) => block["anchor"] = json!(at),
+            Next::At(at) => {
+                block["anchor"] = json!(at);
+                // The anchor counts only while the job keeps this trigger (`schedules::anchor::of`).
+                block["anchorTrigger"] =
+                    serde_json::to_value(&trigger).map_err(|e| e.to_string())?;
+            }
             Next::OnceFired(ms) => decided = crate::schedules::slot_of_ms(ms),
             Next::Nothing => {}
         }
@@ -610,7 +639,19 @@ fn made_for(job: &Value, routine: &str, bot: &str) -> bool {
         .is_some_and(|r| text(r, "id") == Some(routine) && text(r, "bot") == Some(bot))
 }
 
-fn verdict(jobs: &[Value], row: &Row, mac: &str) -> Verdict {
+/// A job without the host's next run (`routine.anchor` and the trigger it was read for): the anchor is a snapshot of the
+/// host's clock, so `same_answer` must not call a job different because the host's next run moved since.
+pub(super) fn without_anchor(job: &Value) -> Value {
+    let mut job = job.clone();
+    if let Some(r) = job.get_mut("routine").and_then(Value::as_object_mut) {
+        r.remove("anchor");
+        r.remove("anchorTrigger");
+    }
+    job
+}
+
+/// `same`: the check's reading, which leaves the anchor out of the compare (an import still brings it up to date).
+fn verdict(jobs: &[Value], row: &Row, mac: &str, same: bool) -> Verdict {
     let Some(at) = jobs
         .iter()
         .position(|j| text(j, "id") == Some(row.job.as_str()))
@@ -630,7 +671,12 @@ fn verdict(jobs: &[Value], row: &Row, mac: &str) -> Verdict {
             row.agent, row.job
         ));
     }
-    if have == &row.def {
+    let equal = if same {
+        without_anchor(have) == without_anchor(&row.def)
+    } else {
+        have == &row.def
+    };
+    if equal {
         Verdict::Same
     } else {
         Verdict::Update(at)
@@ -715,7 +761,7 @@ fn apply_agent(cx: &mut Apply<'_>, agent: &str, rows: &[&Row]) -> Result<()> {
     })?;
     let mut changed = false;
     for row in rows {
-        match verdict(&jobs, row, cx.mac) {
+        match verdict(&jobs, row, cx.mac, false) {
             Verdict::New => {
                 jobs.push(row.def.clone());
                 cx.counts.added += 1;
@@ -924,14 +970,12 @@ impl Module for Schedules {
             for row in plan.rows.iter().filter(|r| r.key.is_some()) {
                 lines.extend(self.put_key(core, row)?);
             }
-            // Under tick.lock: what the tombstone is checked against.
-            *self.imported.borrow_mut() =
-                Some(crate::import::schedules::state_sha(&env.machine)?.unwrap_or_default());
             lines.extend(Self::decide_fired_onces(core, &plan)?);
-            lines.extend(
-                crate::import::schedules::run_in(&env.layout, &env.machine, false, Some(core))?
-                    .lines,
-            );
+            let (rep, sha) =
+                crate::import::schedules::run_sha(&env.layout, &env.machine, false, Some(core))?;
+            // The sha of the bytes the import read (under tick.lock): what the tombstone is checked against.
+            *self.imported.borrow_mut() = Some(sha.unwrap_or_default());
+            lines.extend(rep.lines);
         } else {
             lines.extend(
                 crate::import::schedules::run_in(&env.layout, &env.machine, true, None)?.lines,
@@ -974,7 +1018,7 @@ impl Module for Schedules {
                 }
             };
             for row in plan.rows.iter().filter(|r| r.agent == agent) {
-                match verdict(&jobs, row, &mac) {
+                match verdict(&jobs, row, &mac, true) {
                     Verdict::Same => {}
                     Verdict::New => {
                         diffs.push(format!("{agent}/{}: a routine, not a job yet", row.job));
@@ -1123,8 +1167,6 @@ impl Schedules {
             .map(|b| sha_hex(&b)))
     }
 
-    /// The job's key as the secret record hooks.rs reads. Written only when missing or different, so a re-import changes
-    /// nothing. Says that it wrote, never what.
     /// A `once` the host already fired gets a decided row at its slot, so the core's plan finds it decided and never
     /// refires it (H2). Idempotent; a row the core already decided is left as it is.
     fn decide_fired_onces(core: &mut Core, plan: &Plan) -> Result<Vec<String>> {
@@ -1151,6 +1193,8 @@ impl Schedules {
         Ok(lines)
     }
 
+    /// The job's key as the secret record hooks.rs reads. Written only when missing or different, so a re-import changes
+    /// nothing. Says that it wrote, never what.
     fn put_key(&self, core: &Core, row: &Row) -> Result<Vec<String>> {
         let Some(key) = &row.key else {
             return Ok(Vec::new());

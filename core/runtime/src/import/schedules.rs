@@ -218,6 +218,17 @@ pub(crate) fn run_in(
     dry_run: bool,
     held: Option<&mut Core>,
 ) -> Result<Report> {
+    run_sha(layout, machine, dry_run, held).map(|(rep, _)| rep)
+}
+
+/// [`run_in`], and the sha of the state.json bytes a real run read (`None`: no file, or a dry run). The cutover module
+/// checks it again before the tombstone, so it is the bytes imported and not a second read.
+pub(crate) fn run_sha(
+    layout: &Layout,
+    machine: &Path,
+    dry_run: bool,
+    held: Option<&mut Core>,
+) -> Result<(Report, Option<String>)> {
     let mut rep = Report {
         dry_run,
         ..Report::default()
@@ -228,7 +239,7 @@ pub(crate) fn run_in(
             "no sched state at {}: nothing to import",
             file.display()
         ));
-        return Ok(rep);
+        return Ok((rep, None));
     };
     for s in &src.skipped {
         rep.lines.push(format!("skipped {s}"));
@@ -256,7 +267,7 @@ pub(crate) fn run_in(
                 .push("schedules: core.db already holds the sched state; nothing to change".into());
         }
         rep.lines.push("dry run: nothing was written".into());
-        return Ok(rep);
+        return Ok((rep, None));
     }
 
     debug_assert!(
@@ -278,7 +289,7 @@ pub(crate) fn run_in(
     if !tick && new.is_empty() {
         rep.lines
             .push("nothing to change: core.db already holds the sched state".into());
-        return Ok(rep);
+        return Ok((rep, Some(sha)));
     }
     // Before the first write. Under the cutover the framework took its snapshot already (`own_lock` is false).
     let backup = if own_lock {
@@ -352,5 +363,5 @@ pub(crate) fn run_in(
     rep.lines.push(
         "done. core.db holds kith-sched's state as of now. A plain `kith migrate` leaves kith-sched in charge of its state files; `kith migrate step schedules` (which holds tick.lock around this import) is what hands the jobs to the core".into(),
     );
-    Ok(rep)
+    Ok((rep, Some(sha)))
 }

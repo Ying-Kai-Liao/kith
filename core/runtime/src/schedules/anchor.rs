@@ -4,7 +4,8 @@
 //! cutover's import writes that instant, as ms, into the job's `routine` block in jobs.json (`routine.anchor`). It lives
 //! in the file, so it survives `sync_in` re-indexing, and it needs no migration. Jobs without one (every kith-sched cron
 //! job, and jobs imported before this rule) count as before: a cron from the per-Mac watermark, an interval from its last
-//! slot. One anchor per job is one per trigger: the import makes one job per trigger, and `next_runs` is per trigger.
+//! slot. The trigger it was read for is stored beside it (`anchorTrigger`) and the anchor counts only while the job's
+//! trigger is still that one. One anchor per job is one per trigger: the import makes one job per trigger, and `next_runs` is per trigger.
 //!
 //! Why not the watermark: it is kith-sched's last tick, which may lag the host's last fire (a slot the host already ran
 //! would run again), and a daily routine's next slot is a day past it (the first tick must not use the anchor up).
@@ -27,9 +28,17 @@ use crate::error::Result;
 
 const TICK_MS: i64 = 60_000;
 
-/// The anchor of a job definition (ms), when its `routine` block carries one.
+/// The anchor of a job definition (ms), when its `routine` block carries one AND the job still has the trigger it was
+/// read for (`routine.anchorTrigger`, written beside it). A trigger edited after the switch (jobs.json by hand, or
+/// `kith schedule` keeping the routine block) makes the host's old next run meaningless: a weekly edited to daily would
+/// otherwise stay silent until the old next run, with no rows. Then the job counts as one without an anchor.
 pub(crate) fn of(def: &Value) -> Option<i64> {
-    def.get("routine")?.get("anchor")?.as_i64()
+    let routine = def.get("routine")?;
+    let read_for = routine.get("anchorTrigger")?;
+    if def.get("trigger")? != read_for {
+        return None;
+    }
+    routine.get("anchor")?.as_i64()
 }
 
 /// The slot the anchor stands for: the anchor cut up to a whole minute (the tick's granularity).

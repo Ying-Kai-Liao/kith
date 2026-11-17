@@ -1688,6 +1688,7 @@ fn routine_job(id: &str, trigger: &Value, anchor: Option<i64>) -> Value {
     let mut routine = json!({"id": id, "bot": "b1", "trigger": 1, "timeoutSeconds": 600});
     if let Some(a) = anchor {
         routine["anchor"] = json!(a);
+        routine["anchorTrigger"] = trigger.clone();
     }
     json!({"id": id, "task": format!("do {id}"), "trigger": trigger, "routine": routine})
 }
@@ -1867,6 +1868,15 @@ fn a_live_kith_sched_run_at_the_switch_skips_its_job_until_the_pid_exits() {
     assert_eq!(fired(&r.tick(now + 60_000)), ["every"]);
 }
 
+/// A stamp of the same form as `stamp` that is not it (macOS `e<ms>`, Linux `b<boot>:<ticks>`).
+fn other_stamp(stamp: &str) -> String {
+    if let Some(ms) = stamp.strip_prefix('e') {
+        return format!("e{}", ms.parse::<i64>().unwrap() - 5_000);
+    }
+    let (boot, ticks) = stamp.rsplit_once(':').unwrap();
+    format!("{boot}:{}", ticks.parse::<u64>().unwrap() + 1)
+}
+
 #[test]
 fn a_reused_pid_is_not_a_live_run_and_a_pid_alone_falls_back_to_alive() {
     let mut r = Rig::new();
@@ -1879,10 +1889,7 @@ fn a_reused_pid_is_not_a_live_run_and_a_pid_alone_falls_back_to_alive() {
     let pid = i64::from(child.id());
     let stamp = kith_kernel::procstart::start_stamp(child.id()).expect("a stamp");
     // `a`: the pid is alive but is another process than the one recorded (the stamp differs, same form).
-    let other = format!(
-        "e{}",
-        stamp.trim_start_matches('e').parse::<i64>().unwrap_or(0) - 5_000
-    );
+    let other = other_stamp(&stamp);
     imported_run(&r, "a", now - 60_000, pid, Some(&other));
     // `b`: an old entry with a pid and no stamp: alive and young is enough.
     imported_run(&r, "b", now - 60_000, pid, None);
@@ -1904,4 +1911,20 @@ fn an_imported_run_older_than_the_window_does_not_skip() {
     assert_eq!(fired(&r.tick(now)), ["old"]);
     child.kill().unwrap();
     child.wait().unwrap();
+}
+
+#[test]
+fn an_anchor_is_ignored_once_the_trigger_it_was_read_for_is_edited() {
+    let mut r = Rig::new();
+    let anchor = at(2026, 11, 10, 9, 0);
+    let weekly = utc_cron("0 9 * * 2");
+    let mut job = routine_job("w", &weekly, Some(anchor));
+    r.jobs("mel", &json!([job.clone()]));
+    r.set_wm(at(2026, 11, 3, 8, 0));
+    assert!(fired(&r.tick(at(2026, 11, 3, 9, 0) + 60_000)).is_empty());
+    // Edited to daily (the routine block is kept): it counts from the watermark again.
+    job["trigger"] = utc_cron("0 9 * * *");
+    r.jobs("mel", &json!([job]));
+    r.set_wm(at(2026, 11, 3, 8, 0));
+    assert_eq!(fired(&r.tick(at(2026, 11, 3, 9, 1))), ["w"]);
 }

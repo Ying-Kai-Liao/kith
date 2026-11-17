@@ -293,6 +293,11 @@ fn the_import_writes_each_triggers_next_run_as_its_anchor_and_decides_a_fired_on
             .and_then(Value::as_i64)
     };
     assert_eq!(anchor("daily"), Some(now + 3_600_000));
+    assert_eq!(
+        find(&jobs, "daily")["routine"]["anchorTrigger"],
+        find(&jobs, "daily")["trigger"],
+        "the anchor names the trigger it was read for"
+    );
     assert_eq!(anchor("every"), Some(now + 1_800_000));
     assert_eq!(anchor("once"), None, "a fired once has no next run");
     assert_eq!(anchor("paused"), None, "a paused routine carries none");
@@ -354,4 +359,42 @@ fn a_run_kith_sched_left_going_is_imported_with_its_pid_and_start_stamp() {
         )
         .unwrap();
     assert_eq!((pid, stamp.as_deref()), (4242, Some("e1700000000000")));
+}
+
+#[test]
+fn the_checks_compare_leaves_the_anchor_out() {
+    let job = |anchor: i64| {
+        json!({"id": "d", "trigger": {"type": "interval", "every": 60},
+               "routine": {"id": "d", "bot": "b1", "trigger": 1, "anchor": anchor,
+                           "anchorTrigger": {"type": "interval", "every": 60}}})
+    };
+    assert_ne!(job(1), job(2));
+    assert_eq!(
+        super::schedules::without_anchor(&job(1)),
+        super::schedules::without_anchor(&job(2))
+    );
+    assert!(
+        super::schedules::without_anchor(&job(1))["routine"]
+            .get("anchor")
+            .is_none()
+    );
+}
+
+#[test]
+fn the_host_lock_is_where_the_host_puts_it_not_beside_serve_db() {
+    let mut w = world(false);
+    let home = w.env.home.clone();
+    w.env.serve_db = None;
+    let var = |k: &str| match k {
+        "KITH_SERVE_DB" => Some("/elsewhere/serve.db".into()),
+        "HOME" => Some(home.clone().into_os_string()),
+        _ => None,
+    };
+    let dir = super::schedules::host_dir_with(&w.env, &var);
+    assert_eq!(dir, home.join(".kith").join("serve"));
+    let var = |k: &str| (k == "KITH_SERVE_HOME").then(|| "/data/kith-serve".into());
+    assert_eq!(
+        super::schedules::host_dir_with(&w.env, &var),
+        PathBuf::from("/data/kith-serve")
+    );
 }
