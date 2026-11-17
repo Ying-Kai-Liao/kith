@@ -289,6 +289,11 @@ pub fn start(hub: &Arc<Hub>) {
 /// One second of the runner. True when a `schedule.tick` is due: the core owns the schedules and the wall-clock minute has changed
 /// (the caller then calls `forward_tick`).
 fn tick(hub: &Arc<Hub>) -> Result<bool> {
+    tick_at(hub, now_ms())
+}
+
+/// `tick` at a given time, so tests need not race the wall clock's minute edge.
+fn tick_at(hub: &Arc<Hub>, now: i64) -> Result<bool> {
     let gate = hub.routines.refresh_gate();
     hub.update_keep_awake();
     // Runs the host started before a switch still finish and publish, whoever owns the schedules now.
@@ -296,16 +301,16 @@ fn tick(hub: &Arc<Hub>) -> Result<bool> {
         tracing::error!(%error, "routine result publication will retry");
     }
     match gate {
-        Gate::Own => hub.routines.schedule_due(&hub.store, now_ms())?,
+        Gate::Own => hub.routines.schedule_due(&hub.store, now)?,
         // The core fires; and when the host cannot tell, nothing starts from serve.db.
         Gate::Core => {}
         Gate::Held(_) => return Ok(false),
     }
     dispatch(hub)?;
     if gate == Gate::Core {
-        hub.routines.pull_due(hub, now_ms(), false);
+        hub.routines.pull_due(hub, now, false);
     }
-    Ok(gate == Gate::Core && hub.routines.core_tick_due(now_ms()))
+    Ok(gate == Gate::Core && hub.routines.core_tick_due(now))
 }
 
 fn dispatch(hub: &Arc<Hub>) -> Result<()> {
@@ -375,16 +380,17 @@ mod tests {
     fn switched_the_host_fires_nothing_and_asks_the_core_for_one_tick_a_minute() {
         use super::super::switch_tests::{hub, switched};
         let hub = hub();
+        const T: i64 = 100_000;
         due_routine(&hub);
         let fake = switched(&hub, Gate::Core);
-        assert!(tick(&hub).unwrap(), "the first second after the switch is due");
+        assert!(tick_at(&hub, T).unwrap(), "the first second after the switch is due");
         assert!(hub.routines.state.locked().runs.is_empty(), "the host's own scheduler fires nothing");
         // A tick in flight is not queued behind: two overlapping asks make one tick.
-        assert!(!tick(&hub).unwrap());
+        assert!(!tick_at(&hub, T).unwrap());
         hub.routines.forward_tick();
         assert_eq!(fake.calls_of("schedule.tick").len(), 1);
         // The core answered, so this minute is done: not asked again until the minute changes.
-        assert!(!tick(&hub).unwrap());
+        assert!(!tick_at(&hub, T).unwrap());
         assert!(hub.routines.state.locked().routines[0].next_runs[0] == Some(1), "serve.db is not read as live");
     }
 
