@@ -475,7 +475,8 @@ public final class AccountStore {
     }
 
     private func rosterChanged() {
-        guard !retired else { return }
+        // A store still reading its file has an empty roster: not an account with no agents (it would end live activities).
+        guard !retired, stores.values.allSatisfy(\.cacheLoaded) else { return }
         onRosterChanged?(roster)
     }
 }
