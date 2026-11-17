@@ -70,10 +70,9 @@ fn each_condition_refuses_on_its_own_and_names_itself() {
 }
 
 #[test]
-fn the_runner_flag_is_on_and_the_module_depends_on_claims() {
-    // On since the runner's PR; its test that a fired job and routine run and end done is the host's
-    // `a_fired_cron_job_and_a_fired_routine_each_run_once_and_end_done`.
-    const { assert!(RUNS_FIRED_TURNS) };
+fn the_runner_flag_is_off_and_the_module_depends_on_claims() {
+    // Off until the temp-home end-to-end test PR: guest jobs, no-bot agents, kith-sched model/effort and host restarts.
+    const { assert!(!RUNS_FIRED_TURNS) };
     assert_eq!(Schedules::new().depends_on(), ["claims"]);
 }
 
