@@ -564,8 +564,10 @@ impl Actor {
         let Some(proc) = conn.writer.as_mut() else { return Ok(()) };
         let want: HashSet<String> = conn.loaded.keys().cloned().collect();
         let unmark = unmarks(&mut proc.closed, &proc.rows, &want);
-        let (add, drop): (Vec<String>, Vec<String>) =
-            (want.difference(&proc.rows).cloned().collect(), proc.rows.difference(&want).cloned().collect());
+        let add: Vec<String> = want.difference(&proc.rows).cloned().collect();
+        // A row follows what the engine still has loaded, not this host's cache (`conn.loaded` loses a session on a new chat or a
+        // fork without any `session/close`): only a session the engine closed loses its row, so a revoke still finds the process.
+        let drop = unmark.clone();
         if add.is_empty() && drop.is_empty() {
             return Ok(());
         }

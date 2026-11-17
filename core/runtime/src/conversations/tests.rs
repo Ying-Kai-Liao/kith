@@ -122,7 +122,7 @@ fn take(c: &mut Core, conv: &str) -> (i64, i64) {
     (id, t)
 }
 
-fn running(c: &mut Core, conv: &str, pid: u32) -> (i64, i64) {
+pub(super) fn running(c: &mut Core, conv: &str, pid: u32) -> (i64, i64) {
     let (id, t) = take(c, conv);
     let r = redeem(c, id, pid, &format!("e{pid}"), "h1", 20).expect("redeem");
     assert_eq!(r, Redeemed::Running { again: false });
