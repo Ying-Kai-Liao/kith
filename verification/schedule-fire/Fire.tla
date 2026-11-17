@@ -15,7 +15,8 @@
 \* of a decided id answers the recorded outcome. The tick's catch-up: after a missed slot, run once if the miss is under
 \* a window; every slot the watermark passes without a fire gets a `skipped:missed` row.
 \*
-\* Model action -> code (M4-3 is not written yet; the M3-2 names are on rust-rebuild, core/runtime/src/conversations/claims.rs):
+\* Model action -> code (M4-3 and M4-5a are on rust-rebuild: core/runtime/src/schedules/fire.rs, and the turn rules in
+\* core/runtime/src/conversations/claims.rs; the skill's "Code to model" table has the lines):
 \*   TickFresh, TickStale   schedules::tick: read the clock, read sched_tick, pick the slot, fire, write sched_tick.
 \*                          TickStale is the clock read before the transaction (or a second tick that read it earlier).
 \*   AdHocFire              schedules::fire for `manual:<id>` (run now) and `event:<id>` (webhook; payload not modelled),
@@ -29,7 +30,12 @@
 \*   RevokePerson           claims.rs revoke_person: cancels the person's unfinished turns and bumps revoke_epoch, AFTER the authority revoke
 \*   Claim, Expire, Start,  M3-2's turn rules: claim (with the may check) or park on a held conversation, re-probe,
 \*   Finish                 expire at the deadline, spawn, end
-\*   Crash, Restart         the core dying and coming back; a claim dies with the core and its turn is queued again
+\*   Crash, Restart         the core dying and coming back. Rule K (reconcile.rs, design 2026-11-16-core-queued-runner): a core
+\*                          restart keeps the serve host's live claims, so a claimed or running turn stays as it is
+\*   HostAdopt              the host's OWN restart (conversations/warm.rs adopt, hostclaim.adopt): a claim never redeemed ends and
+\*                          its turn is queued again; a running one goes to `ending` (its process is killed) and its turn is queued
+\*                          again. Package C of M4-5 changes this for scheduled runs (pid alive: keeps running; redeemed then
+\*                          dead: ends, never retried; no pid: queued again); this model is today's code
 \*   Hold, Release          the conversation held by someone else (a terminal, another run) and let go
 \*   Advance                time; one tick of the model is one unit of the clock, and it runs while the core is down
 \* Modelled time: slots are at P, 2P .. NS*P; the clock `now` runs 0..MaxNow. A job has one person, one definition
@@ -67,12 +73,15 @@ CONSTANTS NS,            \* timed slots 1..NS, slot k at time P*k
           CatchMode,     \* "latest": one fire per tick, the latest due slot | "each": any due slot, one per tick
           Shape,         \* "one-txn" (the design) | "insert-first" | "enqueue-first" (two steps; Crash between)
           TickFirst,     \* TRUE (broken): the tick saves the watermark in one transaction and fires in the next
+          HostBotOnly,   \* TRUE: a claim happens only for an owner turn that has a bot (the host's runner, core_runs.rs); a
+                         \* person's turn without one is only ever expired. The owner (person 1) has a bot, person 2 has none
           Holds,         \* TRUE: the conversation can be held by someone else
           AdHocLate,     \* TRUE: an ad hoc fire is possible at the last instant too (the webhook liveness row)
           Redeliver,     \* TRUE: an unaccepted ad hoc delivery is retried until accepted (strong fairness)
           TickGuard      \* TRUE (liveness rows): time cannot pass an instant at which no tick ran while the core is up
 
 Persons == {1, 2}
+HasBot(p) == p = 1
 Timed == 1..NS
 Slots == Timed \cup AdHoc
 Ids == 1..MaxTurns
@@ -270,10 +279,17 @@ Grant(p) ==
         /\ revHist' = IF MayInTxn THEN revHist ELSE revHist \cup {[rv |-> r2, ep |-> repoch]}
   /\ UNCHANGED <<now, wm, up, def, repoch, held, fires, turn, ans, pend, defHist>>
 
+\* Rule K: the host's claims (claimed, or running with a live process) are left alone by a core restart.
 Crash ==
   /\ up /\ up' = FALSE /\ pend' = NoPend
-  /\ turn' = [i \in Ids |-> IF turn[i].st = "claimed" THEN [turn[i] EXCEPT !.st = "queued"] ELSE turn[i]]
-  /\ UNCHANGED <<now, wm, def, revoked, repoch, cut, held, fires, ans, defHist, revHist>>
+  /\ UNCHANGED <<now, wm, def, revoked, repoch, cut, held, fires, turn, ans, defHist, revHist>>
+
+\* The host starting again (today's adopt): its old claims end and their turns are queued again, whether the core is
+\* restarting or not. Needs the core up (adopt is a core call).
+HostAdopt ==
+  /\ up /\ \E i \in Ids : turn[i].st \in {"claimed", "running"}
+  /\ turn' = [i \in Ids |-> IF turn[i].st \in {"claimed", "running"} THEN [turn[i] EXCEPT !.st = "queued"] ELSE turn[i]]
+  /\ UNCHANGED <<now, wm, up, def, revoked, repoch, cut, held, fires, ans, pend, defHist, revHist>>
 
 Restart ==
   /\ ~up /\ up' = TRUE
@@ -305,6 +321,7 @@ ClaimMayOk(i) ==
 
 Claim(i) ==
   /\ up /\ turn[i].st \in Pending
+  /\ (~HostBotOnly \/ HasBot(turn[i].person))
   /\ (~DeadlineCheck \/ now < turn[i].dl)
   /\ IF held THEN turn[i].st = "queued" /\ TurnStep(i, "parked")
      ELSE ClaimMayOk(i) /\ TurnStep(i, "claimed")
@@ -321,7 +338,7 @@ FinishAny == \E i \in Ids : Finish(i)
 Next ==
   \/ TickFresh \/ TickStale \/ AdHocFire \/ FireB
   \/ Edit \/ CancelPaused \/ (\E p \in Persons : RevokeAuth(p) \/ RevokePerson(p) \/ Grant(p))
-  \/ Crash \/ Restart \/ Hold \/ Release \/ Advance
+  \/ Crash \/ Restart \/ HostAdopt \/ Hold \/ Release \/ Advance
   \/ ClaimAny \/ ExpireAny \/ StartAny \/ FinishAny
 
 \* The core may crash any number of times. A crash loop (claim -> crash -> restart -> claim ...) does not starve a turn:

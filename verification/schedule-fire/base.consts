@@ -28,6 +28,7 @@ Window = TRUE
 CatchMode = "latest"
 Shape = "one-txn"
 TickFirst = FALSE
+HostBotOnly = TRUE
 Holds = TRUE
 AdHocLate = FALSE
 Redeliver = FALSE

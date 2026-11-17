@@ -4,7 +4,8 @@
 //! - Definitions stay in `<agent>/jobs.json` (architect, 2026-11-04): they version and sync with the agent. This module
 //!   only READS them, where they live, under the same `<machine>/sched/<agent>.jobs.lock` that `kith-sched` writes under.
 //!   It never writes a jobs.json, and until M4-5 `kith-sched` is the only writer of both the file and its state files.
-//! - Run state is core.db's. Nothing here writes it but the import (`import/schedules.rs`); firing is M4-3.
+//! - Run state is core.db's. Two things here write it: the import (`import/schedules.rs`) and the fire (`fire.rs`, M4-3: the
+//!   tick, run now, the webhook entry), which the cutover module (M4-5a) will start, but nothing runs on a clock yet.
 //! - A thing that is wrong with one agent is said about that agent (`problems`), never a failure of the listing: an agent
 //!   folder that is not mounted, a jobs.json that is missing or malformed.
 //! - `next` is the cron rule's, which lives in the kernel (`core/kernel/src/schedule/`, M4-1). Until that is wired in,
