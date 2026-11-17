@@ -15,7 +15,7 @@ private func entryJSON(_ id: String, bot: String, seq: Int, rev: Int, text: Stri
 @MainActor private final class Redraws {
     var count = 0
     func watch(_ store: BotStore) {
-        withObservationTracking { _ = store.entries } onChange: {
+        withObservationTracking { _ = store.entries.all } onChange: {
             Task { @MainActor in
                 self.count += 1
                 self.watch(store)
