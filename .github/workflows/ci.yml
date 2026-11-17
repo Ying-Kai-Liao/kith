@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       # mode=check is the cheap by-hand Rust check for workers (the rust-check job at the bottom). mode=model runs
-      # only the schedule-fire TLA+ job (it needs no packages). Push, PR and a dispatch with no inputs are all
+      # only the TLA+ jobs that need no packages (schedule-fire, registry-step). Push, PR and a dispatch with no inputs are all
       # mode=full: exactly the jobs below, as before.
       mode:
-        description: "full = the whole pipeline (batch runs); check = only the rust-check job; model = only the schedule-fire model"
+        description: "full = the whole pipeline (batch runs); check = only the rust-check job; model = only the schedule-fire and registry-step models"
         type: choice
         options: [full, check, model]
         default: full
@@ -76,6 +76,7 @@ jobs:
       secrets: ${{ steps.f.outputs.secrets }}
       rooms: ${{ steps.f.outputs.rooms }}
       lease: ${{ steps.f.outputs.lease }}
+      registry: ${{ steps.f.outputs.registry }}
       schedule_fire: ${{ steps.f.outputs.schedule_fire }}
       ios: ${{ steps.h.outputs.ios }}
       desktop: ${{ steps.h.outputs.desktop }}
@@ -277,6 +278,19 @@ jobs:
               - 'core/holder/src/clock.rs'
               - 'core/runtime/src/holder_link.rs'
               - '.github/workflows/ci.yml'
+            # The TLA+ model of the transcripts registry cutover and the code it covers (the list in the registry-step skill).
+            # Not ci.yml: the full table takes about a minute on CI (47 s on run 44039852733).
+            registry:
+              - 'verification/registry/**'
+              - 'core/runtime/src/daemon.rs'
+              - '.claude/skills/registry-step/**'
+              - 'kernel/bin/kith-sessions'
+              - 'kernel/lib/kith_registry.py'
+              - 'kernel/bin/kith-sched'
+              - 'core/runtime/src/transcripts/**'
+              - 'core/runtime/src/import/transcripts.rs'
+              - 'core/runtime/src/cutover/modules/transcripts.rs'
+              - 'core/kernel/src/threads/registry.rs'
             # The TLA+ model of the schedule fire protocol and the code it covers (the list in the schedule-fire skill).
             schedule_fire:
               - 'verification/schedule-fire/**'
@@ -618,6 +632,26 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/lease/run.sh
+
+  # The same for the transcripts registry cutover (write-ahead spool, file from the row, reconcile): verification/registry/checks.tsv.
+  # mode=model runs it too:  gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model
+  registry-step:
+    needs: changes
+    if: ${{ !cancelled() && (inputs.mode == 'model' || needs.changes.outputs.registry == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/registry/run.sh') }}
+      - name: TLA+ model check
+        run: verification/registry/run.sh
 
   # The same for the schedule fire protocol (one transaction per fire, skip rule, deadline): verification/schedule-fire/checks.tsv.
   # Check mode skips this job (it needs `changes`); mode=model runs just this one:
@@ -1291,7 +1325,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
