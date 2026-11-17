@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       # mode=check is the cheap by-hand Rust check for workers (the rust-check job at the bottom). mode=model runs
-      # only the schedule-fire TLA+ job (it needs no packages). Push, PR and a dispatch with no inputs are all
+      # only the TLA+ jobs that need no packages (schedule-fire, registry-step). Push, PR and a dispatch with no inputs are all
       # mode=full: exactly the jobs below, as before.
       mode:
-        description: "full = the whole pipeline (batch runs); check = only the rust-check job; model = only the schedule-fire model"
+        description: "full = the whole pipeline (batch runs); check = only the rust-check job; model = only the schedule-fire and registry-step models"
         type: choice
         options: [full, check, model]
         default: full
@@ -279,9 +279,10 @@ jobs:
               - 'core/runtime/src/holder_link.rs'
               - '.github/workflows/ci.yml'
             # The TLA+ model of the transcripts registry cutover and the code it covers (the list in the registry-step skill).
-            # Not ci.yml: the full table takes about five minutes.
+            # Not ci.yml: the full table takes about a minute on CI (47 s on run 44039852733).
             registry:
               - 'verification/registry/**'
+              - 'core/runtime/src/daemon.rs'
               - '.claude/skills/registry-step/**'
               - 'kernel/bin/kith-sessions'
               - 'kernel/lib/kith_registry.py'
@@ -629,9 +630,10 @@ jobs:
         run: verification/lease/run.sh
 
   # The same for the transcripts registry cutover (write-ahead spool, file from the row, reconcile): verification/registry/checks.tsv.
+  # mode=model runs it too:  gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model
   registry-step:
     needs: changes
-    if: needs.changes.outputs.registry == 'true'
+    if: ${{ !cancelled() && (inputs.mode == 'model' || needs.changes.outputs.registry == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -643,7 +645,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/kith-verify
-          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+          key: kith-verify-${{ hashFiles('verification/registry/run.sh') }}
       - name: TLA+ model check
         run: verification/registry/run.sh
 

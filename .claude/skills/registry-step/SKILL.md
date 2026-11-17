@@ -26,7 +26,7 @@ CI runs `run.sh` (job `registry-step`) on pull requests and pushes that touch `v
 or the covered code. `run.sh` exits 0 only when every row of `checks.tsv` (variant, kind, property, expected) came out
 as expected; it is a copy of the holder-lease harness (pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE,
 cached under `${XDG_CACHE_HOME:-$HOME/.cache}/kith-verify/`). `fixed` has 110,140 states; the liveness row is the slow
-one (about 100 s). The whole table (29 rows) takes about four minutes on four workers. A row that changes exits 1:
+one (about 100 s). The whole table (29 rows) takes about four minutes on four workers here (47 s on CI). A row that changes exits 1:
 read this skill, do not edit the table to fit.
 
 ## What is modelled
@@ -98,10 +98,29 @@ Closing the window in code would need an exchange-rename (`renameatx_np` RENAME_
 and a check of what came out. The window needs an old-kernel hook of the same session in that millisecond.
 
 Assumed, not modelled as a switch: the Files-mode drains (the hook's and kith-sched's) drop entries the core would
-refuse as invalid.
+refuse as invalid. Both validators run the same fixture files
+(`kernel/tests/fixtures/registry-records/{valid,invalid}/`, contract A9), and drains skip dot-names and non-`.json` names.
+
+Assumed by the model, required of the code (architect MUSTs on #1032, contract A6 and A7):
+- **One order key, stamped everywhere (A6).** The model keys a file by its record, not by when it was written. That
+  is only true if every file the core writes carries `recordedAt`: a row adopted from an unstamped file stores that
+  file's `st_mtime_ns` as its `recordedAt`, and every projection, reconcile write and export_back writes it into the
+  file. One `order_key` (recordedAt, else st_mtime_ns; then procStart; then arrival) serves the settle, the reconcile,
+  the import, the re-read, export_back and both Python drains. Without it: a row adopted at mtime m is written back
+  unstamped (mtime now), a hook's record k (m < k < now) commits, and the settle puts m back over k.
+- **Row writes are conditional (A7).** `Project`, `Reconcile1` and `CorePrune` read and write the row in one step
+  here, but `Txn` runs outside the per-sid lock, so in code a commit can land in between. Adopting a file is the same
+  newer-wins upsert as the record's txn, and the prune deletes a row only where its key is unchanged. When P1's code
+  lands, split those steps in the model (read, then conditional write) and check it still passes.
+- **The per-sid lock is a file lock (A8)** on `live/terminal/locks/<sid>.lock`, also taken by the Files-mode hook
+  write and both Python drains, so the look-then-rename window above is left only to old-kernel writers.
+
+Not modelled, harmless: an old-kernel kith-sched (after a downgrade) prunes whatever the mode; the reconcile writes
+the file back from the row.
 
 Not modelled: several sessions (independent per sid), the content of a record beyond its key, the compact
-`startedAt` rule, a second step after a rollback or cancel, kith-sched's own prune race with a Files-mode hook (as
+`startedAt` rule, a second step after a rollback or cancel (to add with P3: `Begin` from `"files"`, the import
+clearing deleted rows, `Reread` dropping a row whose file was pruned after the import), kith-sched's own prune race with a Files-mode hook (as
 today), Windows (refused by preflight), the readers' Phase B.
 
 ## Broken variants
