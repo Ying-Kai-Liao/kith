@@ -122,6 +122,9 @@ win:
       to: kith-serve.exe
     - from: build/native/kith-servew.exe
       to: kith-servew.exe
+    # The conversation lock's launcher and the process holder (kith/bin/*.exe), where the core finds them beside the host.
+    - from: build/native/kith
+      to: kith
     # The computer-use driver bots act through; the host starts it from beside itself.
     - from: build/native/cua-driver.exe
       to: cua-driver.exe

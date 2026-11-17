@@ -754,8 +754,14 @@ jobs:
             cargo clippy --manifest-path host/Cargo.toml -p kith-stub --all-targets --locked -- -D warnings
             cargo test --manifest-path host/Cargo.toml -p kith-stub --locked
           fi
+      # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
+      - name: Bundled programs build
+        run: |
+          cargo build --manifest-path host/Cargo.toml -p kith-stub -p kith-holder --locked
+          test -f host/target/debug/kith-stub.exe && test -f host/target/debug/kith-holder.exe
       # The attach client's console code (raw mode, VT input, ctrl handler) only proves itself here; serve/host cannot build
-      # on Windows, which is why the client is a crate of its own.
+      # on Windows (the check-mode job says the same), which is why the client is a crate of its own. dist:win asks for
+      # kith-serve.exe all the same, and no CI job builds it.
       - name: Attach client
         run: |
           cargo clippy --manifest-path host/Cargo.toml -p kith-attach --all-targets --locked -- -D warnings
