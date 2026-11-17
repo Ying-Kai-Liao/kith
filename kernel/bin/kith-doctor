@@ -210,23 +210,25 @@ def repos_and_agents():
 
 def services():
     section('services')
-    r = run(str(KITH / 'bin' / 'kith-auth'), 'ls')
+    r = run(str(KITH / 'bin' / 'kith-auth'), 'ls', '--json')
     if r.returncode:
         if 'moved to the Kith core' in (r.stderr + r.stdout) or 'moved to the core' in (r.stderr + r.stdout):
             note('authority is switched to the core and it did not answer `kith-auth ls`, so the grants are not listed here')
             return
         bad(f'kith-auth ls failed: {(r.stderr or r.stdout).strip()[:200]}')
         return
-    agent, n = '', 0
-    for line in r.stdout.splitlines():
-        if line and not line.startswith(' '):
-            agent = line.strip()
-            continue
-        parts = line.split()
-        if len(parts) >= 3 and parts[0] != 'browser':   # the browser line says where the profile is, not ok
+    try:
+        rows = json.loads(r.stdout)['agents']
+    except (ValueError, KeyError, TypeError):
+        bad(f'kith-auth ls --json gave no list: {r.stdout.strip()[:200]}')
+        return
+    n = 0   # the browser line is not a grant: it has no services list
+    for row in rows:
+        for svc in row.get('services') or []:
             n += 1
-            if parts[-1] != 'ok':
-                bad(f'{agent}: {" ".join(parts)}')
+            # an ok grant counts whether or not the agent's needs name it: a connect adds one outside needs
+            if svc.get('status') != 'ok':
+                bad(f"{row.get('agent')}: " + ' '.join(x for x in (svc.get('service'), svc.get('profile'), svc.get('status')) if x))
     if n:
         ok(f'{n} grant(s) checked')
 
