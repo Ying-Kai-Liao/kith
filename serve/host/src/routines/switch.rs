@@ -4,8 +4,8 @@
 //! imports every routine into its agent's jobs.json (job id = routine id, or `<id>-<n>` for the n-th of several
 //! triggers) and the core fires them: [`Gate::Core`]. Then, and only then:
 //!
-//! - the host's own scheduler fires nothing; once a minute it calls `schedule.tick` and the core does the firing (one tick
-//!   at a time, a slow one is skipped not queued, a failed one is logged and waits for the next minute);
+//! - the host's own scheduler fires nothing; when the wall-clock minute changes it calls `schedule.tick` and the core does the firing (one tick
+//!   at a time, a slow one is skipped not queued, a failed one is logged and retried at the next second);
 //! - `POST /hooks/routines/:id` (and the relay's delivery, which reaches the same `receive`) goes to `schedule.fire` for the
 //!   job the import made from that routine, as the Host principal. The core checks the key and the signature with its
 //!   own copy of the key; the host logs and returns no secret;
@@ -33,8 +33,7 @@ use std::sync::atomic::Ordering;
 
 /// The module's name in the cutover framework.
 const MODULE: &str = "schedules";
-/// One core tick a minute, as `kith-sched`'s launchd job ticked.
-const TICK_EVERY_MS: i64 = 60_000;
+const MINUTE_MS: i64 = 60_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum Gate {
@@ -120,29 +119,36 @@ impl Routines {
         *self.link.locked() = link;
     }
 
-    /// Whether a core tick is due now; true claims it (one at a time, a minute apart). The caller must call
-    /// [`Self::forward_tick`], which releases the claim.
+    /// Whether a core tick is due now; true claims it (one at a time). Due when the wall-clock minute differs from the
+    /// last minute a tick succeeded in (so also once at start), however late the previous tick ran: a fixed spacing
+    /// drifted and skipped a minute about hourly. The caller must call [`Self::forward_tick`], which releases the claim.
     pub(super) fn core_tick_due(&self, now: i64) -> bool {
         if self.core_ticking.swap(true, Ordering::AcqRel) {
             return false;
         }
-        let mut last = self.last_core_tick.locked();
-        if now - *last < TICK_EVERY_MS {
+        let minute = now.div_euclid(MINUTE_MS);
+        // `!=` and not `<`: a clock that went back (sleep, NTP) ticks again instead of waiting for the old minute.
+        if *self.last_core_tick.locked() == Some(minute) {
             self.core_ticking.store(false, Ordering::Release);
             return false;
         }
-        // Stamped when claimed, not when done: a failing tick waits for the next minute instead of looping.
-        *last = now;
+        *self.claimed_minute.locked() = minute;
         true
     }
 
-    /// One `schedule.tick`. Blocking; the runner calls it off the async threads.
+    /// One `schedule.tick`. Blocking; the runner calls it off the async threads. Only an answered tick marks its minute
+    /// done: a busy or failed one is claimed again at the next second.
     pub(super) fn forward_tick(&self) {
         let link = self.link.locked().clone();
         match link.owner("schedule.tick", &json!({})) {
-            Answer::Done(v) => tracing::debug!(fired = %v, "routines: the core ticked"),
-            Answer::Refused(why) => tracing::warn!(why, "routines: the core refused a schedule tick"),
-            Answer::Down { why, .. } => tracing::warn!(why, "routines: could not reach the core for a schedule tick"),
+            Answer::Done(v) => {
+                tracing::debug!(fired = %v, "routines: the core ticked");
+                *self.last_core_tick.locked() = Some(*self.claimed_minute.locked());
+            }
+            Answer::Refused(why) => tracing::warn!(why, "routines: the core refused a schedule tick; retrying"),
+            Answer::Down { why, .. } => {
+                tracing::warn!(why, "routines: could not reach the core for a schedule tick; retrying");
+            }
         }
         self.core_ticking.store(false, Ordering::Release);
     }

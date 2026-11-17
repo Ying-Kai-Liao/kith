@@ -286,7 +286,7 @@ pub fn start(hub: &Arc<Hub>) {
     *hub.routines.scheduler.locked() = Some(task);
 }
 
-/// One second of the runner. True when a `schedule.tick` is due: the core owns the schedules and it has been a minute
+/// One second of the runner. True when a `schedule.tick` is due: the core owns the schedules and the wall-clock minute has changed
 /// (the caller then calls `forward_tick`).
 fn tick(hub: &Arc<Hub>) -> Result<bool> {
     let gate = hub.routines.refresh_gate();
@@ -383,21 +383,90 @@ mod tests {
         assert!(!tick(&hub).unwrap());
         hub.routines.forward_tick();
         assert_eq!(fake.calls_of("schedule.tick").len(), 1);
-        // A minute has not passed since the claim, so a failed tick is not retried in a tight loop either.
+        // The core answered, so this minute is done: not asked again until the minute changes.
         assert!(!tick(&hub).unwrap());
         assert!(hub.routines.state.locked().routines[0].next_runs[0] == Some(1), "serve.db is not read as live");
     }
 
     #[test]
-    fn a_failed_core_tick_is_logged_and_frees_the_next_one() {
+    fn a_failed_core_tick_is_retried_at_the_next_second_and_a_good_one_waits_for_the_next_minute() {
         use super::super::switch_tests::{hub, switched};
         let hub = hub();
         let fake = switched(&hub, Gate::Core);
         fake.says(|_, _| crate::core_front::Answer::Down { why: "no core is running".into(), lost: false });
         assert!(hub.routines.core_tick_due(100_000));
+        assert!(!hub.routines.core_tick_due(100_000), "two ticks never overlap");
         hub.routines.forward_tick();
-        assert!(!hub.routines.core_tick_due(100_001), "not before a minute has passed");
-        assert!(hub.routines.core_tick_due(160_000), "and then it is asked again");
+        assert!(hub.routines.core_tick_due(101_000), "a failed tick is claimed again at the next second");
+        fake.says(|_, _| crate::core_front::Answer::Done(json!({})));
+        hub.routines.forward_tick();
+        assert!(!hub.routines.core_tick_due(119_000), "the minute is done");
+        assert!(hub.routines.core_tick_due(120_000), "and the next minute is due on its first second");
+        hub.routines.forward_tick();
+        // The clock went back (sleep, NTP): a different minute ticks, it does not wait for the old one.
+        assert!(hub.routines.core_tick_due(60_000));
+    }
+
+    #[test]
+    fn two_simulated_hours_tick_once_a_minute_with_jittery_latency_and_skip_none() {
+        use super::super::switch_tests::{hub, switched};
+        let hub = hub();
+        let fake = switched(&hub, Gate::Core);
+        let start = 1_000_000_000_i64 * 60 + 7_300; // not on a minute edge
+        let mut ticked = Vec::new();
+        let mut busy_until = 0;
+        for step in 0..(120 * 60) {
+            // The runner's second is late by a varying amount, and a tick takes 0.9 to 2.9 s (in flight across seconds).
+            let now = start + step * 1000 + (step * 7919 % 400);
+            if now < busy_until {
+                continue;
+            }
+            if hub.routines.core_tick_due(now) {
+                ticked.push(now.div_euclid(60_000));
+                busy_until = now + (step * 31 % 3) * 1000 + 900;
+                hub.routines.forward_tick();
+            }
+        }
+        assert_eq!(fake.calls_of("schedule.tick").len(), ticked.len());
+        let first = start.div_euclid(60_000);
+        let want: Vec<i64> = (first..first + 120).collect();
+        assert_eq!(ticked, want, "exactly one tick per minute, none skipped");
+    }
+
+    #[test]
+    fn the_first_second_after_start_ticks_even_mid_minute() {
+        use super::super::switch_tests::{hub, switched};
+        let hub = hub();
+        switched(&hub, Gate::Core);
+        assert!(hub.routines.core_tick_due(59_999));
+        hub.routines.forward_tick();
+        assert!(hub.routines.core_tick_due(60_000));
+    }
+
+    #[test]
+    fn switched_a_pending_serve_db_run_is_still_dispatched_once_and_nothing_new_is_fired() {
+        use super::super::switch_tests::{hub, switched};
+        let hub = hub();
+        due_routine(&hub);
+        let pending = {
+            let r = hub.routines.state.locked().routines[0].clone();
+            new_run(&r, Value::Null, None)
+        };
+        let id = pending.id.clone();
+        hub.routines
+            .change(&hub.store, |s| {
+                s.runs.push(pending);
+                Ok(())
+            })
+            .unwrap();
+        switched(&hub, Gate::Core);
+        tick(&hub).unwrap();
+        let after = |hub: &Arc<Hub>| hub.routines.state.locked().runs.clone();
+        let runs = after(&hub);
+        assert_eq!(runs.len(), 1, "no new run is fired from serve.db's next_runs");
+        assert!(runs[0].id == id && runs[0].status != Status::Pending, "the pending one was handed on");
+        tick(&hub).unwrap();
+        assert_eq!(after(&hub).len(), 1, "and nothing is fired or run twice on the next second");
     }
 
     #[test]
