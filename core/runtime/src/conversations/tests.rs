@@ -969,15 +969,15 @@ fn reconcile_ends_unlisted_claimed_claims_and_holds_unlisted_running_ones_as_end
 }
 
 /// Step 5 takes a host's running turn claim whose recorded process is gone (rule K keeps only a live one, `reconcile_tests.rs`;
-/// pid 200 here has no process started `e200`) into `ending` (`holder_changed`, the turn queued again), and an imported claim
+/// pid 4000200 here has no process started `e200`; a small pid like 200 is a live process on some CI runners) into `ending` (`holder_changed`, the turn queued again), and an imported claim
 /// with no instance. Both stay the writer until `end_gone`.
 /// The tick signals the host's; the instance-less one is never signalled (`kill_resend::pass` skips a `holder_changed` claim
 /// that no holder started, which `end_reason` alone says).
 #[test]
 fn reconcile_takes_a_hosts_running_turn_and_an_instanceless_one_into_ending() {
     let (_t, mut c) = open();
-    let host = take_as(&mut c, "a", Some("kith-serve-host"), Some(200));
-    let imported = take_as(&mut c, "b", None, Some(300));
+    let host = take_as(&mut c, "a", Some("kith-serve-host"), Some(4_000_200));
+    let imported = take_as(&mut c, "b", None, Some(4_000_300));
     unreconcile(&c);
     let out = reconcile(&mut c, &[], &[], i64::MAX, 50).expect("reconcile");
     assert_eq!(state(&c, host), "ending", "never straight to ended");
