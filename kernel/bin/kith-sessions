@@ -206,7 +206,8 @@ def record():
         if reg.switched(state):
             record_in_core(reg, state, rec)
             return
-        write_atomic(path, rec)
+        with reg.sid_lock(state, sid):   # A8: the core's per-sid lock; not had within 1 s, the write goes on as today (fail open)
+            write_atomic(path, rec)
         reg.drain(state)
         if reg.switched(state):   # the step's marker landed after the first look: the core may have read the folder already
             record_in_core(reg, state, rec)

@@ -64,7 +64,9 @@ finally:
 state = tmp / 'state'; os.environ['KITH_MACHINE'] = str(tmp / 'machine')
 reg = state / 'live' / 'terminal'
 old_dead = mk(reg / 'old.json', 10, '{"pid": %d, "recordedAt": 1}' % dead.pid)
-spooled = mk(reg / 'inbox' / 'new.5.1.json', 0, '{"sessionId": "new", "recordedAt": 5, "pid": null}')
+spooled = mk(reg / 'inbox' / 'new.5.1.json', 0, '{"v": 1, "sessionId": "new", "recordedAt": 5, "pid": null}')
+bad_v = mk(reg / 'inbox' / 'badv.5.1.json', 0, '{"v": 2, "sessionId": "badv", "recordedAt": 5}')
+bad_p = mk(reg / 'inbox' / 'badp.5.1.json', 0, '{"v": 1, "sessionId": "badp", "recordedAt": 5, "person": "ann"}')
 mk(reg / 'registry.tombstone', 0, '{}')
 assert ks.prune_registry(state, now=now) == 0 and old_dead.exists() and spooled.exists(), 'Writer mode: nothing pruned or drained'
 (reg / 'registry.tombstone').unlink()
@@ -74,6 +76,8 @@ assert ks.prune_registry(state, now=now) == 0 and old_dead.exists() and spooled.
 sw.write_text('state=stepping\nat=1\n')
 assert ks.prune_registry(state, now=now) == 1, 'Files mode: the old dead record goes'
 assert not old_dead.exists() and not spooled.exists() and (reg / 'new.json').exists(), 'the spool entry was put in place first'
+assert not bad_v.exists() and not bad_p.exists() and not (reg / 'badv.json').exists() and not (reg / 'badp.json').exists(), \
+    'A5: entries the core would refuse are deleted, never placed'
 assert ks.STATE == ks.paths()['KITH_STATE']
 src_text = open(src).read()
 assert "prune_registry(STATE, t)" in src_text and "paths()['KITH_MACHINE'] / 'live' / 'terminal'" not in src_text
