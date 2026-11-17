@@ -1,0 +1,118 @@
+import Foundation
+import KithKit
+import Observation
+
+/// One chat's entries. Its own `@Observable`, so a view reading chat X is invalidated by chat X's writes only.
+@Observable
+final class ChatEntries {
+    var list: [Entry] = []
+
+    /// Moves the list out, leaving it empty, so a caller mutating it holds the only reference (no copy-on-write).
+    func take() -> [Entry] {
+        var out: [Entry] = []
+        swap(&out, &list)
+        return out
+    }
+}
+
+/// Every chat's entries, one `ChatEntries` holder each, created once and kept. The shelf itself is not observed (the
+/// store keeps it `@ObservationIgnored`): a read observes only the holders it touches, and `all` (the board, which
+/// really wants every chat) also observes `membership`, which moves when a chat gains its first entry or loses its last.
+/// A holder is created on read too, so a view can watch a chat that has no entries yet; it stays when the chat empties.
+@MainActor public final class EntryShelf {
+    @Observable final class Membership { var generation = 0 }
+
+    private var holders: [String: ChatEntries] = [:]
+    private let membership = Membership()
+
+    private func holder(_ id: String) -> ChatEntries {
+        if let h = holders[id] { return h }
+        let h = ChatEntries()
+        holders[id] = h
+        return h
+    }
+
+    /// The chat's entries, `nil` when it has none (as a missing dictionary key was).
+    public subscript(id: String) -> [Entry]? {
+        get { let list = holder(id).list; return list.isEmpty ? nil : list }
+        set { write(id, newValue ?? []) }
+        _modify {
+            let h = holder(id)
+            let wasEmpty = h.list.isEmpty
+            var taken: [Entry]? = wasEmpty ? nil : h.take()
+            yield &taken
+            let list = taken ?? []
+            h.list = list
+            if wasEmpty != list.isEmpty { membership.generation += 1 }
+        }
+    }
+
+    public subscript(id: String, default fallback: @autoclosure () -> [Entry]) -> [Entry] {
+        get { holder(id).list }
+        set { write(id, newValue) }
+        _modify {
+            // In place, on the holder's own storage: a copy per event made a catch-up quadratic.
+            let h = holder(id)
+            let wasEmpty = h.list.isEmpty
+            yield &h.list
+            // A known chat's first or last entry also bumps `membership`, so the board re-reads once then.
+            if wasEmpty != h.list.isEmpty { membership.generation += 1 }
+        }
+    }
+
+    private func write(_ id: String, _ list: [Entry]) {
+        let h = holder(id)
+        if list.isEmpty && h.list.isEmpty { return }
+        commit(h, list)
+    }
+
+    private func commit(_ h: ChatEntries, _ list: [Entry]) {
+        let wasEmpty = h.list.isEmpty
+        h.list = list
+        if wasEmpty != list.isEmpty { membership.generation += 1 }
+    }
+
+    /// Every chat that has entries. Observes all of them: for the board and the cache, not for a row or a chat.
+    public var all: [String: [Entry]] {
+        _ = membership.generation
+        return holders.reduce(into: [:]) { out, pair in
+            let list = pair.value.list
+            if !list.isEmpty { out[pair.key] = list }
+        }
+    }
+
+    /// Just these chats' entries; observes only their holders, so another chat's event leaves the reader alone.
+    public func chats(_ ids: some Sequence<String>) -> [String: [Entry]] {
+        ids.reduce(into: [:]) { out, id in
+            let list = holder(id).list
+            if !list.isEmpty { out[id] = list }
+        }
+    }
+
+    /// Every chat but these (guests' cards live in chats the account has no bot for). Observes `membership` for a new
+    /// chat appearing and the holders outside `known`; an event in a known chat does not reach the reader.
+    public func chats(excluding known: Set<String>) -> [String: [Entry]] {
+        _ = membership.generation
+        return holders.reduce(into: [:]) { out, pair in
+            guard !known.contains(pair.key) else { return }
+            let list = pair.value.list
+            if !list.isEmpty { out[pair.key] = list }
+        }
+    }
+
+    public var isEmpty: Bool {
+        _ = membership.generation
+        return !holders.values.contains { !$0.list.isEmpty }
+    }
+    public var values: [[Entry]] { Array(all.values) }
+
+    /// Replaces every chat's entries at once (cache load).
+    func replaceAll(_ new: [String: [Entry]]) {
+        for id in Set(holders.keys).union(new.keys) { write(id, new[id] ?? []) }
+    }
+
+    /// Rewrites each chat's entries; a chat left with none drops out.
+    func transform(_ change: ([Entry]) -> [Entry]) {
+        for (id, h) in holders where !h.list.isEmpty { write(id, change(h.list)) }
+    }
+}

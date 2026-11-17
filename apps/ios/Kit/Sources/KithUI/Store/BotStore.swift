@@ -78,7 +78,8 @@ public final class BotStore {
     /// The host's version and protocol levels, kept even when the rest of its `hello` can't be read.
     public internal(set) var hostVersion: HostVersion?
     public internal(set) var bots: [String: Bot] = [:]
-    public internal(set) var entries: [String: [Entry]] = [:]
+    /// Per chat, each its own observation scope (see `EntryShelf`); the shelf is not observed itself.
+    @ObservationIgnored public let entries = EntryShelf()
     /// Where each thread works, by `threadFolderKey`; filled by `loadThread` and `setPlaceFolder`.
     public internal(set) var threadFolders: [String: PlaceFolder] = [:]
     public internal(set) var usage: Usage
@@ -216,6 +217,9 @@ public final class BotStore {
     @ObservationIgnored var readingViews: [UUID: ReadingScope] = [:]
 
     var cacheStamp: String?
+    /// False until the cached mirror has been read (and applied, when there is one): an empty roster before then is not an empty account.
+    public internal(set) var cacheLoaded = false
+    var cacheLoad: Task<Void, Never>?
 
     /// Loads this context's `DeviceIdentity` itself.
     public convenience init(computer: Computer, storage: SharedStore.Context) {
@@ -289,7 +293,7 @@ public final class BotStore {
 
     /// Cards outside this account's chats that wait for it on this computer (see `GuestPrompt`); `isOwner` is the
     /// account's role here.
-    public func guestPrompts(isOwner: Bool) -> [GuestPrompt] { GuestPrompt.pending(in: entries, known: Set(bots.keys), isOwner: isOwner) }
+    public func guestPrompts(isOwner: Bool) -> [GuestPrompt] { GuestPrompt.pending(in: entries.chats(excluding: Set(bots.keys)), known: Set(bots.keys), isOwner: isOwner) }
 
     /// Display name for a harness id, as the host reports it (falls back to the built-in list).
     public func backendName(_ id: String) -> String {
