@@ -54,6 +54,11 @@ impl Ops for Live {
         else {
             return Started::Failed("the core's turn has no id, conversation or person".to_owned());
         };
+        // The owner's turns carry the owner's people id; `run-turn` knows the owner as no person. Unreadable: say so, as the
+        // routines' path does, instead of running as someone unchecked.
+        let Some(spec_person) = person_in_spec(t, person) else {
+            return Started::Failed("the core can't say whose turn this is (no owner read)".to_owned());
+        };
         let claim = match self.0.claim_run(conversation, person, turn) {
             RunClaim::Claimed(id) => id,
             RunClaim::Later | RunClaim::Down(_) => return Started::Later,
@@ -66,7 +71,7 @@ impl Ops for Live {
             return Started::Failed(why);
         };
         let agent = t["agent"].as_str().unwrap_or_default();
-        let spec = json!({"prompt": t["prompt"], "settings": t["settings"], "person": person});
+        let spec = json!({"prompt": t["prompt"], "settings": t["settings"], "person": spec_person});
         match spawn(&kernel, agent, job, turn, claim, &spec) {
             Ok(child) => {
                 let writer = self.0.clone();
@@ -80,6 +85,12 @@ impl Ops for Live {
             }
         }
     }
+}
+
+/// The `person` of the spec `run-turn` checks: null for the owner (the core's `owner: true`, whatever people id it is), else the
+/// turn's person. `None`: the core could not read the owner, so the turn cannot be placed.
+pub(super) fn person_in_spec(t: &Value, person: &str) -> Option<Value> {
+    t["owner"].as_bool().map(|owner| if owner { Value::Null } else { json!(person) })
 }
 
 impl Live {

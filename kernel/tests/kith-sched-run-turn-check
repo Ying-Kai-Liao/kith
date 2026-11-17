@@ -130,6 +130,11 @@ reset
 ( spec_p 'null' '"owner"' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err" ) & PIDS+=("$!"); wait_ran
 check "the owner's job, the owner's turn (the core says owner): runs" "ran"
 kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+# The host sends null for the owner (the core's own id for them is a people id, never the word owner).
+reset
+( spec_p 'null' 'null' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err" ) & PIDS+=("$!"); wait_ran
+check "the owner's job, person null (what the host sends for owner: true): runs" "ran"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
 
 # 5. No state.json, no tick.lock: a tombstone stays the note, a held lock does not stop the run.
 reset

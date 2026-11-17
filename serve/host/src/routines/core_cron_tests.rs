@@ -81,6 +81,17 @@ fn the_child_runs_without_the_hosts_run_token_or_person_and_keeps_the_rest() {
 }
 
 #[test]
+fn the_specs_person_is_none_for_the_owner_whatever_the_cores_id_and_the_turns_for_a_guest() {
+    use super::person_in_spec;
+    // As `hostclaim.queued` lists them: the owner's turn carries the owner's people id with `owner: true`.
+    let mine = json!({"person": "kai", "owner": true});
+    let guest = json!({"person": "sam", "owner": false});
+    assert_eq!(person_in_spec(&mine, "kai"), Some(serde_json::Value::Null));
+    assert_eq!(person_in_spec(&guest, "sam"), Some(json!("sam")));
+    assert_eq!(person_in_spec(&json!({"person": "kai", "owner": null}), "kai"), None, "no owner read: not placed");
+}
+
+#[test]
 fn the_run_leads_a_process_group_of_its_own() {
     let k = kernel("ps -o pid=,pgid= -p $$ >&2");
     let (_, err) = run(&k, None, &json!({"prompt": "x", "settings": null}));
