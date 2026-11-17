@@ -423,10 +423,13 @@ fn release(core: &mut Core, p: &Value, now: i64) -> Result<Value> {
     let only = word(p, "conversation");
     let tx = core.claim_tx()?;
     let ids: Vec<i64> = {
+        // `turn IS NULL`: a scheduled run's claim (its turn set, the run attached) ends by the host's report of that turn, never
+        // by a release of its pid, which would leave the turn `running` under an ended claim.
         let mut st = tx.prepare(
             "SELECT claim_id FROM claims
              WHERE kind = 'external' AND person = ?4 AND pid = ?1 AND pid_started = ?2
-               AND state IN ('claimed', 'running') AND (?3 IS NULL OR conversation = ?3)",
+               AND state IN ('claimed', 'running') AND (?3 IS NULL OR conversation = ?3)
+               AND turn IS NULL",
         )?;
         st.query_map(params![pid, started, only, OWNER], |r| r.get(0))?
             .collect::<std::result::Result<_, _>>()?

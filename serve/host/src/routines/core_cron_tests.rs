@@ -69,6 +69,18 @@ fn a_refusal_is_the_last_line_of_stderr_and_a_non_zero_exit() {
 }
 
 #[test]
+fn the_child_runs_without_the_hosts_run_token_or_person_and_keeps_the_rest() {
+    let k = kernel("true");
+    let cmd = command_with(&k, "house", "daily", 7, 9, None);
+    let removed: Vec<_> =
+        cmd.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+    for var in ["KITH_RUN_TOKEN", "KITH_RUN_SOCKET", "KITH_PERSON", "HQ_PERSON"] {
+        assert!(removed.iter().any(|r| r == var), "{var} is removed from the child");
+    }
+    assert!(!removed.iter().any(|r| r == "KITH_HOME"), "KITH_HOME is inherited");
+}
+
+#[test]
 fn the_run_leads_a_process_group_of_its_own() {
     let k = kernel("ps -o pid=,pgid= -p $$ >&2");
     let (_, err) = run(&k, None, &json!({"prompt": "x", "settings": null}));

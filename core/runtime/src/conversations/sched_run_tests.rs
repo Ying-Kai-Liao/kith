@@ -378,6 +378,23 @@ fn a_revoke_kills_a_guests_scheduled_run_because_its_claim_is_swept_by_person() 
 }
 
 #[test]
+fn releasing_a_pid_never_ends_a_scheduled_runs_claim() {
+    let (_t, mut c) = world();
+    let (conv, turn) = fired(&mut c, "daily", "owner", false);
+    let id = claim_for(&mut c, &conv, "owner", turn).unwrap();
+    attach(&mut c, id, 4242, "e1", NOW + 2).unwrap();
+    // The owner's run-chain asks for its own pid's claims; the scheduled run's pid is no run of that kind.
+    let p = json!({"pid": 4242, "started": "e1"});
+    let said = call_at(&mut c, "claim.release", &p, NOW + 3, &Procs::default()).unwrap();
+    assert_eq!(said["ended"], json!([]), "{said}");
+    assert_eq!(
+        claim_row(&c, id),
+        ("external".into(), "running".into(), Some(4242))
+    );
+    assert_eq!(turn_state(&c, turn), "running");
+}
+
+#[test]
 fn claim_attach_is_served_as_a_row_and_answers_data() {
     let (_t, mut c) = world();
     let (conv, turn) = fired(&mut c, "daily", "kai", false);

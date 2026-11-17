@@ -107,6 +107,30 @@ reset; echo 3 > "$KITH_STATE/ans.exit"
 RT 'null'; wait "$RTPID"; rc=$?
 check "no answer from the core: exits 5 and the engine never starts" "[[ $rc -eq 5 ]] && ! ran"
 
+# 4b. A refused second run-turn must not wipe the log of the live run (a host restart in the same minute opens the same file).
+reset; rm -rf "$MACHINE/outbox"
+RT 'null'; wait_ran
+LOG=$(ls "$KITH_HOME"/../*/logs/sched/house/a-*.log "$MACHINE"/logs/sched/house/a-*.log 2>/dev/null | head -1)
+[[ -z $LOG ]] && LOG=$(find "$T" -name 'a-20261104-0800.log' | head -1)
+echo "engine wrote this" >> "$LOG"
+echo '{"refused": "gone", "state": "running"}' > "$KITH_STATE/ans"
+RT 'null'; wait "$RTPID"; rc=$?
+check "second run-turn loses the attach (exit 4) and the live run's log is untouched" "[[ $rc -eq 4 ]] && grep -q 'engine wrote this' '$LOG'"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+
+# 4c. The turn's person must be the run's: the host passes it; a job of another person (settings null: the job's current one) exits 3.
+reset; rm -f "$KITH_STATE/ans"
+spec_p() { printf '{"prompt": "do a", "settings": %s, "person": %s}' "$1" "$2"; }
+spec_p 'null' '"sam"' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err"; rc=$?
+check "the job is the owner's but the turn's person is sam: exits 3, never attaches" "[[ $rc -eq 3 ]] && ! ran && [[ ! -e '$KITH_STATE/calls' ]] && grep -q 'sam' '$T/err'"
+reset
+spec_p '{"model": "m1", "person": "sam"}' '"owner"' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err"; rc=$?
+check "settings say sam but the turn is the owner's: exits 3" "[[ $rc -eq 3 ]] && ! ran"
+reset
+( spec_p 'null' '"owner"' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err" ) & PIDS+=("$!"); wait_ran
+check "the owner's job, the owner's turn (the core says owner): runs" "ran"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+
 # 5. No state.json, no tick.lock: a tombstone stays the note, a held lock does not stop the run.
 reset
 NOTE='{"kith_tombstone": 1, "module": "schedules", "message": "moved", "rollback": "kith rollback schedules"}'

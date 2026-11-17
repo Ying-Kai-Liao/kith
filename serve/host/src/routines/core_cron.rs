@@ -14,17 +14,28 @@
 //!    is `failed`, never put back: its prompt may have gone out). A host that was restarted meanwhile has no such thread: the
 //!    core's `end_gone` ends the claim when the process is gone, with the turn `failed` (outcome unknown).
 //!
+//! A call that frees the claim (the cancel of a run that could not start, the cancel and the report of one that ended) is asked
+//! again until the core answers ([`until_told`]): a claim of kind `turn` with no process would otherwise hold the job's
+//! conversation for as long as this host lives (only an adopt at the next start ends it) and every later fire would park
+//! behind it. A refusal is an answer: the claim or turn is gone. The retry lives on the run's own thread, which ends with
+//! the host process (adopt handles what a stop leaves).
+//!
+//! The child gets the host's environment minus the run token and `KITH_PERSON`/`HQ_PERSON` (`kith-sched` builds the person
+//! from the turn's, which the spec carries so `run-turn` can check it is the claim's). `KITH_HOME` is inherited as the host
+//! has it; unset, `kith-sched` finds the folder by the same rule as the host does.
+//!
 //! `KITH_SCHED_PERMISSION_MODE` (the mode a scheduled run starts in, else the agent's, else kith's default) is not in the launchd
 //! plist of `dev.kith.sched` either: it comes from the environment `kith-sched` runs in. The host passes its own environment's
 //! value through, so a host started with it set runs the cron jobs the way `kith-sched` did with it set.
 
 use super::core_runs::{Ops, Started};
-use crate::terminal::core_writer::{CoreWriter, RunClaim};
+use crate::terminal::core_writer::{CoreWriter, RunClaim, Told};
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// The environment variable `kith-sched` reads for the permission mode of a scheduled run; the host passes it on.
 pub(super) const PERMISSION_MODE: &str = "KITH_SCHED_PERMISSION_MODE";
@@ -50,22 +61,71 @@ impl Ops for Live {
             RunClaim::Refused(why) => return Started::Failed(why),
         };
         let Some(kernel) = crate::kernel::current_kernel() else {
-            self.0.cancel_turn(turn, "no kith kernel here to run the job");
-            return Started::Failed("no kith kernel here to run the job".to_owned());
+            let why = "no kith kernel here to run the job".to_owned();
+            self.free(turn, &why);
+            return Started::Failed(why);
         };
         let agent = t["agent"].as_str().unwrap_or_default();
-        let spec = json!({"prompt": t["prompt"], "settings": t["settings"]});
+        let spec = json!({"prompt": t["prompt"], "settings": t["settings"], "person": person});
         match spawn(&kernel, agent, job, turn, claim, &spec) {
             Ok(child) => {
                 let writer = self.0.clone();
-                std::thread::spawn(move || over(&writer, child, claim, turn));
+                std::thread::spawn(move || over(&writer, child, claim, turn, &Pace::LIVE));
                 Started::Ran
             }
             Err(error) => {
                 let why = format!("couldn't start kith-sched run-turn: {error}");
-                self.0.cancel_turn(turn, &why);
+                self.free(turn, &why);
                 Started::Failed(why)
             }
+        }
+    }
+}
+
+impl Live {
+    /// Gives a claimed turn back for good (cancelled): once now, then on a thread of its own until the core answers, so the
+    /// puller is never held and the claim never outlives a core that was briefly down.
+    fn free(&self, turn: i64, why: &str) {
+        if matches!(self.0.cancel_told(turn, why), Told::Down(_)) {
+            let (writer, why) = (self.0.clone(), why.to_owned());
+            std::thread::spawn(move || {
+                until_told("cancel", turn, &Pace::LIVE, || writer.cancel_told(turn, &why));
+            });
+        }
+    }
+}
+
+/// How long to wait between two asks of a core that does not answer: from `first`, doubling, at most `cap`.
+pub(super) struct Pace {
+    pub first: Duration,
+    pub cap: Duration,
+}
+
+impl Pace {
+    const LIVE: Pace = Pace { first: Duration::from_secs(2), cap: Duration::from_secs(60) };
+}
+
+/// Asks until the core answers (anything but [`Told::Down`]), pacing the asks by `pace`: never a tight loop, and unbounded
+/// while the host lives. Logs the first failure only (a core down for minutes would otherwise fill the log). A refusal ends it:
+/// the claim or turn it was about is gone. `what` names the call in the log.
+pub(super) fn until_told(what: &str, turn: i64, pace: &Pace, mut ask: impl FnMut() -> Told) -> Told {
+    let mut wait = pace.first;
+    let mut logged = false;
+    loop {
+        match ask() {
+            Told::Down(why) => {
+                if !std::mem::replace(&mut logged, true) {
+                    tracing::warn!(
+                        why,
+                        turn,
+                        what,
+                        "routines: the core did not answer a scheduled run's end; asking again"
+                    );
+                }
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(pace.cap);
+            }
+            told => return told,
         }
     }
 }
@@ -110,6 +170,11 @@ pub(super) fn command_with(
     mode: Option<std::ffi::OsString>,
 ) -> Command {
     let mut cmd = Command::new(kernel.join("bin/kith-sched"));
+    // The run's identity comes from `kith-sched` (`KITH_PERSON` is built from the turn's person; a run token is issued to a run,
+    // not inherited from whatever started the host), as every other kernel spawn of the host does.
+    for var in [crate::runauth::TOKEN_ENV, crate::runauth::SOCKET_ENV, "KITH_PERSON", "HQ_PERSON"] {
+        cmd.env_remove(var);
+    }
     cmd.args(["run-turn", agent, job, "--turn", &turn.to_string(), "--claim", &claim.to_string()])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -126,7 +191,7 @@ pub(super) fn command_with(
 }
 
 /// Waits for the run and tells the core how it ended. Runs on a thread of its own: the run may take hours.
-fn over(writer: &CoreWriter, mut child: Child, claim: i64, turn: i64) {
+fn over(writer: &CoreWriter, mut child: Child, claim: i64, turn: i64, pace: &Pace) {
     let pid = child.id();
     // Until the run is the engine, stderr is its refusal; the engine's own output goes to its log, so this is EOF by then.
     let mut said = String::new();
@@ -139,12 +204,17 @@ fn over(writer: &CoreWriter, mut child: Child, claim: i64, turn: i64) {
         || format!("the scheduled run ended with {}", status.map_or_else(|e| e.to_string(), |s| s.to_string())),
         str::to_owned,
     );
-    if let Err(error) = writer.run_over(claim, turn, pid, clean, &why) {
-        // The core is down: the claim's process is gone, so `end_gone` ends it (the turn `failed`) once the core is back.
-        tracing::warn!(error, turn, "routines: a scheduled run ended and the core was not told");
+    // A run that never attached has its turn cancelled first (a no-op for one that did); both are asked until the core answers.
+    if !clean {
+        until_told("cancel", turn, pace, || writer.cancel_told(turn, &why));
     }
+    until_told("report", turn, pace, || writer.run_over(claim, pid, clean, &why));
 }
 
 #[cfg(test)]
 #[path = "core_cron_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "core_cron_retry_tests.rs"]
+mod retry_tests;

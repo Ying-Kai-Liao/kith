@@ -41,8 +41,10 @@ claims the turn, starts `kith-sched run-turn` detached and pipes the turn's fiel
 {"prompt", "settings": {"model", "effort", "harness", "person"} | null}. It builds the run exactly as `run` and the tick do
 (`run_env`), records its own pid and start time on the turn's claim (`claim.attach`, a check-and-set) and only then replaces
 itself with `kith AGENT task`, so the pid IS the run. It never reads or writes state.json (a tombstone by then) and never takes
-tick.lock. Exit codes: 2 no such job or bad input, 3 the person may not run it now, 4 the claim is gone (cancelled, ended,
-already running: nothing ran), 5 the core did not answer (nothing ran). A turn with `settings: null` (fired before they were kept)
+tick.lock. Exit codes: 2 no such job or bad input, 3 the person may not run it now, or is not the person the host
+claimed the turn for, 4 the claim is gone (cancelled, ended, already running: nothing ran), 5 the core did not answer or
+refused the call (nothing ran). The host also sends the turn's "person"; a run whose job's person (the turn's settings', else
+the job's current) is another exits 3 before it attaches, so a revoke of the claim's person always reaches the run. A turn with `settings: null` (fired before they were kept)
 uses the job's current model, effort and harness. KITH_SCHED_PERMISSION_MODE is read from the environment run-turn gets, which
 is the host's (the launchd plist of the tick does not set it either).
 
@@ -467,13 +469,21 @@ def run_turn(agent, jid, claim, spec):
         _quit(EXIT_BAD, 'the turn has no prompt')
     now = clock().replace(second=0, microsecond=0)
     why = 'core turn %s' % spec.get('turn', '?')
-    built = run_env(agent, turn_job(job, spec), now, why)
+    run = turn_job(job, spec)
+    # The claim is swept by the turn's person: a run as another one (the job's person changed since the turn was fired, and the
+    # turn has no settings) would be missed by that person's revoke. Owner is no person, whatever the core calls it.
+    def who(p):
+        return '' if p in (None, '', 'owner') else p
+    if 'person' in spec and who(run.get('person')) != who(spec['person']):
+        _quit(EXIT_REFUSED, 'the job runs as %r, not as the turn'"'"'s person %r' % (run.get('person'), spec['person']))
+    built = run_env(agent, run, now, why)
     if not built:
         _quit(EXIT_REFUSED, 'the job may not run now (see the line above)')
     argv, env, log = built
     try:
-        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-        os.write(fd, log_header(now, agent, job, why).encode())
+        # Not truncated yet: a second run-turn for this turn (a host restart in the same minute) opens the same file, and the
+        # one that loses the attach must leave the winner's log as it is.
+        fd = os.open(log, os.O_WRONLY | os.O_CREAT, 0o644)
     except OSError as e:
         _quit(EXIT_BAD, "can't open the log %s: %s" % (log, e))
     try:
@@ -484,6 +494,11 @@ def run_turn(agent, jid, claim, spec):
             shutil.rmtree(box, ignore_errors=True)
             Path(box + '.json').unlink(missing_ok=True)
         raise
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, log_header(now, agent, job, why).encode())
+    except OSError as e:
+        _quit(EXIT_BAD, "can't write the log %s: %s" % (log, e))
     devnull = os.open(os.devnull, os.O_RDONLY)
     os.dup2(devnull, 0); os.dup2(fd, 1); os.dup2(fd, 2)
     os.chdir(str(Path.home()))

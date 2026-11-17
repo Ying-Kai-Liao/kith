@@ -216,6 +216,16 @@ pub enum RunClaim {
     Refused(String),
 }
 
+/// What the core said to a write the host must get through (a cron run's cancel or end).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Told {
+    Done,
+    /// The core ran its rules and said no (the claim or turn is gone): nothing to ask again.
+    Refused(String),
+    /// Nothing answered: ask again later.
+    Down(String),
+}
+
 /// Why a turn is dropped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dropped {
@@ -406,6 +416,19 @@ impl CoreWriter {
         done
     }
 
+    /// [`Self::cancel_turn`] that tells a refusal from silence: a refused cancel has nothing left to cancel (the core ran its
+    /// rules), only [`Told::Down`] is worth asking again.
+    pub fn cancel_told(&self, turn: i64, why: &str) -> Told {
+        match self.call("hostclaim.cancel", &json!({"turn": turn, "reason": why})) {
+            Answer::Done(_) => {
+                strays::forget_turn(turn);
+                Told::Done
+            }
+            Answer::Refused(said) => Told::Refused(said),
+            Answer::Down { why, .. } => Told::Down(why),
+        }
+    }
+
     /// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire), for the host's runner
     /// (`routines/core_runs.rs`). `Err(why)`: the core did not answer.
     pub fn queued(&self) -> Result<Vec<Value>, String> {
@@ -443,13 +466,19 @@ impl CoreWriter {
     }
 
     /// The end of a cron run's process, as its starter saw it: `done` for a clean exit, `exit` otherwise (the turn is `failed`,
-    /// never put back: its prompt may have gone out). A run that never attached (its claim gone, or `run-turn` refused) has its
-    /// claim ended and its turn cancelled first, which is a no-op for a run that did.
-    pub fn run_over(&self, claim: i64, turn: i64, pid: u32, clean: bool, why: &str) -> Result<(), String> {
-        if !clean {
-            self.cancel(turn, why);
+    /// never put back: its prompt may have gone out). The caller cancels the turn first for a run that never attached
+    /// ([`Self::cancel_told`]: a no-op for one that did) and asks again while this says [`Told::Down`]: a claim of kind `turn`
+    /// with no process is ended by nothing else while the host lives.
+    pub fn run_over(&self, claim: i64, pid: u32, clean: bool, why: &str) -> Told {
+        match self.call(
+            "hostclaim.report",
+            &json!({"claimId": claim, "kind": if clean { "done" } else { "exit" },
+                    "body": json!({"out_of_usage": false, "pid": pid, "why": why}).to_string()}),
+        ) {
+            Answer::Done(_) => Told::Done,
+            Answer::Refused(said) => Told::Refused(said),
+            Answer::Down { why, .. } => Told::Down(why),
         }
-        self.report(claim, if clean { "done" } else { "exit" }, pid, &json!({"why": why}))
     }
 
     fn report(&self, claim: i64, kind: &str, pid: u32, extra: &Value) -> Result<(), String> {
