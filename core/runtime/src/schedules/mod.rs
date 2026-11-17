@@ -17,7 +17,7 @@ mod call;
 #[cfg(unix)]
 mod fire;
 #[cfg(unix)]
-pub(crate) use fire::owner_in;
+pub(crate) use fire::{owner_in, watermark_in};
 #[cfg(all(test, unix))]
 mod fire_tests;
 #[cfg(unix)]

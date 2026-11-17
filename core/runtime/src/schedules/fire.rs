@@ -155,7 +155,7 @@ pub(super) fn no_step(_: Step) -> Result<()> {
 
 /// The watermark of this Mac as an instant in ms: the table of migration 121, else the local-minute text `kith-sched`'s
 /// tick import left in `sched_tick`, converted the way the import converts a run's time.
-pub(super) fn watermark_in(conn: &rusqlite::Connection, mac: &str) -> Result<Option<i64>> {
+pub(crate) fn watermark_in(conn: &rusqlite::Connection, mac: &str) -> Result<Option<i64>> {
     let w: Option<i64> = conn
         .query_row(
             "SELECT at FROM sched_watermark WHERE mac = ?1",
