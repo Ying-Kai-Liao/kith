@@ -1,8 +1,9 @@
 //! M4-2 (the schedule store): the owner's view of the schedules, from the agents' `jobs.json` definitions joined with the
 //! run state in the core's database (tables in `core/runtime/src/migrations/schedules/`). Experimental and owner only.
 //!
-//! The reads are `Served::Core` so a test core answers them; the daemon runs nothing for them yet (the host and `kith
-//! schedule` keep `kith-sched` until M4-5). `schedule.jobs` is the store's listing: `schedule.list` is the existing
+//! The reads are `Served::Core` so a test core answers them. The fire rows (`schedule.tick`, `.runNow`, `.fire`, M4-3) are
+//! served too, but nothing runs them on a clock yet: the host and `kith schedule` keep `kith-sched` until the M4-5 switch.
+//! `schedule.jobs` is the store's listing: `schedule.list` is the existing
 //! `kith schedule ls --json` row (kernel, in `json_forms_more`), which stays as it is until the switch.
 //!
 //! The write rows (`schedule.add`, `.remove`, `.pause`, `.resume`, `.run`) already exist in `json_forms_more` as kernel

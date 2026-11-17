@@ -76,3 +76,20 @@ fixed	INVARIANT	NeverExpired	fail
 fixed	INVARIANT	NeverDone	fail
 fixed	INVARIANT	NeverCancelled	fail
 fixed	INVARIANT	NeverDown	fail
+# --- Handover.tla (M4-5: kith-sched + the host's routines -> the core), MaxMin 3; rows from the architect's results.md (2026-11-17) ---
+h-design	INVARIANT	AtMostOnce	pass
+h-design	INVARIANT	NoSilentLoss	pass
+h-design	INVARIANT	NoStack	pass
+h-perjob-as-written	INVARIANT	AtMostOnce	fail
+h-no-lock	INVARIANT	AtMostOnce	fail
+h-no-anchor	INVARIANT	AtMostOnce	fail
+h-no-anchor	INVARIANT	NoSilentLoss	fail
+h-wm-back	INVARIANT	AtMostOnce	fail
+h-no-h3	INVARIANT	NoStack	fail
+h-global-rewind	INVARIANT	AtMostOnce	fail
+h-bare	INVARIANT	NoSilentLoss	fail
+h-nolast	INVARIANT	NoStack	fail
+# --- package C ahead of its brief: AdoptMode "c" (pid alive keeps running, redeemed-then-dead ended, no-pid requeued), with and without ClaimPausedCheck ---
+c-nocheck	PROPERTY	PausedNeverStarts	pass
+c-check	PROPERTY	PausedNeverStarts	pass
+c-check-rev	PROPERTY	RevokedNeverStarts	pass
