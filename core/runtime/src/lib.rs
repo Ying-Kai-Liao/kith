@@ -366,6 +366,35 @@ pub fn call_account_embedded(
     }
 }
 
+/// Runs `session.record` (transcripts P1) inside an embedded core, for a `SessionStart` hook that found no daemon. Takes the
+/// lifetime lock WITHOUT waiting: a held lock is [`EmbeddedCall::Busy`] at once, nothing ran, and the hook's spool entry
+/// stays for the daemon's drain (a hook has five seconds and must never stall a session). Never creates a core.db and
+/// never migrates one. The answer is the daemon's: `{outcome}` or `{refused: invalid | not-serving, why}`.
+#[cfg(unix)]
+pub fn call_transcripts_embedded(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<EmbeddedCall, Error> {
+    if !transcripts::record::serves(method) {
+        return Err(Error::NoSuchMethod(format!(
+            "kith-core: {method} is not a transcripts method"
+        )));
+    }
+    call::check(kith_api::Principal::Owner, method, params)?;
+    let layout = Layout::new(&paths.machine);
+    let empty = std::fs::metadata(&layout.db).map_or(true, |m| m.len() == 0);
+    if empty && !layout.marker.exists() {
+        return Ok(EmbeddedCall::NoCore(layout.dir));
+    }
+    match open_embedded(paths)? {
+        Embedded::Open(mut core) => {
+            transcripts::record::call(&mut core, params).map(EmbeddedCall::Answered)
+        }
+        Embedded::DaemonRunning { .. } => Ok(EmbeddedCall::Busy),
+    }
+}
+
 /// Points the kernel's notes (a lock or write it could not do and carried on) at the core log for the rest of this
 /// process: a kernel verb that does not go through the core (`kernel accounts`) calls this itself.
 pub fn route_kernel_notes(paths: &Paths) {

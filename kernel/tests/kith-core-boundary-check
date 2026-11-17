@@ -49,6 +49,8 @@ PUBLIC = {
     ("lib.rs", "field:lines"),
     # `kith kernel core-call` with no daemon (the revoke stopgap before M2-23): one owner `people.*` write in an embedded core.
     ("lib.rs", "call_authority_embedded"), ("lib.rs", "call_account_embedded"), ("lib.rs", "EmbeddedCall"),
+    # `session.record` with no daemon (transcripts P1): the SessionStart hook's record in an embedded core that never waits.
+    ("lib.rs", "call_transcripts_embedded"),
     # the narrowing-only list those writes are held to; the host's core_front.rs reuses it (a list of names, no table)
     ("lib.rs", "EMBEDDED_WRITES"), ("lib.rs", "EMBEDDED_READS"), ("lib.rs", "embedded"),
     ("lib.rs", "cutover"),   # `kith kernel cutover ...` (M3-10a): argv in, lines out

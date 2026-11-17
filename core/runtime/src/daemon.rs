@@ -357,6 +357,16 @@ impl Shared {
                 return Ok(answer);
             }
         }
+        // The session registry's records (transcripts P1): a claim transaction, then the file from the row; refused as
+        // `not-serving` data until the transcripts module is switched.
+        #[cfg(unix)]
+        {
+            if crate::transcripts::record::serves(method) {
+                let answer = self.with_core(|c| crate::transcripts::record::call(c, params))?;
+                self.served.fetch_add(1, Ordering::SeqCst);
+                return Ok(answer);
+            }
+        }
         // So do the cards: raise, claim and close are claim transactions.
         if method.starts_with("cards.") {
             let answer =
@@ -714,6 +724,9 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
     {
         log::note(&shared.logs, &format!("daemon: no kill re-send tick: {e}"));
     }
+    // The registry's rows and files (transcripts P1): drained and reconciled at start and every minute once switched.
+    #[cfg(unix)]
+    crate::transcripts::tick::spawn(shared.clone());
     if cfg.holder_on {
         holder_link::supervise(shared, layout, &cfg.holder);
     }

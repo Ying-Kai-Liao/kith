@@ -11728,6 +11728,39 @@
       }
     },
     {
+      "name": "session.record",
+      "summary": "Records a session in the core's session registry (the `SessionStart` hook once the transcripts are the core's): in one transaction the newest record wins (order: `recordedAt` ns, then `procStart`, then the last to arrive) and `session_records`, `engine_sessions` and `conversations` are written; then `$KITH_STATE/live/terminal/<sid>.json` is written from the row (also when the record was older), and only then does the call answer. A compact keeps the row's `startedAt`. Answers `{outcome: recorded | older}`, or `{refused: invalid, why}` (the record is dropped) or `{refused: not-serving, why}` (the transcripts module is not switched: the hook keeps its spool entry).",
+      "params": [
+        {
+          "name": "record",
+          "summary": "The record `kith-sessions record` writes (`v: 1`, `sessionId`, `agent`, `cwd`, `transcriptPath`, `pid`, ...), with `recordedAt` in nanoseconds since the epoch.",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "record": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
       "name": "conversation.transcript",
       "summary": "The engine sessions a conversation has, one per account: the engine, its session id, the pointer to where the engine keeps it, the hash and size as of the last read, and whether the engine's copy is there now and has changed since. Refuses an id that is no conversation. Only Claude's sessions are held; another engine's row says `held: false`.",
       "params": [
