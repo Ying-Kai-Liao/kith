@@ -376,6 +376,7 @@ jobs:
               Guest door check|kernel/tests/kith-guest-door-check
               Schedule json check (kith schedule ls/add/rm/pause/resume/run/log --json, the error object)|kernel/tests/kith-sched-json-check
               Auth json check (kith auth ls/granted/grant/revoke --json, no secret value in any output)|kernel/tests/kith-auth-json-check
+              Doctor services check (kith doctor: an ok grant outside needs is fine, a missing one is a failure)|kernel/tests/kith-doctor-services-check
               New check (kith new --json - the agent made, or the error object and no folder left)|kernel/tests/kith-new-check
               Pkg json check (kith versions, history, pin, unpin, restore, install, share, deps, update, push, commit --json)|kernel/tests/kith-pkg-json-check
               JSON misc check (--json on doctor, remote, ask ls, bug, backup add/remove, update self --check, wake status, lifecycle, chain, project)|kernel/tests/kith-json-misc-check
