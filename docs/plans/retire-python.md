@@ -120,7 +120,29 @@ same name; they carry no code of their own. Callers below are non-test files.
 | `adapters/claude-code/hooks/register.tsx` | n/a | the Claude Code plugin | n/a | A TSX module that shells to `kith_facets`, `kith_paths`, `kith_settings` (grep of the imports); moves with them. |
 | `adapters/acp/shim/claude` | n/a | `kith-acp` | none | `#!/usr/bin/env python3`. |
 
-### 1.3a Import graph (who imports a `lib/` module), from the scripts' `import` lines
+### 1.3a Who uses each Python file (architect MUST 3)
+
+**This map must be built mechanically, not by hand,** and re-run in each step PR: `import` lines, `SourceFileLoader` /
+`spec_from_file_location` loads of another script, `python3 <path>` and `uv run --script <path>` calls in bash, Rust, plists and
+the Claude Code plugin (`kernel/adapters/claude-code/hooks/register.tsx`). The manager records, for every file, its last user and
+its step, and a step may delete a file only when the re-run shows no user left. What a first pass found:
+
+- Scripts loaded as Python modules (cannot be replaced by an `sh` stub): `kith-info` loads `kith-pkg`, `kith-sched`, `kith-cost`,
+  `kith-memory` (`kith-info:29,131,295,329,349,368`); `kith-ask` loads `kith-wake` (`:400`); `kith-bug` loads `kith-permit`
+  (`:39`); `kith-lifecycle` loads `kith-sessions` (`:37`); `kith-remote` loads `kith-ask` (`:45`); `kith-skills` loads `kith-pkg`
+  (`:48`). So `kith-info` moves to Rust **before** the `kith-cost` stub (R2) and the `kith-sched` stub (R6) (it moves out of R8 to R2), `kith-ask` is
+  ported with or before `kith-wake` (R5/R7 together), `kith-bug` goes with `kith-permit` (R4), `kith-remote` and `kith-skills` go with `kith-ask` and `kith-pkg`.
+- `bin/kith` is the last user of `kith_guard`, `kith_allowed`, `kith_accounts` (`:936,1049,1200`, `:563-693`) and of
+  `kith_facets.py` (also used by `kith-project`, `kith-room-ledger`, `kith_recall.py` and the plugin, whose `register.tsx` runs
+  `python3 kith_facets.py load` (`:325`), `kith_paths.py --json` (`:59`) and `kith_settings.py` (`:127`)). Those modules go **at R9
+  with `bin/kith`**, unless R8 ports the parts `bin/kith` uses (launch-env, main-env, main-id, run-chain, session-run,
+  session-account; the guard and allow calls at `:936,1049,1200`). The plugin's TSX moves in its own step before R9: it calls the
+  `kith` program instead of Python. R7 therefore does not delete `kith_facets.py`.
+- Nothing in 2.1 yet deletes `kith_settings.py`, `kith_redact.py`, `kith_bug.py`, `kith_chain.py` or `bin/kith-room-ledger`: they
+  go at R9 (`kith_settings`, `kith_redact`), with `kith-bug` at R4 (`kith_bug`), with `kith-chain` at R8 (`kith_chain`), and at R2
+  (`kith-room-ledger`, once the launch writes the Rust hook).
+
+Import lines, first pass:
 
 `kith_accounts.py` is imported by `bin/kith` (it runs it for launch-env, main-env, main-id, run-chain, session-run and
 session-account, `bin/kith:563-693`, as well as `backups-json`/`accounts-json`), `kith-pkg:94`, `kith-scratch:24`,
@@ -132,6 +154,9 @@ R3 (R3 deletes `kith-account` and the `account-state` branch; the module goes at
 `door-preload.mjs` go with `kith_door` at R4. `starters.json`, `user.md`, `agents.gitignore`, `dot-kith.gitignore` are data that
 `kith-init` reads: when R9 stops staging `kernel/bin` and `kernel/lib` they move to `share/kith/` (with `kernel/skills/`,
 `kernel/services/*.json`, `PROTOCOL.md` and `kernel/agents/scratch`) and `stage-kernel.sh` is updated to copy them.
+
+Old hosts call `python3 kith_paths.py --json` (`serve/host/src/cards/resource.rs:160`, `runauth.rs:507`); both already fall back when
+the file is gone (`resource.rs:148-149`, `runauth.rs:510`). That path cannot be stubbed (it is `python3 <file>`) and must not get a stub.
 
 ### 1.4 What every run still runs in Python
 
@@ -184,9 +209,10 @@ Rules for every step.
    (`KITH_KEEP_VERSIONS`). A step never edits an installed kernel in place. **Schema rule:** an older binary refuses to write a
    core.db that has a migration step it does not know (`core/runtime/src/db.rs:421-430`, "it won't write. Update kith."), so
    going back to the previous release only works if the deletion release added no core.db migration. A deletion release adds
-   none (migrations ship in the release before it); where one cannot be avoided the PR names the earliest release a Mac can go
+   none (migrations ship in the release before it); this is a **check, not a promise**: at release time, when kernel files are
+   deleted, CI compares the migration list in `core/runtime/src/migrations` with the previous tag's and fails on a difference; where one cannot be avoided the PR names the earliest release a Mac can go
    back to, and `kith update --back` refuses to go further.
-2. **Gate = the cutover module is switched on every Mac that will take the release**, checked at install time (section 3.2),
+2. **Gate = the cutover module is switched on every Mac that will take the release**, checked by the three layers of 3.1,
    plus the verb switch (`core-switched.txt`) where the step only moves verbs.
 3. **Stub in place of the script, only for callers that run the file directly.** A script cannot be deleted and stubbed at
    once (same path): the release that deletes it ships the stub *in its place*, a few lines of `sh` that find the `kith`
@@ -195,8 +221,11 @@ Rules for every step.
    callers). A stub serves a caller that executes the file (an old host's `Command::new(bin/kith-auth)`, a hook command).
    It does **not** serve a caller that names an interpreter: `kith-uv run --script <file>` would hand the stub to Python
    (the `dev.kith.state` and `dev.kith.sched` plists), and `python3 <kernel>/bin/kith-permit apply` (`assemble.rs:1391`)
-   would fail. Those callers are rewritten in the release *before* the delete, by an install action that is safe to run twice
-   (rewrite the plist, reload). Before R4 a golden freezes what every `kith-auth` call an old host makes prints and exits
+   would fail. Those callers are rewritten in the release *before* the delete, by a Rust install action that is safe to run twice
+   (rewrite the plist, reload): `kith-state` and `kith-sched` only write jobs that call themselves (`kith-state:248-249`), so the
+   rewrite cannot be theirs. What the rewritten job runs depends on section 5: under option A it is `kith-uv run --no-project --
+   kith <verb>`-style (still behind the launcher, so Full Disk Access holds on the external-disk Mac); a job that ran without
+   `kith-uv` would lose that access. Before R4 a golden freezes what every `kith-auth` call an old host makes prints and exits
    with. A stub lives one release (the window, 3.1); this is the verb-level twin of `kith_tombstone.py`.
 4. **Tag before the first deletion.** `git tag python-kernel-final` on the last commit that has every Python file. Undo of any
    step is "install the previous release folder", and "restore from the tag" for a source checkout.
@@ -208,8 +237,9 @@ Rules for every step.
    *switched* and *rolled back* (a rolled-back module is an unswitched one that still has the old state files and a
    `rolling-back` or absent switch record; `kith kernel cutover status MODULE` tells which).
 
-Unless a step says otherwise: **unswitched or rolled back = the Mac is not offered the release** (installer refuses, the Mac
-stays on the old `cli/<version>`, `kith doctor` says why); **switched = proceeds.**
+Unless a step says otherwise: **unswitched or rolled back = the Mac is not offered the release** (the installer refuses and the
+Mac stays on the old `cli/<version>`, `kith doctor` says why; on a brew or git install, or an app-bundled host, the start-up
+refusal stops it instead, 3.1); **switched = proceeds.**
 
 ### 2.0 Step 0: groundwork (no removal)
 
@@ -225,7 +255,7 @@ stays on the old `cli/<version>`, `kith doctor` says why); **switched = proceeds
 |---|---|---|---|---|
 | **R1** Leaves with Rust twins that Python never needs to fall back to | No cutover module. Verbs `engines`, `paths`, `launch`, `settings` of `core-switched.txt`, plus `readfence` (launch picks Rust when it knows a binary). "Switched" = the Mac's `kith` program lists the module in `kith kernel version` (every Mac on the floor release F, section 3.1). | `hq_paths.py`, `hq_settings.py`, `kith_engines.py`, `kith_readfence.py` and the `python3_abs` fallback in `launch/settings.rs`; the `KITH_CORE=python` branches for these verbs in `bin/kith`. Stub: none (no external caller). | Reinstall the previous `cli/<version>`; or restore from the tag. | Unswitched (no or old kith program): not offered the release. Switched: runs. Rolled back: n/a (no module). |
 | **R2** Per-verb switched stores that carry no state | `cost`, `pkg`, `project-id`, `settings` lines present and the program on F. For `cost`: add `tag`, `record` to Rust first (the SessionStart hook and the ledger's only writer). For `pkg`: only `resolve` exists; **the script stays until its other verbs are ported or declared dead (R8)**, so R2 deletes only the fallback branch of `resolve`. For `project-id`: port the guest branch first (run-socket client) then delete `bin/project-id`. | `bin/project-id` (after its guest branch), `kith_cost` and `kith_cost_ported` in `kith-core.sh`, `kith-cost` after `tag`/`record`/reports are Rust. Hook `kith-cost tag` becomes `kith kernel cost tag` in `launch/settings.rs:774`. Stubs: `bin/kith-cost`, `bin/project-id` (forward). | Previous release; stubs forward, so a rollback of the Rust half is the same. | Unswitched: stays on old release. Switched: runs. In-flight run keeps the old hook path, which is now a stub that forwards: harmless. |
-| **R3** `accounts` | Module `accounts` switched (`step accounts` done: state.json is a tombstone, the core is the only writer). On F: every Mac that runs agents. Kai's Mac: switched 2026-11-16. | `bin/kith-account` (the module `lib/kith_accounts.py` stays until its last importer goes, R8), the `account-state` fallback in `bin/kith:175`, `kith_accounts.py backups-json\|accounts-json` calls (`bin/kith:331-332`) once the chain verbs answer. Stub: `bin/kith-account`. | `kith rollback accounts` (Rust, writes state.json back) **then** the previous release. Rolled back state files are readable only by that older release. | Unswitched: run `kith migrate step accounts` (offered by the updater, section 3.2); refused if it refuses. Switched: proceeds. Rolled back: treated as unswitched, so the release waits. |
+| **R3** `accounts` | Module `accounts` switched (`step accounts` done: state.json is a tombstone, the core is the only writer). On F: every Mac that runs agents. Kai's Mac: switched 2026-11-16. | `bin/kith-account` (the module `lib/kith_accounts.py` stays until its last importer goes, R8), the `account-state` fallback in `bin/kith:175`, `kith_accounts.py backups-json\|accounts-json` calls (`bin/kith:331-332`) once the chain verbs answer. Ports first: the `kith account add\|remove` verbs (login command returned, not run; section 1.2 had this "to be confirmed"). Stub: `bin/kith-account`. | `kith rollback accounts` (Rust, writes state.json back) **then** the previous release. Rolled back state files are readable only by that older release. | Unswitched: run `kith migrate step accounts` (offered by the updater, section 3.2); refused if it refuses. Switched: proceeds. Rolled back: treated as unswitched, so the release waits. |
 | **R4** `authority` | Module `authority` switched: `auth.json` is a tombstone (`kith migrate step authority`, `KITH_CORE_AUTHORITY` on, M2-24). On every Mac whose people or bots use the owner's agents. Kai's Mac: switched. | `bin/kith-auth` and its `hq-auth` link, `kith-people`, `kith-door`, `lib/kith_door.py`, `door-chrome`, `door-preload.mjs`, `kith-allow`, `kith-helper-allow` (`kith_guard.py`, `kith_allowed.py`, `kith_jobs.py` stay until R8: `bin/kith` and `kith-pkg` still import them); `kith-permit` once the hooks and MCP command point at `kith kernel permit` (`settings.rs:977-984`, `mcp.rs:14`, `assemble.rs:1392,1425`). Ports first: the Python the Rust code itself runs (`permit/door.rs` and `proc.rs` run `kith_door`; `pkg/problems.rs` runs `kith_guard`; the host's `kith_paths.py --json` calls; `assemble.rs:1391`); Rust CLI for every `kith-auth` shape the callers use (the exit-3 shapes become real core calls or are declared dead with the callers named in their M2-23 lift list entries); `kith-allow --derive/--add-json`; the door process side. Stubs: `kith-auth`, `kith-permit`, `kith-door`, `kith-allow`, `kith-cards` (host calls by path), all as forwarders. | `kith rollback authority`, then the previous release. The model checks (section 4) re-run on the rolled-back state. | Unswitched: updater runs `step authority` (it already refuses on one-time secrets, a stale core import, or a changed file: the Mac then stays on the old release and says why). Switched: proceeds. Rolled back: held. |
 | **R5** `claims`, then `transcripts` | Module `claims` switched on every Mac (#1010 lifted the refusal; Kai's Mac switched 2026-11-17, other Macs unknown; needs the host stopped, the stub installed (`kith-stub`), and every live claim importable). Then `transcripts` (`depends_on` claims; today it refuses until `kith-sessions record` stops being its writer). On every Mac that has terminal sessions or the host. | `bin/kith-sessions`, `kith-wake`, `kith-lifecycle`, `lib/kith_claims.py`, `kith_procstart.py`, `kith_lifecycle.py`, and the writes `kith-sessions record` makes. Ports first: `kith kernel threads` routed in `bin/kith`; `kith-sessions run` (the take-over note and exec) in Rust; the host's `wake.rs` calls the core's wake methods; `kith-lifecycle` (compact) in Rust. Hooks: `kith-sessions record` becomes `kith kernel threads record` (`settings.rs:776`). Stubs: `kith-sessions`, `kith-wake`, `kith-lifecycle` (the host calls them by path; old hosts too). | `kith rollback claims` (refuses while a claim is live and while the host runs; neither refusal can be overridden, `cutover/modules/claims.rs:21,178-229`) then the previous release. `claims.tombstone` stays a note old Python takers read by existence. | Unswitched: **this is the long pole**: stepping needs the host stopped and the stub present; the updater cannot do it unattended. Release waits. Switched: proceeds. Rolled back: waits. |
 | **R6** `schedules` | Module `schedules` switched (depends on `claims`): `sched/state.json` is a tombstone, the host's routines are jobs in `jobs.json`, the core's fire is the only scheduler. On every Mac. **Kai's Mac rolled it back 2026-11-16** because the core could not fire (M4-5): that Mac is *rolled back* here until `core-schedules` lands and `kith migrate step schedules` passes the four-fact gate in `schedules_gate.rs` (#1011), after which it is stepped again. | `bin/kith-sched`, the `kith schedule` dispatch, `kith_launchd.py` reload helper (if `kith-state` has moved), the installer that writes `dev.kith.sched`. The plist `dev.kith.sched` is removed by an idempotent installer action; the core fires from the host daemon. Stub: `kith-sched` (forward, or print the moved note and exit 3). | `kith rollback schedules` (host stopped) writes `state.json` and the routines back; then the previous release; `kith-sched --install` re-adds the job. | Unswitched/rolled back: release waits; Kai's `dev.kith.sched` is not installed anyway (docs/codebase-map.md). Switched: proceeds. |
@@ -273,8 +303,14 @@ Mac on an older release holds it open (it keeps its `cli/<version>` and the Pyth
 
 1. **Publish gate (the one that counts).** No deletion release is tagged until `kith kernel cutover status --all --json` is green on every
    Mac in the owner list (decision 1) for the modules that release needs.
-2. **Start-up refusal.** The new `kith` program and the host read `kernel/lib/requires-switched.txt` (new, Step 0) at start and
-   refuse, with one line naming the step to run, when a required module is not switched on this Mac. This covers brew, git and
+2. **Start-up refusal.** The new `kith` program and the host refuse to start, with one line naming the step to run, when a
+   required module is not switched on this Mac. **The host's list of required modules is built into the host binary**, not read
+   from `kernel/lib/requires-switched.txt`: the host finds its kernel under `cli/current` first (`kernel.rs:153-157`), and on the
+   Mac layer 3 holds back, `cli/current` is still the old release, so a newer host reading the kernel's list would read the old
+   list and not refuse (architect MUST 1). The host keeps its unswitched code path until its built-in list requires the module.
+   The `kith` program may read the file as well (it is the installer's input). The refusal lets `kith migrate step|status|rollback`,
+   `kith kernel cutover ...`, `kith update --back` and `kith doctor` through. On a brew or git install the refusal is a stop (the
+   Mac is down until the module is stepped), not a hold on the old release; only layer 3 holds a Mac back. This covers brew, git and
    the app's bundled host. The refusal must leave the old CLI folder runnable: the host that refuses must not also have raised
    `MIN_CLI` past what the Mac's CLI can serve, or agents stop on that Mac (`host-controller.ts:206-208` only shows a notice).
 3. **Installer check.** `scripts/install.sh` asks `<new>/bin/kith kernel cutover status --require ...` before it flips
@@ -294,7 +330,11 @@ moved. Both need the Python still on disk. After a step's release:
   written back; (2) point `cli/current` at the previous `cli/<version>` (the installer keeps three); (3) run `kith serve install`
   from the old binary, because the launchd job holds the exact versioned binary path (`serve/host/src/service/unix.rs:180`) and
   the host looks for its kernel under `cli/current` first (`kernel.rs:153-157`): without (3) you get a new host on an old kernel.
-  Decision 9's `kith update --back` does all three. Flipped before (1), the old release meets a tombstone and refuses (fails
+  Decision 9's
+  `kith update --back` does all three **and writes a hold marker** that `install.sh` CLI-only mode (the desktop app's `ensureCli`,
+  `cli-install.ts:81-87`, run on every refresh) respects: otherwise the app reinstalls its newer bundled CLI over the rollback,
+  which is exactly what happens after a verb-only step (R1, R2, R7, R8) because no unswitched module trips layer 3. Rolling back
+  past a `MIN_CLI` raise (R9) also needs the older app, since the newer app's host refuses the older CLI. Flipped before (1), the old release meets a tombstone and refuses (fails
   closed, safe, but the Mac is down until the rollback runs). The schema rule (2.1 rule 1) bounds how far back this goes.
 - **The tag.** `python-kernel-final` and the per-step commits make a source checkout restorable. A package user restores
   from the retained folder or by `KITH_VERSION=<old> sh install.sh`.
@@ -479,7 +519,7 @@ Each has a recommended default; the `retire-python` manager proceeds on the defa
 7. **`kith-uv`.** Section 5. **Default: A (keep, decouple from the kernel).**
 8. **Remove `python@3` from the Homebrew formula and the installer's Python at R9?** Options: (a) yes at R9; (b) keep for
    one more release as a safety. **Default: (a)**, because the installer's gate runs the new program, not Python.
-9. **`kith update --back`**: rollback is three actions (3.2). Add one command that does them, refusing past a schema step? Options: (a) yes, in Step 0; (b) document the three. **Default: (a).**
+9. **`kith update --back`**: rollback is three actions (3.2). Add one command that does them, writes the hold marker the app respects, and refuses past a schema step? (Going back past R9 also needs the older app.) Options: (a) yes, in Step 0; (b) document the three. **Default: (a).**
 10. **Where the gate lives.** Options: (a) publish gate plus start-up refusal plus installer check (3.1); (b) installer only. **Default: (a).**
 11. **Schema rule.** Options: (a) a deletion release adds no core.db migration (2.1 rule 1); (b) allow migrations and state the earliest rollback release. **Default: (a).**
 
@@ -499,4 +539,12 @@ settled. MUSTs and what changed:
 
 SHOULDs taken: claims `depends_on authority` (R5 note), `door-chrome` and data files in the staging (1.3a), missing tests (4.1), stub/script contradiction in the window (3.1), `kith-uv` option A wording (5), M1 and M0f notes in one-bot-model.md. Not taken: none.
 
-Round 2: pending.
+Round 2 (same day): **approved with changes**. MUSTs and what changed:
+
+1. The host's start-up refusal must not read the kernel's list (it finds its kernel under `cli/current`, the old release on a held-back Mac): the list is built into the host (3.1 layer 2).
+2. The desktop app's `ensureCli` would undo a rollback: `kith update --back` writes a hold marker the CLI-only install respects; rolling back past R9 needs the older app (3.2, decision 9).
+3. Rule 5 covered only `import` lines: 1.3a now requires a mechanical map (imports, `SourceFileLoader`, `python3 <path>`, the plugin), lists the first pass (`kith-info`, `kith-ask`, `kith-bug`, `kith-lifecycle`, `kith-remote`, `kith-skills` load other scripts; `bin/kith` and the plugin are the last users of `kith_facets`, `kith_guard`, `kith_allowed`, `kith_accounts`), moves `kith-info` to R2 and the shared modules to R9, and gives the files nothing deleted yet a step.
+
+SHOULDs taken: schema rule as a CI check, what rewritten `kith-uv` jobs run, refusal exemptions and brew/git behaviour, no stub for `kith_paths.py --json`, rule 2 pointer, R3 `kith account add|remove` port.
+
+Round 3: pending.
