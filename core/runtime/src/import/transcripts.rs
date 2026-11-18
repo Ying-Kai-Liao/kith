@@ -35,6 +35,10 @@ use crate::transcripts::{DEFAULT_ACCOUNT, SessionPtr, engine_of, hash_session};
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Options {
     pub dry_run: bool,
+    /// Also delete the `session_records` rows whose `<sid>.json` is gone (a session pruned since an earlier step or cancel):
+    /// the cutover module's import, so a second step does not write a pruned record back. `kith migrate --transcripts` keeps
+    /// the rows, because on a switched Mac the core's rows are the truth. `engine_sessions` and `conversations` stay.
+    pub clear_gone: bool,
 }
 
 /// What the step did, one line each.
@@ -227,7 +231,7 @@ fn newer_row(
 
 /// Whether the record's `session_records` row is missing or older than it (migration 111; a core.db from before it
 /// has no such table, and a dry run then counts every record).
-fn record_stale(c: Option<&Connection>, r: &Record) -> Result<bool> {
+fn record_stale(c: Option<&Connection>, r: &Record, mirror: bool) -> Result<bool> {
     let Some(c) = c else {
         return Ok(true);
     };
@@ -239,7 +243,30 @@ fn record_stale(c: Option<&Connection>, r: &Record) -> Result<bool> {
     if has == 0 {
         return Ok(true);
     }
-    Ok(newer_row(c, r)?.is_some())
+    Ok(newer_row(c, r)?.is_some() || (mirror && row_newer_than_file(c, r)?))
+}
+
+/// Mirror mode (the cutover module's import): the files are the truth until the switch, so a row that is newer than its file
+/// (the file was pruned and an older spool entry placed, or restored) is replaced by it. Python is the only writer then.
+fn row_newer_than_file(c: &Connection, r: &Record) -> Result<bool> {
+    use crate::transcripts::record::{Key, row};
+    Ok(row(c, &r.sid)?.is_some_and(|(_, k)| k > Key::of(&r.raw, r.mtime)))
+}
+
+/// The sids that have a `session_records` row and no `<sid>.json` at all (a file that exists but cannot be read is not gone).
+pub(crate) fn rows_without_file(c: &Connection, dir: &Path) -> Result<Vec<String>> {
+    let has: i64 = c.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'session_records'",
+        [],
+        |row| row.get(0),
+    )?;
+    if has == 0 {
+        return Ok(Vec::new());
+    }
+    Ok(crate::transcripts::record::sids(c)?
+        .into_iter()
+        .filter(|sid| !crate::transcripts::project::file_of(dir, sid).exists())
+        .collect())
 }
 
 /// Which records need writing: `(conversation missing, session missing or different from the registry)`.
@@ -346,18 +373,27 @@ pub(crate) fn run_in(
         let (mut would, mut same) = (0, 0);
         for ((_, s), r) in sessions.iter().zip(&records) {
             let (c, e) = missing(db.as_ref(), s)?;
-            if c || e || record_stale(db.as_ref(), r)? {
+            if c || e || record_stale(db.as_ref(), r, opts.clear_gone)? {
                 would += 1;
             } else {
                 same += 1;
             }
         }
+        let gone = match (&db, opts.clear_gone) {
+            (Some(c), true) => rows_without_file(c, &dir)?.len(),
+            _ => 0,
+        };
         rep.imported = would;
         rep.unchanged = same;
-        rep.changed = would > 0;
+        rep.changed = would + gone > 0;
         rep.lines.push(format!(
             "transcripts: would import {would} session(s), {same} already there"
         ));
+        if gone > 0 {
+            rep.lines.push(format!(
+                "transcripts: would drop {gone} record row(s) whose registry file is gone"
+            ));
+        }
         rep.lines.push("dry run: nothing was written".into());
         return Ok(rep);
     }
@@ -374,7 +410,7 @@ pub(crate) fn run_in(
     let mut touched = 0;
     for (item, r) in sessions.iter().zip(&records) {
         let (c, e) = missing(Some(core.conn()), &item.1)?;
-        let stale = record_stale(Some(core.conn()), r)?;
+        let stale = record_stale(Some(core.conn()), r, opts.clear_gone)?;
         if c || e {
             todo.push(item);
         }
@@ -386,7 +422,12 @@ pub(crate) fn run_in(
         }
     }
     rep.unchanged = sessions.len() - touched;
-    if todo.is_empty() && whole.is_empty() {
+    let gone = if opts.clear_gone {
+        rows_without_file(core.conn(), &dir)?
+    } else {
+        Vec::new()
+    };
+    if todo.is_empty() && whole.is_empty() && gone.is_empty() {
         rep.lines.push(format!(
             "nothing to change: core.db already holds the {} session(s) of the registry",
             sessions.len()
@@ -404,9 +445,15 @@ pub(crate) fn run_in(
     // The whole record where the file is newer than its row (Python is the writer until the switch). Only the row: the
     // engine session and the conversation were written just above, from the same record, with the hash read now.
     for r in &whole {
+        if opts.clear_gone && row_newer_than_file(&tx, r)? {
+            tx.execute("DELETE FROM session_records WHERE sid = ?1", [&r.sid])?;
+        }
         if let Some((rec, key)) = newer_row(&tx, r)? {
             crate::transcripts::record::put_row(&tx, &r.sid, &rec, &key)?;
         }
+    }
+    for sid in &gone {
+        tx.execute("DELETE FROM session_records WHERE sid = ?1", [sid])?;
     }
     tx.execute(
         "INSERT INTO import_log (step, at, source, source_sha256, backup, summary) VALUES ('transcripts', ?1, ?2, ?3, ?4, ?5)",
@@ -415,7 +462,11 @@ pub(crate) fn run_in(
             dir.display().to_string(),
             sha,
             backup.display().to_string(),
-            format!("transcripts: {} session(s) imported", touched),
+            format!(
+                "transcripts: {} session(s) imported, {} record row(s) dropped",
+                touched,
+                gone.len()
+            ),
         ],
     )
     .map_err(Error::from)?;
@@ -426,5 +477,11 @@ pub(crate) fn run_in(
     rep.lines.push(format!(
         "transcripts: imported {touched} session(s); the registry and the transcripts were only read",
     ));
+    if !gone.is_empty() {
+        rep.lines.push(format!(
+            "transcripts: dropped {} record row(s) whose registry file is gone (pruned since)",
+            gone.len()
+        ));
+    }
     Ok(rep)
 }

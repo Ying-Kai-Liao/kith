@@ -1,6 +1,6 @@
 //! The daemon's registry tick (architect MUST 1): while the `transcripts` module serves, the spool is drained and the rows
 //! and files reconciled at the daemon's start and every [`EVERY`], and the registry is pruned every [`prune::EVERY`]. Until
-//! the module is switched a pass reads the switch and does nothing: the core touches no registry file before that.
+//! the module is switched a pass reads the switch and does nothing: the daemon's pass touches no registry file before that. (The transcripts step itself does, under its lifetime lock: its re-read drains the spool, which writes files from rows, and a rollback's `export_back` writes rows to files.)
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

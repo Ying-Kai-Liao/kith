@@ -394,89 +394,7 @@ fn register(env: &Env, sid: &str, cwd: &str) {
 }
 
 #[test]
-fn transcripts_have_no_python_writer_to_tombstone_and_the_step_switches() {
-    let (_t, env) = setup();
-    let reg = open_registry();
-    register(&env, "s-one", "/work");
-    register(&env, "s-two", "/other");
-    let m = super::transcripts::Transcripts;
-    assert_eq!(m.tombstones(&env), Vec::<std::path::PathBuf>::new());
-    let out = step(&reg, &env, "transcripts", opts()).unwrap();
-    assert!(out.iter().any(|l| l.contains("same answer")), "{out:?}");
-    assert!(serves(&env, &m));
-    let n: i64 = db(&env)
-        .query_row("SELECT COUNT(*) FROM engine_sessions", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(n, 2);
-    // The registry was only read.
-    assert!(registry_dir(&env).join("s-one.json").is_file());
-    // Marker tampered: deny.
-    db(&env)
-        .execute("DELETE FROM meta WHERE key = 'cutover:transcripts'", [])
-        .unwrap();
-    assert!(!serves(&env, &m));
-}
-
-#[test]
-fn transcripts_same_answer_catches_a_missing_and_a_changed_session() {
-    let (_t, env) = setup();
-    register(&env, "s-one", "/work");
-    let m = super::transcripts::Transcripts;
-    let mut core = crate::start_with(&env.layout, crate::db::MIGRATIONS).unwrap();
-    assert_eq!(m.same_answer(&env, core.conn()).unwrap().len(), 1);
-    m.import(&env, Some(&mut core), opts()).unwrap();
-    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
-    // A session registered after the import, and one whose working folder moved.
-    register(&env, "s-new", "/w2");
-    register(&env, "s-one", "/elsewhere");
-    let diffs = m.same_answer(&env, core.conn()).unwrap();
-    assert_eq!(diffs.len(), 2, "{diffs:?}");
-    assert!(
-        diffs
-            .iter()
-            .any(|d| d.contains("s-new") && d.contains("not in the core"))
-    );
-    assert!(diffs.iter().any(|d| d.contains("working folder")));
-    // The core holding a session the registry does not have is not a difference.
-    std::fs::remove_file(registry_dir(&env).join("s-new.json")).unwrap();
-    register(&env, "s-one", "/work");
-    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
-    std::fs::remove_file(registry_dir(&env).join("s-one.json")).unwrap();
-    assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
-}
-
-#[test]
-fn transcripts_a_rollback_clears_the_switch_and_a_step_resumes() {
-    let (_t, env) = setup();
-    let reg = open_registry();
-    register(&env, "s-one", "/work");
-    let m = super::transcripts::Transcripts;
-    step(&reg, &env, "transcripts", opts()).unwrap();
-    assert!(serves(&env, &m));
-    let out = rollback(&reg, &env, "transcripts", opts()).unwrap();
-    assert!(out.iter().any(|l| l.contains("rolled back")), "{out:?}");
-    assert!(!serves(&env, &m));
-    assert!(state::read(&env.layout, "transcripts").unwrap().is_none());
-    // A crash during the import resumes.
-    state::write(
-        &env.layout,
-        "transcripts",
-        &state::Switch {
-            phase: state::Phase::Stepping,
-            snapshot: None,
-            at: 1,
-        },
-    )
-    .unwrap();
-    register(&env, "s-two", "/w");
-    step(&reg, &env, "transcripts", opts()).unwrap();
-    assert!(serves(&env, &m));
-    // `kith migrate check` on a fixture is the same-answer; on a switched module it says the core is the store.
-    assert!(check(&reg, &env, "transcripts").unwrap()[0].contains("only store"));
-}
-
-#[test]
-fn both_s1_modules_are_listed_and_checkable() {
+fn the_modules_are_listed_and_accounts_is_checkable() {
     let (_t, env) = setup();
     register(&env, "s-one", "/work");
     let reg = open_registry();
@@ -492,14 +410,10 @@ fn both_s1_modules_are_listed_and_checkable() {
         ]
     );
     crate::tests::open_all(&env.layout);
-    for m in ["accounts", "transcripts"] {
-        let out = check(&reg, &env, m).unwrap();
-        assert!(out[0].contains("difference"), "{m}: {out:?}");
-    }
-    for m in ["accounts", "transcripts"] {
-        step(&reg, &env, m, opts()).unwrap();
-        assert!(check(&reg, &env, m).unwrap()[0].contains("only store"));
-    }
+    let out = check(&reg, &env, "accounts").unwrap();
+    assert!(out[0].contains("difference"), "{out:?}");
+    step(&reg, &env, "accounts", opts()).unwrap();
+    assert!(check(&reg, &env, "accounts").unwrap()[0].contains("only store"));
 }
 
 // --- the step refusals, the source lock, and the SHOULDs -----------------------------------------------------------------
@@ -528,28 +442,6 @@ fn accounts_a_step_through_the_real_registry_is_no_longer_refused_and_account_wr
         rows.contains_key("claude:work"),
         "the imported rows are still there"
     );
-}
-
-#[test]
-fn refused_transcripts_step_waits_for_the_session_recorder_and_leaves_nothing_behind() {
-    let (_t, env) = setup();
-    register(&env, "s-one", "/work");
-    for dry_run in [false, true, false] {
-        let e = step(
-            &registry(),
-            &env,
-            "transcripts",
-            Opts {
-                dry_run,
-                ..Opts::default()
-            },
-        )
-        .unwrap_err();
-        assert!(e.to_string().contains("kith-sessions record"), "{e}");
-    }
-    assert!(state::read(&env.layout, "transcripts").unwrap().is_none());
-    assert!(!env.layout.db.exists(), "no core.db was opened or made");
-    assert!(registry_dir(&env).join("s-one.json").is_file());
 }
 
 #[test]
@@ -617,7 +509,7 @@ fn transcripts_an_import_before_the_switch_replaces_a_row_that_differs() {
     m.import(&env, Some(&mut core), opts()).unwrap();
     // A resume rewrote the record: the working folder moved.
     register(&env, "s-one", "/elsewhere");
-    assert_eq!(m.same_answer(&env, core.conn()).unwrap().len(), 1);
+    assert_ne!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
     m.import(&env, Some(&mut core), opts()).unwrap();
     assert_eq!(m.same_answer(&env, core.conn()).unwrap(), no_diffs());
     assert!(

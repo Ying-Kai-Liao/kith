@@ -590,7 +590,15 @@ mod import {
         let (_t, m) = machine();
         let layout = Layout::new(&m);
 
-        let dry = run(&layout, &ctx, Options { dry_run: true }).unwrap();
+        let dry = run(
+            &layout,
+            &ctx,
+            Options {
+                dry_run: true,
+                ..Options::default()
+            },
+        )
+        .unwrap();
         assert!(dry.changed && dry.imported == 3, "{dry:?}");
         assert!(!layout.db.exists(), "a dry run creates nothing");
 
@@ -626,7 +634,15 @@ mod import {
             !again.changed && again.imported == 0 && again.unchanged == 3,
             "{again:?}"
         );
-        let again_dry = run(&layout, &ctx, Options { dry_run: true }).unwrap();
+        let again_dry = run(
+            &layout,
+            &ctx,
+            Options {
+                dry_run: true,
+                ..Options::default()
+            },
+        )
+        .unwrap();
         assert!(!again_dry.changed, "{again_dry:?}");
         let core = open_all(&layout);
         let logged: i64 = core

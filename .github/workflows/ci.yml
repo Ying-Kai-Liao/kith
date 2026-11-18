@@ -291,7 +291,7 @@ jobs:
               - 'kernel/bin/kith-sched'
               - 'core/runtime/src/transcripts/**'
               - 'core/runtime/src/import/transcripts.rs'
-              - 'core/runtime/src/cutover/modules/transcripts.rs'
+              - 'core/runtime/src/cutover/modules/transcripts*.rs'
               - 'core/kernel/src/threads/registry.rs'
             # The TLA+ model of the schedule fire protocol and the code it covers (the list in the schedule-fire skill).
             schedule_fire:
