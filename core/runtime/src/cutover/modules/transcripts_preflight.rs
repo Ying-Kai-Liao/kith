@@ -2,7 +2,7 @@
 //! record, marker or file). It also runs on every rerun of a step that stopped with the tombstone in place, so it must not
 //! refuse a state the step's own first writes create (entries the tombstone made hooks spool: architect MUST 1).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags};
 
@@ -26,20 +26,57 @@ pub(super) fn host_line(env: &Env, running: &str) -> Option<String> {
     }
 }
 
-/// What `$KITH/bin/kith-sessions caps` prints: the very path `bin/kith` writes into the `SessionStart` hook, with no search of
-/// `PATH` (a copy found there could say `registry-core` for a hook that never runs it). `Err(why)` when it cannot be asked.
-fn caps() -> std::result::Result<String, String> {
+/// The kernel whose `bin/kith-sessions` the `SessionStart` hook runs: `$KITH` (set inside `bin/kith`, or by the caller),
+/// else the host's own order (`serve/host/src/kernel.rs` `find_kernel`, minus the binary-relative prefix): `$KITH_KERNEL`,
+/// the installed CLI's `cli/current` the installer links, the old flat install. Neither `kith kernel cutover` nor
+/// `kith migrate` sets `$KITH`, so a shell without it must still find the same file.
+fn kernel_for_hook(
+    kith: Option<std::ffi::OsString>,
+    kernel: Option<std::ffi::OsString>,
+    machine: &Path,
+) -> std::result::Result<PathBuf, String> {
+    let set = |v: Option<std::ffi::OsString>| v.filter(|v| !v.is_empty()).map(PathBuf::from);
+    if let Some(k) = set(kith) {
+        return Ok(k);
+    }
+    let shipped = "share/kith/kernel";
+    // Like `find_kernel`, a set `$KITH_KERNEL` is the only candidate: it never falls through to the installed CLI.
+    let tried: Vec<PathBuf> = match set(kernel) {
+        Some(k) => vec![k],
+        None => vec![
+            machine.join("cli/current").join(shipped),
+            machine.join(shipped),
+        ],
+    };
+    tried
+        .iter()
+        .find(|d| d.join("bin/kith-sessions").is_file())
+        .cloned()
+        .ok_or_else(|| {
+            let looked: Vec<String> = tried.iter().map(|d| d.display().to_string()).collect();
+            format!(
+                "$KITH is not set and no kernel with bin/kith-sessions is installed (looked in {}), so the kith-sessions the SessionStart hook runs cannot be found (set $KITH=<kernel dir> to name it)",
+                looked.join(", ")
+            )
+        })
+}
+
+/// What `<kernel>/bin/kith-sessions caps` prints: the very path `bin/kith` writes into the `SessionStart` hook, with no search
+/// of `PATH` (a copy found there could say `registry-core` for a hook that never runs it). `Err(why)` when it cannot be asked.
+fn caps(machine: &Path) -> std::result::Result<String, String> {
     #[cfg(test)]
     if let Some(c) = CAPS.with(|c| c.borrow().clone()) {
         return c;
     }
-    let Some(kith) = std::env::var_os("KITH").filter(|v| !v.is_empty()) else {
-        return Err(
-            "$KITH is not set, so the kith-sessions the SessionStart hook runs cannot be found"
-                .into(),
-        );
-    };
-    let bin = PathBuf::from(kith).join("bin").join("kith-sessions");
+    caps_of(&kernel_for_hook(
+        std::env::var_os("KITH"),
+        std::env::var_os("KITH_KERNEL"),
+        machine,
+    )?)
+}
+
+fn caps_of(kith: &Path) -> std::result::Result<String, String> {
+    let bin = kith.join("bin").join("kith-sessions");
     let out = std::process::Command::new(&bin)
         .arg("caps")
         .output()
@@ -50,8 +87,8 @@ fn caps() -> std::result::Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-fn sessions_line() -> Option<String> {
-    match caps() {
+fn sessions_line(machine: &Path) -> Option<String> {
+    match caps(machine) {
         Ok(out) if out.lines().any(|l| l.trim() == "registry-core") => None,
         Ok(_) => Some(
             "the installed kith-sessions does not know Writer mode (`kith-sessions caps` lacks registry-core); update this Mac's kith first"
@@ -109,7 +146,7 @@ pub(super) fn preflight(env: &Env) -> Result<Preflight> {
         item(
             3,
             "the installed kith-sessions knows Writer mode",
-            sessions_line().into_iter().collect(),
+            sessions_line(&env.machine).into_iter().collect(),
         ),
         item(
             4,
@@ -124,4 +161,71 @@ pub(super) fn preflight(env: &Env) -> Result<Preflight> {
                 .into(),
         ],
     })
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+mod kernel_tests {
+    use super::*;
+
+    fn fake_kernel(dir: &Path, says: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let f = bin.join("kith-sessions");
+        std::fs::write(&f, format!("#!/bin/sh\necho {says}\n")).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn unset_kith_resolves_the_installed_cli() {
+        let t = tempfile::tempdir().unwrap();
+        let k = t.path().join("cli/current/share/kith/kernel");
+        fake_kernel(&k, "registry-core");
+        let got = kernel_for_hook(None, None, t.path()).unwrap();
+        assert_eq!(got, k);
+        assert_eq!(caps_of(&got).unwrap().trim(), "registry-core");
+        // An empty $KITH counts as unset.
+        assert_eq!(kernel_for_hook(Some("".into()), None, t.path()).unwrap(), k);
+    }
+
+    #[test]
+    fn kithkernel_alone_when_set_and_the_flat_install_is_found() {
+        let t = tempfile::tempdir().unwrap();
+        let flat = t.path().join("share/kith/kernel");
+        fake_kernel(&flat, "x");
+        assert_eq!(kernel_for_hook(None, None, t.path()).unwrap(), flat);
+        fake_kernel(&t.path().join("cli/current/share/kith/kernel"), "x");
+        // cli/current beats the flat install.
+        assert_ne!(kernel_for_hook(None, None, t.path()).unwrap(), flat);
+        // $KITH_KERNEL without a kith-sessions is refused, never replaced by the layout.
+        let dev = t.path().join("dev");
+        let e = kernel_for_hook(None, Some(dev.clone().into()), t.path()).unwrap_err();
+        assert!(
+            e.contains(&dev.display().to_string()) && !e.contains("cli/current"),
+            "{e}"
+        );
+        fake_kernel(&dev, "x");
+        assert_eq!(
+            kernel_for_hook(None, Some(dev.clone().into()), t.path()).unwrap(),
+            dev
+        );
+    }
+
+    #[test]
+    fn kith_wins_when_set() {
+        let t = tempfile::tempdir().unwrap();
+        fake_kernel(&t.path().join("cli/current/share/kith/kernel"), "x");
+        let got = kernel_for_hook(Some("/elsewhere".into()), None, t.path()).unwrap();
+        assert_eq!(got, PathBuf::from("/elsewhere"));
+    }
+
+    #[test]
+    fn a_missing_kernel_refuses_naming_what_it_looked_for() {
+        let t = tempfile::tempdir().unwrap();
+        let e = kernel_for_hook(None, None, t.path()).unwrap_err();
+        assert!(e.contains("$KITH is not set"), "{e}");
+        assert!(e.contains("cli/current/share/kith/kernel"), "{e}");
+    }
 }
