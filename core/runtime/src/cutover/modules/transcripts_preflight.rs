@@ -40,9 +40,14 @@ fn kernel_for_hook(
         return Ok(k);
     }
     let shipped = "share/kith/kernel";
-    let mut tried: Vec<PathBuf> = set(kernel).into_iter().collect();
-    tried.push(machine.join("cli/current").join(shipped));
-    tried.push(machine.join(shipped));
+    // Like `find_kernel`, a set `$KITH_KERNEL` is the only candidate: it never falls through to the installed CLI.
+    let tried: Vec<PathBuf> = match set(kernel) {
+        Some(k) => vec![k],
+        None => vec![
+            machine.join("cli/current").join(shipped),
+            machine.join(shipped),
+        ],
+    };
     tried
         .iter()
         .find(|d| d.join("bin/kith-sessions").is_file())
@@ -50,7 +55,7 @@ fn kernel_for_hook(
         .ok_or_else(|| {
             let looked: Vec<String> = tried.iter().map(|d| d.display().to_string()).collect();
             format!(
-                "$KITH is not set and no kernel with bin/kith-sessions is installed (looked in {}), so the kith-sessions the SessionStart hook runs cannot be found",
+                "$KITH is not set and no kernel with bin/kith-sessions is installed (looked in {}), so the kith-sessions the SessionStart hook runs cannot be found (set $KITH=<kernel dir> to name it)",
                 looked.join(", ")
             )
         })
@@ -159,6 +164,7 @@ pub(super) fn preflight(env: &Env) -> Result<Preflight> {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 #[allow(clippy::unwrap_used)]
 mod kernel_tests {
     use super::*;
@@ -182,6 +188,29 @@ mod kernel_tests {
         assert_eq!(caps_of(&got).unwrap().trim(), "registry-core");
         // An empty $KITH counts as unset.
         assert_eq!(kernel_for_hook(Some("".into()), None, t.path()).unwrap(), k);
+    }
+
+    #[test]
+    fn kithkernel_alone_when_set_and_the_flat_install_is_found() {
+        let t = tempfile::tempdir().unwrap();
+        let flat = t.path().join("share/kith/kernel");
+        fake_kernel(&flat, "x");
+        assert_eq!(kernel_for_hook(None, None, t.path()).unwrap(), flat);
+        fake_kernel(&t.path().join("cli/current/share/kith/kernel"), "x");
+        // cli/current beats the flat install.
+        assert_ne!(kernel_for_hook(None, None, t.path()).unwrap(), flat);
+        // $KITH_KERNEL without a kith-sessions is refused, never replaced by the layout.
+        let dev = t.path().join("dev");
+        let e = kernel_for_hook(None, Some(dev.clone().into()), t.path()).unwrap_err();
+        assert!(
+            e.contains(&dev.display().to_string()) && !e.contains("cli/current"),
+            "{e}"
+        );
+        fake_kernel(&dev, "x");
+        assert_eq!(
+            kernel_for_hook(None, Some(dev.clone().into()), t.path()).unwrap(),
+            dev
+        );
     }
 
     #[test]
