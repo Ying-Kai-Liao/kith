@@ -155,7 +155,7 @@ pub(super) fn no_step(_: Step) -> Result<()> {
 
 /// The watermark of this Mac as an instant in ms: the table of migration 121, else the local-minute text `kith-sched`'s
 /// tick import left in `sched_tick`, converted the way the import converts a run's time.
-pub(super) fn watermark_in(conn: &rusqlite::Connection, mac: &str) -> Result<Option<i64>> {
+pub(crate) fn watermark_in(conn: &rusqlite::Connection, mac: &str) -> Result<Option<i64>> {
     let w: Option<i64> = conn
         .query_row(
             "SELECT at FROM sched_watermark WHERE mac = ?1",
@@ -404,16 +404,34 @@ fn fire_with(tx: &Transaction<'_>, f: &Fire<'_>, event: Option<&Value>) -> Resul
         claims::park_in(tx, turn, "lock_busy", f.now)?;
     }
 
-    // 6. The turn id, so the next fire's skip rule finds it.
+    // 6. The turn id, so the next fire's skip rule finds it, and the settings the run will use: fixed here, as the prompt
+    // is, so an edit of the job between this fire and the run cannot mix the two (`hostclaim.queued` hands them on).
     tx.execute(
-        "UPDATE sched_fires SET turn_id = ?4 WHERE agent = ?1 AND job = ?2 AND slot = ?3",
-        params![agent, f.job, slot, turn.to_string()],
+        "UPDATE sched_fires SET turn_id = ?4, settings = ?5 WHERE agent = ?1 AND job = ?2 AND slot = ?3",
+        params![agent, f.job, slot, turn.to_string(), settings_of(&job.def).to_string()],
     )?;
     (f.after)(Step::TurnId)?;
 
     // 7. The watermark.
     finish(tx, f, seen)?;
     Ok(Outcome::Fired { turn })
+}
+
+/// The job settings a run is started with, as the job holds them when the turn is made: `{model, effort, harness, person}`, each only
+/// when set (`kith-sched`s `start()` reads the same four). Stored on the fire row; a turn fired before this column existed has
+/// none, and its run falls back to the job's current values.
+pub(super) fn settings_of(def: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for key in ["model", "effort", "harness", "person"] {
+        if let Some(v) = def
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+        {
+            out.insert(key.to_owned(), Value::String(v.to_owned()));
+        }
+    }
+    Value::Object(out)
 }
 
 /// One fire as its own transaction.

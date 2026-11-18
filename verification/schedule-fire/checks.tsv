@@ -89,7 +89,44 @@ h-no-h3	INVARIANT	NoStack	fail
 h-global-rewind	INVARIANT	AtMostOnce	fail
 h-bare	INVARIANT	NoSilentLoss	fail
 h-nolast	INVARIANT	NoStack	fail
-# --- package C ahead of its brief: AdoptMode "c" (pid alive keeps running, redeemed-then-dead ended, no-pid requeued), with and without ClaimPausedCheck ---
+# --- Handover.tla: an old-code tick (no tick.lock) that launchd started before the update, still running at the step; gate
+# condition 6 (package F) waits it out after taking tick.lock. h-old-nowait: without the wait it renames over the tombstone
+# and runs a slot the core runs too (F review SHOULD 7) ---
+h-old	INVARIANT	AtMostOnce	pass
+h-old	INVARIANT	NoSilentLoss	pass
+h-old	INVARIANT	NoStack	pass
+h-old-nowait	INVARIANT	AtMostOnce	fail
+# --- package C: AdoptMode "c" (pid alive keeps running, redeemed-then-dead ended, no-pid requeued) and the claim's paused check
+# (ClaimPausedCheck) are the base now; the rows switch each off. keep-nocheck: the out-of-usage keep path (KeepRebegin) claims a
+# paused job's turn again, so the paused check is what holds PausedNeverStarts ---
 c-nocheck	PROPERTY	PausedNeverStarts	pass
 c-check	PROPERTY	PausedNeverStarts	pass
 c-check-rev	PROPERTY	RevokedNeverStarts	pass
+keep-nocheck	PROPERTY	PausedNeverStarts	fail
+# --- the base is a kith-sched (cron) job since the M4-5 re-sync (Cron: any person's turn is claimed and run by run-turn); a
+# host routine's job (owner's bot only, adopt requeues, the keep path) is the variant routine ---
+routine	INVARIANT	AtMostOncePerSlot	pass
+routine	INVARIANT	NoStacking	pass
+routine	PROPERTY	PausedNeverStarts	pass
+# --- HostRuns.tla: who runs a fired turn (design 2026-11-16-core-queued-runner) and package C's cron turn run by `kith-sched
+# run-turn`. hr-runner is the architect's design row without the cron turn; the broken rows are his, on the current base;
+# hr-no-cas: run-turn attaching without the check-and-set on its own claim ---
+hr-design	INVARIANT	PromptOnce	pass
+hr-design	INVARIANT	NoLiveKill	pass
+hr-design	INVARIANT	NoStuck	pass
+hr-design	INVARIANT	FiredRuns	pass
+hr-runner	INVARIANT	PromptOnce	pass
+hr-runner	INVARIANT	NoLiveKill	pass
+hr-runner	INVARIANT	NoStuck	pass
+hr-runner	INVARIANT	FiredRuns	pass
+hr-today	INVARIANT	NoLiveKill	fail
+hr-no-keep	INVARIANT	NoLiveKill	fail
+hr-no-runner	INVARIANT	NoStuck	fail
+hr-pull-any	INVARIANT	PromptOnce	fail
+hr-rerun-redeemed	INVARIANT	PromptOnce	fail
+hr-no-cas	INVARIANT	PromptOnce	fail
+# --- hr-dies: run-turn may exit before it attaches while its claim is its own (architect's DieC, review of #1047) ---
+hr-dies	INVARIANT	PromptOnce	pass
+hr-dies	INVARIANT	NoLiveKill	pass
+hr-dies	INVARIANT	NoStuck	pass
+hr-dies	INVARIANT	FiredRuns	pass

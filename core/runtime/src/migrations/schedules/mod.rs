@@ -10,6 +10,7 @@ mod m0122_index;
 mod m0123_first_seen;
 mod m0124_fires_at;
 mod m0125_run_proc_start;
+mod m0126_fire_settings;
 
 pub(super) const STEPS: &[Migration] = &[
     m0120_schedules::MIGRATION,
@@ -18,4 +19,5 @@ pub(super) const STEPS: &[Migration] = &[
     m0123_first_seen::MIGRATION,
     m0124_fires_at::MIGRATION,
     m0125_run_proc_start::MIGRATION,
+    m0126_fire_settings::MIGRATION,
 ];

@@ -10,56 +10,64 @@ EXTENDS Naturals, TLC
 
 CONSTANTS MaxOps, SplitRead, RestoreToo, Renames, RecByCurrent,
           Owed,          \* the fix: a cut whose ids read failed leaves an owed row, retried by the poll
-          UndoKeepsOwed  \* broken: the undo does not clear the owed row
+          UndoKeepsOwed, \* broken: the undo does not clear the owed row
+          UndoBlind,     \* an undo's read of the ids may fail, so its clear misses a row kept under a former id
+          UndoMarks      \* the fix: such an undo leaves a marker (a newer sequence number) the retry reads
 
-VARIABLES rev, hs, app, seen, rec, failcut, termundo, ops, renamed, missed, owed
+VARIABLES rev, hs, app, seen, rec, failcut, termundo, ops, renamed, missed, owed, mark
 
-vars == <<rev, hs, app, seen, rec, failcut, termundo, ops, renamed, missed, owed>>
+vars == <<rev, hs, app, seen, rec, failcut, termundo, ops, renamed, missed, owed, mark>>
 
 Init == rev = FALSE /\ hs = FALSE /\ app = "idle" /\ seen = FALSE /\ rec = "idle"
-        /\ failcut = FALSE /\ termundo = FALSE /\ ops = 0 /\ renamed = FALSE /\ missed = FALSE /\ owed = FALSE
+        /\ failcut = FALSE /\ termundo = FALSE /\ ops = 0 /\ renamed = FALSE /\ missed = FALSE /\ owed = FALSE /\ mark = FALSE
 
 Budget == ops < MaxOps
 Reaches(ok) == ~renamed \/ ok
 RecSees(x) == x /\ (~renamed \/ ~RecByCurrent)
 
 Rename == Renames /\ ~renamed /\ renamed' = TRUE
-          /\ UNCHANGED <<rev, hs, app, seen, rec, failcut, termundo, ops, missed, owed>>
+          /\ UNCHANGED <<rev, hs, app, seen, rec, failcut, termundo, ops, missed, owed, mark>>
 
 TermRevoke == Budget /\ ~rev /\ rev' = TRUE /\ ops' = ops + 1
-              /\ UNCHANGED <<hs, app, seen, rec, failcut, termundo, renamed, missed, owed>>
+              /\ UNCHANGED <<hs, app, seen, rec, failcut, termundo, renamed, missed, owed, mark>>
 TermUndo   == Budget /\ rev /\ rev' = FALSE /\ termundo' = TRUE /\ ops' = ops + 1
-              /\ UNCHANGED <<hs, app, seen, rec, failcut, renamed, missed, owed>>
+              /\ UNCHANGED <<hs, app, seen, rec, failcut, renamed, missed, owed, mark>>
 
 AppRevoke  == Budget /\ app = "idle" /\ rec = "idle" /\ rev' = TRUE /\ app' = "cut" /\ ops' = ops + 1
-              /\ UNCHANGED <<hs, seen, rec, failcut, termundo, renamed, missed, owed>>
+              /\ UNCHANGED <<hs, seen, rec, failcut, termundo, renamed, missed, owed, mark>>
 AppRevokeFails == Budget /\ app = "idle" /\ rec = "idle" /\ app' = "cut" /\ failcut' = TRUE /\ ops' = ops + 1
-              /\ UNCHANGED <<rev, hs, seen, rec, termundo, renamed, missed, owed>>
+              /\ UNCHANGED <<rev, hs, seen, rec, termundo, renamed, missed, owed, mark>>
 \* ok: held() answered. The code cannot tell whether a rename happened, so a failed read always leaves the row.
 AppCut     == app = "cut" /\ app' = "idle"
               /\ \E ok \in BOOLEAN : /\ hs' = (hs \/ Reaches(ok))
                                     /\ owed' = (owed \/ (Owed /\ ~ok))
+                                    \* a row written now is newer than any marker
+                                    /\ mark' = (mark /\ ~(Owed /\ ~ok))
               /\ UNCHANGED <<rev, seen, rec, failcut, termundo, ops, renamed, missed>>
 AppUndo    == Budget /\ app = "idle" /\ rec = "idle" /\ rev' = FALSE /\ app' = "restore" /\ ops' = ops + 1
-              /\ owed' = (owed /\ UndoKeepsOwed)
               /\ UNCHANGED <<hs, seen, rec, failcut, termundo, renamed, missed>>
+              /\ \E blind \in BOOLEAN :
+                   IF UndoBlind /\ blind
+                     THEN (owed' = owed /\ mark' = (mark \/ UndoMarks))   \* the clear missed the row; the marker is written
+                     ELSE (owed' = (owed /\ UndoKeepsOwed) /\ mark' = mark)
 AppRestore == app = "restore" /\ failcut' = FALSE /\ termundo' = FALSE /\ app' = "idle"
               /\ \E ok \in BOOLEAN : /\ hs' = (hs /\ ~Reaches(ok))
                                     /\ missed' = (hs /\ ~Reaches(ok))
-              /\ UNCHANGED <<rev, seen, rec, ops, renamed, owed>>
+              /\ UNCHANGED <<rev, seen, rec, ops, renamed, owed, mark>>
 
 RecAtomic  == ~SplitRead /\ rec = "idle"
               /\ hs' = (IF RestoreToo THEN RecSees(rev) ELSE (hs \/ RecSees(rev)))
-              /\ UNCHANGED <<rev, app, seen, rec, failcut, termundo, ops, renamed, missed, owed>>
+              /\ UNCHANGED <<rev, app, seen, rec, failcut, termundo, ops, renamed, missed, owed, mark>>
 RecRead    == SplitRead /\ rec = "idle" /\ seen' = rev /\ rec' = "cut"
-              /\ UNCHANGED <<rev, hs, app, failcut, termundo, ops, renamed, missed, owed>>
+              /\ UNCHANGED <<rev, hs, app, failcut, termundo, ops, renamed, missed, owed, mark>>
 RecCut     == SplitRead /\ rec = "cut"
               /\ hs' = (IF RestoreToo THEN RecSees(seen) ELSE (hs \/ RecSees(seen))) /\ rec' = "idle"
-              /\ UNCHANGED <<rev, app, seen, failcut, termundo, ops, renamed, missed, owed>>
+              /\ UNCHANGED <<rev, app, seen, failcut, termundo, ops, renamed, missed, owed, mark>>
 
 \* The poll pays the owed cut: under AUTH_WRITES (atomic), only on a read of the ids that answered (a failed read is a
 \* stutter), cut every id, drop the row.
-OwedRetry  == owed /\ rec = "idle" /\ hs' = TRUE /\ owed' = FALSE
+\* A row older than an undo marker is dropped unpaid (the person was undone after it); otherwise paid.
+OwedRetry  == owed /\ rec = "idle" /\ owed' = FALSE /\ mark' = FALSE /\ hs' = (hs \/ ~mark)
               /\ UNCHANGED <<rev, app, seen, rec, failcut, termundo, ops, renamed, missed>>
 
 Next == TermRevoke \/ TermUndo \/ AppRevoke \/ AppRevokeFails \/ AppCut \/ AppUndo \/ AppRestore
@@ -76,5 +84,5 @@ FailCutHoldsOwed == (failcut /\ app = "idle") => (hs \/ owed)
 FailCutReached == [](failcut => <>(hs \/ ~failcut))
 Narrows == [](rev => <>(hs \/ ~rev))
 TypeOK == rev \in BOOLEAN /\ hs \in BOOLEAN /\ app \in {"idle", "cut", "restore"} /\ rec \in {"idle", "cut"}
-          /\ renamed \in BOOLEAN /\ missed \in BOOLEAN /\ owed \in BOOLEAN
+          /\ renamed \in BOOLEAN /\ missed \in BOOLEAN /\ owed \in BOOLEAN /\ mark \in BOOLEAN
 =============================================================================

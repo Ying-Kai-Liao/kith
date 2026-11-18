@@ -11234,6 +11234,64 @@
       }
     },
     {
+      "name": "claim.attach",
+      "summary": "A scheduled cron run records its own process on the claim the host made for its turn (`hostclaim.claim` kind `scheduleRun`), with a check-and-set: the claim must be `claimed` with no process yet. The claim becomes kind `external`, `running`, with this pid and start stamp, and its turn `running`; the caller then starts the engine, and exits without running when this refuses. Answers `{attached: true}` (`again` for the same process), or `{refused: \"gone\", state}` when the claim was cancelled, ended, requeued or already has a process. Serves only once the claims are switched.",
+      "params": [
+        {
+          "name": "claimId",
+          "summary": "The claim the host made for the turn.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The run's own process.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "That process's start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "claimId": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
       "name": "claim.release",
       "summary": "Gives back the owner's external claims of one process (pid and start stamp): a claim already ended, or none, answers `{ended: []}`, so a retry is harmless. Never touches a turn's, a terminal's or a person's claim (a person's ends when its process is gone, or by a revoke). Answers `{ended}`.",
       "params": [
@@ -13653,7 +13711,7 @@
     },
     {
       "name": "hostclaim.claim",
-      "summary": "A terminal or `external` writer claim (step 1). Refused when a writer holds the conversation. An `external` claim names its process. Answers `{claimId, generation}`.",
+      "summary": "A terminal or `external` writer claim (step 1), or a `scheduleRun`: the claim of a pulled schedule turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
       "params": [
         {
           "name": "conversation",
@@ -13665,10 +13723,18 @@
         },
         {
           "name": "kind",
-          "summary": "terminal or external.",
+          "summary": "terminal, external or scheduleRun.",
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "turn",
+          "summary": "The schedule turn a `scheduleRun` claim runs.",
+          "required": false,
+          "schema": {
+            "type": "integer"
           }
         },
         {
@@ -13731,6 +13797,9 @@
             "kind": "caller"
           },
           "kind": {
+            "kind": "caller"
+          },
+          "turn": {
             "kind": "caller"
           },
           "person": {

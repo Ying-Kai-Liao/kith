@@ -6,3 +6,6 @@ Anchor = "anchor"
 LiveSkip = TRUE
 Rollback = "perjobfrom"
 CoreSpan = TRUE
+OldTick = FALSE
+OldWait = TRUE
+ShaCheck = TRUE

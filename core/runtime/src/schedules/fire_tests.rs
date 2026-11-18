@@ -277,6 +277,52 @@ fn a_due_job_fires_into_a_turn_with_its_deadline_and_moves_the_watermark() {
 }
 
 #[test]
+fn the_settings_of_the_run_are_fixed_on_the_turn_when_it_fires_and_listed_for_the_host() {
+    let mut r = Rig::new();
+    let mut job = daily("daily", "30 8 * * *");
+    job["model"] = json!("opus");
+    job["effort"] = json!("high");
+    job["harness"] = json!("claude");
+    job["person"] = json!("sam");
+    r.jobs("mel", &json!([job.clone()]));
+    r.set_wm(at(2026, 11, 3, 8, 29));
+    r.tick(at(2026, 11, 3, 8, 30));
+    let want = json!({"model": "opus", "effort": "high", "harness": "claude", "person": "sam"});
+    let stored: String = r
+        .core
+        .conn()
+        .query_row("SELECT settings FROM sched_fires", [], |x| x.get(0))
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), want);
+    // An edit between the fire and the run changes nothing the run reads: the host is handed what was fixed.
+    job["model"] = json!("haiku");
+    job.as_object_mut().unwrap().remove("effort");
+    r.jobs("mel", &json!([job]));
+    r.tick(at(2026, 11, 3, 8, 31));
+    let queued = crate::hostclaim::call_at(
+        &mut r.core,
+        "hostclaim.queued",
+        &json!({}),
+        at(2026, 11, 3, 8, 32),
+    )
+    .unwrap();
+    assert_eq!(queued["turns"][0]["settings"], want);
+    // A turn fired before the column existed has none: the run falls back to the job's current values.
+    r.core
+        .conn()
+        .execute("UPDATE sched_fires SET settings = NULL", [])
+        .unwrap();
+    let old = crate::hostclaim::call_at(
+        &mut r.core,
+        "hostclaim.queued",
+        &json!({}),
+        at(2026, 11, 3, 8, 32),
+    )
+    .unwrap();
+    assert_eq!(old["turns"][0]["settings"], Value::Null);
+}
+
+#[test]
 fn a_failure_between_any_two_steps_leaves_nothing_and_the_slot_fires_on_the_next_tick() {
     for step in [
         Step::Row,

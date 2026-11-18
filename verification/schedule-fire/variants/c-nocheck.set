@@ -1,1 +1,3 @@
 AdoptMode = "c"
+ClaimPausedCheck = FALSE
+KeepRebegin = FALSE

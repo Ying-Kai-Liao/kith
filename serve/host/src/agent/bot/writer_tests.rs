@@ -910,6 +910,10 @@ actor_test! {
         // lock alone still stops this process (design 2026-11-16-offturn-lock-alone, architect MUST 1).
         assert_eq!(marked(&rig, "sess-a"), before, "a forgotten session keeps its marker");
         assert_eq!(marked(&rig, "sess-fork"), 1, "the new session is marked too");
+        // And its `warm_procs` row stays with it: the engine still has the session, so a revoke must still find the process
+        // (architect MUST of #1031). Only a session the engine closed loses its row.
+        let forgotten = w.asked.iter().filter(|(m, p)| m == "hostclaim.procGone" && p["conversation"] == "sess-a").count();
+        assert_eq!(forgotten, 0, "a forgotten session keeps its warm row: {:?}", w.asked);
     }
 }
 
@@ -1104,8 +1108,16 @@ async fn pull_until(rig: &Rig, what: &str, ok: impl Fn(&Rig) -> bool) {
 
 actor_test! {
     /// A fired cron job and a fired routine each run once, by their id, on the core's conversation, and end done. Neither is enqueued
-    /// again, each is claimed once, and each result reaches the chat.
+    /// again, each is claimed once, and each result reaches the chat. A cron job of `kith-sched` runs as its own process
+    /// (`routines/core_cron.rs`: claimed with no process, `kith-sched run-turn`, its end reported), here a stand-in that ends at
+    /// once; a routine runs through its bot's actor.
     async fn a_fired_cron_job_and_a_fired_routine_each_run_once_and_end_done(rig) {
+        use std::os::unix::fs::PermissionsExt;
+        let kernel = std::env::temp_dir().join(format!("kith-cron-kernel-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(kernel.join("bin")).unwrap();
+        std::fs::write(kernel.join("bin/kith-sched"), "#!/bin/sh\ncat >/dev/null\nexit 0\n").unwrap();
+        std::fs::set_permissions(kernel.join("bin/kith-sched"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        *crate::routines::core_cron::TEST_KERNEL.lock().unwrap() = Some(kernel);
         let saved = rig
             .hub
             .routines
@@ -1118,23 +1130,34 @@ actor_test! {
         {
         let w = rig.w();
         assert!(w.log.iter().all(|m| m != "hostclaim.enqueue"), "a pulled turn is never enqueued: {:?}", w.log);
-        for (turn, job) in [(101, "daily".to_owned()), (102, routine.clone())] {
-            let claims: Vec<&serde_json::Value> =
-                w.asked.iter().filter(|(m, p)| m == "hostclaim.turn" && p["turn"] == turn).map(|(_, p)| p).collect();
-            assert_eq!(claims.len(), 1, "turn {turn} is claimed once: {claims:?}");
-            assert_eq!(claims[0]["conversation"], format!("schedule:bot:a:{job}:claude"), "on the core's conversation");
-            assert_eq!(claims[0]["person"], "kai", "as the turn's person");
-            assert_ne!(claims[0]["sessionId"], claims[0]["conversation"], "on a session of its own");
-        }
+        // The routine: claimed once by its id, on a session of its own, through its bot.
+        let claims: Vec<&serde_json::Value> =
+            w.asked.iter().filter(|(m, p)| m == "hostclaim.turn" && p["turn"] == 102).map(|(_, p)| p).collect();
+        assert_eq!(claims.len(), 1, "turn 102 is claimed once: {claims:?}");
+        assert_eq!(claims[0]["conversation"], format!("schedule:bot:a:{routine}:claude"), "on the core's conversation");
+        assert_eq!(claims[0]["person"], "kai", "as the turn's person");
+        assert_ne!(claims[0]["sessionId"], claims[0]["conversation"], "on a session of its own");
+        // The cron job: claimed once with no process, on the core's conversation, as the turn's person; no bot actor claim.
+        let runs: Vec<&serde_json::Value> = w
+            .asked
+            .iter()
+            .filter(|(m, p)| m == "hostclaim.claim" && p["kind"] == "scheduleRun" && p["turn"] == 101)
+            .map(|(_, p)| p)
+            .collect();
+        assert_eq!(runs.len(), 1, "turn 101 is claimed once: {runs:?}");
+        assert_eq!(runs[0]["conversation"], "schedule:bot:a:daily:claude");
+        assert_eq!(runs[0]["person"], "kai");
+        assert!(w.asked.iter().all(|(m, p)| !(m == "hostclaim.turn" && p["turn"] == 101)), "not through a bot's actor");
         assert_eq!(w.reports.iter().filter(|(k, _)| k == "done").count(), 2, "{:?}", w.reports);
         }
-        assert!(rig.replied("a", "run daily") && rig.replied("a", "run "), "the results reach the chat");
-        assert!(rig.noticed("a", "Scheduled · daily") && rig.noticed("a", "Scheduled · Digest"));
+        assert!(rig.replied("a", "run "), "the routine's result reaches the chat");
+        assert!(rig.noticed("a", "Scheduled · Digest"));
         // Pulled again later: nothing is waiting, nothing runs twice.
         let hub = rig.hub.clone();
         tokio::task::spawn_blocking(move || hub.routines.pull_due(&hub, crate::store::now_ms(), true)).await.unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
-        assert_eq!(rig.calls("hostclaim.turn"), 2);
+        assert_eq!(rig.calls("hostclaim.turn"), 1);
+        assert_eq!(rig.calls("hostclaim.claim"), 1);
     }
 }
 
@@ -1187,6 +1210,8 @@ actor_test! {
 
 /// A loaded marker goes only with a session the engine closed since it last loaded it (architect MUST 1 of #1016): close, load the
 /// same session again (no sync in between, as `close_reloadable` then the next turn), then a new chat drops it: the marker stays.
+/// The `warm_procs` row goes by the same rule (`sync_warm` forgets exactly `unmarks`): a new chat or fork with no close keeps the
+/// row, a close then a sync drops it, a close then a reload then a drop keeps it.
 #[test]
 fn a_marker_goes_only_with_a_session_closed_since_its_last_load() {
     use std::collections::HashSet;
