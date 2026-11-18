@@ -174,6 +174,14 @@ Where the Python code differs from the model (the model allows more, so no actio
 - kith-sched's prune deletes under the per-sid lock and re-checks age and pid there, so its race with a Files-mode
   hook is closed (it was on the "Not modelled" list).
 
+Where the core's code differs from the model (the model allows more, so no action changes):
+- `prune_once` judges which rows are old and dead outside the lock, then re-checks inside it: the row by its whole key
+  (compare-and-delete) and the file (a valid record of the sid whose key beats the judged one is left for the
+  reconcile). The model's `CorePrune` judges and checks the file in one look. The code removes the file only when it
+  deleted the row; the model unlinks the file even when the row stayed.
+- The settle reads the file once, adopts through the conditional upsert, then reads the row back and renames. A commit
+  after that read settles under the same lock after it, so the model's one `ProjectAdopt` covers both.
+
 ## When you change covered code
 
 1. Run `verification/registry/drift.sh`. If it lists nothing, there is no work. If it lists files, read each diff and

@@ -164,6 +164,30 @@ fn the_prune_takes_old_dead_records_and_keeps_the_engine_sessions() {
     assert!(project::lock_of(&dir(&m), SID).exists());
 }
 
+/// An older-kernel hook that resumed the session wrote `<sid>.json` itself (no `recordedAt`, a fresh mtime) before the
+/// reconcile adopted it: the prune leaves that file and the row alone, and the reconcile then adopts the file.
+#[test]
+fn the_prune_leaves_a_newer_unstamped_file_for_the_reconcile() {
+    let (_t, m) = machine();
+    let mut core = core(&m, true);
+    let day = 86_400 * 1_000_000_000_i64;
+    let now = 100 * day;
+    ask(
+        &mut core,
+        &rec(SID, now - 8 * day, &json!({"pid": null, "cwd": "/old"})),
+    );
+    let mut fresh = file(&m, SID);
+    fresh.remove("recordedAt");
+    fresh.insert("cwd".into(), json!("/resumed"));
+    write_atomic(&file_of(&dir(&m), SID), &Value::Object(fresh)).unwrap();
+    let gone = super::prune::prune_once(&mut core, &dir(&m), now, &|_| false).unwrap();
+    assert!(gone.is_empty(), "{gone:?}");
+    assert!(file_of(&dir(&m), SID).exists());
+    assert!(record::row(core.conn(), SID).unwrap().is_some());
+    reconcile_once(&mut core, &ctx(&m), &dir(&m)).unwrap();
+    assert_eq!(row_of(&core, SID)["cwd"], "/resumed");
+}
+
 #[test]
 fn the_prune_deletes_only_the_row_it_judged() {
     let (_t, m) = machine();

@@ -9,7 +9,7 @@ use std::path::Path;
 use rusqlite::params;
 use serde_json::Value;
 
-use super::project::{file_of, with_lock};
+use super::project::{file_of, read_file, with_lock};
 use super::record;
 use super::record::Key;
 use crate::db::Core;
@@ -55,6 +55,15 @@ pub(crate) fn prune_once(
         }
         let path = file_of(dir, &sid);
         let pruned = with_lock(dir, &sid, || -> Result<bool> {
+            // A file newer than the row judged (an older-kernel hook resumed the session and wrote it itself) is not ours to
+            // delete: the next reconcile adopts it. This is `kith-sched`'s re-check under the lock.
+            if let Some((obj, mtime)) = read_file(&path)
+                && record::validate(Some(&Value::Object(obj.clone())))
+                    .is_ok_and(|(got, _)| got == sid)
+                && Key::of(&obj, mtime) > key
+            {
+                return Ok(false);
+            }
             let tx = core.claim_tx()?;
             // Compare-and-delete (A7): only the row that was judged, by its whole key; a record that came in since keeps
             // its session. The session's lock file stays (A8: a flock lives on the file, never deleted).
