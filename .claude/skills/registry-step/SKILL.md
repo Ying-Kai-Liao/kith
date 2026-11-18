@@ -185,7 +185,7 @@ Where the Python code differs from the model (the model allows more, so no actio
 4. A pass can have lost the ability to fail. Break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `SYNC_SHA` (transcripts P1, #1040: the core side; the module files at it are pre-P3 and match "planned").
+**Sync commit:** `70df0d7fcfc6556856e17fe96c81d2a4bb53e88d` (transcripts P1, #1040: the core side; the module files at it are pre-P3 and match "planned").
 
 ## Map of the folder
 
