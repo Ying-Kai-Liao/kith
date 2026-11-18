@@ -827,6 +827,8 @@ jobs:
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
           # The accounts step: the account verbs and the Python readers through the core, nothing reading the tombstone.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
+          # The retire-python gate: kernel/lib/requires-switched.txt is shipped and valid, and cutover status answers by exit code.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
           # The pkg and project-id switches: the launch's two lookups are the core's, per verb, and a guest's project-id stays Python.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
           # The cost switch: the ported kith-cost verbs are the core's, tag/record stay Python, and the launch's budget checks hold on both paths.
