@@ -934,14 +934,14 @@ fn cutover_verb(p: &kith_kernel::paths::Paths, args: &[String]) -> i32 {
     let home = kith_kernel::paths::process_home();
     let kernel = kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
     match kith_core::cutover_outcome(p, &kernel, args) {
-        Ok(o) => {
-            for line in &o.out {
+        Ok((code, out, err)) => {
+            for line in &out {
                 println!("{line}");
             }
-            for line in &o.err {
+            for line in &err {
                 eprintln!("{line}");
             }
-            o.code
+            code
         }
         Err(e) => {
             eprintln!("{e}");

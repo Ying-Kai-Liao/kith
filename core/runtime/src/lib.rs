@@ -235,19 +235,16 @@ pub fn cutover(
     cutover::run(paths, kernel, args)
 }
 
-/// What [`cutover_outcome`] answers: stdout lines, stderr lines and the exit code (the `status MODULE | --json | --require`
-/// questions answer by exit code, and `--json` goes to stdout whatever the code).
-#[cfg(unix)]
-pub use cutover::status::Outcome as CutoverOutcome;
-
-/// [`cutover`] for the CLI: the same verbs, with the exit code the `status` variants need.
+/// [`cutover`] for the CLI, with the exit code: `(code, stdout lines, stderr lines)`. The `status MODULE | --json | --require`
+/// questions answer by exit code, and `--json` goes to stdout whatever the code.
 #[cfg(unix)]
 pub fn cutover_outcome(
     paths: &Paths,
     kernel: &std::path::Path,
     args: &[String],
-) -> Result<CutoverOutcome, Error> {
-    cutover::run_outcome(paths, kernel, args)
+) -> Result<(i32, Vec<String>, Vec<String>), Error> {
+    let o = cutover::run_outcome(paths, kernel, args)?;
+    Ok((o.code, o.out, o.err))
 }
 
 /// Opens the core inside this process for one command.
