@@ -25,8 +25,8 @@ verification/registry/drift.sh                     # which covered files changed
 CI runs `run.sh` (job `registry-step`) on pull requests and pushes that touch `verification/registry/`, this skill,
 or the covered code. `run.sh` exits 0 only when every row of `checks.tsv` (variant, kind, property, expected) came out
 as expected; it is a copy of the holder-lease harness (pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE,
-cached under `${XDG_CACHE_HOME:-$HOME/.cache}/kith-verify/`). `fixed` has 549,021 states; the liveness row is the slow
-one (about 100 s). The whole table (31 rows) takes about 90 s here. A row that changes exits 1:
+cached under `${XDG_CACHE_HOME:-$HOME/.cache}/kith-verify/`). `fixed` has about 1.15M states; the liveness rows (`Converges`, `StepFinishes`) are the slow
+ones (about 2 min each). The whole table (49 rows) takes about 5 min here on 4 workers. A row that changes exits 1:
 read this skill, do not edit the table to fit.
 
 ## What is modelled
@@ -49,14 +49,22 @@ larger key is a newer record.
   - The core can crash at any step, including between commit and rename.
 - **kith-sched, Files mode only:** prune and the inbox drain.
 - **Step:**
-  - preflight (inbox empty), then the switch file says stepping;
-  - import (row := file);
+  - preflight, then the switch file says stepping (the inbox may hold entries: the re-read drains it);
+  - import (mirrors the files: a row newer than its file is replaced, a row whose file is gone is cleared, `ImportClears`);
+  - same_answer guards the tombstone (`TombGuard`): a row newer than its file or with no file stops the step, and a
+    rerun imports again (`RerunImp`);
   - tombstone (Writer mode on for hooks; the core does not serve yet);
-  - before_tombstone re-read (row := file);
+  - before_tombstone re-read: drain the inbox, take the files in, clear rows whose file is gone. A stale row refuses
+    and takes the tombstone away (`prer`: stepping without it, hooks write files again);
   - marker and switch (the daemon serves).
-- **Cancel** before the switch puts the Mac back in Files mode.
+  - A rerun with the tombstone still in place (`Rerun`) stays in Writer mode.
+  - A second step may begin from Files mode (`files`, `filesc`), after a cancel or a rollback.
+- **Cancel** before the switch puts the Mac back in Files mode (`filesc` when it left spool entries).
 - **Rollback:** the record says rolling-back and the daemon is stopped (hooks stay in Writer mode and spool), then
-  `export_back` drains the inbox into the row and writes the row to the file, then the marker and record go.
+  `export_back` drains the inbox into the row and writes the row to the file (`rbxe`: it took a spool entry), then the marker and
+record go. Hooks keep spooling until the record is cleared; what they spool after the last drain waits for the next Files-mode
+drain (the next session start on this Mac, or kith-sched's hourly pass: `kith_registry.drain` empties the whole inbox), the
+gap the model has as `rbx` followed by Files mode.
 
 Writer mode is `registry.tombstone` exists, or the transcripts switch file says more than `stepping` (switched,
 rolling-back). Fair: a hook's own steps (not its start or the kill), the core's work, its restart, the 60 s pass,
@@ -121,8 +129,13 @@ Not modelled, harmless: an old-kernel kith-sched (after a downgrade) prunes what
 the file back from the row.
 
 Not modelled: several sessions (independent per sid), the content of a record beyond its key, the compact
-`startedAt` rule, a second step after a rollback or cancel (to add with P3: `Begin` from `"files"`, the import
-clearing deleted rows, `Reread` dropping a row whose file was pruned after the import), Windows (refused by preflight), the readers' Phase B.
+`startedAt` rule (the same-answer compare leaves `startedAt` out of a compact), more than two steps, Windows (refused by
+preflight), the readers' Phase B. The step's `drain_once` before the re-read writes registry files from rows before the
+switch (settle); the model has it as `Reread` taking the newest valid entry into row and file.
+
+A record a Files-mode prune removed can come back through a stale spool entry once switched (a drain of an entry that
+committed before a later record was pruned). That is the same as any record arriving late; it is why the model's guard is
+the same-answer check at the step (`SwitchClean`, `StepFinishes`), not a "never resurrected" invariant.
 
 ## Broken variants
 
@@ -139,15 +152,20 @@ clearing deleted rows, `Reread` dropping a row whose file was pruned after the i
 | `no-reconcile` | no 60 s reconcile (MUST 1) | `Converges` |
 | `ns-drop` | not-serving deletes the entry (MUST 5) | `Converges`, `SpoolKept` |
 | `bad` | an invalid hook in the middle, no crash or prune | none (passes) |
+| `fixed-new` | three new hooks (no old-kernel hook) | none (passes) |
+| `import-keeps-rows` | the import keeps a row whose file was pruned | `StepFinishes` (the same-answer guard stops the step for ever) |
+| `no-guard` | the same, with no same-answer guard at the tombstone or the re-read | `SwitchClean` (it switches over the stale row) |
+| `reread-refuses` | the import keeps the row, the tombstone is not guarded: the re-read's refusal is taken | none (passes `SpoolKept`, `NeverBackwards`, `Converges`) |
 
 The `Never*` rows are expected to fail. They show that each of these happens: a switch, a rollback, an old hook's
 file newer than the row while switched, a crash between commit and rename, a core drain, a drain racing a live
-record, a not-serving answer, a prune and an invalid answer. So a pass is not vacuous.
+record, a not-serving answer, a prune and an invalid answer, `export_back` taking a spool entry, a Files-mode drain of what a
+cancel left, a second step, and the re-read's refusal. So a pass is not vacuous.
 
 ## Code to model
 
-The Python side (P2, #1041) and the core (P1) are in; the module (P3) is still planned. The PR that lands each part
-fills in its rows and moves `SYNC`.
+The Python side (P2, #1041), the core (P1, #1040) and the module (P3) are in. The PR that lands each part fills in its
+rows and moves `SYNC`.
 
 | Model action | Code |
 |---|---|
@@ -162,8 +180,13 @@ fills in its rows and moves `SYNC`.
 | `CorePrune`, `RcFinish` (prune) | `transcripts/prune.rs` `prune_once`: judges rows by `(recorded_at, proc_start)`, deletes with `recorded_at = ? AND COALESCE(proc_start,'') = ?` |
 | `Crash`, `Restart` | the daemon or the embedded core dies, comes back |
 | `SchedDrain`, `SchedPrune` | `kernel/bin/kith-sched` `prune_registry` (Files mode only: `kith_registry.drain`) and `prune_terminal` (deletes under `lock_at`, re-checks age and pid) |
-| `Begin`, `Import`, `Tombstone`, `Reread`, `Switch`, `Cancel` | (planned, P3) `core/runtime/src/cutover/modules/transcripts.rs` preflight, import (`import/transcripts.rs`), tombstones, before_tombstone, cancel_step |
-| `Rollback`, `ExportBack`, `RollbackDone` | (planned, P3) the framework's rollback, the module's export_back |
+| `Begin` | `cutover::step` (any `Stepping` record or none) after `transcripts_preflight.rs` `preflight` (host stopped, not Windows, `kith-sessions caps`, `session_records` table); the inbox is not a refusal |
+| `Import`, `RerunImp` | `import/transcripts.rs` `run_in` with `clear_gone` (`rows_without_file`), then `transcripts_answer.rs` `differences` (the framework refuses a step on any difference: `TombGuard`); a rerun imports again |
+| `Tombstone` | `modules/transcripts.rs` `before_tombstone`: host re-probe, `tombstone::ensure(registry.tombstone)` |
+| `Reread`, `Rerun` | `transcripts_answer.rs` `reread` (through the framework's `Module::reread`, after `before_tombstone`): `drain_once`, `import_files`, clear rows without a file, `record_diffs` (non-strict); on a stale row remove the tombstone and refuse |
+| `Switch` | the framework: marker, then the switched record; the daemon's 60 s pass serves |
+| `Cancel` | `transcripts_back.rs` `cancel` (`cancel_step`): remove the tombstone |
+| `Rollback`, `ExportBack`, `RollbackDone` | the framework's rollback; `transcripts_back.rs` `export_back`: `drain_once`, `export_rows` (A3), `drain_once`, remove the tombstone last |
 | (refuses under the marker) | `core/kernel/src/threads/registry.rs` `record` (refuses once `registry.tombstone` exists) |
 
 Where the Python code differs from the model (the model allows more, so no action changes):
@@ -175,6 +198,9 @@ Where the Python code differs from the model (the model allows more, so no actio
   hook is closed (it was on the "Not modelled" list).
 
 Where the core's code differs from the model (the model allows more, so no action changes):
+- The re-read is three steps in code (drain, one transaction, the check) and one in the model. A writer that slips in
+  between can only make a file newer, which is no refusal (Python's prune is off in Writer mode). Any failure of the
+  re-read, not only a stale row, removes the tombstone: the model's `prer` branch.
 - `prune_once` judges which rows are old and dead outside the lock, then re-checks inside it: the row by its whole key
   (compare-and-delete) and the file (a valid record of the sid whose key beats the judged one is left for the
   reconcile). The model's `CorePrune` judges and checks the file in one look. The code removes the file only when it
@@ -193,7 +219,7 @@ Where the core's code differs from the model (the model allows more, so no actio
 4. A pass can have lost the ability to fail. Break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `96429c4db8425fd7fb508b11fc50a3de61aa2c3f` (transcripts P1, #1040: the core side; the module files at it are pre-P3 and match "planned").
+**Sync commit:** `ead5f725668c0f367ec3b15b6c3f81ffb3f7807f` (transcripts P3, the cutover module; P1 #1040 and P2 #1041 are in it).
 
 ## Map of the folder
 

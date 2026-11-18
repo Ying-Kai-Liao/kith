@@ -36,3 +36,26 @@ fixed	INVARIANT	NeverPruned	fail
 fixed	INVARIANT	NeverRacing	fail
 fixed	INVARIANT	NeverOvertaken	fail
 bad	INVARIANT	NeverInvalid	fail
+# --- P3: a second step from Files mode, after a cancel or a rollback; the re-read; the same-answer guard -------------
+fixed	PROPERTY	SwitchClean	pass
+fixed	PROPERTY	StepFinishes	pass
+fixed-new	INVARIANT	TypeOK	pass
+fixed-new	INVARIANT	NeverBackwards	pass
+fixed-new	INVARIANT	SpoolKept	pass
+fixed-new	PROPERTY	SwitchClean	pass
+fixed-new	PROPERTY	Converges	pass
+# a row kept for a pruned file: the same-answer check stops the step for ever (never switches over it)
+import-keeps-rows	PROPERTY	StepFinishes	fail
+import-keeps-rows	PROPERTY	SwitchClean	pass
+# without the guard the step switches over that row
+no-guard	PROPERTY	SwitchClean	fail
+# --- non-vacuity of the P3 rows: each of these happens (the invariant FAILS) ---------------------------------------
+fixed	INVARIANT	NeverExportSpool	fail
+fixed	INVARIANT	NeverCancelDrain	fail
+fixed	INVARIANT	NeverSecondStep	fail
+# the re-read's refusal (a stale row after the tombstone is down) is taken, and removing the tombstone loses nothing
+reread-refuses	INVARIANT	NeverRereadRefused	fail
+reread-refuses	INVARIANT	SpoolKept	pass
+reread-refuses	INVARIANT	NeverBackwards	pass
+reread-refuses	PROPERTY	Converges	pass
+reread-refuses	INVARIANT	NeverStaleTomb	fail

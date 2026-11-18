@@ -17,7 +17,8 @@
 //! - `step`: refuse when the module says it is not ready (`step_refusal`, before anything is written) or unless dependencies
 //!   are switched; take the old store's writer lock (`source_lock`, held to the end); `VACUUM INTO` snapshot (recorded, reused on resume); record
 //!   `stepping`; `import`; `same_answer` must be empty or the step fails and stays `stepping` (Python is still the writer;
-//!   re-run to resume, or roll back); write the marker (`marker.rs`); record `switched`; put the tombstones. The tombstone comes AFTER the record so a
+//!   re-run to resume, or roll back); write the marker (`marker.rs`); record `switched`; put the tombstones (a module that
+//!   puts one earlier, in `before_tombstone` -- `claims`, `transcripts` -- has it already, and `reread` runs after it). The tombstone comes AFTER the record so a
 //!   crash between them is repaired by running `step` again (the import cannot be re-run once its sources are gone, and
 //!   need not be).
 //! - `rollback`: refuse while a dependent is switched, or while a claim/take is live (any claim not ended, or the module's
@@ -192,6 +193,12 @@ pub(crate) trait Module {
     /// refuses here when a source changed since (a writer that does not take the lock), so the step never tombstones a
     /// file it did not import. Default: nothing to check.
     fn before_tombstone(&self, _env: &Env) -> Result<()> {
+        Ok(())
+    }
+    /// [`Module::before_tombstone`] with the core in hand, run right after it and before the marker: a module whose
+    /// `before_tombstone` already put its tombstone (`claims`, `transcripts`: the old readers fail closed from then on)
+    /// re-reads its sources into core.db here, under the same locks. Default: nothing.
+    fn reread(&self, _env: &Env, _core: &mut Core) -> Result<()> {
         Ok(())
     }
     /// Under the source lock, for a switched (or stepping-with-marker) record whose source is still a real file with no copy
@@ -479,6 +486,7 @@ pub(crate) fn step(
         lines.push(format!("{name}: same answer as the old store"));
         // Before the marker and the switched record: a refusal here leaves the module stepping, so a rerun imports again.
         m.before_tombstone(env)?;
+        m.reread(env, &mut core)?;
         let digest = m.digest(env, core.conn())?;
         let seed = m.seed(env, core.conn())?;
         marker::write(&mut core, name, at, &digest, seed.as_deref())?;

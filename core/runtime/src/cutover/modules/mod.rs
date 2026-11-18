@@ -35,3 +35,10 @@ mod schedules_ticks_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod transcripts;
+mod transcripts_answer;
+mod transcripts_back;
+#[cfg(test)]
+mod transcripts_back_tests;
+mod transcripts_preflight;
+#[cfg(test)]
+mod transcripts_tests;

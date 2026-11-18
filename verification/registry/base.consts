@@ -14,4 +14,7 @@ RowWrite = "conditional"
 Reconcile = TRUE
 MissingKey = "mtime"
 ExportRule = "newer"
+ImportClears = TRUE
+SameGuard = TRUE
+TombGuard = TRUE
 FileWrite = "atomic"

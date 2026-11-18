@@ -10,9 +10,9 @@
 # set SYNC below to the commit you checked (and in .claude/skills/registry-step/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was last read against the code below: transcripts P1 (#1040), the core side. The step's
-# module (cutover/modules/transcripts.rs) is pre-P3 at it; P3 reads the model against it and moves SYNC.
-SYNC=96429c4db8425fd7fb508b11fc50a3de61aa2c3f
+# The commit at which the model was last read against the code below: transcripts P3, the cutover module. P1 (#1040) is the
+# core side, P2 (#1041) the Python side.
+SYNC=ead5f725668c0f367ec3b15b6c3f81ffb3f7807f
 
 FILES=(
   kernel/bin/kith-sessions                        # record(): the hook, Files mode and Writer mode (spool, call, delete own)
@@ -20,7 +20,7 @@ FILES=(
   kernel/bin/kith-sched                           # prune_terminal: skip in Writer mode, the Files-mode inbox drain
   core/runtime/src/transcripts                    # session.record (txn, per-sid file write), reconcile, drain, prune (P1)
   core/runtime/src/import/transcripts.rs          # import from files into rows
-  core/runtime/src/cutover/modules/transcripts.rs # the step: preflight, import, tombstone, before_tombstone, cancel, export_back
+  core/runtime/src/cutover/modules/transcripts*.rs # the step: preflight, answer (same_answer, re-read), back (cancel, export_back), the module
   core/runtime/src/daemon.rs                      # the session.record dispatch, the 60 s reconcile + drain
   core/kernel/src/threads/registry.rs             # the Rust port of record (refuses under the marker)
 )

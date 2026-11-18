@@ -470,15 +470,19 @@ fn a_live_claim_that_appears_after_the_marker_stops_the_step_and_a_cancel_takes_
 // --- the other modules ------------------------------------------------------------------------------------------------------
 
 #[test]
-fn transcripts_waits_for_claims_and_still_refuses_after_them() {
+fn transcripts_waits_for_claims_and_then_has_its_own_preflight() {
     let r = rig();
     assert_eq!(
         crate::cutover::modules::transcripts::Transcripts.depends_on(),
         ["claims"]
     );
     r.step(opts()).unwrap();
+    // Its own preflight now (the installed kith-sessions must know Writer mode); the old blanket refusal is gone.
     let e = err(step(&registry(), &r.env, "transcripts", opts()));
-    assert!(e.contains("kith-sessions record"), "{e}");
+    assert!(
+        e.contains("preflight") && !e.contains("kith-sessions record"),
+        "{e}"
+    );
 }
 
 /// A host turn claim a stopped or killed host left behind.
