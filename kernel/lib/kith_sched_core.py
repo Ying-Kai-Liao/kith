@@ -46,8 +46,10 @@ def takes(argv, machine):
     try:
         with open(os.path.join(str(machine), 'core', 'cutover', 'schedules.switch')) as f:
             return 'state=stepping' not in f.read().split()
-    except OSError:
+    except FileNotFoundError:
         return False
+    except OSError:
+        return True   # a switch file that exists and cannot be read counts as switched (as kith_claims does)
 
 
 def core(method, params, lost='the Kith core went away before it answered; `kith schedule ls` shows whether it was done'):
@@ -58,6 +60,8 @@ def core(method, params, lost='the Kith core went away before it answered; `kith
     try:
         r = subprocess.run([bin_, 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(params),
                            capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        raise Fail(lost)   # the request went out
     except (OSError, subprocess.SubprocessError) as e:
         raise Fail('%s (%s)' % (NO_CORE, e))
     if r.returncode == 0:
@@ -86,8 +90,9 @@ def minute(text):
 def log_of(agent, jid):
     """The newest log file of the job's runs (run-turn names them <job>-<stamp>.log), which the core does not record."""
     runs = os.path.join(str(kith_paths.paths()['KITH_LOGS']), 'sched', 'runs', agent)
+    mine = re.compile(re.escape(jid) + r'-\d{8}-\d{4}\.log')   # not another job's <jid>-x-<stamp>.log
     try:
-        names = sorted(n for n in os.listdir(runs) if n.startswith(jid + '-') and n.endswith('.log'))
+        names = sorted(n for n in os.listdir(runs) if mine.fullmatch(n))
     except OSError:
         return None
     return os.path.join(runs, names[-1]) if names else None
@@ -103,7 +108,8 @@ def runs_of(agent=None, jid=None):
     out = {}
     for v in core('schedule.runs', params).get('runs', []):
         run = {'agent': v['agent'], 'id': v['id'], 'at': v.get('at'), 'why': v.get('why'), 'pid': v.get('pid'),
-               'log': v.get('log') or log_of(v['agent'], v['id']), 'running': bool(v.get('running'))}
+               'log': v.get('log') or (None if v.get('state') in ('queued', 'cancelled') else log_of(v['agent'], v['id'])),
+               'running': bool(v.get('running')), '_state': v.get('state')}
         if v.get('state') == 'failed':
             run['error'] = v.get('outcome') or 'failed'
         out[(v['agent'], v['id'])] = run
@@ -128,6 +134,12 @@ def listing(agent=None):
     """The jobs kith-sched lists: the cron ones (a routine that has only a trigger is the host's to show)."""
     ans = core('schedule.jobs', {'agent': agent} if agent else {})
     return [r for r in ans.get('jobs', []) if r.get('cron') is not None]
+
+
+def note(ans):
+    """The write is done; when the core could not bring its index up to it right away, the next fire does."""
+    if ans.get('indexed') is False:
+        print('(done; the core will pick it up at its next tick: %s)' % ans.get('indexNote', 'not indexed yet'))
 
 
 def cmd_ls(rest, as_json):
@@ -159,13 +171,14 @@ def cmd_log(rest, as_json):
     if n is not None and (not n.isdigit() or int(n) < 1):
         raise Fail('n must be a positive number')
     runs = list(runs_of(agent, jid).values())
+    states = [r.pop('_state') for r in runs]
     if n:
         runs = runs[-int(n):]
     if as_json:
         return {'agent': agent, 'id': jid, 'runs': runs}
     home = os.path.expanduser('~')
-    for r in runs:
-        state = 'failed' if r.get('error') else 'running' if r['running'] else 'done'
+    for r, st in zip(runs, states[-len(runs):] if runs else []):
+        state = 'failed' if r.get('error') else 'running' if r['running'] else st if st in ('queued', 'cancelled') else 'done'
         print('%s  %-24s %-7s %s' % (r['at'], '%s/%s' % (r['agent'], r['id']), state, (r['log'] or '-').replace(home, '~', 1)))
     if agent and jid and runs and runs[-1]['log']:
         try:
@@ -201,6 +214,7 @@ def cmd_add(rest, as_json):
     if as_json:
         return {'ok': True, 'replaced': bool(ans.get('replaced')), 'job': row}
     print('%s/%s: next run %s' % (agent, row['id'], minute(row['next']) if row['next'] else 'never'))
+    note(ans)
     return None
 
 
@@ -245,6 +259,7 @@ def cmd_edit(verb, agent, jid, as_json):
     if as_json:
         return {'ok': True, 'agent': agent, 'id': jid, 'changed': bool(ans.get('changed'))}
     print('%s/%s %s' % (agent, jid, {'rm': 'removed', 'pause': 'paused', 'resume': 'resumed'}[verb]))
+    note(ans)
     return None
 
 

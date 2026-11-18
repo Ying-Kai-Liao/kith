@@ -50,6 +50,12 @@ pub(crate) fn call(core: &mut Core, method: &str, params: &Value, now: i64) -> R
     let agent = need("agent")?;
     // Same refusal as the listing: the agents there are, named.
     known_agent(&paths, Some(agent))?;
+    // An unmounted agents folder knows no agent, and the write would make the folder: refuse, as the listing says it is off.
+    if !paths.agents.is_dir() {
+        return Err(Error::Refused(
+            "kith-core: schedule: the agents folder is not mounted".into(),
+        ));
+    }
     let mut put = None;
     let mut out = match method {
         "schedule.put" => {
@@ -78,6 +84,13 @@ pub(crate) fn call(core: &mut Core, method: &str, params: &Value, now: i64) -> R
             let id = need("id")?;
             edit(&paths, agent, |jobs| {
                 let at = find(jobs, agent, id)?;
+                // A rollback rebuilds the routines from the jobs still in the files: a dropped one would stay enabled in
+                // serve.db and run again, its webhook key left behind. Pausing is the way to stop it.
+                if jobs[at].get("routine").is_some() {
+                    return Err(Error::Refused(format!(
+                        "kith-core: schedule: {agent}/{id} was imported from a routine; pause it instead (a routine with several triggers is paused in the app, a pause of one trigger is lost on rollback)"
+                    )));
+                }
                 jobs.remove(at);
                 Ok(json!({"changed": true}))
             })?

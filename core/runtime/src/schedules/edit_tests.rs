@@ -397,4 +397,15 @@ fn a_job_the_routine_import_made_is_not_replaced_by_put() {
     );
     assert!(e.contains("imported from a routine"), "{e}");
     assert_eq!(r.text("mel"), before);
+    let e = r.err("schedule.drop", &json!({"agent": "mel", "id": "daily"}));
+    assert!(e.contains("imported from a routine"), "{e}");
+    assert_eq!(r.text("mel"), before);
+    let out = call(
+        &mut r.core,
+        "schedule.setPaused",
+        &json!({"agent": "mel", "id": "daily", "paused": true}),
+        NOW,
+    )
+    .unwrap();
+    assert_eq!(out["changed"], true);
 }
