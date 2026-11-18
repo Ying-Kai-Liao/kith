@@ -8,9 +8,9 @@
 # set SYNC below to the commit you checked (and in .claude/skills/schedule-fire/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below: origin/rust-rebuild after M4-3 (the fire
-# transaction) and M4-4a, with the code table in the skill checked against fire.rs / sync.rs.
-SYNC=6f02eea582c60cf7c6a223d3254fcb7d5786e84b
+# The commit at which the models were confirmed to describe the files below: origin/rust-rebuild after M4-5 packages A1
+# (#1033), B (#1042), E (#1043) and C (#1044), with the code tables in the skill and the model headers checked.
+SYNC=d2e6f08c8b83cd3d52e0fd73e6e5b96d1f300d44
 
 FILES=(
   core/runtime/src/conversations/warm.rs  # adopt: the host's claims after a host restart (HostAdopt; package C changes it)
@@ -19,6 +19,10 @@ FILES=(
   core/runtime/src/cutover/modules/schedules.rs  # the schedules cutover module
   core/runtime/src/cutover/modules/schedules_back.rs  # the rollback's hand-back (H4): next runs, state.json last
   core/runtime/src/cutover/modules/schedules_back_tests.rs  # its cases
+  core/runtime/src/cutover/modules/schedules_switch.rs  # the step: host.lock, tick.lock (H1), the import (H2 anchor, H3 live run)
+  core/runtime/src/cutover/modules/schedules_gate.rs  # gate conditions; condition 6 (package F) is Handover.tla's OldWait
+  serve/host/src/agent/bot/writer_turn.rs  # HostRuns SeeDied: End::Died cancels a bot turn
+  core/procstart  # the start stamps condition 6's lister of old ticks matches on (OldWait)
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)
   core/runtime/src/schedules          # M4-2 store and index; M4-3 tick, fire (the one transaction), run now, the webhook entry
   core/runtime/src/migrations/schedules  # sched_tick, sched_fires, sched_runs (unique keys)

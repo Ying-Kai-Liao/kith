@@ -29,6 +29,7 @@ CatchMode = "latest"
 Shape = "one-txn"
 TickFirst = FALSE
 HostBotOnly = TRUE
+Cron = TRUE
 AdoptMode = "c"
 ClaimPausedCheck = TRUE
 KeepRebegin = TRUE
