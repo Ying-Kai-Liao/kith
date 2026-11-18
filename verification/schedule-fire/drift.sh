@@ -10,7 +10,7 @@ set -euo pipefail
 
 # The commit at which the models were confirmed to describe the files below: origin/rust-rebuild after M4-5 packages A1
 # (#1033), B (#1042), E (#1043) and C (#1044), with the code tables in the skill and the model headers checked.
-SYNC=f4794190984e2d233e4547296198985428ef8584
+SYNC=65a96a5e244a5ec19bb8fffc07677aa7575b30bb
 
 FILES=(
   core/runtime/src/conversations/warm.rs  # adopt: the host's claims after a host restart (HostAdopt; package C changes it)

@@ -308,7 +308,7 @@ The two "cancel in a second transaction" variants, run against every property (n
 - *Fairness of `RunnerCancelAny` (`RunnerCancel`, `RunnerGiveUp`):* it has none. `TurnsEnd` holds through `Expire`'s strong fairness, but nothing checks that a redeemed turn is cancelled rather than expired.
 - *Not modelled (adopt):* core reconcile step 5's requeue of a claim whose process is gone (`HostAdopt`'s any-time requeue over-approximates it). The out-of-usage keep path re-begins a running turn by the same id inside the actor, so a paused job's running turn can continue on the backup account; deliberate per rule 5.
 
-**Sync commit:** `f4794190984e2d233e4547296198985428ef8584` (F's head, after #1047 and #1044; M4-5 re-sync, architect MUST 6 of
+**Sync commit:** `65a96a5e244a5ec19bb8fffc07677aa7575b30bb` (F's head, after #1047 and #1044; M4-5 re-sync, architect MUST 6 of
 package F. Read: #1033 (kith-sched `tick.lock`), #1039 (the step: host.lock, tick.lock, anchor, live run), #1042 (per-job
 rollback hand-back), #1043 (gate condition 5), #1044 (cron turns as `kith-sched run-turn` with `claim.attach`).
 `Fire.tla`: the base job is a cron job (`Cron`): its turns are claimed for any person, the keep path is a routine's only,
