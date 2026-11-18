@@ -215,9 +215,12 @@ impl Lab {
     }
 
     /// An owner call of the running daemon.
+    /// `Some(answer)` once the daemon took the call. A call that may have run (the connection ended before the answer) is
+    /// `Some(null)`: it is never repeated. `None`: nothing ran (no daemon yet, a refusal), so asking again is safe.
     fn owner(&self, method: &str, params: &Value) -> Option<Value> {
         match kith_core::reach(&self.paths(), method, params, false) {
             kith_core::Reached::Answered(v) => Some(v),
+            kith_core::Reached::Lost(_) => Some(Value::Null),
             _ => None,
         }
     }
@@ -547,11 +550,24 @@ async fn a_rollback_while_a_detached_run_goes_on_leaves_kith_sched_skipping_that
     // Started now, through the same fire a slot makes.
     let host = lab.start_host().await;
     lab.wait_core_gate();
-    until("the run-now to be answered", 30, || {
-        lab.owner("schedule.runNow", &json!({"agent": "mel", "id": "hourly"}))
-            .is_some_and(|v| v.to_string().contains("fired"))
+    // Once: a second run-now would answer busy while the first run is held. Retried only while nothing ran.
+    let mut answer = None;
+    until("the daemon to take the run-now", 30, || {
+        answer = lab.owner("schedule.runNow", &json!({"agent": "mel", "id": "hourly"}));
+        answer.is_some()
     });
-    until("the run to start", 30, || lab.runs_log().len() == 1);
+    let started = Instant::now();
+    while lab.runs_log().len() != 1 && started.elapsed() < Duration::from_secs(40) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(
+        lab.runs_log().len(),
+        1,
+        "the run never started; run-now answered {answer:?}; fires {:?}; turns {:?}; host log:\n{}",
+        lab.fires(),
+        lab.turns(),
+        lab.host_log()
+    );
     let pid = lab.runs_log()[0].1;
     let claim_pid: Option<i64> = lab
         .db()
