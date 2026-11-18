@@ -75,6 +75,25 @@ for n, (x, y) in enumerate(zip(a, b), 1):
 if len(a) != len(b): print("line counts differ: %d vs %d" % (len(a), len(b)))' "$out" "$FIX/launch-$2.json"
 done
 
+# The Python fill (bin/kith, KITH_CORE=python) and the Rust fill (launch/guard.rs, settings.rs) write the same must-ask
+# rules and autoMode for an owner run; terminal and kith ask runs get the first, app and host turns the second. Only the
+# Bash rules and autoMode are compared: the file paths and hooks differ by where each fill puts the state folders.
+if [ -n "$BIN" ]; then
+  guard_part() {
+    python3 -c '
+import json, sys
+d = json.load(sys.stdin); a = d["claude_args"]; s = json.loads(a[a.index("--settings") + 1])
+p = s["permissions"]
+print(json.dumps({"ask": [r for r in p["ask"] if r.startswith("Bash(")], "deny": [r for r in p["deny"] if r.startswith("Bash(")], "auto": s["autoMode"]}, indent=1))'
+  }
+  py_part=$(cd "$T/home" && KITH_CORE=python "$KITH" cl --launch-json 2>/dev/null | sed -e "s#$T#<T>#g" | guard_part)
+  rs_part=$(cd "$T/home" && "$KITH" cl --launch-json 2>/dev/null | sed -e "s#$T#<T>#g" | guard_part)
+  check "owner: the Python and the Rust fill write the same Bash must-ask rules and autoMode" "[ -n \"\$py_part\" ] && [ \"\$py_part\" = \"\$rs_part\" ]"
+  [ "$py_part" = "$rs_part" ] || diff <(printf '%s\n' "$py_part") <(printf '%s\n' "$rs_part") | cut -c1-200 | head -20
+else
+  echo "skip the fill parity check (no Rust kith program; KITH_DIFFTEST_BIN names one)"
+fi
+
 HAVE=0
 if [ -n "$BIN" ] && "$BIN" kernel engines launch gemini --json >/dev/null 2>&1; then
   HAVE=1
