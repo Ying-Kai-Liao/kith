@@ -31,8 +31,8 @@ use crate::error::{Error, Result};
 
 /// How long a step waits for a tick: for one that holds `tick.lock`, and (condition 6) for one that started before it
 /// took the lock to end. A tick's work before the lock is the prune, the 30 s ask sweep and the 30 s wake drain, and then
-/// its own 30 s wait for the lock; past this the step refuses and changes nothing.
-pub(super) const TICK_WAIT: Duration = Duration::from_secs(120);
+/// its own 50 s wait for the lock (112 s in all); the host cannot start for up to twice this while a step waits; past this the step refuses and changes nothing.
+pub(super) const TICK_WAIT: Duration = Duration::from_secs(150);
 
 /// A test of the real binary shortens the wait with this (milliseconds).
 const TICK_WAIT_ENV: &str = "KITH_SCHEDULES_TICK_WAIT_MS";
@@ -147,14 +147,12 @@ pub(super) fn hold_both(
         match old {
             OldTicks::Refuse => {
                 eprintln!("cutover: schedules: waiting for a running kith-sched tick to end");
-                gate::wait_out_old_ticks(list, &program, wait).map_err(|pid| {
-                    Error::Refused(format!(
-                        "cutover: schedules: 6: a kith-sched tick (pid {pid}) is still running; try again in a minute; nothing was changed"
-                    ))
+                gate::wait_out_old_ticks(list, &program, wait).map_err(|why| {
+                    Error::Refused(format!("cutover: schedules: 6: {why}; nothing was changed"))
                 })?;
             }
             OldTicks::Note => {
-                for t in list(&program) {
+                for t in list(&program).unwrap_or_default() {
                     eprintln!(
                         "cutover: schedules: note: a kith-sched tick (pid {}) is running; it stops at the tombstone",
                         t.pid

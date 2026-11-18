@@ -21,15 +21,16 @@ fn script(listings: Vec<Vec<Tick>>) {
     LISTINGS.with(|l| *l.borrow_mut() = listings);
 }
 
-fn scripted(_program: &Path) -> Vec<Tick> {
-    LISTINGS.with(|l| {
+#[allow(clippy::unnecessary_wraps, reason = "the Lister shape")]
+fn scripted(_program: &Path) -> Result<Vec<Tick>, String> {
+    Ok(LISTINGS.with(|l| {
         let mut l = l.borrow_mut();
         if l.len() > 1 {
             l.remove(0)
         } else {
             l.first().cloned().unwrap_or_default()
         }
-    })
+    }))
 }
 
 fn tick(pid: u32) -> Tick {
@@ -154,7 +155,11 @@ fn the_wait_matches_by_pid_alone_when_a_stamp_is_unreadable_and_by_stamp_otherwi
         }],
         vec![tick(9)],
     ]);
-    assert_eq!(wait_out_old_ticks(scripted, &program, wait), Err(9));
+    assert!(
+        wait_out_old_ticks(scripted, &program, wait)
+            .unwrap_err()
+            .contains("pid 9")
+    );
     // Same pid, other stamp: the pid was reused, the old tick is gone.
     script(vec![
         vec![tick(9)],
@@ -189,7 +194,7 @@ fn the_real_lister_finds_this_homes_ticks_and_not_run_turn_or_another_homes() {
     // The new process may not have exec'd its interpreter yet.
     let until = std::time::Instant::now() + Duration::from_secs(5);
     let found = loop {
-        let l = list_ticks(&program);
+        let l = list_ticks(&program).unwrap();
         if l.iter().any(|x| x.pid == tick_p.id()) || std::time::Instant::now() > until {
             break l;
         }
@@ -221,4 +226,19 @@ fn the_program_is_the_one_launchd_runs_through_every_symlink() {
         .canonicalize()
         .unwrap();
     assert_eq!(sched_program(&w.env.home), Some(want));
+}
+
+fn unreadable(_: &Path) -> Result<Vec<Tick>, String> {
+    Err("the process list cannot be read here".into())
+}
+
+#[test]
+fn a_process_list_that_cannot_be_read_refuses_and_never_reads_as_no_tick() {
+    let why = wait_out_old_ticks(
+        unreadable,
+        Path::new("/x/kith-sched"),
+        Duration::from_millis(50),
+    )
+    .unwrap_err();
+    assert!(why.contains("cannot be read"), "{why}");
 }

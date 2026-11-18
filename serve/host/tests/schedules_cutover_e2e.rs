@@ -626,7 +626,7 @@ fn a_kith_sched_tick_that_started_before_the_step_holds_it_up_until_it_ends() {
     let child_pid = i32::try_from(pid).unwrap();
     let killer = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(1500));
-        // SAFETY: SIGTERM to the one stand-in this test started.
+        // SAFETY: SIGKILL to the one stand-in this test started.
         unsafe { libc::kill(child_pid, libc::SIGKILL) };
     });
     let through = lab

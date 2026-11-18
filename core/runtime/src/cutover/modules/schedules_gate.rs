@@ -191,14 +191,20 @@ pub(super) struct Tick {
 }
 
 /// Lists the ticks of the program `kith-sched` (given as its real path) that are running now.
-pub(super) type Lister = fn(&Path) -> Vec<Tick>;
+/// `Err` when the process table cannot be read: condition 6 then refuses (fails closed), never passes on an empty list.
+pub(super) type Lister = fn(&Path) -> Result<Vec<Tick>, String>;
 
 /// The real lister: processes of our own user whose arguments hold a word that resolves to `program`, followed by
 /// `tick` (the launcher form `launcher run --script <kith-sched> tick` and the plain `<kith-sched> tick` both match;
 /// `run-turn`, `ls` and another home's kith-sched do not). Arguments are read exactly, never split from `ps`.
-pub(super) fn list_ticks(program: &Path) -> Vec<Tick> {
+pub(super) fn list_ticks(program: &Path) -> Result<Vec<Tick>, String> {
     let me = std::process::id();
-    kith_kernel::procstart::own_commands()
+    let all = kith_kernel::procstart::own_commands();
+    // A table that cannot be read lists nothing, which must not read as "no tick is running": this process is always in it.
+    if !all.iter().any(|(pid, args)| *pid == me && !args.is_empty()) {
+        return Err("the process list cannot be read here".to_owned());
+    }
+    Ok(all
         .into_iter()
         .filter(|(pid, args)| {
             *pid != me
@@ -214,7 +220,7 @@ pub(super) fn list_ticks(program: &Path) -> Vec<Tick> {
             pid,
             stamp: kith_kernel::procstart::start_stamp(pid),
         })
-        .collect()
+        .collect())
 }
 
 /// Whether `old` is still among `now`: the same pid with the same stamp, or by pid alone when either stamp is unknown
@@ -231,21 +237,25 @@ fn still_there(old: &Tick, now: &[Tick]) -> bool {
 
 /// Condition 6, taken right after `tick.lock`: the ticks that were running when the lock was taken may be launchd's old
 /// code (started before `cli/current` moved), which cannot be told apart by any clock. Waits until each is gone. A tick
-/// that starts after the listing is new code and blocks on our lock. `Err(pid)` of one still running at `wait`.
+/// that starts after the listing is new code and blocks on our lock. `Err` says why not: one still running at `wait`, or a
+/// process table that cannot be read (never taken for "no tick").
 pub(super) fn wait_out_old_ticks(
     list: Lister,
     program: &Path,
     wait: std::time::Duration,
-) -> Result<(), u32> {
-    let old = list(program);
+) -> Result<(), String> {
+    let old = list(program)?;
     let until = std::time::Instant::now() + wait;
     loop {
-        let now = list(program);
+        let now = list(program)?;
         let Some(left) = old.iter().find(|o| still_there(o, &now)) else {
             return Ok(());
         };
         if std::time::Instant::now() >= until {
-            return Err(left.pid);
+            return Err(format!(
+                "a kith-sched tick (pid {}) is still running; try again in a minute",
+                left.pid
+            ));
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
