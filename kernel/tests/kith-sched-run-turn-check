@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# kith-sched-run-turn-check: `kith-sched run-turn AGENT JOB --turn N --claim C`, how the host runs a turn the core fired for a
+# cron job (design 2026-11-17-schedules-handover Q1, package C).
+#   - parity with `run`/the tick: the environment and the command of a run-turn run equal start()'s (model, effort, harness,
+#     permission mode, via=schedule, backup chain, the outbox), whoever starts it
+#   - the turn's settings win over the job's current ones; no settings (an old turn) takes the job's
+#   - the claim's check-and-set comes BEFORE the engine: a refused or unanswered attach exits non-zero and nothing runs
+#   - the pid recorded on the claim is the pid of the run (exec, not a child)
+#   - state.json is never read or written (a tombstone stays the note) and tick.lock is never taken (a held lock does not stop it)
+# Runs from a copy of the kernel with a stub bin/kith and a stub Rust `kith` for the core call. Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-sched-run-turn-check
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-run-turn.XXXXXX"); T=$(cd "$T" && pwd -P)
+PIDS=()
+trap 'for p in "${PIDS[@]:-}"; do [[ -n $p ]] && kill "$p" 2>/dev/null; done; rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_AUTH=$T/auth.json KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_MACHINE HQ_MACHINE KITH_SCHED_PERMISSION_MODE KITH_RUN_OUTBOX HQ_RUN_OUTBOX
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_SERVE_DIR" "$T/k/bin" "$KITH_HOME/agents/house/role"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+ln -s "$KERNEL/lib" "$T/k/lib"
+for b in kith-sched kith-auth; do cp "$KERNEL/bin/$b" "$T/k/bin/$b"; done
+for b in kith-ask kith-wake; do printf 'pass\n' > "$T/k/bin/$b"; done
+# The stub run: records its command line, pid and environment, then stays alive a while.
+cat > "$T/k/bin/kith" <<'EOF'
+#!/bin/sh
+n=$(cat "$KITH_STATE/n" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$KITH_STATE/n"
+printf '%s\n' "$$" > "$KITH_STATE/ran.pid"
+printf '%s\n' "$@" > "$KITH_STATE/ran.args"
+env | grep -v '^_=\|^SHLVL=\|^PWD=\|^OLDPWD=' | sort > "$KITH_STATE/ran.env"
+pwd > "$KITH_STATE/ran.cwd"
+exec sleep 30
+EOF
+chmod +x "$T/k/bin/kith"
+# The stub Rust kith: `memory hook --help` (kith_paths looks for it) and `kernel core-call` (the claim.attach call).
+cat > "$T/rk" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+  "memory hook") echo "phase"; exit 0;;
+  "kernel core-call")
+    { echo "$3"; cat; echo; } >> "$KITH_STATE/calls"
+    [ -e "$KITH_STATE/ans.exit" ] && exit "$(cat "$KITH_STATE/ans.exit")"
+    if [ -e "$KITH_STATE/ans" ]; then cat "$KITH_STATE/ans"; else echo '{"attached": true}'; fi
+    exit 0;;
+esac
+exit 1
+EOF
+chmod +x "$T/rk"
+export KITH_BIN=$T/rk
+MACHINE=$(python3 -I -c "import sys; sys.path.insert(0, '$KERNEL/lib'); from kith_paths import paths; print(paths()['KITH_MACHINE'])")
+mkdir -p "$MACHINE/sched"
+S=$MACHINE/sched/state.json
+LOCK=$MACHINE/sched/tick.lock
+J=$KITH_HOME/agents/house/jobs.json
+printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a", "model": "m1", "effort": "high", "harness": "claude"}]\n' > "$J"
+export KITH_SCHED_NOW=2026-11-04T08:00 KITH_SCHED_LOCK_WAIT=1 KITH_SCHED_PERMISSION_MODE=plan
+K() { python3 "$T/k/bin/kith-sched" "$@"; }
+reset() { rm -f "$KITH_STATE"/{n,ran.pid,ran.args,ran.env,ran.cwd,calls,ans,ans.exit}; }
+ran() { [[ -e "$KITH_STATE/ran.pid" ]]; }
+wait_ran() { for _ in $(seq 50); do ran && [[ -s "$KITH_STATE/ran.env" ]] && return; sleep 0.1; done; }
+spec() { printf '{"prompt": "do a", "settings": %s}' "$1"; }
+# The run-turn process becomes the engine (a stub that sleeps), so it runs in the background; `wait $RTPID` gives a failed one's code.
+RT() { ( spec "$1" | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err" ) & RTPID=$!; PIDS+=("$RTPID"); }
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; sed 's/^/     | /' "$T/out" "$T/err" 2>/dev/null | tail -8; fails=$((fails + 1)); fi; }
+norm() { sed -E 's#(sched-house-a-)[0-9]+#\1N#g; s#core turn 7#WHY#; s#run by hand#WHY#' "$1"; }
+
+# 1. Parity: a run by hand (start()) and run-turn with the same settings build the same run.
+reset; printf '{"tick": "2026-11-04T07:59", "last": {}}\n' > "$S"
+K run house a >"$T/out" 2>"$T/err" </dev/null; wait_ran
+cp "$KITH_STATE/ran.env" "$T/hand.env"; cp "$KITH_STATE/ran.args" "$T/hand.args"; kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+reset
+RT '{"model": "m1", "effort": "high", "harness": "claude"}'; wait_ran
+check "run-turn starts the engine" "ran"
+check "run-turn's environment equals start()'s" "diff <(norm '$T/hand.env') <(norm '$KITH_STATE/ran.env')"
+check "run-turn's command equals start()'s" "diff <(norm '$T/hand.args') <(norm '$KITH_STATE/ran.args')"
+check "env has model, effort, harness, permission mode, via, backup chain, outbox" "grep -q '^KITH_MODEL=m1\$' '$KITH_STATE/ran.env' && grep -q '^KITH_EFFORT=high\$' '$KITH_STATE/ran.env' && grep -q '^KITH_HARNESS=claude\$' '$KITH_STATE/ran.env' && grep -q '^KITH_PERMISSION_MODE=plan\$' '$KITH_STATE/ran.env' && grep -q '^KITH_VIA=schedule\$' '$KITH_STATE/ran.env' && grep -q '^KITH_BACKUP_CHAIN=on\$' '$KITH_STATE/ran.env' && grep -q '^KITH_RUN_OUTBOX=.*/outbox/sched-house-a-' '$KITH_STATE/ran.env'"
+check "the outbox's meta sits beside it, outside the run's folder" "ls '$MACHINE'/outbox/sched-house-a-*.json >/dev/null"
+# 2. The pid recorded on the claim is the run's own pid (exec), with the claim id and a start stamp.
+check "the attach call names claim 9 and the pid the engine runs as" "grep -q 'claim.attach' '$KITH_STATE/calls' && python3 -c \"
+import json, re
+body = [l for l in open('$KITH_STATE/calls').read().split('\n') if l.startswith('{')][0]
+d = json.loads(body); pid = int(open('$KITH_STATE/ran.pid').read())
+assert d['claimId'] == 9 and d['pid'] == pid and re.match(r'^[eb]', d['started']), d\""
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+
+# 3. The turn's settings win over the job's current ones; none (an old turn) takes the job's.
+reset
+RT '{"model": "m2"}'; wait_ran
+check "settings on the turn: its model, and no effort or harness the job has now" "grep -q '^KITH_MODEL=m2\$' '$KITH_STATE/ran.env' && ! grep -q '^KITH_EFFORT=' '$KITH_STATE/ran.env' && ! grep -q '^KITH_HARNESS=' '$KITH_STATE/ran.env'"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+reset
+RT 'null'; wait_ran
+check "no settings (old turn): the job's current values" "grep -q '^KITH_MODEL=m1\$' '$KITH_STATE/ran.env' && grep -q '^KITH_EFFORT=high\$' '$KITH_STATE/ran.env'"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+
+# 4. The check-and-set refused (claim cancelled, ended, already has a pid): exit 4, nothing runs, no outbox left behind.
+reset; rm -rf "$MACHINE/outbox"
+echo '{"refused": "gone", "state": "ended"}' > "$KITH_STATE/ans"
+RT 'null'; wait "$RTPID"; rc=$?
+check "claim gone: exits 4 and the engine never starts" "[[ $rc -eq 4 ]] && ! ran && grep -q 'gone' '$T/err'"
+check "claim gone: the outbox made for it is removed" "[[ -z \"\$(ls '$MACHINE/outbox' 2>/dev/null)\" ]]"
+# The core does not answer: exit 5, nothing runs.
+reset; echo 3 > "$KITH_STATE/ans.exit"
+RT 'null'; wait "$RTPID"; rc=$?
+check "no answer from the core: exits 5 and the engine never starts" "[[ $rc -eq 5 ]] && ! ran"
+
+# 4b. A refused second run-turn must not wipe the log of the live run (a host restart in the same minute opens the same file).
+reset; rm -rf "$MACHINE/outbox"
+RT 'null'; wait_ran
+LOG=$(ls "$KITH_HOME"/../*/logs/sched/house/a-*.log "$MACHINE"/logs/sched/house/a-*.log 2>/dev/null | head -1)
+[[ -z $LOG ]] && LOG=$(find "$T" -name 'a-20261104-0800.log' | head -1)
+echo "engine wrote this" >> "$LOG"
+echo '{"refused": "gone", "state": "running"}' > "$KITH_STATE/ans"
+RT 'null'; wait "$RTPID"; rc=$?
+check "second run-turn loses the attach (exit 4) and the live run's log is untouched" "[[ $rc -eq 4 ]] && grep -q 'engine wrote this' '$LOG'"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+
+# 4c. The turn's person must be the run's: the host passes it; a job of another person (settings null: the job's current one) exits 3.
+reset; rm -f "$KITH_STATE/ans"
+spec_p() { printf '{"prompt": "do a", "settings": %s, "person": %s}' "$1" "$2"; }
+spec_p 'null' '"sam"' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err"; rc=$?
+check "the job is the owner's but the turn's person is sam: exits 3, never attaches" "[[ $rc -eq 3 ]] && ! ran && [[ ! -e '$KITH_STATE/calls' ]] && grep -q 'sam' '$T/err'"
+reset
+spec_p '{"model": "m1", "person": "sam"}' '"owner"' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err"; rc=$?
+check "settings say sam but the turn is the owner's: exits 3" "[[ $rc -eq 3 ]] && ! ran"
+reset
+( spec_p 'null' '"owner"' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err" ) & PIDS+=("$!"); wait_ran
+check "the owner's job, the owner's turn (the core says owner): runs" "ran"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+# The host sends null for the owner (the core's own id for them is a people id, never the word owner).
+reset
+( spec_p 'null' 'null' | K run-turn house a --turn 7 --claim 9 >"$T/out" 2>"$T/err" ) & PIDS+=("$!"); wait_ran
+check "the owner's job, person null (what the host sends for owner: true): runs" "ran"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null
+
+# 5. No state.json, no tick.lock: a tombstone stays the note, a held lock does not stop the run.
+reset
+NOTE='{"kith_tombstone": 1, "module": "schedules", "message": "moved", "rollback": "kith rollback schedules"}'
+printf '%s' "$NOTE" > "$S"; rm -f "$LOCK"
+python3 -c "
+import fcntl, time
+f = open('$LOCK', 'a'); fcntl.flock(f, fcntl.LOCK_EX); print('held', flush=True); time.sleep(60)" >"$T/held" 2>&1 &
+HOLD=$!; PIDS+=("$HOLD"); for _ in $(seq 50); do grep -q held "$T/held" 2>/dev/null && break; sleep 0.1; done
+RT '{"model": "m1"}'; wait_ran
+check "tombstoned state.json and a held tick.lock: the run starts all the same" "ran"
+check "state.json is still the note, untouched" "[[ \"\$(cat '$S')\" == '$NOTE' ]] && [[ ! -e '$S.tmp' ]]"
+kill "$(cat "$KITH_STATE/ran.pid")" 2>/dev/null; kill "$HOLD" 2>/dev/null
+
+# 6. A job that is not there: exit 2, nothing runs.
+reset
+spec 'null' | K run-turn house nope --turn 7 --claim 9 >"$T/out" 2>"$T/err"; rc=$?
+check "unknown job: exits 2, never attaches" "[[ $rc -eq 2 ]] && ! ran && [[ ! -e '$KITH_STATE/calls' ]]"
+
+# 7. A start that fails after the record was saved says so in the record (SHOULD 3 of #1033) and ls/log show it.
+printf '{"tick": "2026-11-04T07:59", "last": {}}\n' > "$S"; reset
+chmod 000 "$KITH_STATE" 2>/dev/null; chmod 755 "$KITH_STATE"
+python3 - <<PY >"$T/out" 2>"$T/err"
+import importlib.machinery, importlib.util, sys
+sys.path.insert(0, '$T/k/lib')
+loader = importlib.machinery.SourceFileLoader('ks', '$T/k/bin/kith-sched')
+spec = importlib.util.spec_from_loader('ks', loader); ks = importlib.util.module_from_spec(spec); loader.exec_module(ks)
+import subprocess
+def boom(*a, **k): raise OSError('no such program')
+ks.subprocess.Popen = boom
+job = ks.load('house')[0]
+r = ks.start('house', job, ks.clock().replace(second=0, microsecond=0), 'run by hand')
+assert r is None, r
+last = ks.machine()['last']['house/a']
+assert 'not started' in last['error'] and 'pid' not in last, last
+row = ks.job_row('house', job, ks.machine()['last'], ks.clock())
+assert row['last']['error'] and row['last']['running'] is False, row
+print('error recorded')
+PY
+check "Popen failing after the record: the record carries an error, ls/log do not show it as done" "grep -q 'error recorded' '$T/out'"
+
+[[ $fails -eq 0 ]] && echo "all ok" || echo "$fails failed"
+exit $((fails > 0))

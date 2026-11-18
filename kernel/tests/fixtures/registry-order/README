@@ -1,0 +1,5 @@
+Order-key cases for the session registry: the core (core/, transcripts P1) and kernel/lib/kith_registry.py both run
+every file here (contract A6, A10). Each file: {"a": record, "b": record, "winner": "a" | "b"}, and optionally
+"mtime": {"a"|"b": st_mtime_ns of that record's file} (a side not named has no file) and "arrival": {"a"|"b": n}
+(default 0; a larger n arrived later). Key: (recordedAt if an integer, else the file's st_mtime_ns, else -1;
+procStart or "" as a string; arrival), later wins. Every case has a strict winner.

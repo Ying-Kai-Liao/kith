@@ -1,0 +1,36 @@
+# variant	kind	property	expected
+# --- the design with the fixes: every property holds ------------------------------------------------
+fixed	INVARIANT	TypeOK	pass
+fixed	INVARIANT	NeverBackwards	pass
+fixed	INVARIANT	SpoolKept	pass
+fixed	PROPERTY	Converges	pass
+bad	INVARIANT	SpoolKept	pass
+bad	INVARIANT	BadNeverListed	pass
+bad	PROPERTY	Converges	pass
+# --- contract.md as written (2026-11-17): loses records (findings 1-3 in the skill) ----------------------------
+contract	PROPERTY	Converges	fail
+contract	INVARIANT	NeverBackwards	fail
+# export "where different" fails even with no old-kernel hook (a Files-mode hook that wrote after the switch)
+contract-no-old	PROPERTY	Converges	fail
+# --- each contract fix alone is needed -----------------------------------------------------------------
+missing-oldest	PROPERTY	Converges	fail
+project-row	PROPERTY	Converges	fail
+export-different	PROPERTY	Converges	fail
+blind-write	PROPERTY	Converges	fail
+# --- broken variants: each check removed must fail -----------------------------------------------------
+no-write-ahead	PROPERTY	Converges	fail
+one-name	INVARIANT	SpoolKept	fail
+file-from-request	INVARIANT	NeverBackwards	fail
+no-reconcile	PROPERTY	Converges	fail
+ns-drop	PROPERTY	Converges	fail
+ns-drop	INVARIANT	SpoolKept	fail
+# --- the runs are not vacuous: each of these happens (the invariant FAILS) --------------------------------
+fixed	INVARIANT	NeverSwitched	fail
+fixed	INVARIANT	NeverRolledBack	fail
+fixed	INVARIANT	NeverOldWhileOn	fail
+fixed	INVARIANT	NeverStale	fail
+fixed	INVARIANT	NeverDrainedByCore	fail
+fixed	INVARIANT	NeverNotServing	fail
+fixed	INVARIANT	NeverPruned	fail
+fixed	INVARIANT	NeverRacing	fail
+bad	INVARIANT	NeverInvalid	fail

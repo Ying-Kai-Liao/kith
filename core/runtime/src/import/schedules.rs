@@ -12,7 +12,8 @@
 //!   already matches is left alone. A second run changes nothing, makes no backup and no log row.
 //! - A job's `last` keeps being overwritten by `kith-sched` while it ticks, so each import adds the runs it has not
 //!   seen: that is the history the file itself never kept.
-//! - Old files: entries without `at` are skipped and said so; `pid`, `log` and `why` may be missing; keys that are not
+//! - A run's `pid` and `procStart` come along: the fire skips a job whose imported run is still going (H3).
+//! - Old files: entries without `at` are skipped and said so; `pid`, `procStart`, `log` and `why` may be missing; keys that are not
 //!   `agent/job` and other top-level keys (`pruned`) are ignored.
 
 use std::path::Path;
@@ -36,6 +37,8 @@ struct Run {
     at: String,
     why: Option<String>,
     pid: Option<i64>,
+    /// `procStart` (the stamp of the run's process, written beside `pid`); the fire's skip rule reads it.
+    proc_start: Option<String>,
     log: Option<String>,
 }
 
@@ -53,6 +56,12 @@ fn sha_hex(bytes: &[u8]) -> String {
             let _ = write!(s, "{b:02x}");
             s
         })
+}
+
+/// The sha of state.json as it is now (`None`: no file). The cutover module takes it under tick.lock before its import
+/// and compares it again before the tombstone, so a state file that moved in between is never tombstoned unimported.
+pub(crate) fn state_sha(machine: &Path) -> Result<Option<String>> {
+    Ok(read_source(&machine.join("sched").join("state.json"))?.map(|(_, sha)| sha))
 }
 
 fn now_secs() -> i64 {
@@ -106,6 +115,7 @@ fn read_source(path: &Path) -> Result<Option<(Source, String)>> {
                 at: at.to_owned(),
                 why: text("why"),
                 pid: entry.get("pid").and_then(Value::as_i64),
+                proc_start: text("procStart"),
                 log: text("log"),
             });
         }
@@ -208,6 +218,17 @@ pub(crate) fn run_in(
     dry_run: bool,
     held: Option<&mut Core>,
 ) -> Result<Report> {
+    run_sha(layout, machine, dry_run, held).map(|(rep, _)| rep)
+}
+
+/// [`run_in`], and the sha of the state.json bytes a real run read (`None`: no file, or a dry run). The cutover module
+/// checks it again before the tombstone, so it is the bytes imported and not a second read.
+pub(crate) fn run_sha(
+    layout: &Layout,
+    machine: &Path,
+    dry_run: bool,
+    held: Option<&mut Core>,
+) -> Result<(Report, Option<String>)> {
     let mut rep = Report {
         dry_run,
         ..Report::default()
@@ -218,7 +239,7 @@ pub(crate) fn run_in(
             "no sched state at {}: nothing to import",
             file.display()
         ));
-        return Ok(rep);
+        return Ok((rep, None));
     };
     for s in &src.skipped {
         rep.lines.push(format!("skipped {s}"));
@@ -246,7 +267,7 @@ pub(crate) fn run_in(
                 .push("schedules: core.db already holds the sched state; nothing to change".into());
         }
         rep.lines.push("dry run: nothing was written".into());
-        return Ok(rep);
+        return Ok((rep, None));
     }
 
     debug_assert!(
@@ -268,7 +289,7 @@ pub(crate) fn run_in(
     if !tick && new.is_empty() {
         rep.lines
             .push("nothing to change: core.db already holds the sched state".into());
-        return Ok(rep);
+        return Ok((rep, Some(sha)));
     }
     // Before the first write. Under the cutover the framework took its snapshot already (`own_lock` is false).
     let backup = if own_lock {
@@ -303,10 +324,19 @@ pub(crate) fn run_in(
     for &i in &new {
         let r = &src.runs[i];
         tx.execute(
-            "INSERT OR IGNORE INTO sched_runs (agent, job, mac, slot, at, state, why, pid, log)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT OR IGNORE INTO sched_runs (agent, job, mac, slot, at, state, why, pid, log, proc_start)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
-                r.agent, r.job, mac, r.slot, r.at, STATE, r.why, r.pid, r.log
+                r.agent,
+                r.job,
+                mac,
+                r.slot,
+                r.at,
+                STATE,
+                r.why,
+                r.pid,
+                r.log,
+                r.proc_start
             ],
         )?;
         // The run exists, so its slot was fired. A fire the core already decided is left as it is.
@@ -331,7 +361,7 @@ pub(crate) fn run_in(
     rep.lines
         .push(format!("imported {}", describe(tick, new.len())));
     rep.lines.push(
-        "done. core.db is a copy: kith-sched still decides and writes its state files (the cutover is M4-5)".into(),
+        "done. core.db holds kith-sched's state as of now. A plain `kith migrate` leaves kith-sched in charge of its state files; `kith migrate step schedules` (which holds tick.lock around this import) is what hands the jobs to the core".into(),
     );
-    Ok(rep)
+    Ok((rep, Some(sha)))
 }

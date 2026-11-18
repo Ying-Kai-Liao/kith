@@ -72,6 +72,15 @@ pub(super) const ROWS: &[Method] = &[
         )],
     ),
     external(
+        "claim.attach",
+        "A scheduled cron run records its own process on the claim the host made for its turn (`hostclaim.claim` kind `scheduleRun`), with a check-and-set: the claim must be `claimed` with no process yet. The claim becomes kind `external`, `running`, with this pid and start stamp, and its turn `running`; the caller then starts the engine, and exits without running when this refuses. Answers `{attached: true}` (`again` for the same process), or `{refused: \"gone\", state}` when the claim was cancelled, ended, requeued or already has a process. Serves only once the claims are switched.",
+        &[
+            caller("claimId", "int", "The claim the host made for the turn."),
+            caller("pid", "int", "The run's own process."),
+            caller("started", "string", "That process's start stamp."),
+        ],
+    ),
+    external(
         "claim.release",
         "Gives back the owner's external claims of one process (pid and start stamp): a claim already ended, or none, answers `{ended: []}`, so a retry is harmless. Never touches a turn's, a terminal's or a person's claim (a person's ends when its process is gone, or by a revoke). Answers `{ended}`.",
         &[

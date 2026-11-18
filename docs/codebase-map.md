@@ -166,7 +166,9 @@ JSON answer back → `git fetch` the branch, `scp` `.kith-out/` to `./kith-out/<
 **A scheduled job** → launchd runs `kith-sched tick` every minute → for each `jobs.json` job whose cron time fell since
 the last tick (at most a day back) and that isn't still running: `kith <agent> "task + scheduled note"` detached, with
 `--permission-mode` from `KITH_SCHED_PERMISSION_MODE` when set (else the agent's mode, else kith's default) → output in
-`~/.kith/logs/sched/runs/<agent>/`, delivery by `kith-send`.
+`~/.kith/logs/sched/runs/<agent>/`, delivery by `kith-send`. Once `kith kernel cutover step schedules` has moved the schedules to
+the core, the core fires the turn and the host runs it: it claims the turn and starts `kith-sched run-turn <agent> <job> --turn N
+--claim C` detached, which builds the same run, records its own pid on the claim (`claim.attach`) and `exec`s `kith <agent> task`.
 
 **Cost** → Claude Code writes transcripts → `kith-cost sync` (every 6 h, and before each report) → `cost.db`;
 `runs` (from the hook) and `kith:` subagent types attribute requests to agents.

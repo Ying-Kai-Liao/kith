@@ -2,6 +2,7 @@
   "fakes": "\nkith-ask --sweep\nkith-wake drain",
   "state:home/.kith/sched/echo.jobs.lock": "",
   "state:home/.kith/sched/state.json": "{\n  \"pruned\": 1793700000.0,\n  \"tick\": \"2026-11-03@10:00\"\n}\n",
+  "state:home/.kith/sched/tick.lock": "",
   "state:kith/agents/echo/jobs.json": "",
   "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
   "state:kith/state/": "<empty dir>\n",

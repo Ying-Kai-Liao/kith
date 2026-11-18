@@ -1021,9 +1021,17 @@ fn record_lists_a_terminal_run_in_the_order_the_host_reads() {
             "account",
             "kind",
             "label",
-            "procStart"
+            "procStart",
+            "recordedAt"
         ]
     );
+    assert!(
+        v["recordedAt"]
+            .as_u64()
+            .is_some_and(|n| n > 1_700_000_000_000_000_000)
+    );
+    let lock = t.reg().join("locks").join("s-1.lock");
+    assert!(lock.exists(), "the per-sid lock file is made and kept (A8)");
     assert_eq!(
         (
             v["kind"].as_str(),

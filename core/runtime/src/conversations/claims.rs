@@ -274,8 +274,22 @@ pub(super) fn kill_of(claim_id: i64, pid: Option<i64>, started: Option<String>) 
     }
 }
 
-/// Puts a turn back in the queue when its claim ends before the turn finished.
+/// Puts a turn back in the queue when its claim ends before the turn finished. A turn of a paused job is cancelled instead:
+/// pause wins over every put-back (an out-of-usage restart, a host change, a reconcile), or the paused job's turn would
+/// be claimed again and run.
 pub(super) fn requeue_turn(tx: &Transaction<'_>, claim_id: i64) -> Result<()> {
+    let waiting: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM turns WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
+            [claim_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(turn) = waiting
+        && super::sched_run::paused_in(tx, turn)?
+    {
+        return cancel_turn(tx, claim_id, super::sched_run::now_ms());
+    }
     tx.execute(
         "UPDATE turns SET state = 'queued', claim_id = NULL, requeues = requeues + 1, started_at = NULL
          WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
@@ -284,7 +298,7 @@ pub(super) fn requeue_turn(tx: &Transaction<'_>, claim_id: i64) -> Result<()> {
     Ok(())
 }
 
-fn cancel_turn(tx: &Transaction<'_>, claim_id: i64, now: i64) -> Result<()> {
+pub(super) fn cancel_turn(tx: &Transaction<'_>, claim_id: i64, now: i64) -> Result<()> {
     tx.execute(
         "UPDATE turns SET state = 'cancelled', finished_at = ?2
          WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
@@ -305,6 +319,8 @@ fn cancel_turn(tx: &Transaction<'_>, claim_id: i64, now: i64) -> Result<()> {
 pub(crate) enum Fence {
     /// The conversation's ask was stopped or ended: it takes no ask or wake turn (the fence never lifts).
     Stopped(String),
+    /// The turn is a schedule's and its job is paused (level-triggered: pause wins over a turn that was already queued).
+    Paused,
     /// The person's revoke epoch moved after the caller's may check. The turn stays as it is for a fresh claim.
     Revoked,
 }
@@ -314,13 +330,14 @@ impl Fence {
     pub(crate) fn reason(&self) -> &'static str {
         match self {
             Self::Stopped(_) => "stopped",
+            Self::Paused => "paused",
             Self::Revoked => "revoked",
         }
     }
 
-    /// Whether the turn is cancelled for this fence (only a stopped ask's).
+    /// Whether the turn is cancelled for this fence (a stopped ask's, a paused job's).
     fn cancels(&self) -> bool {
-        matches!(self, Self::Stopped(_))
+        matches!(self, Self::Stopped(_) | Self::Paused)
     }
 
     pub(crate) fn refusal(&self, req: &NewClaim<'_>) -> Error {
@@ -330,6 +347,10 @@ impl Fence {
             Self::Stopped(ask) => Error::Stopped(format!(
                 "kith-core: ask {ask} was stopped; conversation {} takes no ask or wake turn",
                 req.conversation
+            )),
+            Self::Paused => Error::Refused(format!(
+                "kith-core: the job of turn {:?} is paused; the turn is cancelled",
+                req.turn
             )),
             Self::Revoked => Error::Refused(format!(
                 "kith-core: {} was revoked after the may check",
@@ -371,7 +392,15 @@ fn fence_in(tx: &Transaction<'_>, req: &NewClaim<'_>) -> Result<Option<Fence>> {
         return Ok(Some(Fence::Revoked));
     }
     basis::claim_gate(tx, turn)?;
-    Ok(stopped_in(tx, turn)?.map(Fence::Stopped))
+    held_in(tx, turn)
+}
+
+/// What takes a turn out for good: a stopped ask, or (for a schedule's turn) a paused job.
+fn held_in(tx: &rusqlite::Connection, turn: i64) -> Result<Option<Fence>> {
+    if let Some(ask) = stopped_in(tx, turn)? {
+        return Ok(Some(Fence::Stopped(ask)));
+    }
+    Ok(super::sched_run::paused_in(tx, turn)?.then_some(Fence::Paused))
 }
 
 /// After a claim refused by `fence` (its transaction rolled back): if that fence cancels, cancels the request's turn in
@@ -392,7 +421,7 @@ pub(crate) fn cancel_fenced(
         let tx = core.claim_tx()?;
         // The fence only moves one way, but the write re-checks it: a stale view cancels nothing.
         let held = match req.turn {
-            Some(turn) => stopped_in(&tx, turn)?.map(Fence::Stopped),
+            Some(turn) => held_in(&tx, turn)?,
             None => None,
         };
         if let (Some(_), Some(turn)) = (&held, req.turn) {
@@ -683,6 +712,14 @@ pub(crate) fn report(
     Ok(Reported::Stored { applied })
 }
 
+fn is_external(tx: &Transaction<'_>, claim_id: i64) -> Result<bool> {
+    Ok(tx.query_row(
+        "SELECT kind = 'external' FROM claims WHERE claim_id = ?1",
+        [claim_id],
+        |r| r.get(0),
+    )?)
+}
+
 /// Acts on one kept report. True when it changed the claim.
 fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) -> Result<bool> {
     let b: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
@@ -721,6 +758,13 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
                     tx.execute(
                         "UPDATE turns SET state = 'done', finished_at = ?2
                          WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
+                        params![claim_id, now],
+                    )?;
+                } else if is_external(tx, claim_id)? {
+                    // A scheduled run (kind `external`, attached by `claim.attach`) that exits badly is over: its prompt went
+                    // out, so it is never put back.
+                    tx.execute(
+                        "UPDATE turns SET state = 'failed', finished_at = ?2 WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
                         params![claim_id, now],
                     )?;
                 } else {
@@ -997,6 +1041,13 @@ pub(crate) fn end_gone(core: &mut Core, live: &dyn Liveness, now: i64) -> Result
         )?;
         if n == 1 {
             ended.push(id);
+            // A scheduled run (an external claim with a turn) whose process is gone without a report: its prompt went out, so the
+            // turn ends as failed (outcome unknown) and is never put back. A claim that never got a process is the adopt's.
+            tx.execute(
+                "UPDATE turns SET state = 'failed', finished_at = ?2 WHERE claim_id = ?1 AND state IN ('claimed', 'running')
+                   AND (SELECT kind FROM claims WHERE claim_id = ?1) = 'external'",
+                params![id, now],
+            )?;
         }
     }
     tx.commit()?;

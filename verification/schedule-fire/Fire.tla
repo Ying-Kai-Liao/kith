@@ -15,7 +15,8 @@
 \* of a decided id answers the recorded outcome. The tick's catch-up: after a missed slot, run once if the miss is under
 \* a window; every slot the watermark passes without a fire gets a `skipped:missed` row.
 \*
-\* Model action -> code (M4-3 is not written yet; the M3-2 names are on rust-rebuild, core/runtime/src/conversations/claims.rs):
+\* Model action -> code (M4-3 and M4-5a are on rust-rebuild: core/runtime/src/schedules/fire.rs, and the turn rules in
+\* core/runtime/src/conversations/claims.rs; the skill's "Code to model" table has the lines):
 \*   TickFresh, TickStale   schedules::tick: read the clock, read sched_tick, pick the slot, fire, write sched_tick.
 \*                          TickStale is the clock read before the transaction (or a second tick that read it earlier).
 \*   AdHocFire              schedules::fire for `manual:<id>` (run now) and `event:<id>` (webhook; payload not modelled),
@@ -29,7 +30,21 @@
 \*   RevokePerson           claims.rs revoke_person: cancels the person's unfinished turns and bumps revoke_epoch, AFTER the authority revoke
 \*   Claim, Expire, Start,  M3-2's turn rules: claim (with the may check) or park on a held conversation, re-probe,
 \*   Finish                 expire at the deadline, spawn, end
-\*   Crash, Restart         the core dying and coming back; a claim dies with the core and its turn is queued again
+\*   Crash, Restart         the core dying and coming back. Rule K (reconcile.rs, design 2026-11-16-core-queued-runner): a core
+\*                          restart keeps the serve host's live claims, so a claimed or running turn stays as it is
+\*   HostAdopt              the host's OWN restart (conversations/warm.rs adopt, hostclaim.adopt): a claim never redeemed ends and
+\*                          its turn is queued again (requeue_turn: cancelled instead when the job is paused); a bot run's claim
+\*                          goes to `ending` (its process is killed) and its turn is queued again (the runner then cancels it as
+\*                          redeemed). A cron job's attached run (Cron, AdoptMode "c": kind `external` since claim.attach) is
+\*                          left alone; end_gone fails its turn once the process is gone, never requeued
+\*   Claim                  who claims: the host's runner (serve/host/src/routines/core_runs.rs take). A routine's turn begins on
+\*                          the owner's bot (another person's is cancelled: RunnerGiveUp); a cron job's turn, any person's,
+\*                          is claimed by core_cron.rs (sched_run::claim_run) and Start is `kith-sched run-turn` attaching
+\*                          (claim.attach, the check-and-set: a claim a pause, revoke or adopt ended can never be attached,
+\*                          HostRuns.tla row hr-no-cas). Who runs the turn across host and core restarts is HostRuns.tla
+\*   (the M4-5 switch)      kith-sched and the host handing their jobs to this core, and the rollback, are Handover.tla: rows
+\*                          h-no-lock (H1, tick.lock), h-no-anchor and h-wm-back (H2), h-no-h3 (H3), h-perjob-as-written,
+\*                          h-global-rewind, h-bare, h-nolast (H4), h-old-nowait (gate condition 6, an old-code tick)
 \*   Hold, Release          the conversation held by someone else (a terminal, another run) and let go
 \*   Advance                time; one tick of the model is one unit of the clock, and it runs while the core is down
 \* Modelled time: slots are at P, 2P .. NS*P; the clock `now` runs 0..MaxNow. A job has one person, one definition
@@ -67,12 +82,25 @@ CONSTANTS NS,            \* timed slots 1..NS, slot k at time P*k
           CatchMode,     \* "latest": one fire per tick, the latest due slot | "each": any due slot, one per tick
           Shape,         \* "one-txn" (the design) | "insert-first" | "enqueue-first" (two steps; Crash between)
           TickFirst,     \* TRUE (broken): the tick saves the watermark in one transaction and fires in the next
+          HostBotOnly,   \* TRUE: turns are claimed by the host's runner (core_runs.rs): never a turn redeemed before (it is
+                         \* cancelled, RunnerCancel), and for a routine (~Cron) only an owner turn that has a bot (another is
+                         \* cancelled, RunnerGiveUp). The owner (person 1) has a bot, person 2 has none. FALSE: any claimer
+          Cron,          \* TRUE: the job is kith-sched's, run by `kith-sched run-turn` for any person (package C, #1044): its
+                         \* attached claim is `external` (adopt leaves it, a bad exit or end_gone fails it, no keep path).
+                         \* FALSE: a host routine on the owner's bot (adopt requeues a running turn; the keep path)
+          AdoptMode,     \* "today": the host's adopt requeues every claimed or running turn | "c" (package C): a claimed turn
+                         \* (no process) is requeued, a running one keeps running (process alive) or ends, never retried
+          ClaimPausedCheck, \* TRUE (package C): a claim of a schedule turn reads the job's paused row in its transaction and
+                         \* cancels the turn when paused (`Fence::Paused`, claims.rs; `requeue_turn` cancels a paused job's turn too)
+          KeepRebegin,   \* TRUE: a bot run that exits out of usage is put back (OutOfUsage) and its actor claims it again by its id
+                         \* (Rebegin: the keep path, core_runs.rs "a requeue after a usage limit"), past the runner's redeemed check
           Holds,         \* TRUE: the conversation can be held by someone else
           AdHocLate,     \* TRUE: an ad hoc fire is possible at the last instant too (the webhook liveness row)
           Redeliver,     \* TRUE: an unaccepted ad hoc delivery is retried until accepted (strong fairness)
           TickGuard      \* TRUE (liveness rows): time cannot pass an instant at which no tick ran while the core is up
 
 Persons == {1, 2}
+HasBot(p) == p = 1
 Timed == 1..NS
 Slots == Timed \cup AdHoc
 Ids == 1..MaxTurns
@@ -84,7 +112,7 @@ Max(a, b) == IF a > b THEN a ELSE b
 SlotTime(s) == IF s \in Timed THEN P * s ELSE 0
 NextSlot(x) == (x \div P + 1) * P
 
-NoTurn == [slot |-> NONE, person |-> 0, ver |-> 0, st |-> "none", dl |-> 0]
+NoTurn == [slot |-> NONE, person |-> 0, ver |-> 0, st |-> "none", dl |-> 0, rd |-> FALSE]
 NoRow == [out |-> "none", n |-> 0, src |-> "none"]
 NoPend == [on |-> FALSE, kind |-> "none", id |-> 0, rec |-> NoTurn, slot |-> NONE, row |-> NoRow, n |-> 0]
 
@@ -97,7 +125,7 @@ VARIABLES now,      \* the clock
           cut,      \* [person -> revoke_person has run for the current revoke]
           held,     \* the job's conversation is held by someone else
           fires,    \* sched_fires: [slot -> [out, n, src]]; out "none" = no row
-          turn,     \* turns of the job: [id -> [slot, person, ver, st, dl]]
+          turn,     \* turns of the job: [id -> [slot, person, ver, st, dl, rd]]; rd = redeemed (it has run: running_at set)
           ans,      \* [slot -> what the ad hoc caller was last told: none, busy, or the recorded outcome]
           pend,     \* a split fire between its two steps (broken variants)
           defHist,  \* every definition the index has had (read only when DefInTxn is FALSE)
@@ -126,7 +154,7 @@ AuthChoices == IF MayInTxn THEN {[rv |-> revoked, ep |-> repoch]} ELSE revHist
 RowOf(o, n, src) == [out |-> o, n |-> n, src |-> src]
 \* The deadline is the first slot after the later of the slot and the read clock, so a caught-up fire, a run now and a
 \* webhook (slot time 0) still have a future deadline (FiredIsLive; requirement 6).
-NewTurn(s, n, d) == [slot |-> s, person |-> d.person, ver |-> d.ver, st |-> "queued",
+NewTurn(s, n, d) == [slot |-> s, person |-> d.person, ver |-> d.ver, st |-> "queued", rd |-> FALSE,
                      dl |-> IF DlFromSlot THEN NextSlot(SlotTime(s)) ELSE NextSlot(Max(n, SlotTime(s)))]
 SkipOn(s) == SkipPrev /\ (s \in Timed \/ ManualSkips)
 
@@ -270,10 +298,25 @@ Grant(p) ==
         /\ revHist' = IF MayInTxn THEN revHist ELSE revHist \cup {[rv |-> r2, ep |-> repoch]}
   /\ UNCHANGED <<now, wm, up, def, repoch, held, fires, turn, ans, pend, defHist>>
 
+\* Rule K: the host's claims (claimed, or running with a live process) are left alone by a core restart.
 Crash ==
   /\ up /\ up' = FALSE /\ pend' = NoPend
-  /\ turn' = [i \in Ids |-> IF turn[i].st = "claimed" THEN [turn[i] EXCEPT !.st = "queued"] ELSE turn[i]]
-  /\ UNCHANGED <<now, wm, def, revoked, repoch, cut, held, fires, ans, defHist, revHist>>
+  /\ UNCHANGED <<now, wm, def, revoked, repoch, cut, held, fires, turn, ans, defHist, revHist>>
+
+\* The host starting again (warm.rs adopt), whether the core is restarting or not. Needs the core up (adopt is a core
+\* call). A claim with no process ends and its turn is put back (requeue_turn, which cancels a paused job's turn: the
+\* paused rule of package C, so under ClaimPausedCheck). A bot run's running turn goes back too ("today", or any routine);
+\* a cron job's attached run (Cron, "c") keeps running if its process is alive, else its turn ends (failed in code).
+Requeued == IF ClaimPausedCheck /\ def.paused THEN "cancelled" ELSE "queued"
+HostAdopt ==
+  /\ up /\ \E i \in Ids : turn[i].st \in {"claimed", "running"}
+  /\ IF AdoptMode = "today" \/ ~Cron
+     THEN turn' = [i \in Ids |-> IF turn[i].st \in {"claimed", "running"} THEN [turn[i] EXCEPT !.st = Requeued] ELSE turn[i]]
+     ELSE \E dead \in [Ids -> BOOLEAN] :
+            turn' = [i \in Ids |-> IF turn[i].st = "claimed" THEN [turn[i] EXCEPT !.st = Requeued]
+                                   ELSE IF turn[i].st = "running" /\ dead[i] THEN [turn[i] EXCEPT !.st = "cancelled"]
+                                   ELSE turn[i]]
+  /\ UNCHANGED <<now, wm, up, def, revoked, repoch, cut, held, fires, ans, pend, defHist, revHist>>
 
 Restart ==
   /\ ~up /\ up' = TRUE
@@ -305,24 +348,47 @@ ClaimMayOk(i) ==
 
 Claim(i) ==
   /\ up /\ turn[i].st \in Pending
+  /\ (~HostBotOnly \/ ((Cron \/ HasBot(turn[i].person)) /\ ~turn[i].rd))
   /\ (~DeadlineCheck \/ now < turn[i].dl)
-  /\ IF held THEN turn[i].st = "queued" /\ TurnStep(i, "parked")
+  /\ IF ClaimPausedCheck /\ def.paused THEN TurnStep(i, "cancelled")
+     ELSE IF held THEN turn[i].st = "queued" /\ TurnStep(i, "parked")
+     ELSE ClaimMayOk(i) /\ TurnStep(i, "claimed")
+
+\* The host's runner cancels a turn that was redeemed before ("interrupted", hostclaim.queued redeemedBefore): never re-run.
+RunnerCancel(i) == /\ HostBotOnly /\ up /\ turn[i].st \in Pending /\ turn[i].rd /\ TurnStep(i, "cancelled")
+\* A routine's turn for a person with no bot of the owner's here: give_up cancels it with the reason ("a routine runs for
+\* the owner only", "no bot of the owner's here to run it").
+RunnerGiveUp(i) == /\ HostBotOnly /\ ~Cron /\ up /\ turn[i].st \in Pending /\ ~HasBot(turn[i].person) /\ TurnStep(i, "cancelled")
+
+\* The keep path (package C's brief: pause wins over it). The claim's exit report with out_of_usage puts a running turn back
+\* (claims.rs apply -> requeue_turn, which cancels it instead when the job is paused: ClaimPausedCheck); the host's actor still
+\* holds the item and claims the turn again by its id, which is not the runner's redeemed check but the same claim.
+OutOfUsage(i) ==
+  /\ KeepRebegin /\ ~Cron /\ up /\ HasBot(turn[i].person) /\ turn[i].st = "running"
+  /\ IF ClaimPausedCheck /\ def.paused THEN TurnStep(i, "cancelled") ELSE TurnStep(i, "queued")
+Rebegin(i) ==
+  /\ KeepRebegin /\ ~Cron /\ up /\ HasBot(turn[i].person) /\ turn[i].st = "queued" /\ turn[i].rd /\ ~held
+  /\ (~DeadlineCheck \/ now < turn[i].dl)
+  /\ IF ClaimPausedCheck /\ def.paused THEN TurnStep(i, "cancelled")
      ELSE ClaimMayOk(i) /\ TurnStep(i, "claimed")
 
 Expire(i) == /\ up /\ turn[i].st \in Pending /\ turn[i].dl <= now /\ TurnStep(i, "expired")
-Start(i) == /\ up /\ turn[i].st = "claimed" /\ TurnStep(i, "running")
+Start(i) == /\ up /\ turn[i].st = "claimed" /\ turn' = [turn EXCEPT ![i].st = "running", ![i].rd = TRUE]
+  /\ UNCHANGED <<now, wm, up, def, revoked, repoch, cut, held, fires, ans, pend, defHist, revHist>>
 Finish(i) == /\ up /\ turn[i].st = "running" /\ TurnStep(i, "done")
 
 ClaimAny == \E i \in Ids : Claim(i)
 ExpireAny == \E i \in Ids : Expire(i)
+RunnerCancelAny == \E i \in Ids : RunnerCancel(i) \/ RunnerGiveUp(i)
+KeepAny == \E i \in Ids : OutOfUsage(i) \/ Rebegin(i)
 StartAny == \E i \in Ids : Start(i)
 FinishAny == \E i \in Ids : Finish(i)
 
 Next ==
   \/ TickFresh \/ TickStale \/ AdHocFire \/ FireB
   \/ Edit \/ CancelPaused \/ (\E p \in Persons : RevokeAuth(p) \/ RevokePerson(p) \/ Grant(p))
-  \/ Crash \/ Restart \/ Hold \/ Release \/ Advance
-  \/ ClaimAny \/ ExpireAny \/ StartAny \/ FinishAny
+  \/ Crash \/ Restart \/ HostAdopt \/ Hold \/ Release \/ Advance
+  \/ ClaimAny \/ ExpireAny \/ RunnerCancelAny \/ StartAny \/ FinishAny \/ KeepAny
 
 \* The core may crash any number of times. A crash loop (claim -> crash -> restart -> claim ...) does not starve a turn:
 \* strong fairness lets it run in the stretches where the core is up (the review replaced "crashes finitely often").

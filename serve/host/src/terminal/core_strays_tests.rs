@@ -9,11 +9,8 @@ use std::sync::Arc;
 /// A scripted core with these waiting host turns `(turn, key)`; it records every cancel.
 fn core(listed: Vec<(i64, String)>, answers: bool) -> (CoreWriter, Arc<Mutex<Vec<i64>>>, std::path::PathBuf) {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "kith-strays-{}-{}",
-        std::process::id(),
-        N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("kith-strays-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     let state = dir.join("state");
     std::fs::create_dir_all(&state).unwrap();
     let folders = Paths {
@@ -82,6 +79,17 @@ fn a_core_that_does_not_answer_cancels_nothing() {
     assert_eq!(w.sweep_strays(), 0);
     assert!(cancelled.lock().unwrap().is_empty());
     std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_failing_sweep_is_logged_when_it_starts_and_when_it_recovers_not_every_minute() {
+    use std::sync::atomic::AtomicBool;
+    let failing = AtomicBool::new(false);
+    assert!(!note_sweep(&failing, None), "healthy and quiet");
+    assert!(note_sweep(&failing, Some("down")), "the first failure speaks");
+    assert!(!note_sweep(&failing, Some("down")), "a core that stays down does not");
+    assert!(note_sweep(&failing, None), "the recovery speaks once");
+    assert!(!note_sweep(&failing, None));
 }
 
 #[test]

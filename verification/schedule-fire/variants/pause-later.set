@@ -1,1 +1,3 @@
 PauseLater = TRUE
+ClaimPausedCheck = FALSE
+KeepRebegin = FALSE

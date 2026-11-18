@@ -1,0 +1,2 @@
+\* run-turn may exit before it attaches (the architect's DieC)
+RunDies = TRUE
