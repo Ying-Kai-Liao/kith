@@ -17,7 +17,8 @@ use std::path::Path;
 use serde_json::{Map, Value, json};
 
 use super::guard::{
-    self, OWNER_ALLOW, SECRET_RULES, SOFT_DENY, both, dedup, edit_rules, rule_w, secret_paths, valid_domain,
+    self, OWNER_ALLOW, SECRET_RULES, SOFT_DENY, both, dedup, edit_rules, rule_w, secret_paths,
+    valid_domain,
 };
 use super::machine;
 use super::prompt::Registry;
