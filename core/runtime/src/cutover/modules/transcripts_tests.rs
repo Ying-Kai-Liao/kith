@@ -327,6 +327,29 @@ fn a_refused_reread_removes_the_tombstone_and_leaves_the_module_stepping() {
 }
 
 #[test]
+fn a_reread_that_fails_takes_the_tombstone_away_too() {
+    use fs2::FileExt as _;
+    let r = rig();
+    r.write("s-one", &rec("s-one", 10, "/work"));
+    let mut core = r.core();
+    Transcripts.import(&r.env, Some(&mut core), opts()).unwrap();
+    tombstone::ensure(&r.tombstone(), "transcripts", 3).unwrap();
+    // A spool entry for a session whose lock another writer holds: the drain gives up after its wait.
+    r.spool("s-one", &rec("s-one", 20, "/spooled"));
+    let locks = r.terminal().join("locks");
+    std::fs::create_dir_all(&locks).unwrap();
+    let held = std::fs::File::create(locks.join("s-one.lock")).unwrap();
+    held.lock_exclusive().unwrap();
+    let e = Transcripts
+        .reread(&r.env, &mut core)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("held by another writer"), "{e}");
+    assert!(!r.tombstone().exists(), "hooks write files again");
+    assert_eq!(r.inbox_len(), 1, "the entry waits");
+}
+
+#[test]
 fn a_file_newer_than_its_row_is_no_refusal_at_the_reread() {
     let r = rig();
     r.write("s-one", &rec("s-one", 10, "/work"));

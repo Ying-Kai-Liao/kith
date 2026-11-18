@@ -124,6 +124,19 @@ pub(super) fn differences(env: &Env, db: &Connection) -> Result<Vec<String>> {
 /// `before_tombstone`'s second half (the tombstone is down). On a refusal the tombstone is taken away again, so the module
 /// is left `stepping` with hooks writing files as before.
 pub(super) fn reread(env: &Env, core: &mut Core) -> Result<()> {
+    // Any failure, not only a refusal (a session lock held past its wait, a database error), takes the tombstone away: left
+    // in place it would leave hooks in Writer mode with nothing serving `session.record` (architect MUST 1 on #1049). Work
+    // already done is safe: each drained entry committed with its file, and the import transaction is all-or-nothing.
+    let result = reread_inner(env, core);
+    if result.is_err()
+        && let Ok(state) = state(env)
+    {
+        let _ = std::fs::remove_file(marker_of(state));
+    }
+    result
+}
+
+fn reread_inner(env: &Env, core: &mut Core) -> Result<()> {
     let state = state(env)?;
     let c = ctx(env);
     let dir = kith_kernel::threads::registry_dir(state);

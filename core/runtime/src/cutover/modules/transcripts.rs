@@ -141,13 +141,18 @@ impl Module for Transcripts {
     }
 
     fn check_notes(&self, env: &Env) -> Vec<String> {
-        let mut out = vec![
-            "transcripts: after the step start the host (`kith serve`): only the daemon's 60 s pass drains the spool and reconciles files and rows. If a step stopped with registry.tombstone in place, new sessions are not listed until `kith migrate step transcripts` is run again or `kith rollback transcripts` cancels it".to_owned(),
-        ];
-        if let Ok(s) = state(env)
-            && marker_of(s).exists()
-            && !tombstone::is_tombstone(&marker_of(s))
-        {
+        let Ok(s) = state(env) else {
+            return Vec::new();
+        };
+        let stepped = crate::cutover::state::read(&env.layout, self.name())
+            .ok()
+            .flatten()
+            .is_some();
+        let mut out = Vec::new();
+        if stepped || marker_of(s).exists() {
+            out.push("transcripts: after the step start the host (`kith serve`): only the daemon's 60 s pass drains the spool and reconciles files and rows. If a step stopped with registry.tombstone in place, new sessions are not listed until `kith migrate step transcripts` is run again or `kith rollback transcripts` cancels it".to_owned());
+        }
+        if marker_of(s).exists() && !tombstone::is_tombstone(&marker_of(s)) {
             out.push(format!(
                 "transcripts: {} exists but is not a tombstone note",
                 marker_of(s).display()

@@ -50,7 +50,7 @@ larger key is a newer record.
 - **kith-sched, Files mode only:** prune and the inbox drain.
 - **Step:**
   - preflight, then the switch file says stepping (the inbox may hold entries: the re-read drains it);
-  - import (newer-wins; a row whose file is gone is cleared, `ImportClears`);
+  - import (mirrors the files: a row newer than its file is replaced, a row whose file is gone is cleared, `ImportClears`);
   - same_answer guards the tombstone (`TombGuard`): a row newer than its file or with no file stops the step, and a
     rerun imports again (`RerunImp`);
   - tombstone (Writer mode on for hooks; the core does not serve yet);
@@ -198,6 +198,9 @@ Where the Python code differs from the model (the model allows more, so no actio
   hook is closed (it was on the "Not modelled" list).
 
 Where the core's code differs from the model (the model allows more, so no action changes):
+- The re-read is three steps in code (drain, one transaction, the check) and one in the model. A writer that slips in
+  between can only make a file newer, which is no refusal (Python's prune is off in Writer mode). Any failure of the
+  re-read, not only a stale row, removes the tombstone: the model's `prer` branch.
 - `prune_once` judges which rows are old and dead outside the lock, then re-checks inside it: the row by its whole key
   (compare-and-delete) and the file (a valid record of the sid whose key beats the judged one is left for the
   reconcile). The model's `CorePrune` judges and checks the file in one look. The code removes the file only when it
