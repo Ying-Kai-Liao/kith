@@ -1,12 +1,26 @@
 //! Whether this build may step `schedules` (the refusal rule of the architect, 2026-11-16). Stepping tombstones
 //! `sched/state.json`, so `kith-sched` stands down and the core's fire becomes the only scheduler: a build whose core
 //! cannot run the turns a fire makes would stop every routine and cron job. The step holds the core lock, so there is no
-//! daemon to ask; this binary answers for itself, from five facts that must all hold.
+//! daemon to ask; this binary answers for itself, from five facts that must all hold. A sixth, which only a running system can
+//! answer (an old `kith-sched tick` still in flight), is waited out by `schedules_switch` once the step holds `tick.lock`.
 
 use std::path::{Path, PathBuf};
 
+use crate::cutover::Env;
 use kith_api::Served;
 use sha2::{Digest as _, Sha256};
+
+/// Where launchd's plists are: under the user's `HOME` (`~/Library/LaunchAgents`), which is not the Kith folder
+/// (`env.home` is `$KITH_HOME`, `~/kith` or `~/.kith`: no plist lives there). Tests have no home of their own to set (the
+/// environment is shared between them), so a test's `env.home` stands in for it.
+pub(super) fn user_home(env: &Env) -> PathBuf {
+    #[cfg(test)]
+    return env.home.clone();
+    #[cfg(not(test))]
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map_or_else(|| env.home.clone(), PathBuf::from)
+}
 
 /// The rows the core must serve, and the daemon route, for the fire to run anywhere.
 const ROWS: [&str; 3] = ["schedule.tick", "schedule.runNow", "schedule.fire"];
@@ -128,20 +142,13 @@ const TICK_LOCK_MARKER: &str = "KITH_SCHED_TICK_LOCK = 1";
 /// symlink, not the copy beside this binary) carries the tick-lock marker. The installer writes `[launcher run --quiet
 /// --script <kith-sched> tick]` or `[<kith-sched> tick]`, so the program is the word before the last `tick`.
 pub(super) fn launchd_sched_locks(home: &Path) -> Result<(), String> {
-    let plist = home.join("Library/LaunchAgents/dev.kith.sched.plist");
-    let program = std::fs::read_to_string(&plist)
-        .ok()
-        .and_then(|t| plist_words(&t))
-        .and_then(|w| {
-            let i = (1..w.len()).rev().find(|&i| w[i] == "tick")?;
-            w.get(i - 1).cloned()
-        })
-        .ok_or_else(|| {
-            format!(
-                "no kith-sched program found in {}; update kith first",
-                plist.display()
-            )
-        })?;
+    let plist = sched_plist(home);
+    let program = sched_program_word(home).ok_or_else(|| {
+        format!(
+            "no kith-sched program found in {}; run `kith-sched --install`",
+            plist.display()
+        )
+    })?;
     let stale = || {
         format!("launchd's kith-sched ({program}) does not take sched/tick.lock; update kith first")
     };
@@ -153,5 +160,103 @@ pub(super) fn launchd_sched_locks(home: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(stale())
+    }
+}
+
+fn sched_plist(home: &Path) -> PathBuf {
+    home.join("Library/LaunchAgents/dev.kith.sched.plist")
+}
+
+fn sched_program_word(home: &Path) -> Option<String> {
+    std::fs::read_to_string(sched_plist(home))
+        .ok()
+        .and_then(|t| plist_words(&t))
+        .and_then(|w| {
+            let i = (1..w.len()).rev().find(|&i| w[i] == "tick")?;
+            w.get(i - 1).cloned()
+        })
+}
+
+/// The file condition 5 reads: launchd's `kith-sched`, through every symlink. `None` when the plist or the file is not
+/// there (condition 5 refuses that on its own).
+pub(super) fn sched_program(home: &Path) -> Option<PathBuf> {
+    PathBuf::from(sched_program_word(home)?).canonicalize().ok()
+}
+
+/// One running `kith-sched tick` of this home: its pid and, when it could be read, its start stamp.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Tick {
+    pub pid: u32,
+    pub stamp: Option<String>,
+}
+
+/// Lists the ticks of the program `kith-sched` (given as its real path) that are running now.
+/// `Err` when the process table cannot be read: condition 6 then refuses (fails closed), never passes on an empty list.
+pub(super) type Lister = fn(&Path) -> Result<Vec<Tick>, String>;
+
+/// The real lister: processes of our own user whose arguments hold a word that resolves to `program`, followed by
+/// `tick` (the launcher form `launcher run --script <kith-sched> tick` and the plain `<kith-sched> tick` both match;
+/// `run-turn`, `ls` and another home's kith-sched do not). Arguments are read exactly, never split from `ps`.
+pub(super) fn list_ticks(program: &Path) -> Result<Vec<Tick>, String> {
+    let me = std::process::id();
+    let all = kith_kernel::procstart::own_commands();
+    // A table that cannot be read lists nothing, which must not read as "no tick is running": this process is always in it.
+    if !all.iter().any(|(pid, args)| *pid == me && !args.is_empty()) {
+        return Err("the process list cannot be read here".to_owned());
+    }
+    Ok(all
+        .into_iter()
+        .filter(|(pid, args)| {
+            *pid != me
+                && args.windows(2).any(|w| {
+                    w[1] == "tick"
+                        && w[0].contains("kith-sched")
+                        && PathBuf::from(&w[0])
+                            .canonicalize()
+                            .is_ok_and(|p| p == program)
+                })
+        })
+        .map(|(pid, _)| Tick {
+            pid,
+            stamp: kith_kernel::procstart::start_stamp(pid),
+        })
+        .collect())
+}
+
+/// Whether `old` is still among `now`: the same pid with the same stamp, or by pid alone when either stamp is unknown
+/// (a wrong "gone" would let a tick that holds old code go on).
+fn still_there(old: &Tick, now: &[Tick]) -> bool {
+    now.iter().any(|n| {
+        n.pid == old.pid
+            && match (&old.stamp, &n.stamp) {
+                (Some(a), Some(b)) => kith_kernel::procstart::same_process(a, b),
+                _ => true,
+            }
+    })
+}
+
+/// Condition 6, taken right after `tick.lock`: the ticks that were running when the lock was taken may be launchd's old
+/// code (started before `cli/current` moved), which cannot be told apart by any clock. Waits until each is gone. A tick
+/// that starts after the listing is new code and blocks on our lock. `Err` says why not: one still running at `wait`, or a
+/// process table that cannot be read (never taken for "no tick").
+pub(super) fn wait_out_old_ticks(
+    list: Lister,
+    program: &Path,
+    wait: std::time::Duration,
+) -> Result<(), String> {
+    let old = list(program)?;
+    let until = std::time::Instant::now() + wait;
+    loop {
+        let now = list(program)?;
+        let Some(left) = old.iter().find(|o| still_there(o, &now)) else {
+            return Ok(());
+        };
+        if std::time::Instant::now() >= until {
+            return Err(format!(
+                "a kith-sched tick (pid {}) is still running; try again in a minute",
+                left.pid
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }

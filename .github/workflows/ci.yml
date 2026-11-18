@@ -330,7 +330,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -878,6 +878,18 @@ jobs:
         run: kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
       - name: Core dependency rules
         run: kernel/tests/kith-core-deps-check
+      # The schedules cutover on real processes (kith serve, the core daemon, the holder, the real kith-sched from a kernel copy):
+      # slot due while the host is down, a host start during the step, a rollback under a detached run, an old tick holding the
+      # step up (serve/host/tests/schedules_cutover_e2e.rs). It waits on the clock (about 2 minutes), so it runs here from the
+      # archive on every PR that changes the host or core, not in the heavy host-e2e shards (which leave it out).
+      - name: Schedules cutover end to end (real processes)
+        working-directory: serve/host
+        run: >-
+          cargo nextest run --profile ci --no-tests=fail
+          --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
+          --extract-to . --extract-overwrite
+          --workspace-remap .
+          -E 'binary(schedules_cutover_e2e)'
       - uses: actions/upload-artifact@v4
         with:
           name: host-tests
@@ -991,7 +1003,7 @@ jobs:
           --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
           --extract-to . --extract-overwrite
           --workspace-remap .
-          -E 'kind(test)' --partition count:${{ matrix.shard }}/3
+          -E 'kind(test) and not binary(schedules_cutover_e2e)' --partition count:${{ matrix.shard }}/3
 
   # The secrets envelope against the real OS key stores (the unit tests use an in-memory one): a throwaway keychain on
   # macOS, gnome-keyring in its own D-Bus session on Linux.

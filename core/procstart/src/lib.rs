@@ -18,6 +18,9 @@
 
 #![allow(unsafe_code)]
 
+mod args;
+pub use args::own_commands;
+
 /// What the system said about a pid.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Probe {
