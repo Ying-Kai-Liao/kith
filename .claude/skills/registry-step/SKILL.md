@@ -193,7 +193,7 @@ Where the core's code differs from the model (the model allows more, so no actio
 4. A pass can have lost the ability to fail. Break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `70df0d7fcfc6556856e17fe96c81d2a4bb53e88d` (transcripts P1, #1040: the core side; the module files at it are pre-P3 and match "planned").
+**Sync commit:** `96429c4db8425fd7fb508b11fc50a3de61aa2c3f` (transcripts P1, #1040: the core side; the module files at it are pre-P3 and match "planned").
 
 ## Map of the folder
 

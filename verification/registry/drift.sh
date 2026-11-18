@@ -12,7 +12,7 @@ set -euo pipefail
 
 # The commit at which the model was last read against the code below: transcripts P1 (#1040), the core side. The step's
 # module (cutover/modules/transcripts.rs) is pre-P3 at it; P3 reads the model against it and moves SYNC.
-SYNC=70df0d7fcfc6556856e17fe96c81d2a4bb53e88d
+SYNC=96429c4db8425fd7fb508b11fc50a3de61aa2c3f
 
 FILES=(
   kernel/bin/kith-sessions                        # record(): the hook, Files mode and Writer mode (spool, call, delete own)
