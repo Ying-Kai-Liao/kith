@@ -266,32 +266,16 @@ const CODE_CMDS: [&str; 13] = [
     "eval",
     "deno eval",
 ];
-/// Interpreters and the flags that hand them code inline.
-const INLINE: [(&str, &[&str]); 12] = [
-    ("python", &["-c"]),
-    ("node", &["-e", "--eval", "-p", "--print"]),
-    ("deno", &["eval"]),
-    ("bun", &["-e", "--eval", "eval"]),
-    ("ruby", &["-e"]),
-    ("perl", &["-e", "-E"]),
-    ("php", &["-r"]),
-    ("osascript", &["-e"]),
-    ("bash", &["-c", "-s"]),
-    ("sh", &["-c", "-s"]),
-    ("zsh", &["-c", "-s"]),
-    ("dash", &["-c", "-s"]),
-];
-const INLINE_FISH: (&str, &[&str]) = ("fish", &["-c"]);
-const SHELLS: [&str; 5] = ["bash", "sh", "zsh", "dash", "fish"];
-
 /// One sentence per class for the auto-mode classifier (`autoMode.soft_deny`), for what the rules cannot spell.
 pub const SOFT_DENY: [&str; 5] = [
     "Never read, print or send a password, token, key or login (Keychain, kith-auth values, ~/.ssh, cloud logins).",
     "Never change a file that decides what later runs may do (any allowed.json, settings.json, capabilities.yaml, run/once, the agent's own package outside skills/learned, kith's protected paths, shell start-up files, LaunchAgents, folders on PATH) without the owner's yes.",
     "Never delete or overwrite anything outside the run's own writable folders and its working copy (rm -rf, git reset --hard, git clean, a disk tool) without the owner's yes.",
     "Never do something public or past the owner without the owner's yes: a force push or a push to main or master, a merge, a release, a publish or deploy, a network post, a message to anyone but the owner, spending money.",
-    "Never run code that has no name: an interpreter or shell given inline code, a package fetched and run (npx, uvx, dlx), eval, or a download piped into a shell.",
+    "Never run code fetched from outside without the owner's yes: a package fetched and run (npx, uvx, dlx, pipx run), eval, or a download piped or substituted into a shell or interpreter.",
 ];
+/// The kernel's own `autoMode.allow` sentence for owner runs (guests get none): `OWNER_ALLOW` of `kith_guard.py`.
+pub const OWNER_ALLOW: &str = "Running scripts and inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc, a script file it wrote) is routine when it works on files in the agent's own folders, the run's scratch folder or the project the run works in.";
 
 /// Where the trust and secret paths are for one run: `Places` of `kith_guard.py`.
 pub struct Places {
@@ -590,31 +574,9 @@ pub fn must_ask_rules(places: &Places) -> MustAsk {
     }
     ask_bash.push("Bash(wget * --post-*)".to_owned());
     ask_bash.push("Bash(wget --post-*)".to_owned());
-    // code
+    // code: the package runners and eval. Inline code is the agent's own; a download piped into a shell is judged by
+    // must_ask and the classifier (a rule for a bare `sh` would also ask for the agent's own heredoc).
     ask_bash.extend(bash_rules(&CODE_CMDS, &[]));
-    for (b, flags) in INLINE.iter().chain([&INLINE_FISH]) {
-        let b: &str = b;
-        let names: Vec<&str> = if b == "python" {
-            vec!["python", "python3"]
-        } else {
-            vec![b]
-        };
-        for n in names {
-            ask_bash.push(format!("Bash({n})"));
-            ask_bash.push(format!("Bash({n} -)"));
-            ask_bash.push(format!("Bash({n} - *)"));
-            ask_bash.extend(flags.iter().map(|f| format!("Bash({n} {f} *)")));
-            ask_bash.extend(flags.iter().map(|f| format!("Bash({n} {f})")));
-            if SHELLS.contains(&b) {
-                // the usual combined spellings; `-*c *` would run on to any later word ending in c
-                for f in [
-                    "-lc", "-ec", "-xc", "-ic", "-euc", "-exc", "-lic", "-cl", "-ce",
-                ] {
-                    ask_bash.push(format!("Bash({n} {f} *)"));
-                }
-            }
-        }
-    }
     MustAsk {
         deny: dedup(deny),
         ask_files: dedup(ask_files),

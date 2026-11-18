@@ -17,7 +17,7 @@ use std::path::Path;
 use serde_json::{Map, Value, json};
 
 use super::guard::{
-    self, SECRET_RULES, SOFT_DENY, both, dedup, edit_rules, rule_w, secret_paths, valid_domain,
+    self, OWNER_ALLOW, SECRET_RULES, SOFT_DENY, both, dedup, edit_rules, rule_w, secret_paths, valid_domain,
 };
 use super::machine;
 use super::prompt::Registry;
@@ -875,7 +875,8 @@ pub fn build(i: &Input<'_>) -> R<Output> {
                 .chain(SOFT_DENY.iter().map(|x| (*x).to_owned())),
         );
         auto.insert("soft_deny".to_owned(), strings(&soft));
-        // A package may declare its routine work as autoMode.allow sentences; owner runs keep them, others have none.
+        // A package may declare its routine work as autoMode.allow sentences; owner runs keep them and the kernel's own
+        // sentence (code the agent wrote itself is routine), others have none.
         let declared: Vec<String> = auto
             .get("allow")
             .and_then(Value::as_array)
@@ -885,8 +886,12 @@ pub fn build(i: &Input<'_>) -> R<Output> {
                     .collect()
             })
             .unwrap_or_default();
-        if owner && !declared.is_empty() {
-            let all = dedup(std::iter::once("$defaults".to_owned()).chain(declared));
+        if owner {
+            let all = dedup(
+                std::iter::once("$defaults".to_owned())
+                    .chain(declared)
+                    .chain(std::iter::once(OWNER_ALLOW.to_owned())),
+            );
             auto.insert("allow".to_owned(), strings(&all));
         } else {
             auto.remove("allow");

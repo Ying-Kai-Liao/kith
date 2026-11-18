@@ -962,10 +962,11 @@ for lst, rules in ((s["permissions"]["deny"], must["deny"]), (ask, must["ask_fil
 auto = s.setdefault("autoMode", {})
 auto["soft_deny"] = list(dict.fromkeys(["$defaults"] + [x for x in auto.get("soft_deny") or [] if isinstance(x, str)] + must["soft_deny"]))
 # A package may declare its routine work as autoMode.allow sentences (kith-pkg check refuses one naming a must-ask
-# class); owner runs keep them next to the defaults of Claude Code, runs for anyone else have none.
+# class); owner runs keep them next to the defaults of Claude Code and the kernel sentence OWNER_ALLOW (code the agent
+# wrote itself is routine), runs for anyone else have none.
 declared = [x for x in auto.get("allow") or [] if isinstance(x, str)]
-if os.environ["P_OWNER"] == "1" and declared:
-    auto["allow"] = list(dict.fromkeys(["$defaults"] + declared))
+if os.environ["P_OWNER"] == "1":
+    auto["allow"] = list(dict.fromkeys(["$defaults"] + declared + [kith_guard.OWNER_ALLOW]))
 else:
     auto.pop("allow", None)
 # Anyone but the owner (an invited person, a bot): the OS sandbox of Claude Code (macOS seatbelt) around Bash and every

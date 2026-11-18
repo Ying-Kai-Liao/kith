@@ -17,6 +17,7 @@ it offers "Always allow", and again, from the same card input, when it saves.
 """
 import fcntl
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -35,7 +36,7 @@ EDIT_TOOLS = ('Edit', 'Write', 'MultiEdit', 'NotebookEdit')
 # Names of the run's own approval tools and of kith's secret handling are never remembered.
 NEVER_TOOLS = ('mcp__kithpermit__',)
 
-# A shell that can run anything: a bare one, or one given code to run, is not a rule worth keeping.
+# A command that can run anything: a bare one, or one told to run another program, is not a rule worth keeping.
 RUNNERS = {'sudo', 'su', 'doas', 'eval', 'exec', 'xargs', 'env', 'bash', 'sh', 'zsh', 'dash', 'fish', 'python', 'python3',
            'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'osascript', 'npx', 'pnpx', 'bunx', 'uvx', 'ssh', 'nohup', 'time',
            'command', 'builtin', 'watch', 'timeout', 'nice', 'open', 'xcrun'}
@@ -50,7 +51,7 @@ WHY = {'secret': 'it names a secret or a login',
        'trust': 'it changes what later runs may do (an allow list, settings, a package, a protected path)',
        'destroy': 'a delete or overwrite outside the run\'s own folders is asked each time',
        'outward': 'something public or past the owner (a push to main, a merge, a publish, a post) is asked each time',
-       'code': 'code with no name (inline code, a package runner, a pipe into a shell) is asked each time'}
+       'code': 'code fetched from outside and run (a package runner, eval, a download piped into a shell) is asked each time'}
 COMPOUND = re.compile(r'[;&|`<>\n\\*?{}\[\]]|\$\(|\$\{|\$[A-Za-z_]')
 URL = re.compile(r'https?://', re.I)
 # Package managers whose run/exec forms Claude Code drops from allow rules in auto mode (permission-modes: "Package-manager run
@@ -236,8 +237,14 @@ def _derive_bash(agent, tool_input):
         return no(WHY['destroy'])
     if first in NEVER_FIRST:
         return no('a command that runs another command is asked each time')
-    if first in RUNNERS and first not in PKG_ALWAYS and (len(words) == 1 or any(w in ('-c', '-e', '-i', '--eval', 'exec', 'run', '-m') for w in words[1:])):
-        return no('a shell or interpreter given code to run is asked each time')
+    # Its leading flags: code the agent wrote itself (-c, -e, a heredoc) is routine; one with nothing after its flags runs
+    # whatever comes in on stdin.
+    lead = list(itertools.takewhile(lambda w: w.startswith('-'), words[1:]))
+    stdin = len(words) == 1 or lead == words[1:] and any(w in ('-', '-s') for w in lead)
+    if first in RUNNERS and first not in PKG_ALWAYS and (stdin or any(w in ('-i', '-m') for w in lead)
+                                                         or words[1:2] in (['exec'], ['run'])):
+        return no('a bare shell or interpreter (it runs whatever comes in on stdin), or one told to run another program, '
+                  'is asked each time')
     if first in PKG_ALWAYS or (first in PKG_RUN and any(w in PKG_RUN_VERBS for w in words[1:2])):
         return {'ok': True, 'kind': 'prose', 'rule': prose(agent, 'Bash', {'command': command})}
     if first in NETWORK or URL.search(command) or CC_PROTECTED.search(command) or first == 'git' and \

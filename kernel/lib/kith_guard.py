@@ -188,7 +188,9 @@ def apply_grants(s, grants, home, secrets):
 #   destroy  a delete or overwrite outside the run's writable roots
 #   outward  public or past the owner: a force push or a push to main, a merge, a release, a publish or deploy, a network
 #            post, a message to anyone but the owner, spending
-#   code     code with no name: an interpreter or shell given inline code, a package runner, eval, a pipe into a shell
+#   code     code fetched from outside and run: a package runner, eval, a download piped or substituted into a shell or
+#            interpreter. Inline code the agent wrote itself (-c, -e, a heredoc) is not this class; its text is judged
+#            for the other four.
 CLASSES = ("secret", "trust", "destroy", "outward", "code")
 
 SECRET_WORDS = re.compile(
@@ -242,9 +244,13 @@ SOFT_DENY = {
     "outward": "Never do something public or past the owner without the owner's yes: a force push or a push to main or "
                "master, a merge, a release, a publish or deploy, a network post, a message to anyone but the owner, "
                "spending money.",
-    "code": "Never run code that has no name: an interpreter or shell given inline code, a package fetched and run "
-            "(npx, uvx, dlx), eval, or a download piped into a shell.",
+    "code": "Never run code fetched from outside without the owner's yes: a package fetched and run (npx, uvx, dlx, "
+            "pipx run), eval, or a download piped or substituted into a shell or interpreter.",
 }
+# The kernel's own autoMode.allow sentence for owner runs (guests get none).
+OWNER_ALLOW = ("Running scripts and inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc, a script "
+               "file it wrote) is routine when it works on files in the agent's own folders, the run's scratch folder or "
+               "the project the run works in.")
 # What a sentence for autoMode.allow may not name (kith-pkg check).
 SENTENCE = {
     "secret": re.compile(r"(?i)\b(passwords?|tokens?|credentials?|keychain|api[ _-]?keys?|secrets?|logins?|sign[ -]?in)\b"),
@@ -253,7 +259,7 @@ SENTENCE = {
     "destroy": re.compile(r"(?i)\brm\s+-\w*r|\bdelet\w*|\bwipe|\berase|reset --hard|git clean|\boverwrit"),
     "outward": re.compile(r"(?i)\b(push\w*|publish\w*|merg\w*|deploy\w*|releas\w*|post\w* to|send\w* (to|an? e-?mail)|"
                           r"e-?mail\w*|tweet\w*|pay\w*|purchas\w*|buy\w*|spend\w*)\b"),
-    "code": re.compile(r"(?i)\b(npx|uvx|bunx|pnpx|dlx|eval|inline code|python3? -c|node -e|ba?sh -c|curl[^.]*\|\s*\w*sh)\b"),
+    "code": re.compile(r"(?i)\b(npx|uvx|bunx|pnpx|dlx|eval|pipx run|uv tool run|npm exec|(?:curl|wget)[^.]*\|\s*\w*sh)\b"),
 }
 
 
@@ -379,8 +385,9 @@ def _names_secret(text, places):
         return False
 
 
-def _segments(command):
-    """The simple commands of a shell line, as word lists (a quote-aware split on ; & | && || ( ) and newlines)."""
+def _pipelines(command):
+    """The pipelines of a shell line, each a list of simple commands as word lists (a quote-aware split on ; & && || ( )
+    and newlines; a single | joins the commands of one pipeline)."""
     import shlex
     lex = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|()<>")
     lex.whitespace_split = True
@@ -388,17 +395,27 @@ def _segments(command):
         toks = list(lex)
     except ValueError:
         toks = command.replace("\n", " ; ").split()
-    segs, cur = [], []
+    pipes, segs, cur = [], [], []
     for t in toks:
         if t and set(t) <= set(";&|()"):
             if cur:
                 segs.append(cur)
             cur = []
+            if t not in ("|", "|&") and segs:
+                pipes.append(segs)
+                segs = []
         else:
             cur.append(t)
     if cur:
         segs.append(cur)
-    return segs
+    if segs:
+        pipes.append(segs)
+    return pipes
+
+
+def _segments(command):
+    """The simple commands of a shell line, as word lists."""
+    return [s for p in _pipelines(command) for s in p]
 
 
 def _strip(words):
@@ -495,24 +512,87 @@ def _curl_write(words):
     return False
 
 
-def _inline_code(words):
-    """An interpreter or shell given code inline, alone (reading stdin: a pipe into it), or fed a heredoc. Its flags are
-    read up to the script it is given: `python3 tool.py -c x.yml` runs a named script."""
+def _runs(words):
+    """The interpreters and shells a command starts, as (name, the words after it): the first word, and after a launcher
+    (uv run python ..., find -exec sh -c ...)."""
     starts = [0] + ([i for i in range(1, len(words)) if _base(words[i]) in INLINE]
                     if os.path.basename(words[0]) in LAUNCHERS else [])
-    for i in starts:
-        b = _base(words[i])
-        if b not in INLINE:
-            continue
-        rest = words[i + 1:]
-        if not rest or rest[0] in ("-", "<", "<<", "<<<"):
-            return True
-        for r in rest:
-            if r in INLINE[b] or (b in SHELLS and re.fullmatch(r"-[a-z]*c[a-z]*", r)):
-                return True
+    return [(_base(words[i]), words[i + 1:]) for i in starts if _base(words[i]) in INLINE]
+
+
+def _code_flag(b, r):
+    return r in INLINE[b] and r != "-s" or (b in SHELLS and re.fullmatch(r"-[a-z]*c[a-z]*", r))
+
+
+def _inline_bodies(words):
+    """The code given inline (-c, -e, eval ...): (shell bodies, other interpreters' bodies). Flags are read up to the script
+    a command is given: `python3 tool.py -c x.yml` runs a named script."""
+    shell, other = [], []
+    for b, rest in _runs(words):
+        for j, r in enumerate(rest):
+            if _code_flag(b, r):
+                if j + 1 < len(rest):
+                    (shell if b in SHELLS else other).append(rest[j + 1])
+                break
             if not r.startswith("-"):
                 break
+    return shell, other
+
+
+def _reads_code(words):
+    """An interpreter or shell that takes its code from stdin: alone, or with flags only, `-`, or a shell's -s (a pipe into
+    it runs what came down the pipe). Fed from a file or a heredoc, or given its code inline or a script, it does not."""
+    for b, rest in _runs(words):
+        if any(r.startswith("<") for r in rest):
+            continue
+        for r in rest:
+            if r == "-" or (r == "-s" and b in SHELLS):
+                return True
+            if _code_flag(b, r) or not r.startswith("-"):
+                break
+        else:
+            return True
     return False
+
+
+# A download handed over as code: `bash <(curl ..)`, `python3 -c "$(curl ..)"`, `source <(wget ..)`, or `$(curl ..)` run as
+# the command itself.
+FETCHED = re.compile(
+    r"(?:(?:^|[\s;&|(])(?:\S*/)?(?:python[\d.]*|pypy\d*|node|deno|bun|ruby|perl|php|osascript|bash|sh|zsh|dash|fish|source|\.)"
+    r"(?:\s+-\S*)*\s+|(?:^|[;&|\n(])\s*)[\"']?(?:<\(|\$\(|`)\s*(?:\S*/)?(?:curl|wget)\b")
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)(?:\n[ \t]*\2[ \t]*(?:\n|$)|\Z)", re.S)
+LITERAL = re.compile(r"'([^'\\\n]*(?:\\.[^'\\\n]*)*)'|\"([^\"\\\n]*(?:\\.[^\"\\\n]*)*)\"")
+PATHISH = re.compile(r"(?<![\w.$}~-])(?:~|\$HOME|\$\{HOME\})?/[\w.@+~-]+(?:/[\w.@+~-]+)*")
+
+
+def _heredoc_bodies(command):
+    """The heredoc text fed to an interpreter that is not a shell (a shell's heredoc lines are already read as commands)."""
+    out = []
+    for m in HEREDOC.finditer(command):
+        segs = _segments(command[:m.start()].rsplit("\n", 1)[-1])
+        if segs and any(b not in SHELLS for b, _ in _runs(_strip(segs[-1]) or ["-"])):
+            out.append(m.group(3))
+    return out
+
+
+def _judge_code(body, roots, places, depth):
+    """The must-ask classes a script's text shows: a string or list of strings that reads as a shell command, a trust or
+    secret file it names. What it does without spelling a command (shutil.rmtree, a socket) is the classifier's."""
+    found = set()
+    lits = [a or b for a, b in LITERAL.findall(body)]
+    for m in re.finditer(r"\[([^\[\]]*)\]", body):
+        items = [a or b for a, b in LITERAL.findall(m.group(1))]
+        if len(items) > 1:
+            lits.append(" ".join(items))
+    for lit in lits:
+        if " " in lit.strip():
+            found |= _bash(lit, roots, places, depth + 1)
+    paths = PATHISH.findall(body)
+    if any(places.is_secret(p) for p in paths):
+        found.add("secret")
+    if SENTENCE["trust"].search(body) or any(places.is_trust(p) for p in paths):
+        found.add("trust")
+    return found
 
 
 def _targets(words):
@@ -545,12 +625,31 @@ def _inside(path, roots, home):
     return any(holds(r, x) for r in roots for x in (path, real)) and real.rstrip("/") not in [r.rstrip("/") for r in roots]
 
 
-def _bash(command, roots, places):
+def _bash(command, roots, places, depth=0):
     found = set()
+    if FETCHED.search(command):
+        found.add("code")
+    if depth < 3:
+        for body in _heredoc_bodies(command):
+            found |= _judge_code(body, roots, places, depth)
+    for pipe in _pipelines(command):
+        fetched = False
+        for seg in pipe:
+            words = _strip(seg)
+            if fetched and words and _reads_code(words):
+                found.add("code")
+            if words and os.path.basename(words[0]) in ("curl", "wget"):
+                fetched = True
     for seg in _segments(command):
         words = _strip(seg)
         if not words:
             continue
+        if depth < 3:
+            shell, other = _inline_bodies(words)
+            for body in shell:
+                found |= _bash(body, roots, places, depth + 1)
+            for body in other:
+                found |= _judge_code(body, roots, places, depth)
         b = os.path.basename(words[0])
         if _starts(words, SECRET_CMDS):
             found.add("secret")
@@ -571,7 +670,7 @@ def _bash(command, roots, places):
         if b == "git" and _push_outward(words) or b == "gh" and _gh_api_write(words) or _curl_write(words) \
                 or _starts(words, OUTWARD_CMDS):
             found.add("outward")
-        if _starts(words, CODE_CMDS) or _inline_code(words):
+        if _starts(words, CODE_CMDS):
             found.add("code")
     return found
 
@@ -714,15 +813,8 @@ def must_ask_rules(places):
         ask_bash += ["Bash(curl * %s *)" % f.rstrip("*") if not f.endswith("*") else "Bash(curl * %s)" % f,
                      "Bash(curl %s *)" % f.rstrip("*") if not f.endswith("*") else "Bash(curl %s)" % f]
     ask_bash += ["Bash(wget * --post-*)", "Bash(wget --post-*)"]
-    # code
+    # code: the package runners and eval. Inline code is the agent's own; a download piped into a shell is judged by
+    # must_ask and the classifier (a rule for a bare `sh` would also ask for the agent's own heredoc).
     ask_bash += _bash_rules(CODE_CMDS)
-    for b, flags in INLINE.items():
-        names = [b] if b != "python" else ["python", "python3"]
-        for n in names:
-            ask_bash += ["Bash(%s)" % n, "Bash(%s -)" % n, "Bash(%s - *)" % n]
-            ask_bash += ["Bash(%s %s *)" % (n, f) for f in flags] + ["Bash(%s %s)" % (n, f) for f in flags]
-            if b in SHELLS:   # the usual combined spellings; `-*c *` would run on to any later word ending in c
-                ask_bash += ["Bash(%s %s *)" % (n, f) for f in ("-lc", "-ec", "-xc", "-ic", "-euc", "-exc", "-lic",
-                                                                 "-cl", "-ce")]
     return {"deny": list(dict.fromkeys(deny)), "ask_files": list(dict.fromkeys(ask_files)),
             "ask_bash": list(dict.fromkeys(ask_bash)), "soft_deny": [SOFT_DENY[c] for c in CLASSES]}
