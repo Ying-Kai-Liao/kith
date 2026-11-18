@@ -46,7 +46,7 @@ impl Gate {
                 Phase::Switched => m
                     .tombstones(env)
                     .iter()
-                    .find(|p| !tombstone::is_tombstone(p))
+                    .find(|p| tombstone::module_of(p).as_deref() != Some(m.name()))
                     .map_or(Self::Switched(s.at), |p| {
                         Self::Unfinished(p.display().to_string())
                     }),
@@ -104,14 +104,21 @@ impl Gate {
         }
     }
 
-    fn json(&self, name: &str) -> Value {
+    /// `state`, `since` (when known) and `ok`, in that order.
+    fn fields(&self) -> Map<String, Value> {
         let mut o = Map::new();
-        o.insert("module".into(), json!(name));
         o.insert("state".into(), json!(self.word()));
         if let Some(a) = self.since() {
             o.insert("since".into(), json!(a));
         }
         o.insert("ok".into(), json!(self.ok()));
+        o
+    }
+
+    fn json(&self, name: &str) -> Value {
+        let mut o = Map::new();
+        o.insert("module".into(), json!(name));
+        o.extend(self.fields());
         Value::Object(o)
     }
 }
@@ -152,10 +159,19 @@ pub(crate) fn run(reg: &[Box<dyn Module>], env: &Env, rest: &[String]) -> Result
         ([], Some(f)) => Want::Require(f),
         _ => return Err(usage()),
     };
-    match want {
-        Want::All => Ok(all(reg, env)),
+    let answer = match want {
+        Want::All => return Ok(all(reg, env)),
         Want::One(m) => one(reg, env, &m, json),
         Want::Require(f) => require_file(reg, env, &f, json),
+    };
+    // With --json a caller reads stdout, so an unknown module or an unreadable file is JSON there too (exit 1).
+    match answer {
+        Err(e) if json => Ok(Outcome {
+            code: 1,
+            out: vec![json!({ "ok": false, "error": e.to_string() }).to_string()],
+            err: Vec::new(),
+        }),
+        other => other,
     }
 }
 
@@ -163,12 +179,10 @@ fn all(reg: &[Box<dyn Module>], env: &Env) -> Outcome {
     // `--json` is the only way here (the plain status never gets this far), so it always prints JSON.
     let mut mods = Map::new();
     for m in reg {
-        let g = Gate::of(m.as_ref(), env);
-        let mut o = g.json(m.name());
-        if let Value::Object(o) = &mut o {
-            o.remove("module");
-        }
-        mods.insert(m.name().to_owned(), o);
+        mods.insert(
+            m.name().to_owned(),
+            Value::Object(Gate::of(m.as_ref(), env).fields()),
+        );
     }
     Outcome {
         code: 0,

@@ -56,9 +56,9 @@ expect "status MODULE fails when not switched" 1 "$REAL" kernel cutover status a
 expect "status with no arguments still exits 0" 0 "$REAL" kernel cutover status
 grep -q '^accounts: not switched$' "$T/out" && ok "and prints its lines as before" || bad "plain status changed: $(cat "$T/out")"
 expect "--json exits 0" 0 "$REAL" kernel cutover status --json
-grep -q '"accounts":{"ok":false,"state":"not switched"}' "$T/out" && ok "--json is on stdout" || bad "no json: $(cat "$T/out")"
+python3 -I -c 'import json,sys; d=json.load(sys.stdin)["modules"]["accounts"]; sys.exit(0 if d=={"state":"not switched","ok":False} else 1)' < "$T/out" && ok "--json is on stdout" || bad "no json: $(cat "$T/out")"
 expect "--json with a failing --require still prints to stdout" 1 "$REAL" kernel cutover status --require "$T/req.txt" --json
-grep -q '"ok":false' "$T/out" && ok "and says ok:false" || bad "json: $(cat "$T/out")"
+python3 -I -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["ok"] is False else 1)' < "$T/out" && ok "and says ok:false" || bad "json: $(cat "$T/out")"
 expect "a file that is not there fails" 1 "$REAL" kernel cutover status --require "$T/nope.txt"
 expect "--require without a file is a usage error" 1 "$REAL" kernel cutover status --require
 

@@ -82,12 +82,12 @@ fn status_module_exits_zero_only_when_switched() {
     let o = go(&reg, &env, &["fa"]);
     assert_eq!(o.code, 1);
     assert_eq!(o.err, vec!["fa: not switched; run: kith migrate step fa"]);
-    assert!(o.out.is_empty());
+    assert_eq!(o.out, Vec::<String>::new());
     switched(&env, "fa", 1_700_000_000);
     let o = go(&reg, &env, &["fa"]);
     assert_eq!(o.code, 0);
     assert_eq!(o.out, vec!["fa: switched (since 1700000000)"]);
-    assert!(o.err.is_empty());
+    assert_eq!(o.err, Vec::<String>::new());
     // The other module is still unswitched.
     assert_eq!(go(&reg, &env, &["fb"]).code, 1);
 }
@@ -150,6 +150,23 @@ fn an_unknown_module_is_an_error() {
     let (_t, env, reg) = setup(&["fa"]);
     let e = run_outcome_with(&reg, &env, &a(&["status", "nope"])).unwrap_err();
     assert!(e.to_string().contains("no module"), "{e}");
+    // With --json the same answer is on stdout, exit 1.
+    let o = go(&reg, &env, &["nope", "--json"]);
+    assert_eq!(o.code, 1);
+    assert_eq!(json(&o)["ok"], false);
+    assert!(json(&o)["error"].as_str().unwrap().contains("no module"));
+}
+
+#[test]
+fn another_modules_tombstone_does_not_finish_this_one() {
+    let (_t, env, reg) = setup(&["fa", "fb"]);
+    // fa's file holds fb's tombstone: not the tombstone `step fa` writes.
+    tombstone::ensure(&env.machine.join("fa-src.json"), "fb", 5).unwrap();
+    record(&env, "fa", Phase::Switched, 9);
+    assert_eq!(
+        json(&go(&reg, &env, &["fa", "--json"]))["state"],
+        "unfinished"
+    );
 }
 
 #[test]
@@ -168,6 +185,13 @@ fn json_lists_every_module_in_registry_order() {
         .collect();
     assert_eq!(names, ["fb", "fa", "fc"]);
     assert_eq!(j["modules"]["fb"]["state"], "not switched");
+    let keys: Vec<&str> = j["modules"]["fa"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys, ["state", "since", "ok"]);
     assert!(j["modules"]["fb"].get("since").is_none());
     assert_eq!(j["modules"]["fa"]["state"], "switched");
     assert_eq!(j["modules"]["fa"]["since"], 1_700_000_001);
@@ -182,7 +206,7 @@ fn json_for_one_module_goes_to_stdout_whatever_the_exit_code() {
     let (_t, env, reg) = setup(&["fa"]);
     let o = go(&reg, &env, &["fa", "--json"]);
     assert_eq!(o.code, 1);
-    assert!(o.err.is_empty());
+    assert_eq!(o.err, Vec::<String>::new());
     let j = json(&o);
     assert_eq!(
         (j["module"].as_str(), j["state"].as_str()),
@@ -248,7 +272,7 @@ fn require_json_reports_ok_and_each_module_on_stdout() {
     switched(&env, "fa", 1);
     let o = go(&reg, &env, &["--require", &f, "--json"]);
     assert_eq!(o.code, 1);
-    assert!(o.err.is_empty());
+    assert_eq!(o.err, Vec::<String>::new());
     let j = json(&o);
     assert_eq!(j["ok"], false);
     assert_eq!(j["required"][0]["ok"], true);
@@ -261,6 +285,9 @@ fn require_with_a_missing_file_fails() {
     let gone = t.path().join("nope.txt").display().to_string();
     let e = run_outcome_with(&reg, &env, &a(&["status", "--require", &gone])).unwrap_err();
     assert!(e.to_string().contains("nope.txt"), "{e}");
+    let o = go(&reg, &env, &["--require", &gone, "--json"]);
+    assert_eq!(o.code, 1);
+    assert!(json(&o)["error"].as_str().unwrap().contains("nope.txt"));
 }
 
 #[test]
