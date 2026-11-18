@@ -73,9 +73,9 @@ fn each_condition_refuses_on_its_own_and_names_itself() {
 }
 
 #[test]
-fn the_runner_flag_is_off_and_the_module_depends_on_claims() {
-    // Off until the temp-home end-to-end test PR: guest jobs, no-bot agents, kith-sched model/effort and host restarts.
-    const { assert!(!RUNS_FIRED_TURNS) };
+fn the_runner_flag_is_on_and_the_module_depends_on_claims() {
+    // On since the temp-home end-to-end test (`serve/host/tests/schedules_cutover_e2e.rs`); the checklist is on the flag.
+    const { assert!(RUNS_FIRED_TURNS) };
     assert_eq!(Schedules::new().depends_on(), ["claims"]);
 }
 
@@ -202,10 +202,11 @@ fn launchds_kith_sched_must_carry_the_tick_lock_marker() {
     let t = tempfile::tempdir().unwrap();
     let home = t.path();
     // Missing plist.
+    let missing = launchd_sched_locks(home).unwrap_err();
     assert!(
-        launchd_sched_locks(home)
-            .unwrap_err()
-            .contains("update kith first")
+        missing.contains("no kith-sched program found in")
+            && missing.ends_with("; run `kith-sched --install`"),
+        "{missing}"
     );
     // Through a `current` symlink, with the launcher words in front.
     let v = home.join("cli/v2/bin");

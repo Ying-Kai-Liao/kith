@@ -292,7 +292,11 @@ fn the_import_writes_each_triggers_next_run_as_its_anchor_and_decides_a_fired_on
             .get("anchor")
             .and_then(Value::as_i64)
     };
-    assert_eq!(anchor("daily"), Some(now + 3_600_000));
+    // A cron slot is a whole minute: the host's next run carries the sub-minute part of the clock it counted from.
+    assert_eq!(
+        anchor("daily"),
+        Some((now + 3_600_000).div_euclid(60_000) * 60_000)
+    );
     assert_eq!(
         find(&jobs, "daily")["routine"]["anchorTrigger"],
         find(&jobs, "daily")["trigger"],
@@ -303,7 +307,7 @@ fn the_import_writes_each_triggers_next_run_as_its_anchor_and_decides_a_fired_on
     assert_eq!(anchor("paused"), None, "a paused routine carries none");
     assert_eq!(
         anchor("multi-1"),
-        Some(now + 7_200_000),
+        Some((now + 7_200_000).div_euclid(60_000) * 60_000),
         "one anchor per trigger"
     );
     assert_eq!(
