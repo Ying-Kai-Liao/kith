@@ -12,7 +12,7 @@ set -euo pipefail
 
 # The commit at which the model was last read against the code below: transcripts P3, the cutover module. P1 (#1040) is the
 # core side, P2 (#1041) the Python side.
-SYNC=96429c4db8425fd7fb508b11fc50a3de61aa2c3f
+SYNC=553030268505e3fe9ab8386e763c90dff8074b81
 
 FILES=(
   kernel/bin/kith-sessions                        # record(): the hook, Files mode and Writer mode (spool, call, delete own)
