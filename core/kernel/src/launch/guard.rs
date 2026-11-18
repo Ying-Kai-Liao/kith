@@ -272,10 +272,13 @@ pub const SOFT_DENY: [&str; 5] = [
     "Never change a file that decides what later runs may do (any allowed.json, settings.json, capabilities.yaml, run/once, the agent's own package outside skills/learned, kith's protected paths, shell start-up files, LaunchAgents, folders on PATH) without the owner's yes.",
     "Never delete or overwrite anything outside the run's own writable folders and its working copy (rm -rf, git reset --hard, git clean, a disk tool) without the owner's yes.",
     "Never do something public or past the owner without the owner's yes: a force push or a push to main or master, a merge, a release, a publish or deploy, a network post, a message to anyone but the owner, spending money.",
-    "Never run code fetched from outside without the owner's yes: a package fetched and run (npx, uvx, dlx, pipx run), eval, or a download piped or substituted into a shell or interpreter.",
+    "Never run code fetched from outside without the owner's yes: a package fetched and run (npx, uvx, dlx, pipx run), eval, a download piped or substituted into a shell or interpreter, or a download saved to a file and then run.",
 ];
-/// The kernel's own `autoMode.allow` sentence for owner runs (guests get none): `OWNER_ALLOW` of `kith_guard.py`.
-pub const OWNER_ALLOW: &str = "Running scripts and inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc, a script file it wrote) is routine when it works on files in the agent's own folders, the run's scratch folder or the project the run works in.";
+/// The shells whose bare form, `-` and `-s` take their code from stdin (an ask rule each, as `SHELLS` of `kith_guard.py`).
+const SHELLS: [&str; 5] = ["bash", "sh", "zsh", "dash", "fish"];
+/// The kernel's own `autoMode.allow` sentence for owner runs (guests get none): `OWNER_ALLOW` of `kith_guard.py`. An allow
+/// sentence overrides soft_deny, so it is narrow and names what it does not cover.
+pub const OWNER_ALLOW: &str = "Running a script or inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc) is routine when it does nothing but read and write ordinary files in the agent's own folders, the run's scratch folder or the project the run works in. It covers no secret (a project .env, a key, a token), no trust file (.claude, .github, kith's protected paths, shell start-up files), no delete outside the run's own writable folders and its working copy, no network post and no code fetched from outside.";
 
 /// Where the trust and secret paths are for one run: `Places` of `kith_guard.py`.
 pub struct Places {
@@ -574,9 +577,19 @@ pub fn must_ask_rules(places: &Places) -> MustAsk {
     }
     ask_bash.push("Bash(wget * --post-*)".to_owned());
     ask_bash.push("Bash(wget --post-*)".to_owned());
-    // code: the package runners and eval. Inline code is the agent's own; a download piped into a shell is judged by
-    // must_ask and the classifier (a rule for a bare `sh` would also ask for the agent's own heredoc).
+    // code: the package runners and eval, and a shell that takes its code from stdin (bare, `-`, `-s`), so `curl .. | sh`
+    // is a rule-level ask. Inline code is the agent's own (python3 -c, bash -c, a heredoc), and a bare python or node
+    // stays off: the agent's own `python3 - <<EOF` would ask. must_ask (a remembered call) and the classifier judge the rest.
     ask_bash.extend(bash_rules(&CODE_CMDS, &[]));
+    for sh in SHELLS {
+        ask_bash.push(format!("Bash({sh})"));
+        ask_bash.push(format!("Bash({sh} -)"));
+        ask_bash.push(format!("Bash({sh} - *)"));
+        if sh != "fish" {
+            ask_bash.push(format!("Bash({sh} -s)"));
+            ask_bash.push(format!("Bash({sh} -s *)"));
+        }
+    }
     MustAsk {
         deny: dedup(deny),
         ask_files: dedup(ask_files),

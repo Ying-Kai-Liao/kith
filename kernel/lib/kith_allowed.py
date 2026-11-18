@@ -237,10 +237,14 @@ def _derive_bash(agent, tool_input):
         return no(WHY['destroy'])
     if first in NEVER_FIRST:
         return no('a command that runs another command is asked each time')
-    # Its leading flags: code the agent wrote itself (-c, -e, a heredoc) is routine; one with nothing after its flags runs
-    # whatever comes in on stdin.
+    # Its leading flags: code the agent wrote itself (-c, -e, a heredoc) is routine. One that takes its code from stdin is
+    # not: nothing after its flags (bash -l, python3 -u), or a `-` among them (python3 - arg), or a shell's -s (bash -s arg);
+    # asking its version or help is not.
     lead = list(itertools.takewhile(lambda w: w.startswith('-'), words[1:]))
-    stdin = len(words) == 1 or lead == words[1:] and any(w in ('-', '-s') for w in lead)
+    helps = any(w in ('--version', '-V', '--help', '-h') for w in lead)
+    redirected = any(w.startswith('<') for w in words[1:])   # a heredoc or a file is its stdin: that is the agent's own text
+    stdin = not redirected and (len(words) == 1 or (lead == words[1:] and not helps) or '-' in lead
+                                or (first in ('bash', 'sh', 'zsh', 'dash') and '-s' in lead))
     if first in RUNNERS and first not in PKG_ALWAYS and (stdin or any(w in ('-i', '-m') for w in lead)
                                                          or words[1:2] in (['exec'], ['run'])):
         return no('a bare shell or interpreter (it runs whatever comes in on stdin), or one told to run another program, '

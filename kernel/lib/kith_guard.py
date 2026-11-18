@@ -245,12 +245,17 @@ SOFT_DENY = {
                "master, a merge, a release, a publish or deploy, a network post, a message to anyone but the owner, "
                "spending money.",
     "code": "Never run code fetched from outside without the owner's yes: a package fetched and run (npx, uvx, dlx, "
-            "pipx run), eval, or a download piped or substituted into a shell or interpreter.",
+            "pipx run), eval, a download piped or substituted into a shell or interpreter, or a download saved to a "
+            "file and then run.",
 }
-# The kernel's own autoMode.allow sentence for owner runs (guests get none).
-OWNER_ALLOW = ("Running scripts and inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc, a script "
-               "file it wrote) is routine when it works on files in the agent's own folders, the run's scratch folder or "
-               "the project the run works in.")
+# The kernel's own autoMode.allow sentence for owner runs (guests get none). An allow sentence overrides soft_deny, so it
+# is narrow: code that only reads and writes ordinary files, and it names what it does not cover. It names the classes, so
+# sentence_class (the kith-pkg lint of a package's own sentences) would flag it; the kernel's own is not linted.
+OWNER_ALLOW = ("Running a script or inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc) is "
+               "routine when it does nothing but read and write ordinary files in the agent's own folders, the run's "
+               "scratch folder or the project the run works in. It covers no secret (a project .env, a key, a token), "
+               "no trust file (.claude, .github, kith's protected paths, shell start-up files), no delete outside the "
+               "run's own writable folders and its working copy, no network post and no code fetched from outside.")
 # What a sentence for autoMode.allow may not name (kith-pkg check).
 SENTENCE = {
     "secret": re.compile(r"(?i)\b(passwords?|tokens?|credentials?|keychain|api[ _-]?keys?|secrets?|logins?|sign[ -]?in)\b"),
@@ -418,6 +423,51 @@ def _segments(command):
     return [s for p in _pipelines(command) for s in p]
 
 
+OPERATORS = re.compile(r"\|\||\|&|&&|;;|[;&|()]")
+
+
+def _chains(command):
+    """The pipelines of a shell line as lists of stages. A stage is one member of a pipe and holds the simple commands it
+    runs (word lists): a group, `(curl ..)` or `{ curl ..; }`, is one stage with its commands, so a download in a group
+    still reaches the shell after it. `;`, `&`, `&&` and `||` end a chain outside a group."""
+    import shlex
+    lex = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|()<>")
+    lex.whitespace_split = True
+    try:
+        toks = list(lex)
+    except ValueError:
+        toks = command.replace("\n", " ; ").split()
+    chains, stages, stage, cur, depth = [], [], [], [], 0
+    for t in toks:
+        ops = OPERATORS.findall(t) if t and set(t) <= set(";&|()") else None
+        if ops is None:
+            if not cur and t in ("{", "}"):
+                depth = depth + 1 if t == "{" else max(depth - 1, 0)
+            else:
+                cur.append(t)
+            continue
+        for op in ops:
+            if cur:
+                stage.append(cur)
+                cur = []
+            if op in ("|", "|&"):
+                stages.append(stage)
+                stage = []
+            elif op == "(":
+                depth += 1
+            elif op == ")":
+                depth = max(depth - 1, 0)
+            elif depth == 0:
+                stages.append(stage)
+                chains.append(stages)
+                stages, stage = [], []
+    if cur:
+        stage.append(cur)
+    stages.append(stage)
+    chains.append(stages)
+    return [[s for s in c if s] for c in chains if any(c)]
+
+
 def _strip(words):
     """The command a segment runs: leading VAR=value words and wrappers (env, nohup, sudo, timeout N...) taken off."""
     w = list(words)
@@ -559,19 +609,26 @@ def _reads_code(words):
 # the command itself.
 FETCHED = re.compile(
     r"(?:(?:^|[\s;&|(])(?:\S*/)?(?:python[\d.]*|pypy\d*|node|deno|bun|ruby|perl|php|osascript|bash|sh|zsh|dash|fish|source|\.)"
-    r"(?:\s+-\S*)*\s+|(?:^|[;&|\n(])\s*)[\"']?(?:<\(|\$\(|`)\s*(?:\S*/)?(?:curl|wget)\b")
+    r"(?:\s+-\S*)*\s+(?:<{1,3}\s*)?|(?:^|[;&|\n(])\s*)[\"']?(?:<\(|\$\(|`)\s*(?:\S*/)?(?:curl|wget)\b")
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)(?:\n[ \t]*\2[ \t]*(?:\n|$)|\Z)", re.S)
 LITERAL = re.compile(r"'([^'\\\n]*(?:\\.[^'\\\n]*)*)'|\"([^\"\\\n]*(?:\\.[^\"\\\n]*)*)\"")
 PATHISH = re.compile(r"(?<![\w.$}~-])(?:~|\$HOME|\$\{HOME\})?/[\w.@+~-]+(?:/[\w.@+~-]+)*")
 
 
 def _heredoc_bodies(command):
-    """The heredoc text fed to an interpreter that is not a shell (a shell's heredoc lines are already read as commands)."""
+    """The heredoc text fed to an interpreter that is not a shell (a shell's heredoc lines are already read as commands):
+    the command the heredoc is given to, or a later one in the pipe it starts (`cat <<EOF | python3 -`)."""
     out = []
     for m in HEREDOC.finditer(command):
-        segs = _segments(command[:m.start()].rsplit("\n", 1)[-1])
+        start = command.rfind("\n", 0, m.start()) + 1
+        segs = _segments(command[start:m.start()])
         if segs and any(b not in SHELLS for b, _ in _runs(_strip(segs[-1]) or ["-"])):
             out.append(m.group(3))
+            continue
+        for chain in _chains(command[start:command.find("\n", m.start())]):
+            if any(_reads_code(w) and _runs(w)[0][0] not in SHELLS for st in chain[1:] for w in map(_strip, st) if w):
+                out.append(m.group(3))
+                break
     return out
 
 
@@ -629,27 +686,48 @@ def _bash(command, roots, places, depth=0):
     found = set()
     if FETCHED.search(command):
         found.add("code")
+    heredocs = _heredoc_bodies(command)
     if depth < 3:
-        for body in _heredoc_bodies(command):
+        for body in heredocs:
             found |= _judge_code(body, roots, places, depth)
-    for pipe in _pipelines(command):
-        fetched = False
-        for seg in pipe:
-            words = _strip(seg)
-            if fetched and words and _reads_code(words):
-                found.add("code")
-            if words and os.path.basename(words[0]) in ("curl", "wget"):
+    elif heredocs:
+        found.add("code")   # nested too deep to read: asked
+    for chain in _chains(command):
+        fetched, texts = False, []
+        for stage in chain:
+            cmds = [w for w in map(_strip, stage) if w]
+            for w in cmds:
+                if not _reads_code(w):
+                    continue
+                if fetched:
+                    found.add("code")   # a download into a shell or interpreter
+                for text in texts:   # echo/printf text into one: judged as the code it is
+                    if depth >= 3:
+                        found.add("code")
+                    elif _runs(w)[0][0] in SHELLS:
+                        found |= _bash(text, roots, places, depth + 1)
+                    else:
+                        found |= _judge_code(text, roots, places, depth)
+            if any(os.path.basename(w[0]) in ("curl", "wget") for w in cmds):
                 fetched = True
+            texts += [a for w in cmds if os.path.basename(w[0]) in ("echo", "printf")
+                      for a in w[1:] if not a.startswith("-")]
     for seg in _segments(command):
         words = _strip(seg)
         if not words:
             continue
+        shell, other = _inline_bodies(words)
+        if "<<<" in words[1:]:   # a here-string is the program's stdin: code when it takes its code from there
+            i = words.index("<<<")
+            if i + 1 < len(words) and _reads_code(words[:i]):
+                (shell if _runs(words[:i])[0][0] in SHELLS else other).append(words[i + 1])
         if depth < 3:
-            shell, other = _inline_bodies(words)
             for body in shell:
                 found |= _bash(body, roots, places, depth + 1)
             for body in other:
                 found |= _judge_code(body, roots, places, depth)
+        elif shell or other:
+            found.add("code")   # nested too deep to read: asked
         b = os.path.basename(words[0])
         if _starts(words, SECRET_CMDS):
             found.add("secret")
@@ -813,8 +891,13 @@ def must_ask_rules(places):
         ask_bash += ["Bash(curl * %s *)" % f.rstrip("*") if not f.endswith("*") else "Bash(curl * %s)" % f,
                      "Bash(curl %s *)" % f.rstrip("*") if not f.endswith("*") else "Bash(curl %s)" % f]
     ask_bash += ["Bash(wget * --post-*)", "Bash(wget --post-*)"]
-    # code: the package runners and eval. Inline code is the agent's own; a download piped into a shell is judged by
-    # must_ask and the classifier (a rule for a bare `sh` would also ask for the agent's own heredoc).
+    # code: the package runners and eval, and a shell that takes its code from stdin (bare, `-`, `-s`), so `curl .. | sh`
+    # is a rule-level ask. Inline code is the agent's own (python3 -c, bash -c, a heredoc), and a bare python or node
+    # stays off: the agent's own `python3 - <<EOF` would ask. must_ask (a remembered call) and the classifier judge the rest.
     ask_bash += _bash_rules(CODE_CMDS)
+    for sh in SHELLS:
+        ask_bash += ["Bash(%s)" % sh, "Bash(%s -)" % sh, "Bash(%s - *)" % sh]
+        if sh != "fish":
+            ask_bash += ["Bash(%s -s)" % sh, "Bash(%s -s *)" % sh]
     return {"deny": list(dict.fromkeys(deny)), "ask_files": list(dict.fromkeys(ask_files)),
             "ask_bash": list(dict.fromkeys(ask_bash)), "soft_deny": [SOFT_DENY[c] for c in CLASSES]}
