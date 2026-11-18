@@ -161,6 +161,7 @@ M4-3 is `core/runtime/src/schedules/fire.rs` (with `sync.rs`, the index). The ta
 | `FireOne` | `fire::fire` / `fire_in`: one `claim_tx` over `sched_fires` (unique per agent, job, slot) and the turn, steps 1-7 in the module header |
 | `AdHocFire` | `fire::run_now` and the webhook entry, `manual:<id>` / `event:<id>` slots, the answer to the caller (`Outcome::Busy` writes no key) |
 | `Edit`, `CancelPaused` | `sync::sync_in` (re-index on a hash change, `cancel_in` on every write with `paused`), `index` / `read_jobs` in `schedules/mod.rs` |
+| `Edit` by `kith schedule add\|rm\|pause\|resume` once switched | `schedules::edit` (`schedule.put`, `.drop`, `.setPaused`): the file write under the exclusive `<agent>.jobs.lock` (`jobs_io`) is the model's `Edit` (`Pause`, `Remove`), and `fire::settle` right after it is an early re-index: the same `sync_in`, so `CancelPaused` runs now instead of at the next fire. The lock is let go before the claim transaction (the fire takes it shared inside its own). A replaced job cancels nothing: a queued turn keeps what it captured when it fired |
 | `RevokeAuth`, `Grant` | authority tables (M2) |
 | `RevokePerson` | `revoke_person` (`claims.rs:673`): cancels queued and parked turns, ends live claims, bumps the epoch |
 | `Claim` (may check) | `claim` (`:246`), `revoke_epoch` (`:182`), `NewClaim::revoke_seen` (`:91`, checked `:273`), the deadline check in the claim's UPDATE (`:350`) |

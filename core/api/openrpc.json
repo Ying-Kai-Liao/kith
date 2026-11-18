@@ -11702,6 +11702,275 @@
       }
     },
     {
+      "name": "schedule.runs",
+      "summary": "The newest run of every job that has one (of one agent, or one job): what `kith schedule log` lists. Answers `{runs}`.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "Only this agent's.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "Only this job's.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "schedule.put",
+      "summary": "Add a job to an agent's jobs.json, or replace the one with that id (`kith schedule add`). The cron is checked as the fire reads it; `effort` is one of low, medium, high, xhigh, max; with no `id` it is a slug of the task. `person` is who the job runs as (the caller's person; none is the owner). Answers `{ok, agent, replaced, job}`, the job as `schedule.jobs` shows it.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cron",
+          "summary": "Five cron fields, or @hourly, @daily, @weekly, @monthly.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "task",
+          "summary": "What the run is asked to do.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job's id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "model",
+          "summary": "The model.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "effort",
+          "summary": "The effort.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "harness",
+          "summary": "The engine.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Who the job runs as.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "cron": {
+            "kind": "positional"
+          },
+          "task": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "model": {
+            "kind": "positional"
+          },
+          "effort": {
+            "kind": "positional"
+          },
+          "harness": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "schedule.drop",
+      "summary": "Remove a job from an agent's jobs.json (`kith schedule rm`); what it has waiting is cancelled. Answers `{ok, agent, id, changed}`.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "schedule.setPaused",
+      "summary": "Pause or resume a job (`kith schedule pause` and `resume`); pausing cancels what it has waiting. Answers `{ok, agent, id, changed}`.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "paused",
+          "summary": "True to pause, false to resume.",
+          "required": true,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "paused": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
       "name": "schedule.fire",
       "summary": "A webhook or event delivery for one job: checks the job's key (`Authorization: Bearer` or a GitHub-style `X-Hub-Signature-256` HMAC of the exact body, the key read from the secrets lane), the event against the job's trigger and filters, then fires through the same transaction as `schedule.runNow` with the slot `event:<hash of the delivery id>`, so a redelivery fires at most once. Answers `fired`, `busy` (retry), `ignored`, `ping`, `refused` (`unauthorized`, `paused`, `gone`, `invalid`) or what an earlier delivery of the same id decided. The body is UTF-8 text: the listener refuses a body that is not as `invalid` and never converts it lossily (a replaced byte would make a correct signature fail). The host calls it as itself with the real sender in `caller`; `caller` is only echoed in the answer, never used to decide anything, and M4-5 stores it with the fire row.",
       "params": [

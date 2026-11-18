@@ -6,9 +6,11 @@
 //! `schedule.jobs` is the store's listing: `schedule.list` is the existing
 //! `kith schedule ls --json` row (kernel, in `json_forms_more`), which stays as it is until the switch.
 //!
-//! The write rows (`schedule.add`, `.remove`, `.pause`, `.resume`, `.run`) already exist in `json_forms_more` as kernel
-//! rows and stay unserved by the core: nothing in the core writes a jobs.json, which `kith-sched` keeps to itself until
-//! M4-5. (`kith-sched` has no edit verb, so there is no `schedule.edit`.)
+//! The write rows (`schedule.add`, `.remove`, `.pause`, `.resume`, `.run`) exist in `json_forms_more` as the kernel's
+//! `kith schedule --json` forms and stay `kith-sched`'s own while the schedules are not switched. Once they are, `kith-sched`
+//! hands those verbs to the core through the rows below (`schedule.put`, `.drop`, `.setPaused`, `.runNow`, `.runs`, `.jobs`),
+//! which have no command line of their own: the old rows describe the CLI's shape, these are what it calls. (`kith-sched`
+//! has no edit verb, so there is no `schedule.edit`.)
 
 use super::build::*;
 
@@ -66,6 +68,56 @@ pub(super) const ROWS: &[Method] = &[
         ],
         &["schedule", "run-now"],
     ),
+    // The verbs of `kith schedule` once the schedules are the core's (`kith kernel core-call`; no command line of their own, the
+    // CLI formats the answers as `kith-sched` did). They edit the agent's jobs.json under its `.jobs.lock` and bring the index up
+    // to it in the same call, so a pause or a removal cancels the job's waiting turns at once.
+    read(
+        "schedule.runs",
+        "The newest run of every job that has one (of one agent, or one job): what `kith schedule log` lists. Answers `{runs}`.",
+        &[
+            pos("agent", "string", false, "Only this agent's."),
+            pos("id", "string", false, "Only this job's."),
+        ],
+        &[],
+    )
+    .no_cli(),
+    act(
+        "schedule.put",
+        "Add a job to an agent's jobs.json, or replace the one with that id (`kith schedule add`). The cron is checked as the fire reads it; `effort` is one of low, medium, high, xhigh, max; with no `id` it is a slug of the task. `person` is who the job runs as (the caller's person; none is the owner). Answers `{ok, agent, replaced, job}`, the job as `schedule.jobs` shows it.",
+        &[
+            pos("agent", "string", true, "The agent."),
+            pos("cron", "string", true, "Five cron fields, or @hourly, @daily, @weekly, @monthly."),
+            pos("task", "string", true, "What the run is asked to do."),
+            pos("id", "string", false, "The job's id."),
+            pos("model", "string", false, "The model."),
+            pos("effort", "string", false, "The effort."),
+            pos("harness", "string", false, "The engine."),
+            pos("person", "string", false, "Who the job runs as."),
+        ],
+        &[],
+    )
+    .no_cli(),
+    act(
+        "schedule.drop",
+        "Remove a job from an agent's jobs.json (`kith schedule rm`); what it has waiting is cancelled. Answers `{ok, agent, id, changed}`.",
+        &[
+            pos("agent", "string", true, "The agent."),
+            pos("id", "string", true, "The job."),
+        ],
+        &[],
+    )
+    .no_cli(),
+    act(
+        "schedule.setPaused",
+        "Pause or resume a job (`kith schedule pause` and `resume`); pausing cancels what it has waiting. Answers `{ok, agent, id, changed}`.",
+        &[
+            pos("agent", "string", true, "The agent."),
+            pos("id", "string", true, "The job."),
+            pos("paused", "bool", true, "True to pause, false to resume."),
+        ],
+        &[],
+    )
+    .no_cli(),
     // The host takes a webhook or event delivery at its listener and hands it over whole: the core checks the proof, the
     // event and the job, and fires. Not switched: the host's own routines keep deciding until M4-5.
     act(

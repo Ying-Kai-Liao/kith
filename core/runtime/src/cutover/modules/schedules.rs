@@ -47,7 +47,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use kith_kernel::paths::Paths;
 use kith_kernel::schedule::{Trigger, Zone};
@@ -62,6 +62,7 @@ use crate::cutover::state::{self, Phase};
 use crate::cutover::{Env, Module, Opts, SourceLock};
 use crate::db::Core;
 use crate::error::{Error, Result};
+use crate::schedules::jobs_io::{self, JobsLock, write_list};
 use crate::secrets::Envelope;
 use crate::secrets::keystore::KeyStore;
 
@@ -600,60 +601,9 @@ fn read_list(file: &Path) -> std::result::Result<Vec<Value>, String> {
     }
 }
 
-/// `jobs.json` replaced whole (a temp file in the same folder, synced, then renamed), as `kith-sched` writes it.
-fn write_list(file: &Path, jobs: &[Value]) -> Result<()> {
-    let io = |e: std::io::Error| Error::Io(format!("cutover: schedules: {}: {e}", file.display()));
-    let dir = file.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(dir).map_err(io)?;
-    let tmp = dir.join(format!(".jobs.json.{}.tmp", std::process::id()));
-    let mut body = serde_json::to_string_pretty(&Value::Array(jobs.to_vec()))
-        .map_err(|e| Error::Io(format!("cutover: schedules: {e}")))?;
-    body.push('\n');
-    {
-        use std::io::Write as _;
-        let mut f = std::fs::File::create(&tmp).map_err(io)?;
-        f.write_all(body.as_bytes()).map_err(io)?;
-        f.sync_all().map_err(io)?;
-    }
-    std::fs::rename(&tmp, file).map_err(io)
-}
-
-/// The exclusive side of `<machine>/sched/<agent>.jobs.lock`, the lock `kith-sched` edits under; let go on drop.
-struct JobsLock(#[allow(dead_code, reason = "held for its drop")] std::fs::File);
-
+/// The import waits [`LOCK_WAIT`] for another writer of the file; the writer and the lock are the one `kith schedule` uses.
 fn lock_jobs(machine: &Path, agent: &str) -> Result<JobsLock> {
-    use fs2::FileExt as _;
-    let dir = machine.join("sched");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| Error::Io(format!("cutover: schedules: {}: {e}", dir.display())))?;
-    let path = dir.join(format!("{agent}.jobs.lock"));
-    let f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| Error::Io(format!("cutover: schedules: {}: {e}", path.display())))?;
-    let until = Instant::now() + LOCK_WAIT;
-    loop {
-        match f.try_lock_exclusive() {
-            Ok(()) => return Ok(JobsLock(f)),
-            Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
-                if Instant::now() >= until {
-                    return Err(Error::Refused(format!(
-                        "cutover: schedules: {} is held by another writer (kith-sched?) for more than {}s; try again",
-                        path.display(),
-                        LOCK_WAIT.as_secs()
-                    )));
-                }
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(e) => {
-                return Err(Error::Io(format!(
-                    "cutover: schedules: {}: {e}",
-                    path.display()
-                )));
-            }
-        }
-    }
+    jobs_io::lock_jobs(machine, agent, LOCK_WAIT)
 }
 
 enum Verdict {
