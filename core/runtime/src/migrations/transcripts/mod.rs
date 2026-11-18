@@ -5,5 +5,9 @@
 use super::Migration;
 
 mod m0110_engine_sessions;
+mod m0111_session_records;
 
-pub(super) const STEPS: &[Migration] = &[m0110_engine_sessions::MIGRATION];
+pub(super) const STEPS: &[Migration] = &[
+    m0110_engine_sessions::MIGRATION,
+    m0111_session_records::MIGRATION,
+];

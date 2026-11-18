@@ -10,6 +10,7 @@ OneName = FALSE
 NsDrops = FALSE
 FileFrom = "row"
 ProjectRule = "reconcile"
+RowWrite = "conditional"
 Reconcile = TRUE
 MissingKey = "mtime"
 ExportRule = "newer"

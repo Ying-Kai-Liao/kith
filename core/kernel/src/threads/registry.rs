@@ -9,6 +9,9 @@ use serde_json::{Map, Value, json};
 
 use super::{Ctx, iso_utc, os, write_json};
 
+/// The marker in the registry folder once the `transcripts` module is stepped: the core writes `<sid>.json` from then on.
+pub const TOMBSTONE: &str = "registry.tombstone";
+
 /// The one-shot kinds `bin/kith` labels a run with (`KITH_RUN_KIND`).
 pub const ONE_SHOTS: [&str; 3] = ["ask", "schedule", "helper"];
 
@@ -116,6 +119,13 @@ pub fn record(c: &Ctx, stdin: &str) -> Result<(), String> {
     };
     if !listable(c, &cwd) {
         return Ok(());
+    }
+    // Once the transcripts are the core's (the step writes this marker) the core is the registry's only writer; this port
+    // is not routed to `session.record` yet, so it writes nothing.
+    if d.join(TOMBSTONE).exists() {
+        return Err(format!(
+            "the session registry is the core's ({TOMBSTONE}); not written here"
+        ));
     }
     let path = d.join(format!("{sid}.json"));
     let mut started = iso_utc();

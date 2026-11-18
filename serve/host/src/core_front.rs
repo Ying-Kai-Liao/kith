@@ -476,6 +476,8 @@ const CORE_CALL_METHODS: &[&str] = &[
     "claim.sweepPerson",
     "claim.list",
     "claim.epoch",
+    // the SessionStart hook's record once the transcripts are the core's (transcripts P1), see kernel/bin/kith-sessions
+    "session.record",
     "people.suspend",
     "people.undo",
     "people.removePerson",
@@ -606,6 +608,41 @@ fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
     }
 }
 
+/// `session.record` with no daemon (transcripts P1): an embedded core that takes the lock WITHOUT waiting. A held lock is
+/// exit 3 at once (nothing ran, the hook's spool entry stays for the daemon's drain): a hook has five seconds. No core file
+/// yet is exit 3 too: there is no core to be the registry's writer, so the hook keeps its entry. 0 answered (the answer may
+/// be a `refused` as data), 4 refused, 5 failed after it may have written.
+#[cfg(unix)]
+fn record_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
+    match kith_core::call_transcripts_embedded(folders, method, params) {
+        Ok(kith_core::EmbeddedCall::Answered(answer)) => {
+            println!("{answer}");
+            0
+        }
+        Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
+            eprintln!("no core db at {}: nothing recorded", dir.display());
+            3
+        }
+        Ok(kith_core::EmbeddedCall::Busy) => {
+            eprintln!("no core daemon answers, and another core holds the lock");
+            3
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            match e {
+                kith_core::Error::NoSuchMethod(_)
+                | kith_core::Error::BadParams(_)
+                | kith_core::Error::NotAllowed(_)
+                | kith_core::Error::NotServed(_)
+                | kith_core::Error::Refused(_)
+                | kith_core::Error::Stopped(_) => 4,
+                kith_core::Error::Io(_) => 5,
+                _ => 3,
+            }
+        }
+    }
+}
+
 /// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered (for the
 /// people.* writes with no daemon: ran in an embedded core, or `{"noCore":true}` when there is no core to update), 3 no
 /// daemon answers and nothing ran (the caller falls back), 4 refused, 5 lost after sending, 2 usage.
@@ -660,6 +697,8 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
         // The terminal methods need the daemon's sockets.
         kith_core::Reached::NoDaemon if kith_core::embedded(method) => core_call_embedded(&folders, method, &params),
+        #[cfg(unix)]
+        kith_core::Reached::NoDaemon if method == "session.record" => record_embedded(&folders, method, &params),
         kith_core::Reached::NoDaemon => {
             eprintln!("no core daemon answers");
             3

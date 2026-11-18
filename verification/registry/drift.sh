@@ -3,14 +3,16 @@
 #
 #   verification/registry/drift.sh        compares the working tree (so also uncommitted edits) with SYNC
 #
-# Prints the covered files that differ and a diff stat. No output of changed files = nothing to re-read.
+# With a difference it prints the covered files that differ from SYNC, a diff stat, untracked covered files and the commits
+# touching them since, and exits 1. With none it prints one line saying the model still describes them and exits 0.
+# Exit 2: SYNC is not in this clone.
 # After you have read the changes, updated RegistryStep.tla / base.consts if needed, and run.sh is as expected,
 # set SYNC below to the commit you checked (and in .claude/skills/registry-step/SKILL.md).
 set -euo pipefail
 
-# The model was written before the code (P0 of the transcripts cutover). At SYNC none of the Writer-mode code exists
-# yet; the first PR that lands it reads the model against it and moves SYNC.
-SYNC=06253be744095d5687d58b2d4849210c0b7b8af1
+# The commit at which the model was last read against the code below: transcripts P1 (#1040), the core side. The step's
+# module (cutover/modules/transcripts.rs) is pre-P3 at it; P3 reads the model against it and moves SYNC.
+SYNC=96429c4db8425fd7fb508b11fc50a3de61aa2c3f
 
 FILES=(
   kernel/bin/kith-sessions                        # record(): the hook, Files mode and Writer mode (spool, call, delete own)

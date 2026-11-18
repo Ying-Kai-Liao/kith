@@ -13,6 +13,8 @@
 //!   follows `CLAUDE_CONFIG_DIR` (kith-kernel's definition), so run the import with the owner's normal environment. A record whose `transcriptPath` is gone, or
 //!   under an account folder that was removed, still gets its row, with no hash.
 //! - `conversations.transcript_ptr/hash` (m0080) are left empty: `engine_sessions` is the source.
+//! - Each record is also kept whole in `session_records` (migration 111), replacing a row older than it by the one order
+//!   key (A6): the registry is the truth until the switch, and the core writes the files from these rows after it.
 //! - Not wired into `kith migrate`'s default run yet (M3-10).
 
 use std::path::Path;
@@ -27,7 +29,7 @@ use crate::error::{Error, Result};
 use crate::layout::Layout;
 use crate::transcripts::hash::CHANGED;
 use crate::transcripts::rows::{self, EngineSession};
-use crate::transcripts::{DEFAULT_ACCOUNT, Located, SessionPtr, engine_of, hash_session, locate};
+use crate::transcripts::{DEFAULT_ACCOUNT, SessionPtr, engine_of, hash_session};
 
 /// What was asked of the step.
 #[derive(Clone, Copy, Debug, Default)]
@@ -57,6 +59,9 @@ struct Record {
     defaulted: bool,
     cwd: String,
     transcript_path: String,
+    /// The whole record, for `session_records` (migration 111), and its file's modification time in ns.
+    raw: serde_json::Map<String, Value>,
+    mtime: i64,
 }
 
 fn text(v: &Value, key: &str) -> String {
@@ -95,10 +100,11 @@ fn read_records(dir: &Path) -> (Vec<Record>, Vec<String>, String) {
         sha.update(name.as_bytes());
         sha.update([0]);
         sha.update(&bytes);
-        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
-            skipped.push(format!("{name}: not JSON, skipped"));
+        let Ok(Value::Object(raw)) = serde_json::from_slice::<Value>(&bytes) else {
+            skipped.push(format!("{name}: not a JSON object, skipped"));
             continue;
         };
+        let v = Value::Object(raw.clone());
         let sid = text(&v, "sessionId");
         let stem = name.strip_suffix(".json").unwrap_or(&name);
         if !safe_id(&sid) || sid != stem {
@@ -121,6 +127,8 @@ fn read_records(dir: &Path) -> (Vec<Record>, Vec<String>, String) {
             defaulted,
             cwd: text(&v, "cwd"),
             transcript_path: text(&v, "transcriptPath"),
+            mtime: crate::transcripts::project::mtime_ns(&dir.join(&name)),
+            raw,
         });
     }
     let digest = sha.finalize().iter().fold(String::new(), |mut s, b| {
@@ -131,20 +139,9 @@ fn read_records(dir: &Path) -> (Vec<Record>, Vec<String>, String) {
     (records, skipped, digest)
 }
 
-/// Where a record's session is: the pointer it names, else where the engine keeps it; and the pointer text the row stores.
+/// Where a record's session is, and the pointer text the row stores ([`crate::transcripts::pointer`]).
 fn pointer_of(ctx: &Ctx<'_>, r: &Record) -> (Option<SessionPtr>, String) {
-    let ptr = SessionPtr::from_text(&r.transcript_path).or_else(|| {
-        match locate(ctx, &r.account, &r.sid) {
-            Located::Found(p) => Some(p),
-            Located::Missing | Located::NotHeld => None,
-        }
-    });
-    let pointer = match (&ptr, r.transcript_path.is_empty()) {
-        (Some(p), _) => p.text(),
-        (None, false) => r.transcript_path.clone(),
-        (None, true) => String::new(),
-    };
-    (ptr, pointer)
+    crate::transcripts::pointer(ctx, &r.account, &r.sid, &r.transcript_path)
 }
 
 /// The registry's sessions as the import would write them, but without reading any transcript (no hash, no size): what the
@@ -211,6 +208,38 @@ fn has_tables(c: &Connection) -> bool {
             )
             .is_ok_and(|n| n > 0)
         })
+}
+
+/// The record as its `session_records` row would take it, when the row is missing or older by the one order key (A6, A7;
+/// a file with no `recordedAt` by its mtime): the same newer-wins decision as `session.record`'s.
+fn newer_row(
+    c: &Connection,
+    r: &Record,
+) -> Result<
+    Option<(
+        serde_json::Map<String, Value>,
+        crate::transcripts::record::Key,
+    )>,
+> {
+    use crate::transcripts::record::{Tie, newer};
+    newer(c, &r.sid, r.raw.clone(), r.mtime, Tie::Strict)
+}
+
+/// Whether the record's `session_records` row is missing or older than it (migration 111; a core.db from before it
+/// has no such table, and a dry run then counts every record).
+fn record_stale(c: Option<&Connection>, r: &Record) -> Result<bool> {
+    let Some(c) = c else {
+        return Ok(true);
+    };
+    let has: i64 = c.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'session_records'",
+        [],
+        |row| row.get(0),
+    )?;
+    if has == 0 {
+        return Ok(true);
+    }
+    Ok(newer_row(c, r)?.is_some())
 }
 
 /// Which records need writing: `(conversation missing, session missing or different from the registry)`.
@@ -315,9 +344,9 @@ pub(crate) fn run_in(
             .ok()
             .filter(has_tables);
         let (mut would, mut same) = (0, 0);
-        for (_, s) in &sessions {
+        for ((_, s), r) in sessions.iter().zip(&records) {
             let (c, e) = missing(db.as_ref(), s)?;
-            if c || e {
+            if c || e || record_stale(db.as_ref(), r)? {
                 would += 1;
             } else {
                 same += 1;
@@ -340,18 +369,24 @@ pub(crate) fn run_in(
         taken = crate::start_with(layout, MIGRATIONS)?;
         &mut taken
     };
-    let todo: Vec<&(String, EngineSession)> = {
-        let mut v = Vec::new();
-        for item in &sessions {
-            let (c, e) = missing(Some(core.conn()), &item.1)?;
-            if c || e {
-                v.push(item);
-            }
+    let mut todo: Vec<&(String, EngineSession)> = Vec::new();
+    let mut whole: Vec<&Record> = Vec::new();
+    let mut touched = 0;
+    for (item, r) in sessions.iter().zip(&records) {
+        let (c, e) = missing(Some(core.conn()), &item.1)?;
+        let stale = record_stale(Some(core.conn()), r)?;
+        if c || e {
+            todo.push(item);
         }
-        v
-    };
-    rep.unchanged = sessions.len() - todo.len();
-    if todo.is_empty() {
+        if stale {
+            whole.push(r);
+        }
+        if c || e || stale {
+            touched += 1;
+        }
+    }
+    rep.unchanged = sessions.len() - touched;
+    if todo.is_empty() && whole.is_empty() {
         rep.lines.push(format!(
             "nothing to change: core.db already holds the {} session(s) of the registry",
             sessions.len()
@@ -366,6 +401,13 @@ pub(crate) fn run_in(
         add_conversation(&tx, s, agent, now)?;
         rows::put(&tx, s, now)?;
     }
+    // The whole record where the file is newer than its row (Python is the writer until the switch). Only the row: the
+    // engine session and the conversation were written just above, from the same record, with the hash read now.
+    for r in &whole {
+        if let Some((rec, key)) = newer_row(&tx, r)? {
+            crate::transcripts::record::put_row(&tx, &r.sid, &rec, &key)?;
+        }
+    }
     tx.execute(
         "INSERT INTO import_log (step, at, source, source_sha256, backup, summary) VALUES ('transcripts', ?1, ?2, ?3, ?4, ?5)",
         rusqlite::params![
@@ -373,17 +415,16 @@ pub(crate) fn run_in(
             dir.display().to_string(),
             sha,
             backup.display().to_string(),
-            format!("transcripts: {} session(s) imported", todo.len()),
+            format!("transcripts: {} session(s) imported", touched),
         ],
     )
     .map_err(Error::from)?;
     tx.commit()?;
     rep.backup = Some(backup);
-    rep.imported = todo.len();
+    rep.imported = touched;
     rep.changed = true;
     rep.lines.push(format!(
-        "transcripts: imported {} session(s); the registry and the transcripts were only read",
-        todo.len()
+        "transcripts: imported {touched} session(s); the registry and the transcripts were only read",
     ));
     Ok(rep)
 }

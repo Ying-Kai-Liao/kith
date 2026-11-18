@@ -32,6 +32,8 @@ CONSTANTS K1, K2, K3,     \* the session's three hooks, in order: "new" | "old" 
           FileFrom,       \* "row": the core writes the file from the row read back (MUST 2); "request": from the request
           ProjectRule,    \* "reconcile": the file write after a record is the reconcile of that sid (a newer file is
                           \* taken into the row first); "row": write the row over the file whatever the file holds
+          RowWrite,       \* "conditional": adopting a file into the row, or pruning a row, is decided inside the write
+                          \* (newer-wins upsert; delete only the row judged), A7. "blind": from what the look read
           Reconcile,      \* TRUE: the daemon reconciles rows and files every 60 s (MUST 1); FALSE: never
           MissingKey,     \* order key of a file with no recordedAt: "mtime" (its mtime) | "oldest" (older than anything)
           ExportRule,     \* export_back writes a row to its file: "newer" (only over an older file) | "different"
@@ -70,7 +72,7 @@ VARIABLES phase,      \* "files0" no step yet | "pre" stepping | "imp" imported 
 vars == <<phase, file, row, inbox, hpc, hkey, ans, jobs, rc, up, clock, oldKeys, made, spooled, consumed,
           pruneMark, crashes, prunes, backwards>>
 
-NoRc == [act |-> "none", v |-> 0]
+NoRc == [act |-> "none", v |-> 0, rs |-> 0]
 
 \* --- modes ------------------------------------------------------------------------------------------------------
 Tomb == phase \in {"tomb", "reread", "on", "rb"}
@@ -86,7 +88,7 @@ Newer(a, b) == Ok(a) > Ok(b)
 CoreSetFile(v) == /\ file' = v
                   /\ backwards' = (backwards \/ (v # 0 /\ v < file))
 
-LockHeld == (\E j \in jobs : j.st = "wr") \/ rc.act # "none"
+LockHeld == (\E j \in jobs : j.st \in {"wr", "adopt"}) \/ rc.act # "none"
 
 \* Spool writes and deletes by name: unique names, or one name per sid.
 SpoolWrite(e) == inbox' = IF OneName THEN {e} ELSE inbox \cup {e}
@@ -168,7 +170,7 @@ Call(i) ==
   /\ hpc[i] = "w_call"
   /\ made' = Made(i)     \* without write-ahead the record is handed off here
   /\ IF Serving
-       THEN /\ jobs' = jobs \cup {[src |-> "req", e |-> Entry(i), st |-> "txn", out |-> "none", r |-> 0]}
+       THEN /\ jobs' = jobs \cup {[src |-> "req", e |-> Entry(i), st |-> "txn", out |-> "none", r |-> 0, f |-> 0, rs |-> 0]}
             /\ UNCHANGED ans
      ELSE IF phase = "on"
        THEN UNCHANGED <<jobs, ans>>
@@ -222,18 +224,36 @@ Txn(j) ==
 \* What the record path writes into the file (MUST 2: from the row read back, also when the record lost as older).
 Target(j) == IF FileFrom = "request" THEN j.e.k ELSE row
 
-\* After the commit, under the per-sid lock: the file write. With ProjectRule "reconcile" a newer file (an old hook's)
-\* is taken into the row first; with "row" the row is written whatever the file holds.
+\* After the commit, under the per-sid lock: the file write. With ProjectRule "reconcile" the settle first looks at the
+\* file (and takes the lock); a newer file (an old hook's) is then adopted by ProjectAdopt, in a step of its own, as
+\* the code does (project.rs settle_with, A7). With "row" the row is written whatever the file holds.
 Project(j) ==
   /\ j \in jobs /\ j.st = "proj" /\ ~LockHeld
-  /\ IF ProjectRule = "reconcile" /\ Newer(file, row)
-       THEN /\ row' = file /\ UNCHANGED <<file, backwards>>
-            /\ jobs' = (jobs \ {j}) \cup {[j EXCEPT !.st = "done"]}
+  /\ IF ProjectRule = "reconcile"
+       THEN /\ jobs' = (jobs \ {j}) \cup {[j EXCEPT !.st = "adopt", !.f = file, !.rs = row]}
+            /\ UNCHANGED <<file, row, backwards>>
      ELSE IF FileWrite = "atomic"
        THEN /\ CoreSetFile(Target(j)) /\ UNCHANGED row
             /\ jobs' = (jobs \ {j}) \cup {[j EXCEPT !.st = "done"]}
      ELSE /\ UNCHANGED <<file, row, backwards>>
           /\ jobs' = (jobs \ {j}) \cup {[j EXCEPT !.st = "wr", !.r = Target(j)]}
+  /\ UNCHANGED <<phase, inbox, hpc, hkey, ans, rc, up, clock, oldKeys, made, spooled, consumed, pruneMark, crashes, prunes>>
+
+\* The adoption and the file write, after the look. The row is written by the record's own newer-wins upsert (a commit
+\* that landed since the look is kept) or, in the broken variant, from what the look read. Then the file is written from
+\* the row as it is now, unless the file is newer than that (swapped out and checked, FileWrite "atomic").
+Adopted(f, rs) == IF RowWrite = "conditional" THEN Newer(f, row) ELSE Newer(f, rs)
+ProjectAdopt(j) ==
+  /\ j \in jobs /\ j.st = "adopt"
+  /\ IF Adopted(j.f, j.rs)
+       THEN /\ row' = j.f /\ UNCHANGED <<file, backwards>>
+            /\ jobs' = (jobs \ {j}) \cup {[j EXCEPT !.st = "done"]}
+     ELSE /\ UNCHANGED row
+          /\ IF FileWrite = "atomic"
+               THEN /\ IF FileFrom = "row" /\ Newer(file, row) THEN UNCHANGED <<file, backwards>> ELSE CoreSetFile(Target(j))
+                    /\ jobs' = (jobs \ {j}) \cup {[j EXCEPT !.st = "done"]}
+               ELSE /\ UNCHANGED <<file, backwards>>
+                    /\ jobs' = (jobs \ {j}) \cup {[j EXCEPT !.st = "wr", !.r = Target(j)]}
   /\ UNCHANGED <<phase, inbox, hpc, hkey, ans, rc, up, clock, oldKeys, made, spooled, consumed, pruneMark, crashes, prunes>>
 
 \* Blind: the rename of what was looked at, later.
@@ -258,37 +278,46 @@ Finish(j) ==
 DrainStart(e) ==
   /\ Serving /\ e \in inbox
   /\ ~\E j \in jobs : j.src = "drain"
-  /\ jobs' = jobs \cup {[src |-> "drain", e |-> e, st |-> "txn", out |-> "none", r |-> 0]}
+  /\ jobs' = jobs \cup {[src |-> "drain", e |-> e, st |-> "txn", out |-> "none", r |-> 0, f |-> 0, rs |-> 0]}
   /\ UNCHANGED <<phase, file, row, inbox, hpc, hkey, ans, rc, up, clock, oldKeys, made, spooled, consumed, pruneMark, crashes, prunes, backwards>>
 
-\* The daemon's reconcile (MUST 1), under the per-sid lock: a file newer than its row goes into the row; a row whose
-\* file differs or is missing is written to the file.
+\* The daemon's reconcile (MUST 1), under the per-sid lock: a file newer than its row is adopted (a look here, the
+\* conditional write in RcFinish, A7); a row whose file differs or is missing is written to the file.
 Reconcile1 ==
   /\ Reconcile /\ Serving /\ ~LockHeld /\ file # row
   /\ IF Newer(file, row)
-       THEN /\ row' = file /\ UNCHANGED <<file, rc, backwards>>
+       THEN /\ rc' = [act |-> "adopt", v |-> file, rs |-> row] /\ UNCHANGED <<file, row, backwards>>
      ELSE IF FileWrite = "atomic"
        THEN /\ CoreSetFile(row) /\ UNCHANGED <<row, rc>>
-     ELSE /\ rc' = [act |-> "write", v |-> row] /\ UNCHANGED <<file, row, backwards>>
+     ELSE /\ rc' = [act |-> "write", v |-> row, rs |-> row] /\ UNCHANGED <<file, row, backwards>>
   /\ UNCHANGED <<phase, inbox, hpc, hkey, ans, jobs, up, clock, oldKeys, made, spooled, consumed, pruneMark, crashes, prunes>>
 
-\* The hourly prune in the core (kith-sched's rule: old and its pid gone), under the per-sid lock: the file and the
-\* row. Atomic: not while the file is newer than the row (that one is reconciled first).
+\* The hourly prune in the core (kith-sched's rule: old and its pid gone), under the per-sid lock: judges the row now
+\* (a look); RcFinish deletes the file and the row, the row only where its key is still the judged one. Not while the
+\* file is newer than the row (that one is reconciled first).
 CorePrune ==
   /\ Serving /\ ~LockHeld /\ prunes < MaxPrune /\ row # 0
   /\ prunes' = prunes + 1
-  /\ IF FileWrite = "atomic"
-       THEN /\ ~Newer(file, row)
-            /\ row' = 0 /\ file' = 0 /\ pruneMark' = Max2(pruneMark, row) /\ UNCHANGED rc
-     ELSE /\ rc' = [act |-> "prune", v |-> row] /\ UNCHANGED <<file, row, pruneMark>>
+  /\ (FileWrite = "atomic" => ~Newer(file, row))
+  /\ rc' = [act |-> "prune", v |-> row, rs |-> row] /\ UNCHANGED <<file, row, pruneMark>>
   /\ UNCHANGED <<phase, inbox, hpc, hkey, ans, jobs, up, clock, oldKeys, made, spooled, consumed, crashes, backwards>>
 
-\* Blind: the write or unlink after the look (the row is deleted only if it is still the one looked at).
+\* The write or unlink after the look.
 RcFinish ==
   /\ rc.act # "none"
   /\ IF rc.act = "write"
        THEN /\ CoreSetFile(rc.v) /\ UNCHANGED <<row, pruneMark>>
-     ELSE /\ file' = 0 /\ row' = (IF row = rc.v THEN 0 ELSE row) /\ pruneMark' = Max2(pruneMark, rc.v)
+     ELSE IF rc.act = "adopt"
+       THEN /\ UNCHANGED <<pruneMark>>
+            /\ IF Adopted(rc.v, rc.rs)
+                 THEN /\ row' = rc.v /\ UNCHANGED <<file, backwards>>
+               ELSE /\ UNCHANGED row
+                    /\ IF Newer(file, row) \/ file = row THEN UNCHANGED <<file, backwards>> ELSE CoreSetFile(row)
+     ELSE IF FileWrite = "atomic" /\ Newer(file, rc.v)
+       THEN UNCHANGED <<file, row, pruneMark, backwards>>
+     ELSE /\ file' = 0
+          /\ row' = (IF RowWrite = "conditional" /\ row # rc.v THEN row ELSE 0)
+          /\ pruneMark' = Max2(pruneMark, rc.v)
           /\ UNCHANGED backwards
   /\ rc' = NoRc
   /\ UNCHANGED <<phase, inbox, hpc, hkey, ans, jobs, up, clock, oldKeys, made, spooled, consumed, crashes, prunes>>
@@ -374,7 +403,7 @@ RollbackDone ==
 \* =================================================================================================================
 HookStep(i) == FilesWrite(i) \/ FilesHookDrain(i) \/ FilesRecheck(i) \/ Spool(i) \/ Call(i) \/ Answered(i)
                \/ TimeOut(i) \/ LateSpool(i) \/ OldWrite(i)
-CoreStep(j) == Txn(j) \/ Project(j) \/ ProjectWrite(j) \/ Finish(j)
+CoreStep(j) == Txn(j) \/ Project(j) \/ ProjectAdopt(j) \/ ProjectWrite(j) \/ Finish(j)
 StepProgress == Import \/ Tombstone \/ Reread \/ Switch \/ ExportBack \/ RollbackDone
 
 Next == \/ \E i \in Hooks : HookStart(i) \/ HookStep(i) \/ Kill(i)
@@ -430,5 +459,7 @@ NeverDrainedByCore == ~\E j \in jobs : j.src = "drain"
 NeverNotServing == \A i \in Hooks : ans[i] # "ns"
 NeverPruned == prunes = 0
 NeverInvalid == \A i \in Hooks : ans[i] # "invalid"
+\* The look of a settle, a reconcile or a prune is overtaken by a commit before its write (A7).
+NeverOvertaken == ~((\E j \in jobs : j.st = "adopt" /\ row # j.rs) \/ (rc.act \in {"adopt", "prune"} /\ row # rc.rs))
 NeverRacing == ~\E j1, j2 \in jobs : j1.src = "req" /\ j2.src = "drain"
 ====
