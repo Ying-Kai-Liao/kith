@@ -1,0 +1,2 @@
+\* rule K without the runner: nothing runs a fired turn
+Runner = FALSE

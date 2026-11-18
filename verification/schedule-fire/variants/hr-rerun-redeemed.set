@@ -1,0 +1,2 @@
+\* the runner re-runs a turn whose earlier claim was redeemed
+SkipRedeemed = FALSE
