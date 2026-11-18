@@ -39,16 +39,16 @@ use crate::error::Result;
 /// The spool folder under the registry (`inbox/<sid>.<recordedAt>.<pid>.json`); readers that glob `*.json` never see it.
 pub(crate) const INBOX: &str = "inbox";
 
-/// The order of two records of one session: `(recordedAt in ns, procStart)`, `None` sorting first. [`Key::of`] is the one
+/// The order of two records of one session: `(recordedAt in ns, procStart)`; a null or missing `procStart` is "" and a record with no `recordedAt` and no file is -1 (contract A10). [`Key::of`] is the one
 /// order key (contract A6): the record, the settle, the reconcile, the import and the rollback's export all use it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Key {
     pub at: i64,
-    pub proc_start: Option<String>,
+    pub proc_start: String,
 }
 
 impl Key {
-    /// A record's key; `fallback` stands for a missing `recordedAt` (the file's modification time, or 0).
+    /// A record's key; `fallback` stands for a missing `recordedAt` (the file's modification time, or -1 with no file).
     pub(crate) fn of(rec: &Map<String, Value>, fallback: i64) -> Self {
         let at = rec
             .get("recordedAt")
@@ -58,9 +58,9 @@ impl Key {
             })
             .unwrap_or(fallback);
         let proc_start = match rec.get("procStart") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(s)) => Some(s.clone()),
-            Some(other) => Some(other.to_string()),
+            None | Some(Value::Null) => String::new(),
+            Some(Value::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
         };
         Self { at, proc_start }
     }
@@ -122,9 +122,17 @@ pub(crate) fn row(conn: &Connection, sid: &str) -> Result<Option<(Map<String, Va
         )
         .optional()?;
     Ok(
-        got.and_then(|(text, at, proc_start)| match serde_json::from_str(&text) {
-            Ok(Value::Object(m)) => Some((m, Key { at, proc_start })),
-            _ => None,
+        got.and_then(|(text, at, proc_start): (String, i64, Option<String>)| {
+            match serde_json::from_str(&text) {
+                Ok(Value::Object(m)) => Some((
+                    m,
+                    Key {
+                        at,
+                        proc_start: proc_start.unwrap_or_default(),
+                    },
+                )),
+                _ => None,
+            }
         }),
     )
 }
@@ -346,7 +354,7 @@ pub(crate) fn call(core: &mut Core, params: &Value) -> Result<Value> {
         return Ok(not_serving("this core was opened without its folders"));
     };
     Ok(
-        match record_in(core, &ctx, &dir, params.get("record"), 0)? {
+        match record_in(core, &ctx, &dir, params.get("record"), -1)? {
             Ok(took) => took.answer(),
             Err(why) => invalid(why),
         },

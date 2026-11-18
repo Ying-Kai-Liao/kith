@@ -7,7 +7,7 @@
 //! - `record`: the record as JSON text, the same object `kith-sessions record` writes (plus `recordedAt` when it carried one).
 //! - `recorded_at`: the order key in nanoseconds since the epoch: the record's `recordedAt`, or for a record that had none
 //!   (a file written by an older hook) the file's modification time when it was read.
-//! - `proc_start`: the record's `procStart`, the order key's tiebreak (a string compare; NULL sorts first). A full tie is won by
+//! - `proc_start`: the record's `procStart`, the order key's tiebreak (a string compare; null or missing is "", contract A10). A full tie is won by
 //!   the record that arrives last, so no column holds the arrival.
 //! - `updated_at`: seconds, when the row last changed.
 

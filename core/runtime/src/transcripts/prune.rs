@@ -40,7 +40,7 @@ pub(crate) fn prune_once(
                 r.get(0)?,
                 Key {
                     at: r.get(1)?,
-                    proc_start: r.get(2)?,
+                    proc_start: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 },
             ))
         })?
@@ -59,7 +59,7 @@ pub(crate) fn prune_once(
             // Compare-and-delete (A7): only the row that was judged, by its whole key; a record that came in since keeps
             // its session. The session's lock file stays (A8: a flock lives on the file, never deleted).
             let n = tx.execute(
-                "DELETE FROM session_records WHERE sid = ?1 AND recorded_at = ?2 AND proc_start IS ?3",
+                "DELETE FROM session_records WHERE sid = ?1 AND recorded_at = ?2 AND COALESCE(proc_start, '') = ?3",
                 params![sid, key.at, key.proc_start],
             )?;
             tx.commit()?;

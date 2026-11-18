@@ -193,7 +193,7 @@ fn the_prune_deletes_only_the_row_it_judged() {
     let n = core
         .conn()
         .execute(
-            "DELETE FROM session_records WHERE sid = ?1 AND recorded_at = ?2 AND proc_start IS ?3",
+            "DELETE FROM session_records WHERE sid = ?1 AND recorded_at = ?2 AND COALESCE(proc_start, '') = ?3",
             rusqlite::params![SID, now - 8 * day, "e1"],
         )
         .unwrap();

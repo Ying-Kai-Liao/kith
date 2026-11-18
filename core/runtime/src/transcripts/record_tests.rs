@@ -195,12 +195,12 @@ fn the_newer_record_wins_and_ties_go_by_proc_start_then_arrival() {
     assert!(
         Key {
             at: 1,
-            proc_start: None
+            proc_start: String::new()
         } < Key {
             at: 1,
-            proc_start: Some(String::new())
+            proc_start: "a".into()
         },
-        "None sorts first"
+        "the empty procStart sorts first"
     );
 }
 
@@ -383,4 +383,33 @@ fn the_embedded_call_finds_no_core_on_a_fresh_install() {
     let out =
         call_transcripts_embedded(&paths(&m), "session.record", &json!({"record": {}})).unwrap();
     assert!(matches!(out, EmbeddedCall::NoCore(_)), "{out:?}");
+}
+
+/// Contract A10: every case under `kernel/tests/fixtures/registry-order/` (the files `kith_registry` runs too) has a strict
+/// winner by `(recordedAt else the file mtime else -1, procStart or "", arrival)`.
+#[test]
+fn the_shared_order_fixtures_pick_their_winner_by_key() {
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel/tests/fixtures/registry-order");
+    let mut n = 0;
+    for e in std::fs::read_dir(&root).unwrap().flatten() {
+        let path = e.path();
+        if path.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        let case: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let key = |side: &str| {
+            let rec = case[side].as_object().unwrap();
+            let mtime = case["mtime"][side].as_i64().unwrap_or(-1);
+            (
+                Key::of(rec, mtime),
+                case["arrival"][side].as_i64().unwrap_or(0),
+            )
+        };
+        assert_ne!(key("a"), key("b"), "{path:?}: no strict winner");
+        let winner = if key("a") > key("b") { "a" } else { "b" };
+        assert_eq!(winner, case["winner"].as_str().unwrap(), "{path:?}");
+        n += 1;
+    }
+    assert!(n >= 14, "only {n} order fixtures");
 }

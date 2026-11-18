@@ -91,7 +91,7 @@ pub(crate) fn mtime_ns(path: &Path) -> i64 {
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+        .map_or(-1, |d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
 }
 
 /// Writes `value` to `path` atomically: `.<name>.<pid>.tmp` beside it (0600), then a rename. The folder is made 0700 and
@@ -196,8 +196,8 @@ pub(crate) fn settle_with(
 fn key_of_row(conn: &Connection, sid: &str) -> Result<Key> {
     Ok(record::row(conn, sid)?.map_or(
         Key {
-            at: 0,
-            proc_start: None,
+            at: -1,
+            proc_start: String::new(),
         },
         |(_, k)| k,
     ))

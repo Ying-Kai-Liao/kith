@@ -3,7 +3,9 @@
 #
 #   verification/registry/drift.sh        compares the working tree (so also uncommitted edits) with SYNC
 #
-# Prints the covered files that differ and a diff stat. No output of changed files = nothing to re-read.
+# With a difference it prints the covered files that differ from SYNC, a diff stat, untracked covered files and the commits
+# touching them since, and exits 1. With none it prints one line saying the model still describes them and exits 0.
+# Exit 2: SYNC is not in this clone.
 # After you have read the changes, updated RegistryStep.tla / base.consts if needed, and run.sh is as expected,
 # set SYNC below to the commit you checked (and in .claude/skills/registry-step/SKILL.md).
 set -euo pipefail
