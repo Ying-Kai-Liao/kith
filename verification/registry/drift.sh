@@ -10,11 +10,11 @@ set -euo pipefail
 
 # The model was written before the code (P0 of the transcripts cutover). At SYNC none of the Writer-mode code exists
 # yet; the first PR that lands it reads the model against it and moves SYNC.
-SYNC=48ed39f13b7c71814a96fb59ea3a8be71a64333a
+SYNC=06253be744095d5687d58b2d4849210c0b7b8af1
 
 FILES=(
   kernel/bin/kith-sessions                        # record(): the hook, Files mode and Writer mode (spool, call, delete own)
-  kernel/lib/kith_registry.py                     # switched, record, spool, drain (P2)
+  kernel/lib/kith_registry.py                     # switched, order_key, valid, lock_at, spool, call, drain, sweep_temps (P2)
   kernel/bin/kith-sched                           # prune_terminal: skip in Writer mode, the Files-mode inbox drain
   core/runtime/src/transcripts                    # session.record (txn, per-sid file write), reconcile, drain, prune (P1)
   core/runtime/src/import/transcripts.rs          # import from files into rows

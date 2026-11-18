@@ -1,0 +1,3 @@
+Session registry records for the validator: the core (core/, transcripts P1) and kernel/lib/kith_registry.py
+both run every file here. A file is the record of the session id that is its name without .json (so
+sid-mismatch.json names another sid in its content). valid/ must be taken, invalid/ refused as invalid.

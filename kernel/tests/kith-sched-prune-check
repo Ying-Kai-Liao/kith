@@ -58,5 +58,53 @@ try:
     assert b2.exists() and c.exists() and e.exists()
 finally:
     live.kill(); live.wait()
-print('ok: run logs keep 50 or 30 days, auth.log rotates not truncates, terminal records keep live pids')
+
+# A10: the prune deletes under the sid's lock (live/terminal/locks/<sid>.lock, the hook's and the core's lock). A held lock
+# skips the record for the next prune; free again, it goes. A record made fresh again before the lock is had stays.
+held = mk(term / 'held-old.json', 10, '{"pid": %d}' % dead.pid)
+(term / 'locks').mkdir(exist_ok=True)
+holder = subprocess.Popen([sys.executable, '-c', 'import fcntl, sys, time; f = open(sys.argv[1], "w"); fcntl.flock(f, fcntl.LOCK_EX); print("held", flush=True); time.sleep(30)',
+                           str(term / 'locks' / 'held-old.lock')], stdout=subprocess.PIPE, text=True)
+try:
+    assert holder.stdout.readline().strip() == 'held'
+    t0 = time.monotonic()
+    ks.prune_terminal(term, now=now); assert held.exists(), 'a held lock: skipped'
+    assert time.monotonic() - t0 >= 0.8, 'it waited for the lock first'
+finally:
+    holder.kill(); holder.wait()
+ks.prune_terminal(term, now=now); assert not held.exists(), 'free again: pruned'
+assert (term / 'locks' / 'held-old.lock').exists(), 'the lock file stays'
+fresh = mk(term / 'fresh-again.json', 10, '{"pid": %d}' % dead.pid)
+real_lock = ks.kith_registry.lock_at
+def touching_lock(reg, sid, wait=1.0):   # a hook writes the record between the prune's first look and its lock
+    os.utime(fresh, (now, now)); return real_lock(reg, sid, wait)
+ks.kith_registry.lock_at = touching_lock
+try:
+    ks.prune_terminal(term, now=now); assert fresh.exists(), 'age read again under the lock'
+finally:
+    ks.kith_registry.lock_at = real_lock
+
+# the registry as prune() reaches it: $KITH_STATE/live/terminal (not KITH_MACHINE's). Files mode drains the spool first, then
+# prunes; Writer mode (the transcripts marker, or its switch file past stepping) touches nothing: the core prunes its own rows.
+state = tmp / 'state'; os.environ['KITH_MACHINE'] = str(tmp / 'machine')
+reg = state / 'live' / 'terminal'
+old_dead = mk(reg / 'old.json', 10, '{"pid": %d, "recordedAt": 1}' % dead.pid)
+spooled = mk(reg / 'inbox' / 'new.5.1.json', 0, '{"v": 1, "sessionId": "new", "recordedAt": 5, "pid": null}')
+bad_v = mk(reg / 'inbox' / 'badv.5.1.json', 0, '{"v": 2, "sessionId": "badv", "recordedAt": 5}')
+bad_p = mk(reg / 'inbox' / 'badp.5.1.json', 0, '{"v": 1, "sessionId": "badp", "recordedAt": 5, "person": "ann"}')
+mk(reg / 'registry.tombstone', 0, '{}')
+assert ks.prune_registry(state, now=now) == 0 and old_dead.exists() and spooled.exists(), 'Writer mode: nothing pruned or drained'
+(reg / 'registry.tombstone').unlink()
+sw = tmp / 'machine' / 'core' / 'cutover' / 'transcripts.switch'
+mk(sw, 0, 'state=switched\nat=1\n')
+assert ks.prune_registry(state, now=now) == 0 and old_dead.exists() and spooled.exists(), 'the switch file alone is Writer mode'
+sw.write_text('state=stepping\nat=1\n')
+assert ks.prune_registry(state, now=now) == 1, 'Files mode: the old dead record goes'
+assert not old_dead.exists() and not spooled.exists() and (reg / 'new.json').exists(), 'the spool entry was put in place first'
+assert not bad_v.exists() and not bad_p.exists() and not (reg / 'badv.json').exists() and not (reg / 'badp.json').exists(), \
+    'A5: entries the core would refuse are deleted, never placed'
+assert ks.STATE == ks.paths()['KITH_STATE']
+src_text = open(src).read()
+assert "prune_registry(STATE, t)" in src_text and "paths()['KITH_MACHINE'] / 'live' / 'terminal'" not in src_text
+print('ok: run logs keep 50 or 30 days, auth.log rotates not truncates, terminal records keep live pids, the registry pruned in KITH_STATE in Files mode only')
 PY
