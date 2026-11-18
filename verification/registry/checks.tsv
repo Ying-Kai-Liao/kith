@@ -17,6 +17,7 @@ missing-oldest	PROPERTY	Converges	fail
 project-row	PROPERTY	Converges	fail
 export-different	PROPERTY	Converges	fail
 blind-write	PROPERTY	Converges	fail
+blind-row-write	PROPERTY	Converges	fail
 # --- broken variants: each check removed must fail -----------------------------------------------------
 no-write-ahead	PROPERTY	Converges	fail
 one-name	INVARIANT	SpoolKept	fail
@@ -33,4 +34,5 @@ fixed	INVARIANT	NeverDrainedByCore	fail
 fixed	INVARIANT	NeverNotServing	fail
 fixed	INVARIANT	NeverPruned	fail
 fixed	INVARIANT	NeverRacing	fail
+fixed	INVARIANT	NeverOvertaken	fail
 bad	INVARIANT	NeverInvalid	fail

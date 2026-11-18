@@ -299,3 +299,27 @@ fn the_shared_registry_fixtures_are_taken_or_refused_as_their_folder_says() {
         }
     }
 }
+
+/// A killed hook leaves its spool temp file; once the Mac is switched the Python sweep no longer runs, so the drain deletes
+/// dot-names older than 300 s and leaves a younger one (a write in progress).
+#[test]
+fn the_drain_sweeps_old_spool_temp_files_and_keeps_a_young_one() {
+    let (_t, m) = machine();
+    let mut core = core(&m, true);
+    spool(&m, &format!(".{SID}.30.1.json.tmp"), &json!({}));
+    spool(&m, &format!(".{SID}.31.2.json.tmp"), &json!({}));
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(301);
+    std::fs::File::options()
+        .write(true)
+        .open(dir(&m).join(INBOX).join(format!(".{SID}.30.1.json.tmp")))
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    drain_once(&mut core, &ctx(&m), &dir(&m)).unwrap();
+    let left: Vec<String> = std::fs::read_dir(dir(&m).join(INBOX))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left, vec![format!(".{SID}.31.2.json.tmp")]);
+}

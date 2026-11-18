@@ -25,8 +25,8 @@ verification/registry/drift.sh                     # which covered files changed
 CI runs `run.sh` (job `registry-step`) on pull requests and pushes that touch `verification/registry/`, this skill,
 or the covered code. `run.sh` exits 0 only when every row of `checks.tsv` (variant, kind, property, expected) came out
 as expected; it is a copy of the holder-lease harness (pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE,
-cached under `${XDG_CACHE_HOME:-$HOME/.cache}/kith-verify/`). `fixed` has 110,140 states; the liveness row is the slow
-one (about 100 s). The whole table (29 rows) takes about four minutes on four workers here (47 s on CI). A row that changes exits 1:
+cached under `${XDG_CACHE_HOME:-$HOME/.cache}/kith-verify/`). `fixed` has 549,021 states; the liveness row is the slow
+one (about 100 s). The whole table (31 rows) takes about 90 s here. A row that changes exits 1:
 read this skill, do not edit the table to fit.
 
 ## What is modelled
@@ -109,9 +109,11 @@ Assumed by the model, required of the code (architect MUSTs on #1032, contract A
   the import, the re-read, export_back and both Python drains. Without it: a row adopted at mtime m is written back
   unstamped (mtime now), a hook's record k (m < k < now) commits, and the settle puts m back over k.
 - **Row writes are conditional (A7).** `Project`, `Reconcile1` and `CorePrune` read and write the row in one step
-  here, but `Txn` runs outside the per-sid lock, so in code a commit can land in between. Adopting a file is the same
-  newer-wins upsert as the record's txn, and the prune deletes a row only where its key is unchanged. When P1's code
-  lands, split those steps in the model (read, then conditional write) and check it still passes.
+  once, but `Txn` runs outside the per-sid lock, so in code a commit can land in between. Adopting a file is the same
+  newer-wins upsert as the record's txn, and the prune deletes a row only where its key is unchanged. The model now has
+  those steps split (a look under the lock, then the conditional write: `Project` and `ProjectAdopt`; `Reconcile1`,
+  `CorePrune` and `RcFinish` with the look in `rc`), and `RowWrite = "blind"` (`blind-row-write`) is the broken variant
+  that writes the row from what the look read.
 - **The per-sid lock is a file lock (A8)** on `live/terminal/locks/<sid>.lock`, also taken by the Files-mode hook
   write and both Python drains, so the look-then-rename window above is left only to old-kernel writers.
 
@@ -130,6 +132,7 @@ clearing deleted rows, `Reread` dropping a row whose file was pruned after the i
 | `contract-no-old` | the same with three new hooks | `Converges` (finding 3) |
 | `missing-oldest` / `project-row` / `export-different` | one fix undone | `Converges` |
 | `blind-write` | look, then a plain rename | `Converges` (the known window) |
+| `blind-row-write` | adopt or prune the row from what the look read (A7 undone) | `Converges` |
 | `no-write-ahead` | call first, spool on no answer | `Converges` (killed mid-call) |
 | `one-name` | one spool name per sid | `SpoolKept` |
 | `file-from-request` | the file from the request, not the row (MUST 2) | `NeverBackwards` |
@@ -143,7 +146,7 @@ record, a not-serving answer, a prune and an invalid answer. So a pass is not va
 
 ## Code to model
 
-The Python side (P2, #1041) is in; the core (P1) and the module (P3) are still planned. The PR that lands each part
+The Python side (P2, #1041) and the core (P1) are in; the module (P3) is still planned. The PR that lands each part
 fills in its rows and moves `SYNC`.
 
 | Model action | Code |
@@ -152,13 +155,16 @@ fills in its rows and moves `SYNC`.
 | `FilesHookDrain` | `kith_registry.drain` (and `sweep_temps`), called from `record()` in Files mode |
 | `Spool`, `Call`, `Answered`, `TimeOut`, `Kill` | `kith-sessions` `record_in_core()`: `kith_registry.spool`, `kith_registry.call` (3 s), delete its own entry on `recorded`/`older`/`invalid` |
 | `OldWrite` | an older kernel's `kith-sessions` record() (today's code at the sync commit) |
-| `Txn`, `Project`, `ProjectWrite`, `Finish` | (planned, P1) `core/runtime/src/transcripts/` session.record (daemon dispatch and embedded fallback) |
-| `DrainStart`, `Reconcile1`, `CorePrune`, `RcFinish` | (planned, P1) the daemon's start and 60 s pass, the hourly prune (`core/runtime/src/daemon.rs`, transcripts/) |
+| `Txn`, `Finish` | `core/runtime/src/transcripts/record.rs` `call` (the daemon's dispatch and the embedded fallback) -> `record_in` -> `commit_as` (the newer-wins upsert in one transaction) |
+| `Project`, `ProjectAdopt`, `ProjectWrite` | `transcripts/project.rs` `settle_with` under `with_lock`: the look at the file, then `commit_as(.., Tie::Strict)` (the conditional adopt), then the row read back and `write_atomic` (the rename; `ProjectWrite` is the known window, A4) |
+| `DrainStart` | `transcripts/reconcile.rs` `drain_once` (each spool entry through `record_in`, then deleted; it sweeps dot-temps older than 300 s), run by `transcripts/tick.rs` `pass` at start and every 60 s (`daemon.rs` spawns it) |
+| `Reconcile1`, `RcFinish` (adopt, write) | `reconcile.rs` `reconcile_once` -> `settle` (the same look and conditional adopt as above) |
+| `CorePrune`, `RcFinish` (prune) | `transcripts/prune.rs` `prune_once`: judges rows by `(recorded_at, proc_start)`, deletes with `recorded_at = ? AND COALESCE(proc_start,'') = ?` |
 | `Crash`, `Restart` | the daemon or the embedded core dies, comes back |
 | `SchedDrain`, `SchedPrune` | `kernel/bin/kith-sched` `prune_registry` (Files mode only: `kith_registry.drain`) and `prune_terminal` (deletes under `lock_at`, re-checks age and pid) |
 | `Begin`, `Import`, `Tombstone`, `Reread`, `Switch`, `Cancel` | (planned, P3) `core/runtime/src/cutover/modules/transcripts.rs` preflight, import (`import/transcripts.rs`), tombstones, before_tombstone, cancel_step |
 | `Rollback`, `ExportBack`, `RollbackDone` | (planned, P3) the framework's rollback, the module's export_back |
-| (refuses under the marker) | (planned, P1) `core/kernel/src/threads/registry.rs` record; today it writes `recordedAt` under `lock_at`'s flock, reached only by the difftest |
+| (refuses under the marker) | `core/kernel/src/threads/registry.rs` `record` (refuses once `registry.tombstone` exists) |
 
 Where the Python code differs from the model (the model allows more, so no action changes):
 - The drain takes one entry at a time under that sid's lock, reads the mode once at its start, and leaves an entry
@@ -179,7 +185,7 @@ Where the Python code differs from the model (the model allows more, so no actio
 4. A pass can have lost the ability to fail. Break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `06253be744095d5687d58b2d4849210c0b7b8af1` (#1041, the Python side; the core and module files at it are pre-P1 and match "planned").
+**Sync commit:** `SYNC_SHA` (transcripts P1, #1040: the core side; the module files at it are pre-P3 and match "planned").
 
 ## Map of the folder
 

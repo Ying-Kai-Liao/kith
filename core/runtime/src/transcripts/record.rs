@@ -20,7 +20,7 @@
 //! commit in one order and rename in the other.
 //!
 //! The order key is `(recordedAt, procStart)`, later wins, and a full tie goes to the record that arrives last. A record
-//! with no `recordedAt` (an older hook's file) is keyed by the file's `st_mtime_ns` where there is a file, else 0 (A1), and
+//! with no `recordedAt` (an older hook's file) is keyed by the file's `st_mtime_ns` where there is a file, else -1 (A1, A10), and
 //! the row stores that key as its `recordedAt`, so every file the core writes carries one (A6).
 //!
 //! `startedAt` survives a compact (`source: "compact"` keeps the row's `startedAt`), the rule `kith-sessions record` applied

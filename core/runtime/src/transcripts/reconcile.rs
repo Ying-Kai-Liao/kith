@@ -36,6 +36,28 @@ fn json_names(dir: &Path) -> Vec<String> {
     names
 }
 
+/// How old a spool write's temp file must be before the drain deletes it (a younger one may be a write in progress). The
+/// same 300 s as `kith_registry.sweep_temps`, which stops running once the Mac is switched, so in Writer mode this is the
+/// only sweep.
+const TEMP_AGE: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Deletes the inbox's dot-names (a killed hook's temp files) older than [`TEMP_AGE`].
+fn sweep_temps(inbox: &Path) {
+    let now = std::time::SystemTime::now();
+    for e in std::fs::read_dir(inbox).into_iter().flatten().flatten() {
+        let old = e.file_type().is_ok_and(|t| t.is_file())
+            && e.file_name().to_string_lossy().starts_with('.')
+            && e.metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| now.duration_since(t).ok())
+                .is_some_and(|age| age > TEMP_AGE);
+        if old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// A spool entry is the record itself; one wrapped as the call's params (`{record}`) is read too.
 fn unwrap_entry(v: Value) -> Value {
     match v {
@@ -65,6 +87,7 @@ pub(crate) struct Pass {
 pub(crate) fn drain_once(core: &mut Core, ctx: &Ctx<'_>, dir: &Path) -> Result<Pass> {
     let inbox = dir.join(INBOX);
     let mut pass = Pass::default();
+    sweep_temps(&inbox);
     for name in json_names(&inbox) {
         let path = inbox.join(&name);
         let Ok(bytes) = std::fs::read(&path) else {
