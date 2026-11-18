@@ -52,14 +52,15 @@ def marker_path(state):
     return Path(state) / 'live' / 'terminal' / MARKER if state else None
 
 
-def switch_file():
-    """`<machine>/core/cutover/claims.switch`, the claims module's own record (core/runtime/src/cutover/state.rs), or None."""
+def switch_file(module='claims'):
+    """`<machine>/core/cutover/<module>.switch`, a cutover module's own record (core/runtime/src/cutover/state.rs), or None.
+    kith_registry asks for `transcripts` the same way."""
     try:
         machine = os.environ.get('KITH_MACHINE')
         if not machine:
             from kith_paths import paths
             machine = str(paths()['KITH_MACHINE'])
-        return Path(machine) / 'core' / 'cutover' / 'claims.switch'
+        return Path(machine) / 'core' / 'cutover' / f'{module}.switch'
     except Exception:  # noqa: BLE001 — no way to look is no second source; the marker still decides
         return None
 
@@ -88,18 +89,25 @@ def lockable(sid):
     return bool(_LOCKABLE.match(sid or '')) and sid not in ('.', '..')
 
 
-def call(method, params):
-    """One owner call of the core. Returns the answer object; raises Refused (the core rejected it) or NoAnswer."""
+def call(method, params, timeout=None):
+    """One owner call of the core. Returns the answer object; raises Refused (the core rejected it) or NoAnswer.
+    No `timeout` (the claims callers): CALL_SECS to find the kith program, then CALL_SECS for the call, as before. A
+    `timeout` (seconds) bounds the whole call, finding the kith program included (a SessionStart hook has 5 s in all)."""
+    import time
+    end = time.monotonic() + timeout if timeout is not None else None
     try:
         from kith_paths import kith_bin
-        bin_ = kith_bin(budget=CALL_SECS)
+        bin_ = kith_bin(budget=timeout if timeout is not None else CALL_SECS)
     except Exception:  # noqa: BLE001 — no way to look is no answer
         bin_ = ''
     if not bin_:
         raise NoAnswer('no kith program to ask')
+    left = end - time.monotonic() if end is not None else CALL_SECS
+    if left <= 0:
+        raise NoAnswer('the core did not answer in time', 5)
     try:
         r = subprocess.run([bin_, 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(params),
-                           capture_output=True, text=True, timeout=CALL_SECS)
+                           capture_output=True, text=True, timeout=left)
     except subprocess.TimeoutExpired:
         raise NoAnswer('the core did not answer in time', 5)
     except OSError as e:

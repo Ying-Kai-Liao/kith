@@ -58,6 +58,7 @@ from pathlib import Path
 KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_launchd  # noqa: E402
+import kith_registry  # noqa: E402
 import kith_procstart  # noqa: E402
 import kith_runenv  # noqa: E402
 import kith_tombstone  # noqa: E402
@@ -555,23 +556,46 @@ def rotate_log(log, limit=AUTH_LOG_MAX):
 
 
 def prune_terminal(dirpath, now=None, days=TERMINAL_DAYS):
-    """Remove live/terminal/*.json records older than `days` whose pid is not running (no pid: treated as gone)."""
+    """Remove live/terminal/*.json records older than `days` whose pid is not running (no pid: treated as gone). Each one
+    under its sid's lock (contract A10, kith_registry.lock_at, the lock the hook's write and the core take): a lock not had
+    within a second skips the file for the next prune, and the age and pid are read again under the lock, so a record
+    written while this looked is never the one deleted. A name that is no session id has no writer to wait for."""
     now = now or time.time()
     gone = 0
+
+    def stale(f):
+        if now - f.stat().st_mtime < days * 86400:
+            return False
+        try:
+            pid = json.loads(f.read_text()).get('pid')
+        except (OSError, ValueError, AttributeError):
+            pid = None
+        return not running(pid)
+
     for f in Path(dirpath).glob('*.json'):
         try:
-            if now - f.stat().st_mtime < days * 86400:
+            if not stale(f):
                 continue
-            try:
-                pid = json.loads(f.read_text()).get('pid')
-            except (OSError, ValueError, AttributeError):
-                pid = None
-            if running(pid):
+            sid = f.name[:-len('.json')]
+            if not kith_registry.safe_id(sid):
+                f.unlink(); gone += 1
                 continue
-            f.unlink(); gone += 1
+            with kith_registry.lock_at(dirpath, sid) as held:
+                if held and stale(f):
+                    f.unlink(); gone += 1
         except OSError:
             pass
     return gone
+
+
+def prune_registry(state, now=None):
+    """The session registry's housekeeping, in $KITH_STATE/live/terminal (where kith-sessions writes it and the host reads it).
+    Once it is the core's (kith_registry.switched) nothing here: the core prunes its rows and their files. In Files mode a
+    spool entry left by a Writer-mode hook (before a rollback) is put in place first when newer, then old records go."""
+    if kith_registry.switched(state):
+        return 0
+    kith_registry.drain(state)
+    return prune_terminal(kith_registry.reg_dir(state), now)
 
 
 def prune(force=False):
@@ -610,7 +634,7 @@ def _prune(force):
     prune_runs(LOGS / 'runs', busy, t)
     auth = Path(os.environ.get('KITH_AUTH') or paths()['KITH_SECRETS'] / 'auth.json').with_name('auth.log')
     rotate_log(auth)
-    prune_terminal(paths()['KITH_MACHINE'] / 'live' / 'terminal', t)
+    prune_registry(STATE, t)
 
 
 def tick():

@@ -160,7 +160,46 @@ pub fn record(c: &Ctx, stdin: &str) -> Result<(), String> {
             .filter(|_| kind.as_deref() != Some("terminal"))
             .and_then(os::proc_start)),
     );
+    // The order key of the registry's records (kernel/lib/kith_registry.py, the transcripts contract): nanoseconds since the epoch.
+    let ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
+    put("recordedAt", json!(ns));
+    let _held = sid_lock(&d, &sid); // not had within 1 s: the write goes on as before (fail open), as kith-sessions
     write_json(&path, &Value::Object(entry), true).map_err(|e| e.to_string())
+}
+
+/// The registry's per-sid lock (transcripts contract A8; `kith_registry.sid_lock`, the core's settle takes it too): an
+/// exclusive flock on `<reg>/locks/<sid>.lock` (folder 0700, file 0600, never deleted), waited for at most 1 s. `None`
+/// when it was not had (held past the wait, a sid that is no file name, or no way to open it).
+fn sid_lock(reg: &Path, sid: &str) -> Option<std::fs::File> {
+    use fs2::FileExt;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    if sid.is_empty()
+        || sid.len() > 64
+        || !sid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return None;
+    }
+    let dir = reg.join("locks");
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(dir.join(format!("{sid}.lock")))
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while f.try_lock_exclusive().is_err() {
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Some(f)
 }
 
 /// A registry file's content, `{}` when it is missing or damaged.

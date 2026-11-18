@@ -1710,6 +1710,9 @@
  },
  {
   "name": "threads-record-terminal",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -1745,6 +1748,9 @@
  },
  {
   "name": "threads-record-resumed",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -1781,6 +1787,9 @@
  },
  {
   "name": "threads-record-oneshot-ask",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -1815,6 +1824,9 @@
  },
  {
   "name": "threads-record-oneshot-schedule-and-helper",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -1848,6 +1860,9 @@
  },
  {
   "name": "threads-record-helper-label",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -1882,6 +1897,9 @@
  },
  {
   "name": "threads-record-not-listed",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -1918,6 +1936,9 @@
  },
  {
   "name": "threads-record-hidden",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -1954,6 +1975,9 @@
  },
  {
   "name": "threads-record-host-run",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -1990,6 +2014,9 @@
  },
  {
   "name": "threads-record-unknown-run-kind",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -2023,6 +2050,9 @@
  },
  {
   "name": "threads-record-no-agent",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -2055,6 +2085,9 @@
  },
  {
   "name": "threads-record-worktree",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -2090,6 +2123,9 @@
  },
  {
   "name": "threads-record-no-session-id",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -2125,6 +2161,9 @@
  },
  {
   "name": "threads-record-compact-keeps-start",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -2165,6 +2204,9 @@
  },
  {
   "name": "threads-record-non-ascii",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -2200,6 +2242,9 @@
  },
  {
   "name": "threads-record-bad-json",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
@@ -2236,6 +2281,9 @@
  },
  {
   "name": "threads-record-finds-nothing-above",
+  "mask_keys": [
+   "recordedAt"
+  ],
   "command": "threads",
   "needs": "rust",
   "program": {
