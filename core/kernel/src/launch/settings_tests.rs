@@ -252,6 +252,50 @@ fn guest_needs_a_new_enough_claude_code() {
 }
 
 #[test]
+fn guest_without_a_readfence_program_does_not_run() {
+    let t = Tree::new();
+    let p = t.paths();
+    let home = t.root.join("home");
+    let src_pkg = t.root.join("kith/agents/echo/role");
+    let kernel = t.root.join("kernel");
+    let member = t.guest("sam", "default");
+    let env = |_: &str| None;
+    let cwd = home.to_string_lossy().into_owned();
+    let files = settings::Folders::new(&p, &src_pkg, "echo", &member);
+    settings::prepare_folders(&p, &files, &member).unwrap();
+    let e = settings::build(&Input {
+        agent: "echo",
+        paths: &p,
+        kernel: &kernel,
+        src_pkg: &src_pkg,
+        pkg: &src_pkg,
+        member: &member,
+        claude: true,
+        caller_mode: "",
+        project: "",
+        project_dirs: &[],
+        cwd: &cwd,
+        user_home: &home,
+        kith_bin: Some("/usr/local/bin/kith"),
+        fence_bin: None,
+        plugins_json: "[]",
+        owner_terminal: false,
+        api_helper: "",
+        once_id: "x",
+        developer_dir: "",
+        ctmp: "",
+        claude_version: Some("2.1.309"),
+        guest_domains: Ok(&[]),
+        env: &env,
+    })
+    .err()
+    .unwrap();
+    assert_eq!(e.code, 3);
+    assert!(e.message.contains("readfence"));
+    assert!(!e.message.contains("kith_readfence.py"));
+}
+
+#[test]
 fn guest_work_dir_is_never_the_home_folder() {
     let t = Tree::new();
     let p = t.paths();
