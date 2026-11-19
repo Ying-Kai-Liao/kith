@@ -775,11 +775,13 @@ jobs:
 
   # The kernel checks that need the kith program: `bin/project-id` is a stub for `kith kernel project-id`, so a check that registers
   # or looks up a project (kith project, a launch with -p) or the guest client itself runs against the built program. The shards
-  # above have none. Runs on any kernel change, like them; only the one `kith` binary is built (the host's cache is restored).
+  # above have none. Runs on any kernel change, like them, and on any change to the program; only the one `kith` binary is built
+  # (the host's cache is restored).
   kernel-program:
     name: kernel checks with the kith program
     needs: changes
-    if: needs.changes.outputs.kernel == 'true'
+    # Also on a change to the program itself (core/kernel/src/project, serve/host/src/main.rs): host-build does not run these.
+    if: needs.changes.outputs.kernel == 'true' || needs.changes.outputs.host_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

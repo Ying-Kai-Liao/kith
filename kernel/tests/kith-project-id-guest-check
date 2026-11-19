@@ -256,12 +256,12 @@ PY
     fakehost 1
     (cd "$T/w" && srt --settings "$S/srt-closed.json" -c "env -i PATH=/usr/bin:/bin HOME='$S/home' KITH_BIN='$GBIN' KITH_RUN_TOKEN=good KITH_RUN_SOCKET='$SOCK' '$P'" >"$T/out" 2>"$T/err"); rc=$?
     kill $FH 2>/dev/null; wait $FH 2>/dev/null
-    check "under srt without the program's folder open: no answer (so the check proves something)" "[ $rc != 0 ] && ! said alpha"
+    check "under srt without the program's folder open: the program could not start (exit 3, was not found)" "[ $rc = 3 ] && ! said alpha && grep -q 'was not found' $T/err"
   fi
   # Without the opening the same run fails: this is what the launch's allowRead is for.
   grep -v "$S/kh/cli" "$S/guest.sb" > "$S/closed.sb"
   (cd "$T/w" && sandbox-exec -f "$S/closed.sb" env -i PATH=/usr/bin:/bin HOME="$S/home" KITH_BIN="$GBIN" KITH_RUN_TOKEN=good KITH_RUN_SOCKET="$SOCK" "$P" >"$T/out" 2>"$T/err"); rc=$?
-  check "the same run without the program's folder open: no answer (so the check proves something)" "[ $rc != 0 ] && ! said alpha"
+  check "the same run without the program's folder open: no answer (this stand-in profile is crude about the working folder; the srt run below says why)" "[ $rc != 0 ] && ! said alpha"
 fi
 
 echo
