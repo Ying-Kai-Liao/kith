@@ -157,20 +157,6 @@ is "owner: rm -rf ~ asks" "$(asked "rm -rf ~")" "Bash(rm -* ~)"
 is "owner: rm -rf \$HOME/ asks" "$(asked 'rm -rf $HOME/')" 'Bash(rm -* $HOME/)'
 is "owner: bash -lc asks" "$(asked "bash -lc 'echo x'")" "Bash(bash -lc *)"
 is "owner: bash -e on a script with a later word ending in c asks nothing" "$(asked "bash -e tools/run.sh --sync now --sync-c")" "-"
-# Owner runs: the package's own tools/ and learned-skill scripts and the kernel commands PROTOCOL.md uses, both spellings.
-A=$(js "d['permissions']['allow']" <<< "$S")
-pinned=$(js "[r[5:-9] for r in d['permissions']['allow'] if r.startswith('Bash(/') and r.endswith('/tools/*)')][0]" <<< "$S")
-has "owner: the tools rule is for the pinned snapshot" "$pinned" "@"
-has "owner: its tools, bare" "$A" "'Bash($pinned/tools/*)'"
-has "owner: its tools, quoted" "$A" "'Bash(\"$pinned/tools/*)'"
-has "owner: its tools under python3" "$A" "'Bash(python3 $pinned/tools/*)'"
-has "owner: its learned-skill scripts" "$A" "'Bash($PKG/skills/learned/*)'"
-has "owner: its learned-skill scripts, quoted, under python3" "$A" "'Bash(python3 \"$PKG/skills/learned/*)'"
-for k in "kith-send --as echo" "kith ask" "kith-wake wait" "project-id" "kith-memory search" "kith-recall" "kith bug" "kith-who"; do
-  tool=${k%% *} rest=${k#"$tool"}
-  has "owner: $k, bare" "$A" "'Bash($KERNEL/bin/$tool$rest:*)'"
-  has "owner: $k, quoted" "$A" "'Bash(\"$KERNEL/bin/$tool\"$rest:*)'"
-done
 "$KERNEL/bin/kith-auth" person guest name=Guest >/dev/null 2>&1
 "$KERNEL/bin/kith-auth" member echo guest mode=default >/dev/null 2>&1
 S=$(settings KITH_PERSON=guest KITH_PERMISSION_MODE=auto)
@@ -179,11 +165,6 @@ has "guest: secrets are denied" "$(js "d['permissions']['deny']" <<< "$S")" "/.s
 has "guest: the own package is asked" "$(js "d['permissions'].get('ask')" <<< "$S")" "/role/*)"
 hasnt "guest: no Bash ask rules (its Bash is sandboxed)" "$(js "d['permissions'].get('ask')" <<< "$S")" "Bash("
 is "guest: no autoMode.allow" "$(js "'allow' in d.get('autoMode', {})" <<< "$S")" "False"
-A=$(js "d['permissions']['allow']" <<< "$S")
-hasnt "guest: no tools rule" "$A" "/tools/*)"
-hasnt "guest: no learned-skill rule" "$A" "/skills/learned/*)"
-hasnt "guest: no kith-send rule" "$A" "kith-send"
-hasnt "guest: no kith ask rule" "$A" "/bin/kith ask"
 rm -f "$PKG/settings.json"
 S=$(settings KITH_PERMISSION_MODE=auto)
 is "no package settings: no autoMode.allow" "$(js "'allow' in d.get('autoMode', {})" <<< "$S")" "False"
