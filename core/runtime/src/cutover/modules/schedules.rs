@@ -165,6 +165,7 @@ impl Schedules {
             serves_rows: gate::serves_rows(),
             launchd: gate::launchd_runs_this_build(&gate::user_home(env)),
             sched_locks: gate::launchd_sched_locks(&gate::user_home(env)),
+            holder: gate::launchd_has_holder(&gate::user_home(env)),
         })
     }
 
