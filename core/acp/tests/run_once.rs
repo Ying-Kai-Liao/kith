@@ -22,6 +22,7 @@ fn spec(env: &[(&str, &str)]) -> RunSpec {
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect(),
         model: None,
+        modes: Vec::new(),
         mcp_servers: json!([]),
         task: "say hi".into(),
         timeout: Duration::from_secs(20),
@@ -58,6 +59,61 @@ async fn the_model_and_mcp_servers_reach_the_session() {
     let _ = std::fs::remove_file(&log);
     assert!(text.contains(r#""modelId": "fast-1""#), "{text}");
     assert!(text.contains(r#""name": "m""#), "{text}");
+}
+
+/// The `session/set_mode` ids an agent listing `listed` got for a run asking `modes`.
+async fn modes_set(name: &str, listed: &str, modes: &[&str]) -> Vec<String> {
+    let log = std::env::temp_dir().join(format!("kith-acp-{name}-{}", std::process::id()));
+    let mut s = spec(&[
+        ("FAKE_ACP_LOG", log.to_str().unwrap()),
+        ("FAKE_ACP_MODES", listed),
+    ]);
+    s.modes = modes.iter().map(|m| (*m).to_owned()).collect();
+    assert_eq!(run_once(s).await.unwrap().text, "echo: say hi");
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    text.lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .filter(|m| m["method"] == "session/set_mode")
+        .map(|m| m["params"]["modeId"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn the_session_is_set_to_the_first_asked_mode_the_agent_lists() {
+    let listed = "agent,read-only,workspace-write,agent-full-access";
+    assert_eq!(
+        modes_set("mode-full", listed, &["agent-full-access", "full-access"]).await,
+        ["agent-full-access"]
+    );
+    assert_eq!(
+        modes_set(
+            "mode-older",
+            "auto,full-access",
+            &["agent-full-access", "full-access"]
+        )
+        .await,
+        ["full-access"]
+    );
+}
+
+#[tokio::test]
+async fn a_session_whose_agent_lists_none_of_the_modes_runs_as_it_started() {
+    assert!(
+        modes_set("mode-none", "agent", &["workspace-write"])
+            .await
+            .is_empty()
+    );
+    assert!(
+        modes_set("mode-unlisted", "", &["workspace-write"])
+            .await
+            .is_empty()
+    );
+    assert!(
+        modes_set("mode-unasked", "agent,workspace-write", &[])
+            .await
+            .is_empty()
+    );
 }
 
 /// The params the agent got in `session/new` for a run with these extra folders.

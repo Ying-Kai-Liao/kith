@@ -4,7 +4,7 @@
 
 use anyhow::{Result, anyhow, bail};
 use kith_acp::{Failure, FailureKind, RunSpec, depleted, needs_sign_in};
-use kith_kernel::engines::{self, Oneshot};
+use kith_kernel::engines::{self, Oneshot, Reach};
 use serde_json::{Value, json};
 use std::io::Read as _;
 use std::path::PathBuf;
@@ -82,6 +82,12 @@ pub async fn run(a: Args) -> Result<i32> {
         dirs: a.dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect(),
         env: Vec::new(),
         model: a.model,
+        // Native codex one-shots were workspace-write, or bypass with `--approve`; asks reach `handle`, which refuses
+        // them without it.
+        modes: engines::session_modes(engine.id, if a.approve { Reach::Full } else { Reach::Workspace })
+            .iter()
+            .map(|m| (*m).to_owned())
+            .collect(),
         mcp_servers,
         task,
         timeout: Duration::from_secs(a.timeout),

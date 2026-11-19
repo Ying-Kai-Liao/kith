@@ -2,7 +2,7 @@
 # kith-run-once-cost-check — a one-shot over ACP that crashes or times out still reports what the engine had spent:
 # `kith kernel run-once --json` puts cost_usd in its error, harness.py takes it into the result (total_cost_usd), so
 # kith ask settles it and a delegation's cap counts it. An older host binary sends none: no cost, no crash.
-# Also: a codex one-shot runs over its registry adapter with its MCP servers by name; `kith kernel accounts` notes
+# Also: a codex one-shot runs over its registry adapter with its MCP servers by name, in the run's session mode; `kith kernel accounts` notes
 # reach core.log.
 # Needs the Rust kith program (KITH_BIN, else a build under CARGO_TARGET_DIR / serve/host/target, before any installed one); skips without one.
 #
@@ -53,6 +53,17 @@ KITH_SERVE_HOME=$T/serve KITH_RUN_MCP=$T/mcp.json FAKE_ACP_LOG=$T/acp.log \
   python3 "$KERNEL/adapters/harness.py" codex --output json -- hello 2>"$T/err" | tail -1 > "$T/codex.json"
 check "codex one-shot: answered over its registry adapter" "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert not d[\"is_error\"] and \"hello\" in d[\"result\"]' '$T/codex.json' 2>/dev/null"
 check "codex one-shot: the jev-browser MCP server reaches the engine by its own name" "python3 -c 'import json,sys; s=[json.loads(l) for l in open(sys.argv[1])]; n=[m[\"params\"][\"mcpServers\"] for m in s if m[\"method\"]==\"session/new\"]; assert [x[\"name\"] for x in n[0]]==[\"jev-browser\"]' '$T/acp.log' 2>/dev/null"
+
+# The session runs in the mode the native one-shot had, never codex-acp's default "agent" (its own reviewer answers
+# escalations): workspace-write, or full access for a bypass run.
+codex_mode() {
+  rm -f "$T/mode.log"
+  KITH_SERVE_HOME=$T/serve FAKE_ACP_LOG=$T/mode.log FAKE_ACP_MODES=agent,read-only,workspace-write,agent-full-access \
+    python3 "$KERNEL/adapters/harness.py" codex --output json "$@" -- hello >/dev/null 2>"$T/err"
+  python3 -c 'import json,sys; print(",".join(m["params"]["modeId"] for m in map(json.loads, open(sys.argv[1])) if m["method"]=="session/set_mode"))' "$T/mode.log"
+}
+check "codex one-shot: workspace-write, as native codex exec" "[ \"\$(codex_mode)\" = workspace-write ]"
+check "codex one-shot: bypass gets full access" "[ \"\$(codex_mode --permission-mode bypassPermissions)\" = agent-full-access ]"
 
 # `kith kernel accounts` exits before the verbs that run through the core, yet its notes (a state write or a settings
 # migration it could not do) still go to core.log: the hook is set once for every kernel verb.

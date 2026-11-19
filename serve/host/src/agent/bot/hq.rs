@@ -12,6 +12,7 @@ use crate::cards::access::Reservation;
 use crate::hub::Hub;
 use crate::store::{EntryKind, Lane};
 use anyhow::{Result, anyhow, bail};
+use kith_kernel::engines::{self, Reach};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -38,13 +39,23 @@ fn refresh_chain_later(hub: &Arc<Hub>, agent: &str) {
     }
 }
 
-/// What a Codex backup's `permission_mode` (the agent's, in Claude's words) means to codex-acp's session modes.
-fn codex_mode(permission: &str) -> Option<&'static str> {
+/// What a Codex backup's `permission_mode` (the agent's, in Claude's words) lets it reach.
+fn codex_reach(permission: &str) -> Option<Reach> {
     match permission {
-        "plan" | "default" => Some("read-only"),
-        "acceptEdits" | "auto" => Some("auto"),
-        "bypassPermissions" => Some("full-access"),
+        "plan" | "default" => Some(Reach::ReadOnly),
+        "acceptEdits" | "auto" => Some(Reach::Workspace),
+        "bypassPermissions" => Some(Reach::Full),
         _ => None,
+    }
+}
+
+/// The codex-acp session mode for `permission`: the first of [`engines::session_modes`] the adapter lists, or the
+/// first of them when it lists none.
+fn codex_mode(permission: &str, listed: Option<&Vec<Value>>) -> Option<&'static str> {
+    let modes = engines::session_modes("codex", codex_reach(permission)?);
+    match listed {
+        Some(listed) => modes.iter().copied().find(|m| listed.iter().any(|l| l["id"] == *m)),
+        None => modes.first().copied(),
     }
 }
 
@@ -285,11 +296,9 @@ impl Actor {
     /// A Codex backup's new session starts in the mode that matches the agent's permission mode, when the adapter lists
     /// it. Left as it is when it doesn't, or when the call fails.
     pub(super) async fn set_codex_mode(&mut self, sid: &str, res: &Value, permission: Option<&str>) {
-        let Some(mode) = permission.and_then(codex_mode) else { return };
-        let listed = res["modes"]["availableModes"].as_array();
-        if listed.is_some_and(|modes| !modes.iter().any(|m| m["id"] == mode)) {
+        let Some(mode) = permission.and_then(|p| codex_mode(p, res["modes"]["availableModes"].as_array())) else {
             return;
-        }
+        };
         if let Err(error) = self.session_request("session/set_mode", json!({"sessionId": sid, "modeId": mode})).await {
             tracing::warn!(mode, error = format!("{error:#}"), "couldn't set the backup's permission mode");
         }
@@ -869,12 +878,21 @@ mod tests {
 
     #[test]
     fn claudes_permission_modes_map_to_codexs() {
-        assert_eq!(codex_mode("default"), Some("read-only"));
-        assert_eq!(codex_mode("plan"), Some("read-only"));
-        assert_eq!(codex_mode("acceptEdits"), Some("auto"));
-        assert_eq!(codex_mode("auto"), Some("auto"));
-        assert_eq!(codex_mode("bypassPermissions"), Some("full-access"));
-        assert_eq!(codex_mode("surprise"), None);
+        let listed = |ids: &[&str]| ids.iter().map(|id| json!({"id": id})).collect::<Vec<_>>();
+        // codex-acp 2.x: its default "agent" (codex's own reviewer answers) is never picked.
+        let v2 = listed(&["read-only", "workspace-write", "agent", "agent-full-access"]);
+        assert_eq!(codex_mode("default", Some(&v2)), Some("read-only"));
+        assert_eq!(codex_mode("plan", Some(&v2)), Some("read-only"));
+        assert_eq!(codex_mode("acceptEdits", Some(&v2)), Some("workspace-write"));
+        assert_eq!(codex_mode("auto", Some(&v2)), Some("workspace-write"));
+        assert_eq!(codex_mode("bypassPermissions", Some(&v2)), Some("agent-full-access"));
+        // The Zed adapter's ids.
+        let zed = listed(&["read-only", "auto", "full-access"]);
+        assert_eq!(codex_mode("acceptEdits", Some(&zed)), Some("auto"));
+        assert_eq!(codex_mode("bypassPermissions", Some(&zed)), Some("full-access"));
+        assert_eq!(codex_mode("bypassPermissions", Some(&listed(&["read-only"]))), None);
+        assert_eq!(codex_mode("bypassPermissions", None), Some("agent-full-access"));
+        assert_eq!(codex_mode("surprise", Some(&v2)), None);
     }
 
     #[test]

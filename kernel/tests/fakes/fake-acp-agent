@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""A fake ACP agent for tests: speaks initialize, session/new, session/set_model, session/prompt over stdio.
+"""A fake ACP agent for tests: speaks initialize, session/new, session/set_model, session/set_mode, session/prompt over
+stdio.
 
 FAKE_ACP_MODE   ok (default) | signin (session/new says authentication required) | depleted (the prompt fails with a
                 usage limit) | hang (the prompt is never answered) | crash (exits during the prompt, saying why on stderr; with FAKE_ACP_COST it first
                 reports that cost in a usage_update) | answer-exit (answers, then exits at once)
 FAKE_ACP_ANSWER  the answer, instead of echoing the task
 FAKE_ACP_DIRS   set: initialize says the agent takes session additionalDirectories
+FAKE_ACP_MODES  comma-separated session mode ids session/new lists (the first is current); session/set_mode takes only these
 FAKE_ACP_COST   dollars to report in the prompt result (default: none reported)
 FAKE_ACP_PIDFILE  file to write this process's pid to (a test checks nothing is left running)
 FAKE_ACP_LOG    file to append every request's method and params to, one JSON line each
@@ -13,6 +15,7 @@ FAKE_ACP_LOG    file to append every request's method and params to, one JSON li
 import json, os, sys, time
 
 mode = os.environ.get('FAKE_ACP_MODE', 'ok')
+modes = [m for m in os.environ.get('FAKE_ACP_MODES', '').split(',') if m]
 if os.environ.get('FAKE_ACP_PIDFILE'):
     open(os.environ['FAKE_ACP_PIDFILE'], 'w').write(str(os.getpid()))
 
@@ -42,9 +45,17 @@ for line in sys.stdin:
         if mode == 'signin':
             reply(id, error={'code': -32000, 'message': 'Authentication required'})
         else:
-            reply(id, {'sessionId': 'fake-session-1'})
+            result = {'sessionId': 'fake-session-1'}
+            if modes:
+                result['modes'] = {'currentModeId': modes[0], 'availableModes': [{'id': m, 'name': m} for m in modes]}
+            reply(id, result)
     elif method == 'session/set_model':
         reply(id, {})
+    elif method == 'session/set_mode':
+        if params.get('modeId') in modes:
+            reply(id, {})
+        else:
+            reply(id, error={'code': -32602, 'message': 'unknown mode'})
     elif method == 'session/prompt':
         task = ''.join(b.get('text', '') for b in params.get('prompt', []))
         if mode == 'hang':

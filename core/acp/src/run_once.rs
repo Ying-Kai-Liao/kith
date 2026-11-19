@@ -17,6 +17,8 @@ pub struct RunSpec {
     /// Added to the agent's environment; kept out of the command line (it can hold API keys).
     pub env: Vec<(String, String)>,
     pub model: Option<String>,
+    /// ACP session modes to run in, best first: the first the agent lists is set. Empty: the agent's own.
+    pub modes: Vec<String>,
     /// ACP `mcpServers` for the session (see [`mcp_servers`]).
     pub mcp_servers: Value,
     pub task: String,
@@ -191,6 +193,9 @@ async fn session(
         .as_str()
         .ok_or_else(|| anyhow!("agent returned no sessionId"))?
         .to_owned();
+    if !spec.modes.is_empty() {
+        select_mode(acp, &created, &sid, &spec.modes).await?;
+    }
     if let Some(model) = spec.model.as_deref().filter(|m| !m.is_empty()) {
         select_model(acp, &created, &sid, model).await?;
     }
@@ -232,6 +237,31 @@ async fn session(
         cost_usd: cost_of(&result).or(*cost),
         session_id: sid,
     })
+}
+
+/// The first of `modes` the agent lists in `session/new`. None listed: the session stays as it started, said on stderr.
+async fn select_mode(acp: &Acp, created: &Value, sid: &str, modes: &[String]) -> Result<()> {
+    let listed = created["modes"]["availableModes"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let Some(mode) = modes
+        .iter()
+        .find(|m| listed.iter().any(|l| l["id"].as_str() == Some(m.as_str())))
+    else {
+        eprintln!(
+            "kith: this agent offers none of the session modes {}; this run is in its own mode",
+            modes.join(", ")
+        );
+        return Ok(());
+    };
+    acp.request(
+        "session/set_mode",
+        json!({"sessionId": sid, "modeId": mode}),
+    )
+    .await
+    .map(|_| ())
+    .map_err(|e| e.context(format!("Couldn't set session mode {mode}")))
 }
 
 /// The agent's model list may be a config option (`category: model`) or the older `session/set_model`.
