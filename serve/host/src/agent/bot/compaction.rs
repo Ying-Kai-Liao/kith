@@ -68,7 +68,8 @@ impl Actor {
     /// The command that makes the agent compact, with the keep-list where it takes one. Before the agent runs, its
     /// harness stands in for the adapter.
     fn compact_command(&self) -> Option<String> {
-        if self.is_hq() {
+        // C5: a host-native bot is never compacted (nothing of it runs).
+        if self.is_hq() || self.cfg.refused_native() {
             return None;
         }
         let adapter = self.conn.as_ref().map_or(
@@ -210,7 +211,7 @@ impl Actor {
     /// While the bot is at rest: compact before an hour-long cache expires, and once the next message should start
     /// a new conversation, put the handoff in the chat for the user to review.
     pub(super) fn tend_idle(&mut self) {
-        if self.is_hq() {
+        if self.is_hq() || self.cfg.refused_native() {
             return;
         }
         let Some(sid) = self.session_id.clone() else { return };

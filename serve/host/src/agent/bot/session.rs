@@ -183,6 +183,7 @@ impl Actor {
     /// Makes sure the agent runs and `slot`'s session (main, or a thread's) is live;
     /// sets `turn_session`. A thread without one forks the main session when it can.
     pub(super) async fn ensure_session(&mut self, slot: Option<&str>) -> Result<()> {
+        self.cfg.refuse_native()?;
         if self.is_hq() {
             return self.ensure_hq_session(slot).await;
         }

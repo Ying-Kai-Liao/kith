@@ -104,6 +104,8 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 .args(["serve", "--bind", "127.0.0.1", "--port", &port.to_string()])
                 .env("KITH_SERVE_HOME", home)
                 .env("KITH_SERVE_CLOUD", "off")
+                // The old suites still run host-native bots against fake agents (a debug build allows only this).
+                .env("KITH_SERVE_NATIVE_FOR_TESTS", "1")
                 // Never the hq on this computer: a test that wants one passes its own `KITH_KERNEL_BIN`.
                 .env("KITH_KERNEL_BIN", "")
                 .env("HQ_BIN", "")

@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'a04de8abd0a0da6eb7e07b7eb1146f44214035f99ee7351f9e5d750507cdcdce'
+export const CONTRACT_SHA256 = '251d94cca935ece19e392e2e0285325a3ccc7184623b3d6431cd7b98232e521d'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -217,6 +217,7 @@ export interface Bot {
   tasks?: boolean | null
   hqAgent?: string | null
   builtin?: boolean | null
+  needsKithAgent?: boolean | null
   project?: string | null
   person?: string | null
   createdAt: number
@@ -1383,7 +1384,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     KithInfo: { fields: { info: 'KithCard?', fetchedAt: 'int', error: 'string?' }, mayOmit: ['error'] },
     WorkingLane: { fields: { chat: 'string', thread: 'string?' } },
     BotGuestRef: { fields: { botId: 'string', name: 'string', provider: 'BotProvider', ownerPerson: 'string?', ownerName: 'string?' } },
-    Bot: { fields: { id: 'string', kind: 'BotKind', members: '[string]', labels: '[string]?', name: 'string', description: 'string', avatarColor: 'string', avatarShape: 'string', avatarSource: 'string', backend: 'string', command: 'string?', cwd: 'string?', permission: 'Permission', model: 'string?', modelOptions: '{string}', fastMode: 'bool', pinned: 'bool', position: 'int', hidden: 'bool', notify: 'bool?', connectors: '[string]', skills: '[string]', computer: 'bool', sharedMemory: 'bool?', harnessMemory: 'bool?', rowShowsSummary: 'bool', autoName: 'bool', tasks: 'bool?', hqAgent: 'string?', builtin: 'bool?', project: 'string?', person: 'string?', createdAt: 'int', managedWorkspace: 'bool', folder: 'json?', memoryRev: 'int?', workingLanes: '[WorkingLane]', rev: 'int', deleted: 'bool', status: 'BotStatus', activity: 'string', startedAt: 'int?', workingChat: 'string?', workingThread: 'string?', fastModeSupport: 'string', fastModeIssue: 'string?', unread: 'int', lastMessage: 'string?', lastSummary: 'string?', lastAt: 'int', botGuest: 'BotGuestRef?' }, mayOmit: ['labels', 'command', 'cwd', 'folder', 'sharedMemory', 'memoryRev', 'tasks', 'hqAgent', 'builtin', 'project', 'person', 'botGuest'] },
+    Bot: { fields: { id: 'string', kind: 'BotKind', members: '[string]', labels: '[string]?', name: 'string', description: 'string', avatarColor: 'string', avatarShape: 'string', avatarSource: 'string', backend: 'string', command: 'string?', cwd: 'string?', permission: 'Permission', model: 'string?', modelOptions: '{string}', fastMode: 'bool', pinned: 'bool', position: 'int', hidden: 'bool', notify: 'bool?', connectors: '[string]', skills: '[string]', computer: 'bool', sharedMemory: 'bool?', harnessMemory: 'bool?', rowShowsSummary: 'bool', autoName: 'bool', tasks: 'bool?', hqAgent: 'string?', builtin: 'bool?', needsKithAgent: 'bool?', project: 'string?', person: 'string?', createdAt: 'int', managedWorkspace: 'bool', folder: 'json?', memoryRev: 'int?', workingLanes: '[WorkingLane]', rev: 'int', deleted: 'bool', status: 'BotStatus', activity: 'string', startedAt: 'int?', workingChat: 'string?', workingThread: 'string?', fastModeSupport: 'string', fastModeIssue: 'string?', unread: 'int', lastMessage: 'string?', lastSummary: 'string?', lastAt: 'int', botGuest: 'BotGuestRef?' }, mayOmit: ['labels', 'command', 'cwd', 'folder', 'sharedMemory', 'memoryRev', 'tasks', 'hqAgent', 'builtin', 'needsKithAgent', 'project', 'person', 'botGuest'] },
     BotAnswer: { fields: { bot: 'Bot' } },
     Entry: { fields: { id: 'string', seq: 'int', botId: 'string', threadId: 'string?', rev: 'int', kind: 'EntryKind', turn: 'int', data: 'json', createdAt: 'int', updatedAt: 'int' } },
     Entries: { fields: { entries: '[Entry]', folder: 'json?', conversation: 'RoomConversation?' }, mayOmit: ['folder', 'conversation'] },
