@@ -13,7 +13,6 @@
 //! core step down.
 
 use std::collections::{HashMap, HashSet};
-#[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
